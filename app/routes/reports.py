@@ -84,7 +84,9 @@ def balance_sheet(as_of_date: date = Query(default=None), db: Session = Depends(
             db.query(Account.name, Account.account_number,
                      sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit - TransactionLine.credit), 0))
             .join(TransactionLine, TransactionLine.account_id == Account.id)
+            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
             .filter(Account.account_type == acct_type)
+            .filter(Transaction.date <= as_of_date)
             .group_by(Account.id, Account.name, Account.account_number)
             .all()
         )
@@ -117,6 +119,7 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
     invoices = (
         db.query(Invoice)
         .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
+        .filter(Invoice.date <= as_of_date)
         .filter(Invoice.balance_due > 0)
         .all()
     )
