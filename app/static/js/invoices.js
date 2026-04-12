@@ -164,12 +164,21 @@ const InvoicesPage = {
     _customers: [],
 
     async showForm(id = null) {
-        const [customers, items] = await Promise.all([
+        const [customers, items, settings] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/items?active_only=true'),
+            API.get('/settings'),
         ]);
 
-        let inv = { customer_id: '', date: todayISO(), terms: 'Net 30', po_number: '', tax_rate: 0, notes: '', lines: [] };
+        let inv = {
+            customer_id: '',
+            date: todayISO(),
+            terms: settings.default_terms || 'Net 30',
+            po_number: '',
+            tax_rate: (parseFloat(settings.default_tax_rate || '0') || 0) / 100,
+            notes: settings.invoice_notes || '',
+            lines: [],
+        };
         if (id) inv = await API.get(`/invoices/${id}`);
         if (inv.lines.length === 0) inv.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
 
