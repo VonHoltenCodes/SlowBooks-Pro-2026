@@ -101,11 +101,7 @@ Relevant files:
 
 ### Payroll
 
-Payroll is US-specific in both storage and calculation:
-
-- Employee uses `ssn_last_four`, filing status, allowances, state, and zip.
-- Pay stubs store federal tax, state tax, Social Security, and Medicare.
-- Payroll service hardcodes Social Security, Medicare, federal brackets, and a flat state tax.
+Payroll employee setup now uses an NZ-focused field set for IRD number, tax code, KiwiSaver, student loan, child support, ESCT, pay frequency, and start/end dates. PAYE calculations, deductions, payslips, and payday filing outputs remain later slices, and the Payroll page now stays visible as an NZ placeholder rather than serving US withholding behavior.
 
 Relevant files:
 
@@ -198,7 +194,7 @@ Relevant files:
     Schedule C routes/UI are now hidden or disabled for SlowBooks NZ. Future work should replace them with NZ income-tax outputs only after deciding whether the target is IR3 business summary, IR10-style financial statements, or accountant export.
 
 12. Rebuild payroll around NZ:
-    Replace SSN/filing status/allowances with IRD number, tax code, KiwiSaver status/rate, student loan, child support, start/end dates, ESCT rate, pay frequency, and any required payday filing fields.
+    Employee payroll setup now uses NZ fields instead of SSN/filing status/allowances. Payroll processing endpoints and UI are disabled behind an NZ placeholder until the PAYE slice is implemented.
 
 13. Implement PAYE using versioned official tables:
     Use IRD PAYE tables/specs by tax year instead of hardcoded constants. Model PAYE, student loan, KiwiSaver employee deduction, employer KiwiSaver, ESCT, child support, and payday filing fields.

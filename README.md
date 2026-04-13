@@ -53,9 +53,8 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - **Account Balances** — Updated in real-time as transactions post
 
 ### Payroll
-- **Employees** — Full employee records with pay type (hourly/salary), pay rate, filing status, allowances
-- **Pay Runs** — Create pay runs with automatic withholding calculations: Federal (progressive brackets), State (5% flat), Social Security (6.2%), Medicare (1.45%)
-- **Process Payroll** — Creates journal entries: DR Wage Expense, CR Federal Withholding, CR State Withholding, CR SS Payable, CR Medicare Payable, CR Bank
+- **Employees** — NZ payroll employee setup with IRD number, tax code, KiwiSaver, student loan, child support, ESCT, and pay frequency
+- **Payroll** — NZ payroll page placeholder while PAYE calculations and payslips are implemented in later slices
 - Tax calculations are approximate — disclaimer included. Verify with a tax professional
 
 ### Banking

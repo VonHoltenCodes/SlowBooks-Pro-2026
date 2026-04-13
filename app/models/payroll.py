@@ -1,9 +1,11 @@
 # ============================================================================
-# Payroll — employee records, pay runs, withholding calculations
-# Feature 17: Simplified payroll with federal/state/SS/Medicare
+# Payroll — NZ employee records, pay runs, and future PAYE workflows
+# Rebuilt for SlowBooks NZ. PAYE calculations and payday filing follow in
+# later slices; this file defines the NZ setup shape only.
 # ============================================================================
 
 import enum
+from decimal import Decimal
 
 from sqlalchemy import (
     Column, Integer, String, Date, Numeric, DateTime, Text, Enum, Boolean,
@@ -19,12 +21,6 @@ class PayType(str, enum.Enum):
     HOURLY = "hourly"
 
 
-class FilingStatus(str, enum.Enum):
-    SINGLE = "single"
-    MARRIED = "married"
-    HEAD_OF_HOUSEHOLD = "head_of_household"
-
-
 class PayRunStatus(str, enum.Enum):
     DRAFT = "draft"
     PROCESSED = "processed"
@@ -37,11 +33,16 @@ class Employee(Base):
     id = Column(Integer, primary_key=True, index=True)
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
-    ssn_last_four = Column(String(4), nullable=True)
+    ird_number = Column(String(20), nullable=True)
     pay_type = Column(Enum(PayType), default=PayType.HOURLY)
-    pay_rate = Column(Numeric(12, 2), default=0)  # hourly rate or salary amount
-    filing_status = Column(Enum(FilingStatus), default=FilingStatus.SINGLE)
-    allowances = Column(Integer, default=0)
+    pay_rate = Column(Numeric(12, 2), default=0)
+    tax_code = Column(String(20), default="M")
+    kiwisaver_enrolled = Column(Boolean, default=False)
+    kiwisaver_rate = Column(Numeric(6, 4), default=Decimal("0.0300"))
+    student_loan = Column(Boolean, default=False)
+    child_support = Column(Boolean, default=False)
+    esct_rate = Column(Numeric(6, 4), default=Decimal("0.0000"))
+    pay_frequency = Column(String(20), default="fortnightly")
 
     address1 = Column(String(200), nullable=True)
     address2 = Column(String(200), nullable=True)
@@ -49,7 +50,8 @@ class Employee(Base):
     state = Column(String(50), nullable=True)
     zip = Column(String(20), nullable=True)
 
-    hire_date = Column(Date, nullable=True)
+    start_date = Column(Date, nullable=True)
+    end_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)
     notes = Column(Text, nullable=True)
 
@@ -57,10 +59,6 @@ class Employee(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     pay_stubs = relationship("PayStub", back_populates="employee")
-
-
-# Fix missing Boolean import
-from sqlalchemy import Boolean
 
 
 class PayRun(Base):
@@ -94,8 +92,8 @@ class PayStub(Base):
     gross_pay = Column(Numeric(12, 2), default=0)
     federal_tax = Column(Numeric(12, 2), default=0)
     state_tax = Column(Numeric(12, 2), default=0)
-    ss_tax = Column(Numeric(12, 2), default=0)       # Social Security 6.2%
-    medicare_tax = Column(Numeric(12, 2), default=0)  # Medicare 1.45%
+    ss_tax = Column(Numeric(12, 2), default=0)
+    medicare_tax = Column(Numeric(12, 2), default=0)
     net_pay = Column(Numeric(12, 2), default=0)
 
     pay_run = relationship("PayRun", back_populates="stubs")

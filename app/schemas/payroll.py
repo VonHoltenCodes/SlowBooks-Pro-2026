@@ -1,30 +1,42 @@
-from datetime import date, datetime
+from datetime import date
+from decimal import Decimal
 from typing import Optional
+
 from pydantic import BaseModel
 
 
 class EmployeeCreate(BaseModel):
     first_name: str
     last_name: str
-    ssn_last_four: Optional[str] = None
+    ird_number: Optional[str] = None
     pay_type: str = "hourly"
     pay_rate: float = 0
-    filing_status: str = "single"
-    allowances: int = 0
-    address1: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    hire_date: Optional[date] = None
+    tax_code: str = "M"
+    kiwisaver_enrolled: bool = False
+    kiwisaver_rate: Decimal = Decimal("0.0300")
+    student_loan: bool = False
+    child_support: bool = False
+    esct_rate: Decimal = Decimal("0.0000")
+    pay_frequency: str = "fortnightly"
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
 
 
 class EmployeeUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
+    ird_number: Optional[str] = None
     pay_type: Optional[str] = None
     pay_rate: Optional[float] = None
-    filing_status: Optional[str] = None
-    allowances: Optional[int] = None
+    tax_code: Optional[str] = None
+    kiwisaver_enrolled: Optional[bool] = None
+    kiwisaver_rate: Optional[Decimal] = None
+    student_loan: Optional[bool] = None
+    child_support: Optional[bool] = None
+    esct_rate: Optional[Decimal] = None
+    pay_frequency: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     is_active: Optional[bool] = None
 
 
@@ -32,13 +44,19 @@ class EmployeeResponse(BaseModel):
     id: int
     first_name: str
     last_name: str
-    ssn_last_four: Optional[str] = None
+    ird_number: Optional[str] = None
     pay_type: str
     pay_rate: float = 0
-    filing_status: str
-    allowances: int = 0
+    tax_code: str = "M"
+    kiwisaver_enrolled: bool = False
+    kiwisaver_rate: Decimal = Decimal("0.0300")
+    student_loan: bool = False
+    child_support: bool = False
+    esct_rate: Decimal = Decimal("0.0000")
+    pay_frequency: str = "fortnightly"
     is_active: bool = True
-    hire_date: Optional[date] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
     model_config = {"from_attributes": True}
 
 
@@ -60,11 +78,6 @@ class PayStubResponse(BaseModel):
     employee_name: Optional[str] = None
     hours: float = 0
     gross_pay: float = 0
-    federal_tax: float = 0
-    state_tax: float = 0
-    ss_tax: float = 0
-    medicare_tax: float = 0
-    net_pay: float = 0
     model_config = {"from_attributes": True}
 
 
