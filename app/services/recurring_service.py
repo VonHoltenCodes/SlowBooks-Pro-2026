@@ -17,6 +17,8 @@ from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
     get_default_income_account_id, get_sales_tax_account_id,
 )
+from app.services.gst_calculations import calculate_document_gst, prices_include_gst
+from app.services.gst_lines import stored_gst_line_inputs
 
 
 def _next_invoice_number(db: Session) -> str:
@@ -62,11 +64,12 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
 
         invoice_number = _next_invoice_number(db)
 
-        # Compute totals
-        subtotal = sum(Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in rec.lines)
-        tax_rate = rec.tax_rate or Decimal("0")
-        tax_amount = subtotal * tax_rate
-        total = subtotal + tax_amount
+        gst_inputs = stored_gst_line_inputs(db, rec.lines)
+        gst_totals = calculate_document_gst(
+            gst_inputs,
+            prices_include_gst=prices_include_gst(db),
+            gst_context="sales",
+        )
 
         # Parse terms for due date
         due_date = rec.next_due + timedelta(days=30)
@@ -80,17 +83,17 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
         invoice = Invoice(
             invoice_number=invoice_number, customer_id=rec.customer_id,
             date=rec.next_due, due_date=due_date, terms=rec.terms,
-            subtotal=subtotal, tax_rate=tax_rate, tax_amount=tax_amount,
-            total=total, balance_due=total, notes=rec.notes,
+            subtotal=gst_totals.subtotal, tax_rate=gst_totals.effective_tax_rate, tax_amount=gst_totals.tax_amount,
+            total=gst_totals.total, balance_due=gst_totals.total, notes=rec.notes,
         )
         db.add(invoice)
         db.flush()
 
-        for rline in rec.lines:
+        for i, rline in enumerate(rec.lines):
             db.add(InvoiceLine(
                 invoice_id=invoice.id, item_id=rline.item_id,
                 description=rline.description, quantity=rline.quantity,
-                rate=rline.rate, amount=Decimal(str(rline.quantity)) * Decimal(str(rline.rate)),
+                rate=rline.rate, amount=gst_totals.lines[i].net_amount,
                 gst_code=rline.gst_code, gst_rate=rline.gst_rate,
                 line_order=rline.line_order,
             ))
@@ -98,11 +101,11 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
         # Journal entry
         if ar_id and default_income_id:
             journal_lines = [{
-                "account_id": ar_id, "debit": total, "credit": Decimal("0"),
+                "account_id": ar_id, "debit": gst_totals.total, "credit": Decimal("0"),
                 "description": f"Recurring Invoice #{invoice_number}",
             }]
-            for rline in rec.lines:
-                line_amt = Decimal(str(rline.quantity)) * Decimal(str(rline.rate))
+            for i, rline in enumerate(rec.lines):
+                line_amt = gst_totals.lines[i].net_amount
                 if line_amt == 0:
                     continue
                 income_id = default_income_id
@@ -114,9 +117,9 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
                     "account_id": income_id, "debit": Decimal("0"), "credit": line_amt,
                     "description": rline.description or "",
                 })
-            if tax_amount > 0 and tax_account_id:
+            if gst_totals.tax_amount > 0 and tax_account_id:
                 journal_lines.append({
-                    "account_id": tax_account_id, "debit": Decimal("0"), "credit": tax_amount,
+                    "account_id": tax_account_id, "debit": Decimal("0"), "credit": gst_totals.tax_amount,
                     "description": "Sales tax",
                 })
             txn = create_journal_entry(

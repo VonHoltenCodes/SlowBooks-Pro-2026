@@ -42,11 +42,13 @@ const RecurringPage = {
     lineCount: 0,
 
     async showForm(id = null) {
-        const [customers, items, settings] = await Promise.all([
+        const [customers, items, settings, gstCodes] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/items?active_only=true'),
             API.get('/settings'),
+            API.get('/gst-codes'),
         ]);
+        App.gstCodes = gstCodes;
         RecurringPage._items = items;
         RecurringPage._customers = customers;
 
@@ -86,12 +88,11 @@ const RecurringPage = {
                             ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
                                 `<option value="${t}" ${rec.terms===t?'selected':''}>${t}</option>`).join('')}
                         </select></div>
-                    <div class="form-group"><label>Tax Rate (%)</label>
-                        <input name="tax_rate" type="number" step="0.01" value="${(rec.tax_rate * 100) || 0}"></div>
+                    <input name="tax_rate" type="hidden" value="${(rec.tax_rate * 100) || 0}">
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th></tr></thead>
+                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th>GST</th><th class="col-rate">Rate</th></tr></thead>
                     <tbody id="rec-lines">
                         ${rec.lines.map((l, i) => {
                             const opts = items.map(it => `<option value="${it.id}" ${l.item_id==it.id?'selected':''}>${escapeHtml(it.name)}</option>`).join('');
@@ -99,6 +100,7 @@ const RecurringPage = {
                                 <td><select class="line-item"><option value="">--</option>${opts}</select></td>
                                 <td><input class="line-desc" value="${escapeHtml(l.description || '')}"></td>
                                 <td><input class="line-qty" type="number" step="0.01" value="${l.quantity || 1}"></td>
+                                <td><select class="line-gst">${gstOptionsHtml(l.gst_code || 'GST15')}</select></td>
                                 <td><input class="line-rate" type="number" step="0.01" value="${l.rate || 0}"></td>
                             </tr>`;
                         }).join('')}
@@ -131,6 +133,7 @@ const RecurringPage = {
                 <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                 <td><input class="line-desc"></td>
                 <td><input class="line-qty" type="number" step="0.01" value="1"></td>
+                <td><select class="line-gst">${gstOptionsHtml('GST15')}</select></td>
                 <td><input class="line-rate" type="number" step="0.01" value="0"></td>
             </tr>`);
     },
@@ -140,11 +143,14 @@ const RecurringPage = {
         const form = e.target;
         const lines = [];
         $$('#rec-lines tr').forEach((row, i) => {
+            const gst = readGstLinePayload(row);
             lines.push({
                 item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
                 description: row.querySelector('.line-desc')?.value || '',
-                quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
-                rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                quantity: gst.quantity,
+                rate: gst.rate,
+                gst_code: gst.gst_code,
+                gst_rate: gst.gst_rate,
                 line_order: i,
             });
         });

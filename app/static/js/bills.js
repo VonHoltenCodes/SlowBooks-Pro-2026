@@ -88,11 +88,13 @@ const BillsPage = {
     lineCount: 0,
 
     async showForm() {
-        const [vendors, items, accounts] = await Promise.all([
+        const [vendors, items, accounts, gstCodes] = await Promise.all([
             API.get('/vendors?active_only=true'),
             API.get('/items?active_only=true'),
             API.get('/accounts?account_type=expense'),
+            API.get('/gst-codes'),
         ]);
+        App.gstCodes = gstCodes;
         BillsPage._items = items;
         BillsPage.lineCount = 1;
 
@@ -116,12 +118,13 @@ const BillsPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th>GST</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
                     <tbody id="bill-lines">
                         <tr data-billline="0">
                             <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                             <td><input class="line-desc"></td>
                             <td><input class="line-qty" type="number" step="0.01" value="1"></td>
+                            <td><select class="line-gst">${gstOptionsHtml('GST15')}</select></td>
                             <td><input class="line-rate" type="number" step="0.01" value="0"></td>
                             <td class="col-amount">$0.00</td>
                         </tr>
@@ -145,6 +148,7 @@ const BillsPage = {
                 <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                 <td><input class="line-desc"></td>
                 <td><input class="line-qty" type="number" step="0.01" value="1"></td>
+                <td><select class="line-gst">${gstOptionsHtml('GST15')}</select></td>
                 <td><input class="line-rate" type="number" step="0.01" value="0"></td>
                 <td class="col-amount">$0.00</td>
             </tr>`);
@@ -155,11 +159,14 @@ const BillsPage = {
         const form = e.target;
         const lines = [];
         $$('#bill-lines tr').forEach((row, i) => {
+            const gst = readGstLinePayload(row);
             lines.push({
                 item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
                 description: row.querySelector('.line-desc')?.value || '',
-                quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
-                rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                quantity: gst.quantity,
+                rate: gst.rate,
+                gst_code: gst.gst_code,
+                gst_rate: gst.gst_rate,
                 line_order: i,
             });
         });

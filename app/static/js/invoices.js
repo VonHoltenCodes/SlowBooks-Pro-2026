@@ -162,13 +162,16 @@ const InvoicesPage = {
 
     lineCount: 0,
     _customers: [],
+    _gstCodes: [],
 
     async showForm(id = null) {
-        const [customers, items, settings] = await Promise.all([
+        const [customers, items, settings, gstCodes] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/items?active_only=true'),
             API.get('/settings'),
+            API.get('/gst-codes'),
         ]);
+        App.gstCodes = gstCodes;
 
         let inv = {
             customer_id: '',
@@ -185,6 +188,7 @@ const InvoicesPage = {
         InvoicesPage.lineCount = inv.lines.length;
         InvoicesPage._items = items;
         InvoicesPage._customers = customers;
+        InvoicesPage._gstCodes = gstCodes;
 
         const custOpts = customers.map(c => `<option value="${c.id}" ${inv.customer_id==c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
 
@@ -202,14 +206,12 @@ const InvoicesPage = {
                         </select></div>
                     <div class="form-group"><label>PO #</label>
                         <input name="po_number" value="${escapeHtml(inv.po_number || '')}"></div>
-                    <div class="form-group"><label>Tax Rate (%)</label>
-                        <input name="tax_rate" type="number" step="0.01" value="${(inv.tax_rate * 100) || 0}"
-                            oninput="InvoicesPage.recalc()"></div>
+                    <input name="tax_rate" type="hidden" value="${(inv.tax_rate * 100) || 0}">
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th>Item</th><th>Description</th><th class="col-qty">Qty</th>
+                        <th>Item</th><th>Description</th><th class="col-qty">Qty</th><th>GST</th>
                         <th class="col-rate">Rate</th><th class="col-amount">Amount</th><th class="col-actions"></th>
                     </tr></thead>
                     <tbody id="inv-lines">
@@ -248,6 +250,7 @@ const InvoicesPage = {
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="InvoicesPage.recalc()"></td>
+            <td><select class="line-gst" onchange="InvoicesPage.recalc()">${gstOptionsHtml(line.gst_code || 'GST15')}</select></td>
             <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="InvoicesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" onclick="InvoicesPage.removeLine(${idx})">X</button></td>
@@ -278,20 +281,18 @@ const InvoicesPage = {
     },
 
     recalc() {
-        let subtotal = 0;
+        const lines = [];
         $$('#inv-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
+            const payload = readGstLinePayload(row);
+            const amount = payload.quantity * payload.rate;
+            lines.push(payload);
             const amountCell = row.querySelector('.line-amount');
             if (amountCell) amountCell.textContent = formatCurrency(amount);
         });
-        const taxPct = parseFloat($('[name="tax_rate"]')?.value) || 0;
-        const tax = subtotal * (taxPct / 100);
-        $('#inv-subtotal').textContent = formatCurrency(subtotal);
-        $('#inv-tax').textContent = formatCurrency(tax);
-        $('#inv-total').textContent = formatCurrency(subtotal + tax);
+        const totals = calculateGstTotals(lines);
+        $('#inv-subtotal').textContent = formatCurrency(totals.subtotal);
+        $('#inv-tax').textContent = formatCurrency(totals.tax_amount);
+        $('#inv-total').textContent = formatCurrency(totals.total);
     },
 
     async save(e, id) {
@@ -300,11 +301,14 @@ const InvoicesPage = {
         const lines = [];
         $$('#inv-lines tr').forEach((row, i) => {
             const item_id = row.querySelector('.line-item')?.value;
+            const gst = readGstLinePayload(row);
             lines.push({
                 item_id: item_id ? parseInt(item_id) : null,
                 description: row.querySelector('.line-desc')?.value || '',
-                quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
-                rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                quantity: gst.quantity,
+                rate: gst.rate,
+                gst_code: gst.gst_code,
+                gst_rate: gst.gst_rate,
                 line_order: i,
             });
         });

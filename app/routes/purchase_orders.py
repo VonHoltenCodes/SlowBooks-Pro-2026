@@ -13,7 +13,8 @@ from app.database import get_db
 from app.models.purchase_orders import PurchaseOrder, PurchaseOrderLine, POStatus
 from app.models.contacts import Vendor
 from app.schemas.purchase_orders import POCreate, POUpdate, POResponse
-from app.services.gst_lines import resolve_line_gst
+from app.services.gst_calculations import calculate_document_gst, prices_include_gst
+from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
 
@@ -61,25 +62,29 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     po_number = _next_po_number(db)
-    subtotal = sum(Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in data.lines)
-    tax_amount = subtotal * Decimal(str(data.tax_rate))
-    total = subtotal + tax_amount
+    gst_inputs = resolve_gst_line_inputs(db, data.lines)
+    gst_totals = calculate_document_gst(
+        gst_inputs,
+        prices_include_gst=prices_include_gst(db),
+        gst_context="purchase",
+    )
 
     po = PurchaseOrder(
         po_number=po_number, vendor_id=data.vendor_id, date=data.date,
         expected_date=data.expected_date, ship_to=data.ship_to,
-        subtotal=subtotal, tax_rate=data.tax_rate, tax_amount=tax_amount,
-        total=total, notes=data.notes,
+        subtotal=gst_totals.subtotal, tax_rate=gst_totals.effective_tax_rate, tax_amount=gst_totals.tax_amount,
+        total=gst_totals.total, notes=data.notes,
     )
     db.add(po)
     db.flush()
 
     for i, line_data in enumerate(data.lines):
         gst_code, gst_rate = resolve_line_gst(db, line_data)
+        line_total = gst_totals.lines[i]
         line = PurchaseOrderLine(
             purchase_order_id=po.id, item_id=line_data.item_id,
             description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, amount=Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate)),
+            rate=line_data.rate, amount=line_total.net_amount,
             gst_code=gst_code, gst_rate=gst_rate,
             line_order=line_data.line_order or i,
         )
@@ -106,21 +111,25 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
 
     if data.lines is not None:
         db.query(PurchaseOrderLine).filter(PurchaseOrderLine.purchase_order_id == po_id).delete()
-        subtotal = Decimal(0)
+        gst_inputs = resolve_gst_line_inputs(db, data.lines)
+        gst_totals = calculate_document_gst(
+            gst_inputs,
+            prices_include_gst=prices_include_gst(db),
+            gst_context="purchase",
+        )
         for i, line_data in enumerate(data.lines):
             gst_code, gst_rate = resolve_line_gst(db, line_data)
-            amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
-            subtotal += amt
+            amt = gst_totals.lines[i].net_amount
             db.add(PurchaseOrderLine(
                 purchase_order_id=po_id, item_id=line_data.item_id,
                 description=line_data.description, quantity=line_data.quantity,
                 rate=line_data.rate, amount=amt, gst_code=gst_code, gst_rate=gst_rate,
                 line_order=line_data.line_order or i,
             ))
-        tax_rate = Decimal(str(data.tax_rate)) if data.tax_rate is not None else po.tax_rate
-        po.subtotal = subtotal
-        po.tax_amount = subtotal * tax_rate
-        po.total = subtotal + po.tax_amount
+        po.subtotal = gst_totals.subtotal
+        po.tax_rate = gst_totals.effective_tax_rate
+        po.tax_amount = gst_totals.tax_amount
+        po.total = gst_totals.total
 
     db.commit()
     db.refresh(po)

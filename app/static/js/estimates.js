@@ -88,11 +88,13 @@ const EstimatesPage = {
     _items: [],
 
     async showForm(id = null) {
-        const [customers, items, settings] = await Promise.all([
+        const [customers, items, settings, gstCodes] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/items?active_only=true'),
             API.get('/settings'),
+            API.get('/gst-codes'),
         ]);
+        App.gstCodes = gstCodes;
 
         let est = {
             customer_id: '',
@@ -119,14 +121,12 @@ const EstimatesPage = {
                         <input name="date" type="date" required value="${est.date}"></div>
                     <div class="form-group"><label>Expiration Date</label>
                         <input name="expiration_date" type="date" value="${est.expiration_date || ''}"></div>
-                    <div class="form-group"><label>Tax Rate (%)</label>
-                        <input name="tax_rate" type="number" step="0.01" value="${(est.tax_rate * 100) || 0}"
-                            oninput="EstimatesPage.recalc()"></div>
+                    <input name="tax_rate" type="hidden" value="${(est.tax_rate * 100) || 0}">
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th>Item</th><th>Description</th><th class="col-qty">Qty</th>
+                        <th>Item</th><th>Description</th><th class="col-qty">Qty</th><th>GST</th>
                         <th class="col-rate">Rate</th><th class="col-amount">Amount</th><th class="col-actions"></th>
                     </tr></thead>
                     <tbody id="est-lines">
@@ -156,6 +156,7 @@ const EstimatesPage = {
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
+            <td><select class="line-gst" onchange="EstimatesPage.recalc()">${gstOptionsHtml(line.gst_code || 'GST15')}</select></td>
             <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" onclick="EstimatesPage.removeLine(${idx})">X</button></td>
@@ -186,20 +187,18 @@ const EstimatesPage = {
     },
 
     recalc() {
-        let subtotal = 0;
+        const lines = [];
         $$('#est-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
+            const payload = readGstLinePayload(row);
+            const amount = payload.quantity * payload.rate;
+            lines.push(payload);
             const amountCell = row.querySelector('.line-amount');
             if (amountCell) amountCell.textContent = formatCurrency(amount);
         });
-        const taxPct = parseFloat($('[name="tax_rate"]')?.value) || 0;
-        const tax = subtotal * (taxPct / 100);
-        if ($('#est-subtotal')) $('#est-subtotal').textContent = formatCurrency(subtotal);
-        if ($('#est-tax')) $('#est-tax').textContent = formatCurrency(tax);
-        if ($('#est-total')) $('#est-total').textContent = formatCurrency(subtotal + tax);
+        const totals = calculateGstTotals(lines);
+        if ($('#est-subtotal')) $('#est-subtotal').textContent = formatCurrency(totals.subtotal);
+        if ($('#est-tax')) $('#est-tax').textContent = formatCurrency(totals.tax_amount);
+        if ($('#est-total')) $('#est-total').textContent = formatCurrency(totals.total);
     },
 
     async save(e, id) {
@@ -208,11 +207,14 @@ const EstimatesPage = {
         const lines = [];
         $$('#est-lines tr').forEach((row, i) => {
             const item_id = row.querySelector('.line-item')?.value;
+            const gst = readGstLinePayload(row);
             lines.push({
                 item_id: item_id ? parseInt(item_id) : null,
                 description: row.querySelector('.line-desc')?.value || '',
-                quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
-                rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                quantity: gst.quantity,
+                rate: gst.rate,
+                gst_code: gst.gst_code,
+                gst_rate: gst.gst_rate,
                 line_order: i,
             });
         });

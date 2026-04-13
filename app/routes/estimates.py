@@ -20,7 +20,8 @@ from app.schemas.estimates import EstimateCreate, EstimateUpdate, EstimateRespon
 from app.schemas.invoices import InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
 from app.routes.settings import _get_all as get_settings, _set as set_setting
-from app.services.gst_lines import resolve_line_gst
+from app.services.gst_calculations import calculate_document_gst, prices_include_gst
+from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
@@ -77,19 +78,22 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     estimate_number = _next_estimate_number(db)
-    subtotal = sum(l.quantity * l.rate for l in data.lines)
-    tax_amount = subtotal * data.tax_rate
-    total = subtotal + tax_amount
+    gst_inputs = resolve_gst_line_inputs(db, data.lines)
+    gst_totals = calculate_document_gst(
+        gst_inputs,
+        prices_include_gst=prices_include_gst(db),
+        gst_context="sales",
+    )
 
     estimate = Estimate(
         estimate_number=estimate_number,
         customer_id=data.customer_id,
         date=data.date,
         expiration_date=data.expiration_date,
-        subtotal=subtotal,
-        tax_rate=data.tax_rate,
-        tax_amount=tax_amount,
-        total=total,
+        subtotal=gst_totals.subtotal,
+        tax_rate=gst_totals.effective_tax_rate,
+        tax_amount=gst_totals.tax_amount,
+        total=gst_totals.total,
         notes=data.notes,
     )
     db.add(estimate)
@@ -97,13 +101,14 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
 
     for i, line_data in enumerate(data.lines):
         gst_code, gst_rate = resolve_line_gst(db, line_data)
+        line_total = gst_totals.lines[i]
         line = EstimateLine(
             estimate_id=estimate.id,
             item_id=line_data.item_id,
             description=line_data.description,
             quantity=line_data.quantity,
             rate=line_data.rate,
-            amount=line_data.quantity * line_data.rate,
+            amount=line_total.net_amount,
             gst_code=gst_code,
             gst_rate=gst_rate,
             class_name=line_data.class_name,
@@ -133,15 +138,22 @@ def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depend
 
     if data.lines is not None:
         db.query(EstimateLine).filter(EstimateLine.estimate_id == estimate_id).delete()
+        gst_inputs = resolve_gst_line_inputs(db, data.lines)
+        gst_totals = calculate_document_gst(
+            gst_inputs,
+            prices_include_gst=prices_include_gst(db),
+            gst_context="sales",
+        )
         for i, line_data in enumerate(data.lines):
             gst_code, gst_rate = resolve_line_gst(db, line_data)
+            line_total = gst_totals.lines[i]
             line = EstimateLine(
                 estimate_id=estimate_id,
                 item_id=line_data.item_id,
                 description=line_data.description,
                 quantity=line_data.quantity,
                 rate=line_data.rate,
-                amount=line_data.quantity * line_data.rate,
+                amount=line_total.net_amount,
                 gst_code=gst_code,
                 gst_rate=gst_rate,
                 class_name=line_data.class_name,
@@ -149,11 +161,10 @@ def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depend
             )
             db.add(line)
 
-        tax_rate = data.tax_rate if data.tax_rate is not None else estimate.tax_rate
-        subtotal = sum(l.quantity * l.rate for l in data.lines)
-        estimate.subtotal = subtotal
-        estimate.tax_amount = subtotal * tax_rate
-        estimate.total = subtotal + estimate.tax_amount
+        estimate.subtotal = gst_totals.subtotal
+        estimate.tax_rate = gst_totals.effective_tax_rate
+        estimate.tax_amount = gst_totals.tax_amount
+        estimate.total = gst_totals.total
 
     db.commit()
     db.refresh(estimate)

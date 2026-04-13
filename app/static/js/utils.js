@@ -40,6 +40,84 @@ function formatDate(dateStr, settings = null) {
     }
 }
 
+function gstCodesForCalculation() {
+    if (typeof App !== 'undefined' && Array.isArray(App.gstCodes)) return App.gstCodes;
+    return [
+        { code: 'GST15', rate: 0.15, category: 'taxable' },
+        { code: 'ZERO', rate: 0, category: 'zero_rated' },
+        { code: 'EXEMPT', rate: 0, category: 'exempt' },
+        { code: 'NO_GST', rate: 0, category: 'no_gst' },
+    ];
+}
+
+function roundMoney(amount) {
+    return Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
+}
+
+function gstCodeForLine(line) {
+    const code = line.gst_code || 'GST15';
+    return gstCodesForCalculation().find(g => g.code === code) || { code, rate: line.gst_rate || 0, category: 'taxable' };
+}
+
+function calculateGstTotals(lines, settings = null) {
+    const formatSettings = getFormatSettings(settings);
+    const inclusive = String(formatSettings.prices_include_gst || 'false').toLowerCase() === 'true';
+    const result = {
+        subtotal: 0,
+        tax_amount: 0,
+        total: 0,
+        taxable_total: 0,
+        zero_rated_total: 0,
+        exempt_total: 0,
+        no_gst_total: 0,
+        lines: [],
+    };
+    for (const line of lines) {
+        const gst = gstCodeForLine(line);
+        const grossOrNet = (parseFloat(line.quantity) || 0) * (parseFloat(line.rate) || 0);
+        let net = roundMoney(grossOrNet);
+        let tax = 0;
+        let gross = net;
+        if ((gst.category || 'taxable') === 'taxable' && (parseFloat(gst.rate) || parseFloat(line.gst_rate) || 0) > 0) {
+            const rate = parseFloat(gst.rate) || parseFloat(line.gst_rate) || 0;
+            if (inclusive) {
+                gross = roundMoney(grossOrNet);
+                tax = roundMoney(gross * rate / (1 + rate));
+                net = roundMoney(gross - tax);
+            } else {
+                tax = roundMoney(net * rate);
+                gross = roundMoney(net + tax);
+            }
+        }
+        result.subtotal = roundMoney(result.subtotal + net);
+        result.tax_amount = roundMoney(result.tax_amount + tax);
+        result.total = roundMoney(result.total + gross);
+        if ((gst.category || 'taxable') === 'zero_rated') result.zero_rated_total = roundMoney(result.zero_rated_total + net);
+        else if ((gst.category || 'taxable') === 'exempt') result.exempt_total = roundMoney(result.exempt_total + net);
+        else if ((gst.category || 'taxable') === 'no_gst') result.no_gst_total = roundMoney(result.no_gst_total + net);
+        else result.taxable_total = roundMoney(result.taxable_total + net);
+        result.lines.push({ net_amount: net, gst_amount: tax, gross_amount: gross });
+    }
+    return result;
+}
+
+function readGstLinePayload(row) {
+    const gstCode = row.querySelector('.line-gst')?.value || 'GST15';
+    const gst = gstCodesForCalculation().find(g => g.code === gstCode);
+    return {
+        quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
+        rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+        gst_code: gstCode,
+        gst_rate: gst ? parseFloat(gst.rate) || 0 : 0,
+    };
+}
+
+function gstOptionsHtml(selectedCode = 'GST15') {
+    return gstCodesForCalculation().map(g =>
+        `<option value="${g.code}" ${g.code === selectedCode ? 'selected' : ''}>${escapeHtml(g.name || g.code)}</option>`
+    ).join('');
+}
+
 function todayISO() {
     return new Date().toISOString().slice(0, 10);
 }

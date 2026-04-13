@@ -10,8 +10,8 @@ The app is strongly US-shaped in tax, payroll, addresses, reports, PDF/UI copy, 
 
 - Purchase-side GST is more than a label change. Bills already debit account `2200` for tax, so the current single "Sales Tax Payable" account is being used as both collected-output tax and purchase-input tax.
 - Import/export paths are a major localization surface. CSV and IIF logic use State/ZIP conventions, QuickBooks-style address parsing, and "Sales Tax Payable" labels.
-- GST calculation is duplicated across invoices, bills, credit memos, purchase orders, estimates, and recurring invoices.
-- Upstream now prefills `default_tax_rate` into invoice, estimate, purchase order, and recurring invoice forms. That is useful as a temporary bridge, but it must not become the GST design. NZ GST still needs line-level GST codes, inclusive pricing, and separate output/input GST treatment.
+- GST calculation is now centralized for invoices, bills, credit memos, purchase orders, estimates, and generated recurring invoices.
+- Document forms now use line-level GST codes for GST calculation. The legacy `default_tax_rate` setting still exists for compatibility, but it is no longer the GST design for NZ documents.
 - Upstream added shared report period UI for several reports. Reuse that flow for GST returns instead of building a separate date picker.
 - Document updates recalculate totals but do not consistently rebuild/reverse journal entries, which becomes riskier once GST posting rules are introduced.
 - A small `tests/` directory now exists for settings localization. GST, reporting, and payroll changes still need focused regression tests before implementation.
@@ -82,7 +82,7 @@ Relevant files:
 - `app/static/js/purchase_orders.js`
 - `app/static/js/recurring.js`
 
-Upstream now reads `default_tax_rate` from settings in these frontend forms. The GST replacement must update both backend posting/calculation and frontend preview/save behavior.
+Document forms now load GST codes and use line-level GST logic for frontend previews and save payloads. Keep new GST UI work aligned with that path rather than reintroducing document-level tax-rate calculation.
 
 ### GST Posting
 
@@ -181,7 +181,7 @@ Relevant files:
    GST code and rate snapshots are stored on invoice, estimate, credit memo, bill, purchase order, and recurring invoice lines. Existing invoice-level totals and posting remain unchanged until the GST calculation service is added.
 
 7. Build one GST calculation service:
-   Support exclusive and inclusive pricing, `3/23` GST-inclusive extraction, rounding, taxable totals, zero-rated totals, exempt totals, output GST, and input GST. Replace the current `subtotal * tax_rate` logic in backend routes and frontend preview calculators. Do not solve GST by setting `default_tax_rate=15.0`; that cannot represent zero-rated/exempt lines or GST-inclusive prices.
+   Shared GST calculation is now in place for invoices, estimates, bills, purchase orders, credit memos, and generated recurring invoices. Backend totals use line-level GST codes with exclusive/inclusive pricing support, including `3/23` GST-inclusive extraction for the standard 15% code. Frontend document forms now load GST codes, save per-line GST choices, and preview totals with the same line GST logic. Existing `tax_rate` fields remain compatibility fields rather than the authoritative GST design.
 
 8. Rework journal posting:
    Replace `get_sales_tax_account_id()` with GST-aware account helpers. Decide whether to use separate `GST Collected` and `GST Paid` accounts plus `GST Payable`, or one GST control account with reporting splits.

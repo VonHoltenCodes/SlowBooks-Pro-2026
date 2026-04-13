@@ -20,7 +20,8 @@ from app.services.accounting import (
     get_default_income_account_id, get_sales_tax_account_id,
 )
 from app.services.closing_date import check_closing_date
-from app.services.gst_lines import resolve_line_gst
+from app.services.gst_calculations import calculate_document_gst, prices_include_gst
+from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -70,15 +71,18 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     memo_number = _next_cm_number(db)
-    subtotal = sum(Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in data.lines)
-    tax_amount = subtotal * Decimal(str(data.tax_rate))
-    total = subtotal + tax_amount
+    gst_inputs = resolve_gst_line_inputs(db, data.lines)
+    gst_totals = calculate_document_gst(
+        gst_inputs,
+        prices_include_gst=prices_include_gst(db),
+        gst_context="sales",
+    )
 
     cm = CreditMemo(
         memo_number=memo_number, customer_id=data.customer_id, date=data.date,
         original_invoice_id=data.original_invoice_id,
-        subtotal=subtotal, tax_rate=data.tax_rate, tax_amount=tax_amount,
-        total=total, balance_remaining=total, notes=data.notes,
+        subtotal=gst_totals.subtotal, tax_rate=gst_totals.effective_tax_rate, tax_amount=gst_totals.tax_amount,
+        total=gst_totals.total, balance_remaining=gst_totals.total, notes=data.notes,
         status=CreditMemoStatus.ISSUED,
     )
     db.add(cm)
@@ -91,7 +95,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
 
     for i, line_data in enumerate(data.lines):
         gst_code, gst_rate = resolve_line_gst(db, line_data)
-        amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
+        amt = gst_totals.lines[i].net_amount
         db.add(CreditMemoLine(
             credit_memo_id=cm.id, item_id=line_data.item_id,
             description=line_data.description, quantity=line_data.quantity,
@@ -111,16 +115,16 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                 })
 
     # DR Sales Tax Payable if tax
-    if tax_amount > 0 and tax_account_id:
+    if gst_totals.tax_amount > 0 and tax_account_id:
         journal_lines.append({
-            "account_id": tax_account_id, "debit": tax_amount, "credit": Decimal("0"),
+            "account_id": tax_account_id, "debit": gst_totals.tax_amount, "credit": Decimal("0"),
             "description": "Sales tax credit",
         })
 
     # CR Accounts Receivable
     if ar_id and journal_lines:
         journal_lines.append({
-            "account_id": ar_id, "debit": Decimal("0"), "credit": total,
+            "account_id": ar_id, "debit": Decimal("0"), "credit": gst_totals.total,
             "description": f"Credit Memo {memo_number}",
         })
         txn = create_journal_entry(

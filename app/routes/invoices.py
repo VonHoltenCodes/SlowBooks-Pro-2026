@@ -26,7 +26,8 @@ from app.services.accounting import (
 )
 from app.routes.settings import _get_all as get_settings
 from app.services.closing_date import check_closing_date
-from app.services.gst_lines import resolve_line_gst
+from app.services.gst_calculations import calculate_document_gst, prices_include_gst
+from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 
@@ -37,15 +38,6 @@ def _next_invoice_number(db: Session) -> str:
     if last and last.isdigit():
         return str(int(last) + 1).zfill(len(last))
     return "1001"
-
-
-def _compute_totals(lines_data, tax_rate):
-    """From CInvoice::RecalcTotals() @ 0x0015CE40 — tax was always line-level
-    in the original but we simplified to invoice-level. Sorry, Intuit."""
-    subtotal = sum(l.quantity * l.rate for l in lines_data)
-    tax_amount = subtotal * tax_rate
-    total = subtotal + tax_amount
-    return subtotal, tax_amount, total
 
 
 @router.get("", response_model=list[InvoiceResponse])
@@ -94,7 +86,12 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         except ValueError:
             due_date = data.date + timedelta(days=30)
 
-    subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
+    gst_inputs = resolve_gst_line_inputs(db, data.lines)
+    gst_totals = calculate_document_gst(
+        gst_inputs,
+        prices_include_gst=prices_include_gst(db),
+        gst_context="sales",
+    )
 
     invoice = Invoice(
         invoice_number=invoice_number,
@@ -113,11 +110,11 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         ship_city=data.ship_city or customer.ship_city,
         ship_state=data.ship_state or customer.ship_state,
         ship_zip=data.ship_zip or customer.ship_zip,
-        subtotal=subtotal,
-        tax_rate=data.tax_rate,
-        tax_amount=tax_amount,
-        total=total,
-        balance_due=total,
+        subtotal=gst_totals.subtotal,
+        tax_rate=gst_totals.effective_tax_rate,
+        tax_amount=gst_totals.tax_amount,
+        total=gst_totals.total,
+        balance_due=gst_totals.total,
         notes=data.notes,
     )
     db.add(invoice)
@@ -125,13 +122,14 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
 
     for i, line_data in enumerate(data.lines):
         gst_code, gst_rate = resolve_line_gst(db, line_data)
+        line_total = gst_totals.lines[i]
         line = InvoiceLine(
             invoice_id=invoice.id,
             item_id=line_data.item_id,
             description=line_data.description,
             quantity=line_data.quantity,
             rate=line_data.rate,
-            amount=line_data.quantity * line_data.rate,
+            amount=line_total.net_amount,
             gst_code=gst_code,
             gst_rate=gst_rate,
             class_name=line_data.class_name,
@@ -154,13 +152,13 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         # Debit A/R for total
         journal_lines.append({
             "account_id": ar_id,
-            "debit": Decimal(str(total)),
+            "debit": Decimal(str(gst_totals.total)),
             "credit": Decimal("0"),
             "description": f"Invoice #{invoice_number}",
         })
         # Credit income for each line (use item's income account or default)
-        for line_data in data.lines:
-            line_amount = Decimal(str(line_data.quantity * line_data.rate))
+        for i, line_data in enumerate(data.lines):
+            line_amount = gst_totals.lines[i].net_amount
             if line_amount == 0:
                 continue
             income_id = default_income_id
@@ -175,11 +173,11 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
                 "description": line_data.description or "",
             })
         # Credit sales tax if any
-        if tax_amount > 0 and tax_account_id:
+        if gst_totals.tax_amount > 0 and tax_account_id:
             journal_lines.append({
                 "account_id": tax_account_id,
                 "debit": Decimal("0"),
-                "credit": Decimal(str(tax_amount)),
+                "credit": Decimal(str(gst_totals.tax_amount)),
                 "description": "Sales tax",
             })
 
@@ -212,15 +210,22 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     if data.lines is not None:
         # Replace lines
         db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).delete()
+        gst_inputs = resolve_gst_line_inputs(db, data.lines)
+        gst_totals = calculate_document_gst(
+            gst_inputs,
+            prices_include_gst=prices_include_gst(db),
+            gst_context="sales",
+        )
         for i, line_data in enumerate(data.lines):
             gst_code, gst_rate = resolve_line_gst(db, line_data)
+            line_total = gst_totals.lines[i]
             line = InvoiceLine(
                 invoice_id=invoice_id,
                 item_id=line_data.item_id,
                 description=line_data.description,
                 quantity=line_data.quantity,
                 rate=line_data.rate,
-                amount=line_data.quantity * line_data.rate,
+                amount=line_total.net_amount,
                 gst_code=gst_code,
                 gst_rate=gst_rate,
                 class_name=line_data.class_name,
@@ -228,12 +233,11 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             )
             db.add(line)
 
-        tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
-        subtotal, tax_amount, total = _compute_totals(data.lines, tax_rate)
-        invoice.subtotal = subtotal
-        invoice.tax_amount = tax_amount
-        invoice.total = total
-        invoice.balance_due = total - invoice.amount_paid
+        invoice.subtotal = gst_totals.subtotal
+        invoice.tax_rate = gst_totals.effective_tax_rate
+        invoice.tax_amount = gst_totals.tax_amount
+        invoice.total = gst_totals.total
+        invoice.balance_due = gst_totals.total - invoice.amount_paid
 
     db.commit()
     db.refresh(invoice)
