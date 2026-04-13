@@ -101,7 +101,7 @@ Relevant files:
 
 ### Payroll
 
-Payroll employee setup now uses an NZ-focused field set for IRD number, tax code, KiwiSaver, student loan, child support, ESCT, pay frequency, start/end dates, and a per-pay child support amount. The Payroll page now supports draft pay runs using versioned NZ PAYE rules, calculates PAYE/ACC/student loan/KiwiSaver/ESCT/child support values, and posts processed runs into NZ payroll liability accounts. Payslips and payday filing outputs remain later slices.
+Payroll employee setup now uses an NZ-focused field set for IRD number, tax code, KiwiSaver, student loan, child support, ESCT, pay frequency, start/end dates, and a per-pay child support amount. The Payroll page now supports draft pay runs using versioned NZ PAYE rules, calculates PAYE/ACC/student loan/KiwiSaver/ESCT/child support values, posts processed runs into NZ payroll liability accounts, and generates payslip PDFs for processed pay runs. Payday filing outputs remain a later slice.
 
 Relevant files:
 
@@ -200,7 +200,7 @@ Relevant files:
     Draft NZ pay runs now use versioned IRD-driven PAYE logic by tax year and model PAYE, ACC earners’ levy, student loan, KiwiSaver employee deduction, employer KiwiSaver, ESCT, and child support deductions. Payday filing fields and exports remain future work.
 
 14. Replace payroll outputs:
-    Add NZ payslip labels and Employment Information / payday filing export. Avoid naming this "IRFile/EMS" until confirmed by current IRD requirements.
+    NZ payslip PDF output now exists for processed pay runs. Employment Information / payday filing export remains the next payroll-output slice. Avoid naming this "IRFile/EMS" until confirmed by current IRD requirements.
 
 15. Seed NZ chart and demo data:
     Create NZ chart accounts for GST, PAYE, KiwiSaver, ESCT, wages, and any ACC-related expenses/liabilities as appropriate. Replace IRS Pub 583 seed/demo data with NZ examples.

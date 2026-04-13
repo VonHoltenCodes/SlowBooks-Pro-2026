@@ -39,7 +39,7 @@ const PayrollPage = {
                 <td class="amount">${formatCurrency(run.total_taxes)}</td>
                 <td class="actions">
                     <button class="btn btn-sm btn-secondary" onclick="PayrollPage.viewRun(${run.id})">View</button>
-                    ${status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.processRun(${run.id})">Process</button>` : ''}
+                    ${status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.processRun(${run.id})">Process</button>` : `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.viewRun(${run.id})">Payslips</button>`}
                 </td>
             </tr>`;
         }
@@ -146,6 +146,7 @@ const PayrollPage = {
                     <td class="amount">${formatCurrency(stub.kiwisaver_employee_deduction)}</td>
                     <td class="amount">${formatCurrency(stub.child_support_deduction)}</td>
                     <td class="amount">${formatCurrency(stub.net_pay)}</td>
+                    <td>${String(run.status || '').toLowerCase() === 'processed' ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.openPayslip(${run.id}, ${stub.employee_id})">Print / PDF</button>` : ''}</td>
                 </tr>
             `).join('');
             openModal(`Pay Run ${id}`, `
@@ -156,7 +157,7 @@ const PayrollPage = {
                 </div>
                 <div class="table-container">
                     <table>
-                        <thead><tr><th>Employee</th><th>Tax Code</th><th class="amount">Gross</th><th class="amount">PAYE</th><th class="amount">ACC</th><th class="amount">Student Loan</th><th class="amount">KiwiSaver</th><th class="amount">Child Support</th><th class="amount">Net</th></tr></thead>
+                        <thead><tr><th>Employee</th><th>Tax Code</th><th class="amount">Gross</th><th class="amount">PAYE</th><th class="amount">ACC</th><th class="amount">Student Loan</th><th class="amount">KiwiSaver</th><th class="amount">Child Support</th><th class="amount">Net</th><th>Actions</th></tr></thead>
                         <tbody>${rows}</tbody>
                     </table>
                 </div>
@@ -170,5 +171,9 @@ const PayrollPage = {
         } catch (err) {
             toast(err.message, 'error');
         }
+    },
+
+    openPayslip(runId, employeeId) {
+        window.open(`/api/payroll/${runId}/payslips/${employeeId}/pdf`, '_blank');
     },
 };

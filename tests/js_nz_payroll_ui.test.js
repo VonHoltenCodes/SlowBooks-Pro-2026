@@ -30,16 +30,28 @@ async function runPayrollPage() {
             get: async (path) => {
                 calls.push(path);
                 if (path === '/payroll') {
-                    return [{
-                        id: 1,
-                        status: 'draft',
-                        tax_year: 2027,
-                        pay_date: '2026-04-15',
-                        total_gross: 4200,
-                        total_net: 2922.13,
-                        total_taxes: 1277.87,
-                        stubs: [],
-                    }];
+                    return [
+                        {
+                            id: 1,
+                            status: 'draft',
+                            tax_year: 2027,
+                            pay_date: '2026-04-15',
+                            total_gross: 4200,
+                            total_net: 2922.13,
+                            total_taxes: 1277.87,
+                            stubs: [],
+                        },
+                        {
+                            id: 2,
+                            status: 'processed',
+                            tax_year: 2027,
+                            pay_date: '2026-04-29',
+                            total_gross: 4200,
+                            total_net: 2922.13,
+                            total_taxes: 1277.87,
+                            stubs: [],
+                        }
+                    ];
                 }
                 if (path === '/employees?active_only=true') {
                     return [{
@@ -90,6 +102,7 @@ async function runPayrollPage() {
     assert.ok(payrollHtml.includes('Tax Year'));
     assert.ok(payrollHtml.includes('Process'));
     assert.ok(payrollHtml.includes('Draft'));
+    assert.ok(payrollHtml.includes('Payslip'));
     assert.ok(payrollHtml.includes('NZ payroll setup is ready'));
     assert.ok(payrollHtml.includes('PAYE'));
     assert.ok(!payrollHtml.includes('Federal'));

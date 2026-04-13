@@ -51,3 +51,14 @@ def generate_statement_pdf(customer, invoices, payments, company_settings: dict,
         company=company_settings, as_of_date=as_of_date,
     )
     return HTML(string=html_str).write_pdf()
+
+
+def generate_payroll_payslip_pdf(pay_run, stub, employee, company_settings: dict) -> bytes:
+    template = _jinja_env.get_template("payroll_payslip_pdf.html")
+    html_str = template.render(
+        pay_run=pay_run,
+        stub=stub,
+        employee=employee,
+        company=company_settings,
+    )
+    return HTML(string=html_str).write_pdf()

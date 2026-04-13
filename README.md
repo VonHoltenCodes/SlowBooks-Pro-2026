@@ -54,7 +54,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 
 ### Payroll
 - **Employees** — NZ payroll employee setup with IRD number, tax code, KiwiSaver, student loan, child support, ESCT, and pay frequency
-- **Payroll** — NZ draft pay runs with versioned PAYE calculations, KiwiSaver/student loan/child support deductions, ESCT, and journal posting to payroll liability accounts
+- **Payroll** — NZ draft/processed pay runs with versioned PAYE calculations, KiwiSaver/student loan/child support deductions, ESCT, journal posting to payroll liability accounts, and payslip PDFs for processed runs
 - Tax calculations are approximate — disclaimer included. Verify with a tax professional
 
 ### Banking

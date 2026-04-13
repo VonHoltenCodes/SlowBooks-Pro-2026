@@ -123,6 +123,41 @@ class PdfServiceFormattingTests(unittest.TestCase):
         self.assertIn("$1,234.50", CapturingHTML.rendered[-1])
         self.assertIn("$234.50", CapturingHTML.rendered[-1])
 
+    def test_payroll_payslip_pdf_uses_nz_payroll_labels_and_company_settings(self):
+        pay_run = SimpleNamespace(
+            id=7,
+            period_start=date(2026, 4, 1),
+            period_end=date(2026, 4, 14),
+            pay_date=date(2026, 4, 15),
+            tax_year=2027,
+        )
+        employee = SimpleNamespace(
+            first_name="Aroha",
+            last_name="Ngata",
+        )
+        stub = SimpleNamespace(
+            tax_code="M",
+            hours=Decimal("0"),
+            gross_pay=Decimal("3000.00"),
+            paye=Decimal("600.78"),
+            acc_earners_levy=Decimal("52.50"),
+            student_loan_deduction=Decimal("0.00"),
+            kiwisaver_employee_deduction=Decimal("105.00"),
+            employer_kiwisaver_contribution=Decimal("105.00"),
+            esct=Decimal("18.37"),
+            child_support_deduction=Decimal("0.00"),
+            net_pay=Decimal("2241.72"),
+        )
+
+        pdf_service.generate_payroll_payslip_pdf(pay_run, stub, employee, self.company)
+
+        self.assertIn("Payslip", CapturingHTML.rendered[-1])
+        self.assertIn("Aroha Ngata", CapturingHTML.rendered[-1])
+        self.assertIn("15 Apr 2026", CapturingHTML.rendered[-1])
+        self.assertIn("PAYE", CapturingHTML.rendered[-1])
+        self.assertIn("ACC Earners' Levy", CapturingHTML.rendered[-1])
+        self.assertIn("$2,241.72", CapturingHTML.rendered[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

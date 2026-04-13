@@ -6,11 +6,13 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.payroll import Employee, PayRun, PayRunStatus, PayStub
 from app.schemas.payroll import PayRunCreate, PayRunResponse, PayStubResponse
+from app.services.pdf_service import generate_payroll_payslip_pdf
 from app.services.accounting import (
     create_journal_entry,
     get_child_support_payable_account_id,
@@ -23,6 +25,7 @@ from app.services.accounting import (
 )
 from app.services.closing_date import check_closing_date
 from app.services.nz_payroll import calculate_payroll_stub, round_money
+from app.routes.settings import _get_all as get_settings
 
 router = APIRouter(prefix="/api/payroll", tags=["payroll"])
 
@@ -266,3 +269,27 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(pay_run)
     return _pay_run_response(pay_run)
+
+
+@router.get("/{run_id}/payslips/{employee_id}/pdf")
+def payroll_payslip_pdf(run_id: int, employee_id: int, db: Session = Depends(get_db)):
+    pay_run = db.query(PayRun).filter(PayRun.id == run_id).first()
+    if not pay_run:
+        raise HTTPException(status_code=404, detail="Pay run not found")
+    if pay_run.status != PayRunStatus.PROCESSED:
+        raise HTTPException(status_code=400, detail="Payslips are only available for processed pay runs")
+
+    stub = (
+        db.query(PayStub)
+        .filter(PayStub.pay_run_id == run_id, PayStub.employee_id == employee_id)
+        .first()
+    )
+    if not stub or not stub.employee:
+        raise HTTPException(status_code=404, detail="Employee payslip not found for this pay run")
+
+    pdf_bytes = generate_payroll_payslip_pdf(pay_run, stub, stub.employee, get_settings(db))
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=PaySlip_{run_id}_{employee_id}.pdf"},
+    )
