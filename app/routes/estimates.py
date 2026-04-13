@@ -11,7 +11,6 @@ from datetime import timedelta
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
@@ -20,16 +19,26 @@ from app.models.contacts import Customer
 from app.schemas.estimates import EstimateCreate, EstimateUpdate, EstimateResponse
 from app.schemas.invoices import InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
-from app.routes.settings import _get_all as get_settings
+from app.routes.settings import _get_all as get_settings, _set as set_setting
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
 
 def _next_estimate_number(db: Session) -> str:
-    last = db.query(sqlfunc.max(Estimate.estimate_number)).scalar()
-    if last and last.isdigit():
-        return str(int(last) + 1).zfill(len(last))
-    return "E-1001"
+    settings = get_settings(db)
+    prefix = settings.get("estimate_prefix", "E-")
+    next_number = settings.get("estimate_next_number", "1001").strip() or "1001"
+    try:
+        current_number = int(next_number)
+    except ValueError:
+        current_number = 1001
+
+    while True:
+        estimate_number = f"{prefix}{current_number}"
+        exists = db.query(Estimate.id).filter(Estimate.estimate_number == estimate_number).first()
+        if not exists:
+            return estimate_number
+        current_number += 1
 
 
 @router.get("", response_model=list[EstimateResponse])
@@ -97,6 +106,10 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             line_order=line_data.line_order or i,
         )
         db.add(line)
+
+    numeric_part = estimate_number.removeprefix(get_settings(db).get("estimate_prefix", "E-"))
+    if numeric_part.isdigit():
+        set_setting(db, "estimate_next_number", str(int(numeric_part) + 1))
 
     db.commit()
     db.refresh(estimate)

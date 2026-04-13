@@ -38,16 +38,28 @@ const RecurringPage = {
     },
 
     _items: [],
+    _customers: [],
     lineCount: 0,
 
     async showForm(id = null) {
-        const [customers, items] = await Promise.all([
+        const [customers, items, settings] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/items?active_only=true'),
+            API.get('/settings'),
         ]);
         RecurringPage._items = items;
+        RecurringPage._customers = customers;
 
-        let rec = { customer_id: '', frequency: 'monthly', start_date: todayISO(), end_date: '', terms: 'Net 30', tax_rate: 0, notes: '', lines: [] };
+        let rec = {
+            customer_id: '',
+            frequency: 'monthly',
+            start_date: todayISO(),
+            end_date: '',
+            terms: settings.default_terms || 'Net 30',
+            tax_rate: (parseFloat(settings.default_tax_rate || '0') || 0) / 100,
+            notes: '',
+            lines: [],
+        };
         if (id) rec = await API.get(`/recurring/${id}`);
         if (rec.lines.length === 0) rec.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
         RecurringPage.lineCount = rec.lines.length;
@@ -59,7 +71,7 @@ const RecurringPage = {
             <form onsubmit="RecurringPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Customer *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+                        <select name="customer_id" required onchange="RecurringPage.customerSelected(this.value)"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>Frequency *</label>
                         <select name="frequency">
                             ${['weekly','monthly','quarterly','yearly'].map(f =>
@@ -70,9 +82,9 @@ const RecurringPage = {
                     <div class="form-group"><label>End Date</label>
                         <input name="end_date" type="date" value="${rec.end_date || ''}"></div>
                     <div class="form-group"><label>Terms</label>
-                        <select name="terms">
+                        <select name="terms" id="recurring-terms">
                             ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                `<option ${rec.terms===t?'selected':''}>${t}</option>`).join('')}
+                                `<option value="${t}" ${rec.terms===t?'selected':''}>${t}</option>`).join('')}
                         </select></div>
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.01" value="${(rec.tax_rate * 100) || 0}"></div>
@@ -100,6 +112,15 @@ const RecurringPage = {
                     <button type="submit" class="btn btn-primary">${id ? 'Update' : 'Create'}</button>
                 </div>
             </form>`);
+        if (!id && rec.customer_id) RecurringPage.customerSelected(rec.customer_id);
+    },
+
+    customerSelected(customerId) {
+        const customer = RecurringPage._customers.find(c => c.id == customerId);
+        const termsField = $('#recurring-terms');
+        if (customer && termsField && customer.terms) {
+            termsField.value = customer.terms;
+        }
     },
 
     addLine() {

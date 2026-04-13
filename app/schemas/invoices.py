@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -32,8 +32,8 @@ class InvoiceLineResponse(BaseModel):
 
 class InvoiceCreate(BaseModel):
     customer_id: int
-    date: date
-    due_date: Optional[date] = None
+    date: dt_date
+    due_date: Optional[dt_date] = None
     terms: str = "Net 30"
     po_number: Optional[str] = None
     bill_address1: Optional[str] = None
@@ -53,8 +53,8 @@ class InvoiceCreate(BaseModel):
 
 class InvoiceUpdate(BaseModel):
     customer_id: Optional[int] = None
-    date: Optional[date] = None
-    due_date: Optional[date] = None
+    date: Optional[dt_date] = None
+    due_date: Optional[dt_date] = None
     terms: Optional[str] = None
     po_number: Optional[str] = None
     status: Optional[InvoiceStatus] = None
@@ -68,8 +68,8 @@ class InvoiceResponse(BaseModel):
     invoice_number: str
     customer_id: int
     status: InvoiceStatus
-    date: date
-    due_date: Optional[date]
+    date: dt_date
+    due_date: Optional[dt_date]
     terms: Optional[str]
     po_number: Optional[str]
     bill_address1: Optional[str]

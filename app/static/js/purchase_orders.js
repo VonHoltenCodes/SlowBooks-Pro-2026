@@ -38,13 +38,22 @@ const PurchaseOrdersPage = {
     lineCount: 0,
 
     async showForm(id = null) {
-        const [vendors, items] = await Promise.all([
+        const [vendors, items, settings] = await Promise.all([
             API.get('/vendors?active_only=true'),
             API.get('/items?active_only=true'),
+            API.get('/settings'),
         ]);
         PurchaseOrdersPage._items = items;
 
-        let po = { vendor_id: '', date: todayISO(), expected_date: '', ship_to: '', tax_rate: 0, notes: '', lines: [] };
+        let po = {
+            vendor_id: '',
+            date: todayISO(),
+            expected_date: '',
+            ship_to: '',
+            tax_rate: (parseFloat(settings.default_tax_rate || '0') || 0) / 100,
+            notes: '',
+            lines: [],
+        };
         if (id) po = await API.get(`/purchase-orders/${id}`);
         if (po.lines.length === 0) po.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
         PurchaseOrdersPage.lineCount = po.lines.length;

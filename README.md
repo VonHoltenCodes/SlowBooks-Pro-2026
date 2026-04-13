@@ -64,8 +64,9 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - **OFX/QFX Import** — Import bank transactions from OFX/QFX files with FITID dedup, preview before import, auto-match by amount/date
 
 ### Reports & Tax
+- **QuickBooks-style period selector** — All reports support preset periods (This Month, This Quarter, This/Last Year, Year to Date, Custom Date) with live refresh
 - **Profit & Loss** — Income vs expenses for any date range
-- **Balance Sheet** — Assets, liabilities, and equity
+- **Balance Sheet** — Assets, liabilities, and equity as of any date
 - **A/R Aging** — Outstanding receivables grouped by customer with 30/60/90 day buckets
 - **A/P Aging** — Outstanding payables grouped by vendor with 30/60/90 day buckets
 - **Sales Tax** — Tax collected by invoice with taxable/non-taxable breakdowns
@@ -474,5 +475,10 @@ You can use, modify, and run Slowbooks Pro for any personal, educational, or int
 - Every small business owner who lost software they paid for when activation servers died
 
 ---
+
+## Contributors
+
+- [VonHoltenCodes](https://github.com/VonHoltenCodes) — Creator
+- [jake-378](https://github.com/jake-378) — Backup UI fixes, report period selectors, invoice terms autofill, date validation fixes
 
 *Built by [VonHoltenCodes](https://github.com/VonHoltenCodes) with Claude Code.*

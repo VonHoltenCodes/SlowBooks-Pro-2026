@@ -88,12 +88,20 @@ const EstimatesPage = {
     _items: [],
 
     async showForm(id = null) {
-        const [customers, items] = await Promise.all([
+        const [customers, items, settings] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/items?active_only=true'),
+            API.get('/settings'),
         ]);
 
-        let est = { customer_id: '', date: todayISO(), expiration_date: '', tax_rate: 0, notes: '', lines: [] };
+        let est = {
+            customer_id: '',
+            date: todayISO(),
+            expiration_date: '',
+            tax_rate: (parseFloat(settings.default_tax_rate || '0') || 0) / 100,
+            notes: '',
+            lines: [],
+        };
         if (id) est = await API.get(`/estimates/${id}`);
         if (est.lines.length === 0) est.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
 

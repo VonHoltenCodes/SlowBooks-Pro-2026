@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -32,8 +32,8 @@ class EstimateLineResponse(BaseModel):
 
 class EstimateCreate(BaseModel):
     customer_id: int
-    date: date
-    expiration_date: Optional[date] = None
+    date: dt_date
+    expiration_date: Optional[dt_date] = None
     tax_rate: Decimal = Decimal("0")
     notes: Optional[str] = None
     lines: list[EstimateLineCreate] = []
@@ -41,8 +41,8 @@ class EstimateCreate(BaseModel):
 
 class EstimateUpdate(BaseModel):
     customer_id: Optional[int] = None
-    date: Optional[date] = None
-    expiration_date: Optional[date] = None
+    date: Optional[dt_date] = None
+    expiration_date: Optional[dt_date] = None
     status: Optional[EstimateStatus] = None
     tax_rate: Optional[Decimal] = None
     notes: Optional[str] = None
@@ -54,8 +54,8 @@ class EstimateResponse(BaseModel):
     estimate_number: str
     customer_id: int
     status: EstimateStatus
-    date: date
-    expiration_date: Optional[date]
+    date: dt_date
+    expiration_date: Optional[dt_date]
     subtotal: Decimal
     tax_rate: Decimal
     tax_amount: Decimal
