@@ -4,6 +4,7 @@
 # ============================================================================
 
 import enum
+from decimal import Decimal
 
 from sqlalchemy import (
     Column, Integer, String, Date, Numeric, DateTime, Text, Enum,
@@ -56,6 +57,11 @@ class CreditMemo(Base):
 class CreditMemoLine(Base):
     __tablename__ = "credit_memo_lines"
 
+    def __init__(self, **kwargs):
+        kwargs.setdefault("gst_code", "GST15")
+        kwargs.setdefault("gst_rate", Decimal("0.1500"))
+        super().__init__(**kwargs)
+
     id = Column(Integer, primary_key=True, index=True)
     credit_memo_id = Column(Integer, ForeignKey("credit_memos.id", ondelete="CASCADE"), nullable=False)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
@@ -63,10 +69,13 @@ class CreditMemoLine(Base):
     quantity = Column(Numeric(10, 2), default=1)
     rate = Column(Numeric(12, 2), default=0)
     amount = Column(Numeric(12, 2), default=0)
+    gst_code = Column(String(20), ForeignKey("gst_codes.code"), default="GST15", nullable=False)
+    gst_rate = Column(Numeric(6, 4), default=Decimal("0.1500"), nullable=False)
     line_order = Column(Integer, default=0)
 
     credit_memo = relationship("CreditMemo", back_populates="lines")
     item = relationship("Item")
+    gst = relationship("GstCode", foreign_keys=[gst_code])
 
 
 class CreditApplication(Base):

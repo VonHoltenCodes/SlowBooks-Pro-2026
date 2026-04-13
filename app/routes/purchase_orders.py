@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.purchase_orders import PurchaseOrder, PurchaseOrderLine, POStatus
 from app.models.contacts import Vendor
 from app.schemas.purchase_orders import POCreate, POUpdate, POResponse
+from app.services.gst_lines import resolve_line_gst
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
 
@@ -74,10 +75,12 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
     db.flush()
 
     for i, line_data in enumerate(data.lines):
+        gst_code, gst_rate = resolve_line_gst(db, line_data)
         line = PurchaseOrderLine(
             purchase_order_id=po.id, item_id=line_data.item_id,
             description=line_data.description, quantity=line_data.quantity,
             rate=line_data.rate, amount=Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate)),
+            gst_code=gst_code, gst_rate=gst_rate,
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -105,12 +108,14 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
         db.query(PurchaseOrderLine).filter(PurchaseOrderLine.purchase_order_id == po_id).delete()
         subtotal = Decimal(0)
         for i, line_data in enumerate(data.lines):
+            gst_code, gst_rate = resolve_line_gst(db, line_data)
             amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
             subtotal += amt
             db.add(PurchaseOrderLine(
                 purchase_order_id=po_id, item_id=line_data.item_id,
                 description=line_data.description, quantity=line_data.quantity,
-                rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
+                rate=line_data.rate, amount=amt, gst_code=gst_code, gst_rate=gst_rate,
+                line_order=line_data.line_order or i,
             ))
         tax_rate = Decimal(str(data.tax_rate)) if data.tax_rate is not None else po.tax_rate
         po.subtotal = subtotal
@@ -149,6 +154,7 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
         db.add(BillLine(
             bill_id=bill.id, item_id=poline.item_id, description=poline.description,
             quantity=poline.quantity, rate=poline.rate, amount=poline.amount,
+            gst_code=poline.gst_code, gst_rate=poline.gst_rate,
             line_order=poline.line_order,
         ))
 

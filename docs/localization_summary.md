@@ -178,7 +178,7 @@ Relevant files:
    GST code reference data is now modeled and seeded with `GST15`, `ZERO`, `EXEMPT`, and `NO_GST`, with a read-only API for downstream line-level GST work. Consider `IMPORT` or `REVERSE_CHARGE` later if needed.
 
 6. Store GST per line:
-   Add GST code/rate to invoice lines, estimate lines, credit memo lines, bill lines, purchase order lines, and recurring invoice lines.
+   GST code and rate snapshots are stored on invoice, estimate, credit memo, bill, purchase order, and recurring invoice lines. Existing invoice-level totals and posting remain unchanged until the GST calculation service is added.
 
 7. Build one GST calculation service:
    Support exclusive and inclusive pricing, `3/23` GST-inclusive extraction, rounding, taxable totals, zero-rated totals, exempt totals, output GST, and input GST. Replace the current `subtotal * tax_rate` logic in backend routes and frontend preview calculators. Do not solve GST by setting `default_tax_rate=15.0`; that cannot represent zero-rated/exempt lines or GST-inclusive prices.

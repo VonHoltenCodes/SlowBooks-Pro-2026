@@ -65,7 +65,7 @@ class GstCode(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 
-def ensure_default_gst_codes(db: Session) -> None:
+def ensure_default_gst_codes(db: Session, commit: bool = True) -> None:
     existing = {
         row.code: row
         for row in db.query(GstCode).filter(GstCode.code.in_([item["code"] for item in DEFAULT_GST_CODES])).all()
@@ -78,4 +78,7 @@ def ensure_default_gst_codes(db: Session) -> None:
             row.is_system = True
         else:
             db.add(GstCode(**item, is_system=True, is_active=True))
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()

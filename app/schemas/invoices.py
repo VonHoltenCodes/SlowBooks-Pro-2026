@@ -13,6 +13,8 @@ class InvoiceLineCreate(BaseModel):
     quantity: Decimal = Decimal("1")
     rate: Decimal = Decimal("0")
     amount: Decimal = Decimal("0")
+    gst_code: str = "GST15"
+    gst_rate: Decimal = Decimal("0.1500")
     class_name: Optional[str] = None
     line_order: int = 0
 
@@ -24,6 +26,8 @@ class InvoiceLineResponse(BaseModel):
     quantity: Decimal
     rate: Decimal
     amount: Decimal
+    gst_code: str
+    gst_rate: Decimal
     class_name: Optional[str]
     line_order: int
 

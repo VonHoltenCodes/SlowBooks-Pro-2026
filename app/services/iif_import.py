@@ -487,6 +487,8 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
             quantity=qty,
             rate=rate,
             amount=spl_amount,
+            gst_code="GST15",
+            gst_rate=Decimal("0.1500"),
             line_order=line_order,
         )
         db.add(line)
@@ -686,6 +688,8 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
             quantity=qty,
             rate=rate,
             amount=spl_amount,
+            gst_code="GST15",
+            gst_rate=Decimal("0.1500"),
             line_order=line_order,
         )
         db.add(line)

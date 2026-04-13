@@ -11,6 +11,7 @@ from app.models.recurring import RecurringInvoice, RecurringInvoiceLine
 from app.models.contacts import Customer
 from app.schemas.recurring import RecurringCreate, RecurringUpdate, RecurringResponse
 from app.services.recurring_service import generate_due_invoices
+from app.services.gst_lines import resolve_line_gst
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
 
@@ -57,10 +58,12 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     db.flush()
 
     for i, line_data in enumerate(data.lines):
+        gst_code, gst_rate = resolve_line_gst(db, line_data)
         db.add(RecurringInvoiceLine(
             recurring_invoice_id=rec.id, item_id=line_data.item_id,
             description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, line_order=line_data.line_order or i,
+            rate=line_data.rate, gst_code=gst_code, gst_rate=gst_rate,
+            line_order=line_data.line_order or i,
         ))
 
     db.commit()
@@ -82,10 +85,12 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
     if data.lines is not None:
         db.query(RecurringInvoiceLine).filter(RecurringInvoiceLine.recurring_invoice_id == rec_id).delete()
         for i, line_data in enumerate(data.lines):
+            gst_code, gst_rate = resolve_line_gst(db, line_data)
             db.add(RecurringInvoiceLine(
                 recurring_invoice_id=rec_id, item_id=line_data.item_id,
                 description=line_data.description, quantity=line_data.quantity,
-                rate=line_data.rate, line_order=line_data.line_order or i,
+                rate=line_data.rate, gst_code=gst_code, gst_rate=gst_rate,
+                line_order=line_data.line_order or i,
             ))
 
     db.commit()

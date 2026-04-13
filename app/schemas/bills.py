@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel
 
@@ -9,6 +10,8 @@ class BillLineCreate(BaseModel):
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
+    gst_code: str = "GST15"
+    gst_rate: Decimal = Decimal("0.1500")
     line_order: int = 0
 
 
@@ -20,6 +23,8 @@ class BillLineResponse(BaseModel):
     quantity: float = 1
     rate: float = 0
     amount: float = 0
+    gst_code: str = "GST15"
+    gst_rate: Decimal = Decimal("0.1500")
     line_order: int = 0
     model_config = {"from_attributes": True}
 

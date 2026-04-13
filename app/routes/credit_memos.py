@@ -20,6 +20,7 @@ from app.services.accounting import (
     get_default_income_account_id, get_sales_tax_account_id,
 )
 from app.services.closing_date import check_closing_date
+from app.services.gst_lines import resolve_line_gst
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -89,11 +90,13 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     journal_lines = []
 
     for i, line_data in enumerate(data.lines):
+        gst_code, gst_rate = resolve_line_gst(db, line_data)
         amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
         db.add(CreditMemoLine(
             credit_memo_id=cm.id, item_id=line_data.item_id,
             description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
+            rate=line_data.rate, amount=amt, gst_code=gst_code, gst_rate=gst_rate,
+            line_order=line_data.line_order or i,
         ))
         if amt > 0:
             income_id = default_income_id

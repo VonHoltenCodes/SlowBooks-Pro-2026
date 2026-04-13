@@ -91,6 +91,7 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
                 invoice_id=invoice.id, item_id=rline.item_id,
                 description=rline.description, quantity=rline.quantity,
                 rate=rline.rate, amount=Decimal(str(rline.quantity)) * Decimal(str(rline.rate)),
+                gst_code=rline.gst_code, gst_rate=rline.gst_rate,
                 line_order=rline.line_order,
             ))
 

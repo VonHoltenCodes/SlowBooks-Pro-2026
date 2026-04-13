@@ -17,6 +17,7 @@ from app.models.accounts import Account
 from app.schemas.bills import BillCreate, BillUpdate, BillResponse
 from app.services.accounting import create_journal_entry
 from app.services.closing_date import check_closing_date
+from app.services.gst_lines import resolve_line_gst
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
 
@@ -89,6 +90,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
 
     journal_lines = []
     for i, line_data in enumerate(data.lines):
+        gst_code, gst_rate = resolve_line_gst(db, line_data)
         amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
         expense_acct = line_data.account_id
         if not expense_acct and line_data.item_id:
@@ -101,7 +103,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         db.add(BillLine(
             bill_id=bill.id, item_id=line_data.item_id, account_id=expense_acct,
             description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
+            rate=line_data.rate, amount=amt, gst_code=gst_code, gst_rate=gst_rate,
+            line_order=line_data.line_order or i,
         ))
 
         if amt > 0 and expense_acct:

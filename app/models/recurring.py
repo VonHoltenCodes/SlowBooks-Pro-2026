@@ -3,6 +3,8 @@
 # Feature 2: Weekly/monthly/quarterly/yearly recurring invoice templates
 # ============================================================================
 
+from decimal import Decimal
+
 from sqlalchemy import (
     Column, Integer, String, Date, Numeric, DateTime, Boolean, Text,
     ForeignKey, func,
@@ -39,13 +41,21 @@ class RecurringInvoice(Base):
 class RecurringInvoiceLine(Base):
     __tablename__ = "recurring_invoice_lines"
 
+    def __init__(self, **kwargs):
+        kwargs.setdefault("gst_code", "GST15")
+        kwargs.setdefault("gst_rate", Decimal("0.1500"))
+        super().__init__(**kwargs)
+
     id = Column(Integer, primary_key=True, index=True)
     recurring_invoice_id = Column(Integer, ForeignKey("recurring_invoices.id", ondelete="CASCADE"), nullable=False)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)
     rate = Column(Numeric(12, 2), default=0)
+    gst_code = Column(String(20), ForeignKey("gst_codes.code"), default="GST15", nullable=False)
+    gst_rate = Column(Numeric(6, 4), default=Decimal("0.1500"), nullable=False)
     line_order = Column(Integer, default=0)
 
     recurring_invoice = relationship("RecurringInvoice", back_populates="lines")
     item = relationship("Item")
+    gst = relationship("GstCode", foreign_keys=[gst_code])

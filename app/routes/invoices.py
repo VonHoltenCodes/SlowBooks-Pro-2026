@@ -26,6 +26,7 @@ from app.services.accounting import (
 )
 from app.routes.settings import _get_all as get_settings
 from app.services.closing_date import check_closing_date
+from app.services.gst_lines import resolve_line_gst
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 
@@ -123,6 +124,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     db.flush()
 
     for i, line_data in enumerate(data.lines):
+        gst_code, gst_rate = resolve_line_gst(db, line_data)
         line = InvoiceLine(
             invoice_id=invoice.id,
             item_id=line_data.item_id,
@@ -130,6 +132,8 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             quantity=line_data.quantity,
             rate=line_data.rate,
             amount=line_data.quantity * line_data.rate,
+            gst_code=gst_code,
+            gst_rate=gst_rate,
             class_name=line_data.class_name,
             line_order=line_data.line_order or i,
         )
@@ -209,6 +213,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         # Replace lines
         db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).delete()
         for i, line_data in enumerate(data.lines):
+            gst_code, gst_rate = resolve_line_gst(db, line_data)
             line = InvoiceLine(
                 invoice_id=invoice_id,
                 item_id=line_data.item_id,
@@ -216,6 +221,8 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 quantity=line_data.quantity,
                 rate=line_data.rate,
                 amount=line_data.quantity * line_data.rate,
+                gst_code=gst_code,
+                gst_rate=gst_rate,
                 class_name=line_data.class_name,
                 line_order=line_data.line_order or i,
             )
@@ -411,6 +418,8 @@ def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db)):
             quantity=oline.quantity,
             rate=oline.rate,
             amount=oline.amount,
+            gst_code=oline.gst_code,
+            gst_rate=oline.gst_rate,
             class_name=oline.class_name,
             line_order=oline.line_order,
         )
