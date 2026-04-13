@@ -22,7 +22,7 @@ from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.pdf_service import generate_invoice_pdf
 from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
-    get_default_income_account_id, get_sales_tax_account_id,
+    get_default_income_account_id, get_gst_account_id,
 )
 from app.routes.settings import _get_all as get_settings
 from app.services.closing_date import check_closing_date
@@ -141,11 +141,11 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     # Journal Entry — CInvoice::PostToJournal() @ 0x0015D800
     # DR  Accounts Receivable (1100)     total
     # CR  Income per line item           line amount
-    # CR  Sales Tax Payable (2200)       tax amount (if any)
+    # CR  GST (2200)                     tax amount (if any)
     # ================================================================
     ar_id = get_ar_account_id(db)
     default_income_id = get_default_income_account_id(db)
-    tax_account_id = get_sales_tax_account_id(db)
+    tax_account_id = get_gst_account_id(db)
 
     if ar_id and default_income_id:
         journal_lines = []
@@ -172,13 +172,13 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
                 "credit": line_amount,
                 "description": line_data.description or "",
             })
-        # Credit sales tax if any
+        # Credit GST if any
         if gst_totals.tax_amount > 0 and tax_account_id:
             journal_lines.append({
                 "account_id": tax_account_id,
                 "debit": Decimal("0"),
                 "credit": Decimal(str(gst_totals.tax_amount)),
-                "description": "Sales tax",
+                "description": "GST",
             })
 
         txn = create_journal_entry(

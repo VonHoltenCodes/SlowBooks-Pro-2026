@@ -17,7 +17,7 @@ from app.models.items import Item
 from app.schemas.credit_memos import CreditMemoCreate, CreditMemoResponse, CreditApplicationCreate
 from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
-    get_default_income_account_id, get_sales_tax_account_id,
+    get_default_income_account_id, get_gst_account_id,
 )
 from app.services.closing_date import check_closing_date
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
@@ -90,7 +90,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
 
     ar_id = get_ar_account_id(db)
     default_income_id = get_default_income_account_id(db)
-    tax_account_id = get_sales_tax_account_id(db)
+    tax_account_id = get_gst_account_id(db)
     journal_lines = []
 
     for i, line_data in enumerate(data.lines):
@@ -114,11 +114,11 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                     "description": line_data.description or "",
                 })
 
-    # DR Sales Tax Payable if tax
+    # DR GST if tax
     if gst_totals.tax_amount > 0 and tax_account_id:
         journal_lines.append({
             "account_id": tax_account_id, "debit": gst_totals.tax_amount, "credit": Decimal("0"),
-            "description": "Sales tax credit",
+            "description": "GST credit",
         })
 
     # CR Accounts Receivable

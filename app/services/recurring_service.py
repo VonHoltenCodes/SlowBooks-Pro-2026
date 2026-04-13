@@ -15,7 +15,7 @@ from app.models.invoices import Invoice, InvoiceLine
 from app.models.items import Item
 from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
-    get_default_income_account_id, get_sales_tax_account_id,
+    get_default_income_account_id, get_gst_account_id,
 )
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import stored_gst_line_inputs
@@ -54,7 +54,7 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
     created_ids = []
     ar_id = get_ar_account_id(db)
     default_income_id = get_default_income_account_id(db)
-    tax_account_id = get_sales_tax_account_id(db)
+    tax_account_id = get_gst_account_id(db)
 
     for rec in recurrings:
         # Check end date
@@ -120,7 +120,7 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
             if gst_totals.tax_amount > 0 and tax_account_id:
                 journal_lines.append({
                     "account_id": tax_account_id, "debit": Decimal("0"), "credit": gst_totals.tax_amount,
-                    "description": "Sales tax",
+                    "description": "GST",
                 })
             txn = create_journal_entry(
                 db, rec.next_due, f"Recurring Invoice #{invoice_number}",

@@ -35,6 +35,7 @@ from app.database import Base
 from app.models.accounts import Account, AccountType
 from app.models.contacts import Customer, Vendor
 from app.models.bills import Bill
+from app.models.credit_memos import CreditMemo
 from app.models.invoices import Invoice
 from app.models.settings import Settings
 from app.models.transactions import TransactionLine
@@ -56,7 +57,7 @@ class DocumentGstCalculationTests(unittest.TestCase):
             vendor,
             Account(name="Accounts Receivable", account_number="1100", account_type=AccountType.ASSET),
             Account(name="Accounts Payable", account_number="2000", account_type=AccountType.LIABILITY),
-            Account(name="GST Control", account_number="2200", account_type=AccountType.LIABILITY),
+            Account(name="Sales Tax Payable", account_number="2200", account_type=AccountType.LIABILITY),
             Account(name="Service Income", account_number="4000", account_type=AccountType.INCOME),
             Account(name="Expenses", account_number="6000", account_type=AccountType.EXPENSE),
         ])
@@ -66,6 +67,9 @@ class DocumentGstCalculationTests(unittest.TestCase):
     def _set_inclusive_prices(self, db):
         db.add(Settings(key="prices_include_gst", value="true"))
         db.commit()
+
+    def _account_snapshot(self, line):
+        return line.account.account_number, line.account.name
 
     def test_invoice_totals_use_line_gst_codes_not_document_tax_rate(self):
         from app.routes.invoices import create_invoice
@@ -152,6 +156,9 @@ class DocumentGstCalculationTests(unittest.TestCase):
             ), db=db)
             stored_invoice = db.query(Invoice).filter(Invoice.id == invoice.id).one()
             lines = db.query(TransactionLine).filter(TransactionLine.transaction_id == stored_invoice.transaction_id).all()
+            gst_line = next(line for line in lines if line.credit == Decimal("15.00"))
+            gst_account_number, gst_account_name = self._account_snapshot(gst_line)
+            gst_description = gst_line.description
 
         self.assertEqual(invoice.subtotal, Decimal("100.00"))
         self.assertEqual(invoice.tax_amount, Decimal("15.00"))
@@ -162,6 +169,9 @@ class DocumentGstCalculationTests(unittest.TestCase):
             sorted(line.credit for line in lines if line.credit > 0),
             [Decimal("15.00"), Decimal("100.00")],
         )
+        self.assertEqual(gst_account_number, "2200")
+        self.assertEqual(gst_account_name, "GST")
+        self.assertEqual(gst_description, "GST")
 
     def test_inclusive_bill_posts_balanced_net_expense_and_input_gst(self):
         from app.routes.bills import create_bill
@@ -178,6 +188,9 @@ class DocumentGstCalculationTests(unittest.TestCase):
             ), db=db)
             stored_bill = db.query(Bill).filter(Bill.id == bill.id).one()
             lines = db.query(TransactionLine).filter(TransactionLine.transaction_id == stored_bill.transaction_id).all()
+            gst_line = next(line for line in lines if line.debit == Decimal("15.00"))
+            gst_account_number, gst_account_name = self._account_snapshot(gst_line)
+            gst_description = gst_line.description
 
         self.assertEqual(Decimal(str(bill.subtotal)), Decimal("100.00"))
         self.assertEqual(Decimal(str(bill.tax_amount)), Decimal("15.00"))
@@ -188,6 +201,58 @@ class DocumentGstCalculationTests(unittest.TestCase):
             sorted(line.debit for line in lines if line.debit > 0),
             [Decimal("15.00"), Decimal("100.00")],
         )
+        self.assertEqual(gst_account_number, "2200")
+        self.assertEqual(gst_account_name, "GST")
+        self.assertEqual(gst_description, "GST on bill")
+
+    def test_credit_memo_posts_gst_debit_to_gst_account(self):
+        from app.routes.credit_memos import create_credit_memo
+        from app.schemas.credit_memos import CreditMemoCreate, CreditMemoLineCreate
+
+        with self.Session() as db:
+            customer, _vendor = self._seed_parties_and_accounts(db)
+            credit = create_credit_memo(CreditMemoCreate(
+                customer_id=customer.id,
+                date=date(2026, 4, 13),
+                lines=[CreditMemoLineCreate(description="Credit", quantity=1, rate=100, gst_code="GST15")],
+            ), db=db)
+            stored_credit = db.query(CreditMemo).filter(CreditMemo.id == credit.id).one()
+            lines = db.query(TransactionLine).filter(TransactionLine.transaction_id == stored_credit.transaction_id).all()
+            gst_line = next(line for line in lines if line.debit == Decimal("15.00"))
+            gst_account_number, gst_account_name = self._account_snapshot(gst_line)
+            gst_description = gst_line.description
+
+        self.assertEqual(sum(line.debit for line in lines), Decimal("115.00"))
+        self.assertEqual(sum(line.credit for line in lines), Decimal("115.00"))
+        self.assertEqual(gst_account_number, "2200")
+        self.assertEqual(gst_account_name, "GST")
+        self.assertEqual(gst_description, "GST credit")
+
+    def test_generated_recurring_invoice_posts_gst_credit_to_gst_account(self):
+        from app.routes.recurring import create_recurring
+        from app.schemas.recurring import RecurringCreate, RecurringLineCreate
+        from app.services.recurring_service import generate_due_invoices
+
+        with self.Session() as db:
+            customer, _vendor = self._seed_parties_and_accounts(db)
+            create_recurring(RecurringCreate(
+                customer_id=customer.id,
+                frequency="monthly",
+                start_date=date(2026, 4, 13),
+                lines=[RecurringLineCreate(description="Recurring", quantity=1, rate=100, gst_code="GST15")],
+            ), db=db)
+            generated_ids = generate_due_invoices(db, as_of=date(2026, 4, 13))
+            generated_invoice = db.query(Invoice).filter(Invoice.id == generated_ids[0]).one()
+            lines = db.query(TransactionLine).filter(TransactionLine.transaction_id == generated_invoice.transaction_id).all()
+            gst_line = next(line for line in lines if line.credit == Decimal("15.00"))
+            gst_account_number, gst_account_name = self._account_snapshot(gst_line)
+            gst_description = gst_line.description
+
+        self.assertEqual(sum(line.debit for line in lines), Decimal("115.00"))
+        self.assertEqual(sum(line.credit for line in lines), Decimal("115.00"))
+        self.assertEqual(gst_account_number, "2200")
+        self.assertEqual(gst_account_name, "GST")
+        self.assertEqual(gst_description, "GST")
 
 
 if __name__ == "__main__":

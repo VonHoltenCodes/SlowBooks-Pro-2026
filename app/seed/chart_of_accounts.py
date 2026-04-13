@@ -22,7 +22,7 @@ CHART_OF_ACCOUNTS = [
     # Liabilities (2000s)
     {"account_number": "2000", "name": "Accounts Payable", "account_type": "liability"},
     {"account_number": "2100", "name": "Credit Card", "account_type": "liability"},
-    {"account_number": "2200", "name": "Sales Tax Payable", "account_type": "liability"},
+    {"account_number": "2200", "name": "GST", "account_type": "liability"},
     {"account_number": "2300", "name": "Payroll Liabilities", "account_type": "liability"},
     {"account_number": "2400", "name": "Loan Payable", "account_type": "liability"},
     {"account_number": "2500", "name": "Other Current Liabilities", "account_type": "liability"},

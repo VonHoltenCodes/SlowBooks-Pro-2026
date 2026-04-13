@@ -8,7 +8,7 @@ The `nz-localization` branch is the working branch. It has been synced with upst
 
 The app is strongly US-shaped in tax, payroll, addresses, reports, PDF/UI copy, seed data, and import/export behavior. The broad direction from the external review is accurate, but the code audit found several additional surfaces that need attention:
 
-- Purchase-side GST is more than a label change. Bills already debit account `2200` for tax, so the current single "Sales Tax Payable" account is being used as both collected-output tax and purchase-input tax.
+- Purchase-side and sales-side GST now post through a single `2200 GST` control account. The account balance represents GST owing to or from Inland Revenue, following the Xero-style single GST account model.
 - Import/export paths are a major localization surface. CSV and IIF logic use State/ZIP conventions, QuickBooks-style address parsing, and "Sales Tax Payable" labels.
 - GST calculation is now centralized for invoices, bills, credit memos, purchase orders, estimates, and generated recurring invoices.
 - Document forms now use line-level GST codes for GST calculation. The legacy `default_tax_rate` setting still exists for compatibility, but it is no longer the GST design for NZ documents.
@@ -86,7 +86,7 @@ Document forms now load GST codes and use line-level GST logic for frontend prev
 
 ### GST Posting
 
-The app uses account `2200` as "Sales Tax Payable" for both sales tax collected and tax on bills.
+The app uses account `2200 GST` as the GST control account. Sales/output GST credits this account; purchase/input GST and credit memo reversals debit this account. Settlement/payment workflows remain separate work.
 
 Relevant files:
 
@@ -178,13 +178,13 @@ Relevant files:
    GST code reference data is now modeled and seeded with `GST15`, `ZERO`, `EXEMPT`, and `NO_GST`, with a read-only API for downstream line-level GST work. Consider `IMPORT` or `REVERSE_CHARGE` later if needed.
 
 6. Store GST per line:
-   GST code and rate snapshots are stored on invoice, estimate, credit memo, bill, purchase order, and recurring invoice lines. Existing invoice-level totals and posting remain unchanged until the GST calculation service is added.
+   GST code and rate snapshots are stored on invoice, estimate, credit memo, bill, purchase order, and recurring invoice lines. Later calculation and posting slices now consume these line GST fields.
 
 7. Build one GST calculation service:
    Shared GST calculation is now in place for invoices, estimates, bills, purchase orders, credit memos, and generated recurring invoices. Backend totals use line-level GST codes with exclusive/inclusive pricing support, including `3/23` GST-inclusive extraction for the standard 15% code. Frontend document forms now load GST codes, save per-line GST choices, and preview totals with the same line GST logic. Existing `tax_rate` fields remain compatibility fields rather than the authoritative GST design.
 
 8. Rework journal posting:
-   Replace `get_sales_tax_account_id()` with GST-aware account helpers. Decide whether to use separate `GST Collected` and `GST Paid` accounts plus `GST Payable`, or one GST control account with reporting splits.
+   Journal posting now uses a Xero-style single `2200 GST` control account. Seed and migration logic rename legacy `Sales Tax Payable` to `GST`, invoices and generated recurring invoices credit GST, bills debit input GST, and credit memos debit GST reversals. GST settlement/reporting splits remain separate work.
 
 9. Fix posting lifecycle behavior:
    Ensure edits, voids, duplicates, and conversions either reverse/repost journal entries correctly or enforce immutable posted documents.

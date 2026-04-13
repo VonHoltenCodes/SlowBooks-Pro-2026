@@ -23,7 +23,7 @@ from app.models.items import Item, ItemType
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
-from app.services.accounting import create_journal_entry, get_ar_account_id, get_sales_tax_account_id
+from app.services.accounting import create_journal_entry, get_ar_account_id
 
 
 # ============================================================================

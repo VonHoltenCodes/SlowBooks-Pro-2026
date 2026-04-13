@@ -13,7 +13,7 @@ from decimal import Decimal
 from sqlalchemy.orm import Session
 
 from app.models.transactions import Transaction, TransactionLine
-from app.models.accounts import Account
+from app.models.accounts import Account, AccountType
 
 
 def create_journal_entry(
@@ -85,10 +85,32 @@ def get_default_income_account_id(db: Session) -> int:
     return acct.id if acct else None
 
 
-def get_sales_tax_account_id(db: Session) -> int:
-    """Get Sales Tax Payable account ID (2200)."""
+def get_gst_account_id(db: Session) -> int:
+    """Get or create the NZ GST control account (2200)."""
     acct = db.query(Account).filter(Account.account_number == "2200").first()
+    if acct:
+        if acct.name == "Sales Tax Payable":
+            acct.name = "GST"
+        acct.account_type = AccountType.LIABILITY
+        acct.is_system = True
+        db.flush()
+        return acct.id
+
+    acct = Account(
+        name="GST",
+        account_number="2200",
+        account_type=AccountType.LIABILITY,
+        is_system=True,
+        is_active=True,
+    )
+    db.add(acct)
+    db.flush()
     return acct.id if acct else None
+
+
+def get_sales_tax_account_id(db: Session) -> int:
+    """Compatibility alias for the NZ GST account."""
+    return get_gst_account_id(db)
 
 
 def get_undeposited_funds_id(db: Session) -> int:

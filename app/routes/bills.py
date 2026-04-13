@@ -15,7 +15,7 @@ from app.models.contacts import Vendor
 from app.models.items import Item
 from app.models.accounts import Account
 from app.schemas.bills import BillCreate, BillUpdate, BillResponse
-from app.services.accounting import create_journal_entry
+from app.services.accounting import create_journal_entry, get_gst_account_id
 from app.services.closing_date import check_closing_date
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
@@ -118,14 +118,14 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                 "description": line_data.description or "",
             })
 
-    # Tax line
+    # GST line
     if gst_totals.tax_amount > 0:
-        tax_acct = db.query(Account).filter(Account.account_number == "2200").first()
-        if tax_acct:
+        tax_account_id = get_gst_account_id(db)
+        if tax_account_id:
             journal_lines.append({
-                "account_id": tax_acct.id,
+                "account_id": tax_account_id,
                 "debit": gst_totals.tax_amount, "credit": Decimal("0"),
-                "description": "Sales tax on bill",
+                "description": "GST on bill",
             })
 
     # Credit AP
