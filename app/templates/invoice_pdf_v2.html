@@ -40,7 +40,7 @@ tbody tr:nth-child(even) { background: #f8f9fa; }
         <h1>{{ company.get('company_name', 'Company') }}</h1>
         <p>
             {% if company.get('company_address1') %}{{ company.company_address1 }}<br>{% endif %}
-            {% if company.get('company_city') %}{{ company.company_city }}, {{ company.get('company_state', '') }} {{ company.get('company_zip', '') }}<br>{% endif %}
+            {% if company.get('company_city') or company.get('company_state') or company.get('company_zip') %}{{ [company.get('company_city'), company.get('company_state'), company.get('company_zip')] | select | join(' ') }}<br>{% endif %}
             {% if company.get('company_phone') %}{{ company.company_phone }}<br>{% endif %}
             {% if company.get('company_email') %}{{ company.company_email }}{% endif %}
         </p>
@@ -64,7 +64,7 @@ tbody tr:nth-child(even) { background: #f8f9fa; }
             <strong>{{ inv.customer.name if inv.customer else '' }}</strong><br>
             {% if inv.bill_address1 %}{{ inv.bill_address1 }}<br>{% endif %}
             {% if inv.bill_address2 %}{{ inv.bill_address2 }}<br>{% endif %}
-            {% if inv.bill_city %}{{ inv.bill_city }}, {{ inv.bill_state or '' }} {{ inv.bill_zip or '' }}{% endif %}
+            {% if inv.bill_city or inv.bill_state or inv.bill_zip %}{{ [inv.bill_city, inv.bill_state, inv.bill_zip] | select | join(' ') }}{% endif %}
         </p>
     </div>
     {% if inv.ship_address1 %}
@@ -73,7 +73,7 @@ tbody tr:nth-child(even) { background: #f8f9fa; }
         <p>
             {% if inv.ship_address1 %}{{ inv.ship_address1 }}<br>{% endif %}
             {% if inv.ship_address2 %}{{ inv.ship_address2 }}<br>{% endif %}
-            {% if inv.ship_city %}{{ inv.ship_city }}, {{ inv.ship_state or '' }} {{ inv.ship_zip or '' }}{% endif %}
+            {% if inv.ship_city or inv.ship_state or inv.ship_zip %}{{ [inv.ship_city, inv.ship_state, inv.ship_zip] | select | join(' ') }}{% endif %}
         </p>
     </div>
     {% endif %}

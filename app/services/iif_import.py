@@ -251,11 +251,11 @@ def import_customers(db: Session, rows: list) -> dict:
             if existing:
                 continue
 
-            # Parse ADDR4 "City, State ZIP" pattern
+            # Parse ADDR4 "City, Region Postcode" pattern
             addr4 = row.get("ADDR4", "").strip()
-            city, state, zipcode = "", "", ""
+            city, region, postcode = "", "", ""
             if addr4:
-                city, state, zipcode = _parse_city_state_zip(addr4)
+                city, region, postcode = _parse_city_region_postcode(addr4)
 
             cust = Customer(
                 name=name,
@@ -266,8 +266,9 @@ def import_customers(db: Session, rows: list) -> dict:
                 bill_address1=row.get("ADDR2", "").strip() or None,
                 bill_address2=row.get("ADDR3", "").strip() or None,
                 bill_city=city or None,
-                bill_state=state or None,
-                bill_zip=zipcode or None,
+                bill_state=region or None,
+                bill_zip=postcode or None,
+                bill_country="NZ",
                 terms=row.get("TERMS", "").strip() or "Net 30",
                 tax_id=row.get("TAXID", "").strip() or None,
                 credit_limit=_parse_decimal(row.get("LIMIT", "")) or None,
@@ -300,9 +301,9 @@ def import_vendors(db: Session, rows: list) -> dict:
                 continue
 
             addr4 = row.get("ADDR4", "").strip()
-            city, state, zipcode = "", "", ""
+            city, region, postcode = "", "", ""
             if addr4:
-                city, state, zipcode = _parse_city_state_zip(addr4)
+                city, region, postcode = _parse_city_region_postcode(addr4)
 
             vend = Vendor(
                 name=name,
@@ -313,8 +314,9 @@ def import_vendors(db: Session, rows: list) -> dict:
                 address1=row.get("ADDR2", "").strip() or None,
                 address2=row.get("ADDR3", "").strip() or None,
                 city=city or None,
-                state=state or None,
-                zip=zipcode or None,
+                state=region or None,
+                zip=postcode or None,
+                country="NZ",
                 terms=row.get("TERMS", "").strip() or "Net 30",
                 tax_id=row.get("TAXID", "").strip() or None,
                 is_active=True,
@@ -697,29 +699,30 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
     return estimate
 
 
-def _parse_city_state_zip(s: str) -> tuple:
-    """Parse 'City, State ZIP' string into components."""
-    city, state, zipcode = "", "", ""
+def _parse_city_region_postcode(s: str) -> tuple:
+    """Parse 'City, Region Postcode' string into components."""
+    city, region, postcode = "", "", ""
     if not s:
-        return city, state, zipcode
+        return city, region, postcode
 
-    # Try "City, State ZIP" pattern
+    # Try "City, Region Postcode" pattern
     if "," in s:
         parts = s.split(",", 1)
         city = parts[0].strip()
         remainder = parts[1].strip()
-        # State ZIP
+        # Region Postcode
         rparts = remainder.rsplit(" ", 1)
         if len(rparts) == 2:
-            state = rparts[0].strip()
-            zipcode = rparts[1].strip()
+            region = rparts[0].strip()
+            postcode = rparts[1].strip()
         else:
-            state = remainder
+            region = remainder
     else:
-        # No comma — try "State ZIP" or just city
+        # No comma — treat as city.
         city = s.strip()
 
-    return city, state, zipcode
+    return city, region, postcode
+
 
 
 # ============================================================================

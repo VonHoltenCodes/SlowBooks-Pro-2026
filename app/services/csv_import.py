@@ -12,6 +12,14 @@ from app.models.contacts import Customer, Vendor
 from app.models.items import Item, ItemType
 
 
+def _row_value(row: dict, *keys: str) -> str:
+    for key in keys:
+        value = row.get(key)
+        if value:
+            return value
+    return ""
+
+
 def import_customers(db: Session, csv_text: str) -> dict:
     reader = csv.DictReader(io.StringIO(csv_text))
     created = 0
@@ -37,8 +45,9 @@ def import_customers(db: Session, csv_text: str) -> dict:
                 phone=row.get("Phone", ""),
                 bill_address1=row.get("Address", ""),
                 bill_city=row.get("City", ""),
-                bill_state=row.get("State", ""),
-                bill_zip=row.get("ZIP", ""),
+                bill_state=_row_value(row, "Region", "State"),
+                bill_zip=_row_value(row, "Postcode", "ZIP"),
+                bill_country="NZ",
                 terms=row.get("Terms", "Net 30"),
             ))
             created += 1
@@ -74,8 +83,9 @@ def import_vendors(db: Session, csv_text: str) -> dict:
                 phone=row.get("Phone", ""),
                 address1=row.get("Address", ""),
                 city=row.get("City", ""),
-                state=row.get("State", ""),
-                zip=row.get("ZIP", ""),
+                state=_row_value(row, "Region", "State"),
+                zip=_row_value(row, "Postcode", "ZIP"),
+                country="NZ",
                 terms=row.get("Terms", "Net 30"),
             ))
             created += 1

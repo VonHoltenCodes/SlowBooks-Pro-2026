@@ -40,7 +40,7 @@
             <div class="company-info">
                 {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
                 {% if company.company_address2 %}{{ company.company_address2 }}<br>{% endif %}
-                {% if company.company_city %}{{ company.company_city }}, {{ company.company_state }} {{ company.company_zip }}<br>{% endif %}
+                {% if company.company_city or company.company_state or company.company_zip %}{{ [company.company_city, company.company_state, company.company_zip] | select | join(' ') }}<br>{% endif %}
                 {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
                 {% if company.company_email %}{{ company.company_email }}{% endif %}
             </div>
@@ -65,7 +65,7 @@
                 <strong>{{ inv.customer_name or '' }}</strong><br>
                 {% if inv.bill_address1 %}{{ inv.bill_address1 }}<br>{% endif %}
                 {% if inv.bill_address2 %}{{ inv.bill_address2 }}<br>{% endif %}
-                {% if inv.bill_city %}{{ inv.bill_city }}, {{ inv.bill_state }} {{ inv.bill_zip }}{% endif %}
+                {% if inv.bill_city or inv.bill_state or inv.bill_zip %}{{ [inv.bill_city, inv.bill_state, inv.bill_zip] | select | join(' ') }}{% endif %}
             </div>
         </div>
         {% if inv.ship_address1 %}
@@ -74,7 +74,7 @@
             <div class="address-text">
                 {% if inv.ship_address1 %}{{ inv.ship_address1 }}<br>{% endif %}
                 {% if inv.ship_address2 %}{{ inv.ship_address2 }}<br>{% endif %}
-                {% if inv.ship_city %}{{ inv.ship_city }}, {{ inv.ship_state }} {{ inv.ship_zip }}{% endif %}
+                {% if inv.ship_city or inv.ship_state or inv.ship_zip %}{{ [inv.ship_city, inv.ship_state, inv.ship_zip] | select | join(' ') }}{% endif %}
             </div>
         </div>
         {% endif %}

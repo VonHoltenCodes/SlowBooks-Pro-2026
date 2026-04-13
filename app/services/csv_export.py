@@ -18,7 +18,7 @@ def export_customers(db: Session) -> str:
     customers = db.query(Customer).filter(Customer.is_active == True).all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "Name", "Company", "Email", "Phone", "Address", "City", "State", "ZIP", "Terms", "Balance"])
+    writer.writerow(["ID", "Name", "Company", "Email", "Phone", "Address", "City", "Region", "Postcode", "Terms", "Balance"])
     for c in customers:
         writer.writerow([c.id, c.name, c.company or "", c.email or "", c.phone or "",
                          c.bill_address1 or "", c.bill_city or "", c.bill_state or "",
@@ -30,7 +30,7 @@ def export_vendors(db: Session) -> str:
     vendors = db.query(Vendor).filter(Vendor.is_active == True).all()
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["ID", "Name", "Company", "Email", "Phone", "Address", "City", "State", "ZIP", "Terms", "Balance"])
+    writer.writerow(["ID", "Name", "Company", "Email", "Phone", "Address", "City", "Region", "Postcode", "Terms", "Balance"])
     for v in vendors:
         writer.writerow([v.id, v.name, v.company or "", v.email or "", v.phone or "",
                          v.address1 or "", v.city or "", v.state or "",

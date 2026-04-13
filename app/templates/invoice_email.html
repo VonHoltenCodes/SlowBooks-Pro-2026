@@ -35,8 +35,7 @@ td { padding: 8px; border-bottom: 1px solid #eee; }
 </div>
 <div class="footer">
     <p>{{ company.get('company_name', '') }}<br>
-    {{ company.get('company_address1', '') }} {{ company.get('company_city', '') }}
-    {{ company.get('company_state', '') }} {{ company.get('company_zip', '') }}<br>
+    {{ [company.get('company_address1'), company.get('company_city'), company.get('company_state'), company.get('company_zip')] | select | join(' ') }}<br>
     {{ company.get('company_phone', '') }} | {{ company.get('company_email', '') }}</p>
 </div>
 </body>

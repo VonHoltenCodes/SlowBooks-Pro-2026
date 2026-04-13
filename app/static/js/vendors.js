@@ -41,7 +41,7 @@ const VendorsPage = {
 
     async showForm(id = null) {
         let v = { name:'', company:'', email:'', phone:'', fax:'', website:'',
-            address1:'', address2:'', city:'', state:'', zip:'',
+            address1:'', address2:'', city:'', state:'', zip:'', country:'NZ',
             terms:'Net 30', tax_id:'', account_number:'', notes:'' };
         if (id) v = await API.get(`/vendors/${id}`);
 
@@ -69,10 +69,11 @@ const VendorsPage = {
                         <input name="address2" value="${escapeHtml(v.address2 || '')}"></div>
                     <div class="form-group"><label>City</label>
                         <input name="city" value="${escapeHtml(v.city || '')}"></div>
-                    <div class="form-group"><label>State</label>
+                    <div class="form-group"><label>Region</label>
                         <input name="state" value="${escapeHtml(v.state || '')}"></div>
-                    <div class="form-group"><label>ZIP</label>
+                    <div class="form-group"><label>Postcode</label>
                         <input name="zip" value="${escapeHtml(v.zip || '')}"></div>
+                    <input name="country" type="hidden" value="${escapeHtml(v.country || 'NZ')}">
                 </div>
                 <div class="form-grid" style="margin-top:16px;">
                     <div class="form-group"><label>Terms</label>

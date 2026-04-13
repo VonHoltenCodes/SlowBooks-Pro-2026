@@ -40,7 +40,7 @@
             <div class="company-info">
                 {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
                 {% if company.company_address2 %}{{ company.company_address2 }}<br>{% endif %}
-                {% if company.company_city %}{{ company.company_city }}, {{ company.company_state }} {{ company.company_zip }}<br>{% endif %}
+                {% if company.company_city or company.company_state or company.company_zip %}{{ [company.company_city, company.company_state, company.company_zip] | select | join(' ') }}<br>{% endif %}
                 {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
                 {% if company.company_email %}{{ company.company_email }}{% endif %}
             </div>
@@ -56,7 +56,7 @@
         <div class="customer-info">
             {% if customer.bill_address1 %}{{ customer.bill_address1 }}<br>{% endif %}
             {% if customer.bill_address2 %}{{ customer.bill_address2 }}<br>{% endif %}
-            {% if customer.bill_city %}{{ customer.bill_city }}, {{ customer.bill_state }} {{ customer.bill_zip }}{% endif %}
+            {% if customer.bill_city or customer.bill_state or customer.bill_zip %}{{ [customer.bill_city, customer.bill_state, customer.bill_zip] | select | join(' ') }}{% endif %}
         </div>
     </div>
 

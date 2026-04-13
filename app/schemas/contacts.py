@@ -18,13 +18,13 @@ class CustomerCreate(BaseModel):
     bill_city: Optional[str] = None
     bill_state: Optional[str] = None
     bill_zip: Optional[str] = None
-    bill_country: str = "US"
+    bill_country: str = "NZ"
     ship_address1: Optional[str] = None
     ship_address2: Optional[str] = None
     ship_city: Optional[str] = None
     ship_state: Optional[str] = None
     ship_zip: Optional[str] = None
-    ship_country: str = "US"
+    ship_country: str = "NZ"
     terms: str = "Net 30"
     credit_limit: Optional[Decimal] = None
     tax_id: Optional[str] = None
@@ -106,7 +106,7 @@ class VendorCreate(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     zip: Optional[str] = None
-    country: str = "US"
+    country: str = "NZ"
     terms: str = "Net 30"
     tax_id: Optional[str] = None
     account_number: Optional[str] = None

@@ -155,11 +155,11 @@ def export_customers(db: Session) -> str:
         first = parts[0] if parts else ""
         last = parts[1] if len(parts) > 1 else ""
 
-        # QB address convention: ADDR1=company/name, ADDR2-3=street, ADDR4=city/state/zip
+        # QB address convention: ADDR1=company/name, ADDR2-3=street, ADDR4=city/region/postcode
         addr1 = c.company or c.name or ""
         addr2 = c.bill_address1 or ""
         addr3 = c.bill_address2 or ""
-        city_st_zip = ", ".join(filter(None, [
+        city_region_postcode = ", ".join(filter(None, [
             c.bill_city,
             f"{c.bill_state} {c.bill_zip}".strip() if (c.bill_state or c.bill_zip) else None,
         ]))
@@ -173,7 +173,7 @@ def export_customers(db: Session) -> str:
             addr1,
             addr2,
             addr3,
-            city_st_zip,
+            city_region_postcode,
             "",  # ADDR5
             c.phone or "",
             c.mobile or "",
@@ -202,7 +202,7 @@ def export_vendors(db: Session) -> str:
         addr1 = v.company or v.name or ""
         addr2 = v.address1 or ""
         addr3 = v.address2 or ""
-        city_st_zip = ", ".join(filter(None, [
+        city_region_postcode = ", ".join(filter(None, [
             v.city,
             f"{v.state} {v.zip}".strip() if (v.state or v.zip) else None,
         ]))
@@ -213,7 +213,7 @@ def export_vendors(db: Session) -> str:
             addr1,
             addr2,
             addr3,
-            city_st_zip,
+            city_region_postcode,
             "",  # ADDR5
             v.phone or "",
             v.fax or "",

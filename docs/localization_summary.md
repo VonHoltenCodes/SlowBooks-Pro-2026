@@ -132,6 +132,8 @@ Relevant files:
 - `app/templates/statement_pdf.html`
 - `app/templates/invoice_email.html`
 
+Address labels and defaults now have a compatibility-preserving NZ foundation: customer/vendor create defaults use `NZ`, company/customer/vendor forms show `Region` and `Postcode`, document address lines use NZ city/region/postcode formatting, CSV export uses `Region`/`Postcode`, and CSV import accepts both the NZ headers and legacy `State`/`ZIP`. Database/API field names are still unchanged for compatibility.
+
 ### Tax Reporting
 
 Schedule C is hardcoded in routes, model comments, service mappings, CSV headings, UI, and docs.
@@ -170,7 +172,7 @@ Relevant files:
    Shared Python and frontend formatting helpers are in place and wired into known PDF, email, report, transaction, dashboard, settings, and company-list date/currency surfaces. Keep using these helpers for new GST, payroll, address, CSV, IIF, and reporting work.
 
 4. Refactor address fields without breaking data:
-   Prefer label/remap first (`Region`, `Postcode`, `Country=NZ`), then consider schema migrations later. Update settings, customers, vendors, employees, PDFs, CSV, and IIF.
+   Label/default remapping is in place for company, customer, vendor, PDF/email, CSV, and IIF surfaces while preserving existing database/API field names. Payroll employee address fields and any future schema renames remain separate work.
 
 5. Create a GST domain model:
    Add GST codes/rates such as `GST15`, `ZERO`, `EXEMPT`, and `NO_GST`. Consider `IMPORT` or `REVERSE_CHARGE` later if needed.

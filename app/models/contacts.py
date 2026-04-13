@@ -18,6 +18,11 @@ from app.database import Base
 class Customer(Base):
     __tablename__ = "customers"
 
+    def __init__(self, **kwargs):
+        kwargs.setdefault("bill_country", "NZ")
+        kwargs.setdefault("ship_country", "NZ")
+        super().__init__(**kwargs)
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False)
     company = Column(String(200), nullable=True)
@@ -33,7 +38,7 @@ class Customer(Base):
     bill_city = Column(String(100), nullable=True)
     bill_state = Column(String(50), nullable=True)
     bill_zip = Column(String(20), nullable=True)
-    bill_country = Column(String(100), default="US")
+    bill_country = Column(String(100), default="NZ")
 
     # Shipping address
     ship_address1 = Column(String(200), nullable=True)
@@ -41,7 +46,7 @@ class Customer(Base):
     ship_city = Column(String(100), nullable=True)
     ship_state = Column(String(50), nullable=True)
     ship_zip = Column(String(20), nullable=True)
-    ship_country = Column(String(100), default="US")
+    ship_country = Column(String(100), default="NZ")
 
     terms = Column(String(50), default="Net 30")
     credit_limit = Column(Numeric(12, 2), nullable=True)
@@ -58,6 +63,10 @@ class Customer(Base):
 class Vendor(Base):
     __tablename__ = "vendors"
 
+    def __init__(self, **kwargs):
+        kwargs.setdefault("country", "NZ")
+        super().__init__(**kwargs)
+
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False)
     company = Column(String(200), nullable=True)
@@ -71,7 +80,7 @@ class Vendor(Base):
     city = Column(String(100), nullable=True)
     state = Column(String(50), nullable=True)
     zip = Column(String(20), nullable=True)
-    country = Column(String(100), default="US")
+    country = Column(String(100), default="NZ")
 
     terms = Column(String(50), default="Net 30")
     tax_id = Column(String(50), nullable=True)

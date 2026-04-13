@@ -28,9 +28,9 @@ const SettingsPage = {
                             <input name="company_address2" value="${escapeHtml(s.company_address2 || '')}"></div>
                         <div class="form-group"><label>City</label>
                             <input name="company_city" value="${escapeHtml(s.company_city || '')}"></div>
-                        <div class="form-group"><label>State</label>
+                        <div class="form-group"><label>Region</label>
                             <input name="company_state" value="${escapeHtml(s.company_state || '')}"></div>
-                        <div class="form-group"><label>ZIP</label>
+                        <div class="form-group"><label>Postcode</label>
                             <input name="company_zip" value="${escapeHtml(s.company_zip || '')}"></div>
                         <div class="form-group"><label>Phone</label>
                             <input name="company_phone" value="${escapeHtml(s.company_phone || '')}"></div>
@@ -38,7 +38,7 @@ const SettingsPage = {
                             <input name="company_email" type="email" value="${escapeHtml(s.company_email || '')}"></div>
                         <div class="form-group"><label>Website</label>
                             <input name="company_website" value="${escapeHtml(s.company_website || '')}"></div>
-                        <div class="form-group"><label>Tax ID / EIN</label>
+                        <div class="form-group"><label>IRD / GST Number</label>
                             <input name="company_tax_id" value="${escapeHtml(s.company_tax_id || '')}"></div>
                     </div>
                 </div>
