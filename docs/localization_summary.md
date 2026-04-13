@@ -2,7 +2,7 @@
 
 This document captures the current localization audit for turning SlowBooks Pro 2026 into a New Zealand-localized version.
 
-The `nz-localization` branch is the working branch. It has been synced with upstream changes through commit `99bbcc7`, so the plan below reflects the current branch state rather than the original audit-time checkout instructions.
+The `nz-localization` branch is now the authoritative SlowBooks NZ product branch. Treat it as a New Zealand-localized product fork, not as a light patch set over the US-shaped upstream. See `docs/nz-fork-policy.md` for branch roles and upstream-sync rules.
 
 ## Assessment
 
@@ -140,7 +140,7 @@ Address labels and defaults now have a compatibility-preserving NZ foundation: c
 
 Schedule C is hardcoded in routes, model comments, service mappings, CSV headings, UI, and docs.
 
-The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The existing Sales Tax report should be replaced with a GST return while reusing that period selector.
+The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The Sales Tax report is now a GST Return report that produces GST101A box values and can generate a filled GST101A April 2023 PDF. Box 9 and Box 13 adjustment values are entered at report-generation time, and the selected GST accounting basis comes from Company Settings.
 
 Relevant files:
 
@@ -164,8 +164,8 @@ Relevant files:
 
 ## Consolidated Todo
 
-1. Keep branch hygiene clean:
-   Work on `nz-localization`, sync from upstream before each implementation slice, and re-check this plan for newly touched tax/report/settings paths.
+1. Keep NZ fork hygiene clean:
+   Work on `nz-localization` as the canonical SlowBooks NZ branch. Treat `main` and any external upstream as reference sources only, cherry-pick generic fixes selectively, and do not restore US tax, payroll, reporting, address, or seed-data behavior without an explicit product decision. Re-check this plan for newly touched localized surfaces before each implementation slice.
 
 2. Maintain the localization foundation:
    Settings for `country=NZ`, `tax_regime=NZ`, `currency=NZD`, `locale=en-NZ`, `timezone=Pacific/Auckland`, `ird_number`, `gst_number`, `gst_registered`, `gst_basis`, `gst_period`, and `prices_include_gst` now exist. Add tests when consuming these settings from formatting, GST, reports, imports, or payroll.
@@ -192,7 +192,7 @@ Relevant files:
    Posted invoice line edits now reverse/repost journal entries. Invoice duplicates, estimate-to-invoice conversions, and purchase-order-to-bill conversions now post through normal create paths, and bill voids use the shared reversal helper with closing-date protection. Remaining lifecycle hardening should cover any future edit routes for bills or credit memos and decide how much non-line invoice metadata may change after posting.
 
 10. Replace the sales tax report with a GST return report:
-    Include sales/output GST, purchases/input GST, net GST payable/refundable, GST period/basis, zero-rated/exempt supplies, and drilldowns to source transactions. Reuse the existing reports period selector/custom date UI instead of adding a second date-range pattern.
+    The Reports UI now exposes a GST Return flow using the shared period selector. It calculates GST101A Boxes 5-15, supports invoice and payments basis from Settings, accepts Box 9 and Box 13 adjustments before generation, includes source drilldowns, and generates a filled `gst101a-2023.pdf`. The old `/api/reports/sales-tax` endpoint remains a compatibility alias.
 
 11. Replace Schedule C:
     Remove or hide Schedule C routes/UI for NZ mode. Replace later with NZ income tax outputs after deciding whether the target is IR3 business summary, IR10-style financial statements, or accountant export.

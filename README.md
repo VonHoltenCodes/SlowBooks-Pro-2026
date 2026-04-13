@@ -69,7 +69,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - **Balance Sheet** — Assets, liabilities, and equity as of any date
 - **A/R Aging** — Outstanding receivables grouped by customer with 30/60/90 day buckets
 - **A/P Aging** — Outstanding payables grouped by vendor with 30/60/90 day buckets
-- **Sales Tax** — Tax collected by invoice with taxable/non-taxable breakdowns
+- **GST Return** — GST101A Boxes 5-15 with invoice/payments basis, Box 9/13 adjustments, drilldowns, and filled GST101A PDF output
 - **General Ledger** — All journal entries grouped by account with debit/credit totals
 - **Income by Customer** — Sales totals per customer with invoice counts
 - **Customer Statements** — PDF statement with invoice/payment history and running balance
@@ -348,7 +348,9 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 132 routes across 28 route
 | `/api/reports/balance-sheet` | GET | Balance sheet |
 | `/api/reports/ar-aging` | GET | Accounts receivable aging |
 | `/api/reports/ap-aging` | GET | Accounts payable aging |
-| `/api/reports/sales-tax` | GET | Sales tax collected |
+| `/api/reports/gst-return` | GET | NZ GST return values for GST101A |
+| `/api/reports/gst-return/pdf` | GET | Filled GST101A PDF return |
+| `/api/reports/sales-tax` | GET | Compatibility alias for GST return |
 | `/api/reports/general-ledger` | GET | All journal entries by account |
 | `/api/reports/income-by-customer` | GET | Sales totals per customer |
 | `/api/tax/schedule-c` | GET | Schedule C data from P&L |

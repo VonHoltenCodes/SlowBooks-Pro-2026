@@ -23,9 +23,9 @@ const ReportsPage = {
                     <div class="card-header">A/R Aging</div>
                     <p style="font-size:13px; color:var(--gray-500);">Outstanding receivables by age</p>
                 </div>
-                <div class="card" style="cursor:pointer" onclick="ReportsPage.salesTax()">
-                    <div class="card-header">Sales Tax</div>
-                    <p style="font-size:13px; color:var(--gray-500);">Tax collected by invoice</p>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.gstReturn()">
+                    <div class="card-header">GST Return</div>
+                    <p style="font-size:13px; color:var(--gray-500);">GST101A boxes and PDF return</p>
                 </div>
                 <div class="card" style="cursor:pointer" onclick="ReportsPage.generalLedger()">
                     <div class="card-header">General Ledger</div>
@@ -256,34 +256,130 @@ const ReportsPage = {
         }, "As Of", true);
     },
 
+    async gstReturn() {
+        const currentYear = new Date().getFullYear();
+        const defaultCustomStart = `${currentYear}-01-01`;
+        const defaultCustomEnd = todayISO();
+        openModal("GST Return", `
+            <div class="form-grid" style="margin-bottom:4px;">
+                <div class="form-group">
+                    <label>Dates</label>
+                    <select id="report-period-select">${ReportsPage.periodOptions("this_year_to_date")}</select>
+                </div>
+                <div class="form-group">
+                    <label>Box 9 adjustments</label>
+                    <input id="gst-box9-adjustments" type="number" step="0.01" value="0.00">
+                </div>
+                <div class="form-group">
+                    <label>Box 13 credit adjustments</label>
+                    <input id="gst-box13-adjustments" type="number" step="0.01" value="0.00">
+                </div>
+            </div>
+            ${ReportsPage.customRangeHtml(defaultCustomStart, defaultCustomEnd)}
+            <div id="report-content">
+                <div style="font-size:11px; color:var(--gray-500);">Loading report...</div>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                <button class="btn btn-primary" onclick="ReportsPage.downloadGstReturnPdf()">Download GST101A PDF</button>
+            </div>`);
+
+        const select = $("#report-period-select");
+        const startInput = $("#report-custom-start");
+        const endInput = $("#report-custom-end");
+        const box9Input = $("#gst-box9-adjustments");
+        const box13Input = $("#gst-box13-adjustments");
+        const content = $("#report-content");
+
+        const render = async () => {
+            ReportsPage.toggleCustomRange();
+            content.innerHTML = `<div style="font-size:11px; color:var(--gray-500);">Loading report...</div>`;
+            try {
+                const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
+                const box9 = box9Input.value || "0.00";
+                const box13 = box13Input.value || "0.00";
+                const data = await API.get(`/reports/gst-return?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`);
+                content.innerHTML = ReportsPage.renderGstReturn(data);
+            } catch (err) {
+                content.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+            }
+        };
+
+        select.addEventListener("change", render);
+        startInput.addEventListener("change", () => { if (select.value === "custom") render(); });
+        endInput.addEventListener("change", () => { if (select.value === "custom") render(); });
+        box9Input.addEventListener("change", render);
+        box13Input.addEventListener("change", render);
+        await render();
+    },
+
+    renderGstReturn(data) {
+        const boxRows = [
+            ["5", "Total sales and income including GST and zero-rated supplies"],
+            ["6", "Zero-rated supplies included in Box 5"],
+            ["7", "Box 5 minus Box 6"],
+            ["8", "Box 7 multiplied by 3/23"],
+            ["9", "Adjustments from calculation sheet"],
+            ["10", "Total GST collected on sales and income"],
+            ["11", "Total purchases and expenses including GST"],
+            ["12", "Box 11 multiplied by 3/23"],
+            ["13", "Credit adjustments from calculation sheet"],
+            ["14", "Total GST credit for purchases and expenses"],
+            ["15", "Difference between Box 10 and Box 14"],
+        ].map(([box, label]) => `
+            <tr>
+                <td><strong>${box}</strong></td>
+                <td>${escapeHtml(label)}</td>
+                <td class="amount">${formatCurrency(data.boxes[box] || 0)}</td>
+            </tr>`).join("");
+        const sourceRows = (data.items || []).map(item => `
+            <tr>
+                <td>${formatDate(item.date)}</td>
+                <td>${escapeHtml(item.source_type)}</td>
+                <td>${escapeHtml(item.number)}</td>
+                <td>${escapeHtml(item.name)}</td>
+                <td class="amount">${formatCurrency(item.standard_gross || 0)}</td>
+                <td class="amount">${formatCurrency(item.zero_rated || 0)}</td>
+                <td class="amount">${formatCurrency(item.excluded || 0)}</td>
+            </tr>`).join("");
+        const position = data.net_position === "refundable" ? "GST refund" :
+            data.net_position === "payable" ? "GST to pay" : "Nil GST";
+        return `
+            <p style="margin-bottom:12px; color:var(--gray-500);">
+                ${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}
+                · Basis: <strong>${escapeHtml(data.gst_basis)}</strong>
+                · Period: <strong>${escapeHtml(data.gst_period)}</strong>
+            </p>
+            <div style="margin-bottom:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
+                <div style="display:flex; justify-content:space-between; font-size:12px;">
+                    <span>Output GST: <strong>${formatCurrency(data.output_gst)}</strong></span>
+                    <span>Input GST: <strong>${formatCurrency(data.input_gst)}</strong></span>
+                    <span>${position}: <strong>${formatCurrency(data.net_gst)}</strong></span>
+                </div>
+            </div>
+            <div class="table-container"><table>
+                <thead><tr><th>Box</th><th>GST101A field</th><th class="amount">Amount</th></tr></thead>
+                <tbody>${boxRows}</tbody>
+            </table></div>
+            <h3 style="margin:12px 0 4px; font-size:12px; color:var(--qb-navy);">Source drilldown</h3>
+            <div class="table-container"><table>
+                <thead><tr><th>Date</th><th>Source</th><th>Number</th><th>Name</th><th class="amount">Standard-rated</th><th class="amount">Zero-rated</th><th class="amount">Excluded</th></tr></thead>
+                <tbody>${sourceRows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No GST activity</td></tr>'}</tbody>
+            </table></div>`;
+    },
+
+    downloadGstReturnPdf() {
+        const select = $("#report-period-select");
+        const startInput = $("#report-custom-start");
+        const endInput = $("#report-custom-end");
+        const box9 = ($("#gst-box9-adjustments")?.value || "0.00");
+        const box13 = ($("#gst-box13-adjustments")?.value || "0.00");
+        const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
+        window.open(`/api/reports/gst-return/pdf?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`, "_blank");
+    },
+
     async salesTax() {
-        await ReportsPage.openPeriodModal("Sales Tax Report", "this_year_to_date", async (_period, range) => {
-            const data = await API.get(`/reports/sales-tax?start_date=${range.start}&end_date=${range.end}`);
-            const rows = data.items.map(i =>
-                `<tr>
-                    <td>${formatDate(i.date)}</td>
-                    <td>${escapeHtml(i.invoice_number)}</td>
-                    <td>${escapeHtml(i.customer_name)}</td>
-                    <td class="amount">${formatCurrency(i.subtotal)}</td>
-                    <td class="amount">${(i.tax_rate * 100).toFixed(2)}%</td>
-                    <td class="amount">${formatCurrency(i.tax_amount)}</td>
-                </tr>`
-            ).join("");
-            return `
-                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
-                <div class="table-container"><table>
-                    <thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th class="amount">Sales</th><th class="amount">Rate</th><th class="amount">Tax</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No taxable sales</td></tr>'}</tbody>
-                </table></div>
-                <div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
-                    <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
-                        <span>Total Sales: <strong>${formatCurrency(data.total_sales)}</strong></span>
-                        <span>Taxable: <strong>${formatCurrency(data.total_taxable)}</strong></span>
-                        <span>Non-Taxable: <strong>${formatCurrency(data.total_non_taxable)}</strong></span>
-                    </div>
-                    <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">Tax Collected: ${formatCurrency(data.total_tax)}</div>
-                </div>`;
-        });
+        return ReportsPage.gstReturn();
     },
 
     async generalLedger() {

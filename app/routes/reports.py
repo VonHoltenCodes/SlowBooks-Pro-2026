@@ -23,8 +23,23 @@ from app.models.payments import Payment
 from app.models.contacts import Customer
 from app.services.pdf_service import generate_statement_pdf
 from app.routes.settings import _get_all as get_settings
+from app.services.gst_return import calculate_gst_return, generate_gst101a_pdf
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
+
+
+def _decimal_query_value(value, default=Decimal("0.00")) -> Decimal:
+    if hasattr(value, "default"):
+        value = value.default
+    if value is None:
+        return default
+    return Decimal(str(value))
+
+
+def _optional_query_value(value):
+    if hasattr(value, "default"):
+        value = value.default
+    return value
 
 
 @router.get("/profit-loss")
@@ -166,54 +181,76 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
     return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
 
 
+@router.get("/gst-return")
+def gst_return_report(
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    box9_adjustments: Decimal = Query(default=Decimal("0.00")),
+    box13_adjustments: Decimal = Query(default=Decimal("0.00")),
+    db: Session = Depends(get_db),
+):
+    """GST101A return report."""
+    if not start_date:
+        start_date = date(date.today().year, 1, 1)
+    if not end_date:
+        end_date = date.today()
+    return calculate_gst_return(
+        db,
+        start_date,
+        end_date,
+        box9_adjustments=_decimal_query_value(box9_adjustments),
+        box13_adjustments=_decimal_query_value(box13_adjustments),
+    )
+
+
 @router.get("/sales-tax")
 def sales_tax_report(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """CReportEngine::RunSalesTax() @ 0x002108A0"""
+    """Compatibility alias for the NZ GST return report."""
+    return gst_return_report(
+        start_date=start_date,
+        end_date=end_date,
+        box9_adjustments=Decimal("0.00"),
+        box13_adjustments=Decimal("0.00"),
+        db=db,
+    )
+
+
+@router.get("/gst-return/pdf")
+def gst_return_pdf(
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    box9_adjustments: Decimal = Query(default=Decimal("0.00")),
+    box13_adjustments: Decimal = Query(default=Decimal("0.00")),
+    return_due_date: date = Query(default=None),
+    phone: str = Query(default=None),
+    db: Session = Depends(get_db),
+):
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:
         end_date = date.today()
-
-    invoices = (
-        db.query(Invoice)
-        .filter(Invoice.date >= start_date, Invoice.date <= end_date)
-        .filter(Invoice.status != InvoiceStatus.VOID)
-        .order_by(Invoice.date)
-        .all()
+    report = calculate_gst_return(
+        db,
+        start_date,
+        end_date,
+        box9_adjustments=_decimal_query_value(box9_adjustments),
+        box13_adjustments=_decimal_query_value(box13_adjustments),
     )
-
-    total_sales = Decimal(0)
-    total_taxable = Decimal(0)
-    total_tax = Decimal(0)
-    items = []
-
-    for inv in invoices:
-        total_sales += inv.subtotal
-        if inv.tax_amount and inv.tax_amount > 0:
-            total_taxable += inv.subtotal
-            total_tax += inv.tax_amount
-        items.append({
-            "date": inv.date.isoformat(),
-            "invoice_number": inv.invoice_number,
-            "customer_name": inv.customer.name if inv.customer else "",
-            "subtotal": float(inv.subtotal),
-            "tax_rate": float(inv.tax_rate),
-            "tax_amount": float(inv.tax_amount),
-        })
-
-    return {
-        "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat(),
-        "items": items,
-        "total_sales": float(total_sales),
-        "total_taxable": float(total_taxable),
-        "total_non_taxable": float(total_sales - total_taxable),
-        "total_tax": float(total_tax),
-    }
+    pdf_bytes = generate_gst101a_pdf(
+        report,
+        get_settings(db),
+        return_due_date=_optional_query_value(return_due_date),
+        phone=_optional_query_value(phone),
+    )
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=GST101A_{start_date}_{end_date}.pdf"},
+    )
 
 
 @router.get("/general-ledger")

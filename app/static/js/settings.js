@@ -107,11 +107,12 @@ const SettingsPage = {
                                 <option value="false" ${s.gst_registered !== 'true' ? 'selected' : ''}>No</option>
                                 <option value="true" ${s.gst_registered === 'true' ? 'selected' : ''}>Yes</option>
                             </select></div>
-                        <div class="form-group"><label>GST Basis</label>
+                        <div class="form-group"><label>GST Accounting Basis</label>
                             <select name="gst_basis">
                                 <option value="invoice" ${s.gst_basis !== 'payments' ? 'selected' : ''}>Invoice</option>
                                 <option value="payments" ${s.gst_basis === 'payments' ? 'selected' : ''}>Payments</option>
-                            </select></div>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Use the basis selected when registering for GST with IRD.</div></div>
                         <div class="form-group"><label>GST Period</label>
                             <select name="gst_period">
                                 ${['monthly','two-monthly','six-monthly'].map(period =>
