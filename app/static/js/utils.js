@@ -9,17 +9,35 @@
 function $(sel, parent = document) { return parent.querySelector(sel); }
 function $$(sel, parent = document) { return [...parent.querySelectorAll(sel)]; }
 
-function formatCurrency(amount) {
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
+function getFormatSettings(settings = null) {
+    if (settings) return settings;
+    if (typeof App !== 'undefined' && App.settings) return App.settings;
+    return {};
 }
 
-function formatDate(dateStr) {
+function formatCurrency(amount, settings = null) {
+    const formatSettings = getFormatSettings(settings);
+    const locale = formatSettings.locale || 'en-US';
+    const currency = formatSettings.currency || 'USD';
+    try {
+        return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(amount || 0);
+    } catch (err) {
+        return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency || 'USD' }).format(amount || 0);
+    }
+}
+
+function formatDate(dateStr, settings = null) {
     if (!dateStr) return '';
+    const formatSettings = getFormatSettings(settings);
     const d = dateStr.includes('T')
         ? new Date(dateStr)
         : new Date(dateStr + 'T00:00:00');
     if (Number.isNaN(d.getTime())) return 'Invalid date';
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    try {
+        return d.toLocaleDateString(formatSettings.locale || 'en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    } catch (err) {
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    }
 }
 
 function todayISO() {

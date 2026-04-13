@@ -7,6 +7,8 @@
  * it is no longer 2003. WM_COMMAND 0x8001 through 0x801F, rest in peace.
  */
 const App = {
+    settings: {},
+
     routes: {
         '/':              { page: 'dashboard',       label: 'Dashboard',          render: () => App.renderDashboard() },
         '/customers':     { page: 'customers',       label: 'Customer Center',    render: () => CustomersPage.render() },
@@ -74,10 +76,23 @@ const App = {
 
     updateClock() {
         const now = new Date();
+        const locale = App.settings.locale || 'en-US';
         const clock = $('#topbar-clock');
-        if (clock) clock.textContent = now.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+        if (clock) {
+            try {
+                clock.textContent = now.toLocaleTimeString(locale, {hour:'2-digit', minute:'2-digit'});
+            } catch (err) {
+                clock.textContent = now.toLocaleTimeString('en-US', {hour:'2-digit', minute:'2-digit'});
+            }
+        }
         const statusDate = $('#status-date');
-        if (statusDate) statusDate.textContent = now.toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+        if (statusDate) {
+            try {
+                statusDate.textContent = now.toLocaleDateString(locale, {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+            } catch (err) {
+                statusDate.textContent = now.toLocaleDateString('en-US', {weekday:'long', year:'numeric', month:'long', day:'numeric'});
+            }
+        }
     },
 
     showAbout() {
@@ -565,10 +580,18 @@ const App = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    // Load company name from settings for status bar
-    async loadCompanyName() {
+    async loadSettings() {
         try {
-            const s = await API.get('/settings');
+            App.settings = await API.get('/settings');
+        } catch (e) {
+            App.settings = {};
+        }
+    },
+
+    // Load company name from settings for status bar
+    loadCompanyName() {
+        try {
+            const s = App.settings || {};
             const companyEl = $('#status-company');
             if (companyEl && s.company_name && s.company_name !== 'My Company') {
                 companyEl.textContent = `Company: ${s.company_name}`;
@@ -576,7 +599,7 @@ const App = {
         } catch (e) { /* ignore on load */ }
     },
 
-    init() {
+    async init() {
         window.addEventListener('hashchange', () => App.navigate(location.hash));
 
         // Load saved theme
@@ -620,6 +643,8 @@ const App = {
                 if (dd) dd.classList.add('hidden');
             }
         });
+
+        await App.loadSettings();
 
         // Start clock — CMainFrame::OnTimer() at 1-second interval (WM_TIMER id=1)
         App.updateClock();

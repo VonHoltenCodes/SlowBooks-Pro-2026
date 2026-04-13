@@ -2,12 +2,7 @@
 
 This document captures the current localization audit for turning SlowBooks Pro 2026 into a New Zealand-localized version.
 
-The GitHub branch `nz-localization` exists remotely, based on `main` at commit `6fadfa755c9b1625abc5f639c12a6d9edcfb9c78`. At the time of the audit, the local checkout was still on `main`, so local work should begin with:
-
-```bash
-git fetch origin nz-localization
-git switch nz-localization
-```
+The `nz-localization` branch is the working branch. It has been synced with upstream changes through commit `99bbcc7`, so the plan below reflects the current branch state rather than the original audit-time checkout instructions.
 
 ## Assessment
 
@@ -16,8 +11,10 @@ The app is strongly US-shaped in tax, payroll, addresses, reports, PDF/UI copy, 
 - Purchase-side GST is more than a label change. Bills already debit account `2200` for tax, so the current single "Sales Tax Payable" account is being used as both collected-output tax and purchase-input tax.
 - Import/export paths are a major localization surface. CSV and IIF logic use State/ZIP conventions, QuickBooks-style address parsing, and "Sales Tax Payable" labels.
 - GST calculation is duplicated across invoices, bills, credit memos, purchase orders, estimates, and recurring invoices.
+- Upstream now prefills `default_tax_rate` into invoice, estimate, purchase order, and recurring invoice forms. That is useful as a temporary bridge, but it must not become the GST design. NZ GST still needs line-level GST codes, inclusive pricing, and separate output/input GST treatment.
+- Upstream added shared report period UI for several reports. Reuse that flow for GST returns instead of building a separate date picker.
 - Document updates recalculate totals but do not consistently rebuild/reverse journal entries, which becomes riskier once GST posting rules are introduced.
-- There is no `tests/` directory, so GST and payroll changes should start with focused regression tests.
+- A small `tests/` directory now exists for settings localization. GST, reporting, and payroll changes still need focused regression tests before implementation.
 - Schema changes need Alembic migrations under `alembic/versions`.
 
 ## Official NZ Anchors
@@ -55,7 +52,7 @@ Relevant files:
 - `app/routes/settings.py`
 - `app/static/js/settings.js`
 
-NZ fields need to be added to defaults and surfaced in the UI/API together.
+NZ fields have been added to defaults and surfaced in the settings UI. Keep expanding this foundation through tests when other areas begin consuming localization settings.
 
 ### Currency And Dates
 
@@ -78,6 +75,12 @@ Relevant files:
 - `app/routes/credit_memos.py`
 - `app/routes/purchase_orders.py`
 - `app/services/recurring_service.py`
+- `app/static/js/invoices.js`
+- `app/static/js/estimates.js`
+- `app/static/js/purchase_orders.js`
+- `app/static/js/recurring.js`
+
+Upstream now reads `default_tax_rate` from settings in these frontend forms. The GST replacement must update both backend posting/calculation and frontend preview/save behavior.
 
 ### GST Posting
 
@@ -131,6 +134,8 @@ Relevant files:
 
 Schedule C is hardcoded in routes, model comments, service mappings, CSV headings, UI, and docs.
 
+The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The existing Sales Tax report should be replaced with a GST return while reusing that period selector.
+
 Relevant files:
 
 - `app/models/tax.py`
@@ -153,14 +158,14 @@ Relevant files:
 
 ## Consolidated Todo
 
-1. Checkout the local branch:
-   `git fetch origin nz-localization` then `git switch nz-localization`.
+1. Keep branch hygiene clean:
+   Work on `nz-localization`, sync from upstream before each implementation slice, and re-check this plan for newly touched tax/report/settings paths.
 
-2. Add a localization foundation:
-   Add settings for `country=NZ`, `tax_regime=NZ`, `currency=NZD`, `locale=en-NZ`, `timezone=Pacific/Auckland`, `ird_number`, `gst_number`, `gst_registered`, `gst_basis`, `gst_period`, and `prices_include_gst`.
+2. Maintain the localization foundation:
+   Settings for `country=NZ`, `tax_regime=NZ`, `currency=NZD`, `locale=en-NZ`, `timezone=Pacific/Auckland`, `ird_number`, `gst_number`, `gst_registered`, `gst_basis`, `gst_period`, and `prices_include_gst` now exist. Add tests when consuming these settings from formatting, GST, reports, imports, or payroll.
 
 3. Centralize formatting:
-   Replace hardcoded `en-US`, `USD`, `$`, and US date strings with locale-aware frontend and PDF helpers.
+   Replace hardcoded `en-US`, `USD`, `$`, and US date strings with locale-aware frontend and PDF helpers. Include report period display, invoice/estimate/PO/recurring totals, customer statements, and PDF templates.
 
 4. Refactor address fields without breaking data:
    Prefer label/remap first (`Region`, `Postcode`, `Country=NZ`), then consider schema migrations later. Update settings, customers, vendors, employees, PDFs, CSV, and IIF.
@@ -172,7 +177,7 @@ Relevant files:
    Add GST code/rate to invoice lines, estimate lines, credit memo lines, bill lines, purchase order lines, and recurring invoice lines.
 
 7. Build one GST calculation service:
-   Support exclusive and inclusive pricing, `3/23` GST-inclusive extraction, rounding, taxable totals, zero-rated totals, exempt totals, output GST, and input GST.
+   Support exclusive and inclusive pricing, `3/23` GST-inclusive extraction, rounding, taxable totals, zero-rated totals, exempt totals, output GST, and input GST. Replace the current `subtotal * tax_rate` logic in backend routes and frontend preview calculators. Do not solve GST by setting `default_tax_rate=15.0`; that cannot represent zero-rated/exempt lines or GST-inclusive prices.
 
 8. Rework journal posting:
    Replace `get_sales_tax_account_id()` with GST-aware account helpers. Decide whether to use separate `GST Collected` and `GST Paid` accounts plus `GST Payable`, or one GST control account with reporting splits.
@@ -181,7 +186,7 @@ Relevant files:
    Ensure edits, voids, duplicates, and conversions either reverse/repost journal entries correctly or enforce immutable posted documents.
 
 10. Replace the sales tax report with a GST return report:
-    Include sales/output GST, purchases/input GST, net GST payable/refundable, GST period/basis, zero-rated/exempt supplies, and drilldowns to source transactions.
+    Include sales/output GST, purchases/input GST, net GST payable/refundable, GST period/basis, zero-rated/exempt supplies, and drilldowns to source transactions. Reuse the existing reports period selector/custom date UI instead of adding a second date-range pattern.
 
 11. Replace Schedule C:
     Remove or hide Schedule C routes/UI for NZ mode. Replace later with NZ income tax outputs after deciding whether the target is IR3 business summary, IR10-style financial statements, or accountant export.
@@ -205,7 +210,7 @@ Relevant files:
     Replace Sales Tax, Federal Tax, State Tax, SS, Medicare, EIN, ZIP, State, IRS, and Schedule C. Update README and screenshots/docs.
 
 18. Add tests:
-    Add focused tests for GST inclusive/exclusive math, line GST codes, document posting, credit memo reversals, bill input GST, PAYE examples, and formatting.
+    Add focused tests for settings consumption, GST inclusive/exclusive math, line GST codes, frontend/backend calculation agreement, document posting, credit memo reversals, bill input GST, report period handling, PAYE examples, and formatting.
 
 19. Decide multi-currency scope:
     For a pure NZ fork, start with single-currency `NZD` formatting. Full multi-currency is a separate accounting feature involving exchange rates, realized gains/losses, bank-account currencies, and reporting currency.

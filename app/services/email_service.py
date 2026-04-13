@@ -9,14 +9,29 @@ from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from pathlib import Path
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, pass_context
 from sqlalchemy.orm import Session
 
 from app.models.email_log import EmailLog
 from app.models.settings import Settings
+from app.services.formatting import format_currency, format_date
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
+
+
+@pass_context
+def _format_currency(context, value):
+    return format_currency(value, context.get("company", {}))
+
+
+@pass_context
+def _format_date(context, value):
+    return format_date(value, context.get("company", {}))
+
+
+_jinja_env.filters["currency"] = _format_currency
+_jinja_env.filters["fdate"] = _format_date
 
 
 def _get_smtp_settings(db: Session) -> dict:
@@ -97,10 +112,12 @@ def render_invoice_email(invoice, company_settings: dict) -> str:
     except Exception:
         # Fallback simple email
         company_name = company_settings.get("company_name", "Our Company")
+        total = format_currency(invoice.total, company_settings)
+        due_date = format_date(invoice.due_date, company_settings)
         return f"""<html><body>
         <p>Dear {invoice.customer.name if invoice.customer else 'Customer'},</p>
-        <p>Please find attached Invoice #{invoice.invoice_number} for ${float(invoice.total):,.2f}.</p>
-        <p>Payment is due by {invoice.due_date}.</p>
+        <p>Please find attached Invoice #{invoice.invoice_number} for {total}.</p>
+        <p>Payment is due by {due_date}.</p>
         <p>Thank you for your business.</p>
         <p>{company_name}</p>
         </body></html>"""

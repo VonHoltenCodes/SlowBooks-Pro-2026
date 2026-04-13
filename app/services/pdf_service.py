@@ -9,27 +9,23 @@
 from pathlib import Path
 from io import BytesIO
 
-from jinja2 import Environment, FileSystemLoader
+from jinja2 import Environment, FileSystemLoader, pass_context
 from weasyprint import HTML
+
+from app.services.formatting import format_currency, format_date
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
 
 
-def _format_currency(value):
-    try:
-        v = float(value or 0)
-        return f"${v:,.2f}"
-    except (TypeError, ValueError):
-        return "$0.00"
+@pass_context
+def _format_currency(context, value):
+    return format_currency(value, context.get("company", {}))
 
 
-def _format_date(value):
-    if not value:
-        return ""
-    if hasattr(value, "strftime"):
-        return value.strftime("%b %d, %Y")
-    return str(value)
+@pass_context
+def _format_date(context, value):
+    return format_date(value, context.get("company", {}))
 
 
 _jinja_env.filters["currency"] = _format_currency

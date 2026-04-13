@@ -20,12 +20,12 @@ td { padding: 8px; border-bottom: 1px solid #eee; }
 
     <table>
         <tr><th>Invoice #</th><td>{{ inv.invoice_number }}</td></tr>
-        <tr><th>Date</th><td>{{ inv.date }}</td></tr>
-        <tr><th>Due Date</th><td>{{ inv.due_date }}</td></tr>
+        <tr><th>Date</th><td>{{ inv.date | fdate }}</td></tr>
+        <tr><th>Due Date</th><td>{{ inv.due_date | fdate }}</td></tr>
         <tr><th>Terms</th><td>{{ inv.terms or 'Net 30' }}</td></tr>
     </table>
 
-    <p class="amount">Amount Due: ${{ "%.2f"|format(inv.balance_due|float) }}</p>
+    <p class="amount">Amount Due: {{ inv.balance_due | currency }}</p>
 
     {% if inv.notes %}
     <p style="color:#666;">{{ inv.notes }}</p>

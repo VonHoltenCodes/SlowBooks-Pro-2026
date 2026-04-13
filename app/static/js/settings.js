@@ -187,7 +187,8 @@ const SettingsPage = {
         // Remove file input from data
         delete data.file;
         try {
-            await API.put('/settings', data);
+            const settings = await API.put('/settings', data);
+            if (typeof App !== 'undefined') App.settings = settings;
             toast('Settings saved');
         } catch (err) {
             toast(err.message, 'error');
