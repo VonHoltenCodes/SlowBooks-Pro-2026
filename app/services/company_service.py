@@ -5,6 +5,7 @@
 
 import subprocess
 from datetime import datetime
+from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
@@ -13,11 +14,10 @@ from app.config import DATABASE_URL
 from app.models.companies import Company
 
 
-def _base_url():
-    """Get the base URL without database name."""
-    # postgresql://user:pass@host:port/dbname → postgresql://user:pass@host:port/
-    parts = DATABASE_URL.rsplit("/", 1)
-    return parts[0] + "/"
+def _database_url(database_name: str) -> str:
+    """Build a database URL preserving auth/host/query settings."""
+    parsed = urlparse(DATABASE_URL)
+    return urlunparse(parsed._replace(path=f"/{database_name}"))
 
 
 def list_companies(db: Session) -> list[dict]:
@@ -37,16 +37,15 @@ def create_company(db: Session, name: str, database_name: str, description: str 
         return {"success": False, "error": f"Database '{database_name}' already exists"}
 
     # Create the database
-    base_url = _base_url()
     try:
         # Connect to postgres system database to create new DB
-        system_engine = create_engine(base_url + "postgres", isolation_level="AUTOCOMMIT")
+        system_engine = create_engine(_database_url("postgres"), isolation_level="AUTOCOMMIT")
         with system_engine.connect() as conn:
             conn.execute(text(f'CREATE DATABASE "{database_name}"'))
         system_engine.dispose()
 
         # Run Alembic migrations on new database
-        new_engine = create_engine(base_url + database_name)
+        new_engine = create_engine(_database_url(database_name))
         from app.database import Base
         Base.metadata.create_all(new_engine)
         new_engine.dispose()
@@ -64,4 +63,4 @@ def create_company(db: Session, name: str, database_name: str, description: str 
 
 def get_company_db_url(database_name: str) -> str:
     """Get the full database URL for a company."""
-    return _base_url() + database_name
+    return _database_url(database_name)

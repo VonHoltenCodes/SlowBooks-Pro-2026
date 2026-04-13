@@ -1,0 +1,14 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.omx
+alembic/__pycache__
+app/__pycache__
+app/static/uploads
+backups
+data/postgres
+node_modules

@@ -12,6 +12,8 @@ build/
 *.swp
 *.swo
 *~
+backups/
+data/postgres/
 AGENTS.md
 .codex
 .omx/

@@ -136,6 +136,45 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - Python 3.10+
 - PostgreSQL 12+ (running)
 
+### Docker (self-contained default)
+
+```bash
+cp .env.example .env
+docker compose up --build
+```
+
+This starts:
+- `postgres:latest`
+- the Slowbooks app on **http://localhost:3001**
+
+Default compose behavior:
+- waits for the database
+- runs `alembic upgrade head`
+- runs `python scripts/seed_database.py`
+- starts the app
+
+Local bind mounts are used for:
+- repo source code into the app container
+- PostgreSQL data at `./data/postgres`
+
+### Docker with external PostgreSQL
+
+Edit `.env` and either:
+- set `DATABASE_URL` directly, or
+- leave `DATABASE_URL` blank and set:
+  - `POSTGRES_HOST`
+  - `POSTGRES_PORT`
+  - `POSTGRES_DB`
+  - `POSTGRES_USER`
+  - `POSTGRES_PASSWORD`
+  - `POSTGRES_SSLMODE`
+
+Then start only the app service if you do not want the bundled Postgres:
+
+```bash
+docker compose up --build app
+```
+
 ### Install
 
 ```bash
@@ -151,7 +190,7 @@ sudo -u postgres psql -c "CREATE DATABASE bookkeeper OWNER bookkeeper"
 
 # Copy and edit config
 cp .env.example .env
-# Edit .env if your PostgreSQL setup differs
+# For non-Docker local runs, set POSTGRES_HOST=localhost or set DATABASE_URL directly
 
 # Run migrations and seed Chart of Accounts
 alembic upgrade head
@@ -169,6 +208,7 @@ Open **http://localhost:3001** in your browser.
 ./scripts/backup.sh
 # Backs up to ~/bookkeeper-backups/ with gzip compression
 # Keeps the 30 most recent backups
+# Uses POSTGRES_* settings from .env when present
 ```
 
 ---

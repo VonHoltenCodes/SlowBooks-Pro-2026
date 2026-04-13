@@ -6,6 +6,7 @@
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy.orm import Session
 
@@ -19,14 +20,15 @@ BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 def _parse_db_url(url: str) -> dict:
     """Parse PostgreSQL connection URL into components."""
     # postgresql://user:pass@host:port/dbname
-    from urllib.parse import urlparse
     parsed = urlparse(url)
+    query = parse_qs(parsed.query)
     return {
         "host": parsed.hostname or "localhost",
         "port": str(parsed.port or 5432),
         "user": parsed.username or "bookkeeper",
         "password": parsed.password or "",
         "dbname": parsed.path.lstrip("/") or "bookkeeper",
+        "sslmode": (query.get("sslmode") or [""])[0],
     }
 
 
@@ -38,6 +40,8 @@ def create_backup(db: Session, notes: str = None, backup_type: str = "manual") -
     filepath = BACKUP_DIR / filename
 
     env = {"PGPASSWORD": params["password"]}
+    if params["sslmode"]:
+        env["PGSSLMODE"] = params["sslmode"]
 
     try:
         result = subprocess.run(
@@ -74,6 +78,8 @@ def restore_backup(db: Session, filename: str) -> dict:
 
     params = _parse_db_url(DATABASE_URL)
     env = {"PGPASSWORD": params["password"]}
+    if params["sslmode"]:
+        env["PGSSLMODE"] = params["sslmode"]
 
     try:
         result = subprocess.run(

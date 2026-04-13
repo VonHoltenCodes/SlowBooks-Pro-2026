@@ -1,0 +1,37 @@
+services:
+  postgres:
+    image: postgres:latest
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-bookkeeper}
+      POSTGRES_USER: ${POSTGRES_USER:-bookkeeper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bookkeeper}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-bookkeeper} -d ${POSTGRES_DB:-bookkeeper}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  app:
+    build:
+      context: .
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-}
+      POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-bookkeeper}
+      POSTGRES_USER: ${POSTGRES_USER:-bookkeeper}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-bookkeeper}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:-disable}
+      APP_HOST: 0.0.0.0
+      APP_PORT: ${APP_PORT:-3001}
+      APP_DEBUG: ${APP_DEBUG:-true}
+    ports:
+      - "${APP_PORT:-3001}:3001"
+    working_dir: /app
+    volumes:
+      - ./:/app
+    restart: unless-stopped
