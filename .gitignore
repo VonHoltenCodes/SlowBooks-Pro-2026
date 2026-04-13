@@ -13,3 +13,4 @@ build/
 *.swo
 *~
 AGENTS.md
+.codex
