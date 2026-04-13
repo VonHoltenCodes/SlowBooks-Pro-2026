@@ -35,7 +35,6 @@ const App = {
         // Phase 4: CSV Import/Export
         '/csv':           { page: 'csv',             label: 'CSV Import/Export',  render: () => App.renderCSV() },
         // Phase 5: Advanced Integration
-        '/tax':           { page: 'tax',             label: 'Tax Reports',        render: () => TaxPage.render() },
         // Phase 6: Ambitious
         '/companies':     { page: 'companies',       label: 'Companies',          render: () => CompaniesPage.render() },
         '/employees':     { page: 'employees',       label: 'Employees',          render: () => EmployeesPage.render() },

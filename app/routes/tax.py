@@ -5,17 +5,21 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.tax import TaxCategoryMapping
 from app.models.accounts import Account
 from app.schemas.tax import TaxMappingCreate, TaxMappingResponse
-from app.services.tax_export import get_schedule_c_data, export_schedule_c_csv
 
 router = APIRouter(prefix="/api/tax", tags=["tax"])
+
+
+SCHEDULE_C_DISABLED_DETAIL = (
+    "Schedule C is disabled for SlowBooks NZ. "
+    "NZ income-tax output has not yet been implemented."
+)
 
 
 @router.get("/schedule-c")
@@ -24,11 +28,7 @@ def schedule_c_report(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    if not start_date:
-        start_date = date(date.today().year, 1, 1)
-    if not end_date:
-        end_date = date(date.today().year, 12, 31)
-    return get_schedule_c_data(db, start_date, end_date)
+    raise HTTPException(status_code=410, detail=SCHEDULE_C_DISABLED_DETAIL)
 
 
 @router.get("/schedule-c/csv")
@@ -37,14 +37,7 @@ def schedule_c_csv(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    if not start_date:
-        start_date = date(date.today().year, 1, 1)
-    if not end_date:
-        end_date = date(date.today().year, 12, 31)
-    data = get_schedule_c_data(db, start_date, end_date)
-    csv_text = export_schedule_c_csv(data)
-    return Response(content=csv_text, media_type="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename=schedule_c_{start_date}_{end_date}.csv"})
+    raise HTTPException(status_code=410, detail=SCHEDULE_C_DISABLED_DETAIL)
 
 
 @router.get("/mappings", response_model=list[TaxMappingResponse])

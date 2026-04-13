@@ -73,7 +73,6 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - **General Ledger** — All journal entries grouped by account with debit/credit totals
 - **Income by Customer** — Sales totals per customer with invoice counts
 - **Customer Statements** — PDF statement with invoice/payment history and running balance
-- **Schedule C (Tax)** — Generate Schedule C data from P&L with configurable account-to-tax-line mappings. Export as CSV
 
 ### Dashboard
 - Company Snapshot with Total Receivables, Overdue Invoices, Active Customers, Total Payables
@@ -353,8 +352,6 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 132 routes across 28 route
 | `/api/reports/sales-tax` | GET | Compatibility alias for GST return |
 | `/api/reports/general-ledger` | GET | All journal entries by account |
 | `/api/reports/income-by-customer` | GET | Sales totals per customer |
-| `/api/tax/schedule-c` | GET | Schedule C data from P&L |
-| `/api/tax/schedule-c/csv` | GET | Schedule C CSV export |
 
 ### Import/Export
 | Endpoint | Methods | Description |

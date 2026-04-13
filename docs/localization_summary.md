@@ -138,7 +138,7 @@ Address labels and defaults now have a compatibility-preserving NZ foundation: c
 
 ### Tax Reporting
 
-Schedule C is hardcoded in routes, model comments, service mappings, CSV headings, UI, and docs.
+Schedule C storage and legacy code paths still exist, but the NZ branch now disables the active Schedule C routes and removes the Tax Reports navigation entry so US income-tax output is no longer exposed to end users.
 
 The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The Sales Tax report is now a GST Return report that produces GST101A box values and can generate a filled GST101A April 2023 PDF. Box 9 and Box 13 adjustment values are entered at report-generation time, and the selected GST accounting basis comes from Company Settings.
 
@@ -195,7 +195,7 @@ Relevant files:
     The Reports UI now exposes a GST Return flow using the shared period selector. It calculates GST101A Boxes 5-15, supports invoice and payments basis from Settings, accepts Box 9 and Box 13 adjustments before generation, includes source drilldowns, and generates a filled `gst101a-2023.pdf`. The old `/api/reports/sales-tax` endpoint remains a compatibility alias.
 
 11. Replace Schedule C:
-    Remove or hide Schedule C routes/UI for NZ mode. Replace later with NZ income tax outputs after deciding whether the target is IR3 business summary, IR10-style financial statements, or accountant export.
+    Schedule C routes/UI are now hidden or disabled for SlowBooks NZ. Future work should replace them with NZ income-tax outputs only after deciding whether the target is IR3 business summary, IR10-style financial statements, or accountant export.
 
 12. Rebuild payroll around NZ:
     Replace SSN/filing status/allowances with IRD number, tax code, KiwiSaver status/rate, student loan, child support, start/end dates, ESCT rate, pay frequency, and any required payday filing fields.
