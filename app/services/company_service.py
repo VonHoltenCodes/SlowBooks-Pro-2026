@@ -3,8 +3,6 @@
 # Feature 16: Most invasive change — routes to correct database
 # ============================================================================
 
-import subprocess
-from datetime import datetime
 from urllib.parse import urlparse, urlunparse
 
 from sqlalchemy import create_engine, text
@@ -12,12 +10,31 @@ from sqlalchemy.orm import Session
 
 from app.config import DATABASE_URL
 from app.models.companies import Company
+from scripts.bootstrap_database import run_bootstrap as run_database_bootstrap
 
 
 def _database_url(database_name: str) -> str:
     """Build a database URL preserving auth/host/query settings."""
     parsed = urlparse(DATABASE_URL)
     return urlunparse(parsed._replace(path=f"/{database_name}"))
+
+
+def _drop_database(database_name: str) -> None:
+    system_engine = create_engine(_database_url("postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        with system_engine.connect() as conn:
+            conn.execute(text(f'REVOKE CONNECT ON DATABASE "{database_name}" FROM PUBLIC'))
+            conn.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) "
+                    "FROM pg_stat_activity "
+                    "WHERE datname = :database_name AND pid <> pg_backend_pid()"
+                ),
+                {"database_name": database_name},
+            )
+            conn.execute(text(f'DROP DATABASE "{database_name}"'))
+    finally:
+        system_engine.dispose()
 
 
 def list_companies(db: Session) -> list[dict]:
@@ -31,33 +48,33 @@ def list_companies(db: Session) -> list[dict]:
 
 def create_company(db: Session, name: str, database_name: str, description: str = None) -> dict:
     """Create a new company database."""
-    # Check if company already exists
     existing = db.query(Company).filter(Company.database_name == database_name).first()
     if existing:
         return {"success": False, "error": f"Database '{database_name}' already exists"}
 
-    # Create the database
+    created_database = False
     try:
-        # Connect to postgres system database to create new DB
         system_engine = create_engine(_database_url("postgres"), isolation_level="AUTOCOMMIT")
         with system_engine.connect() as conn:
             conn.execute(text(f'CREATE DATABASE "{database_name}"'))
         system_engine.dispose()
+        created_database = True
 
-        # Run Alembic migrations on new database
-        new_engine = create_engine(_database_url(database_name))
-        from app.database import Base
-        Base.metadata.create_all(new_engine)
-        new_engine.dispose()
+        run_database_bootstrap(_database_url(database_name))
 
-        # Register in master DB
         company = Company(name=name, database_name=database_name, description=description)
         db.add(company)
         db.commit()
 
-        return {"success": True, "company_id": company.id, "database_name": database_name}
+        return {"success": True, "company_id": company.id, "database_name": company.database_name}
 
     except Exception as e:
+        db.rollback()
+        if created_database:
+            try:
+                _drop_database(database_name)
+            except Exception:
+                pass
         return {"success": False, "error": str(e)}
 
 

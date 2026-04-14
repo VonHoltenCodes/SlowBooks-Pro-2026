@@ -216,8 +216,8 @@ Relevant files:
 18. Expand SMTP document delivery beyond invoices:
     Shared SMTP document delivery now covers invoices, customer statements, estimates, credit notes, payroll payslips, and purchase orders through a common backend email/logging path. Credit note and purchase order PDFs now exist for outbound delivery, and the existing UI surfaces expose send actions for each supported document type.
 
-19. Add Alembic migrations:
-    Any model/schema changes need migrations under `alembic/versions`. Also ensure multi-company creation and seed flows use the NZ defaults and chart.
+19. Keep Alembic as the canonical schema path:
+    Model/schema changes need migrations under `alembic/versions`. Docker startup and multi-company database creation now share one bootstrap path that runs Alembic upgrade + NZ chart/settings seed before the app uses a database.
 
 20. Update UI copy everywhere:
     Replace Sales Tax, Federal Tax, State Tax, SS, Medicare, EIN, ZIP, State, IRS, and Schedule C. Update README and screenshots/docs.

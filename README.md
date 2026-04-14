@@ -151,8 +151,7 @@ This starts:
 
 Default compose behavior:
 - waits for the database
-- runs `alembic upgrade head`
-- runs `python scripts/seed_database.py`
+- runs `python scripts/bootstrap_database.py` (migrations + NZ seed)
 - starts the app
 
 Local bind mounts are used for:
@@ -195,8 +194,7 @@ cp .env.example .env
 # For non-Docker local runs, set POSTGRES_HOST=localhost or set DATABASE_URL directly
 
 # Run migrations and seed Chart of Accounts
-alembic upgrade head
-python3 scripts/seed_database.py
+python3 scripts/bootstrap_database.py
 
 # Start the app
 python3 run.py
@@ -274,6 +272,7 @@ SlowBooks-Pro-2026/
 │       │   └── dark.css      # Dark mode CSS overrides
 │       └── js/               # SPA router, API wrapper, 23 page modules
 ├── scripts/
+│   ├── bootstrap_database.py # Canonical migrate + seed entry point
 │   ├── seed_database.py      # Seed the Chart of Accounts
 │   ├── seed_nz_demo_data.py  # NZ demo business seed
 │   ├── run_recurring.py      # Cron script for recurring invoices

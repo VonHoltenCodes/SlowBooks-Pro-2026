@@ -45,9 +45,8 @@ docker compose up --build
 ### What happens on startup
 The app container will:
 1. wait for PostgreSQL to become reachable
-2. run `alembic upgrade head`
-3. run `python scripts/seed_database.py`
-4. start the app with Uvicorn
+2. run `python scripts/bootstrap_database.py` (Alembic upgrade + NZ seed)
+3. start the app with Uvicorn
 
 ### Result
 - app: **http://localhost:3001**
@@ -131,8 +130,7 @@ sudo -u postgres psql -c "CREATE DATABASE bookkeeper OWNER bookkeeper"
 ### Bootstrap the database
 
 ```bash
-alembic upgrade head
-python3 scripts/seed_database.py
+python3 scripts/bootstrap_database.py
 ```
 
 ### Start the app

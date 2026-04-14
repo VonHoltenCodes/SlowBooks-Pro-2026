@@ -25,6 +25,5 @@ for attempt in range(60):
 raise SystemExit(f"Database not reachable after waiting: {last_error}")
 PY
 
-alembic upgrade head
-python scripts/seed_database.py
+python scripts/bootstrap_database.py
 exec python run.py
