@@ -113,7 +113,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 ### Utilities
 - **Backup Script** — `scripts/backup.sh` — pg_dump with gzip compression, keeps last 30 backups
 - **Recurring Invoice Cron** — `scripts/run_recurring.py` — Standalone script for generating due recurring invoices
-- **IRS Mock Data** — `scripts/seed_irs_mock_data.py` — Seeds realistic test data from IRS Publication 583 (Henry Brown's Auto Body Shop: 8 customers, 13 vendors, 10 invoices, 5 payments, 3 estimates)
+- **NZ Demo Data** — `scripts/seed_irs_mock_data.py` — Seeds a cohesive NZ demo business with NZ/Xero-derived contacts, 8 items, 10 invoices, 5 payments, and 3 estimates
 
 ---
 
@@ -484,19 +484,15 @@ ENDTRNS
 
 ### Sample Data
 
-The `scripts/seed_irs_mock_data.py` script is now a **transitional NZ demo-data script**.
+The `scripts/seed_irs_mock_data.py` script now seeds a **cohesive NZ demo business**.
 
-Current state:
-- **customers and suppliers** are derived from Xero Demo Company NZ contact exports
-- **items and transactional examples** are still the older temporary sample set and will be replaced in a later follow-up slice
-
-The script currently seeds:
+Current composition:
 - 8 NZ/Xero-derived demo customers (for example Basket Case, Bayside Club, DIISR - Small Business Services, Ridgeway University)
 - 13 NZ/Xero-derived demo suppliers (for example ABC Furniture, Capital Cab Co, Net Connect, PowerDirect)
-- 8 temporary service/material items
-- 10 temporary invoices
-- 5 temporary payments
-- 3 temporary estimates
+- 8 NZ-relevant service items (for example Strategy Workshop, Monthly Advisory Retainer, Website Refresh, Payroll Filing Setup)
+- 10 NZ-relevant invoices with 15% GST
+- 5 payments
+- 3 estimates
 - proper double-entry journal entries for the seeded transactions
 
 ```bash

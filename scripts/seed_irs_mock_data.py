@@ -1,10 +1,10 @@
 """
-Seed Slowbooks with transitional NZ demo data.
+Seed Slowbooks with a cohesive NZ demo business.
 
-Current scope:
+Source material:
 - Customer and supplier contacts are derived from Xero Demo Company NZ exports
-- Items and transaction examples are still the older temporary sample set and
-  will be replaced in a later follow-up slice
+- Items and transactions are repo-authored NZ demo examples built to fit the
+  current NZ chart and product flows
 """
 import sys
 from pathlib import Path
@@ -25,41 +25,6 @@ from app.services.accounting import (
     get_default_income_account_id, get_gst_account_id,
 )
 
-
-# ============================================================================
-# IRS Pub 583 — Henry Brown's Auto Body Shop
-# Monthly Summary of Cash Receipts, January (page 18)
-# ============================================================================
-
-JANUARY_DAILY_SALES = [
-    # (day, net_sales, sales_tax)
-    (3,  263.60, 4.20),
-    (4,  212.00, 3.39),
-    (5,  194.40, 3.10),
-    (6,  222.40, 3.54),
-    (7,  231.15, 3.68),
-    (8,  137.50, 2.13),
-    (10, 187.90, 2.99),
-    (11, 207.56, 3.31),
-    (12, 128.95, 2.05),
-    (13, 231.40, 3.77),
-    (14, 201.28, 3.21),
-    (15, 88.01,  1.40),
-    (17, 210.95, 3.36),
-    (18, 221.80, 3.53),
-    (19, 225.15, 3.59),
-    (20, 221.93, 3.52),
-    (21, 133.53, 2.13),
-    (22, 130.84, 2.08),
-    (24, 216.37, 3.45),
-    (25, 220.05, 3.50),
-    (26, 197.80, 3.15),
-    (27, 272.49, 4.34),
-    (28, 150.64, 2.40),
-    (29, 224.05, 3.56),
-    (31, 133.30, 2.13),
-]
-# Total: $4,865.05 net sales, $77.51 sales tax (matches Pub 583 page 22)
 
 VENDORS = [
     {"name": "ABC Furniture", "company": "ABC Furniture", "phone": "800 124578", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
@@ -88,63 +53,42 @@ CUSTOMERS = [
     {"name": "Ridgeway University", "company": None, "phone": "01 8005001", "email": "", "terms": "Net 30", "bill_address1": "", "bill_city": "", "bill_state": "", "bill_zip": "", "bill_country": "NZ"},
 ]
 
-# ============================================================================
-# Items / Services — Body shop service items
-# Rates derived from Henry's daily sales averages ($195/day avg)
-# ============================================================================
-
 ITEMS = [
-    {"name": "Body Repair",        "item_type": "service",  "rate": 85.00,  "description": "Auto body repair labor",         "income_acct": "200"},
-    {"name": "Paint & Finish",     "item_type": "service",  "rate": 65.00,  "description": "Paint and finish work",           "income_acct": "200"},
-    {"name": "Dent Removal",       "item_type": "service",  "rate": 45.00,  "description": "Dent removal and straightening",  "income_acct": "200"},
-    {"name": "Frame Alignment",    "item_type": "service",  "rate": 125.00, "description": "Frame alignment and correction",  "income_acct": "200"},
-    {"name": "Auto Parts",         "item_type": "material", "rate": 0.00,   "description": "Parts and materials (at cost)",   "income_acct": "200"},
-    {"name": "Paint Supplies",     "item_type": "material", "rate": 0.00,   "description": "Paint, primer, clear coat",       "income_acct": "200"},
-    {"name": "Towing Service",     "item_type": "service",  "rate": 75.00,  "description": "Tow truck service",               "income_acct": "200"},
-    {"name": "Insurance Estimate", "item_type": "service",  "rate": 0.00,   "description": "Insurance damage assessment",     "income_acct": "200"},
+    {"name": "Strategy Workshop",         "item_type": "service",  "rate": 950.00,  "description": "Half-day strategic planning workshop", "income_acct": "200"},
+    {"name": "Monthly Advisory Retainer", "item_type": "service",  "rate": 650.00,  "description": "Monthly business advisory support",    "income_acct": "200"},
+    {"name": "Website Refresh",           "item_type": "service",  "rate": 1800.00, "description": "Website refresh and content update",   "income_acct": "200"},
+    {"name": "Payroll Filing Setup",      "item_type": "service",  "rate": 1200.00, "description": "Payroll and filing setup support",     "income_acct": "200"},
+    {"name": "Compliance Review",         "item_type": "service",  "rate": 780.00,  "description": "Operational compliance review",        "income_acct": "200"},
+    {"name": "Training Session",          "item_type": "service",  "rate": 480.00,  "description": "Staff process and systems training",   "income_acct": "200"},
+    {"name": "Content Pack",              "item_type": "service",  "rate": 520.00,  "description": "Campaign or website content package",  "income_acct": "200"},
+    {"name": "Travel Recovery",           "item_type": "service",  "rate": 85.00,   "description": "Travel and delivery recovery charge",  "income_acct": "260"},
 ]
-
-# ============================================================================
-# Invoices — Based on January daily sales ($4,865.05 total, 1.59% tax rate)
-# Split into customer invoices matching the sales volume
-# ============================================================================
 
 INVOICES = [
-    # (customer_name, invoice_date_offset, lines: [(item_name, qty, rate)], terms)
-    ("Basket Case",   3,  [("Body Repair", 2, 85.00), ("Auto Parts", 1, 203.00), ("Paint & Finish", 1, 65.00)], "Net 30"),
-    ("Bayside Club",  5,  [("Dent Removal", 3, 45.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
-    ("Boom FM",   7,  [("Body Repair", 3, 85.00), ("Frame Alignment", 1, 125.00), ("Auto Parts", 1, 150.00)], "Net 30"),
-    ("City Agency", 10, [("Body Repair", 4, 85.00), ("Paint & Finish", 3, 65.00), ("Paint Supplies", 1, 137.50)], "Net 30"),
-    ("City Limousines",   12, [("Dent Removal", 2, 45.00), ("Paint & Finish", 1, 65.00)], "Net 30"),
-    ("DIISR - Small Business Services",   14, [("Body Repair", 2, 85.00), ("Dent Removal", 1, 45.00), ("Auto Parts", 1, 66.70)], "Net 30"),
-    ("Hamilton Smith Ltd", 17, [("Insurance Estimate", 1, 0.00), ("Body Repair", 3, 85.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
-    ("Ridgeway University", 20, [("Dent Removal", 1, 45.00), ("Paint & Finish", 1, 65.00)], "Due on Receipt"),
-    ("Basket Case",   24, [("Body Repair", 1, 85.00), ("Towing Service", 1, 75.00), ("Auto Parts", 1, 9.80)], "Net 30"),
-    ("Boom FM",   27, [("Frame Alignment", 1, 125.00), ("Body Repair", 2, 85.00), ("Auto Parts", 1, 272.49)], "Net 30"),
+    ("Basket Case",   3,  [("Website Refresh", 1, 1800.00), ("Training Session", 1, 480.00)], "Net 30"),
+    ("Bayside Club",  5,  [("Monthly Advisory Retainer", 1, 650.00), ("Travel Recovery", 1, 85.00)], "Net 30"),
+    ("Boom FM",   7,  [("Strategy Workshop", 1, 950.00), ("Content Pack", 1, 520.00)], "Net 30"),
+    ("City Agency", 10, [("Compliance Review", 1, 780.00), ("Training Session", 1, 480.00)], "Net 15"),
+    ("City Limousines",   12, [("Payroll Filing Setup", 1, 1200.00)], "Net 30"),
+    ("DIISR - Small Business Services",   14, [("Monthly Advisory Retainer", 2, 650.00)], "Net 30"),
+    ("Hamilton Smith Ltd", 17, [("Website Refresh", 1, 1800.00), ("Travel Recovery", 2, 85.00)], "Net 30"),
+    ("Ridgeway University", 20, [("Strategy Workshop", 2, 950.00)], "Net 45"),
+    ("Basket Case",   24, [("Monthly Advisory Retainer", 1, 650.00)], "Net 30"),
+    ("Boom FM",   27, [("Training Session", 2, 480.00), ("Content Pack", 1, 520.00)], "Net 30"),
 ]
-
-# ============================================================================
-# Estimates — Pending work quotes
-# ============================================================================
 
 ESTIMATES = [
-    ("City Agency", 5,  [("Body Repair", 6, 85.00), ("Frame Alignment", 2, 125.00), ("Paint & Finish", 4, 65.00), ("Auto Parts", 1, 450.00)]),
-    ("DIISR - Small Business Services",   8,  [("Body Repair", 3, 85.00), ("Paint & Finish", 3, 65.00), ("Dent Removal", 4, 45.00)]),
-    ("Hamilton Smith Ltd", 15, [("Body Repair", 2, 85.00), ("Paint & Finish", 1, 65.00), ("Auto Parts", 1, 320.00)]),
+    ("City Agency", 5,  [("Website Refresh", 1, 1800.00), ("Content Pack", 2, 520.00)]),
+    ("DIISR - Small Business Services",   8,  [("Payroll Filing Setup", 1, 1200.00), ("Training Session", 2, 480.00)]),
+    ("Hamilton Smith Ltd", 15, [("Strategy Workshop", 1, 950.00), ("Monthly Advisory Retainer", 3, 650.00)]),
 ]
 
-# ============================================================================
-# Payments — Based on Pub 583 check disbursements
-# Transitional sample payments mapped onto the NZ/Xero-derived contacts
-# ============================================================================
-
 PAYMENTS = [
-    # (customer_name, date_offset, amount, method, reference, invoice_index)
-    ("Basket Case",   10, 438.00, "check", "4501", 0),
-    ("Bayside Club",  15, 265.00, "check", "4502", 1),
-    ("Ridgeway University", 21, 110.00, "cash",  "4503", 7),
-    ("City Limousines",   20, 155.00, "check", "4504", 4),
-    ("Boom FM",   22, 530.00, "check", "4505", 2),
+    ("Basket Case",   10, 1200.00, "check", "4501", 0),
+    ("Bayside Club",  15, 845.25, "check", "4502", 1),
+    ("Ridgeway University", 21, 2185.00, "cash",  "4503", 7),
+    ("City Limousines",   20, 1380.00, "check", "4504", 4),
+    ("Boom FM",   22, 900.00, "check", "4505", 2),
 ]
 
 
@@ -172,7 +116,7 @@ def seed():
         except ValueError:
             inv_start = 2001
 
-        print("Seeding transitional NZ demo data from Xero-derived contacts...")
+        print("Seeding cohesive NZ demo business from Xero-derived contacts...")
 
         # --- Vendors (skip existing) ---
         vendor_map = {}
@@ -269,8 +213,7 @@ def seed():
                     "amount": amt, "line_order": i,
                 })
 
-            # 1.59% sales tax (from Pub 583: $77.51 tax / $4,865.05 sales)
-            tax_rate = Decimal("0.0159")
+            tax_rate = Decimal("0.1500")
             tax_amount = (subtotal * tax_rate).quantize(Decimal("0.01"))
             total = subtotal + tax_amount
 
@@ -334,14 +277,14 @@ def seed():
                     "amount": amt, "line_order": i,
                 })
 
-            tax_amount = (subtotal * Decimal("0.0159")).quantize(Decimal("0.01"))
+            tax_amount = (subtotal * Decimal("0.1500")).quantize(Decimal("0.01"))
 
             estimate = Estimate(
                 estimate_number=f"E-{est_counter}",
                 customer_id=customer.id,
                 date=est_date, expiration_date=est_date + timedelta(days=30),
                 status=EstimateStatus.PENDING,
-                subtotal=subtotal, tax_rate=Decimal("0.0159"),
+                subtotal=subtotal, tax_rate=Decimal("0.1500"),
                 tax_amount=tax_amount, total=subtotal + tax_amount,
             )
             db.add(estimate)
@@ -408,7 +351,7 @@ def seed():
         # Summary
         total_invoiced = sum(inv.total for inv in invoice_list)
         total_paid = sum(Decimal(str(p[2])) for p in PAYMENTS)
-        print(f"\nNZ demo contacts seeded successfully.")
+        print(f"\nNZ demo business seeded successfully.")
         print(f"  Total invoiced: ${total_invoiced:,.2f}")
         print(f"  Total paid:     ${total_paid:,.2f}")
         print(f"  Outstanding:    ${total_invoiced - total_paid:,.2f}")

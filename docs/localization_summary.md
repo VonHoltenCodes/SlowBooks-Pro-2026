@@ -205,7 +205,7 @@ Relevant files:
     NZ payslip PDF output now exists for processed pay runs, per-run Employment Information CSV export now exists for processed runs, and first-pass starter/leaver employee filing now exists using the current employee start/end dates as the source of truth. A dedicated filing-status/audit model remains a later RBAC/multiuser slice. Avoid naming this "IRFile/EMS" until confirmed by current IRD requirements.
 
 15. Seed NZ chart and demo data:
-    The default chart seed is now NZ-oriented and derived from the Xero-style chart reference, with explicit system-account role mappings populated during seed/bootstrap. Demo customer/supplier contacts now use NZ/Xero-derived examples, while the older temporary items/invoices/payments/estimates remain for a later follow-up slice.
+    The default chart seed is now NZ-oriented and derived from the Xero-style chart reference, with explicit system-account role mappings populated during seed/bootstrap. Demo customer/supplier contacts and the remaining seeded items/invoices/payments/estimates now form one cohesive NZ demo business built around the NZ chart and NZ GST assumptions.
 
 16. Add RBAC-linked filing audit model later:
     Once multiuser/RBAC work begins, add a dedicated filing-status/audit model for payroll employee filing so the app can track generated, filed, amended, and changed-since-filed employee records separately from employee start/end dates.
