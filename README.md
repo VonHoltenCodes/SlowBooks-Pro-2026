@@ -484,15 +484,20 @@ ENDTRNS
 
 ### Sample Data
 
-The `scripts/seed_irs_mock_data.py` script currently populates Slowbooks with test data from **IRS Publication 583** (Rev. December 2024) — "Starting a Business and Keeping Records." The sample business is **Henry Brown's Auto Body Shop**, a sole proprietorship with:
+The `scripts/seed_irs_mock_data.py` script is now a **transitional NZ demo-data script**.
 
-- 8 customers (John E. Marks, Patricia Davis, Robert Garcia, Thompson & Sons, etc.)
-- 13 vendors from the IRS check disbursements journal (Auto Parts Inc., ABC Auto Paint, Baker's Fender Co., etc.)
-- 8 service/material items (Body Repair, Paint & Finish, Dent Removal, Frame Alignment, etc.)
-- 10 invoices totaling $3,631.31 with 1.59% sales tax
-- 5 payments totaling $1,498.00
-- 3 pending estimates
-- All with proper double-entry journal entries
+Current state:
+- **customers and suppliers** are derived from Xero Demo Company NZ contact exports
+- **items and transactional examples** are still the older temporary sample set and will be replaced in a later follow-up slice
+
+The script currently seeds:
+- 8 NZ/Xero-derived demo customers (for example Basket Case, Bayside Club, DIISR - Small Business Services, Ridgeway University)
+- 13 NZ/Xero-derived demo suppliers (for example ABC Furniture, Capital Cab Co, Net Connect, PowerDirect)
+- 8 temporary service/material items
+- 10 temporary invoices
+- 5 temporary payments
+- 3 temporary estimates
+- proper double-entry journal entries for the seeded transactions
 
 ```bash
 python3 scripts/seed_irs_mock_data.py

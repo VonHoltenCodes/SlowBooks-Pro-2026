@@ -1,16 +1,10 @@
 """
-Seed Slowbooks with mock data from IRS Publication 583 (Rev. December 2024).
+Seed Slowbooks with transitional NZ demo data.
 
-Source: "Starting a Business and Keeping Records"
-        https://www.irs.gov/pub/irs-pdf/p583.pdf
-        Pages 16-23: Henry Brown's Auto Body Shop sample recordkeeping system
-
-Henry Brown is a sole proprietor of a small automobile body shop.
-He uses part-time help, has no inventory of items held for sale,
-and uses the cash method of accounting.
-
-All dollar amounts, vendor names, expense categories, and daily sales
-figures are taken directly from the IRS publication.
+Current scope:
+- Customer and supplier contacts are derived from Xero Demo Company NZ exports
+- Items and transaction examples are still the older temporary sample set and
+  will be replaced in a later follow-up slice
 """
 import sys
 from pathlib import Path
@@ -26,7 +20,10 @@ from app.models.items import Item, ItemType
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
-from app.services.accounting import create_journal_entry, get_ar_account_id
+from app.services.accounting import (
+    create_journal_entry, get_ar_account_id, get_default_bank_account_id,
+    get_default_income_account_id, get_gst_account_id,
+)
 
 
 # ============================================================================
@@ -64,41 +61,31 @@ JANUARY_DAILY_SALES = [
 ]
 # Total: $4,865.05 net sales, $77.51 sales tax (matches Pub 583 page 22)
 
-# ============================================================================
-# IRS Pub 583 — Check Disbursements Journal, January (pages 20-21)
-# Vendors and check amounts exactly as published
-# ============================================================================
-
 VENDORS = [
-    {"name": "Dale Advertising",      "company": "Dale Advertising",      "phone": "555-0101", "terms": "Net 30"},
-    {"name": "Auto Parts, Inc.",      "company": "Auto Parts, Inc.",      "phone": "555-0102", "terms": "Net 30"},
-    {"name": "ABC Auto Paint",        "company": "ABC Auto Paint",        "phone": "555-0103", "terms": "Net 15"},
-    {"name": "Joe's Service Station", "company": "Joe's Service Station", "phone": "555-0104", "terms": "Net 15"},
-    {"name": "M.B. Ignition",         "company": "M.B. Ignition",         "phone": "555-0105", "terms": "Net 30"},
-    {"name": "Baker's Fender Co.",    "company": "Baker's Fender Co.",    "phone": "555-0106", "terms": "Net 30"},
-    {"name": "Enterprise Rentals",    "company": "Enterprise Rentals",    "phone": "555-0107", "terms": "Due on Receipt"},
-    {"name": "Mike's Deli",           "company": "Mike's Deli",           "phone": "555-0108", "terms": "Due on Receipt"},
-    {"name": "Telephone Co.",         "company": "Telephone Co.",         "phone": "555-0109", "terms": "Net 15"},
-    {"name": "National Bank",         "company": "National Bank",         "phone": "555-0110", "terms": "Due on Receipt"},
-    {"name": "Electric Co.",          "company": "Electric Co.",          "phone": "555-0111", "terms": "Net 30"},
-    {"name": "City Treasurer",        "company": "City Treasurer",        "phone": "555-0112", "terms": "Due on Receipt"},
-    {"name": "State Treasurer",       "company": "State Treasurer",       "phone": "555-0113", "terms": "Due on Receipt"},
+    {"name": "ABC Furniture", "company": "ABC Furniture", "phone": "800 124578", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "Bayside Club", "company": "Bayside Club", "phone": "02 2024455", "email": "secretarybob@bsclub.co", "address1": "P O Box 3354", "city": "Ridge Heights", "state": "Madeupville", "zip": "6001", "country": "New Zealand", "terms": "Net 30"},
+    {"name": "Bayside Wholesale", "company": "Bayside Wholesale", "phone": "850 55669", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "Capital Cab Co", "company": "Capital Cab Holdings", "phone": "800 235689", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "Carlton Functions", "company": "Carlton Functions", "phone": "02 9179945", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "Central Copiers", "company": "Central Copiers", "phone": "800 244844", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "Gateway Motors", "company": "Gateway Motors", "phone": "800 349227", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "Hoyt Productions", "company": "Hoyt Productions", "phone": "02 7411234", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "MCO Cleaning Services", "company": "MCO Cleaning Services", "phone": "02 5119119", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "Net Connect", "company": "Net Connect Holdings", "phone": "800 500998", "email": "", "address1": "P O Box 7900", "city": "Oaktown", "state": "", "zip": "1236", "country": "NZ", "terms": "Net 30"},
+    {"name": "PC Complete", "company": "PC Complete", "phone": "800 322600", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
+    {"name": "PowerDirect", "company": "PowerDirect Holdings", "phone": "800 887612", "email": "", "address1": "P O Box 8900", "city": "Oaktown", "state": "", "zip": "1288", "country": "NZ", "terms": "Net 30"},
+    {"name": "SMART Agency", "company": "SMART Agency", "phone": "02 9159889", "email": "", "address1": "", "city": "", "state": "", "zip": "", "country": "NZ", "terms": "Net 30"},
 ]
 
-# ============================================================================
-# Customers — Derived from IRS Pub 583 context (auto body shop customers)
-# Henry's shop does cash and invoice work
-# ============================================================================
-
 CUSTOMERS = [
-    {"name": "John E. Marks",       "company": None,              "phone": "555-0201", "email": "jmarks@example.com",    "terms": "Net 30"},
-    {"name": "Patricia Davis",      "company": None,              "phone": "555-0202", "email": "pdavis@example.com",    "terms": "Net 30"},
-    {"name": "Robert Garcia",       "company": "Garcia Trucking", "phone": "555-0203", "email": "rgarcia@example.com",   "terms": "Net 15"},
-    {"name": "Thompson & Sons",     "company": "Thompson & Sons", "phone": "555-0204", "email": "info@thompson.example", "terms": "Net 30"},
-    {"name": "Linda S. Chen",       "company": None,              "phone": "555-0205", "email": "lchen@example.com",     "terms": "Net 15"},
-    {"name": "Metro Cab Co.",       "company": "Metro Cab Co.",   "phone": "555-0206", "email": "fleet@metrocab.example", "terms": "Net 30"},
-    {"name": "Wilson Insurance",    "company": "Wilson Insurance","phone": "555-0207", "email": "claims@wilson.example",  "terms": "Net 30"},
-    {"name": "David R. Ortega",     "company": None,              "phone": "555-0208", "email": "dortega@example.com",   "terms": "Due on Receipt"},
+    {"name": "Basket Case", "company": None, "phone": "02 9176665", "email": "shop@basketcase.co", "terms": "Net 30", "bill_address1": "Shop 14 Ridgeway Mall", "bill_city": "Pinehaven", "bill_state": "", "bill_zip": "9877", "bill_country": "NZ"},
+    {"name": "Bayside Club", "company": None, "phone": "02 2024455", "email": "secretarybob@bsclub.co", "terms": "Net 30", "bill_address1": "P O Box 3354", "bill_city": "Ridge Heights", "bill_state": "Madeupville", "bill_zip": "6001", "bill_country": "New Zealand"},
+    {"name": "Boom FM", "company": None, "phone": "01 555 9191", "email": "", "terms": "Net 30", "bill_address1": "", "bill_city": "", "bill_state": "", "bill_zip": "", "bill_country": "NZ"},
+    {"name": "City Agency", "company": None, "phone": "01 9173555", "email": "", "terms": "Net 30", "bill_address1": "", "bill_city": "", "bill_state": "", "bill_zip": "", "bill_country": "NZ"},
+    {"name": "City Limousines", "company": None, "phone": "01 8004001", "email": "", "terms": "Net 30", "bill_address1": "", "bill_city": "", "bill_state": "", "bill_zip": "", "bill_country": "NZ"},
+    {"name": "DIISR - Small Business Services", "company": None, "phone": "01 8009001", "email": "cad@diisr.govt", "terms": "Net 30", "bill_address1": "GPO 9566", "bill_city": "Pinehaven", "bill_state": "", "bill_zip": "9862", "bill_country": "NZ"},
+    {"name": "Hamilton Smith Ltd", "company": None, "phone": "01 2345678", "email": "", "terms": "Net 30", "bill_address1": "", "bill_city": "", "bill_state": "", "bill_zip": "", "bill_country": "NZ"},
+    {"name": "Ridgeway University", "company": None, "phone": "01 8005001", "email": "", "terms": "Net 30", "bill_address1": "", "bill_city": "", "bill_state": "", "bill_zip": "", "bill_country": "NZ"},
 ]
 
 # ============================================================================
@@ -107,14 +94,14 @@ CUSTOMERS = [
 # ============================================================================
 
 ITEMS = [
-    {"name": "Body Repair",        "item_type": "service",  "rate": 85.00,  "description": "Auto body repair labor",         "income_acct": "4000"},
-    {"name": "Paint & Finish",     "item_type": "service",  "rate": 65.00,  "description": "Paint and finish work",           "income_acct": "4000"},
-    {"name": "Dent Removal",       "item_type": "service",  "rate": 45.00,  "description": "Dent removal and straightening",  "income_acct": "4000"},
-    {"name": "Frame Alignment",    "item_type": "service",  "rate": 125.00, "description": "Frame alignment and correction",  "income_acct": "4000"},
-    {"name": "Auto Parts",         "item_type": "material", "rate": 0.00,   "description": "Parts and materials (at cost)",   "income_acct": "4100"},
-    {"name": "Paint Supplies",     "item_type": "material", "rate": 0.00,   "description": "Paint, primer, clear coat",       "income_acct": "4100"},
-    {"name": "Towing Service",     "item_type": "service",  "rate": 75.00,  "description": "Tow truck service",               "income_acct": "4000"},
-    {"name": "Insurance Estimate", "item_type": "service",  "rate": 0.00,   "description": "Insurance damage assessment",     "income_acct": "4000"},
+    {"name": "Body Repair",        "item_type": "service",  "rate": 85.00,  "description": "Auto body repair labor",         "income_acct": "200"},
+    {"name": "Paint & Finish",     "item_type": "service",  "rate": 65.00,  "description": "Paint and finish work",           "income_acct": "200"},
+    {"name": "Dent Removal",       "item_type": "service",  "rate": 45.00,  "description": "Dent removal and straightening",  "income_acct": "200"},
+    {"name": "Frame Alignment",    "item_type": "service",  "rate": 125.00, "description": "Frame alignment and correction",  "income_acct": "200"},
+    {"name": "Auto Parts",         "item_type": "material", "rate": 0.00,   "description": "Parts and materials (at cost)",   "income_acct": "200"},
+    {"name": "Paint Supplies",     "item_type": "material", "rate": 0.00,   "description": "Paint, primer, clear coat",       "income_acct": "200"},
+    {"name": "Towing Service",     "item_type": "service",  "rate": 75.00,  "description": "Tow truck service",               "income_acct": "200"},
+    {"name": "Insurance Estimate", "item_type": "service",  "rate": 0.00,   "description": "Insurance damage assessment",     "income_acct": "200"},
 ]
 
 # ============================================================================
@@ -124,16 +111,16 @@ ITEMS = [
 
 INVOICES = [
     # (customer_name, invoice_date_offset, lines: [(item_name, qty, rate)], terms)
-    ("John E. Marks",   3,  [("Body Repair", 2, 85.00), ("Auto Parts", 1, 203.00), ("Paint & Finish", 1, 65.00)], "Net 30"),
-    ("Patricia Davis",  5,  [("Dent Removal", 3, 45.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
-    ("Robert Garcia",   7,  [("Body Repair", 3, 85.00), ("Frame Alignment", 1, 125.00), ("Auto Parts", 1, 150.00)], "Net 15"),
-    ("Thompson & Sons", 10, [("Body Repair", 4, 85.00), ("Paint & Finish", 3, 65.00), ("Paint Supplies", 1, 137.50)], "Net 30"),
-    ("Linda S. Chen",   12, [("Dent Removal", 2, 45.00), ("Paint & Finish", 1, 65.00)], "Net 15"),
-    ("Metro Cab Co.",   14, [("Body Repair", 2, 85.00), ("Dent Removal", 1, 45.00), ("Auto Parts", 1, 66.70)], "Net 30"),
-    ("Wilson Insurance", 17, [("Insurance Estimate", 1, 0.00), ("Body Repair", 3, 85.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
-    ("David R. Ortega", 20, [("Dent Removal", 1, 45.00), ("Paint & Finish", 1, 65.00)], "Due on Receipt"),
-    ("John E. Marks",   24, [("Body Repair", 1, 85.00), ("Towing Service", 1, 75.00), ("Auto Parts", 1, 9.80)], "Net 30"),
-    ("Robert Garcia",   27, [("Frame Alignment", 1, 125.00), ("Body Repair", 2, 85.00), ("Auto Parts", 1, 272.49)], "Net 15"),
+    ("Basket Case",   3,  [("Body Repair", 2, 85.00), ("Auto Parts", 1, 203.00), ("Paint & Finish", 1, 65.00)], "Net 30"),
+    ("Bayside Club",  5,  [("Dent Removal", 3, 45.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
+    ("Boom FM",   7,  [("Body Repair", 3, 85.00), ("Frame Alignment", 1, 125.00), ("Auto Parts", 1, 150.00)], "Net 30"),
+    ("City Agency", 10, [("Body Repair", 4, 85.00), ("Paint & Finish", 3, 65.00), ("Paint Supplies", 1, 137.50)], "Net 30"),
+    ("City Limousines",   12, [("Dent Removal", 2, 45.00), ("Paint & Finish", 1, 65.00)], "Net 30"),
+    ("DIISR - Small Business Services",   14, [("Body Repair", 2, 85.00), ("Dent Removal", 1, 45.00), ("Auto Parts", 1, 66.70)], "Net 30"),
+    ("Hamilton Smith Ltd", 17, [("Insurance Estimate", 1, 0.00), ("Body Repair", 3, 85.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
+    ("Ridgeway University", 20, [("Dent Removal", 1, 45.00), ("Paint & Finish", 1, 65.00)], "Due on Receipt"),
+    ("Basket Case",   24, [("Body Repair", 1, 85.00), ("Towing Service", 1, 75.00), ("Auto Parts", 1, 9.80)], "Net 30"),
+    ("Boom FM",   27, [("Frame Alignment", 1, 125.00), ("Body Repair", 2, 85.00), ("Auto Parts", 1, 272.49)], "Net 30"),
 ]
 
 # ============================================================================
@@ -141,23 +128,23 @@ INVOICES = [
 # ============================================================================
 
 ESTIMATES = [
-    ("Thompson & Sons", 5,  [("Body Repair", 6, 85.00), ("Frame Alignment", 2, 125.00), ("Paint & Finish", 4, 65.00), ("Auto Parts", 1, 450.00)]),
-    ("Metro Cab Co.",   8,  [("Body Repair", 3, 85.00), ("Paint & Finish", 3, 65.00), ("Dent Removal", 4, 45.00)]),
-    ("Wilson Insurance", 15, [("Body Repair", 2, 85.00), ("Paint & Finish", 1, 65.00), ("Auto Parts", 1, 320.00)]),
+    ("City Agency", 5,  [("Body Repair", 6, 85.00), ("Frame Alignment", 2, 125.00), ("Paint & Finish", 4, 65.00), ("Auto Parts", 1, 450.00)]),
+    ("DIISR - Small Business Services",   8,  [("Body Repair", 3, 85.00), ("Paint & Finish", 3, 65.00), ("Dent Removal", 4, 45.00)]),
+    ("Hamilton Smith Ltd", 15, [("Body Repair", 2, 85.00), ("Paint & Finish", 1, 65.00), ("Auto Parts", 1, 320.00)]),
 ]
 
 # ============================================================================
 # Payments — Based on Pub 583 check disbursements
-# John E. Marks paid check #77 $214.11 and #88 $214.11
+# Transitional sample payments mapped onto the NZ/Xero-derived contacts
 # ============================================================================
 
 PAYMENTS = [
     # (customer_name, date_offset, amount, method, reference, invoice_index)
-    ("John E. Marks",   10, 438.00, "check", "4501", 0),
-    ("Patricia Davis",  15, 265.00, "check", "4502", 1),
-    ("David R. Ortega", 21, 110.00, "cash",  "4503", 7),
-    ("Linda S. Chen",   20, 155.00, "check", "4504", 4),
-    ("Robert Garcia",   22, 530.00, "check", "4505", 2),
+    ("Basket Case",   10, 438.00, "check", "4501", 0),
+    ("Bayside Club",  15, 265.00, "check", "4502", 1),
+    ("Ridgeway University", 21, 110.00, "cash",  "4503", 7),
+    ("City Limousines",   20, 155.00, "check", "4504", 4),
+    ("Boom FM",   22, 530.00, "check", "4505", 2),
 ]
 
 
@@ -172,9 +159,9 @@ def seed():
 
     try:
         # Check if mock data already exists
-        existing_customers = db.query(Customer).filter(Customer.name == "John E. Marks").first()
+        existing_customers = db.query(Customer).filter(Customer.name == "Basket Case").first()
         if existing_customers:
-            print("IRS mock data already seeded. Skipping.")
+            print("NZ demo contacts already seeded. Skipping.")
             return
 
         # Find next available invoice/estimate numbers
@@ -185,7 +172,7 @@ def seed():
         except ValueError:
             inv_start = 2001
 
-        print("Seeding IRS Pub 583 mock data — Henry Brown's Auto Body Shop...")
+        print("Seeding transitional NZ demo data from Xero-derived contacts...")
 
         # --- Vendors (skip existing) ---
         vendor_map = {}
@@ -197,9 +184,11 @@ def seed():
                 continue
             vendor = Vendor(
                 name=v["name"], company=v["company"],
+                email=v.get("email"),
                 phone=v["phone"], terms=v["terms"],
-                address1="123 Commerce St", city="Anytown",
-                state="TX", zip="75001", is_active=True,
+                address1=v.get("address1"), city=v.get("city"),
+                state=v.get("state"), zip=v.get("zip"),
+                country=v.get("country") or "NZ", is_active=True,
             )
             db.add(vendor)
             db.flush()
@@ -219,8 +208,9 @@ def seed():
                 name=c["name"], company=c.get("company"),
                 phone=c["phone"], email=c["email"],
                 terms=c["terms"],
-                bill_address1="456 Main St", bill_city="Anytown",
-                bill_state="TX", bill_zip="75001",
+                bill_address1=c.get("bill_address1"), bill_city=c.get("bill_city"),
+                bill_state=c.get("bill_state"), bill_zip=c.get("bill_zip"),
+                bill_country=c.get("bill_country") or "NZ",
                 is_active=True, is_taxable=True,
             )
             db.add(customer)
@@ -302,32 +292,18 @@ def seed():
 
             # Journal entry: DR A/R, CR Income, CR Sales Tax
             if ar_id:
-                income_acct = get_account_by_number(db, "4000")
-                product_acct = get_account_by_number(db, "4100")
-                tax_acct = get_account_by_number(db, "2200")
-
-                # Split income by item type
-                service_total = Decimal("0")
-                product_total = Decimal("0")
-                for ld in inv_lines:
-                    itm = db.query(Item).get(ld["item_id"])
-                    if itm and itm.item_type in (ItemType.MATERIAL, ItemType.PRODUCT):
-                        product_total += ld["amount"]
-                    else:
-                        service_total += ld["amount"]
+                income_acct_id = get_default_income_account_id(db)
+                tax_account_id = get_gst_account_id(db)
 
                 journal_lines = [
                     {"account_id": ar_id, "debit": total, "credit": Decimal("0"),
                      "description": f"Invoice {inv_counter}"},
                 ]
-                if service_total > 0 and income_acct:
-                    journal_lines.append({"account_id": income_acct.id, "debit": Decimal("0"),
-                                          "credit": service_total, "description": f"Invoice {inv_counter}"})
-                if product_total > 0 and product_acct:
-                    journal_lines.append({"account_id": product_acct.id, "debit": Decimal("0"),
-                                          "credit": product_total, "description": f"Invoice {inv_counter}"})
-                if tax_amount > 0 and tax_acct:
-                    journal_lines.append({"account_id": tax_acct.id, "debit": Decimal("0"),
+                if subtotal > 0 and income_acct_id:
+                    journal_lines.append({"account_id": income_acct_id, "debit": Decimal("0"),
+                                          "credit": subtotal, "description": f"Invoice {inv_counter}"})
+                if tax_amount > 0 and tax_account_id:
+                    journal_lines.append({"account_id": tax_account_id, "debit": Decimal("0"),
                                           "credit": tax_amount, "description": f"Invoice {inv_counter} tax"})
 
                 txn = create_journal_entry(db, inv_date, f"Invoice {inv_counter}",
@@ -380,7 +356,7 @@ def seed():
         print(f"  {len(ESTIMATES)} estimates created")
 
         # --- Payments ---
-        checking_acct = get_account_by_number(db, "1000")
+        checking_account_id = get_default_bank_account_id(db)
         for cust_name, day_offset, amount, method, ref, inv_idx in PAYMENTS:
             customer = customer_map[cust_name]
             pmt_date = base_date + timedelta(days=day_offset - 1)
@@ -390,7 +366,7 @@ def seed():
                 customer_id=customer.id,
                 date=pmt_date, amount=pmt_amount,
                 method=method, reference=ref,
-                deposit_to_account_id=checking_acct.id if checking_acct else None,
+                deposit_to_account_id=checking_account_id,
             )
             db.add(payment)
             db.flush()
@@ -413,9 +389,9 @@ def seed():
                     inv.status = InvoiceStatus.PARTIAL
 
             # Journal entry: DR Checking, CR A/R
-            if ar_id and checking_acct:
+            if ar_id and checking_account_id:
                 journal_lines = [
-                    {"account_id": checking_acct.id, "debit": pmt_amount, "credit": Decimal("0"),
+                    {"account_id": checking_account_id, "debit": pmt_amount, "credit": Decimal("0"),
                      "description": f"Payment from {cust_name}"},
                     {"account_id": ar_id, "debit": Decimal("0"), "credit": pmt_amount,
                      "description": f"Payment from {cust_name}"},
@@ -432,7 +408,7 @@ def seed():
         # Summary
         total_invoiced = sum(inv.total for inv in invoice_list)
         total_paid = sum(Decimal(str(p[2])) for p in PAYMENTS)
-        print(f"\nIRS Pub 583 mock data seeded successfully.")
+        print(f"\nNZ demo contacts seeded successfully.")
         print(f"  Total invoiced: ${total_invoiced:,.2f}")
         print(f"  Total paid:     ${total_paid:,.2f}")
         print(f"  Outstanding:    ${total_invoiced - total_paid:,.2f}")
