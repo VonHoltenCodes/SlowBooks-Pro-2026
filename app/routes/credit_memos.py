@@ -6,6 +6,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
@@ -14,14 +15,18 @@ from app.models.credit_memos import CreditMemo, CreditMemoLine, CreditMemoStatus
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Customer
 from app.models.items import Item
+from app.schemas.email import DocumentEmailRequest
 from app.schemas.credit_memos import CreditMemoCreate, CreditMemoResponse, CreditApplicationCreate
 from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
     get_default_income_account_id, get_gst_account_id,
 )
 from app.services.closing_date import check_closing_date
+from app.services.email_service import render_document_email, send_document_email
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
+from app.services.pdf_service import generate_credit_memo_pdf
+from app.routes.settings import _get_all as get_settings
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -138,6 +143,54 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     resp = CreditMemoResponse.model_validate(cm)
     resp.customer_name = customer.name
     return resp
+
+
+@router.get("/{cm_id}/pdf")
+def credit_memo_pdf(cm_id: int, db: Session = Depends(get_db)):
+    cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
+    if not cm:
+        raise HTTPException(status_code=404, detail="Credit memo not found")
+    company = get_settings(db)
+    pdf_bytes = generate_credit_memo_pdf(cm, company)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=CreditMemo_{cm.memo_number}.pdf"},
+    )
+
+
+@router.post("/{cm_id}/email")
+def email_credit_memo(cm_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+    cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
+    if not cm:
+        raise HTTPException(status_code=404, detail="Credit memo not found")
+    if cm.status == CreditMemoStatus.VOID:
+        raise HTTPException(status_code=400, detail="Cannot email a void credit memo")
+    company = get_settings(db)
+    try:
+        pdf_bytes = generate_credit_memo_pdf(cm, company)
+        html_body = render_document_email(
+            document_label="Credit Note",
+            recipient_name=cm.customer.name if cm.customer else None,
+            document_number=cm.memo_number,
+            company_settings=company,
+            amount=cm.total,
+            action_label="Date",
+            action_value=cm.date,
+        )
+        send_document_email(
+            db,
+            to_email=data.recipient,
+            subject=data.subject or f"Credit Note #{cm.memo_number}",
+            html_body=html_body,
+            attachment_bytes=pdf_bytes,
+            attachment_name=f"CreditMemo_{cm.memo_number}.pdf",
+            entity_type="credit_memo",
+            entity_id=cm.id,
+        )
+        return {"status": "sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
 
 
 @router.post("/{cm_id}/apply")

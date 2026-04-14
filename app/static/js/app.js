@@ -476,6 +476,40 @@ const App = {
         }
     },
 
+    showDocumentEmailModal({ title, endpoint, recipient = '', defaultSubject = '', successMessage = 'Document emailed', extraPayload = {} }) {
+        openModal(title, `
+            <form onsubmit="App.sendDocumentEmail(event)" data-endpoint="${escapeHtml(endpoint)}" data-success-message="${escapeHtml(successMessage)}">
+                <input type="hidden" name="_extra_payload" value='${escapeHtml(JSON.stringify(extraPayload))}'>
+                <div class="form-grid">
+                    <div class="form-group full-width"><label>Recipient Email *</label>
+                        <input name="recipient" type="email" required value="${escapeHtml(recipient)}"></div>
+                    <div class="form-group full-width"><label>Subject</label>
+                        <input name="subject" value="${escapeHtml(defaultSubject)}"></div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Send Email</button>
+                </div>
+            </form>`);
+    },
+
+    async sendDocumentEmail(e) {
+        e.preventDefault();
+        const form = e.target;
+        const extraPayload = form._extra_payload?.value ? JSON.parse(form._extra_payload.value) : {};
+        try {
+            await API.post(form.dataset.endpoint, {
+                recipient: form.recipient.value,
+                subject: form.subject.value || null,
+                ...extraPayload,
+            });
+            closeModal();
+            toast(form.dataset.successMessage || 'Document emailed');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    },
+
     // Feature 4: Unified Global Search — replaces CQBSearchEngine @ 0x00250000
     _searchTimeout: null,
     async globalSearch(query) {

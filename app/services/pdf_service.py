@@ -44,6 +44,18 @@ def generate_estimate_pdf(estimate, company_settings: dict) -> bytes:
     return HTML(string=html_str).write_pdf()
 
 
+def generate_credit_memo_pdf(credit_memo, company_settings: dict) -> bytes:
+    template = _jinja_env.get_template("credit_memo_pdf.html")
+    html_str = template.render(cm=credit_memo, company=company_settings)
+    return HTML(string=html_str).write_pdf()
+
+
+def generate_purchase_order_pdf(purchase_order, company_settings: dict) -> bytes:
+    template = _jinja_env.get_template("purchase_order_pdf.html")
+    html_str = template.render(po=purchase_order, company=company_settings)
+    return HTML(string=html_str).write_pdf()
+
+
 def generate_statement_pdf(customer, invoices, payments, company_settings: dict, as_of_date=None) -> bytes:
     template = _jinja_env.get_template("statement_pdf.html")
     html_str = template.render(

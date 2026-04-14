@@ -18,6 +18,7 @@ from app.database import get_db
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.items import Item
 from app.models.contacts import Customer
+from app.schemas.email import DocumentEmailRequest
 from app.schemas.invoices import InvoiceCreate, InvoiceLineCreate, InvoiceUpdate, InvoiceResponse
 from app.services.pdf_service import generate_invoice_pdf
 from app.services.accounting import (
@@ -26,6 +27,7 @@ from app.services.accounting import (
 )
 from app.routes.settings import _get_all as get_settings
 from app.services.closing_date import check_closing_date
+from app.services.email_service import render_invoice_email, send_document_email
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
 
@@ -341,49 +343,27 @@ def mark_invoice_sent(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{invoice_id}/email")
-def email_invoice(invoice_id: int, data: dict, db: Session = Depends(get_db)):
+def email_invoice(invoice_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
     """Email invoice as PDF attachment — Feature 8"""
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     company = get_settings(db)
     try:
-        from app.services.email_service import send_email, render_invoice_email
-        from app.models.email_log import EmailLog
-
         pdf_bytes = generate_invoice_pdf(inv, company)
         html_body = render_invoice_email(inv, company)
-        send_email(
-            to_email=data.get("recipient", ""),
-            subject=data.get("subject", f"Invoice #{inv.invoice_number}"),
+        send_document_email(
+            db,
+            to_email=data.recipient,
+            subject=data.subject or f"Invoice #{inv.invoice_number}",
             html_body=html_body,
-            settings=company,
-            attachments=[{
-                "filename": f"Invoice_{inv.invoice_number}.pdf",
-                "content": pdf_bytes,
-                "mime_type": "application/pdf",
-            }],
+            attachment_bytes=pdf_bytes,
+            attachment_name=f"Invoice_{inv.invoice_number}.pdf",
+            entity_type="invoice",
+            entity_id=inv.id,
         )
-        # Log the email
-        log = EmailLog(
-            entity_type="invoice", entity_id=inv.id,
-            recipient=data.get("recipient", ""),
-            subject=data.get("subject", f"Invoice #{inv.invoice_number}"),
-            status="sent",
-        )
-        db.add(log)
-        db.commit()
         return {"status": "sent"}
     except Exception as e:
-        from app.models.email_log import EmailLog
-        log = EmailLog(
-            entity_type="invoice", entity_id=inv.id,
-            recipient=data.get("recipient", ""),
-            subject=data.get("subject", ""),
-            status="failed", error_message=str(e),
-        )
-        db.add(log)
-        db.commit()
         raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
 
 

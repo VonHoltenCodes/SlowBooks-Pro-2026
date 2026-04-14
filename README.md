@@ -84,7 +84,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - Bank balances at a glance
 
 ### Communication & Export
-- **Invoice Email** — Send invoices as PDF attachments via SMTP with configurable email settings
+- **Document Email** — Send invoices, statements, estimates, credit notes, payslips, and purchase orders as PDF attachments via SMTP
 - **CSV Import/Export** — Import/export customers, vendors, items, invoices, and chart of accounts as CSV
 - **Print-Optimized PDF** — Enhanced invoice PDF template with company logo support
 - **IIF Import/Export** — Full QuickBooks 2003 Pro interoperability (see below)
@@ -351,7 +351,16 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 132 routes across 28 route
 | `/api/invoices/{id}/email` | POST | Email invoice as PDF attachment |
 | `/api/invoices/{id}/duplicate` | POST | Duplicate invoice as new draft |
 | `/api/estimates` | GET, POST, PUT | Estimate CRUD with line items |
+| `/api/estimates/{id}/pdf` | GET | Generate estimate PDF |
+| `/api/estimates/{id}/email` | POST | Email estimate as PDF attachment |
 | `/api/estimates/{id}/convert` | POST | Convert estimate to invoice |
+| `/api/reports/customer-statement/{id}/pdf` | GET | Generate customer statement PDF |
+| `/api/reports/customer-statement/{id}/email` | POST | Email customer statement as PDF attachment |
+| `/api/credit-memos/{id}/pdf` | GET | Generate credit note PDF |
+| `/api/credit-memos/{id}/email` | POST | Email credit note as PDF attachment |
+| `/api/purchase-orders/{id}/pdf` | GET | Generate purchase order PDF |
+| `/api/purchase-orders/{id}/email` | POST | Email purchase order as PDF attachment |
+| `/api/payroll/{run_id}/payslips/{employee_id}/email` | POST | Email processed payslip as PDF attachment |
 | `/api/payments` | GET, POST | Record payments with invoice allocation |
 | `/api/banking/accounts` | GET, POST, PUT | Bank account management |
 | `/api/banking/transactions` | GET, POST | Bank register entries |

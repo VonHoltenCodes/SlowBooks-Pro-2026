@@ -214,7 +214,7 @@ Relevant files:
     The Chart of Accounts admin now includes a dedicated System Account Roles workflow for viewing, assigning, validating, and clearing runtime system-account mappings. The app shows configured, fallback, and missing states so operators can harden role assignments before later chart replacement/import UX improvements.
 
 18. Expand SMTP document delivery beyond invoices:
-    Add shared email/send flows for externally delivered documents that already have PDF output or clear outbound use-cases. Prioritise customer statements, estimates, credit memos / credit notes, payroll payslips, and purchase orders. Keep the SMTP/logging/template approach shared so future outbound document types do not each invent their own email path.
+    Shared SMTP document delivery now covers invoices, customer statements, estimates, credit notes, payroll payslips, and purchase orders through a common backend email/logging path. Credit note and purchase order PDFs now exist for outbound delivery, and the existing UI surfaces expose send actions for each supported document type.
 
 19. Add Alembic migrations:
     Any model/schema changes need migrations under `alembic/versions`. Also ensure multi-company creation and seed flows use the NZ defaults and chart.

@@ -149,7 +149,7 @@ const PayrollPage = {
                     <td class="amount">${formatCurrency(stub.kiwisaver_employee_deduction)}</td>
                     <td class="amount">${formatCurrency(stub.child_support_deduction)}</td>
                     <td class="amount">${formatCurrency(stub.net_pay)}</td>
-                    <td>${String(run.status || '').toLowerCase() === 'processed' ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.openPayslip(${run.id}, ${stub.employee_id})">Print / PDF</button>` : ''}</td>
+                    <td>${String(run.status || '').toLowerCase() === 'processed' ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.openPayslip(${run.id}, ${stub.employee_id})">Print / PDF</button> <button class="btn btn-sm btn-secondary" onclick="PayrollPage.emailPayslip(${run.id}, ${stub.employee_id})">Email</button>` : ''}</td>
                 </tr>
             `).join('');
             openModal(`Pay Run ${id}`, `
@@ -178,6 +178,16 @@ const PayrollPage = {
 
     openPayslip(runId, employeeId) {
         window.open(`/api/payroll/${runId}/payslips/${employeeId}/pdf`, '_blank');
+    },
+
+    emailPayslip(runId, employeeId) {
+        App.showDocumentEmailModal({
+            title: `Email Payslip for Pay Run ${runId}`,
+            endpoint: `/payroll/${runId}/payslips/${employeeId}/email`,
+            recipient: '',
+            defaultSubject: `Payslip for pay run ${runId}`,
+            successMessage: 'Payslip emailed',
+        });
     },
 
     exportEmploymentInformation(runId) {

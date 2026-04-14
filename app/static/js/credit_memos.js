@@ -26,6 +26,7 @@ const CreditMemosPage = {
                     <td class="amount">${formatCurrency(m.total)}</td>
                     <td class="amount">${formatCurrency(m.balance_remaining)}</td>
                     <td class="actions">
+                        <button class="btn btn-sm btn-secondary" onclick="CreditMemosPage.emailCreditMemo(${m.id})">Email</button>
                         ${m.status === 'issued' ? `<button class="btn btn-sm btn-primary" onclick="CreditMemosPage.showApply(${m.id})">Apply</button>` : ''}
                     </td>
                 </tr>`;
@@ -33,6 +34,18 @@ const CreditMemosPage = {
             html += '</tbody></table></div>';
         }
         return html;
+    },
+
+    async emailCreditMemo(id) {
+        const memo = await API.get(`/credit-memos/${id}`);
+        const customer = memo.customer_id ? await API.get(`/customers/${memo.customer_id}`) : null;
+        App.showDocumentEmailModal({
+            title: `Email Credit Note #${memo.memo_number}`,
+            endpoint: `/credit-memos/${id}/email`,
+            recipient: customer?.email || '',
+            defaultSubject: `Credit Note #${memo.memo_number}`,
+            successMessage: 'Credit note emailed',
+        });
     },
 
     _items: [],

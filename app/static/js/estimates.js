@@ -69,9 +69,22 @@ const EstimatesPage = {
             ${est.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(est.notes)}</p>` : ''}
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Print / PDF</button>
+                <button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>
                 ${est.status !== 'converted' ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to Invoice</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+    },
+
+    async emailEstimate(id) {
+        const est = await API.get(`/estimates/${id}`);
+        const customer = est.customer_id ? await API.get(`/customers/${est.customer_id}`) : null;
+        App.showDocumentEmailModal({
+            title: `Email Estimate #${est.estimate_number}`,
+            endpoint: `/estimates/${id}/email`,
+            recipient: customer?.email || '',
+            defaultSubject: `Estimate #${est.estimate_number}`,
+            successMessage: 'Estimate emailed',
+        });
     },
 
     async convert(id) {

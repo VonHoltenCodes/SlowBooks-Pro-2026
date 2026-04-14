@@ -158,6 +158,44 @@ class PdfServiceFormattingTests(unittest.TestCase):
         self.assertIn("ACC Earners' Levy", CapturingHTML.rendered[-1])
         self.assertIn("$2,241.72", CapturingHTML.rendered[-1])
 
+    def test_credit_memo_pdf_uses_rendered_company_settings(self):
+        credit_memo = SimpleNamespace(
+            memo_number="CM-0001",
+            date=date(2026, 4, 13),
+            customer=SimpleNamespace(name="Aroha Ltd"),
+            lines=[SimpleNamespace(description="Refund", quantity=1, rate=Decimal("1234.5"), amount=Decimal("1234.5"))],
+            subtotal=Decimal("1234.5"),
+            tax_amount=Decimal("185.18"),
+            total=Decimal("1419.68"),
+            notes=None,
+        )
+
+        pdf_service.generate_credit_memo_pdf(credit_memo, self.company)
+
+        self.assertIn("Credit Note", CapturingHTML.rendered[-1])
+        self.assertIn("13 Apr 2026", CapturingHTML.rendered[-1])
+        self.assertIn("$1,419.68", CapturingHTML.rendered[-1])
+
+    def test_purchase_order_pdf_uses_rendered_company_settings(self):
+        purchase_order = SimpleNamespace(
+            po_number="PO-0001",
+            date=date(2026, 4, 13),
+            expected_date=date(2026, 4, 20),
+            vendor=SimpleNamespace(name="Harbour Supplies"),
+            ship_to="SlowBooks NZ",
+            lines=[SimpleNamespace(description="Stationery", quantity=1, rate=Decimal("1234.5"), amount=Decimal("1234.5"))],
+            subtotal=Decimal("1234.5"),
+            tax_amount=Decimal("185.18"),
+            total=Decimal("1419.68"),
+            notes=None,
+        )
+
+        pdf_service.generate_purchase_order_pdf(purchase_order, self.company)
+
+        self.assertIn("Purchase Order", CapturingHTML.rendered[-1])
+        self.assertIn("20 Apr 2026", CapturingHTML.rendered[-1])
+        self.assertIn("$1,419.68", CapturingHTML.rendered[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,9 @@
 # Feature 8: Infrastructure B (smtplib + email.mime)
 # ============================================================================
 
+import html
 import smtplib
+from datetime import date
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
@@ -43,10 +45,39 @@ def _get_smtp_settings(db: Session) -> dict:
     return settings
 
 
-def send_email(db: Session, to_email: str, subject: str, html_body: str,
-               attachment_bytes: bytes = None, attachment_name: str = None,
-               entity_type: str = None, entity_id: int = None) -> bool:
-    """Send an email via SMTP. Returns True on success."""
+def _log_email(
+    db: Session,
+    *,
+    entity_type: str,
+    entity_id: int,
+    recipient: str,
+    subject: str,
+    status: str,
+    error_message: str | None = None,
+):
+    log = EmailLog(
+        entity_type=entity_type or "",
+        entity_id=entity_id or 0,
+        recipient=recipient,
+        subject=subject,
+        status=status,
+        error_message=error_message,
+    )
+    db.add(log)
+    db.commit()
+
+
+def _send_email_impl(
+    db: Session,
+    *,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    attachment_bytes: bytes = None,
+    attachment_name: str = None,
+    entity_type: str = None,
+    entity_id: int = None,
+) -> str | None:
     smtp = _get_smtp_settings(db)
 
     host = smtp.get("smtp_host", "")
@@ -57,13 +88,31 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
     from_name = smtp.get("smtp_from_name", "Slowbooks Pro")
     use_tls = smtp.get("smtp_use_tls", "true").lower() == "true"
 
+    if not to_email:
+        error = "Recipient email is required"
+        _log_email(
+            db,
+            entity_type=entity_type or "",
+            entity_id=entity_id or 0,
+            recipient=to_email,
+            subject=subject,
+            status="failed",
+            error_message=error,
+        )
+        return error
+
     if not host or not from_email:
-        log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
-                       recipient=to_email, subject=subject, status="failed",
-                       error_message="SMTP not configured")
-        db.add(log)
-        db.commit()
-        return False
+        error = "SMTP not configured"
+        _log_email(
+            db,
+            entity_type=entity_type or "",
+            entity_id=entity_id or 0,
+            recipient=to_email,
+            subject=subject,
+            status="failed",
+            error_message=error,
+        )
+        return error
 
     msg = MIMEMultipart()
     msg["From"] = f"{from_name} <{from_email}>"
@@ -89,19 +138,60 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
         server.sendmail(from_email, [to_email], msg.as_string())
         server.quit()
 
-        log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
-                       recipient=to_email, subject=subject, status="sent")
-        db.add(log)
-        db.commit()
-        return True
+        _log_email(
+            db,
+            entity_type=entity_type or "",
+            entity_id=entity_id or 0,
+            recipient=to_email,
+            subject=subject,
+            status="sent",
+        )
+        return None
+    except Exception as exc:
+        error = str(exc)
+        _log_email(
+            db,
+            entity_type=entity_type or "",
+            entity_id=entity_id or 0,
+            recipient=to_email,
+            subject=subject,
+            status="failed",
+            error_message=error,
+        )
+        return error
 
-    except Exception as e:
-        log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
-                       recipient=to_email, subject=subject, status="failed",
-                       error_message=str(e))
-        db.add(log)
-        db.commit()
-        return False
+
+def send_email(db: Session, to_email: str, subject: str, html_body: str,
+               attachment_bytes: bytes = None, attachment_name: str = None,
+               entity_type: str = None, entity_id: int = None) -> bool:
+    """Send an email via SMTP. Returns True on success."""
+    return _send_email_impl(
+        db,
+        to_email=to_email,
+        subject=subject,
+        html_body=html_body,
+        attachment_bytes=attachment_bytes,
+        attachment_name=attachment_name,
+        entity_type=entity_type,
+        entity_id=entity_id,
+    ) is None
+
+
+def send_email_or_raise(db: Session, to_email: str, subject: str, html_body: str,
+                        attachment_bytes: bytes = None, attachment_name: str = None,
+                        entity_type: str = None, entity_id: int = None) -> None:
+    error = _send_email_impl(
+        db,
+        to_email=to_email,
+        subject=subject,
+        html_body=html_body,
+        attachment_bytes=attachment_bytes,
+        attachment_name=attachment_name,
+        entity_type=entity_type,
+        entity_id=entity_id,
+    )
+    if error:
+        raise ValueError(error)
 
 
 def render_invoice_email(invoice, company_settings: dict) -> str:
@@ -121,3 +211,79 @@ def render_invoice_email(invoice, company_settings: dict) -> str:
         <p>Thank you for your business.</p>
         <p>{company_name}</p>
         </body></html>"""
+
+
+def _format_document_value(value, company_settings: dict) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, date):
+        return format_date(value, company_settings)
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        try:
+            return format_date(value, company_settings)
+        except Exception:
+            return html.escape(str(value))
+    if isinstance(value, (int, float)) or hasattr(value, "quantize"):
+        try:
+            return format_currency(value, company_settings)
+        except Exception:
+            return html.escape(str(value))
+    return html.escape(str(value))
+
+
+def render_document_email(
+    *,
+    document_label: str,
+    company_settings: dict,
+    recipient_name: str | None = None,
+    document_number: str | None = None,
+    amount=None,
+    action_label: str | None = None,
+    action_value=None,
+    message: str | None = None,
+) -> str:
+    company_name = html.escape(company_settings.get("company_name", "Our Company"))
+    recipient = html.escape(recipient_name or "there")
+    doc_label = html.escape(document_label)
+    number_text = f" #{html.escape(document_number)}" if document_number else ""
+    amount_html = (
+        f"<p><strong>Amount:</strong> {_format_document_value(amount, company_settings)}</p>"
+        if amount is not None else ""
+    )
+    action_html = (
+        f"<p><strong>{html.escape(action_label)}:</strong> {_format_document_value(action_value, company_settings)}</p>"
+        if action_label and action_value is not None else ""
+    )
+    body_message = html.escape(message or f"Please find attached your {document_label.lower()}.")
+    return f"""<html><body>
+    <p>Dear {recipient},</p>
+    <p>{body_message}</p>
+    <p><strong>Document:</strong> {doc_label}{number_text}</p>
+    {action_html}
+    {amount_html}
+    <p>Thank you,</p>
+    <p>{company_name}</p>
+    </body></html>"""
+
+
+def send_document_email(
+    db: Session,
+    *,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    attachment_bytes: bytes,
+    attachment_name: str,
+    entity_type: str,
+    entity_id: int,
+) -> None:
+    send_email_or_raise(
+        db,
+        to_email=to_email,
+        subject=subject,
+        html_body=html_body,
+        attachment_bytes=attachment_bytes,
+        attachment_name=attachment_name,
+        entity_type=entity_type,
+        entity_id=entity_id,
+    )

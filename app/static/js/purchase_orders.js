@@ -25,6 +25,7 @@ const PurchaseOrdersPage = {
                     <td class="amount">${formatCurrency(po.total)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.showForm(${po.id})">Edit</button>
+                        <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.emailPurchaseOrder(${po.id})">Email</button>
                         ${po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : ''}
                     </td>
                 </tr>`;
@@ -32,6 +33,18 @@ const PurchaseOrdersPage = {
             html += '</tbody></table></div>';
         }
         return html;
+    },
+
+    async emailPurchaseOrder(id) {
+        const po = await API.get(`/purchase-orders/${id}`);
+        const vendor = po.vendor_id ? await API.get(`/vendors/${po.vendor_id}`) : null;
+        App.showDocumentEmailModal({
+            title: `Email Purchase Order #${po.po_number}`,
+            endpoint: `/purchase-orders/${id}/email`,
+            recipient: vendor?.email || '',
+            defaultSubject: `Purchase Order #${po.po_number}`,
+            successMessage: 'Purchase order emailed',
+        });
     },
 
     _items: [],

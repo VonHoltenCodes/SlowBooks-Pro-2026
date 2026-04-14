@@ -4,16 +4,21 @@
 # ============================================================================
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
 from app.models.purchase_orders import PurchaseOrder, PurchaseOrderLine, POStatus
 from app.models.contacts import Vendor
+from app.schemas.email import DocumentEmailRequest
 from app.schemas.bills import BillCreate, BillLineCreate
 from app.schemas.purchase_orders import POCreate, POUpdate, POResponse
+from app.services.email_service import render_document_email, send_document_email
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
+from app.services.pdf_service import generate_purchase_order_pdf
+from app.routes.settings import _get_all as get_settings
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
 
@@ -136,6 +141,52 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
     if po.vendor:
         resp.vendor_name = po.vendor.name
     return resp
+
+
+@router.get("/{po_id}/pdf")
+def purchase_order_pdf(po_id: int, db: Session = Depends(get_db)):
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    company = get_settings(db)
+    pdf_bytes = generate_purchase_order_pdf(po, company)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=PurchaseOrder_{po.po_number}.pdf"},
+    )
+
+
+@router.post("/{po_id}/email")
+def email_purchase_order(po_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    company = get_settings(db)
+    try:
+        pdf_bytes = generate_purchase_order_pdf(po, company)
+        html_body = render_document_email(
+            document_label="Purchase Order",
+            recipient_name=po.vendor.name if po.vendor else None,
+            document_number=po.po_number,
+            company_settings=company,
+            amount=po.total,
+            action_label="Expected date",
+            action_value=po.expected_date,
+        )
+        send_document_email(
+            db,
+            to_email=data.recipient,
+            subject=data.subject or f"Purchase Order #{po.po_number}",
+            html_body=html_body,
+            attachment_bytes=pdf_bytes,
+            attachment_name=f"PurchaseOrder_{po.po_number}.pdf",
+            entity_type="purchase_order",
+            entity_id=po.id,
+        )
+        return {"status": "sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
 
 
 @router.post("/{po_id}/convert-to-bill")

@@ -21,6 +21,8 @@ from app.models.transactions import Transaction, TransactionLine
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment
 from app.models.contacts import Customer
+from app.schemas.email import StatementEmailRequest
+from app.services.email_service import render_document_email, send_document_email
 from app.services.pdf_service import generate_statement_pdf
 from app.routes.settings import _get_all as get_settings
 from app.services.gst_return import calculate_gst_return, generate_gst101a_pdf
@@ -471,3 +473,58 @@ def customer_statement_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=Statement_{customer.name}.pdf"},
     )
+
+
+@router.post("/customer-statement/{customer_id}/email")
+def email_customer_statement(
+    customer_id: int,
+    data: StatementEmailRequest,
+    db: Session = Depends(get_db),
+):
+    as_of_date = data.as_of_date or date.today()
+
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.customer_id == customer_id)
+        .filter(Invoice.status != InvoiceStatus.VOID)
+        .filter(Invoice.date <= as_of_date)
+        .order_by(Invoice.date)
+        .all()
+    )
+
+    payments = (
+        db.query(Payment)
+        .filter(Payment.customer_id == customer_id)
+        .filter(Payment.date <= as_of_date)
+        .order_by(Payment.date)
+        .all()
+    )
+
+    company = get_settings(db)
+    try:
+        pdf_bytes = generate_statement_pdf(customer, invoices, payments, company, as_of_date)
+        html_body = render_document_email(
+            document_label="Statement",
+            recipient_name=customer.name,
+            company_settings=company,
+            action_label="As of",
+            action_value=as_of_date,
+            message="Please find attached your customer statement.",
+        )
+        send_document_email(
+            db,
+            to_email=data.recipient,
+            subject=data.subject or f"Statement as at {as_of_date.isoformat()}",
+            html_body=html_body,
+            attachment_bytes=pdf_bytes,
+            attachment_name=f"Statement_{customer_id}_{as_of_date.isoformat()}.pdf",
+            entity_type="statement",
+            entity_id=customer.id,
+        )
+        return {"status": "sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")

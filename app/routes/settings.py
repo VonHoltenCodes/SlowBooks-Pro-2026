@@ -52,12 +52,14 @@ def test_email(db: Session = Depends(get_db)):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="SMTP not configured")
     try:
-        from app.services.email_service import send_email
-        send_email(
+        from app.services.email_service import send_email_or_raise
+        send_email_or_raise(
+            db,
             to_email=settings.get("smtp_from_email") or settings.get("smtp_user", ""),
             subject="Slowbooks Pro 2026 — Test Email",
             html_body="<p>This is a test email from Slowbooks Pro 2026. SMTP is configured correctly.</p>",
-            settings=settings,
+            entity_type="settings_test",
+            entity_id=0,
         )
         return {"status": "sent"}
     except Exception as e:

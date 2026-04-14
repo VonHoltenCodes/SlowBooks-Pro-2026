@@ -11,9 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.payroll import Employee, PayRun, PayRunStatus, PayStub
+from app.schemas.email import DocumentEmailRequest
 from app.schemas.payroll import PayRunCreate, PayRunResponse, PayStubResponse
 from app.services.pdf_service import generate_payroll_payslip_pdf
 from app.services.payday_filing import generate_employment_information_csv
+from app.services.email_service import render_document_email, send_document_email
 from app.services.accounting import (
     create_journal_entry,
     get_child_support_payable_account_id,
@@ -294,6 +296,49 @@ def payroll_payslip_pdf(run_id: int, employee_id: int, db: Session = Depends(get
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=PaySlip_{run_id}_{employee_id}.pdf"},
     )
+
+
+@router.post("/{run_id}/payslips/{employee_id}/email")
+def email_payroll_payslip(run_id: int, employee_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+    pay_run = db.query(PayRun).filter(PayRun.id == run_id).first()
+    if not pay_run:
+        raise HTTPException(status_code=404, detail="Pay run not found")
+    if pay_run.status != PayRunStatus.PROCESSED:
+        raise HTTPException(status_code=400, detail="Payslips are only available for processed pay runs")
+
+    stub = (
+        db.query(PayStub)
+        .filter(PayStub.pay_run_id == run_id, PayStub.employee_id == employee_id)
+        .first()
+    )
+    if not stub or not stub.employee:
+        raise HTTPException(status_code=404, detail="Employee payslip not found for this pay run")
+
+    company = get_settings(db)
+    try:
+        pdf_bytes = generate_payroll_payslip_pdf(pay_run, stub, stub.employee, company)
+        html_body = render_document_email(
+            document_label="Payslip",
+            recipient_name=f"{stub.employee.first_name} {stub.employee.last_name}".strip(),
+            document_number=f"Pay Run {pay_run.id}",
+            company_settings=company,
+            amount=stub.net_pay,
+            action_label="Pay date",
+            action_value=pay_run.pay_date,
+        )
+        send_document_email(
+            db,
+            to_email=data.recipient,
+            subject=data.subject or f"Payslip for {pay_run.pay_date.isoformat()}",
+            html_body=html_body,
+            attachment_bytes=pdf_bytes,
+            attachment_name=f"PaySlip_{run_id}_{employee_id}.pdf",
+            entity_type="payroll_payslip",
+            entity_id=stub.id,
+        )
+        return {"status": "sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
 
 
 @router.get("/{run_id}/employment-information/export")

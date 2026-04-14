@@ -16,10 +16,12 @@ from app.database import get_db
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice
 from app.models.contacts import Customer
+from app.schemas.email import DocumentEmailRequest
 from app.schemas.estimates import EstimateCreate, EstimateUpdate, EstimateResponse
 from app.schemas.invoices import InvoiceCreate, InvoiceLineCreate, InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
 from app.routes.settings import _get_all as get_settings, _set as set_setting
+from app.services.email_service import render_document_email, send_document_email
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
 
@@ -187,6 +189,38 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=Estimate_{est.estimate_number}.pdf"},
     )
+
+
+@router.post("/{estimate_id}/email")
+def email_estimate(estimate_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+    est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    company = get_settings(db)
+    try:
+        pdf_bytes = generate_estimate_pdf(est, company)
+        html_body = render_document_email(
+            document_label="Estimate",
+            recipient_name=est.customer.name if est.customer else None,
+            document_number=est.estimate_number,
+            company_settings=company,
+            amount=est.total,
+            action_label="Valid until",
+            action_value=est.expiration_date,
+        )
+        send_document_email(
+            db,
+            to_email=data.recipient,
+            subject=data.subject or f"Estimate #{est.estimate_number}",
+            html_body=html_body,
+            attachment_bytes=pdf_bytes,
+            attachment_name=f"Estimate_{est.estimate_number}.pdf",
+            entity_type="estimate",
+            entity_id=est.id,
+        )
+        return {"status": "sent"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)

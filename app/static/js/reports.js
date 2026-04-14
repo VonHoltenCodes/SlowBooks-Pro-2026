@@ -443,6 +443,7 @@ const ReportsPage = {
 
     async customerStatementPicker() {
         const customers = await API.get("/customers?active_only=true");
+        ReportsPage._statementCustomers = customers;
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
         openModal("Customer Statement", `
             <form onsubmit="ReportsPage.openStatement(event)">
@@ -454,6 +455,7 @@ const ReportsPage = {
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="ReportsPage.emailStatementFromForm(this.form)">Email PDF</button>
                     <button type="submit" class="btn btn-primary">Generate PDF</button>
                 </div>
             </form>`);
@@ -466,6 +468,20 @@ const ReportsPage = {
         const asOf = form.as_of_date.value || todayISO();
         window.open(`/api/reports/customer-statement/${cid}/pdf?as_of_date=${asOf}`, "_blank");
         closeModal();
+    },
+
+    emailStatementFromForm(form) {
+        const cid = form.customer_id.value;
+        const asOf = form.as_of_date.value || todayISO();
+        const customer = (ReportsPage._statementCustomers || []).find((entry) => String(entry.id) === String(cid));
+        App.showDocumentEmailModal({
+            title: "Email Customer Statement",
+            endpoint: `/reports/customer-statement/${cid}/email`,
+            recipient: customer?.email || '',
+            defaultSubject: `Statement as at ${asOf}`,
+            successMessage: 'Statement emailed',
+            extraPayload: { as_of_date: asOf },
+        });
     },
 
     async arAging() {

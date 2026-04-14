@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page { size: letter; margin: 0.6in 0.75in; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .company-info { font-size: 9pt; color: #4a4a6a; }
+    .company-name { font-size: 16pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
+    .doc-title { text-align: right; }
+    .doc-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
+    .doc-number { font-size: 12pt; color: #666; margin-top: 4px; }
+    .meta-table { width: 100%; margin-bottom: 16px; }
+    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; }
+    .meta-label { font-weight: 700; color: #4a4a6a; width: 100px; }
+    .section-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
+    .section-text { font-size: 9pt; color: #333; margin-bottom: 20px; }
+    table.line-items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.line-items th.r { text-align: right; }
+    table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.line-items tr:nth-child(even) { background: #f7f9fb; }
+    .totals { float: right; width: 240px; }
+    .totals table { width: 100%; }
+    .totals td { padding: 3px 8px; font-size: 9pt; }
+    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    .totals .label { font-weight: 700; color: #4a4a6a; }
+    .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
+    .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <div class="company-name">{{ company.company_name }}</div>
+            <div class="company-info">
+                {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
+                {% if company.company_address2 %}{{ company.company_address2 }}<br>{% endif %}
+                {% if company.company_city or company.company_state or company.company_zip %}{{ [company.company_city, company.company_state, company.company_zip] | select | join(' ') }}<br>{% endif %}
+                {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
+                {% if company.company_email %}{{ company.company_email }}{% endif %}
+            </div>
+        </div>
+        <div class="doc-title">
+            <h1>Purchase Order</h1>
+            <div class="doc-number">#{{ po.po_number }}</div>
+        </div>
+    </div>
+
+    <table class="meta-table"><tr>
+        <td class="meta-label">Date:</td><td>{{ po.date | fdate }}</td>
+        {% if po.expected_date %}<td class="meta-label">Expected:</td><td>{{ po.expected_date | fdate }}</td>{% endif %}
+        <td class="meta-label">Status:</td><td>{{ po.status.value | title if po.status and po.status.value else '' }}</td>
+    </tr></table>
+
+    <div class="section-label">Supplier</div>
+    <div class="section-text"><strong>{{ po.vendor.name if po.vendor else '' }}</strong></div>
+
+    {% if po.ship_to %}
+    <div class="section-label">Ship To</div>
+    <div class="section-text">{{ po.ship_to }}</div>
+    {% endif %}
+
+    <table class="line-items">
+        <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th><th class="r" style="width:80px;">Rate</th><th class="r" style="width:80px;">Amount</th></tr></thead>
+        <tbody>
+        {% for line in po.lines %}
+            <tr>
+                <td>{{ line.description or '' }}</td>
+                <td class="r">{{ line.quantity }}</td>
+                <td class="r">{{ line.rate | currency }}</td>
+                <td class="r">{{ line.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <table>
+            <tr><td class="label">Subtotal</td><td class="r">{{ po.subtotal | currency }}</td></tr>
+            {% if po.tax_amount and po.tax_amount != 0 %}
+            <tr><td class="label">GST</td><td class="r">{{ po.tax_amount | currency }}</td></tr>
+            {% endif %}
+            <tr><td class="label grand">Total</td><td class="r grand">{{ po.total | currency }}</td></tr>
+        </table>
+    </div>
+
+    {% if po.notes %}
+    <div class="notes"><strong>Notes:</strong> {{ po.notes }}</div>
+    {% endif %}
+</body>
+</html>
