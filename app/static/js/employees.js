@@ -3,35 +3,61 @@
  */
 const EmployeesPage = {
     async render() {
+        const canManageEmployees = !App.hasPermission || App.hasPermission('employees.manage');
+        const canExportFiling = !App.hasPermission || App.hasPermission('employees.filing.export');
         const emps = await API.get('/employees');
+        const historyByEmployee = new Map();
+        await Promise.all(emps.map(async (employee) => {
+            try {
+                historyByEmployee.set(employee.id, await API.get(`/employees/${employee.id}/filing/history`));
+            } catch (_err) {
+                historyByEmployee.set(employee.id, []);
+            }
+        }));
         let html = `
             <div class="page-header">
                 <h2>Employees</h2>
-                <button class="btn btn-primary" onclick="EmployeesPage.showForm()">+ Add Employee</button>
+                ${canManageEmployees ? `<button class="btn btn-primary" onclick="EmployeesPage.showForm()">+ Add Employee</button>` : ''}
             </div>`;
 
         if (emps.length === 0) {
             html += '<div class="empty-state"><p>No employees added yet</p></div>';
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>Name</th><th>Tax Code</th><th>Pay Frequency</th><th class="amount">Rate</th><th>Status</th><th>Actions</th></tr></thead><tbody>`;
+                <thead><tr><th>Name</th><th>Tax Code</th><th>Pay Frequency</th><th class="amount">Rate</th><th>Status</th><th>Filing Status</th><th>Actions</th></tr></thead><tbody>`;
             for (const e of emps) {
+                const history = historyByEmployee.get(e.id) || [];
+                const starter = history.find(entry => entry.filing_type === 'starter');
+                const leaver = history.find(entry => entry.filing_type === 'leaver');
                 html += `<tr>
                     <td><strong>${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</strong></td>
                     <td>${escapeHtml(e.tax_code || '')}</td>
                     <td>${escapeHtml(e.pay_frequency || '')}</td>
                     <td class="amount">${formatCurrency(e.pay_rate)}${e.pay_type==='hourly'?'/hr':'/yr'}</td>
                     <td>${e.is_active ? '<span class="badge badge-paid">Active</span>' : '<span class="badge badge-draft">Inactive</span>'}</td>
+                    <td style="font-size:10px;">
+                        ${EmployeesPage.filingSummary('Starter', starter)}
+                        ${EmployeesPage.filingSummary('Leaver', leaver)}
+                    </td>
                     <td class="actions">
-                        <button class="btn btn-sm btn-secondary" onclick="EmployeesPage.showForm(${e.id})">Edit</button>
-                        ${e.start_date ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.exportStarterFiling(${e.id})">Starter Filing</button>` : ''}
-                        ${e.end_date ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.exportLeaverFiling(${e.id})">Leaver Filing</button>` : ''}
+                        ${canManageEmployees ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.showForm(${e.id})">Edit</button>` : ''}
+                        ${canExportFiling && e.start_date ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.exportStarterFiling(${e.id})">Starter Filing</button>` : ''}
+                        ${canExportFiling && starter && starter.status === 'generated' ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.markFilingStatus(${e.id}, ${starter.id}, 'filed')">Mark Starter Filed</button>` : ''}
+                        ${canExportFiling && starter && starter.status === 'filed' && starter.changed_since_source ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.markFilingStatus(${e.id}, ${starter.id}, 'amended')">Mark Starter Amended</button>` : ''}
+                        ${canExportFiling && e.end_date ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.exportLeaverFiling(${e.id})">Leaver Filing</button>` : ''}
+                        ${canExportFiling && leaver && leaver.status === 'generated' ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.markFilingStatus(${e.id}, ${leaver.id}, 'filed')">Mark Leaver Filed</button>` : ''}
+                        ${canExportFiling && leaver && leaver.status === 'filed' && leaver.changed_since_source ? `<button class="btn btn-sm btn-secondary" onclick="EmployeesPage.markFilingStatus(${e.id}, ${leaver.id}, 'amended')">Mark Leaver Amended</button>` : ''}
                     </td>
                 </tr>`;
             }
             html += '</tbody></table></div>';
         }
         return html;
+    },
+
+    filingSummary(label, record) {
+        if (!record) return '';
+        return `<div>${escapeHtml(label)} ${escapeHtml(record.status)}</div>${record.changed_since_source ? '<div style="color:#9d1f1f;">Changed since filing</div>' : ''}`;
     },
 
     async showForm(id = null) {
@@ -123,5 +149,15 @@ const EmployeesPage = {
 
     exportLeaverFiling(id) {
         window.open(`/api/employees/${id}/filing/leaver/export`, '_blank');
+    },
+
+    async markFilingStatus(employeeId, auditId, status) {
+        try {
+            await API.post(`/employees/${employeeId}/filing/${auditId}/status`, { status });
+            toast(`Employee filing marked ${status}`);
+            App.navigate('#/employees');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
     },
 };

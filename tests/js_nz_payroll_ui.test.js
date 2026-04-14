@@ -21,6 +21,9 @@ async function runEmployeesPage() {
                     end_date: '2026-04-30',
                 }];
             }
+            if (path === '/employees/1/filing/history') {
+                return [{ filing_type: 'starter', status: 'generated', changed_since_source: false }];
+            }
             throw new Error('new employee form should not load existing employee');
         } },
         App: { navigate() {} },
@@ -80,6 +83,9 @@ async function runPayrollPage() {
                         pay_frequency: 'fortnightly',
                     }];
                 }
+                if (path === '/payroll/2/filing/history') {
+                    return [{ filing_type: 'employment_information', status: 'generated', changed_since_source: false }];
+                }
                 throw new Error(`unexpected path ${path}`);
             },
         },
@@ -111,6 +117,7 @@ async function runPayrollPage() {
     assert.ok(employeeHtml.includes('Pay Frequency'));
     assert.ok(employeeListHtml.includes('Starter Filing'));
     assert.ok(employeeListHtml.includes('Leaver Filing'));
+    assert.ok(employeeListHtml.includes('Starter generated'));
     assert.ok(!employeeHtml.includes('SSN Last 4'));
     assert.ok(!employeeHtml.includes('Filing Status'));
     assert.ok(!employeeHtml.includes('Allowances'));
@@ -124,6 +131,7 @@ async function runPayrollPage() {
     assert.ok(payrollHtml.includes('Draft'));
     assert.ok(payrollHtml.includes('Payslip'));
     assert.ok(payrollHtml.includes('Employment Information'));
+    assert.ok(payrollHtml.includes('Employment Information generated'));
     assert.ok(payrollHtml.includes('NZ payroll setup is ready'));
     assert.ok(payrollHtml.includes('starter/leaver filing'));
     assert.ok(payrollHtml.includes('PAYE'));

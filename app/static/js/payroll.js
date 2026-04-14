@@ -3,15 +3,32 @@
  */
 const PayrollPage = {
     async render() {
+        const canCreateRun = !App.hasPermission || App.hasPermission('payroll.create');
+        const canProcessRun = !App.hasPermission || App.hasPermission('payroll.process');
+        const canViewPayslips = !App.hasPermission || App.hasPermission('payroll.payslips.view');
+        const canEmailPayslips = !App.hasPermission || App.hasPermission('payroll.payslips.email');
+        const canExportFiling = !App.hasPermission || App.hasPermission('payroll.filing.export');
         const [runs, employees] = await Promise.all([
             API.get('/payroll'),
             API.get('/employees?active_only=true'),
         ]);
+        const filingHistoryByRun = new Map();
+        await Promise.all(runs.map(async (run) => {
+            if (String(run.status || '').toLowerCase() !== 'processed') {
+                filingHistoryByRun.set(run.id, []);
+                return;
+            }
+            try {
+                filingHistoryByRun.set(run.id, await API.get(`/payroll/${run.id}/filing/history`));
+            } catch (_err) {
+                filingHistoryByRun.set(run.id, []);
+            }
+        }));
 
         let html = `
             <div class="page-header">
                 <h2>Payroll</h2>
-                <button class="btn btn-primary" onclick="PayrollPage.showForm()">New Pay Run</button>
+                ${canCreateRun ? `<button class="btn btn-primary" onclick="PayrollPage.showForm()">New Pay Run</button>` : ''}
             </div>
             <div style="background:#e0f2fe;border:1px solid #7dd3fc;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#0c4a6e;">
                 <strong>NZ payroll setup is ready.</strong> PAYE calculations, KiwiSaver deductions, student loan deductions, ESCT, payslips, Employment Information export, starter/leaver filing, and posting now run through the NZ payroll workflow.
@@ -26,10 +43,11 @@ const PayrollPage = {
         }
 
         html += `<div class="table-container"><table>
-            <thead><tr><th>Pay Date</th><th>Tax Year</th><th>Status</th><th class="amount">Gross</th><th class="amount">Net</th><th class="amount">Deductions</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Pay Date</th><th>Tax Year</th><th>Status</th><th class="amount">Gross</th><th class="amount">Net</th><th class="amount">Deductions</th><th>Filing Status</th><th>Actions</th></tr></thead>
             <tbody>`;
         for (const run of runs) {
             const status = String(run.status || '').toLowerCase();
+            const latestFiling = (filingHistoryByRun.get(run.id) || [])[0];
             html += `<tr>
                 <td>${formatDate(run.pay_date)}</td>
                 <td>${escapeHtml(run.tax_year)}</td>
@@ -37,17 +55,25 @@ const PayrollPage = {
                 <td class="amount">${formatCurrency(run.total_gross)}</td>
                 <td class="amount">${formatCurrency(run.total_net)}</td>
                 <td class="amount">${formatCurrency(run.total_taxes)}</td>
+                <td style="font-size:10px;">${PayrollPage.filingSummary(latestFiling)}</td>
                 <td class="actions">
                     <button class="btn btn-sm btn-secondary" onclick="PayrollPage.viewRun(${run.id})">View</button>
                     ${status === 'draft'
-                        ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.processRun(${run.id})">Process</button>`
-                        : `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.viewRun(${run.id})">Payslips</button>
-                           <button class="btn btn-sm btn-secondary" onclick="PayrollPage.exportEmploymentInformation(${run.id})">Employment Information</button>`}
+                        ? `${canProcessRun ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.processRun(${run.id})">Process</button>` : ''}`
+                        : `${canViewPayslips ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.viewRun(${run.id})">Payslips</button>` : ''}
+                           ${canExportFiling ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.exportEmploymentInformation(${run.id})">Employment Information</button>` : ''}
+                           ${canExportFiling && latestFiling && latestFiling.status === 'generated' ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.markFilingStatus(${run.id}, ${latestFiling.id}, 'filed')">Mark Filed</button>` : ''}
+                           ${canExportFiling && latestFiling && latestFiling.status === 'filed' && latestFiling.changed_since_source ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.markFilingStatus(${run.id}, ${latestFiling.id}, 'amended')">Mark Amended</button>` : ''}`}
                 </td>
             </tr>`;
         }
         html += `</tbody></table></div>`;
         return html;
+    },
+
+    filingSummary(record) {
+        if (!record) return '';
+        return `<div>Employment Information ${escapeHtml(record.status)}</div>${record.changed_since_source ? '<div style="color:#9d1f1f;">Changed since filing</div>' : ''}`;
     },
 
     async showForm() {
@@ -137,6 +163,8 @@ const PayrollPage = {
 
     async viewRun(id) {
         try {
+            const canViewPayslips = !App.hasPermission || App.hasPermission('payroll.payslips.view');
+            const canEmailPayslips = !App.hasPermission || App.hasPermission('payroll.payslips.email');
             const run = await API.get(`/payroll/${id}`);
             const rows = (run.stubs || []).map(stub => `
                 <tr>
@@ -149,7 +177,7 @@ const PayrollPage = {
                     <td class="amount">${formatCurrency(stub.kiwisaver_employee_deduction)}</td>
                     <td class="amount">${formatCurrency(stub.child_support_deduction)}</td>
                     <td class="amount">${formatCurrency(stub.net_pay)}</td>
-                    <td>${String(run.status || '').toLowerCase() === 'processed' ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.openPayslip(${run.id}, ${stub.employee_id})">Print / PDF</button> <button class="btn btn-sm btn-secondary" onclick="PayrollPage.emailPayslip(${run.id}, ${stub.employee_id})">Email</button>` : ''}</td>
+                    <td>${String(run.status || '').toLowerCase() === 'processed' ? `${canViewPayslips ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.openPayslip(${run.id}, ${stub.employee_id})">Print / PDF</button>` : ''} ${canEmailPayslips ? `<button class="btn btn-sm btn-secondary" onclick="PayrollPage.emailPayslip(${run.id}, ${stub.employee_id})">Email</button>` : ''}` : ''}</td>
                 </tr>
             `).join('');
             openModal(`Pay Run ${id}`, `
@@ -192,5 +220,15 @@ const PayrollPage = {
 
     exportEmploymentInformation(runId) {
         window.open(`/api/payroll/${runId}/employment-information/export`, '_blank');
+    },
+
+    async markFilingStatus(runId, auditId, status) {
+        try {
+            await API.post(`/payroll/${runId}/filing/${auditId}/status`, { status });
+            toast(`Filing marked ${status}`);
+            App.navigate('#/payroll');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
     },
 };

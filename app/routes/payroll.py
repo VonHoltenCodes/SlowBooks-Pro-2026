@@ -29,6 +29,14 @@ from app.services.accounting import (
 from app.services.auth import require_permissions
 from app.services.closing_date import check_closing_date
 from app.services.nz_payroll import calculate_payroll_stub, round_money
+from app.services.payroll_filing_audit import (
+    create_filing_audit,
+    list_pay_run_filing_history,
+    pay_run_filing_snapshot,
+    update_filing_audit_status,
+)
+from app.models.payroll_filing import PayrollFilingAudit
+from app.schemas.payroll_filing import PayrollFilingAuditResponse, PayrollFilingAuditStatusUpdate
 from app.routes.settings import _get_all as get_settings
 
 router = APIRouter(prefix="/api/payroll", tags=["payroll"])
@@ -379,12 +387,62 @@ def export_employment_information(
         raise HTTPException(status_code=404, detail="Pay run not found")
 
     try:
-        csv_content = generate_employment_information_csv(pay_run, get_settings(db))
+        settings = get_settings(db)
+        csv_content = generate_employment_information_csv(pay_run, settings)
     except ValueError as err:
         raise HTTPException(status_code=400, detail=str(err)) from err
+    filename = f"EmploymentInformation_{pay_run.pay_date.isoformat()}_run-{pay_run.id}.csv"
+    user = getattr(auth, "user", None)
+    create_filing_audit(
+        db,
+        filing_type="employment_information",
+        pay_run_id=pay_run.id,
+        export_filename=filename,
+        source_snapshot=pay_run_filing_snapshot(pay_run, settings),
+        generated_by_user_id=getattr(user, "id", None),
+    )
+    db.commit()
 
     return Response(
         content=csv_content,
         media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="EmploymentInformation_{pay_run.pay_date.isoformat()}_run-{pay_run.id}.csv"'},
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{run_id}/filing/history", response_model=list[PayrollFilingAuditResponse])
+def get_pay_run_filing_history(
+    run_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("payroll.view")),
+):
+    pay_run = db.query(PayRun).filter(PayRun.id == run_id).first()
+    if not pay_run:
+        raise HTTPException(status_code=404, detail="Pay run not found")
+    return list_pay_run_filing_history(db, run_id, get_settings(db))
+
+
+@router.post("/{run_id}/filing/{audit_id}/status", response_model=PayrollFilingAuditResponse)
+def update_pay_run_filing_record(
+    run_id: int,
+    audit_id: int,
+    data: PayrollFilingAuditStatusUpdate,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("payroll.filing.export")),
+):
+    record = db.query(PayrollFilingAudit).filter(
+        PayrollFilingAudit.id == audit_id,
+        PayrollFilingAudit.pay_run_id == run_id,
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Pay run filing record not found")
+    user = getattr(auth, "user", None)
+    return update_filing_audit_status(
+        db,
+        record=record,
+        status=data.status,
+        reference=data.reference,
+        notes=data.notes,
+        user_id=getattr(user, "id", None),
+        settings=get_settings(db),
     )

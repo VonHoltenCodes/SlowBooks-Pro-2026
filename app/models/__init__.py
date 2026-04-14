@@ -31,6 +31,7 @@ from app.models.backups import Backup
 # Phase 6: Ambitious
 from app.models.companies import Company
 from app.models.payroll import Employee, PayRun, PayStub
+from app.models.payroll_filing import PayrollFilingAudit
 
 __all__ = [
     "Account", "Customer", "Vendor", "Item",
@@ -53,5 +54,5 @@ __all__ = [
     # Phase 5
     "TaxCategoryMapping", "Backup",
     # Phase 6
-    "Company", "Employee", "PayRun", "PayStub",
+    "Company", "Employee", "PayRun", "PayStub", "PayrollFilingAudit",
 ]
