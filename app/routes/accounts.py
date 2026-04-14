@@ -3,7 +3,18 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.accounts import Account
-from app.schemas.accounts import AccountCreate, AccountUpdate, AccountResponse
+from app.schemas.accounts import (
+    AccountCreate,
+    AccountUpdate,
+    AccountResponse,
+    SystemAccountRoleResponse,
+    SystemAccountRoleUpdate,
+)
+from app.services.accounting import (
+    get_system_account_role_status,
+    list_system_account_role_statuses,
+    set_system_account_role_mapping,
+)
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -16,6 +27,24 @@ def list_accounts(active_only: bool = False, account_type: str = None, db: Sessi
     if account_type:
         q = q.filter(Account.account_type == account_type)
     return q.order_by(Account.account_number).all()
+
+
+@router.get("/system-roles", response_model=list[SystemAccountRoleResponse])
+def list_system_account_roles(db: Session = Depends(get_db)):
+    return list_system_account_role_statuses(db)
+
+
+@router.put("/system-roles/{role_key}", response_model=SystemAccountRoleResponse)
+def update_system_account_role(role_key: str, data: SystemAccountRoleUpdate, db: Session = Depends(get_db)):
+    current = get_system_account_role_status(db, role_key)
+    if not current:
+        raise HTTPException(status_code=404, detail="System account role not found")
+    try:
+        return set_system_account_role_mapping(db, role_key, data.account_id)
+    except ValueError as err:
+        message = str(err)
+        status_code = 404 if message == "Account not found" else 400
+        raise HTTPException(status_code=status_code, detail=message) from err
 
 
 @router.get("/{account_id}", response_model=AccountResponse)

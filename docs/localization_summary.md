@@ -211,7 +211,7 @@ Relevant files:
     Once multiuser/RBAC work begins, add a dedicated filing-status/audit model for payroll employee filing so the app can track generated, filed, amended, and changed-since-filed employee records separately from employee start/end dates.
 
 17. Add system-account role mapping admin workflow:
-    The Chart of Accounts admin already exists, but the new system-account role mappings currently rely on generic settings pathways and fallback logic. Add a dedicated admin workflow for viewing, assigning, validating, and updating runtime system-account roles before or alongside the later default-chart replacement/import UX improvements.
+    The Chart of Accounts admin now includes a dedicated System Account Roles workflow for viewing, assigning, validating, and clearing runtime system-account mappings. The app shows configured, fallback, and missing states so operators can harden role assignments before later chart replacement/import UX improvements.
 
 18. Expand SMTP document delivery beyond invoices:
     Add shared email/send flows for externally delivered documents that already have PDF output or clear outbound use-cases. Prioritise customer statements, estimates, credit memos / credit notes, payroll payslips, and purchase orders. Keep the SMTP/logging/template approach shared so future outbound document types do not each invent their own email path.

@@ -258,7 +258,12 @@ const App = {
     },
 
     async renderAccounts() {
-        const accounts = await API.get('/accounts');
+        const [accounts, systemRoles] = await Promise.all([
+            API.get('/accounts'),
+            API.get('/accounts/system-roles'),
+        ]);
+        App._accountsCache = accounts;
+        App._systemAccountRolesCache = systemRoles;
         const grouped = {};
         for (const a of accounts) {
             if (!grouped[a.account_type]) grouped[a.account_type] = [];
@@ -274,6 +279,7 @@ const App = {
                 <h2>Chart of Accounts</h2>
                 <button class="btn btn-primary" onclick="App.showAccountForm()">New Account</button>
             </div>
+            ${App.renderSystemAccountRoles(systemRoles)}
             <div class="table-container"><table>
                 <thead><tr><th style="width:80px;">Number</th><th>Name</th><th style="width:100px;">Type</th><th class="amount" style="width:100px;">Balance</th><th style="width:60px;">Actions</th></tr></thead>
                 <tbody>`;
@@ -296,6 +302,78 @@ const App = {
         }
         html += `</tbody></table></div>`;
         return html;
+    },
+
+    renderSystemAccountRoles(roles = []) {
+        const statusStyles = {
+            configured: 'background:#e6f6eb; color:#1f6b3a; border:1px solid #b8e0c2;',
+            fallback: 'background:#fff4db; color:#8a5a00; border:1px solid #f0d38b;',
+            missing: 'background:#fde7e7; color:#9d1f1f; border:1px solid #f0b6b6;',
+        };
+        const statusLabels = {
+            configured: 'Configured',
+            fallback: 'Fallback',
+            missing: 'Missing',
+        };
+        const accountLabel = (account) => {
+            if (!account) return '—';
+            const number = account.account_number ? `${escapeHtml(account.account_number)} — ` : '';
+            return `${number}${escapeHtml(account.name)}`;
+        };
+
+        return `
+            <div class="settings-section" style="margin-bottom:16px;">
+                <h3>System Account Roles</h3>
+                <div style="font-size:10px; color:var(--text-muted); margin-bottom:10px;">
+                    Explicit role mappings override legacy fallback selection. Use this to validate the runtime posting accounts before later chart import or replacement work.
+                </div>
+                <div class="table-container"><table>
+                    <thead>
+                        <tr>
+                            <th>Role</th>
+                            <th style="width:110px;">Type</th>
+                            <th>Resolved Account</th>
+                            <th style="width:110px;">Status</th>
+                            <th style="width:130px;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${roles.map(role => `
+                            <tr>
+                                <td>
+                                    <strong>${escapeHtml(role.label)}</strong>
+                                    <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">${escapeHtml(role.description || '')}</div>
+                                    ${role.warning ? `<div style="font-size:10px; color:#8a5a00; margin-top:4px;">${escapeHtml(role.warning)}</div>` : ''}
+                                </td>
+                                <td>${escapeHtml(role.account_type)}</td>
+                                <td>
+                                    <div>${accountLabel(role.resolved_account)}</div>
+                                    ${role.configured_account && role.status === 'configured'
+                                        ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Explicit mapping</div>`
+                                        : ''}
+                                    ${role.configured_account && role.status !== 'configured'
+                                        ? `<div style="font-size:10px; color:#9d1f1f; margin-top:2px;">Stored mapping: ${accountLabel(role.configured_account)}</div>`
+                                        : ''}
+                                    ${role.auto_create_on_use && role.status === 'missing'
+                                        ? `<div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Will auto-create on runtime use if still missing.</div>`
+                                        : ''}
+                                </td>
+                                <td>
+                                    <span style="display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; ${statusStyles[role.status] || ''}">
+                                        ${statusLabels[role.status] || escapeHtml(role.status)}
+                                    </span>
+                                </td>
+                                <td class="actions">
+                                    <button class="btn btn-sm btn-secondary" onclick="App.showSystemAccountRoleForm('${role.role_key}')">
+                                        ${role.status === 'configured' ? 'Change' : 'Assign'}
+                                    </button>
+                                    ${role.configured_account_valid ? `<button class="btn btn-sm btn-secondary" onclick="App.clearSystemAccountRole('${role.role_key}')">Clear</button>` : ''}
+                                </td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table></div>
+            </div>`;
     },
 
     async showAccountForm(id = null) {
@@ -333,6 +411,69 @@ const App = {
             closeModal();
             App.navigate('#/accounts');
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async showSystemAccountRoleForm(roleKey) {
+        const roles = App._systemAccountRolesCache || await API.get('/accounts/system-roles');
+        const accounts = App._accountsCache || await API.get('/accounts');
+        const role = roles.find((entry) => entry.role_key === roleKey);
+        if (!role) {
+            toast('System account role not found', 'error');
+            return;
+        }
+        const candidates = accounts
+            .filter((account) => account.is_active && account.account_type === role.account_type)
+            .sort((a, b) => String(a.account_number || '').localeCompare(String(b.account_number || '')) || a.name.localeCompare(b.name));
+        const selectedId = role.configured_account_valid && role.configured_account ? String(role.configured_account.id) : '';
+        openModal(`Assign ${role.label}`, `
+            <form onsubmit="App.saveSystemAccountRole(event, '${role.role_key}')">
+                <div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">
+                    ${escapeHtml(role.description || '')}<br>
+                    Required account type: <strong>${escapeHtml(role.account_type)}</strong>
+                </div>
+                <div class="form-group">
+                    <label>Account</label>
+                    <select name="account_id" required>
+                        <option value="">Select an account…</option>
+                        ${candidates.map(account => `
+                            <option value="${account.id}" ${selectedId === String(account.id) ? 'selected' : ''}>
+                                ${escapeHtml(account.account_number || '—')} — ${escapeHtml(account.name)}
+                            </option>
+                        `).join('')}
+                    </select>
+                </div>
+                ${candidates.length === 0 ? `<div style="font-size:10px; color:#9d1f1f; margin-top:8px;">No active ${escapeHtml(role.account_type)} accounts are available.</div>` : ''}
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" ${candidates.length === 0 ? 'disabled' : ''}>Save Mapping</button>
+                </div>
+            </form>`);
+    },
+
+    async saveSystemAccountRole(e, roleKey) {
+        e.preventDefault();
+        const formData = new FormData(e.target);
+        const accountId = formData.get('account_id');
+        try {
+            await API.put(`/accounts/system-roles/${encodeURIComponent(roleKey)}`, {
+                account_id: accountId ? Number(accountId) : null,
+            });
+            closeModal();
+            toast('System account role updated');
+            App.navigate('#/accounts');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
+    },
+
+    async clearSystemAccountRole(roleKey) {
+        try {
+            await API.put(`/accounts/system-roles/${encodeURIComponent(roleKey)}`, { account_id: null });
+            toast('System account role cleared');
+            App.navigate('#/accounts');
+        } catch (err) {
+            toast(err.message, 'error');
+        }
     },
 
     // Feature 4: Unified Global Search — replaces CQBSearchEngine @ 0x00250000
