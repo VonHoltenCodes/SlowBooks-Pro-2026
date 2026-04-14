@@ -117,7 +117,7 @@ Relevant files:
 
 ### Addresses
 
-Customer and vendor records default country to `US`; forms and templates still use State/ZIP labels.
+Customer and vendor records previously defaulted to `US` and used State/ZIP labels; the NZ branch now presents Region/Postcode wording while preserving storage compatibility.
 
 Relevant files:
 
@@ -138,7 +138,7 @@ Address labels and defaults now have a compatibility-preserving NZ foundation: c
 
 Schedule C storage and legacy code paths still exist, but the NZ branch now disables the active Schedule C routes and removes the Tax Reports navigation entry so US income-tax output is no longer exposed to end users.
 
-The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The Sales Tax report is now a GST Return report that produces GST101A box values and can generate a filled GST101A April 2023 PDF. Box 9 and Box 13 adjustment values are entered at report-generation time, and the selected GST accounting basis comes from Company Settings.
+The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The legacy sales-tax surface is now an NZ GST Return report that produces GST101A box values and can generate a filled GST101A April 2023 PDF. Box 9 and Box 13 adjustment values are entered at report-generation time, and the selected GST accounting basis comes from Company Settings.
 
 Relevant files:
 
@@ -219,8 +219,8 @@ Relevant files:
 19. Keep Alembic as the canonical schema path:
     Model/schema changes need migrations under `alembic/versions`. Docker startup and multi-company database creation now share one bootstrap path that runs Alembic upgrade + NZ chart/settings seed before the app uses a database.
 
-20. Update UI copy everywhere:
-    Replace Sales Tax, Federal Tax, State Tax, SS, Medicare, EIN, ZIP, State, IRS, and Schedule C. Update README and screenshots/docs.
+20. Update UI copy across the visible NZ product surface:
+    Major README, payroll, report, and screenshot-facing copy now uses NZ wording instead of stale US terms. Explicit disabled/compatibility paths may still mention legacy terms where they guard retired behavior or preserve import/export compatibility.
 
 21. Add tests:
     Add focused tests for settings consumption, GST inclusive/exclusive math, line GST codes, frontend/backend calculation agreement, document posting, credit memo reversals, bill input GST, report period handling, PAYE examples, and formatting.

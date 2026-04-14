@@ -129,7 +129,7 @@ const SettingsPage = {
                 <div class="settings-section">
                     <h3>Payroll Filing Contact</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Used for Employment Information / payday filing exports. Falls back to company details if left blank.
+                        Used for Employment Information and employee filing exports. Falls back to company details if left blank.
                     </div>
                     <div class="form-grid">
                         <div class="form-group"><label>Contact Name</label>

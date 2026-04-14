@@ -125,7 +125,10 @@ async function runPayrollPage() {
     assert.ok(payrollHtml.includes('Payslip'));
     assert.ok(payrollHtml.includes('Employment Information'));
     assert.ok(payrollHtml.includes('NZ payroll setup is ready'));
+    assert.ok(payrollHtml.includes('starter/leaver filing'));
     assert.ok(payrollHtml.includes('PAYE'));
+    assert.ok(!payrollHtml.includes('payday filing'));
+    assert.ok(!payrollHtml.includes('later slices'));
     assert.ok(!payrollHtml.includes('Federal'));
     assert.ok(!payrollHtml.includes('Medicare'));
     assert.ok(!payrollHtml.includes('Social Security'));

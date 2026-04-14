@@ -14,7 +14,7 @@ const PayrollPage = {
                 <button class="btn btn-primary" onclick="PayrollPage.showForm()">New Pay Run</button>
             </div>
             <div style="background:#e0f2fe;border:1px solid #7dd3fc;padding:10px 12px;margin-bottom:12px;font-size:12px;color:#0c4a6e;">
-                <strong>NZ payroll setup is ready.</strong> PAYE calculations, KiwiSaver deductions, student loan deductions, ESCT, and posting now run through draft pay runs. Payslips and payday filing exports remain later slices.
+                <strong>NZ payroll setup is ready.</strong> PAYE calculations, KiwiSaver deductions, student loan deductions, ESCT, payslips, Employment Information export, starter/leaver filing, and posting now run through the NZ payroll workflow.
             </div>
             <div style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">
                 ${employees.length} active employee${employees.length === 1 ? '' : 's'} available for payroll.

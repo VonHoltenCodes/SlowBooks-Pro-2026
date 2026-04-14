@@ -12,7 +12,7 @@ For detailed setup and environment instructions, see **INSTALL.md**.
 
 ![Slowbooks Pro 2026 — Dashboard (Dark Mode)](screenshots/dashboard-dark.png)
 
-![Slowbooks Pro 2026 — Invoices with IRS Pub 583 Mock Data](screenshots/invoices.png)
+![Slowbooks Pro 2026 — Invoices with NZ Demo Data](screenshots/invoices.png)
 
 ![Slowbooks Pro 2026 — QuickBooks 2003 IIF Interop](screenshots/iif-interop.png)
 
@@ -258,7 +258,7 @@ SlowBooks-Pro-2026/
 │   │   ├── csv_export.py     # CSV export (5 entity types)
 │   │   ├── csv_import.py     # CSV import with error handling
 │   │   ├── ofx_import.py     # OFX/QFX bank feed parser
-│   │   ├── tax_export.py     # Schedule C data + CSV export
+│   │   ├── tax_export.py     # Legacy disabled income-tax export code
 │   │   ├── backup_service.py # pg_dump/pg_restore wrapper
 │   │   ├── company_service.py # Multi-company DB management
 │   │   ├── iif_export.py     # IIF export (8 export functions)
@@ -318,7 +318,7 @@ SlowBooks-Pro-2026/
 | `recurring_invoices` | Recurring invoice templates |
 | `recurring_invoice_lines` | Recurring invoice line items |
 | `email_log` | Email delivery history |
-| `tax_category_mappings` | Account-to-tax-line mappings for Schedule C |
+| `tax_category_mappings` | Legacy disabled income-tax mapping storage |
 | `backups` | Backup file records |
 | `companies` | Multi-company database list |
 | `employees` | Employee records for payroll |
@@ -475,7 +475,7 @@ IIF is tab-delimited with `\r\n` line endings. Header rows start with `!`. Trans
 !ENDTRNS
 TRNS	INVOICE	01/15/2026	Accounts Receivable	John E. Marks	444.96	2001
 SPL	INVOICE	01/15/2026	Service Income	John E. Marks	-438.00	2001
-SPL	INVOICE	01/15/2026	Sales Tax Payable	John E. Marks	-6.96	2001
+SPL	INVOICE	01/15/2026	GST	John E. Marks	-6.96	2001
 ENDTRNS
 ```
 
