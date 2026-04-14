@@ -140,7 +140,7 @@ Address labels and defaults now have a compatibility-preserving NZ foundation: c
 
 Schedule C storage and legacy code paths still exist, but the NZ branch now disables the active Schedule C routes and removes the Tax Reports navigation entry so US income-tax output is no longer exposed to end users.
 
-The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The legacy sales-tax surface is now an NZ GST Return report that produces GST101A box values and can generate a filled GST101A April 2023 PDF. Box 9 and Box 13 adjustment values are entered at report-generation time, and the selected GST accounting basis comes from Company Settings.
+The general reports UI now includes reusable period selection and custom date handling in `app/static/js/reports.js`. The legacy sales-tax surface is now an NZ GST Return report that produces GST101A box values, can generate a filled GST101A April 2023 PDF, and now surfaces bank-confirmed GST settlement state by matching reconciled bank transactions to GST periods. Box 9 and Box 13 adjustment values are entered at report-generation time, and the selected GST accounting basis comes from Company Settings.
 
 Relevant files:
 
@@ -173,17 +173,14 @@ Relevant files:
 3. Finish payroll address/schema cleanup:
    Company, customer, and vendor address labeling is now NZ-first, but payroll employee address fields and any deeper schema renames are still deferred follow-up work.
 
-4. Add GST settlement/reporting follow-up work:
-   GST calculation, GST return reporting, and GST posting are in place, but settlement/payment workflows for clearing the GST control balance remain separate work.
-
-5. Decide and implement the NZ income-tax replacement surface:
+4. Decide and implement the NZ income-tax replacement surface:
    Schedule C is retired on the NZ branch, but the replacement output still needs a product decision: IR3 business summary, IR10-style financial statements, accountant export, or another NZ-specific output.
 
-6. Extend platform RBAC beyond the current payroll/admin rollout:
+5. Extend platform RBAC beyond the current payroll/admin rollout:
    The platform now has reusable auth UX plus RBAC enforcement for payroll, employee, settings, accounts, backups, audit, and companies. Remaining work is to extend the same model across the rest of the business modules and any future multi-company context switching.
 
-7. Keep expanding focused regression coverage:
-   Continue adding targeted tests whenever localized behavior changes, especially around GST math/reporting, posting lifecycle integrity, payroll calculations/outputs, filing history state, and settings-driven behavior.
+6. Keep expanding focused regression coverage:
+   Continue adding targeted tests whenever localized behavior changes, especially around GST math/reporting, GST settlement matching, posting lifecycle integrity, payroll calculations/outputs, filing history state, and settings-driven behavior.
 
-8. Decide multi-currency scope explicitly:
+7. Decide multi-currency scope explicitly:
    The branch currently assumes single-currency `NZD` formatting. Full multi-currency support remains a separate accounting feature involving exchange rates, realized gains/losses, account currencies, and reporting currency.

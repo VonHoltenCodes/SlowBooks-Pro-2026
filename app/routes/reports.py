@@ -17,15 +17,19 @@ from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
 from app.models.accounts import Account, AccountType
+from app.models.banking import BankTransaction
 from app.models.transactions import Transaction, TransactionLine
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment
 from app.models.contacts import Customer
 from app.schemas.email import StatementEmailRequest
+from pydantic import BaseModel
 from app.services.email_service import render_document_email, send_document_email
 from app.services.pdf_service import generate_statement_pdf
 from app.routes.settings import _get_all as get_settings
+from app.services.auth import require_permissions
 from app.services.gst_return import calculate_gst_return, generate_gst101a_pdf
+from app.services.gst_settlement import build_settlement_state, confirm_settlement
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
@@ -196,12 +200,44 @@ def gst_return_report(
         start_date = date(date.today().year, 1, 1)
     if not end_date:
         end_date = date.today()
-    return calculate_gst_return(
+    report = calculate_gst_return(
         db,
         start_date,
         end_date,
         box9_adjustments=_decimal_query_value(box9_adjustments),
         box13_adjustments=_decimal_query_value(box13_adjustments),
+    )
+    report["settlement"] = build_settlement_state(db, start_date, end_date, report)
+    return report
+
+
+class GstSettlementConfirmRequest(BaseModel):
+    start_date: date
+    end_date: date
+    bank_transaction_id: int
+    box9_adjustments: Decimal = Decimal("0.00")
+    box13_adjustments: Decimal = Decimal("0.00")
+
+
+@router.post("/gst-return/settlement")
+def confirm_gst_settlement(
+    data: GstSettlementConfirmRequest,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("accounts.manage")),
+):
+    report = calculate_gst_return(
+        db,
+        data.start_date,
+        data.end_date,
+        box9_adjustments=_decimal_query_value(data.box9_adjustments),
+        box13_adjustments=_decimal_query_value(data.box13_adjustments),
+    )
+    return confirm_settlement(
+        db,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        bank_transaction_id=data.bank_transaction_id,
+        report=report,
     )
 
 

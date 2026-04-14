@@ -344,6 +344,32 @@ const ReportsPage = {
             </tr>`).join("");
         const position = data.net_position === "refundable" ? "GST refund" :
             data.net_position === "payable" ? "GST to pay" : "Nil GST";
+        const settlement = data.settlement || { status: 'unsettled', candidates: [] };
+        const settlementHtml = settlement.status === 'confirmed'
+            ? `<div style="margin-top:12px; padding:8px; background:var(--primary-light); border:1px solid var(--primary);">
+                    <strong>Settlement Status:</strong> Confirmed<br>
+                    <span style="font-size:10px; color:var(--text-muted);">Settlement date: ${formatDate(settlement.settlement?.settlement_date || '')}</span>
+               </div>`
+            : settlement.status === 'no_settlement_required'
+                ? `<div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
+                        <strong>Settlement Status:</strong> No settlement required for this period.
+                   </div>`
+                : `<div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
+                        <strong>Settlement Status:</strong> Unsettled<br>
+                        <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Expected bank amount: ${formatCurrency(settlement.expected_bank_amount || 0)}</div>
+                        ${(settlement.candidates || []).length > 0 ? `
+                            <div style="margin-top:8px;">
+                                ${(settlement.candidates || []).map(candidate => `
+                                    <div style="display:flex; justify-content:space-between; gap:8px; align-items:center; padding:4px 0; border-top:1px solid var(--gray-200);">
+                                        <div style="font-size:10px;">
+                                            <strong>${formatDate(candidate.date)}</strong> — ${escapeHtml(candidate.payee || candidate.description || 'Bank transaction')}
+                                            <div style="color:var(--text-muted);">${formatCurrency(candidate.amount)}</div>
+                                        </div>
+                                        <button class="btn btn-sm btn-primary" onclick="ReportsPage.confirmGstSettlement(${candidate.id})">Confirm Settlement</button>
+                                    </div>`).join('')}
+                            </div>`
+                            : '<div style="font-size:10px; color:var(--text-muted); margin-top:6px;">No reconciled bank transactions match this GST period yet.</div>'}
+                   </div>`;
         return `
             <p style="margin-bottom:12px; color:var(--gray-500);">
                 ${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}
@@ -365,7 +391,8 @@ const ReportsPage = {
             <div class="table-container"><table>
                 <thead><tr><th>Date</th><th>Source</th><th>Number</th><th>Name</th><th class="amount">Standard-rated</th><th class="amount">Zero-rated</th><th class="amount">Excluded</th></tr></thead>
                 <tbody>${sourceRows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No GST activity</td></tr>'}</tbody>
-            </table></div>`;
+            </table></div>
+            ${settlementHtml}`;
     },
 
     downloadGstReturnPdf() {
@@ -376,6 +403,29 @@ const ReportsPage = {
         const box13 = ($("#gst-box13-adjustments")?.value || "0.00");
         const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
         window.open(`/api/reports/gst-return/pdf?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`, "_blank");
+    },
+
+    async confirmGstSettlement(bankTransactionId) {
+        const select = $("#report-period-select");
+        const startInput = $("#report-custom-start");
+        const endInput = $("#report-custom-end");
+        const box9 = ($("#gst-box9-adjustments")?.value || "0.00");
+        const box13 = ($("#gst-box13-adjustments")?.value || "0.00");
+        const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
+        try {
+            await API.post('/reports/gst-return/settlement', {
+                start_date: range.start,
+                end_date: range.end,
+                bank_transaction_id: bankTransactionId,
+                box9_adjustments: box9,
+                box13_adjustments: box13,
+            });
+            toast('GST settlement confirmed');
+            const data = await API.get(`/reports/gst-return?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`);
+            $("#report-content").innerHTML = ReportsPage.renderGstReturn(data);
+        } catch (err) {
+            toast(err.message, 'error');
+        }
     },
 
     async salesTax() {
