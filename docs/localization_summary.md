@@ -162,6 +162,17 @@ Relevant files:
 - `app/services/iif_export.py`
 - `app/static/js/iif.js`
 
+
+### Xero Import
+
+A file-based Xero import workspace now exists for CSV exports of Chart of Accounts, General Ledger, Trial Balance, Profit & Loss, and Balance Sheet. It supports dry-run verification, historic journal reconstruction from the General Ledger export, and verification against Xero summary reports before import.
+
+Relevant files:
+
+- `app/services/xero_import.py`
+- `app/routes/xero_import.py`
+- `app/static/js/xero_import.js`
+
 ## Remaining Todo
 
 1. Keep NZ fork hygiene clean:

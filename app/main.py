@@ -33,7 +33,7 @@ from app.routes import purchase_orders, bills, bill_payments, credit_memos
 from app.routes import recurring, batch_payments
 # Phase 4: Communication & Export
 from app.routes import csv as csv_routes
-from app.routes import uploads
+from app.routes import uploads, xero_import
 # Phase 5: Advanced Integration
 from app.routes import bank_import, tax, backups, gst
 # Phase 6: Ambitious
@@ -81,6 +81,7 @@ app.include_router(batch_payments.router)
 # Phase 4: Communication & Export
 app.include_router(csv_routes.router)
 app.include_router(uploads.router)
+app.include_router(xero_import.router)
 # Phase 5: Advanced Integration
 app.include_router(bank_import.router)
 app.include_router(tax.router)

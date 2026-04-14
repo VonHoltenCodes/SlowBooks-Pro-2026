@@ -86,6 +86,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 ### Communication & Export
 - **Document Email** — Send invoices, statements, estimates, credit notes, payslips, and purchase orders as PDF attachments via SMTP
 - **CSV Import/Export** — Import/export customers, vendors, items, invoices, and chart of accounts as CSV
+- **Xero Import** — Import Xero CSV exports for Chart of Accounts, General Ledger, Trial Balance, Profit & Loss, and Balance Sheet with dry-run verification before ledger import
 - **Print-Optimized PDF** — Enhanced invoice PDF template with company logo support
 - **IIF Import/Export** — QB2003-compatible legacy IIF interoperability for NZ-ledger data (see below)
 
@@ -257,6 +258,7 @@ SlowBooks-Pro-2026/
 │   │   ├── email_service.py  # SMTP email delivery
 │   │   ├── csv_export.py     # CSV export (5 entity types)
 │   │   ├── csv_import.py     # CSV import with error handling
+│   │   ├── xero_import.py    # Xero CSV import + dry-run verification
 │   │   ├── ofx_import.py     # OFX/QFX bank feed parser
 │   │   ├── tax_export.py     # Legacy disabled income-tax export code
 │   │   ├── backup_service.py # pg_dump/pg_restore wrapper

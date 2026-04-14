@@ -6,6 +6,10 @@
  * reverse — 47 different message types, all packed structs with no padding.
  */
 const API = {
+    authHeaders() {
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('slowbooks-auth-token') : null;
+        return token ? { Authorization: `Bearer ${token}` } : {};
+    },
     async request(method, path, body = null) {
         const token = typeof localStorage !== 'undefined' ? localStorage.getItem('slowbooks-auth-token') : null;
         const opts = {

@@ -24,6 +24,7 @@ const App = {
         '/reports':       { page: 'reports',         label: 'Report Center',      render: () => ReportsPage.render() },
         '/settings':      { page: 'settings',        label: 'Company Settings',   permission: 'settings.manage', render: () => SettingsPage.render() },
         '/iif':           { page: 'iif',             label: 'QuickBooks Interop', render: () => IIFPage.render() },
+        '/xero-import':   { page: 'xero-import',     label: 'Xero Import',        permission: 'accounts.manage', render: () => XeroImportPage.render() },
         '/quick-entry':   { page: 'quick-entry',     label: 'Quick Entry',        render: () => App.renderQuickEntry() },
         // Phase 1: Foundation
         '/audit':         { page: 'audit',           label: 'Audit Log',          permission: 'audit.view', render: () => AuditPage.render() },
