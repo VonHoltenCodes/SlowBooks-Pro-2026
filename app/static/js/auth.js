@@ -1,4 +1,25 @@
 const AuthPage = {
+    formatPermissionLabel(permissionKey) {
+        if (!permissionKey) return '';
+        const parts = String(permissionKey).split('.');
+        const action = parts.pop();
+        const subject = parts
+            .join(' ')
+            .replaceAll('_', ' ')
+            .split(' ')
+            .filter(Boolean)
+            .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+            .join(' ');
+        const actionLabel = action
+            ? action.charAt(0).toUpperCase() + action.slice(1).replaceAll('_', ' ')
+            : '';
+        return [actionLabel, subject].filter(Boolean).join(' ');
+    },
+
+    renderPermissionSummary(permissionKeys) {
+        return (permissionKeys || []).map((permission) => escapeHtml(AuthPage.formatPermissionLabel(permission))).join(', ');
+    },
+
     async render() {
         const state = App.authState && Object.prototype.hasOwnProperty.call(App.authState, 'authenticated')
             ? App.authState
@@ -137,7 +158,7 @@ const AuthPage = {
                         <div class="card">
                             <div class="card-header">${escapeHtml(role.label)}</div>
                             <div style="font-size:11px; margin-bottom:6px;">${escapeHtml(role.description)}</div>
-                            <div style="font-size:10px; color:var(--text-muted);">${(role.permissions || []).map(permission => escapeHtml(permission)).join(', ') || 'No permissions by default'}</div>
+                            <div style="font-size:10px; color:var(--text-muted);">${AuthPage.renderPermissionSummary(role.permissions) || 'No permissions by default'}</div>
                         </div>`).join('')}
                 </div>
             </div>
@@ -154,7 +175,7 @@ const AuthPage = {
                                 </td>
                                 <td>${escapeHtml(user.membership.role_key)}</td>
                                 <td style="font-size:10px; color:var(--text-muted);">
-                                    ${user.membership.allow_permissions.concat(user.membership.deny_permissions).join(', ') || 'None'}
+                                    ${AuthPage.renderPermissionSummary(user.membership.allow_permissions.concat(user.membership.deny_permissions)) || 'None'}
                                 </td>
                                 <td>${user.is_active && user.membership.is_active ? 'Active' : 'Inactive'}</td>
                                 <td class="actions"><button class="btn btn-sm btn-secondary" onclick="AuthPage.showUserForm(${index})">Edit</button></td>
@@ -181,11 +202,11 @@ const AuthPage = {
                 </div>
                 <div class="settings-section">
                     <h3>Allow Overrides</h3>
-                    <div class="card-grid">${meta.permissions.map(permission => `<label class="card" style="cursor:pointer;"><input type="checkbox" name="allow_permissions" value="${permission.key}" ${allow.has(permission.key) ? 'checked' : ''}> <strong>${escapeHtml(permission.key)}</strong><div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${escapeHtml(permission.description)}</div></label>`).join('')}</div>
+                    <div class="card-grid">${meta.permissions.map(permission => `<label class="card" style="cursor:pointer;"><input type="checkbox" name="allow_permissions" value="${permission.key}" ${allow.has(permission.key) ? 'checked' : ''}> <strong>${escapeHtml(AuthPage.formatPermissionLabel(permission.key))}</strong><div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${escapeHtml(permission.description)}</div></label>`).join('')}</div>
                 </div>
                 <div class="settings-section">
                     <h3>Deny Overrides</h3>
-                    <div class="card-grid">${meta.permissions.map(permission => `<label class="card" style="cursor:pointer;"><input type="checkbox" name="deny_permissions" value="${permission.key}" ${deny.has(permission.key) ? 'checked' : ''}> <strong>${escapeHtml(permission.key)}</strong><div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${escapeHtml(permission.description)}</div></label>`).join('')}</div>
+                    <div class="card-grid">${meta.permissions.map(permission => `<label class="card" style="cursor:pointer;"><input type="checkbox" name="deny_permissions" value="${permission.key}" ${deny.has(permission.key) ? 'checked' : ''}> <strong>${escapeHtml(AuthPage.formatPermissionLabel(permission.key))}</strong><div style="font-size:10px; color:var(--text-muted); margin-top:4px;">${escapeHtml(permission.description)}</div></label>`).join('')}</div>
                 </div>
                 <div class="form-grid">
                     <div class="form-group"><label><input type="checkbox" name="is_active" ${user ? (user.is_active ? 'checked' : '') : 'checked'}> User Active</label></div>

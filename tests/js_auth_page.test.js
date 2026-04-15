@@ -4,6 +4,7 @@ const vm = require('vm');
 
 const code = `${fs.readFileSync('app/static/js/auth.js', 'utf8')}\nthis.AuthPage = AuthPage;`;
 let lastNavigated = null;
+let lastModal = null;
 const localStore = {};
 const context = {
     API: {
@@ -18,8 +19,14 @@ const context = {
             throw new Error(`unexpected post ${path}`);
         },
         get: async (path) => {
-            if (path === '/auth/users') return [{ email: 'ops@example.com', full_name: 'Ops User', membership: { role_key: 'staff', effective_permissions: ['audit.view'], allow_permissions: ['audit.view'], deny_permissions: [] }, is_active: true }];
-            if (path === '/auth/meta') return { roles: [{ key: 'staff', label: 'Staff' }], permissions: [{ key: 'audit.view', description: 'View audit log' }] };
+            if (path === '/auth/users') return [{ email: 'ops@example.com', full_name: 'Ops User', membership: { role_key: 'staff', effective_permissions: ['accounts.view'], allow_permissions: ['accounts.view'], deny_permissions: ['employees.manage'] }, is_active: true }];
+            if (path === '/auth/meta') return {
+                roles: [{ key: 'staff', label: 'Staff', permissions: ['accounts.view', 'employees.manage'] }],
+                permissions: [
+                    { key: 'accounts.view', description: 'View the chart of accounts.' },
+                    { key: 'employees.manage', description: 'Create and update employee records.' },
+                ],
+            };
             throw new Error(`unexpected get ${path}`);
         },
     },
@@ -32,7 +39,7 @@ const context = {
         syncAuthUI() {},
     },
     escapeHtml: value => String(value || ''),
-    openModal() {},
+    openModal(title, html) { lastModal = { title, html }; },
     closeModal() {},
     toast() {},
     FormData,
@@ -57,8 +64,20 @@ vm.runInContext(code, context);
 
     const userHtml = await context.AuthPage.renderUserManagement();
     assert.ok(userHtml.includes('Users & Access'));
-    assert.ok(userHtml.includes('audit.view'));
+    assert.ok(userHtml.includes('View Accounts'));
+    assert.ok(userHtml.includes('Manage Employees'));
+    assert.ok(!userHtml.includes('accounts.view'));
+    assert.ok(!userHtml.includes('employees.manage'));
     assert.ok(userHtml.includes('Ops User'));
+
+    context.AuthPage.showUserForm();
+    assert.ok(lastModal);
+    assert.ok(lastModal.html.includes('View Accounts'));
+    assert.ok(lastModal.html.includes('Manage Employees'));
+    assert.ok(!lastModal.html.includes('accounts.view</strong>'));
+    assert.ok(!lastModal.html.includes('employees.manage</strong>'));
+    assert.ok(lastModal.html.includes('value="accounts.view"'));
+    assert.ok(lastModal.html.includes('value="employees.manage"'));
 
     await context.AuthPage.logout();
     assert.strictEqual(localStore['slowbooks-auth-token'], undefined);
