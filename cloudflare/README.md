@@ -97,6 +97,68 @@ curl -sS https://slowbooks-ai.yourname.workers.dev/v1/chat/completions \
 
 You should get an OpenAI-shaped JSON response with `choices[0].message.content: "ok"`.
 
+## Environment variables
+
+The Worker respects several environment variables to customize behaviour.
+All are optional except `AUTH_TOKEN`.
+
+### AUTH_TOKEN (required)
+
+The shared secret that Slowbooks sends as a Bearer token. Generate it with
+`openssl rand -hex 32` and store it in Cloudflare as a secret:
+
+```bash
+cd cloudflare
+wrangler secret put AUTH_TOKEN
+# Paste the 64-char hex string from `openssl rand -hex 32`, press Enter
+```
+
+### ALLOWED_MODELS (optional)
+
+Comma-separated list of model IDs to permit. If not set, defaults to:
+
+```
+@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct,@cf/mistral/mistral-7b-instruct-v0.2-lora
+```
+
+To restrict which models Slowbooks can invoke:
+
+```bash
+wrangler deploy --env production
+# (first set ALLOWED_MODELS in wrangler.toml [vars] section, or in the
+# Cloudflare dashboard under Variables > Configuration > Variables)
+```
+
+### DEFAULT_MODEL (optional)
+
+Which model to use if Slowbooks' request doesn't specify one. Must be a model
+in `ALLOWED_MODELS`. Defaults to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
+
+Set via wrangler.toml or Cloudflare dashboard.
+
+### ALLOWED_ORIGINS (optional)
+
+Comma-separated list of browser origins allowed for CORS. If not set, CORS is
+not enforced (useful for same-origin deployments). Example:
+
+```
+http://localhost:3000,https://slowbooks.local
+```
+
+Set via wrangler.toml or Cloudflare dashboard.
+
+### LOG_VERBOSE (optional)
+
+Set to `"1"` to enable structured logging of requests and responses to stdout
+(visible in `wrangler tail`). Defaults to `"0"` (logging disabled) to avoid
+logging sensitive data.
+
+```bash
+wrangler deploy --env production
+# (first set LOG_VERBOSE = "1" in wrangler.toml [vars], or dashboard)
+wrangler tail  # watch live logs
+```
+
 ## Rotating the shared secret
 
 Routine hygiene — do it whenever you rotate other credentials:
