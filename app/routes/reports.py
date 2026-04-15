@@ -287,7 +287,7 @@ def gst_return_pdf(
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=GST101A_{start_date}_{end_date}.pdf"},
+        headers={"Content-Disposition": f'attachment; filename="GST101A_{start_date}_{end_date}.pdf"'},
     )
 
 

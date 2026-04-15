@@ -402,7 +402,7 @@ const ReportsPage = {
         const box9 = ($("#gst-box9-adjustments")?.value || "0.00");
         const box13 = ($("#gst-box13-adjustments")?.value || "0.00");
         const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
-        API.open(`/reports/gst-return/pdf?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`, `gst-return-${range.start}-${range.end}.pdf`);
+        API.download(`/reports/gst-return/pdf?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`, `GST101A_${range.start}_${range.end}.pdf`);
     },
 
     async confirmGstSettlement(bankTransactionId) {

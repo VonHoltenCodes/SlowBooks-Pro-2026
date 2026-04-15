@@ -17,6 +17,55 @@ from app.services.gst_calculations import round_money
 
 GST101A_TEMPLATE = Path(__file__).parent.parent / "forms" / "gst101a-2023.pdf"
 GST_FRACTION = Decimal("3") / Decimal("23")
+GST_BOX_RECTS_PAGE_1 = [
+    (407.307, 502.532, 566.39, 519.43),
+    (407.744, 482.073, 566.281, 498.971),
+    (407.307, 458.957, 566.39, 476.29),
+    (407.743, 437.257, 566.39, 454.155),
+    (407.307, 415.148, 566.39, 432.046),
+    (407.307, 392.005, 566.39, 409.34),
+    (407.307, 362.974, 566.39, 379.872),
+    (407.307, 334.332, 566.39, 351.23),
+    (407.744, 313.898, 566.39, 330.795),
+    (407.744, 290.686, 566.39, 308.02),
+    (407.307, 265.202, 566.063, 282.1),
+]
+GST_REGISTRATION_RECT_PAGE_1 = (465.616, 673.802, 565.591, 691.001)
+GST_PERIOD_RECT_PAGE_1 = (466.487, 650.873, 544.959, 668.061)
+GST_DUE_RECT_PAGE_1 = (429.737, 601.231, 519.938, 618.418)
+GST_REGISTRATION_RECT_PAGE_2 = (432.403, 152.909, 564.233, 171.417)
+GST_END_DATE_RECT_PAGE_2 = (443.095, 130.151, 564.103, 147.921)
+GST_DUE_RECT_PAGE_2 = (443.095, 100.478, 564.103, 118.249)
+GST_AMOUNT_PAY_RECT_PAGE_2 = (423.021, 72.1141, 562.794, 89.8846)
+
+
+def _comb_text_positions(rect: tuple[float, float, float, float], value: str, cell_count: int) -> list[tuple[float, str]]:
+    left, _bottom, right, _top = rect
+    cell_width = (right - left) / cell_count
+    characters = list(str(value or ""))[-cell_count:]
+    start_cell = max(cell_count - len(characters), 0)
+    return [
+        (round(left + ((start_cell + index + 0.5) * cell_width), 3), character)
+        for index, character in enumerate(characters)
+    ]
+
+
+def _draw_comb_text(
+    c: canvas.Canvas,
+    rect: tuple[float, float, float, float],
+    value: str,
+    cell_count: int,
+    font_name: str = "Courier-Bold",
+    font_size: int = 9,
+    y_offset: float = 2.0,
+) -> None:
+    if not value:
+        return
+    _left, bottom, _right, top = rect
+    baseline = bottom + ((top - bottom) / 2) - y_offset
+    c.setFont(font_name, font_size)
+    for x, character in _comb_text_positions(rect, value, cell_count):
+        c.drawCentredString(x, baseline, character)
 
 
 def _setting_map(db: Session) -> dict:
@@ -244,16 +293,23 @@ def _pdf_period(start: str, end: str) -> str:
 def _overlay_pdf(report: dict, company_settings: dict, return_due_date: date | None, phone: str | None) -> BytesIO:
     out = BytesIO()
     c = canvas.Canvas(out, pagesize=(595.276, 841.89))
+    gst_number = company_settings.get("gst_number") or company_settings.get("company_tax_id") or ""
     c.setFont("Helvetica", 8)
-    c.drawString(426, 683, company_settings.get("gst_number") or company_settings.get("company_tax_id") or "")
-    c.drawString(426, 660, _pdf_period(report["start_date"], report["end_date"]))
-    c.drawString(426, 615, _pdf_date(return_due_date))
+    _draw_comb_text(c, GST_REGISTRATION_RECT_PAGE_1, gst_number, 11, font_size=8, y_offset=2.2)
+    _draw_comb_text(c, GST_PERIOD_RECT_PAGE_1, _pdf_period(report["start_date"], report["end_date"]), 11, font_size=8, y_offset=2.2)
+    _draw_comb_text(c, GST_DUE_RECT_PAGE_1, _pdf_date(return_due_date), 8, font_size=8, y_offset=2.2)
     c.drawString(285, 540, phone or company_settings.get("company_phone") or "")
+
+    boxes = report["boxes"]
+    for rect, box_key in zip(GST_BOX_RECTS_PAGE_1, ("5", "6", "7", "8", "9", "10", "11", "12", "13", "14", "15")):
+        _draw_comb_text(c, rect, _pdf_amount(boxes[box_key]), 11)
     c.showPage()
     c.setFont("Helvetica", 8)
-    c.drawString(433, 160, company_settings.get("gst_number") or company_settings.get("company_tax_id") or "")
-    c.drawString(443, 137, date.fromisoformat(report["end_date"]).strftime("%d/%m/%y"))
-    c.drawString(443, 108, _pdf_date(return_due_date))
+    _draw_comb_text(c, GST_REGISTRATION_RECT_PAGE_2, gst_number, 11, font_size=8, y_offset=2.2)
+    _draw_comb_text(c, GST_END_DATE_RECT_PAGE_2, date.fromisoformat(report["end_date"]).strftime("%d/%m/%y"), 8, font_size=8, y_offset=2.2)
+    _draw_comb_text(c, GST_DUE_RECT_PAGE_2, _pdf_date(return_due_date), 8, font_size=8, y_offset=2.2)
+    if report["net_position"] == "payable":
+        _draw_comb_text(c, GST_AMOUNT_PAY_RECT_PAGE_2, _pdf_amount(boxes["15"]), 11)
     c.showPage()
     c.save()
     out.seek(0)
@@ -273,20 +329,7 @@ def generate_gst101a_pdf(
     for page_number, page in enumerate(writer.pages):
         page.merge_page(overlay.pages[page_number])
 
-    boxes = report["boxes"]
     fields = {
-        "5.0": _pdf_amount(boxes["5"]),
-        "5.1": _pdf_amount(boxes["6"]),
-        "5.2": _pdf_amount(boxes["7"]),
-        "5.3": _pdf_amount(boxes["8"]),
-        "5.4": _pdf_amount(boxes["9"]),
-        "5.5": _pdf_amount(boxes["10"]),
-        "5.6": _pdf_amount(boxes["11"]),
-        "5.7": _pdf_amount(boxes["12"]),
-        "5.8": _pdf_amount(boxes["13"]),
-        "5.9": _pdf_amount(boxes["14"]),
-        "5.10.0": _pdf_amount(boxes["15"]),
-        "Amount of Pay": _pdf_amount(boxes["15"] if report["net_position"] == "payable" else 0),
         "refund / gst": "/No" if report["net_position"] == "payable" else "/Yes",
     }
 

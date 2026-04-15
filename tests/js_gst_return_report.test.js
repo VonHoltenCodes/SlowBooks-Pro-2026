@@ -4,6 +4,7 @@ const vm = require('vm');
 
 const code = `${fs.readFileSync('app/static/js/reports.js', 'utf8')}\nthis.ReportsPage = ReportsPage;`;
 const calls = [];
+const downloads = [];
 let modalHtml = '';
 const elements = {};
 
@@ -25,6 +26,9 @@ const context = {
                 net_position: 'payable',
                 items: [],
             };
+        },
+        download: async (path, filename) => {
+            downloads.push({ path, filename });
         },
     },
     openModal: (_title, html) => {
@@ -59,6 +63,14 @@ vm.runInContext(code, context);
     assert.ok(calls.some(path => path.includes('/reports/gst-return?')));
     assert.ok(calls.some(path => path.includes('box9_adjustments=5.00')));
     assert.ok(calls.some(path => path.includes('box13_adjustments=2.00')));
+
+    context.ReportsPage.downloadGstReturnPdf();
+    assert.deepStrictEqual(downloads, [
+        {
+            path: '/reports/gst-return/pdf?start_date=2026-04-01&end_date=2026-04-30&box9_adjustments=5.00&box13_adjustments=2.00',
+            filename: 'GST101A_2026-04-01_2026-04-30.pdf',
+        },
+    ]);
 })().catch((err) => {
     console.error(err);
     process.exit(1);
