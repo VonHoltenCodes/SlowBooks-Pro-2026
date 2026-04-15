@@ -33,6 +33,7 @@ from app.services.ai_service import (
     generate_insights as ai_generate_insights,
     provider_list as ai_provider_list,
     call_with_tools,
+    validate_worker_url,
 )
 from app.services.ai_tools import TOOLS as AI_TOOLS, call_tool
 from app.services.crypto import decrypt_value, encrypt_value, is_encrypted
@@ -51,6 +52,7 @@ class AIConfigUpdate(BaseModel):
     model: Optional[str] = None
     api_key: Optional[str] = None
     cloudflare_account_id: Optional[str] = None
+    worker_url: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -307,6 +309,7 @@ _AI_PROVIDER_KEY        = "ai_provider"
 _AI_MODEL_KEY           = "ai_model"
 _AI_API_KEY             = "ai_api_key"            # STORED ENCRYPTED
 _AI_CF_ACCOUNT_KEY      = "ai_cloudflare_account_id"
+_AI_WORKER_URL_KEY      = "ai_worker_url"         # HTTPS-only, validated
 
 
 # Tiny in-process cache so the UI can poll without hammering paid APIs.
@@ -318,6 +321,29 @@ _AI_CACHE_TTL_SECONDS = 600
 
 def _clear_ai_cache():
     _AI_CACHE.clear()
+
+
+def _require_provider_extras(provider: str, cfg: dict) -> None:
+    """Raise 400 if a provider needs extra config that isn't set.
+
+    Keeps the "Cloudflare needs account_id / Worker gateway needs worker_url"
+    checks in one place so test_ai_config / ai_insights / ai_query all
+    enforce the same rules.
+    """
+    if provider == "cloudflare" and not cfg.get("cloudflare_account_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cloudflare provider requires cloudflare_account_id",
+        )
+    if provider == "cloudflare_worker" and not cfg.get("worker_url"):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cloudflare Worker gateway requires worker_url — deploy "
+                "cloudflare/worker.js in your own account first, then "
+                "paste the printed Worker URL into AI settings"
+            ),
+        )
 
 
 def _read_ai_config(db: Session) -> dict:
@@ -334,6 +360,7 @@ def _read_ai_config(db: Session) -> dict:
         "model": settings.get(_AI_MODEL_KEY, "") or "",
         "api_key": api_key,
         "cloudflare_account_id": settings.get(_AI_CF_ACCOUNT_KEY, "") or "",
+        "worker_url": settings.get(_AI_WORKER_URL_KEY, "") or "",
     }
 
 
@@ -350,6 +377,7 @@ def get_ai_config(db: Session = Depends(get_db)):
         "provider": settings.get(_AI_PROVIDER_KEY, "") or "",
         "model": settings.get(_AI_MODEL_KEY, "") or "",
         "cloudflare_account_id": settings.get(_AI_CF_ACCOUNT_KEY, "") or "",
+        "worker_url": settings.get(_AI_WORKER_URL_KEY, "") or "",
         "has_api_key": bool(raw_key),
         "api_key_encrypted": is_encrypted(raw_key),
         "providers": ai_provider_list(),
@@ -377,13 +405,25 @@ def put_ai_config(
 
     model = (payload.model or "").strip()
     account_id = (payload.cloudflare_account_id or "").strip()
+    worker_url_raw = (payload.worker_url or "").strip()
 
-    # SSRF guard: validate before storing or interpolating into URLs.
+    # SSRF guard #1: CF account_id must be exactly 32 hex chars.
     if account_id and not CLOUDFLARE_ACCOUNT_ID_RE.match(account_id):
         raise HTTPException(
             status_code=400,
             detail="cloudflare_account_id must be exactly 32 lowercase hex characters",
         )
+
+    # SSRF + MITM guard #2: worker_url must pass validate_worker_url().
+    # That function enforces https://, blocks private/loopback IPs,
+    # rejects embedded credentials, and strips query/fragment.
+    if worker_url_raw:
+        try:
+            worker_url = validate_worker_url(worker_url_raw)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+    else:
+        worker_url = ""
 
     new_api_key = payload.api_key
     # Distinguish "absent" from "empty string" — treat both as "don't change".
@@ -392,6 +432,7 @@ def put_ai_config(
     set_setting(db, _AI_PROVIDER_KEY, provider)
     set_setting(db, _AI_MODEL_KEY, model)
     set_setting(db, _AI_CF_ACCOUNT_KEY, account_id)
+    set_setting(db, _AI_WORKER_URL_KEY, worker_url)
     if should_update_key:
         encrypted = encrypt_value(new_api_key.strip())
         set_setting(db, _AI_API_KEY, encrypted)
@@ -420,11 +461,7 @@ def test_ai_config(db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="No AI provider configured")
     if not api_key:
         raise HTTPException(status_code=400, detail="No AI API key configured")
-    if provider == "cloudflare" and not cfg.get("cloudflare_account_id"):
-        raise HTTPException(
-            status_code=400,
-            detail="Cloudflare provider requires cloudflare_account_id",
-        )
+    _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]
     model = cfg.get("model") or spec.default_model
@@ -439,6 +476,7 @@ def test_ai_config(db: Session = Depends(get_db)):
             system="You are a connectivity check. Reply with exactly one word.",
             user='Reply with the word "ok" and nothing else.',
             account_id=cfg.get("cloudflare_account_id") or None,
+            worker_url=cfg.get("worker_url") or None,
         )
     except AIProviderError as e:
         # AIProviderError messages already have the key redacted.
@@ -476,11 +514,7 @@ def ai_insights(
             status_code=400,
             detail="AI provider not configured. POST /api/analytics/ai-config first.",
         )
-    if provider == "cloudflare" and not cfg.get("cloudflare_account_id"):
-        raise HTTPException(
-            status_code=400,
-            detail="Cloudflare provider requires cloudflare_account_id",
-        )
+    _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]
     model = cfg.get("model") or spec.default_model
@@ -511,6 +545,7 @@ def ai_insights(
             dashboard=dashboard,
             company_name=company_name,
             account_id=cfg.get("cloudflare_account_id") or None,
+            worker_url=cfg.get("worker_url") or None,
         )
     except AIProviderError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -549,11 +584,7 @@ def ai_query(
             status_code=400,
             detail="AI provider not configured. POST /api/analytics/ai-config first.",
         )
-    if provider == "cloudflare" and not cfg.get("cloudflare_account_id"):
-        raise HTTPException(
-            status_code=400,
-            detail="Cloudflare provider requires cloudflare_account_id",
-        )
+    _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]
     model = cfg.get("model") or spec.default_model
@@ -571,6 +602,7 @@ def ai_query(
             tools=AI_TOOLS,
             tool_executor=tool_exec,
             account_id=cfg.get("cloudflare_account_id") or None,
+            worker_url=cfg.get("worker_url") or None,
             max_calls=8,
         )
     except AIProviderError as e:

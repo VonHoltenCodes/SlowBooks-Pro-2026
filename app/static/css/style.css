@@ -1528,6 +1528,60 @@ tr.clickable { cursor: pointer; }
 .ai-test-ok { color: #00c48f; }
 .ai-test-fail { color: var(--qb-red); }
 
+/* ----------------------------------------------------------------
+ * Cloudflare Worker Gateway section (appears when provider is
+ * `cloudflare_worker`). Called out visually so it's obvious this is
+ * the self-hosted, credentials-stay-in-CF option.
+ * ---------------------------------------------------------------- */
+.ai-worker-section {
+    margin: 10px 0 4px 0;
+    padding: 10px 12px 6px 12px;
+    border: 1px solid #f38020;  /* Cloudflare orange */
+    border-left-width: 3px;
+    border-radius: 4px;
+    background: rgba(243, 128, 32, 0.06);
+}
+
+.ai-worker-section > legend {
+    padding: 0 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #f38020;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.ai-worker-help,
+.ai-worker-security {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin: 4px 0 6px 0;
+    line-height: 1.4;
+}
+
+.ai-worker-help code,
+.ai-worker-security code {
+    background: rgba(0, 0, 0, 0.15);
+    padding: 1px 4px;
+    border-radius: 2px;
+    font-size: 10px;
+}
+
+.ai-worker-security {
+    color: #00c48f;  /* green — safety callout */
+    border-top: 1px dashed rgba(243, 128, 32, 0.3);
+    padding-top: 6px;
+    margin-top: 6px;
+}
+
+.ai-worker-required {
+    color: #f38020;
+    font-style: normal;
+    font-size: 10px;
+    font-weight: 600;
+    margin-left: 4px;
+}
+
 /* ================================================================
  * Phase 9.5b — AI Chat Q&A panel
  * ================================================================ */

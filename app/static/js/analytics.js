@@ -723,6 +723,7 @@ const AnalyticsPage = {
 
         const currentSpec = providers.find(p => p.key === currentProvider) || providers[0] || {};
         const needsAccount = !!currentSpec.needs_account_id;
+        const needsWorker = !!currentSpec.needs_worker_url;
 
         const html = `
             <form id="ai-settings-form" class="ai-settings-form" autocomplete="off">
@@ -743,12 +744,40 @@ const AnalyticsPage = {
                 <label class="form-field" id="ai-settings-cf-wrap" style="${needsAccount ? '' : 'display:none'}">
                     <span>Cloudflare Account ID</span>
                     <input type="text" id="ai-settings-cf-account"
-                           value="${escapeHtml(cfg.cloudflare_account_id || '')}">
+                           value="${escapeHtml(cfg.cloudflare_account_id || '')}"
+                           placeholder="32-char hex (from dash.cloudflare.com)">
                 </label>
+                <fieldset id="ai-settings-worker-wrap" class="ai-worker-section"
+                          style="${needsWorker ? '' : 'display:none'}">
+                    <legend>Cloudflare Worker Gateway</legend>
+                    <p class="ai-worker-help">
+                        Deploy <code>cloudflare/worker.js</code> in your own
+                        Cloudflare account — the real AI credentials live
+                        inside Cloudflare as a Worker secret, not in Slowbooks'
+                        database. Slowbooks only holds the shared Bearer
+                        token. See <code>cloudflare/README.md</code> for the
+                        5-minute setup.
+                    </p>
+                    <label class="form-field">
+                        <span>Worker URL <em class="ai-worker-required">(https only)</em></span>
+                        <input type="url" id="ai-settings-worker-url"
+                               value="${escapeHtml(cfg.worker_url || '')}"
+                               placeholder="https://slowbooks-ai.yourname.workers.dev/v1/chat/completions"
+                               autocomplete="off"
+                               spellcheck="false">
+                    </label>
+                    <p class="ai-worker-security">
+                        <strong>Security:</strong> only <code>https://</code>
+                        URLs are accepted; private/loopback IPs, embedded
+                        credentials, and non-HTTPS schemes are rejected.
+                        Redirects are disabled and TLS certificates are
+                        always verified.
+                    </p>
+                </fieldset>
                 <label class="form-field">
-                    <span>API Key ${hasKey ? '<em class="ai-key-saved">(saved ✓)</em>' : ''}</span>
+                    <span>API Key / Shared Secret ${hasKey ? '<em class="ai-key-saved">(saved ✓)</em>' : ''}</span>
                     <input type="password" id="ai-settings-key"
-                           placeholder="${hasKey ? 'Leave blank to keep existing key' : 'Paste key here'}"
+                           placeholder="${hasKey ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32'}"
                            autocomplete="new-password">
                 </label>
                 <div class="ai-settings-buttons">
@@ -768,6 +797,7 @@ const AnalyticsPage = {
         const hintEl = document.getElementById('ai-settings-hint');
         const modelEl = document.getElementById('ai-settings-model');
         const cfWrap = document.getElementById('ai-settings-cf-wrap');
+        const workerWrap = document.getElementById('ai-settings-worker-wrap');
         const saveBtn = document.getElementById('ai-settings-save');
         const testBtn = document.getElementById('ai-settings-test');
         const testRes = document.getElementById('ai-settings-test-result');
@@ -780,15 +810,20 @@ const AnalyticsPage = {
             // Only clear the model input if it's empty — don't trample user edits.
             if (!modelEl.value) modelEl.value = spec.default_model || '';
             cfWrap.style.display = spec.needs_account_id ? '' : 'none';
+            workerWrap.style.display = spec.needs_worker_url ? '' : 'none';
+        });
+
+        // Build the payload once — every save/test uses the same shape.
+        const collectPayload = () => ({
+            provider: providerSel.value,
+            model: modelEl.value.trim(),
+            cloudflare_account_id: document.getElementById('ai-settings-cf-account').value.trim(),
+            worker_url: document.getElementById('ai-settings-worker-url').value.trim(),
+            api_key: document.getElementById('ai-settings-key').value,
         });
 
         saveBtn.addEventListener('click', async () => {
-            const payload = {
-                provider: providerSel.value,
-                model: modelEl.value.trim(),
-                cloudflare_account_id: document.getElementById('ai-settings-cf-account').value.trim(),
-                api_key: document.getElementById('ai-settings-key').value,
-            };
+            const payload = collectPayload();
             try {
                 const updated = await API.put('/analytics/ai-config', payload);
                 this.state.aiConfig = updated;
@@ -803,12 +838,7 @@ const AnalyticsPage = {
             // Save first (so the test uses the just-entered key), then /test.
             testRes.textContent = 'Saving…';
             testRes.className = 'ai-settings-test-result';
-            const payload = {
-                provider: providerSel.value,
-                model: modelEl.value.trim(),
-                cloudflare_account_id: document.getElementById('ai-settings-cf-account').value.trim(),
-                api_key: document.getElementById('ai-settings-key').value,
-            };
+            const payload = collectPayload();
             try {
                 await API.put('/analytics/ai-config', payload);
             } catch (err) {

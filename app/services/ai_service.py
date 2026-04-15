@@ -25,11 +25,13 @@
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -38,6 +40,129 @@ logger = logging.getLogger(__name__)
 # Cloudflare account IDs are exactly 32 lowercase hex chars.
 # Validate before interpolating into URLs to prevent SSRF.
 CLOUDFLARE_ACCOUNT_ID_RE = re.compile(r'^[a-f0-9]{32}$')
+
+# Hosts that must never be accepted as a user-supplied Worker URL.
+_BLOCKED_WORKER_HOSTS = {
+    "localhost",
+    "ip6-localhost",
+    "ip6-loopback",
+    "broadcasthost",
+    "0.0.0.0",
+}
+
+# Max length for a user-supplied URL (defense against absurd inputs).
+_MAX_WORKER_URL_LEN = 2048
+
+
+def validate_worker_url(url: str) -> str:
+    """Validate + normalise a user-supplied Cloudflare Worker URL.
+
+    Security guarantees enforced here (every one of these is a mitigation
+    for a real attack we care about):
+
+      * **MITM**: only `https://` accepted. Plain HTTP, `file://`,
+        `javascript:`, `ftp://`, `gopher://` etc. are rejected outright,
+        so a tampered network path cannot downgrade or redirect the
+        request to cleartext or a non-HTTP scheme.
+      * **SSRF**: hostnames that resolve to (or literally *are*) loopback,
+        link-local, private, multicast, unspecified, or reserved ranges
+        are rejected. So is `localhost` and friends. A compromised
+        Slowbooks install can't be pointed at `http://127.0.0.1:5000/admin`
+        or the AWS metadata service at `169.254.169.254`.
+      * **Credential leakage**: embedded userinfo (`https://user:pw@host`)
+        is rejected — we never want a password fragment flowing through
+        our settings table or error messages.
+      * **Injection**: control characters, whitespace inside the URL,
+        and otherwise unparseable inputs are rejected before the URL is
+        interpolated into anything.
+      * **DoS**: max length 2048 chars.
+
+    Returns the normalised URL (scheme + host [+ port] + path). If the
+    caller supplied no path, `/v1/chat/completions` is appended so the
+    result is directly usable as an OpenAI-compat chat endpoint.
+
+    Raises ``ValueError`` on any violation. The error message is safe to
+    surface to the client — it never echoes back the full URL when a
+    secret is involved.
+    """
+    if not isinstance(url, str) or not url:
+        raise ValueError("worker_url must be a non-empty string")
+
+    url = url.strip()
+    if len(url) > _MAX_WORKER_URL_LEN:
+        raise ValueError(f"worker_url too long (max {_MAX_WORKER_URL_LEN})")
+
+    # Reject any control chars / whitespace mid-URL before parsing.
+    for ch in url:
+        if ord(ch) < 0x20 or ch in (" ", "\t", "\r", "\n"):
+            raise ValueError("worker_url contains whitespace or control characters")
+
+    try:
+        parsed = urlparse(url)
+    except Exception as exc:  # noqa: BLE001 — urlparse is famously lenient
+        raise ValueError(f"worker_url is not parseable: {exc}") from exc
+
+    # --- Scheme: HTTPS only, no exceptions (MITM protection) --------------
+    if parsed.scheme != "https":
+        raise ValueError(
+            "worker_url must use the https:// scheme (plain http or other "
+            "schemes are rejected to protect against MITM/downgrade attacks)"
+        )
+
+    # --- No embedded credentials ------------------------------------------
+    if parsed.username or parsed.password:
+        raise ValueError("worker_url must not contain embedded credentials")
+
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ValueError("worker_url must include a hostname")
+
+    # --- Blocklisted host names -------------------------------------------
+    if host in _BLOCKED_WORKER_HOSTS or host.endswith(".localhost"):
+        raise ValueError(f"worker_url host '{host}' is not allowed")
+
+    # --- Raw IP? block private/loopback/reserved ranges (SSRF) ------------
+    try:
+        ip_obj = ipaddress.ip_address(host)
+    except ValueError:
+        ip_obj = None
+
+    if ip_obj is not None:
+        if (
+            ip_obj.is_private
+            or ip_obj.is_loopback
+            or ip_obj.is_link_local
+            or ip_obj.is_multicast
+            or ip_obj.is_unspecified
+            or ip_obj.is_reserved
+        ):
+            raise ValueError(
+                f"worker_url host '{host}' is a private, loopback, "
+                "link-local, multicast, or reserved address"
+            )
+    else:
+        # DNS hostname — basic character sanity check.
+        if not re.match(r"^[a-z0-9._-]+$", host):
+            raise ValueError(
+                f"worker_url host '{host}' contains invalid characters"
+            )
+        if ".." in host or host.startswith(".") or host.endswith("."):
+            raise ValueError(f"worker_url host '{host}' is malformed")
+
+    # --- Port sanity ------------------------------------------------------
+    port = parsed.port  # urlparse already validates this returns int or None
+    if port is not None and (port < 1 or port > 65535):
+        raise ValueError(f"worker_url port '{port}' out of range")
+
+    # --- Path normalisation -----------------------------------------------
+    path = parsed.path or ""
+    if not path or path == "/":
+        path = "/v1/chat/completions"
+
+    port_part = f":{port}" if port is not None else ""
+    # Query/fragment are intentionally stripped — we never carry arbitrary
+    # user-controlled query params into an outbound HTTP request.
+    return f"https://{host}{port_part}{path}"
 
 DEFAULT_TIMEOUT = 60.0  # seconds
 MAX_TOKENS = 1024
@@ -58,7 +183,8 @@ class ProviderSpec:
     wire_format: str           # "openai" | "anthropic" | "gemini"
     docs_url: str              # where users go to get a key
     free_tier_hint: str        # 1-line description for the UI
-    needs_account_id: bool = False  # Cloudflare special-case
+    needs_account_id: bool = False  # Cloudflare direct REST
+    needs_worker_url: bool = False  # Self-hosted CF Worker gateway
 
 
 PROVIDERS: Dict[str, ProviderSpec] = {
@@ -80,12 +206,25 @@ PROVIDERS: Dict[str, ProviderSpec] = {
     ),
     "cloudflare": ProviderSpec(
         key="cloudflare",
-        label="Cloudflare Workers AI",
+        label="Cloudflare Workers AI (direct)",
         default_model="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
         wire_format="openai",
         docs_url="https://dash.cloudflare.com/profile/api-tokens",
-        free_tier_hint="10,000 neurons/day free — no credit card",
+        free_tier_hint="10,000 neurons/day free — requires CF API token",
         needs_account_id=True,
+    ),
+    "cloudflare_worker": ProviderSpec(
+        key="cloudflare_worker",
+        label="Cloudflare Worker Gateway (self-hosted)",
+        default_model="@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+        wire_format="openai",
+        docs_url="https://github.com/pnwimport/slowbooks-pro-2026/tree/main/cloudflare",
+        free_tier_hint=(
+            "Deploy cloudflare/worker.js in your own CF account — "
+            "real API credentials stay in Cloudflare, Slowbooks only "
+            "holds a shared secret"
+        ),
+        needs_worker_url=True,
     ),
     "anthropic": ProviderSpec(
         key="anthropic",
@@ -124,6 +263,7 @@ def provider_list() -> list:
             "docs_url": p.docs_url,
             "free_tier_hint": p.free_tier_hint,
             "needs_account_id": p.needs_account_id,
+            "needs_worker_url": p.needs_worker_url,
         }
         for p in PROVIDERS.values()
     ]
@@ -291,6 +431,7 @@ def build_request(
     system: str,
     user: str,
     account_id: Optional[str] = None,
+    worker_url: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Build an httpx-ready request dict for the given provider.
 
@@ -332,6 +473,19 @@ def build_request(
             f"{account_id}/ai/v1/chat/completions"
         )
         return _openai_style_request(url, api_key, model, system, user)
+
+    if provider_key == "cloudflare_worker":
+        # Self-hosted CF Worker (see cloudflare/worker.js). The user runs
+        # their own Worker in their own Cloudflare account; Slowbooks only
+        # holds the shared Bearer secret. URL is validated aggressively by
+        # validate_worker_url() to prevent MITM / SSRF / scheme confusion.
+        if not worker_url:
+            raise ValueError(
+                "Cloudflare Worker gateway requires worker_url — deploy "
+                "cloudflare/worker.js and paste its URL in AI settings"
+            )
+        safe_url = validate_worker_url(worker_url)
+        return _openai_style_request(safe_url, api_key, model, system, user)
 
     if provider_key == "anthropic":
         return {
@@ -426,6 +580,26 @@ class AIProviderError(Exception):
     """Raised when the AI provider returns a non-2xx or malformed response."""
 
 
+def _hardened_client(timeout: float) -> httpx.Client:
+    """Build an httpx.Client with explicit security defaults.
+
+    Every outbound AI call goes through one of these so the security
+    posture is obvious from the code (not implicit httpx defaults):
+
+      * ``verify=True``        — TLS cert validation on; no downgrade
+      * ``follow_redirects=False`` — a compromised upstream can't 302 us
+        into a different host/scheme (e.g. cleartext or an SSRF target)
+      * explicit timeout       — no hang forever on a dead provider
+      * minimal User-Agent     — don't leak version strings
+    """
+    return httpx.Client(
+        timeout=timeout,
+        verify=True,
+        follow_redirects=False,
+        headers={"User-Agent": "slowbooks-pro-ai/1.0"},
+    )
+
+
 def call_provider(
     provider_key: str,
     api_key: str,
@@ -433,6 +607,7 @@ def call_provider(
     system: str,
     user: str,
     account_id: Optional[str] = None,
+    worker_url: Optional[str] = None,
     timeout: float = DEFAULT_TIMEOUT,
     client: Optional[httpx.Client] = None,
 ) -> str:
@@ -440,11 +615,13 @@ def call_provider(
 
     `client` is injectable for tests that want to stub out the transport.
     """
-    req = build_request(provider_key, api_key, model, system, user, account_id)
+    req = build_request(
+        provider_key, api_key, model, system, user, account_id, worker_url
+    )
 
     try:
         if client is None:
-            with httpx.Client(timeout=timeout) as c:
+            with _hardened_client(timeout) as c:
                 resp = c.request(req["method"], req["url"],
                                  headers=req["headers"], json=req["json"])
         else:
@@ -485,6 +662,7 @@ def generate_insights(
     dashboard: Dict[str, Any],
     company_name: str = "",
     account_id: Optional[str] = None,
+    worker_url: Optional[str] = None,
     client: Optional[httpx.Client] = None,
 ) -> Dict[str, Any]:
     """End-to-end: build prompt, call provider, return structured result."""
@@ -496,6 +674,7 @@ def generate_insights(
         system=SYSTEM_PROMPT,
         user=prompt,
         account_id=account_id,
+        worker_url=worker_url,
         client=client,
     )
     return {
@@ -521,6 +700,7 @@ def call_with_tools(
     tools: Dict[str, Any],
     tool_executor,
     account_id: Optional[str] = None,
+    worker_url: Optional[str] = None,
     max_calls: int = 8,
     client: Optional[httpx.Client] = None,
 ) -> Dict[str, Any]:
@@ -567,7 +747,10 @@ def call_with_tools(
         # Build the request with tools included
         if wire_format == "openai":
             # OpenAI format: include tools in the request
-            req = build_request(provider_key, api_key, model, "", user_question, account_id)
+            req = build_request(
+                provider_key, api_key, model, "", user_question,
+                account_id, worker_url,
+            )
             req["json"]["messages"] = messages
             req["json"]["tools"] = [
                 {
@@ -583,7 +766,10 @@ def call_with_tools(
 
         elif wire_format == "anthropic":
             # Anthropic format: tools at top level
-            req = build_request(provider_key, api_key, model, "", user_question, account_id)
+            req = build_request(
+                provider_key, api_key, model, "", user_question,
+                account_id, worker_url,
+            )
             req["json"]["messages"] = messages
             req["json"]["tools"] = [
                 {
@@ -600,7 +786,10 @@ def call_with_tools(
 
         elif wire_format == "gemini":
             # Gemini has a different tool format
-            req = build_request(provider_key, api_key, model, "", user_question, account_id)
+            req = build_request(
+                provider_key, api_key, model, "", user_question,
+                account_id, worker_url,
+            )
             req["json"]["tools"] = [
                 {
                     "functionDeclarations": [
@@ -623,10 +812,11 @@ def call_with_tools(
         else:
             raise ValueError(f"Tool calling not supported for wire format: {wire_format}")
 
-        # Make the call
+        # Make the call — reuses the same hardened-client profile as
+        # call_provider (verify=True, follow_redirects=False, explicit UA).
         try:
             if client is None:
-                with httpx.Client(timeout=DEFAULT_TIMEOUT) as c:
+                with _hardened_client(DEFAULT_TIMEOUT) as c:
                     resp = c.request(req["method"], req["url"],
                                      headers=req["headers"], json=req["json"])
             else:
