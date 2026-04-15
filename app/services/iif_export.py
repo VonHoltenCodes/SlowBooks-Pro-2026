@@ -341,7 +341,7 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
         joinedload(Payment.customer),
         joinedload(Payment.deposit_to_account),
         joinedload(Payment.allocations).joinedload(PaymentAllocation.invoice),
-    )
+    ).filter(Payment.is_voided == False)
 
     if date_from:
         query = query.filter(Payment.date >= date_from)

@@ -141,6 +141,61 @@ def _parse_decimal(s: str) -> Decimal:
         return Decimal("0")
 
 
+# Well-known IIF account names mapped to standard Slowbooks account numbers.
+# Used as fallback when name-based lookup fails during import.
+_WELL_KNOWN_ACCOUNTS = {
+    "accounts receivable": "1100",
+    "a/r": "1100",
+    "trade receivables": "1100",
+    "undeposited funds": "1200",
+    "accounts payable": "2000",
+    "a/p": "2000",
+    "trade payables": "2000",
+    "sales tax payable": "2200",
+    "checking": "1000",
+    "savings": "1010",
+    "service income": "4000",
+    "product sales": "4100",
+    "material income": "4200",
+    "labor income": "4300",
+    "other income": "4900",
+    "cost of goods sold": "5000",
+    "cogs": "5000",
+}
+
+
+def _find_account(db: Session, name: str) -> Account:
+    """Find an account by name with fallback strategies.
+
+    1. Exact name match
+    2. Case-insensitive name match
+    3. Well-known account name → account number mapping
+    """
+    if not name:
+        return None
+
+    # 1. Exact match
+    acct = db.query(Account).filter(Account.name == name).first()
+    if acct:
+        return acct
+
+    # 2. Case-insensitive match
+    acct = db.query(Account).filter(
+        Account.name.ilike(name)
+    ).first()
+    if acct:
+        return acct
+
+    # 3. Well-known name → account number fallback
+    acct_num = _WELL_KNOWN_ACCOUNTS.get(name.lower().strip())
+    if acct_num:
+        acct = db.query(Account).filter(Account.account_number == acct_num).first()
+        if acct:
+            return acct
+
+    return None
+
+
 # ============================================================================
 # Reverse type mappings (IIF -> Slowbooks)
 # ============================================================================
@@ -373,11 +428,11 @@ def import_items(db: Session, rows: list) -> dict:
             iif_type = row.get("INVITEMTYPE", "").strip().upper()
             item_type = _IIF_TO_ITEM_TYPE.get(iif_type, ItemType.SERVICE)
 
-            # Resolve income account by name
+            # Resolve income account by name (with fallback)
             income_account_id = None
             acct_name = row.get("ACCNT", "").strip()
             if acct_name:
-                acct = db.query(Account).filter(Account.name == acct_name).first()
+                acct = _find_account(db, acct_name)
                 if acct:
                     income_account_id = acct.id
 
@@ -411,6 +466,7 @@ def import_transactions(db: Session, blocks: list) -> dict:
     """
     counts = {"invoices": 0, "payments": 0, "estimates": 0}
     errors = []
+    warnings = []
 
     for i, block in enumerate(blocks):
         sp = db.begin_nested()
@@ -423,10 +479,15 @@ def import_transactions(db: Session, blocks: list) -> dict:
                 result = _import_invoice(db, trns, spls)
                 if result:
                     counts["invoices"] += 1
+                    if not result.transaction_id:
+                        doc = result.invoice_number or f"block {i+1}"
+                        warnings.append(f"Invoice {doc}: imported but journal entry could not be created (account mismatch)")
             elif trns_type == "PAYMENT":
                 result = _import_payment(db, trns, spls)
                 if result:
                     counts["payments"] += 1
+                    if not result.transaction_id:
+                        warnings.append(f"Payment block {i+1}: imported but journal entry could not be created (account mismatch)")
             elif trns_type == "ESTIMATE":
                 result = _import_estimate(db, trns, spls)
                 if result:
@@ -438,7 +499,7 @@ def import_transactions(db: Session, blocks: list) -> dict:
             sp.rollback()
             errors.append({"row": i + 1, "message": f"Transaction block {i + 1}: {str(e)}"})
 
-    return {"imported": counts, "errors": errors}
+    return {"imported": counts, "errors": errors, "warnings": warnings}
 
 
 def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
@@ -528,6 +589,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
 
     # Create journal entry
     ar_id = get_ar_account_id(db)
+    unmatched_accounts = []
     if ar_id and subtotal > 0:
         journal_lines = [
             {"account_id": ar_id, "debit": invoice.total, "credit": Decimal("0"),
@@ -540,7 +602,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
             spl_amount = abs(_parse_decimal(spl.get("AMOUNT", "")))
             if spl_amount == 0:
                 continue
-            acct = db.query(Account).filter(Account.name == acct_name).first()
+            acct = _find_account(db, acct_name)
             if acct:
                 journal_lines.append({
                     "account_id": acct.id,
@@ -548,6 +610,8 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
                     "credit": spl_amount,
                     "description": f"Invoice {doc_num}",
                 })
+            else:
+                unmatched_accounts.append(acct_name)
 
         # Only post if balanced
         total_dr = sum(Decimal(str(l["debit"])) for l in journal_lines)
@@ -561,6 +625,25 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
                 source_id=invoice.id,
             )
             invoice.transaction_id = txn.id
+        elif total_dr != total_cr:
+            # Journal unbalanced because account(s) not found — use default income
+            default_income_id = get_default_income_account_id(db)
+            if default_income_id:
+                shortfall = total_dr - total_cr
+                journal_lines.append({
+                    "account_id": default_income_id,
+                    "debit": Decimal("0"),
+                    "credit": shortfall,
+                    "description": f"Invoice {doc_num} (unmatched: {', '.join(unmatched_accounts)})",
+                })
+                txn = create_journal_entry(
+                    db, invoice.date,
+                    f"IIF Import — Invoice {doc_num}",
+                    journal_lines,
+                    source_type="invoice",
+                    source_id=invoice.id,
+                )
+                invoice.transaction_id = txn.id
 
     db.flush()
     return invoice
@@ -592,9 +675,15 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     pmt_date = _parse_iif_date(trns.get("DATE", ""))
     amount = abs(_parse_decimal(trns.get("AMOUNT", "")))
 
-    # Resolve deposit account
+    # Resolve deposit account (with fallback to well-known names and Undeposited Funds)
     deposit_acct_name = trns.get("ACCNT", "").strip()
-    deposit_acct = db.query(Account).filter(Account.name == deposit_acct_name).first()
+    deposit_acct = _find_account(db, deposit_acct_name)
+    if not deposit_acct:
+        # Last resort: use Undeposited Funds
+        from app.services.accounting import get_undeposited_funds_id
+        uf_id = get_undeposited_funds_id(db)
+        if uf_id:
+            deposit_acct = db.query(Account).filter(Account.id == uf_id).first()
 
     payment = Payment(
         customer_id=customer.id,
@@ -874,6 +963,7 @@ def import_all(db: Session, content: str) -> dict:
         "payments": 0,
         "estimates": 0,
         "errors": [],
+        "warnings": [],
     }
 
     parsed = parse_iif(content)
@@ -907,6 +997,7 @@ def import_all(db: Session, content: str) -> dict:
         result["payments"] = counts.get("payments", 0)
         result["estimates"] = counts.get("estimates", 0)
         result["errors"].extend(r["errors"])
+        result["warnings"].extend(r.get("warnings", []))
 
     db.commit()
     return result

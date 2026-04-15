@@ -346,6 +346,15 @@ const IIFPage = {
         }
         html += '</div>';
 
+        if (result.warnings && result.warnings.length) {
+            html += '<div class="iif-warnings">';
+            html += `<strong>Warnings (${result.warnings.length}):</strong><br>`;
+            result.warnings.forEach(w => {
+                html += `${escapeHtml(w)}<br>`;
+            });
+            html += '</div>';
+        }
+
         if (result.errors && result.errors.length) {
             html += '<div class="iif-errors">';
             result.errors.forEach(e => {
