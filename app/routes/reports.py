@@ -22,7 +22,7 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment
 from app.models.contacts import Customer
 from app.services.pdf_service import generate_statement_pdf
-from app.routes.settings import _get_all as get_settings
+from app.services.settings_service import get_all_settings as get_settings
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 

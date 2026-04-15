@@ -24,7 +24,7 @@ from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
     get_default_income_account_id, get_sales_tax_account_id,
 )
-from app.routes.settings import _get_all as get_settings
+from app.services.settings_service import get_all_settings as get_settings
 from app.services.closing_date import check_closing_date
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])

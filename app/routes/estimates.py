@@ -19,7 +19,7 @@ from app.models.contacts import Customer
 from app.schemas.estimates import EstimateCreate, EstimateUpdate, EstimateResponse
 from app.schemas.invoices import InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
-from app.routes.settings import _get_all as get_settings, _set as set_setting
+from app.services.settings_service import get_all_settings as get_settings, set_setting
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
