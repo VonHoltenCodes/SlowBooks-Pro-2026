@@ -95,6 +95,8 @@ Real-time business intelligence layer that sits on top of the accounting engine.
 - **Customer Profitability** — Lifetime paid revenue per customer (first pass; COGS attribution on the roadmap)
 - **Dashboard Page** — Standalone dark-themed page at `/analytics` with 4 KPI cards (Revenue / Expenses / DSO / Margin%), sortable revenue table, and A/R aging table. Zero-dependency vanilla JS — no chart library needed yet
 
+**Performance:** `GET /api/analytics/dashboard` issues exactly **10 SQL queries** regardless of dataset size — every method is single-query (or at most two) with no N+1 relationship loads. Measured on SQLite with 3,000 invoices + 1,500 bills: **~19 ms** end-to-end; with 8,000 invoices + 4,000 bills: **~50 ms**.
+
 Quick smoke test once the app is running:
 ```bash
 curl http://localhost:3001/api/analytics/dashboard

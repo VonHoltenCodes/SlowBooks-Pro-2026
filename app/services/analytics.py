@@ -85,22 +85,36 @@ class AnalyticsEngine:
     def revenue_trend(self, months: int = 12):
         """Monthly paid-revenue for the last N months (oldest → newest).
 
-        Walks months by decrementing month/year so two iterations can never
-        collapse into the same bucket (the naive `-30*i` approach would).
+        Single query: fetches `(date, total)` pairs for paid invoices in the
+        window and aggregates by calendar month in Python. One query instead
+        of N (the old per-month loop was a classic N+1). Result is dense —
+        months with no revenue still appear with 0.0.
         """
+        today = date.today()
+        end_cursor = _next_month_start(today)
+        start_cursor = _month_start(today)
+        for _ in range(months - 1):
+            start_cursor = _prev_month_start(start_cursor)
+
+        rows = (
+            self.db.query(Invoice.date, Invoice.total)
+            .filter(Invoice.date >= start_cursor, Invoice.date < end_cursor)
+            .filter(Invoice.status == InvoiceStatus.PAID)
+            .all()
+        )
+
         result = {}
-        cursor = _month_start(date.today())
+        cursor = start_cursor
         for _ in range(months):
-            next_start = _next_month_start(cursor)
-            total = (
-                self.db.query(func.coalesce(func.sum(Invoice.total), 0))
-                .filter(Invoice.date >= cursor, Invoice.date < next_start)
-                .filter(Invoice.status == InvoiceStatus.PAID)
-                .scalar()
-            ) or Decimal(0)
-            result[cursor.strftime("%Y-%m")] = float(total)
-            cursor = _prev_month_start(cursor)
-        return dict(sorted(result.items()))
+            result[cursor.strftime("%Y-%m")] = 0.0
+            cursor = _next_month_start(cursor)
+
+        for inv_date, total in rows:
+            key = inv_date.strftime("%Y-%m")
+            if key in result:
+                result[key] += float(total or 0)
+
+        return result
 
     # ------------------------------------------------------------------
     # Expenses
@@ -142,11 +156,14 @@ class AnalyticsEngine:
         """A/R aging by customer — buckets keyed current / 30 / 60 / 90.
 
         Uses Invoice.balance_due (the canonical open-balance column) so we
-        don't double-count partial payments.
+        don't double-count partial payments. Single joined query returning
+        only `(customer_name, date, balance_due)` tuples — avoids the N+1
+        relationship load that `inv.customer.name` would have triggered.
         """
         today = date.today()
-        invoices = (
-            self.db.query(Invoice)
+        rows = (
+            self.db.query(Customer.name, Invoice.date, Invoice.balance_due)
+            .join(Customer, Invoice.customer_id == Customer.id)
             .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
             .filter(Invoice.balance_due > 0)
             .all()
@@ -159,11 +176,8 @@ class AnalyticsEngine:
             "90": defaultdict(float),
         }
 
-        for inv in invoices:
-            days = (today - inv.date).days
-            customer = inv.customer.name if inv.customer else "Unknown"
-            balance = float(inv.balance_due or 0)
-
+        for customer_name, inv_date, balance in rows:
+            days = (today - inv_date).days
             if days <= 30:
                 bucket = "current"
             elif days <= 60:
@@ -172,16 +186,19 @@ class AnalyticsEngine:
                 bucket = "60"
             else:
                 bucket = "90"
-
-            aging[bucket][customer] += balance
+            aging[bucket][customer_name or "Unknown"] += float(balance or 0)
 
         return {k: dict(v) for k, v in aging.items()}
 
     def ap_aging(self):
-        """A/P aging by vendor — buckets keyed current / 30 / 60 / 90."""
+        """A/P aging by vendor — buckets keyed current / 30 / 60 / 90.
+
+        Single joined query; same N+1-avoidance story as `ar_aging`.
+        """
         today = date.today()
-        bills = (
-            self.db.query(Bill)
+        rows = (
+            self.db.query(Vendor.name, Bill.date, Bill.balance_due)
+            .join(Vendor, Bill.vendor_id == Vendor.id)
             .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
             .filter(Bill.balance_due > 0)
             .all()
@@ -194,11 +211,8 @@ class AnalyticsEngine:
             "90": defaultdict(float),
         }
 
-        for bill in bills:
-            days = (today - bill.date).days
-            vendor = bill.vendor.name if bill.vendor else "Unknown"
-            balance = float(bill.balance_due or 0)
-
+        for vendor_name, bill_date, balance in rows:
+            days = (today - bill_date).days
             if days <= 30:
                 bucket = "current"
             elif days <= 60:
@@ -207,8 +221,7 @@ class AnalyticsEngine:
                 bucket = "60"
             else:
                 bucket = "90"
-
-            aging[bucket][vendor] += balance
+            aging[bucket][vendor_name or "Unknown"] += float(balance or 0)
 
         return {k: dict(v) for k, v in aging.items()}
 
@@ -245,38 +258,48 @@ class AnalyticsEngine:
 
         Cumulative: every bucket shows the total due on-or-before that date.
         Always includes day 0 and day `days` so a 90-day forecast ends at 90.
+
+        Two queries (open A/R, open A/P), then a single sorted walk that
+        accumulates running sums at each weekly cutoff. Was 28 queries.
         """
         today = date.today()
-        forecast = []
+
+        ar_rows = (
+            self.db.query(Invoice.due_date, Invoice.balance_due)
+            .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
+            .filter(Invoice.due_date.isnot(None))
+            .all()
+        )
+        ap_rows = (
+            self.db.query(Bill.due_date, Bill.balance_due)
+            .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
+            .filter(Bill.due_date.isnot(None))
+            .all()
+        )
+
+        ar_sorted = sorted((d, float(b or 0)) for d, b in ar_rows)
+        ap_sorted = sorted((d, float(b or 0)) for d, b in ap_rows)
 
         offsets = list(range(0, days, 7))
         if not offsets or offsets[-1] != days:
             offsets.append(days)
 
+        forecast = []
+        ar_idx = ap_idx = 0
+        ar_sum = ap_sum = 0.0
         for offset in offsets:
             cutoff = today + _days(offset)
-
-            collections = (
-                self.db.query(func.coalesce(func.sum(Invoice.balance_due), 0))
-                .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
-                .filter(Invoice.due_date.isnot(None))
-                .filter(Invoice.due_date <= cutoff)
-                .scalar()
-            ) or Decimal(0)
-
-            payments = (
-                self.db.query(func.coalesce(func.sum(Bill.balance_due), 0))
-                .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
-                .filter(Bill.due_date.isnot(None))
-                .filter(Bill.due_date <= cutoff)
-                .scalar()
-            ) or Decimal(0)
-
+            while ar_idx < len(ar_sorted) and ar_sorted[ar_idx][0] <= cutoff:
+                ar_sum += ar_sorted[ar_idx][1]
+                ar_idx += 1
+            while ap_idx < len(ap_sorted) and ap_sorted[ap_idx][0] <= cutoff:
+                ap_sum += ap_sorted[ap_idx][1]
+                ap_idx += 1
             forecast.append({
                 "date": cutoff.isoformat(),
-                "collections": float(collections),
-                "payments": float(payments),
-                "net": float(collections - payments),
+                "collections": ar_sum,
+                "payments": ap_sum,
+                "net": ar_sum - ap_sum,
             })
 
         return forecast
