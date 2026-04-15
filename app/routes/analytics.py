@@ -30,7 +30,9 @@ from app.services.ai_service import (
     PROVIDERS as AI_PROVIDERS,
     generate_insights as ai_generate_insights,
     provider_list as ai_provider_list,
+    call_with_tools,
 )
+from app.services.ai_tools import TOOLS as AI_TOOLS, call_tool
 from app.services.crypto import decrypt_value, encrypt_value, is_encrypted
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -477,3 +479,58 @@ def ai_insights(
     }
     _AI_CACHE[cache_key] = (now + _AI_CACHE_TTL_SECONDS, payload)
     return payload
+
+
+# ===========================================================================
+# AI Q&A with Tool Calling — Phase 9.5b
+# ===========================================================================
+
+@router.post("/ai-query")
+def ai_query(
+    question: str = Query(..., description="User question"),
+    db: Session = Depends(get_db),
+):
+    """Answer arbitrary business questions using tool-calling LLM.
+
+    The LLM calls tools like search_bills, list_customers, etc. to gather
+    data, then synthesizes an answer. Max 8 tool calls per question.
+
+    Returns {provider, model, final_response, tool_calls, call_count, success}.
+    """
+    cfg = _read_ai_config(db)
+    provider = cfg.get("provider") or ""
+    api_key = cfg.get("api_key") or ""
+
+    if not provider or not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="AI provider not configured. POST /api/analytics/ai-config first.",
+        )
+    if provider == "cloudflare" and not cfg.get("cloudflare_account_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cloudflare provider requires cloudflare_account_id",
+        )
+
+    spec = AI_PROVIDERS[provider]
+    model = cfg.get("model") or spec.default_model
+
+    # Build tool executor that captures DB session
+    def tool_exec(tool_name: str, **params):
+        return call_tool(tool_name, db, **params)
+
+    try:
+        result = call_with_tools(
+            provider_key=provider,
+            api_key=api_key,
+            model=model,
+            user_question=question,
+            tools=AI_TOOLS,
+            tool_executor=tool_exec,
+            account_id=cfg.get("cloudflare_account_id") or None,
+            max_calls=8,
+        )
+    except AIProviderError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return result

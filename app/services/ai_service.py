@@ -496,3 +496,283 @@ def generate_insights(
         "model": model or PROVIDERS[provider_key].default_model,
         "generated_at": date.today().isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Tool-calling / function-calling loop (Phase 9.5b)
+# Supports OpenAI, Anthropic, and Gemini wire formats with max 8 iterations
+# ---------------------------------------------------------------------------
+
+
+def call_with_tools(
+    provider_key: str,
+    api_key: str,
+    model: str,
+    user_question: str,
+    tools: Dict[str, Any],
+    tool_executor,
+    account_id: Optional[str] = None,
+    max_calls: int = 8,
+    client: Optional[httpx.Client] = None,
+) -> Dict[str, Any]:
+    """
+    Execute a tool-calling loop against an LLM that supports function calling.
+
+    Takes a user question, gets the LLM to call tools, executes them, feeds
+    results back to the LLM, repeats until the LLM responds with text (no
+    more tool calls) or max_calls is hit.
+
+    Args:
+        provider_key: "grok" | "groq" | "openai" | "cloudflare" | "anthropic" | "gemini"
+        api_key: Provider's API key
+        model: Model identifier
+        user_question: The user's query
+        tools: Dict of {tool_name: {name, description, parameters, ...}}
+        tool_executor: Callable(tool_name, **kwargs) -> dict result
+        account_id: For Cloudflare (optional)
+        max_calls: Max tool call iterations (default 8)
+        client: httpx.Client for testing (optional)
+
+    Returns:
+        {
+            "provider": str,
+            "model": str,
+            "final_response": str,
+            "tool_calls": [{tool_name, params, result}, ...],
+            "call_count": int,
+            "success": bool,
+        }
+    """
+    spec = PROVIDERS.get(provider_key)
+    if not spec:
+        raise ValueError(f"Unknown provider: {provider_key}")
+
+    wire_format = spec.wire_format
+    messages = [{"role": "user", "content": user_question}]
+    tool_calls_made = []
+    iteration = 0
+
+    while iteration < max_calls:
+        iteration += 1
+
+        # Build the request with tools included
+        if wire_format == "openai":
+            # OpenAI format: include tools in the request
+            req = build_request(provider_key, api_key, model, "", user_question, account_id)
+            req["json"]["messages"] = messages
+            req["json"]["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool.get("description", ""),
+                        "parameters": tool.get("parameters", {}),
+                    },
+                }
+                for tool in tools.values()
+            ]
+
+        elif wire_format == "anthropic":
+            # Anthropic format: tools at top level
+            req = build_request(provider_key, api_key, model, "", user_question, account_id)
+            req["json"]["messages"] = messages
+            req["json"]["tools"] = [
+                {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "input_schema": {
+                        "type": "object",
+                        "properties": tool.get("parameters", {}).get("properties", {}),
+                        "required": tool.get("parameters", {}).get("required", []),
+                    },
+                }
+                for tool in tools.values()
+            ]
+
+        elif wire_format == "gemini":
+            # Gemini has a different tool format
+            req = build_request(provider_key, api_key, model, "", user_question, account_id)
+            req["json"]["tools"] = [
+                {
+                    "functionDeclarations": [
+                        {
+                            "name": tool["name"],
+                            "description": tool.get("description", ""),
+                            "parameters": {
+                                "type": "object",
+                                "properties": tool.get("parameters", {}).get("properties", {}),
+                            },
+                        }
+                        for tool in tools.values()
+                    ]
+                }
+            ]
+            req["json"]["contents"] = [{"role": "user", "parts": [{"text": user_question}]}]
+            # Remove the old messages/contents structure
+            if "messages" in req["json"]:
+                del req["json"]["messages"]
+        else:
+            raise ValueError(f"Tool calling not supported for wire format: {wire_format}")
+
+        # Make the call
+        try:
+            if client is None:
+                with httpx.Client(timeout=DEFAULT_TIMEOUT) as c:
+                    resp = c.request(req["method"], req["url"],
+                                     headers=req["headers"], json=req["json"])
+            else:
+                resp = client.request(req["method"], req["url"],
+                                      headers=req["headers"], json=req["json"])
+        except httpx.HTTPError as e:
+            raise AIProviderError(f"{provider_key}: network error") from e
+
+        if resp.status_code >= 400:
+            text = resp.text
+            if api_key and api_key in text:
+                text = text.replace(api_key, "***REDACTED***")
+            raise AIProviderError(f"{provider_key}: HTTP {resp.status_code} — {text[:500]}")
+
+        try:
+            body = resp.json()
+        except ValueError as e:
+            raise AIProviderError(f"{provider_key}: non-JSON response") from e
+
+        # Parse response and check for tool calls
+        tool_calls = _extract_tool_calls(wire_format, body)
+
+        if not tool_calls:
+            # No tool calls — LLM is done. Extract final text.
+            final_text = parse_response(provider_key, body)
+            return {
+                "provider": provider_key,
+                "model": model,
+                "final_response": final_text,
+                "tool_calls": tool_calls_made,
+                "call_count": iteration,
+                "success": bool(final_text),
+            }
+
+        # Execute the tool calls and build results
+        for call in tool_calls:
+            tool_name = call.get("name")
+            tool_params = call.get("arguments", {})
+            result = tool_executor(tool_name, **tool_params)
+            tool_calls_made.append({
+                "tool_name": tool_name,
+                "params": tool_params,
+                "result": result,
+            })
+
+            # Add the assistant's response (tool call request) to messages
+            if wire_format == "openai":
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [{
+                        "id": f"call_{len(tool_calls_made)}",
+                        "type": "function",
+                        "function": {"name": tool_name, "arguments": str(tool_params)},
+                    }],
+                })
+                # Add tool result
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": f"call_{len(tool_calls_made)}",
+                    "content": str(result),
+                })
+
+            elif wire_format == "anthropic":
+                messages.append({
+                    "role": "assistant",
+                    "content": [{
+                        "type": "tool_use",
+                        "id": f"tool_use_{len(tool_calls_made)}",
+                        "name": tool_name,
+                        "input": tool_params,
+                    }],
+                })
+                messages.append({
+                    "role": "user",
+                    "content": [{
+                        "type": "tool_result",
+                        "tool_use_id": f"tool_use_{len(tool_calls_made)}",
+                        "content": str(result),
+                    }],
+                })
+
+            elif wire_format == "gemini":
+                # Gemini's tool results go in functionResponse
+                pass  # TODO: Implement Gemini tool result handling
+
+    # Max iterations reached
+    return {
+        "provider": provider_key,
+        "model": model,
+        "final_response": "Max tool calls reached without final response",
+        "tool_calls": tool_calls_made,
+        "call_count": iteration,
+        "success": False,
+    }
+
+
+def _extract_tool_calls(wire_format: str, body: Dict[str, Any]) -> list:
+    """Extract tool calls from the provider's response body.
+
+    Returns list of {name, arguments} dicts, or [] if no tool calls.
+    """
+    if wire_format in ("grok", "groq", "openai", "cloudflare"):
+        # OpenAI format: choices[0].message.tool_calls
+        try:
+            choice = body.get("choices", [{}])[0]
+            message = choice.get("message", {})
+            return [
+                {
+                    "name": tc.get("function", {}).get("name"),
+                    "arguments": _parse_json_args(tc.get("function", {}).get("arguments", "{}")),
+                }
+                for tc in message.get("tool_calls", [])
+            ]
+        except (KeyError, IndexError, TypeError):
+            return []
+
+    elif wire_format == "anthropic":
+        # Anthropic format: content array with type: tool_use blocks
+        try:
+            content = body.get("content", [])
+            return [
+                {"name": c.get("name"), "arguments": c.get("input", {})}
+                for c in content
+                if isinstance(c, dict) and c.get("type") == "tool_use"
+            ]
+        except (KeyError, TypeError):
+            return []
+
+    elif wire_format == "gemini":
+        # Gemini format: candidates[0].content.parts with functionCall
+        try:
+            candidate = body.get("candidates", [{}])[0]
+            content = candidate.get("content", {})
+            parts = content.get("parts", [])
+            return [
+                {
+                    "name": p.get("functionCall", {}).get("name"),
+                    "arguments": p.get("functionCall", {}).get("args", {}),
+                }
+                for p in parts
+                if isinstance(p, dict) and "functionCall" in p
+            ]
+        except (KeyError, IndexError, TypeError):
+            return []
+
+    return []
+
+
+def _parse_json_args(args_str: str) -> Dict[str, Any]:
+    """Parse JSON arguments string (from OpenAI format)."""
+    if isinstance(args_str, dict):
+        return args_str
+    try:
+        import json
+        return json.loads(args_str)
+    except (ValueError, TypeError):
+        return {}
