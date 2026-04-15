@@ -24,8 +24,8 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
-RUN chmod +x /app/scripts/docker-entrypoint.sh
+RUN chmod +x /app/scripts/docker-entrypoint.sh /app/scripts/docker/docker-entrypoint.sh
 
 EXPOSE 3001
 
-CMD ["/app/scripts/docker-entrypoint.sh"]
+CMD ["/bin/sh", "/app/scripts/docker-entrypoint.sh"]

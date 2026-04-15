@@ -53,11 +53,14 @@ class DockerConfigTests(unittest.TestCase):
     def test_docker_assets_and_env_keys_exist(self):
         root = Path(__file__).resolve().parent.parent
         env_example = (root / ".env.example").read_text()
+        dockerfile_text = (root / "Dockerfile").read_text()
 
         self.assertTrue((root / "Dockerfile").exists())
         self.assertTrue((root / "docker-compose.yml").exists())
         self.assertTrue((root / ".dockerignore").exists())
         self.assertTrue((root / "scripts" / "docker-entrypoint.sh").exists())
+        self.assertTrue((root / "scripts" / "docker" / "docker-entrypoint.sh").exists())
+        self.assertIn('CMD ["/bin/sh", "/app/scripts/docker-entrypoint.sh"]', dockerfile_text)
         compose_text = (root / "docker-compose.yml").read_text()
         self.assertIn("image: postgres:18", compose_text)
 
