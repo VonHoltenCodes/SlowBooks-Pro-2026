@@ -18,3 +18,5 @@ intuit-oauth>=1.2.0
 # Phase 9.5 — Analytics AI insights + secrets encryption
 cryptography>=41.0.0
 httpx>=0.27.0
+# Fast JSON encoder (used by FastAPI ORJSONResponse for all /api/* replies)
+orjson>=3.10.0

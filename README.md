@@ -299,8 +299,9 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (32 routers, 151+ routes) |
-| Database | PostgreSQL 16 + SQLAlchemy 2.0 |
+| Backend | Python 3.13 + FastAPI (32 routers, 151+ routes) + ORJSONResponse + GZip middleware |
+| Database | PostgreSQL 17 + SQLAlchemy 2.0 (LIFO pool, pool_size=10, max_overflow=20) |
+| Server | uvicorn + uvloop + httptools (2 workers default, tunable via `APP_WORKERS`) |
 | Migrations | Alembic |
 | Frontend | Vanilla HTML/CSS/JS (no framework) + self-hosted Chart.js 4.4.6 for analytics |
 | PDF | WeasyPrint 60.2 + Jinja2 |

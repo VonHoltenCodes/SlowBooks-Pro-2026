@@ -18,37 +18,62 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, ORJSONResponse
 
 from app.routes import (
-    dashboard, accounts, customers, vendors, items,
-    invoices, estimates, payments, banking, reports, settings, iif,
+    dashboard,
+    accounts,
+    customers,
+    vendors,
+    items,
+    invoices,
+    estimates,
+    payments,
+    banking,
+    reports,
+    settings,
+    iif,
 )
+
 # Phase 1: Foundation
 from app.routes import audit, search
+
 # Phase 2: Accounts Payable
 from app.routes import purchase_orders, bills, bill_payments, credit_memos
+
 # Phase 3: Productivity
 from app.routes import recurring, batch_payments
+
 # Phase 4: Communication & Export
 from app.routes import csv as csv_routes
 from app.routes import uploads
+
 # Phase 5: Advanced Integration
 from app.routes import bank_import, tax, backups
+
 # Phase 6: Ambitious
 from app.routes import companies, employees, payroll
+
 # Phase 7: Online Payments
 from app.routes import stripe_payments, public
+
 # Phase 8: QuickBooks Online
 from app.routes import qbo
+
 # Phase 9: Analytics (real-time business intelligence)
 from app.routes import analytics
 
 from app.database import SessionLocal
 from app.services.audit import register_audit_hooks
 
-app = FastAPI(title="Slowbooks Pro 2026", version="2.0.0")
+# ORJSONResponse is 2-3x faster than the stdlib json encoder for every /api/* reply.
+app = FastAPI(
+    title="Slowbooks Pro 2026",
+    version="2.0.0",
+    default_response_class=ORJSONResponse,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -57,6 +82,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# gzip responses larger than 1 KB. Analytics JSON payloads compress ~70%,
+# which is a big win over LAN for /api/analytics/dashboard and friends.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
 # Original API routes
 app.include_router(dashboard.router)
@@ -131,4 +160,5 @@ async def serve_analytics_redirect():
     bare path gets redirected to the same feature.
     """
     from fastapi.responses import RedirectResponse
+
     return RedirectResponse(url="/#/analytics", status_code=307)

@@ -19,4 +19,13 @@ echo "Seeding database..."
 python scripts/seed_database.py
 
 echo "Starting Slowbooks Pro 2026 on port ${APP_PORT:-3001}..."
-exec uvicorn app.main:app --host 0.0.0.0 --port "${APP_PORT:-3001}"
+# Multi-worker production mode.
+# uvloop + httptools come from uvicorn[standard], explicit for clarity.
+# APP_WORKERS defaults to 2 (tunable via docker-compose env or .env).
+exec uvicorn app.main:app \
+    --host 0.0.0.0 \
+    --port "${APP_PORT:-3001}" \
+    --workers "${APP_WORKERS:-2}" \
+    --loop uvloop \
+    --http httptools \
+    --access-log
