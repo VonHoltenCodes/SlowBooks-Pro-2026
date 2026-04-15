@@ -1386,3 +1386,144 @@ tr.clickable { cursor: pointer; }
     border-top: 2px solid var(--panel-border);
     background: rgba(51, 102, 153, 0.04);
 }
+
+/* ================================================================
+ * Phase 9.5 — AI Insights panel + settings modal
+ * ================================================================ */
+.ai-insights-card {
+    border-left: 3px solid #a855f7;
+}
+
+.ai-insights-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #a855f7;
+}
+
+.ai-insights-body {
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--text-muted);
+}
+
+.ai-insights-body h3,
+.ai-insights-body h4 {
+    margin: 10px 0 4px;
+    color: var(--text-heading, var(--text-main, #1a1a28));
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.ai-insights-body ul {
+    margin: 4px 0 8px 18px;
+    padding: 0;
+}
+
+.ai-insights-body li {
+    margin-bottom: 3px;
+}
+
+.ai-insights-body p {
+    margin: 6px 0;
+}
+
+.ai-insights-empty {
+    color: var(--text-muted);
+    font-style: italic;
+    padding: 8px 0;
+}
+
+.ai-insights-busy {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--text-muted);
+    padding: 10px 0;
+}
+
+.ai-insights-meta {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.ai-cache-badge {
+    background: rgba(168, 85, 247, 0.15);
+    color: #a855f7;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+}
+
+.ai-settings-form .form-field {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 10px;
+}
+
+.ai-settings-form .form-field > span {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 4px;
+}
+
+.ai-settings-form input,
+.ai-settings-form select {
+    padding: 6px 10px;
+    font-size: 12px;
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    background: var(--panel-bg);
+    color: var(--text-main, #1a1a28);
+}
+
+.ai-settings-form input:focus,
+.ai-settings-form select:focus {
+    outline: 2px solid #a855f7;
+    outline-offset: -1px;
+}
+
+.ai-settings-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    padding-left: 2px;
+}
+
+.ai-key-saved {
+    color: #00c48f;
+    font-style: normal;
+    font-weight: 600;
+    margin-left: 4px;
+}
+
+.ai-settings-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--panel-border);
+}
+
+.ai-settings-spacer { flex: 1; }
+
+.ai-settings-test-result {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.ai-test-ok { color: #00c48f; }
+.ai-test-fail { color: var(--qb-red); }

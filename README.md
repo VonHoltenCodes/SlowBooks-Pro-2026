@@ -123,6 +123,40 @@ curl 'http://localhost:3001/api/analytics/export.csv?period=year' -o analytics.c
 ```
 Flat CSV with columns `(section, key, subkey, value)` covering 9 sections: period, revenue_by_customer, revenue_trend, expenses_by_category, ar_aging, ap_aging, dso, cash_forecast, customer_profit. Drops straight into Excel / Google Sheets / any BI tool.
 
+#### AI Insights (Phase 9.5)
+An optional LLM layer sits on top of the analytics snapshot and produces a compact **3 observations / 3 risks / 3 recommendations** executive brief. Nothing is sent until you click the **AI Insights** button — the feature is zero-cost by default.
+
+**Six providers supported out of the box** (verified April 2026):
+
+| Provider | Wire format | Default model | Free tier |
+|---|---|---|---|
+| **xAI Grok** | OpenAI-compat | `grok-4.1-fast` | $25 signup credit |
+| **Groq (LPU Cloud)** | OpenAI-compat | `llama-3.3-70b-versatile` | Generous free tier, no card |
+| **Cloudflare Workers AI** | OpenAI-compat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 10k neurons/day, no card |
+| **Anthropic Claude** | `/v1/messages` | `claude-sonnet-4-6` | Paid only |
+| **OpenAI** | `/v1/chat/completions` | `gpt-5.4-mini` | Paid only |
+| **Google Gemini** | `generateContent` | `gemini-2.5-flash` | Free Flash tier via AI Studio |
+
+Each provider's model string is user-editable from the **⚙ AI** button in the analytics header, so renames ("gemini-2.5-flash" → "gemini-3.0-nano" or whatever the vendors ship next quarter) are a UI change, not a code change. Cloudflare gets an extra field for your account ID since its endpoint is account-scoped.
+
+**Settings encryption.** API keys are stored in the `settings` table under `ai_api_key`, encrypted with **Fernet** (AES-128-CBC + HMAC-SHA256) via `app/services/crypto.py`. Ciphertext rows carry the prefix `fernet:v1:` so legacy plaintext rows are detected and migrated gracefully. The master key is resolved in priority order:
+
+1. `SETTINGS_ENCRYPTION_KEY` environment variable (ops-preferred)
+2. `.slowbooks-master.key` file next to the repo (zero-config default; auto-created at 0600)
+3. Fresh generation on first run (logged as a warning)
+
+**Never commit `.slowbooks-master.key`** — it is in `.gitignore`. Losing it means losing every encrypted secret.
+
+`GET /api/analytics/ai-config` returns `{provider, model, cloudflare_account_id, has_api_key, api_key_encrypted, providers}` — the raw key is **never** in the response body. `PUT /api/analytics/ai-config` accepts `{provider, model, cloudflare_account_id, api_key}`; an empty/missing `api_key` is interpreted as "keep the existing encrypted value", so re-saving the provider won't clobber the stored key.
+
+**Endpoints:**
+- `GET  /api/analytics/ai-config` — read display config (no secrets)
+- `PUT  /api/analytics/ai-config` — update provider/model/key/account_id (key is encrypted on save)
+- `POST /api/analytics/ai-config/test` — one-word smoke test against the configured provider
+- `POST /api/analytics/ai-insights?period=month|quarter|year[&force=true]` — run the full dashboard analysis; results are cached in-process for 10 minutes per `(provider, model, period)`, unless `force=true`
+
+All calls go through `httpx` with a 60-second timeout. Error messages redact the API key before raising, so logs and 502 responses never leak your secret.
+
 **PDF export:**
 ```bash
 curl 'http://localhost:3001/api/analytics/export.pdf?period=year' -o analytics.pdf
@@ -488,6 +522,9 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 | `/api/analytics/profitability` | GET | Lifetime paid revenue per customer |
 | `/api/analytics/export.csv` | GET | Flat CSV of the full snapshot (`section,key,subkey,value`) — honors period params |
 | `/api/analytics/export.pdf` | GET | Print-ready PDF via WeasyPrint — honors period params |
+| `/api/analytics/ai-config` | GET, PUT | Display config (no raw key) / update provider/model/key (key Fernet-encrypted at rest) |
+| `/api/analytics/ai-config/test` | POST | Smoke-test the configured provider with a one-word prompt |
+| `/api/analytics/ai-insights` | POST | Run the dashboard through the configured LLM; `?force=true` bypasses 10-min cache |
 | `/analytics` | GET | Backwards-compat 307 redirect to the SPA hash route `/#/analytics` |
 
 ---

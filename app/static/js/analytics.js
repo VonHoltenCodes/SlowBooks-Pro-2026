@@ -28,6 +28,12 @@ const AnalyticsPage = {
         period: 'month',
         data: null,
         charts: {},
+        // Phase 9.5: AI insights are generated on demand (not on every
+        // page load — LLM calls aren't free). We cache the last result in
+        // state so switching routes and coming back keeps it visible.
+        aiInsights: null,   // { insights, provider_label, model, generated_at, cached }
+        aiBusy: false,
+        aiConfig: null,     // last-known provider config (no raw key)
     },
 
     // ------------------------------------------------------------------
@@ -90,11 +96,15 @@ const AnalyticsPage = {
                     </select>
                     <button class="btn btn-secondary btn-sm" id="analytics-refresh" title="Refresh (R)">&#x21bb; Refresh</button>
                     <button class="btn btn-secondary btn-sm" id="analytics-csv" title="Export CSV">Export CSV</button>
-                    <button class="btn btn-primary btn-sm"   id="analytics-pdf" title="Export PDF">Export PDF</button>
+                    <button class="btn btn-secondary btn-sm" id="analytics-pdf" title="Export PDF">Export PDF</button>
+                    <button class="btn btn-secondary btn-sm" id="analytics-ai-settings" title="Configure AI provider">&#9881; AI</button>
+                    <button class="btn btn-primary btn-sm"   id="analytics-ai-run" title="Generate AI insights">&#10024; AI Insights</button>
                 </div>
             </div>
 
             <div class="analytics-meta">${periodLabel}</div>
+
+            ${this._aiPanelHtml()}
 
             <div class="analytics-kpi-grid">
                 <div class="analytics-kpi"><div class="analytics-kpi-label">Revenue</div><div class="analytics-kpi-value kpi-green">${formatCurrency(totalRevenue)}</div></div>
@@ -294,6 +304,11 @@ const AnalyticsPage = {
         if (csv) csv.addEventListener('click', () => this._download('csv'));
         const pdf = $('#analytics-pdf');
         if (pdf) pdf.addEventListener('click', () => this._download('pdf'));
+        // Phase 9.5 AI buttons
+        const aiRun = $('#analytics-ai-run');
+        if (aiRun) aiRun.addEventListener('click', () => this._runAiInsights(false));
+        const aiSettings = $('#analytics-ai-settings');
+        if (aiSettings) aiSettings.addEventListener('click', () => this._openAiSettings());
 
         // Charts
         if (this.state.data && typeof Chart !== 'undefined') {
@@ -564,6 +579,245 @@ const AnalyticsPage = {
                     },
                 },
             },
+        });
+    },
+
+    // ------------------------------------------------------------------
+    // Phase 9.5 — AI insights panel + settings modal
+    // ------------------------------------------------------------------
+    _aiPanelHtml() {
+        const ins = this.state.aiInsights;
+        const busy = this.state.aiBusy;
+        let body;
+        if (busy) {
+            body = `<div class="ai-insights-body ai-insights-busy">
+                <span class="spinner"></span> Generating insights&hellip;
+            </div>`;
+        } else if (!ins) {
+            body = `<div class="ai-insights-body ai-insights-empty">
+                Click <strong>AI Insights</strong> to run the current snapshot through your
+                configured LLM. Nothing is sent until you click.
+            </div>`;
+        } else {
+            body = `
+                <div class="ai-insights-meta">
+                    ${escapeHtml(ins.provider_label || ins.provider || '')}
+                    &middot; ${escapeHtml(ins.model || '')}
+                    &middot; ${escapeHtml(ins.generated_at || '')}
+                    ${ins.cached ? '<span class="ai-cache-badge">cached</span>' : ''}
+                </div>
+                <div class="ai-insights-body">${this._renderMarkdownish(ins.insights || '')}</div>
+            `;
+        }
+        return `
+            <div class="analytics-card ai-insights-card">
+                <div class="analytics-section-title ai-insights-title">
+                    <span>&#10024; AI Insights</span>
+                </div>
+                ${body}
+            </div>
+        `;
+    },
+
+    /**
+     * Minimal markdown-ish renderer for the brief 3/3/3 reports LLMs return.
+     * We intentionally don't pull in a full markdown library — the prompt
+     * tells the model to use ### headings and - bullets, so a tiny
+     * line-by-line pass is enough and keeps the attack surface small.
+     */
+    _renderMarkdownish(text) {
+        const lines = String(text || '').split(/\r?\n/);
+        let html = '';
+        let inList = false;
+        const closeList = () => { if (inList) { html += '</ul>'; inList = false; } };
+
+        for (const raw of lines) {
+            const line = raw.trim();
+            if (!line) { closeList(); continue; }
+            if (line.startsWith('### ')) {
+                closeList();
+                html += `<h4>${escapeHtml(line.slice(4))}</h4>`;
+            } else if (line.startsWith('## ')) {
+                closeList();
+                html += `<h3>${escapeHtml(line.slice(3))}</h3>`;
+            } else if (line.startsWith('- ') || line.startsWith('* ')) {
+                if (!inList) { html += '<ul>'; inList = true; }
+                html += `<li>${escapeHtml(line.slice(2))}</li>`;
+            } else {
+                closeList();
+                html += `<p>${escapeHtml(line)}</p>`;
+            }
+        }
+        closeList();
+        return html || '<p class="ai-insights-empty">(empty response)</p>';
+    },
+
+    async _runAiInsights(force = false) {
+        this.state.aiBusy = true;
+        this._updateAiPanel();
+        App.setStatus('Generating AI insights...');
+        try {
+            const qs = new URLSearchParams({ period: this.state.period });
+            if (force) qs.set('force', 'true');
+            const res = await API.post(`/analytics/ai-insights?${qs.toString()}`, {});
+            this.state.aiInsights = res;
+            toast('AI insights ready', 'success');
+        } catch (err) {
+            const msg = err && err.message ? err.message : String(err);
+            // 400 → config missing. Offer settings modal.
+            if (/not configured/i.test(msg)) {
+                toast('Configure an AI provider first', 'error');
+                this._openAiSettings();
+            } else {
+                toast('AI insights failed: ' + msg, 'error');
+            }
+        } finally {
+            this.state.aiBusy = false;
+            this._updateAiPanel();
+            App.setStatus('Analytics — Ready');
+        }
+    },
+
+    _updateAiPanel() {
+        // Swap only the AI card, not the whole page — keeps chart state
+        // intact (avoids a full _reload()).
+        const host = document.querySelector('.ai-insights-card');
+        if (!host) return;
+        // Replace the inner content. We rebuild the whole card HTML and
+        // splice just the children to avoid re-triggering listeners on
+        // the control bar.
+        const tmp = document.createElement('div');
+        tmp.innerHTML = this._aiPanelHtml();
+        const fresh = tmp.querySelector('.ai-insights-card');
+        if (fresh) host.innerHTML = fresh.innerHTML;
+    },
+
+    async _openAiSettings() {
+        // Fetch current config so the form reflects the stored values.
+        let cfg;
+        try {
+            cfg = await API.get('/analytics/ai-config');
+            this.state.aiConfig = cfg;
+        } catch (err) {
+            toast('Failed to load AI config: ' + (err.message || err), 'error');
+            return;
+        }
+
+        const providers = cfg.providers || [];
+        const currentProvider = cfg.provider || (providers[0] && providers[0].key) || '';
+        const currentModel = cfg.model || '';
+        const hasKey = !!cfg.has_api_key;
+
+        const providerOptions = providers.map(p => `
+            <option value="${escapeHtml(p.key)}"${p.key === currentProvider ? ' selected' : ''}>
+                ${escapeHtml(p.label)}
+            </option>
+        `).join('');
+
+        const currentSpec = providers.find(p => p.key === currentProvider) || providers[0] || {};
+        const needsAccount = !!currentSpec.needs_account_id;
+
+        const html = `
+            <form id="ai-settings-form" class="ai-settings-form" autocomplete="off">
+                <label class="form-field">
+                    <span>Provider</span>
+                    <select id="ai-settings-provider">${providerOptions}</select>
+                </label>
+                <div id="ai-settings-hint" class="ai-settings-hint">
+                    ${escapeHtml(currentSpec.free_tier_hint || '')}
+                    ${currentSpec.docs_url ? ` &middot; <a href="${escapeHtml(currentSpec.docs_url)}" target="_blank" rel="noopener">Get a key</a>` : ''}
+                </div>
+                <label class="form-field">
+                    <span>Model</span>
+                    <input type="text" id="ai-settings-model"
+                           value="${escapeHtml(currentModel || currentSpec.default_model || '')}"
+                           placeholder="${escapeHtml(currentSpec.default_model || '')}">
+                </label>
+                <label class="form-field" id="ai-settings-cf-wrap" style="${needsAccount ? '' : 'display:none'}">
+                    <span>Cloudflare Account ID</span>
+                    <input type="text" id="ai-settings-cf-account"
+                           value="${escapeHtml(cfg.cloudflare_account_id || '')}">
+                </label>
+                <label class="form-field">
+                    <span>API Key ${hasKey ? '<em class="ai-key-saved">(saved ✓)</em>' : ''}</span>
+                    <input type="password" id="ai-settings-key"
+                           placeholder="${hasKey ? 'Leave blank to keep existing key' : 'Paste key here'}"
+                           autocomplete="new-password">
+                </label>
+                <div class="ai-settings-buttons">
+                    <button type="button" class="btn btn-secondary btn-sm" id="ai-settings-test">Test</button>
+                    <span id="ai-settings-test-result" class="ai-settings-test-result"></span>
+                    <div class="ai-settings-spacer"></div>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-primary btn-sm" id="ai-settings-save">Save</button>
+                </div>
+            </form>
+        `;
+
+        openModal('AI Provider Settings', html);
+
+        // Wire up dynamic bits
+        const providerSel = document.getElementById('ai-settings-provider');
+        const hintEl = document.getElementById('ai-settings-hint');
+        const modelEl = document.getElementById('ai-settings-model');
+        const cfWrap = document.getElementById('ai-settings-cf-wrap');
+        const saveBtn = document.getElementById('ai-settings-save');
+        const testBtn = document.getElementById('ai-settings-test');
+        const testRes = document.getElementById('ai-settings-test-result');
+
+        providerSel.addEventListener('change', () => {
+            const spec = providers.find(p => p.key === providerSel.value) || {};
+            hintEl.innerHTML = escapeHtml(spec.free_tier_hint || '') +
+                (spec.docs_url ? ` &middot; <a href="${escapeHtml(spec.docs_url)}" target="_blank" rel="noopener">Get a key</a>` : '');
+            modelEl.placeholder = spec.default_model || '';
+            // Only clear the model input if it's empty — don't trample user edits.
+            if (!modelEl.value) modelEl.value = spec.default_model || '';
+            cfWrap.style.display = spec.needs_account_id ? '' : 'none';
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            const payload = {
+                provider: providerSel.value,
+                model: modelEl.value.trim(),
+                cloudflare_account_id: document.getElementById('ai-settings-cf-account').value.trim(),
+                api_key: document.getElementById('ai-settings-key').value,
+            };
+            try {
+                const updated = await API.put('/analytics/ai-config', payload);
+                this.state.aiConfig = updated;
+                toast('AI settings saved', 'success');
+                closeModal();
+            } catch (err) {
+                toast('Save failed: ' + (err.message || err), 'error');
+            }
+        });
+
+        testBtn.addEventListener('click', async () => {
+            // Save first (so the test uses the just-entered key), then /test.
+            testRes.textContent = 'Saving…';
+            testRes.className = 'ai-settings-test-result';
+            const payload = {
+                provider: providerSel.value,
+                model: modelEl.value.trim(),
+                cloudflare_account_id: document.getElementById('ai-settings-cf-account').value.trim(),
+                api_key: document.getElementById('ai-settings-key').value,
+            };
+            try {
+                await API.put('/analytics/ai-config', payload);
+            } catch (err) {
+                testRes.textContent = 'Save failed: ' + (err.message || err);
+                testRes.classList.add('ai-test-fail');
+                return;
+            }
+            testRes.textContent = 'Testing…';
+            try {
+                const res = await API.post('/analytics/ai-config/test', {});
+                testRes.textContent = `✓ ${res.provider_label} replied: "${res.reply}"`;
+                testRes.classList.add('ai-test-ok');
+            } catch (err) {
+                testRes.textContent = '✗ ' + (err.message || err);
+                testRes.classList.add('ai-test-fail');
+            }
         });
     },
 
