@@ -126,18 +126,19 @@ Flat CSV with columns `(section, key, subkey, value)` covering 9 sections: perio
 #### AI Insights (Phase 9.5)
 An optional LLM layer sits on top of the analytics snapshot and produces a compact **3 observations / 3 risks / 3 recommendations** executive brief. Nothing is sent until you click the **AI Insights** button — the feature is zero-cost by default.
 
-**Six providers supported out of the box** (verified April 2026):
+**Seven providers supported out of the box** (verified April 2026):
 
 | Provider | Wire format | Default model | Free tier |
 |---|---|---|---|
 | **xAI Grok** | OpenAI-compat | `grok-4.1-fast` | $25 signup credit |
 | **Groq (LPU Cloud)** | OpenAI-compat | `llama-3.3-70b-versatile` | Generous free tier, no card |
 | **Cloudflare Workers AI** | OpenAI-compat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 10k neurons/day, no card |
+| **Cloudflare Worker Gateway** (self-hosted) | OpenAI-compat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Same 10k neurons/day — **your keys stay in *your* Cloudflare account** |
 | **Anthropic Claude** | `/v1/messages` | `claude-sonnet-4-6` | Paid only |
 | **OpenAI** | `/v1/chat/completions` | `gpt-5.4-mini` | Paid only |
 | **Google Gemini** | `generateContent` | `gemini-2.5-flash` | Free Flash tier via AI Studio |
 
-Each provider's model string is user-editable from the **⚙ AI** button in the analytics header, so renames ("gemini-2.5-flash" → "gemini-3.0-nano" or whatever the vendors ship next quarter) are a UI change, not a code change. Cloudflare gets an extra field for your account ID since its endpoint is account-scoped.
+Each provider's model string is user-editable from the **⚙ AI** button in the analytics header, so renames ("gemini-2.5-flash" → "gemini-3.0-nano" or whatever the vendors ship next quarter) are a UI change, not a code change. Cloudflare gets an extra field for your account ID since its endpoint is account-scoped. The dedicated **Cloudflare Worker Gateway** provider adds a second field for your Worker URL — see the self-hosted gateway section below.
 
 **Settings encryption.** API keys are stored in the `settings` table under `ai_api_key`, encrypted with **Fernet** (AES-128-CBC + HMAC-SHA256) via `app/services/crypto.py`. Ciphertext rows carry the prefix `fernet:v1:` so legacy plaintext rows are detected and migrated gracefully. The master key is resolved in priority order:
 
@@ -147,7 +148,7 @@ Each provider's model string is user-editable from the **⚙ AI** button in the 
 
 **Never commit `.slowbooks-master.key`** — it is in `.gitignore`. Losing it means losing every encrypted secret.
 
-`GET /api/analytics/ai-config` returns `{provider, model, cloudflare_account_id, has_api_key, api_key_encrypted, providers}` — the raw key is **never** in the response body. `PUT /api/analytics/ai-config` accepts `{provider, model, cloudflare_account_id, api_key}`; an empty/missing `api_key` is interpreted as "keep the existing encrypted value", so re-saving the provider won't clobber the stored key.
+`GET /api/analytics/ai-config` returns `{provider, model, cloudflare_account_id, worker_url, has_api_key, api_key_encrypted, providers}` — the raw key is **never** in the response body. `PUT /api/analytics/ai-config` accepts a Pydantic `AIConfigUpdate` model — `{provider, model, cloudflare_account_id, worker_url, api_key}` — so malformed payloads are rejected with a 422 before they reach the service layer. An empty/missing `api_key` is interpreted as "keep the existing encrypted value", so re-saving the provider won't clobber the stored key.
 
 **Endpoints:**
 - `GET  /api/analytics/ai-config` — read display config (no secrets)
@@ -155,7 +156,30 @@ Each provider's model string is user-editable from the **⚙ AI** button in the 
 - `POST /api/analytics/ai-config/test` — one-word smoke test against the configured provider
 - `POST /api/analytics/ai-insights?period=month|quarter|year[&force=true]` — run the full dashboard analysis; results are cached in-process for 10 minutes per `(provider, model, period)`, unless `force=true`
 
-All calls go through `httpx` with a 60-second timeout. Error messages redact the API key before raising, so logs and 502 responses never leak your secret.
+All calls go through a **hardened** `httpx.Client` with a 60-second timeout, `verify=True` (TLS cert validation), `follow_redirects=False` (no sneaky 302-to-metadata tricks), and a minimal `User-Agent`. Error messages redact the API key before raising, so logs and 502 responses never leak your secret.
+
+**Security hardening (April 2026 external audit pass):**
+- **SSRF guard #1** — Cloudflare account IDs must match `^[a-f0-9]{32}$` (regex enforced both at request-build time and in `PUT /ai-config`)
+- **SSRF guard #2** — `validate_worker_url()` in `app/services/ai_service.py` rejects plain `http://`, embedded credentials, localhost, `127.0.0.1`, all RFC1918 private ranges, link-local (`169.254.x.x` including the AWS metadata endpoint), multicast, and reserved blocks. URLs are capped at 2048 chars
+- **MITM protection** — `verify=True`, `follow_redirects=False`, HTTPS-only enforcement on the Worker URL
+- **CSV formula injection** — `_csv_safe()` in `export_csv()` prefixes any user-controlled cell starting with `=`, `+`, `-`, `@`, `\t`, or `\r` with a leading apostrophe before writing to CSV, neutralizing Excel/Sheets formula execution
+- **Request schema validation** — `PUT /ai-config` uses a Pydantic `AIConfigUpdate` model instead of a raw `dict`, so malformed payloads are rejected with a 422 before they reach the service layer
+- **Constant-time secret compare** — the shared-secret auth in `cloudflare/worker.js` uses a byte-wise constant-time compare instead of `===`, closing timing side-channels
+
+#### Self-hosted Cloudflare Worker Gateway (per-LAN-owner)
+
+For installations where you don't want **any** AI credentials stored inside Slowbooks (even encrypted), the `cloudflare/` directory ships a minimal Worker that you deploy to **your own** Cloudflare account. Slowbooks only ever holds a shared secret scoped to your one Worker, so dumping the SQLite file doesn't expose enough to talk to Workers AI as you.
+
+**What it buys you:**
+- **Your keys never touch Slowbooks' DB.** Workers AI is accessed via the `env.AI.run()` binding — no Cloudflare API token is stored anywhere, in Slowbooks or in the Worker source
+- **Per-installation isolation.** Every LAN owner installs their own Worker in their own Cloudflare account. One compromised install can't reach another; one abused install can't burn someone else's quota
+- **Free tier friendly.** Cloudflare gives every account 10,000 neurons/day for free — plenty for hundreds of AI Insights runs and tool-calling Q&A sessions
+- **Bearer-token auth.** Slowbooks sends `Authorization: Bearer <shared-secret>`; the Worker compares it against `env.AUTH_TOKEN` in constant time and rejects anything else with a 401
+- **OpenAI wire format.** The Worker translates Workers AI's native response into OpenAI-shaped JSON (including `tool_calls`) so Slowbooks' existing OpenAI-compat code path works unchanged
+
+**5-minute setup:** `wrangler login` → `openssl rand -hex 32` → `wrangler secret put AUTH_TOKEN` → `wrangler deploy` → paste the Worker URL + shared secret into Slowbooks **⚙ AI** → Provider: **Cloudflare Worker Gateway (self-hosted)**. Full step-by-step in **[cloudflare/README.md](cloudflare/README.md)**.
+
+**What it does *not* protect against:** a compromised Slowbooks install still has the shared secret, so it can still invoke *your* Worker — rotate the secret if you suspect compromise; abnormal Worker traffic shows up in the Cloudflare dashboard immediately.
 
 #### AI Q&A Assistant — Tool Calling (Phase 9.5b)
 
@@ -191,7 +215,7 @@ The chat panel sits directly under the AI Insights card and supports multi-turn 
 
 Every tool is **strictly read-only**: it builds `db.query()` calls that cannot insert, update, or delete. The tool loop runs up to 8 iterations per question — if the LLM hasn't produced a final answer after 8 tool calls, it returns "Max tool calls reached" rather than looping forever.
 
-**Wire formats:** `call_with_tools()` in `app/services/ai_service.py` supports all three tool-calling formats used by the 6 providers:
+**Wire formats:** `call_with_tools()` in `app/services/ai_service.py` supports all three tool-calling formats used by the 7 providers:
 - **OpenAI-compat** (Grok, Groq, Cloudflare, OpenAI): `choices[0].message.tool_calls`
 - **Anthropic** (`/v1/messages`): `content[].type=tool_use`
 - **Gemini** (`generateContent`): `candidates[0].content.parts[].functionCall`
@@ -568,7 +592,7 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 | `/api/analytics/profitability` | GET | Lifetime paid revenue per customer |
 | `/api/analytics/export.csv` | GET | Flat CSV of the full snapshot (`section,key,subkey,value`) — honors period params |
 | `/api/analytics/export.pdf` | GET | Print-ready PDF via WeasyPrint — honors period params |
-| `/api/analytics/ai-config` | GET, PUT | Display config (no raw key) / update provider/model/key (key Fernet-encrypted at rest) |
+| `/api/analytics/ai-config` | GET, PUT | Display config (no raw key) / update provider/model/key/worker_url (key Fernet-encrypted at rest; worker_url validated against SSRF/MITM) |
 | `/api/analytics/ai-config/test` | POST | Smoke-test the configured provider with a one-word prompt |
 | `/api/analytics/ai-insights` | POST | Run the dashboard through the configured LLM; `?force=true` bypasses 10-min cache |
 | `/api/analytics/ai-query` | POST | Tool-calling Q&A — LLM autonomously calls 16 read-only tools to answer `?question=...` |
