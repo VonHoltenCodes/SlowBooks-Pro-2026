@@ -330,12 +330,19 @@ class AnalyticsEngine:
     # Aggregate
     # ------------------------------------------------------------------
 
-    def get_dashboard(self):
-        """All metrics in one shot — what the frontend hits on page load."""
+    def get_dashboard(self, start_date: date = None, end_date: date = None):
+        """All metrics in one shot — what the frontend hits on page load.
+
+        `start_date` / `end_date` apply to the windowed metrics
+        (`revenue_by_customer`, `expenses_by_category`). The others have
+        their own time semantics: `revenue_trend` is always the last
+        12 months, aging is as-of-today, `cash_forecast` is the next 90
+        days.
+        """
         return {
-            "revenue_by_customer": self.revenue_by_customer(),
+            "revenue_by_customer": self.revenue_by_customer(start_date, end_date),
             "revenue_trend": self.revenue_trend(),
-            "expenses_by_category": self.expenses_by_category(),
+            "expenses_by_category": self.expenses_by_category(start_date, end_date),
             "ar_aging": self.ar_aging(),
             "ap_aging": self.ap_aging(),
             "dso": self.dso(),
