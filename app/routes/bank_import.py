@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.auth import require_permissions
-from app.services.bank_import import import_ofx_file, preview_ofx_file
+from app.services.ofx_import import import_transactions, parse_ofx
 
 router = APIRouter(prefix="/api/bank-import", tags=["bank_import"])
 
@@ -14,7 +14,7 @@ async def preview_ofx(
     auth=Depends(require_permissions("banking.manage")),
 ):
     content = await file.read()
-    return preview_ofx_file(content)
+    return {"transactions": parse_ofx(content), "account_id": None}
 
 
 @router.post("/import/{bank_account_id}")
@@ -25,4 +25,9 @@ async def import_ofx(
     auth=Depends(require_permissions("banking.manage")),
 ):
     content = await file.read()
-    return import_ofx_file(db, bank_account_id, content)
+    result = import_transactions(db, bank_account_id, parse_ofx(content))
+    return {
+        "imported": result["imported"],
+        "skipped_duplicates": result["skipped"],
+        "total": result["total"],
+    }
