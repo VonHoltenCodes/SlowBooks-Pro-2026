@@ -190,17 +190,17 @@ def import_accounts(db: Session, rows: list) -> dict:
     rows.sort(key=lambda r: r.get("NAME", "").count(":"))
 
     for i, row in enumerate(rows):
+        sp = db.begin_nested()  # savepoint — isolate per-row failures
         try:
             full_name = row.get("NAME", "").strip()
             if not full_name:
                 errors.append({"row": i + 1, "message": "Missing account NAME"})
+                sp.rollback()
                 continue
-
-            # Check if already exists
-            existing = db.query(Account).filter(Account.name == full_name.split(":")[-1]).first()
 
             iif_type = row.get("ACCNTTYPE", "").strip().upper()
             acct_type = _IIF_TO_ACCOUNT_TYPE.get(iif_type, AccountType.EXPENSE)
+            acct_num = row.get("ACCNUM", "").strip() or None
 
             # Handle parent:child names
             parent_id = None
@@ -214,22 +214,34 @@ def import_accounts(db: Session, rows: list) -> dict:
             else:
                 name = full_name
 
-            if existing:
+            # Check duplicates by name OR account_number (account_number has a
+            # unique constraint, so a name-only check misses cases where the
+            # seeded chart-of-accounts uses a slightly different label,
+            # e.g. "Opening Balance Equity" vs IIF's "Opening Bal Equity").
+            dup_q = db.query(Account).filter(Account.name == name)
+            if acct_num:
+                dup_q = db.query(Account).filter(
+                    (Account.name == name) | (Account.account_number == acct_num)
+                )
+            if dup_q.first():
+                sp.rollback()
                 continue  # skip duplicate
 
             acct = Account(
                 name=name,
                 account_type=acct_type,
-                account_number=row.get("ACCNUM", "").strip() or None,
+                account_number=acct_num,
                 description=row.get("DESC", "").strip() or None,
                 parent_id=parent_id,
                 is_active=True,
             )
             db.add(acct)
             db.flush()
+            sp.commit()
             imported += 1
 
         except Exception as e:
+            sp.rollback()
             errors.append({"row": i + 1, "message": str(e)})
 
     return {"imported": imported, "errors": errors}
@@ -241,14 +253,17 @@ def import_customers(db: Session, rows: list) -> dict:
     errors = []
 
     for i, row in enumerate(rows):
+        sp = db.begin_nested()
         try:
             name = row.get("NAME", "").strip()
             if not name:
                 errors.append({"row": i + 1, "message": "Missing customer NAME"})
+                sp.rollback()
                 continue
 
             existing = db.query(Customer).filter(Customer.name == name).first()
             if existing:
+                sp.rollback()
                 continue
 
             # Parse ADDR4 "City, State ZIP" pattern
@@ -275,9 +290,11 @@ def import_customers(db: Session, rows: list) -> dict:
             )
             db.add(cust)
             db.flush()
+            sp.commit()
             imported += 1
 
         except Exception as e:
+            sp.rollback()
             errors.append({"row": i + 1, "message": str(e)})
 
     return {"imported": imported, "errors": errors}
@@ -289,14 +306,17 @@ def import_vendors(db: Session, rows: list) -> dict:
     errors = []
 
     for i, row in enumerate(rows):
+        sp = db.begin_nested()
         try:
             name = row.get("NAME", "").strip()
             if not name:
                 errors.append({"row": i + 1, "message": "Missing vendor NAME"})
+                sp.rollback()
                 continue
 
             existing = db.query(Vendor).filter(Vendor.name == name).first()
             if existing:
+                sp.rollback()
                 continue
 
             addr4 = row.get("ADDR4", "").strip()
@@ -321,9 +341,11 @@ def import_vendors(db: Session, rows: list) -> dict:
             )
             db.add(vend)
             db.flush()
+            sp.commit()
             imported += 1
 
         except Exception as e:
+            sp.rollback()
             errors.append({"row": i + 1, "message": str(e)})
 
     return {"imported": imported, "errors": errors}
@@ -335,14 +357,17 @@ def import_items(db: Session, rows: list) -> dict:
     errors = []
 
     for i, row in enumerate(rows):
+        sp = db.begin_nested()
         try:
             name = row.get("NAME", "").strip()
             if not name:
                 errors.append({"row": i + 1, "message": "Missing item NAME"})
+                sp.rollback()
                 continue
 
             existing = db.query(Item).filter(Item.name == name).first()
             if existing:
+                sp.rollback()
                 continue
 
             iif_type = row.get("INVITEMTYPE", "").strip().upper()
@@ -369,9 +394,11 @@ def import_items(db: Session, rows: list) -> dict:
             )
             db.add(item)
             db.flush()
+            sp.commit()
             imported += 1
 
         except Exception as e:
+            sp.rollback()
             errors.append({"row": i + 1, "message": str(e)})
 
     return {"imported": imported, "errors": errors}
@@ -386,6 +413,7 @@ def import_transactions(db: Session, blocks: list) -> dict:
     errors = []
 
     for i, block in enumerate(blocks):
+        sp = db.begin_nested()
         try:
             trns = block.get("trns", {})
             spls = block.get("spl", [])
@@ -404,8 +432,10 @@ def import_transactions(db: Session, blocks: list) -> dict:
                 if result:
                     counts["estimates"] += 1
             # Skip other transaction types (GENERAL JOURNAL, etc.) for now
+            sp.commit()
 
         except Exception as e:
+            sp.rollback()
             errors.append({"row": i + 1, "message": f"Transaction block {i + 1}: {str(e)}"})
 
     return {"imported": counts, "errors": errors}

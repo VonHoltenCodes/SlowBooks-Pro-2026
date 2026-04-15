@@ -13,8 +13,7 @@ from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
-_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
-
+_jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
 
 def _format_currency(value):
     try:
