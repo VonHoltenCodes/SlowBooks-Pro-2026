@@ -53,6 +53,42 @@ class NzPayrollDataModelTests(unittest.TestCase):
         self.assertNotIn("filing_status", response)
         self.assertNotIn("allowances", response)
 
+    def test_employee_address_fields_round_trip_through_create_update_and_response(self):
+        from app.routes.employees import create_employee, get_employee, update_employee
+        from app.schemas.payroll import EmployeeCreate, EmployeeResponse, EmployeeUpdate
+
+        with self.Session() as db:
+            employee = create_employee(EmployeeCreate(
+                first_name="Hemi",
+                last_name="Rangi",
+                ird_number="222-333-444",
+                tax_code="M",
+                address1="12 Karangahape Road",
+                address2="Unit 3",
+                city="Auckland",
+                state="Auckland",
+                zip="1010",
+            ), db=db)
+            updated = update_employee(employee.id, EmployeeUpdate(
+                address1="99 Cuba Street",
+                city="Wellington",
+                state="Wellington",
+                zip="6011",
+            ), db=db)
+            fetched = get_employee(employee.id, db=db)
+            response = EmployeeResponse.model_validate(fetched).model_dump()
+
+        self.assertEqual(updated.address1, "99 Cuba Street")
+        self.assertEqual(updated.address2, "Unit 3")
+        self.assertEqual(updated.city, "Wellington")
+        self.assertEqual(updated.state, "Wellington")
+        self.assertEqual(updated.zip, "6011")
+        self.assertEqual(response["address1"], "99 Cuba Street")
+        self.assertEqual(response["address2"], "Unit 3")
+        self.assertEqual(response["city"], "Wellington")
+        self.assertEqual(response["state"], "Wellington")
+        self.assertEqual(response["zip"], "6011")
+
     def test_employee_update_supports_nz_fields(self):
         from app.routes.employees import create_employee, update_employee
         from app.schemas.payroll import EmployeeCreate, EmployeeUpdate

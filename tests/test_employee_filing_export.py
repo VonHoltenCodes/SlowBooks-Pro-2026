@@ -90,6 +90,27 @@ class EmployeeFilingExportTests(unittest.TestCase):
         self.assertIn("LED,987654321,123456789,Aroha Ngata", content)
         self.assertIn("20260430", content)
 
+    def test_employee_address_fields_do_not_change_starter_export_shape(self):
+        from app.routes.employees import export_starter_employee_filing
+
+        with self.Session() as db:
+            self._seed_settings(db)
+            employee = self._create_employee(
+                db,
+                start_date=date(2026, 4, 1),
+                address1="10 Queen Street",
+                address2="Unit 2",
+                city="Auckland",
+                state="Auckland",
+                zip="1010",
+            )
+            response = export_starter_employee_filing(employee.id, db=db)
+
+        row = response.body.decode().strip().split(',')
+        self.assertEqual(row[0], 'SED')
+        self.assertEqual(row[3], 'Aroha Ngata')
+        self.assertEqual(len(row), 8)
+
     def test_missing_required_date_is_rejected(self):
         from app.routes.employees import export_starter_employee_filing
 

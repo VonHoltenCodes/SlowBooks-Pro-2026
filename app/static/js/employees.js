@@ -65,7 +65,8 @@ const EmployeesPage = {
             first_name: '', last_name: '', ird_number: '', pay_type: 'hourly', pay_rate: 0,
             tax_code: 'M', kiwisaver_enrolled: false, kiwisaver_rate: '0.0350',
             student_loan: false, child_support: false, child_support_amount: '0.00', esct_rate: '0.0000',
-            pay_frequency: 'fortnightly', start_date: todayISO(), end_date: ''
+            pay_frequency: 'fortnightly', address1: '', address2: '', city: '', state: '', zip: '',
+            start_date: todayISO(), end_date: ''
         };
         if (id) emp = await API.get(`/employees/${id}`);
 
@@ -114,6 +115,16 @@ const EmployeesPage = {
                             <option value="fortnightly" ${emp.pay_frequency==='fortnightly'?'selected':''}>Fortnightly</option>
                             <option value="monthly" ${emp.pay_frequency==='monthly'?'selected':''}>Monthly</option>
                         </select></div>
+                    <div class="form-group full-width"><label>Address 1</label>
+                        <input name="address1" value="${escapeHtml(emp.address1 || '')}"></div>
+                    <div class="form-group full-width"><label>Address 2</label>
+                        <input name="address2" value="${escapeHtml(emp.address2 || '')}"></div>
+                    <div class="form-group"><label>City</label>
+                        <input name="city" value="${escapeHtml(emp.city || '')}"></div>
+                    <div class="form-group"><label>Region</label>
+                        <input name="state" value="${escapeHtml(emp.state || '')}"></div>
+                    <div class="form-group"><label>Postcode</label>
+                        <input name="zip" value="${escapeHtml(emp.zip || '')}"></div>
                     <div class="form-group"><label>Start Date</label>
                         <input name="start_date" type="date" value="${emp.start_date || ''}"></div>
                     <div class="form-group"><label>End Date</label>

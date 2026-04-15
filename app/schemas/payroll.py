@@ -51,6 +51,11 @@ class EmployeeCreate(BaseModel):
     child_support_amount: Decimal = Decimal("0.00")
     esct_rate: Decimal = Decimal("0.0000")
     pay_frequency: str = "fortnightly"
+    address1: Optional[str] = None
+    address2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
 
@@ -124,6 +129,11 @@ class EmployeeUpdate(BaseModel):
     child_support_amount: Optional[Decimal] = None
     esct_rate: Optional[Decimal] = None
     pay_frequency: Optional[str] = None
+    address1: Optional[str] = None
+    address2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
     is_active: Optional[bool] = None
@@ -213,6 +223,11 @@ class EmployeeResponse(BaseModel):
     child_support_amount: Decimal = Decimal("0.00")
     esct_rate: Decimal = Decimal("0.0000")
     pay_frequency: str = "fortnightly"
+    address1: Optional[str] = None
+    address2: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    zip: Optional[str] = None
     is_active: bool = True
     start_date: Optional[date] = None
     end_date: Optional[date] = None

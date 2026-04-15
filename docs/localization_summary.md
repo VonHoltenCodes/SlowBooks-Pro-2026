@@ -101,7 +101,7 @@ Relevant files:
 
 ### Payroll
 
-Payroll employee setup now uses an NZ-focused field set for IRD number, tax code, KiwiSaver, student loan, child support, ESCT, pay frequency, start/end dates, and a per-pay child support amount. The Payroll page now supports draft pay runs using versioned NZ PAYE rules, calculates PAYE/ACC/student loan/KiwiSaver/ESCT/child support values, posts processed runs into NZ payroll liability accounts, generates payslip PDFs for processed pay runs, exports per-run Employment Information CSV files for IRD upload, supports starter/leaver employee filing, and now records filing audit/history state with generated/filed/amended/superseded tracking plus changed-since-filing detection.
+Payroll employee setup now uses an NZ-focused field set for IRD number, tax code, KiwiSaver, student loan, child support, ESCT, pay frequency, payroll address fields, start/end dates, and a per-pay child support amount. The Payroll page now supports draft pay runs using versioned NZ PAYE rules, calculates PAYE/ACC/student loan/KiwiSaver/ESCT/child support values, posts processed runs into NZ payroll liability accounts, generates payslip PDFs for processed pay runs, exports per-run Employment Information CSV files for IRD upload, supports starter/leaver employee filing, and now records filing audit/history state with generated/filed/amended/superseded tracking plus changed-since-filing detection.
 
 The platform now also has a reusable authentication/RBAC foundation with session login, bootstrap/login/logout/user-management UX, role-based memberships, permission overrides, and protected payroll/employee/admin routes. Payroll is the first enforced protected domain, and core admin surfaces now use the same RBAC model; broader rollout to the remaining business modules still remains follow-up work.
 
@@ -181,17 +181,14 @@ Relevant files:
 2. Maintain NZ-first foundations as new slices land:
    Reuse the existing NZ settings, formatting helpers, GST model/calculation stack, system-account role mappings, and Alembic bootstrap path rather than creating branch-specific alternatives.
 
-3. Finish payroll address/schema cleanup:
-   Company, customer, and vendor address labeling is now NZ-first, but payroll employee address fields and any deeper schema renames are still deferred follow-up work.
-
-4. Decide and implement the NZ income-tax replacement surface:
+3. Decide and implement the NZ income-tax replacement surface:
    Schedule C is retired on the NZ branch, but the replacement output still needs a product decision: IR3 business summary, IR10-style financial statements, accountant export, or another NZ-specific output.
 
-5. Extend the auth model to future multi-company context switching:
+4. Extend the auth model to future multi-company context switching:
    The platform now enforces RBAC across payroll, admin, core business modules, logo uploads, and retires the dormant legacy tax API surface. Remaining auth follow-up is future multi-company context switching and any new module surfaces added later.
 
-6. Keep expanding focused regression coverage:
+5. Keep expanding focused regression coverage:
    Continue adding targeted tests whenever localized behavior changes, especially around GST math/reporting, GST settlement matching, posting lifecycle integrity, payroll calculations/outputs, filing history state, and settings-driven behavior.
 
-7. Decide multi-currency scope explicitly:
+6. Decide multi-currency scope explicitly:
    The branch currently assumes single-currency `NZD` formatting. Full multi-currency support remains a separate accounting feature involving exchange rates, realized gains/losses, account currencies, and reporting currency.

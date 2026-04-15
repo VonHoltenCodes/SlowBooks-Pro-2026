@@ -115,6 +115,14 @@ async function runPayrollPage() {
     assert.ok(employeeHtml.includes('KiwiSaver'));
     assert.ok(employeeHtml.includes('Child Support Amount'));
     assert.ok(employeeHtml.includes('Pay Frequency'));
+    assert.ok(employeeHtml.includes('<label>Address 1</label>'));
+    assert.ok(employeeHtml.includes('<label>Address 2</label>'));
+    assert.ok(employeeHtml.includes('<label>City</label>'));
+    assert.ok(employeeHtml.includes('<label>Region</label>'));
+    assert.ok(employeeHtml.includes('<label>Postcode</label>'));
+    assert.ok(employeeHtml.includes('name="address1"'));
+    assert.ok(employeeHtml.includes('name="state"'));
+    assert.ok(employeeHtml.includes('name="zip"'));
     assert.ok(employeeListHtml.includes('Starter Filing'));
     assert.ok(employeeListHtml.includes('Leaver Filing'));
     assert.ok(employeeListHtml.includes('Starter generated'));
