@@ -1,24 +1,53 @@
 <!--
-  Slowbooks Pro 2026 — Analytics Dashboard page
-  Standalone page (not part of the main SPA). Served by GET /analytics.
+  Slowbooks Pro 2026 — Analytics Dashboard page (Phase 9, enhanced)
+  Standalone page served by GET /analytics. Honors the same
+  localStorage['slowbooks-theme'] key as the main SPA.
 -->
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Slowbooks Analytics</title>
+    <script>
+      // Apply persisted theme before first paint to avoid a flash.
+      (function() {
+        try {
+          var saved = localStorage.getItem('slowbooks-theme');
+          if (saved === 'light') {
+            document.documentElement.setAttribute('data-theme', 'light');
+          }
+        } catch (_) {}
+      })();
+    </script>
     <style>
-        :root {
+        :root[data-theme="dark"] {
             --bg: #0a0a0f;
             --panel: #1e1e2a;
             --panel-border: #2a2a3a;
+            --panel-header: #17171f;
             --text: #e6e6f0;
             --muted: #a0a0b8;
-            --green: #00d4aa;
+            --accent: #00d4aa;
             --red: #ff4757;
             --blue: #5b7fff;
             --purple: #a855f7;
+            --amber: #ffa94d;
+            --row-hover: #24243a;
+        }
+        :root[data-theme="light"] {
+            --bg: #f4f4f8;
+            --panel: #ffffff;
+            --panel-border: #dfdfe8;
+            --panel-header: #f0f0f5;
+            --text: #1a1a28;
+            --muted: #5a5a70;
+            --accent: #008a70;
+            --red: #d12939;
+            --blue: #2b4bd9;
+            --purple: #7e22ce;
+            --amber: #b86b00;
+            --row-hover: #eef1f7;
         }
 
         * { box-sizing: border-box; }
@@ -28,87 +57,122 @@
             color: var(--text);
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
             margin: 0;
-            padding: 24px;
+            padding: 20px;
             min-height: 100vh;
         }
 
-        header {
+        /* --------- Header --------- */
+        header.page-header {
             display: flex;
-            justify-content: space-between;
             align-items: center;
-            margin-bottom: 24px;
+            gap: 16px;
+            flex-wrap: wrap;
             padding-bottom: 16px;
+            margin-bottom: 20px;
             border-bottom: 1px solid var(--panel-border);
         }
-
-        header h1 {
+        header.page-header h1 {
             margin: 0;
-            color: var(--green);
+            color: var(--accent);
             font-size: 22px;
             letter-spacing: 0.5px;
+            flex: 1 1 auto;
         }
-
-        header a {
+        header.page-header .back-link {
             color: var(--muted);
             text-decoration: none;
             font-size: 13px;
         }
+        header.page-header .back-link:hover { color: var(--text); }
 
-        header a:hover { color: var(--text); }
+        .controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .controls label {
+            color: var(--muted);
+            font-size: 11px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .controls select,
+        .controls button {
+            background: var(--panel);
+            color: var(--text);
+            border: 1px solid var(--panel-border);
+            border-radius: 6px;
+            padding: 6px 10px;
+            font-size: 13px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .controls select:hover,
+        .controls button:hover {
+            border-color: var(--accent);
+        }
+        .controls button.primary {
+            background: var(--accent);
+            color: #0a0a0f;
+            border-color: var(--accent);
+            font-weight: 600;
+        }
+        .updated {
+            color: var(--muted);
+            font-size: 12px;
+            margin-left: auto;
+        }
 
-        h2 {
-            margin: 32px 0 12px;
-            font-size: 14px;
+        /* --------- Section titles --------- */
+        h2.section {
+            margin: 28px 0 10px;
+            font-size: 12px;
             letter-spacing: 1.5px;
             text-transform: uppercase;
             color: var(--muted);
         }
 
+        /* --------- KPI cards --------- */
         .kpi-grid {
             display: grid;
             grid-template-columns: repeat(4, 1fr);
-            gap: 16px;
+            gap: 14px;
         }
-
-        @media (max-width: 800px) {
-            .kpi-grid { grid-template-columns: repeat(2, 1fr); }
-        }
-
+        @media (max-width: 900px) { .kpi-grid { grid-template-columns: repeat(2, 1fr); } }
         .kpi-card {
             background: var(--panel);
             border: 1px solid var(--panel-border);
-            padding: 18px;
+            padding: 16px 18px;
             border-radius: 8px;
         }
-
         .kpi-label {
             color: var(--muted);
-            font-size: 11px;
+            font-size: 10px;
             letter-spacing: 1px;
             text-transform: uppercase;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }
-
-        .kpi-value {
-            font-size: 26px;
-            font-weight: 700;
-            line-height: 1;
-        }
-
-        .kpi-green  { color: var(--green); }
+        .kpi-value { font-size: 26px; font-weight: 700; line-height: 1.1; }
+        .kpi-green  { color: var(--accent); }
         .kpi-red    { color: var(--red); }
         .kpi-blue   { color: var(--blue); }
         .kpi-purple { color: var(--purple); }
 
-        .analytics-table {
-            width: 100%;
-            border-collapse: collapse;
+        /* --------- Panel grid for tables --------- */
+        .panel {
             background: var(--panel);
             border: 1px solid var(--panel-border);
             border-radius: 8px;
             overflow: hidden;
         }
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 14px;
+        }
+        @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 
+        /* --------- Tables --------- */
+        .analytics-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
         .analytics-table th,
         .analytics-table td {
             padding: 10px 14px;
@@ -116,46 +180,108 @@
             border-bottom: 1px solid var(--panel-border);
             font-size: 13px;
         }
-
         .analytics-table thead th {
-            background: #17171f;
+            background: var(--panel-header);
             color: var(--muted);
-            font-size: 11px;
+            font-size: 10px;
             text-transform: uppercase;
             letter-spacing: 1px;
+            font-weight: 600;
         }
-
+        .analytics-table tbody tr:hover { background: var(--row-hover); }
         .analytics-table tbody tr:last-child td { border-bottom: none; }
         .analytics-table .num { text-align: right; font-variant-numeric: tabular-nums; }
-        .analytics-table .green { color: var(--green); }
+        .analytics-table .green { color: var(--accent); }
         .analytics-table .red   { color: var(--red); }
+        .analytics-table .amber { color: var(--amber); }
 
         .empty {
-            padding: 16px;
+            padding: 20px;
             color: var(--muted);
             font-size: 13px;
-            background: var(--panel);
-            border: 1px dashed var(--panel-border);
-            border-radius: 8px;
+            text-align: center;
         }
+
+        /* --------- Sparkline --------- */
+        .sparkline-wrap {
+            background: var(--panel);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            padding: 16px 18px;
+        }
+        .sparkline-wrap svg { display: block; width: 100%; height: 140px; }
+        .sparkline-wrap .bar      { fill: var(--accent); }
+        .sparkline-wrap .bar-zero { fill: var(--panel-border); }
+        .sparkline-wrap text {
+            fill: var(--muted);
+            font-size: 9px;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+        }
+        .sparkline-wrap .bar-label {
+            fill: var(--text);
+            font-size: 10px;
+            font-weight: 600;
+        }
+
+        /* --------- Error --------- */
+        .error-box {
+            padding: 16px 18px;
+            background: var(--panel);
+            border: 1px solid var(--red);
+            border-radius: 8px;
+            color: var(--red);
+        }
+        .error-box strong { display: block; margin-bottom: 6px; }
     </style>
 </head>
 <body>
-    <div id="analytics-root">
-        <header>
-            <h1>Slowbooks Analytics</h1>
-            <a href="/">← Back to Slowbooks</a>
-        </header>
+    <header class="page-header">
+        <h1>Slowbooks Analytics</h1>
+        <div class="controls">
+            <label for="period-select">Period</label>
+            <select id="period-select">
+                <option value="month">Month to Date</option>
+                <option value="quarter">Quarter to Date</option>
+                <option value="year">Year to Date</option>
+            </select>
+            <button id="refresh-btn" title="Refresh (R)">Refresh</button>
+            <button id="csv-btn" class="primary" title="Download CSV">Export CSV</button>
+            <button id="theme-btn" title="Toggle theme (T)">Theme</button>
+        </div>
+        <span class="updated" id="updated-at">&mdash;</span>
+        <a href="/" class="back-link">&larr; Back to Slowbooks</a>
+    </header>
 
-        <h2>Key Metrics</h2>
-        <div id="kpis"></div>
+    <div id="error-container"></div>
 
-        <h2>Revenue by Customer (MTD)</h2>
-        <div id="revenue-table"></div>
+    <h2 class="section">Key Metrics</h2>
+    <div id="kpis" class="kpi-grid"></div>
 
-        <h2>Accounts Receivable Aging</h2>
-        <div id="ar-aging"></div>
+    <h2 class="section">Revenue Trend &mdash; Last 12 Months</h2>
+    <div id="revenue-trend" class="sparkline-wrap"></div>
+
+    <h2 class="section">Top Data</h2>
+    <div class="two-col">
+        <div>
+            <div class="panel"><div id="revenue-table"></div></div>
+        </div>
+        <div>
+            <div class="panel"><div id="expenses-table"></div></div>
+        </div>
     </div>
+
+    <h2 class="section">Accounts Aging</h2>
+    <div class="two-col">
+        <div>
+            <div class="panel"><div id="ar-aging"></div></div>
+        </div>
+        <div>
+            <div class="panel"><div id="ap-aging"></div></div>
+        </div>
+    </div>
+
+    <h2 class="section">90-Day Cash Forecast</h2>
+    <div class="panel"><div id="cash-forecast"></div></div>
 
     <script src="/static/js/AnalyticsDashboard.js"></script>
 </body>

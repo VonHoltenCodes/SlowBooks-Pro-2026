@@ -83,23 +83,48 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 ![Dashboard — Dark Mode](screenshots/dashboard-dark.png)
 
 ### Analytics (Phase 9)
-Real-time business intelligence layer that sits on top of the accounting engine. Powered by `AnalyticsEngine` (`app/services/analytics.py`) with 8 aggregation methods and 5 REST endpoints at `/api/analytics/*`. Accessible from the sidebar → **Analytics**, or directly at `http://localhost:3001/analytics`.
+Real-time business intelligence layer that sits on top of the accounting engine. Powered by `AnalyticsEngine` (`app/services/analytics.py`) with 8 aggregation methods and 6 REST endpoints at `/api/analytics/*`. Accessible from the sidebar → **Analytics**, or directly at `http://localhost:3001/analytics`.
 
-- **Revenue by Customer (MTD)** — Paid revenue per customer for the current month, ranked high-to-low
-- **12-Month Revenue Trend** — Monthly paid-revenue history with proper calendar-month bucketing (no double-bucketed months)
-- **Expenses by Category (MTD)** — Paid-bill expenses grouped by expense account number
-- **A/R Aging** — Open invoice balances bucketed Current / 30 / 60 / 90+ days old, using `invoices.balance_due` so partial payments don't double-count
-- **A/P Aging** — Open bill balances bucketed Current / 30 / 60 / 90+ days old
+**Metrics computed:**
+- **Revenue by Customer** — Paid revenue per customer for the selected period, ranked high-to-low
+- **12-Month Revenue Trend** — Monthly paid-revenue history with proper calendar-month bucketing
+- **Expenses by Category** — Paid-bill expenses grouped by expense account number
+- **A/R Aging** — Open invoice balances bucketed Current / 30 / 60 / 90+ days old, using `invoices.balance_due` so partial payments don't double-count. Table is sorted worst-offender first and includes a TOTAL row.
+- **A/P Aging** — Open bill balances bucketed Current / 30 / 60 / 90+ days old (same treatment as A/R)
 - **DSO (Days Sales Outstanding)** — `(open A/R balance ÷ last-30-day paid revenue) × 30`
-- **90-Day Cash Forecast** — Weekly cumulative buckets of expected A/R collections vs A/P payments due on-or-before each cutoff, with final bucket pinned at day 90
+- **90-Day Cash Forecast** — 14 weekly cumulative buckets of expected A/R collections vs A/P payments due on-or-before each cutoff, with final bucket pinned at day 90. Net column color-coded green/red.
 - **Customer Profitability** — Lifetime paid revenue per customer (first pass; COGS attribution on the roadmap)
-- **Dashboard Page** — Standalone dark-themed page at `/analytics` with 4 KPI cards (Revenue / Expenses / DSO / Margin%), sortable revenue table, and A/R aging table. Zero-dependency vanilla JS — no chart library needed yet
 
-**Performance:** `GET /api/analytics/dashboard` issues exactly **10 SQL queries** regardless of dataset size — every method is single-query (or at most two) with no N+1 relationship loads. Measured on SQLite with 3,000 invoices + 1,500 bills: **~19 ms** end-to-end; with 8,000 invoices + 4,000 bills: **~50 ms**.
+**Dashboard page (`/analytics`):**
+- **4 KPI cards** — Revenue, Expenses, DSO, Margin%
+- **Revenue-trend sparkline** — Inline SVG bar chart of the last 12 months with hover tooltips (no external chart library)
+- **Two-column table grid** — Revenue-by-Customer + Expenses-by-Category, then A/R Aging + A/P Aging, then full-width Cash Forecast
+- **Period selector** — Dropdown for Month / Quarter / Year to Date; re-fetches and re-renders instantly
+- **Refresh button** (`R` key) — Re-fetch without reloading the page
+- **CSV export** — One-click download of the current snapshot at `/api/analytics/export.csv?period=...`
+- **Theme toggle** (`T` key) — Light/dark support matching the main SPA. Honors `localStorage['slowbooks-theme']` so preference is shared with the rest of the app. Pre-paint script avoids flash-of-wrong-theme on load.
+- **Last-updated indicator** — Shows the resolved date window + wall clock time so you always know exactly what period you're looking at
+
+**Date-range filtering (all endpoints):**
+```
+?period=month|quarter|year          (also accepts mtd/qtd/ytd)
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD    (explicit override)
+```
+Unknown period names and missing params fall back to month-to-date. Explicit dates take precedence over named periods.
+
+**CSV export:**
+```bash
+curl 'http://localhost:3001/api/analytics/export.csv?period=year' -o analytics.csv
+```
+Returns a flat CSV with columns `(section, key, subkey, value)` covering 9 sections: period, revenue_by_customer, revenue_trend, expenses_by_category, ar_aging, ap_aging, dso, cash_forecast, customer_profit. Drops straight into Excel / Google Sheets / any BI tool.
+
+**Performance:** `GET /api/analytics/dashboard` issues exactly **10 SQL queries** regardless of dataset size — every method is single-query (or at most two) with no N+1 relationship loads. Measured on SQLite with 3,000 invoices + 1,500 bills: **~26 ms** engine / ~40 ms full HTTP round-trip; with 8,000 invoices + 4,000 bills: **~50 ms**. The `period` parameter adds zero extra queries.
 
 Quick smoke test once the app is running:
 ```bash
 curl http://localhost:3001/api/analytics/dashboard
+curl http://localhost:3001/api/analytics/dashboard?period=year
+curl http://localhost:3001/api/analytics/export.csv > snapshot.csv
 ```
 
 ### Online Payments
@@ -156,7 +181,7 @@ curl http://localhost:3001/api/analytics/dashboard
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (32 routers, 149+ routes) |
+| Backend | Python 3.12 + FastAPI (32 routers, 150+ routes) |
 | Database | PostgreSQL 16 + SQLAlchemy 2.0 |
 | Migrations | Alembic |
 | Frontend | Vanilla HTML/CSS/JS (no framework) |
@@ -221,7 +246,7 @@ SlowBooks-Pro-2026/
 ├── alembic.ini               # Alembic config
 ├── alembic/                  # Database migrations
 ├── app/
-│   ├── main.py               # FastAPI app + 32 routers (149+ routes)
+│   ├── main.py               # FastAPI app + 32 routers (150+ routes)
 │   ├── config.py             # Environment-based settings
 │   ├── database.py           # SQLAlchemy engine + session
 │   ├── models/               # 30+ SQLAlchemy models
@@ -333,7 +358,7 @@ SlowBooks-Pro-2026/
 
 ## API
 
-All endpoints under `/api/`. Swagger docs at `/docs`. 149+ routes across 32 routers.
+All endpoints under `/api/`. Swagger docs at `/docs`. 150+ routes across 32 routers.
 
 ### Core (Original)
 | Endpoint | Methods | Description |
@@ -438,14 +463,17 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 149+ routes across 32 rout
 | `/api/uploads/logo` | POST | Upload company logo |
 
 ### Analytics
+All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or explicit `?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`.
+
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
-| `/api/analytics/dashboard` | GET | Complete analytics snapshot (all 8 metrics) |
-| `/api/analytics/revenue` | GET | Revenue by customer + 12-month trend |
-| `/api/analytics/expenses` | GET | Expense breakdown by account number (MTD) |
+| `/api/analytics/dashboard` | GET | Complete analytics snapshot (all 8 metrics, includes `period` echo) |
+| `/api/analytics/revenue` | GET | Windowed revenue by customer + 12-month trend |
+| `/api/analytics/expenses` | GET | Windowed expense breakdown by account number |
 | `/api/analytics/cash-flow` | GET | Cash forecast + DSO + A/R and A/P aging (`?days=90`) |
 | `/api/analytics/profitability` | GET | Lifetime paid revenue per customer |
-| `/analytics` | GET | Standalone dashboard page (HTML) |
+| `/api/analytics/export.csv` | GET | Flat CSV of the full snapshot (`section,key,subkey,value`) — honors period params |
+| `/analytics` | GET | Standalone dashboard page (HTML) with period selector, refresh, CSV download, light/dark toggle |
 
 ---
 
