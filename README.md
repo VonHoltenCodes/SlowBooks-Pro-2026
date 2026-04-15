@@ -157,6 +157,52 @@ Each provider's model string is user-editable from the **⚙ AI** button in the 
 
 All calls go through `httpx` with a 60-second timeout. Error messages redact the API key before raising, so logs and 502 responses never leak your secret.
 
+#### AI Q&A Assistant — Tool Calling (Phase 9.5b)
+
+Beyond the static insights brief, the analytics page has a **chat assistant** powered by LLM function/tool calling. Users ask arbitrary questions about their books and the LLM autonomously calls read-only query tools to answer them:
+
+> *"How much did I spend at Jack in the Box in 2025?"*
+> *"What are my unpaid invoices from ABC Corp?"*
+> *"Show me my top 5 customers by revenue"*
+> *"What were my HSA-tagged payments in 2024?"*
+
+The chat panel sits directly under the AI Insights card and supports multi-turn conversations with visible tool-call history (click "Used N tools" to expand and see which queries the LLM made).
+
+**16 read-only tools** are registered in `app/services/ai_tools.py`:
+
+| Tool | Purpose |
+|---|---|
+| `search_bills` | Filter bills by vendor name, date range, status |
+| `search_invoices` | Filter invoices by customer name, date range, status |
+| `search_transactions` | Search journal entries by memo/reference |
+| `list_vendors` | List vendors (with name filter) |
+| `list_customers` | List customers (with name filter) |
+| `list_accounts` | List chart of accounts (with type filter) |
+| `get_account_balance` | Get current balance of a specific account |
+| `get_pl_summary` | Current P&L (income, expense, net) |
+| `get_balance_sheet` | Current balance sheet (assets, liabilities, equity) |
+| `get_tax_summary` | Sales tax collected + expenses by category |
+| `get_sales_by_customer` | Total revenue grouped by customer |
+| `get_expenses_by_category` | Total expenses grouped by account |
+| `get_aging_report` | A/R and A/P aging by bucket (current/30/60/90) |
+| `get_current_date` | Server date for "today" / relative-date queries |
+| `search_payments` | Customer payments by customer/date |
+| `search_bill_payments` | Vendor bill payments by vendor/date |
+
+Every tool is **strictly read-only**: it builds `db.query()` calls that cannot insert, update, or delete. The tool loop runs up to 8 iterations per question — if the LLM hasn't produced a final answer after 8 tool calls, it returns "Max tool calls reached" rather than looping forever.
+
+**Wire formats:** `call_with_tools()` in `app/services/ai_service.py` supports all three tool-calling formats used by the 6 providers:
+- **OpenAI-compat** (Grok, Groq, Cloudflare, OpenAI): `choices[0].message.tool_calls`
+- **Anthropic** (`/v1/messages`): `content[].type=tool_use`
+- **Gemini** (`generateContent`): `candidates[0].content.parts[].functionCall`
+
+**Endpoint:**
+- `POST /api/analytics/ai-query?question=...` — ask a question; returns `{provider, model, final_response, tool_calls, call_count, success}`
+
+Results are not cached (each question may be distinct). If you ask the same question twice you'll run the loop twice.
+
+**Test coverage (Phase 5):** 36 backend tests cover every tool with seeded mock data, all 3 wire-format extractors (`_extract_tool_calls`), argument parsing edge cases, and the full `/ai-query` endpoint with a stubbed provider. Plus 34 Phase 4 tests (28 Python + 6 headless Node UI) = **70 total tests** green, all running in under 60 seconds with zero network dependencies.
+
 **PDF export:**
 ```bash
 curl 'http://localhost:3001/api/analytics/export.pdf?period=year' -o analytics.pdf
@@ -525,6 +571,7 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 | `/api/analytics/ai-config` | GET, PUT | Display config (no raw key) / update provider/model/key (key Fernet-encrypted at rest) |
 | `/api/analytics/ai-config/test` | POST | Smoke-test the configured provider with a one-word prompt |
 | `/api/analytics/ai-insights` | POST | Run the dashboard through the configured LLM; `?force=true` bypasses 10-min cache |
+| `/api/analytics/ai-query` | POST | Tool-calling Q&A — LLM autonomously calls 16 read-only tools to answer `?question=...` |
 | `/analytics` | GET | Backwards-compat 307 redirect to the SPA hash route `/#/analytics` |
 
 ---

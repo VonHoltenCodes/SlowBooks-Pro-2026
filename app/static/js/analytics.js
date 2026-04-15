@@ -34,6 +34,9 @@ const AnalyticsPage = {
         aiInsights: null,   // { insights, provider_label, model, generated_at, cached }
         aiBusy: false,
         aiConfig: null,     // last-known provider config (no raw key)
+        // Phase 9.5b: Tool-calling Q&A assistant
+        chatMessages: [],   // array of {role: 'user'|'assistant', content, tool_calls?, timestamp}
+        chatBusy: false,
     },
 
     // ------------------------------------------------------------------
@@ -105,6 +108,8 @@ const AnalyticsPage = {
             <div class="analytics-meta">${periodLabel}</div>
 
             ${this._aiPanelHtml()}
+
+            ${this._aiChatHtml()}
 
             <div class="analytics-kpi-grid">
                 <div class="analytics-kpi"><div class="analytics-kpi-label">Revenue</div><div class="analytics-kpi-value kpi-green">${formatCurrency(totalRevenue)}</div></div>
@@ -309,6 +314,8 @@ const AnalyticsPage = {
         if (aiRun) aiRun.addEventListener('click', () => this._runAiInsights(false));
         const aiSettings = $('#analytics-ai-settings');
         if (aiSettings) aiSettings.addEventListener('click', () => this._openAiSettings());
+        // Phase 9.5b chat listeners
+        this._wireChatListeners();
 
         // Charts
         if (this.state.data && typeof Chart !== 'undefined') {
@@ -819,6 +826,182 @@ const AnalyticsPage = {
                 testRes.classList.add('ai-test-fail');
             }
         });
+    },
+
+    // ------------------------------------------------------------------
+    // Phase 9.5b — Tool-calling Q&A chat assistant
+    // ------------------------------------------------------------------
+    _aiChatHtml() {
+        const messages = this.state.chatMessages || [];
+        const busy = this.state.chatBusy;
+
+        let messagesHtml = '';
+        if (messages.length === 0) {
+            messagesHtml = `
+                <div class="ai-chat-empty">
+                    <p>Ask me anything about your books:</p>
+                    <ul class="ai-chat-examples">
+                        <li>&ldquo;How much did I spend at Jack in the Box in 2025?&rdquo;</li>
+                        <li>&ldquo;What are my unpaid invoices from ABC Corp?&rdquo;</li>
+                        <li>&ldquo;Show me my top 5 customers by revenue&rdquo;</li>
+                        <li>&ldquo;What were my HSA-tagged payments in 2024?&rdquo;</li>
+                    </ul>
+                </div>
+            `;
+        } else {
+            messagesHtml = messages.map(msg => this._renderChatMessage(msg)).join('');
+        }
+
+        if (busy) {
+            messagesHtml += `
+                <div class="ai-chat-message ai-chat-assistant">
+                    <div class="ai-chat-avatar">&#10024;</div>
+                    <div class="ai-chat-bubble">
+                        <span class="spinner"></span> Thinking&hellip;
+                    </div>
+                </div>
+            `;
+        }
+
+        return `
+            <div class="analytics-card ai-chat-card">
+                <div class="analytics-section-title ai-chat-title">
+                    <span>&#128172; Ask AI</span>
+                    ${messages.length > 0 ? '<button class="btn btn-secondary btn-sm" id="ai-chat-clear" style="margin-left:auto">Clear</button>' : ''}
+                </div>
+                <div class="ai-chat-messages" id="ai-chat-messages">
+                    ${messagesHtml}
+                </div>
+                <form class="ai-chat-form" id="ai-chat-form">
+                    <input type="text" id="ai-chat-input"
+                           placeholder="Ask a question..."
+                           ${busy ? 'disabled' : ''}
+                           autocomplete="off">
+                    <button type="submit" class="btn btn-primary btn-sm" ${busy ? 'disabled' : ''}>
+                        Send
+                    </button>
+                </form>
+            </div>
+        `;
+    },
+
+    _renderChatMessage(msg) {
+        if (msg.role === 'user') {
+            return `
+                <div class="ai-chat-message ai-chat-user">
+                    <div class="ai-chat-avatar">&#128100;</div>
+                    <div class="ai-chat-bubble">${escapeHtml(msg.content)}</div>
+                </div>
+            `;
+        }
+        // Assistant message may include tool calls
+        let toolCallsHtml = '';
+        if (msg.tool_calls && msg.tool_calls.length > 0) {
+            toolCallsHtml = `
+                <details class="ai-chat-tools">
+                    <summary>&#128296; Used ${msg.tool_calls.length} tool${msg.tool_calls.length === 1 ? '' : 's'}</summary>
+                    <ul>
+                        ${msg.tool_calls.map(tc => `
+                            <li>
+                                <code>${escapeHtml(tc.tool_name)}</code>
+                                ${tc.params && Object.keys(tc.params).length > 0
+                                    ? `(${Object.entries(tc.params).map(([k,v]) => `${escapeHtml(k)}=${escapeHtml(String(v))}`).join(', ')})`
+                                    : ''}
+                            </li>
+                        `).join('')}
+                    </ul>
+                </details>
+            `;
+        }
+        return `
+            <div class="ai-chat-message ai-chat-assistant">
+                <div class="ai-chat-avatar">&#10024;</div>
+                <div class="ai-chat-bubble">
+                    ${this._renderMarkdownish(msg.content || '')}
+                    ${toolCallsHtml}
+                </div>
+            </div>
+        `;
+    },
+
+    async _submitChatQuery(question) {
+        if (!question || !question.trim()) return;
+        question = question.trim();
+
+        // Add user message to history
+        this.state.chatMessages.push({
+            role: 'user',
+            content: question,
+            timestamp: new Date().toISOString(),
+        });
+        this.state.chatBusy = true;
+        this._updateChatPanel();
+        App.setStatus('Asking AI...');
+
+        try {
+            const url = `/analytics/ai-query?question=${encodeURIComponent(question)}`;
+            const res = await API.post(url, {});
+            this.state.chatMessages.push({
+                role: 'assistant',
+                content: res.final_response || '(no response)',
+                tool_calls: res.tool_calls || [],
+                call_count: res.call_count || 0,
+                success: res.success,
+                timestamp: new Date().toISOString(),
+            });
+        } catch (err) {
+            const msg = err && err.message ? err.message : String(err);
+            if (/not configured/i.test(msg)) {
+                toast('Configure an AI provider first', 'error');
+                this._openAiSettings();
+            } else {
+                toast('Query failed: ' + msg, 'error');
+                this.state.chatMessages.push({
+                    role: 'assistant',
+                    content: `*Error:* ${msg}`,
+                    tool_calls: [],
+                    timestamp: new Date().toISOString(),
+                });
+            }
+        } finally {
+            this.state.chatBusy = false;
+            this._updateChatPanel();
+            App.setStatus('Analytics — Ready');
+        }
+    },
+
+    _updateChatPanel() {
+        const host = document.querySelector('.ai-chat-card');
+        if (!host) return;
+        const tmp = document.createElement('div');
+        tmp.innerHTML = this._aiChatHtml();
+        const fresh = tmp.querySelector('.ai-chat-card');
+        if (fresh) {
+            host.innerHTML = fresh.innerHTML;
+            this._wireChatListeners();
+        }
+    },
+
+    _wireChatListeners() {
+        const form = document.getElementById('ai-chat-form');
+        if (form) {
+            form.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('ai-chat-input');
+                if (input && input.value.trim()) {
+                    const q = input.value;
+                    input.value = '';
+                    this._submitChatQuery(q);
+                }
+            });
+        }
+        const clearBtn = document.getElementById('ai-chat-clear');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', () => {
+                this.state.chatMessages = [];
+                this._updateChatPanel();
+            });
+        }
     },
 
     // ------------------------------------------------------------------
