@@ -18,12 +18,13 @@ import time
 from datetime import date, datetime, timezone
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.rate_limit import limiter
 from app.services.analytics import AnalyticsEngine
 from app.services.ai_service import (
     AIProviderError,
@@ -456,7 +457,8 @@ def put_ai_config(
 
 
 @router.post("/ai-config/test")
-def test_ai_config(db: Session = Depends(get_db)):
+@limiter.limit("20/minute")
+def test_ai_config(request: Request, db: Session = Depends(get_db)):
     """Smoke-test the configured AI provider with a trivial prompt.
 
     Used by the Settings modal's "Test" button to validate the key
@@ -503,7 +505,9 @@ def test_ai_config(db: Session = Depends(get_db)):
 
 
 @router.post("/ai-insights")
+@limiter.limit("10/minute")
 def ai_insights(
+    request: Request,
     period: Optional[str] = Query("month"),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
@@ -576,7 +580,9 @@ def ai_insights(
 
 
 @router.post("/ai-query")
+@limiter.limit("10/minute")
 def ai_query(
+    request: Request,
     question: str = Query(..., description="User question"),
     db: Session = Depends(get_db),
 ):
