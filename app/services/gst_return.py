@@ -55,9 +55,9 @@ def _draw_comb_text(
     rect: tuple[float, float, float, float],
     value: str,
     cell_count: int,
-    font_name: str = "Courier-Bold",
-    font_size: int = 9,
-    y_offset: float = 2.0,
+    font_name: str = "Helvetica",
+    font_size: int = 10,
+    y_offset: float = 2.6,
 ) -> None:
     if not value:
         return
@@ -302,17 +302,15 @@ def _overlay_pdf(report: dict, company_settings: dict, return_due_date: date | N
     out = BytesIO()
     c = canvas.Canvas(out, pagesize=(595.276, 841.89))
     gst_number = company_settings.get("gst_number") or company_settings.get("company_tax_id") or ""
-    c.setFont("Helvetica", 8)
-    _draw_comb_text(c, GST_REGISTRATION_RECT_PAGE_1, gst_number, 11, font_size=8, y_offset=2.2)
-    _draw_comb_text(c, GST_PERIOD_RECT_PAGE_1, _pdf_period(report["start_date"], report["end_date"]), 11, font_size=8, y_offset=2.2)
-    _draw_comb_text(c, GST_DUE_RECT_PAGE_1, _pdf_date_comb(return_due_date), 8, font_size=8, y_offset=2.2)
+    _draw_comb_text(c, GST_REGISTRATION_RECT_PAGE_1, gst_number, 11)
+    _draw_comb_text(c, GST_PERIOD_RECT_PAGE_1, _pdf_period(report["start_date"], report["end_date"]), 11)
+    _draw_comb_text(c, GST_DUE_RECT_PAGE_1, _pdf_date_comb(return_due_date), 8)
     c.drawString(285, 540, phone or company_settings.get("company_phone") or "")
 
     c.showPage()
-    c.setFont("Helvetica", 8)
-    _draw_comb_text(c, GST_REGISTRATION_RECT_PAGE_2, gst_number, 11, font_size=8, y_offset=2.2)
-    _draw_comb_text(c, GST_END_DATE_RECT_PAGE_2, date.fromisoformat(report["end_date"]).strftime("%d%m%Y"), 8, font_size=8, y_offset=2.2)
-    _draw_comb_text(c, GST_DUE_RECT_PAGE_2, _pdf_date_comb(return_due_date), 8, font_size=8, y_offset=2.2)
+    _draw_comb_text(c, GST_REGISTRATION_RECT_PAGE_2, gst_number, 11)
+    _draw_comb_text(c, GST_END_DATE_RECT_PAGE_2, date.fromisoformat(report["end_date"]).strftime("%d%m%Y"), 8)
+    _draw_comb_text(c, GST_DUE_RECT_PAGE_2, _pdf_date_comb(return_due_date), 8)
     c.showPage()
     c.save()
     out.seek(0)
