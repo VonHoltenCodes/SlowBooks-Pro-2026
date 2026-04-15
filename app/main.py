@@ -42,6 +42,8 @@ from app.routes import companies, employees, payroll
 from app.routes import stripe_payments, public
 # Phase 8: QuickBooks Online
 from app.routes import qbo
+# Phase 9: Analytics (real-time business intelligence)
+from app.routes import analytics
 
 from app.database import SessionLocal
 from app.services.audit import register_audit_hooks
@@ -97,6 +99,8 @@ app.include_router(stripe_payments.router)
 app.include_router(public.router)
 # Phase 8: QuickBooks Online
 app.include_router(qbo.router)
+# Phase 9: Analytics (real-time business intelligence)
+app.include_router(analytics.router)
 
 # Register audit log hooks
 register_audit_hooks(SessionLocal)
@@ -112,7 +116,16 @@ uploads_dir.mkdir(exist_ok=True)
 # SPA entry point
 index_path = Path(__file__).parent.parent / "index.html"
 
+# Standalone analytics dashboard page (Phase 9). Served outside the SPA
+# shell so it can evolve independently and be linked from /analytics.
+analytics_page_path = Path(__file__).parent / "templates" / "analytics.html"
+
 
 @app.get("/")
 async def serve_index():
     return FileResponse(str(index_path))
+
+
+@app.get("/analytics")
+async def serve_analytics_page():
+    return FileResponse(str(analytics_page_path))

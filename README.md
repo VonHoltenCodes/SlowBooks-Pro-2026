@@ -82,6 +82,24 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 
 ![Dashboard — Dark Mode](screenshots/dashboard-dark.png)
 
+### Analytics (Phase 9)
+Real-time business intelligence layer that sits on top of the accounting engine. Powered by `AnalyticsEngine` (`app/services/analytics.py`) with 8 aggregation methods and 5 REST endpoints at `/api/analytics/*`. Accessible from the sidebar → **Analytics**, or directly at `http://localhost:3001/analytics`.
+
+- **Revenue by Customer (MTD)** — Paid revenue per customer for the current month, ranked high-to-low
+- **12-Month Revenue Trend** — Monthly paid-revenue history with proper calendar-month bucketing (no double-bucketed months)
+- **Expenses by Category (MTD)** — Paid-bill expenses grouped by expense account number
+- **A/R Aging** — Open invoice balances bucketed Current / 30 / 60 / 90+ days old, using `invoices.balance_due` so partial payments don't double-count
+- **A/P Aging** — Open bill balances bucketed Current / 30 / 60 / 90+ days old
+- **DSO (Days Sales Outstanding)** — `(open A/R balance ÷ last-30-day paid revenue) × 30`
+- **90-Day Cash Forecast** — Weekly cumulative buckets of expected A/R collections vs A/P payments due on-or-before each cutoff, with final bucket pinned at day 90
+- **Customer Profitability** — Lifetime paid revenue per customer (first pass; COGS attribution on the roadmap)
+- **Dashboard Page** — Standalone dark-themed page at `/analytics` with 4 KPI cards (Revenue / Expenses / DSO / Margin%), sortable revenue table, and A/R aging table. Zero-dependency vanilla JS — no chart library needed yet
+
+Quick smoke test once the app is running:
+```bash
+curl http://localhost:3001/api/analytics/dashboard
+```
+
 ### Online Payments
 - **Stripe Checkout** — Accept online payments via Stripe's hosted checkout page. Customers click "Pay Online" in emailed invoices, pay on Stripe, and the payment auto-records with journal entries (DR Undeposited Funds, CR A/R)
 - **Public Payment Page** — Standalone `/pay/{token}` page (no login required) shows invoice summary with "Pay with Stripe" button. Supports light/dark mode
@@ -136,7 +154,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (31 routers, 144+ routes) |
+| Backend | Python 3.12 + FastAPI (32 routers, 149+ routes) |
 | Database | PostgreSQL 16 + SQLAlchemy 2.0 |
 | Migrations | Alembic |
 | Frontend | Vanilla HTML/CSS/JS (no framework) |
@@ -201,7 +219,7 @@ SlowBooks-Pro-2026/
 ├── alembic.ini               # Alembic config
 ├── alembic/                  # Database migrations
 ├── app/
-│   ├── main.py               # FastAPI app + 28 routers (132 routes)
+│   ├── main.py               # FastAPI app + 32 routers (149+ routes)
 │   ├── config.py             # Environment-based settings
 │   ├── database.py           # SQLAlchemy engine + session
 │   ├── models/               # 30+ SQLAlchemy models
@@ -226,9 +244,10 @@ SlowBooks-Pro-2026/
 │   │   ├── payroll.py        # Employees, pay runs, pay stubs
 │   │   └── qbo_mapping.py    # QBO ↔ Slowbooks ID mappings
 │   ├── schemas/              # Pydantic request/response models
-│   ├── routes/               # FastAPI routers (28 routers)
+│   ├── routes/               # FastAPI routers (32 route files including analytics)
 │   ├── services/
 │   │   ├── accounting.py     # Double-entry journal entry engine
+│   │   ├── analytics.py      # Phase 9: business intelligence aggregates (8 methods)
 │   │   ├── audit.py          # SQLAlchemy after_flush audit hooks
 │   │   ├── closing_date.py   # Closing date enforcement guard
 │   │   ├── payroll_service.py # Withholding calculations
@@ -247,13 +266,13 @@ SlowBooks-Pro-2026/
 │   │   ├── qbo_service.py    # QBO OAuth + token management + client factory
 │   │   ├── qbo_import.py     # Import 6 entity types from QBO
 │   │   └── qbo_export.py     # Export 6 entity types to QBO
-│   ├── templates/            # Jinja2 templates (PDF, email)
+│   ├── templates/            # Jinja2 templates (PDF, email) + analytics.html
 │   ├── seed/                 # Chart of Accounts seed data
 │   └── static/
 │       ├── css/
 │       │   ├── style.css     # QB2003 "Default Blue" skin
 │       │   └── dark.css      # Dark mode CSS overrides
-│       └── js/               # SPA router, API wrapper, 23 page modules
+│       └── js/               # SPA router, API wrapper, 23 page modules + AnalyticsDashboard.js
 ├── scripts/
 │   ├── seed_database.py      # Seed the Chart of Accounts
 │   ├── seed_irs_mock_data.py # IRS Pub 583 mock data
@@ -312,7 +331,7 @@ SlowBooks-Pro-2026/
 
 ## API
 
-All endpoints under `/api/`. Swagger docs at `/docs`. 132 routes across 28 routers.
+All endpoints under `/api/`. Swagger docs at `/docs`. 149+ routes across 32 routers.
 
 ### Core (Original)
 | Endpoint | Methods | Description |
@@ -415,6 +434,16 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 132 routes across 28 route
 | `/api/backups/{id}/download` | GET | Download backup file |
 | `/api/companies` | GET, POST | Multi-company management |
 | `/api/uploads/logo` | POST | Upload company logo |
+
+### Analytics
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/analytics/dashboard` | GET | Complete analytics snapshot (all 8 metrics) |
+| `/api/analytics/revenue` | GET | Revenue by customer + 12-month trend |
+| `/api/analytics/expenses` | GET | Expense breakdown by account number (MTD) |
+| `/api/analytics/cash-flow` | GET | Cash forecast + DSO + A/R and A/P aging (`?days=90`) |
+| `/api/analytics/profitability` | GET | Lifetime paid revenue per customer |
+| `/analytics` | GET | Standalone dashboard page (HTML) |
 
 ---
 
