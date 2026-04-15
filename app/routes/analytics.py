@@ -14,7 +14,6 @@
 
 import csv
 import io
-import re
 import time
 from datetime import date, datetime, timezone
 from typing import Optional, Tuple
@@ -217,13 +216,17 @@ def export_csv(
     writer.writerow(["period", "end", "", e.isoformat()])
 
     for customer, revenue in (snap.get("revenue_by_customer") or {}).items():
-        writer.writerow(["revenue_by_customer", _csv_safe(customer), "", f"{revenue:.2f}"])
+        writer.writerow(
+            ["revenue_by_customer", _csv_safe(customer), "", f"{revenue:.2f}"]
+        )
 
     for month, total in (snap.get("revenue_trend") or {}).items():
         writer.writerow(["revenue_trend", _csv_safe(month), "", f"{total:.2f}"])
 
     for category, amount in (snap.get("expenses_by_category") or {}).items():
-        writer.writerow(["expenses_by_category", _csv_safe(category), "", f"{amount:.2f}"])
+        writer.writerow(
+            ["expenses_by_category", _csv_safe(category), "", f"{amount:.2f}"]
+        )
 
     for bucket, by_customer in (snap.get("ar_aging") or {}).items():
         for customer, amount in (by_customer or {}).items():
@@ -235,17 +238,24 @@ def export_csv(
 
     writer.writerow(["dso", "days", "", f"{float(snap.get('dso') or 0):.2f}"])
 
-    for entry in (snap.get("cash_forecast") or []):
-        writer.writerow(["cash_forecast", entry["date"], "collections",
-                         f"{entry['collections']:.2f}"])
-        writer.writerow(["cash_forecast", entry["date"], "payments",
-                         f"{entry['payments']:.2f}"])
-        writer.writerow(["cash_forecast", entry["date"], "net",
-                         f"{entry['net']:.2f}"])
+    for entry in snap.get("cash_forecast") or []:
+        writer.writerow(
+            [
+                "cash_forecast",
+                entry["date"],
+                "collections",
+                f"{entry['collections']:.2f}",
+            ]
+        )
+        writer.writerow(
+            ["cash_forecast", entry["date"], "payments", f"{entry['payments']:.2f}"]
+        )
+        writer.writerow(["cash_forecast", entry["date"], "net", f"{entry['net']:.2f}"])
 
     for customer, info in (snap.get("customer_profit") or {}).items():
-        writer.writerow(["customer_profit", _csv_safe(customer), "",
-                         f"{info['revenue']:.2f}"])
+        writer.writerow(
+            ["customer_profit", _csv_safe(customer), "", f"{info['revenue']:.2f}"]
+        )
 
     filename = f"slowbooks-analytics-{date.today().isoformat()}.csv"
     return Response(
@@ -305,11 +315,11 @@ def export_pdf(
 
 
 # Settings keys — kept in one place so we don't typo them.
-_AI_PROVIDER_KEY        = "ai_provider"
-_AI_MODEL_KEY           = "ai_model"
-_AI_API_KEY             = "ai_api_key"            # STORED ENCRYPTED
-_AI_CF_ACCOUNT_KEY      = "ai_cloudflare_account_id"
-_AI_WORKER_URL_KEY      = "ai_worker_url"         # HTTPS-only, validated
+_AI_PROVIDER_KEY = "ai_provider"
+_AI_MODEL_KEY = "ai_model"
+_AI_API_KEY = "ai_api_key"  # STORED ENCRYPTED
+_AI_CF_ACCOUNT_KEY = "ai_cloudflare_account_id"
+_AI_WORKER_URL_KEY = "ai_worker_url"  # HTTPS-only, validated
 
 
 # Tiny in-process cache so the UI can poll without hammering paid APIs.
@@ -400,7 +410,7 @@ def put_ai_config(
         raise HTTPException(
             status_code=400,
             detail=f"Unknown AI provider '{provider}'. Valid: "
-                   f"{sorted(AI_PROVIDERS.keys())}",
+            f"{sorted(AI_PROVIDERS.keys())}",
         )
 
     model = (payload.model or "").strip()
@@ -469,6 +479,7 @@ def test_ai_config(db: Session = Depends(get_db)):
     try:
         # Smallest possible round-trip: ask for a one-word reply.
         from app.services.ai_service import call_provider
+
         text = call_provider(
             provider_key=provider,
             api_key=api_key,
@@ -562,6 +573,7 @@ def ai_insights(
 # ===========================================================================
 # AI Q&A with Tool Calling — Phase 9.5b
 # ===========================================================================
+
 
 @router.post("/ai-query")
 def ai_query(

@@ -295,12 +295,14 @@ class AnalyticsEngine:
             while ap_idx < len(ap_sorted) and ap_sorted[ap_idx][0] <= cutoff:
                 ap_sum += ap_sorted[ap_idx][1]
                 ap_idx += 1
-            forecast.append({
-                "date": cutoff.isoformat(),
-                "collections": ar_sum,
-                "payments": ap_sum,
-                "net": ar_sum - ap_sum,
-            })
+            forecast.append(
+                {
+                    "date": cutoff.isoformat(),
+                    "collections": ar_sum,
+                    "payments": ap_sum,
+                    "net": ar_sum - ap_sum,
+                }
+            )
 
         return forecast
 
@@ -319,8 +321,11 @@ class AnalyticsEngine:
                 Customer.name,
                 func.coalesce(func.sum(Invoice.total), 0).label("revenue"),
             )
-            .outerjoin(Invoice, (Invoice.customer_id == Customer.id) &
-                                (Invoice.status == InvoiceStatus.PAID))
+            .outerjoin(
+                Invoice,
+                (Invoice.customer_id == Customer.id)
+                & (Invoice.status == InvoiceStatus.PAID),
+            )
             .group_by(Customer.id, Customer.name)
             .all()
         )

@@ -48,7 +48,10 @@ export default {
     // Only accept POST. Accept both /v1/chat/completions (OpenAI-compat)
     // and /chat/completions so the gateway can be mounted under any route.
     if (request.method !== "POST") {
-      return jsonError(405, "Method not allowed. Use POST /v1/chat/completions.");
+      return jsonError(
+        405,
+        "Method not allowed. Use POST /v1/chat/completions.",
+      );
     }
 
     const { pathname } = new URL(request.url);
@@ -64,7 +67,7 @@ export default {
       return jsonError(
         500,
         "Worker misconfigured: AUTH_TOKEN secret not set. " +
-          "Run `wrangler secret put AUTH_TOKEN`."
+          "Run `wrangler secret put AUTH_TOKEN`.",
       );
     }
 
@@ -86,7 +89,9 @@ export default {
     const messages = Array.isArray(body.messages) ? body.messages : [];
     const maxTokens = Number(body.max_tokens) || DEFAULT_MAX_TOKENS;
     const temperature =
-      typeof body.temperature === "number" ? body.temperature : DEFAULT_TEMPERATURE;
+      typeof body.temperature === "number"
+        ? body.temperature
+        : DEFAULT_TEMPERATURE;
     const tools = Array.isArray(body.tools) ? body.tools : null;
 
     if (messages.length === 0) {
@@ -107,15 +112,21 @@ export default {
     try {
       aiResult = await env.AI.run(model, aiInput);
     } catch (e) {
-      return jsonError(502, `Workers AI error: ${String(e && e.message || e)}`);
+      return jsonError(
+        502,
+        `Workers AI error: ${String((e && e.message) || e)}`,
+      );
     }
 
     // --- Translate to OpenAI-compat response shape -----------------------
     // Slowbooks' ai_service.parse_response() expects
     //   choices[0].message.content  (+ optional tool_calls)
     // so we normalise here regardless of the underlying model's raw shape.
-    const responseText = typeof aiResult?.response === "string" ? aiResult.response : "";
-    const rawToolCalls = Array.isArray(aiResult?.tool_calls) ? aiResult.tool_calls : [];
+    const responseText =
+      typeof aiResult?.response === "string" ? aiResult.response : "";
+    const rawToolCalls = Array.isArray(aiResult?.tool_calls)
+      ? aiResult.tool_calls
+      : [];
 
     const message = {
       role: "assistant",
@@ -169,7 +180,7 @@ function jsonError(status, message) {
     {
       status,
       headers: { "content-type": "application/json" },
-    }
+    },
   );
 }
 

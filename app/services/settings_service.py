@@ -4,6 +4,7 @@ Extracted here so multiple routers can import them without creating
 cross-router dependencies or violating the "don't import private _functions
 from other modules" convention.
 """
+
 from sqlalchemy.orm import Session
 
 from app.models.settings import Settings, DEFAULT_SETTINGS

@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 
 # Cloudflare account IDs are exactly 32 lowercase hex chars.
 # Validate before interpolating into URLs to prevent SSRF.
-CLOUDFLARE_ACCOUNT_ID_RE = re.compile(r'^[a-f0-9]{32}$')
+CLOUDFLARE_ACCOUNT_ID_RE = re.compile(r"^[a-f0-9]{32}$")
 
 # Hosts that must never be accepted as a user-supplied Worker URL.
 _BLOCKED_WORKER_HOSTS = {
@@ -143,9 +143,7 @@ def validate_worker_url(url: str) -> str:
     else:
         # DNS hostname — basic character sanity check.
         if not re.match(r"^[a-z0-9._-]+$", host):
-            raise ValueError(
-                f"worker_url host '{host}' contains invalid characters"
-            )
+            raise ValueError(f"worker_url host '{host}' contains invalid characters")
         if ".." in host or host.startswith(".") or host.endswith("."):
             raise ValueError(f"worker_url host '{host}' is malformed")
 
@@ -164,9 +162,10 @@ def validate_worker_url(url: str) -> str:
     # user-controlled query params into an outbound HTTP request.
     return f"https://{host}{port_part}{path}"
 
+
 DEFAULT_TIMEOUT = 60.0  # seconds
 MAX_TOKENS = 1024
-TEMPERATURE = 0.3       # low — we want grounded analysis, not creative writing
+TEMPERATURE = 0.3  # low — we want grounded analysis, not creative writing
 
 
 # ---------------------------------------------------------------------------
@@ -177,12 +176,13 @@ TEMPERATURE = 0.3       # low — we want grounded analysis, not creative writin
 @dataclass(frozen=True)
 class ProviderSpec:
     """Static metadata about a supported AI provider."""
-    key: str                   # machine id used in settings + UI
-    label: str                 # human-readable name for the UI
-    default_model: str         # recommended default as of April 2026
-    wire_format: str           # "openai" | "anthropic" | "gemini"
-    docs_url: str              # where users go to get a key
-    free_tier_hint: str        # 1-line description for the UI
+
+    key: str  # machine id used in settings + UI
+    label: str  # human-readable name for the UI
+    default_model: str  # recommended default as of April 2026
+    wire_format: str  # "openai" | "anthropic" | "gemini"
+    docs_url: str  # where users go to get a key
+    free_tier_hint: str  # 1-line description for the UI
     needs_account_id: bool = False  # Cloudflare direct REST
     needs_worker_url: bool = False  # Self-hosted CF Worker gateway
 
@@ -308,7 +308,8 @@ def build_insights_prompt(dashboard: Dict[str, Any], company_name: str = "") -> 
     total_expenses = sum(float(v or 0) for v in expenses_by_category.values())
     margin_pct = (
         ((total_revenue - total_expenses) / total_revenue) * 100
-        if total_revenue > 0 else 0
+        if total_revenue > 0
+        else 0
     )
     net_income = total_revenue - total_expenses
 
@@ -346,7 +347,8 @@ def build_insights_prompt(dashboard: Dict[str, Any], company_name: str = "") -> 
     period_label = (
         f"{period.get('name', 'month').upper()} "
         f"({period.get('start', '?')} → {period.get('end', '?')})"
-        if period else "(unspecified window)"
+        if period
+        else "(unspecified window)"
     )
 
     company = company_name or "the business"
@@ -363,21 +365,27 @@ def build_insights_prompt(dashboard: Dict[str, Any], company_name: str = "") -> 
         "",
         "=== TOP REVENUE CUSTOMERS ===",
     ]
-    lines += [f"  {name}: ${float(amt or 0):,.0f}" for name, amt in top_customers] or ["  (none)"]
+    lines += [f"  {name}: ${float(amt or 0):,.0f}" for name, amt in top_customers] or [
+        "  (none)"
+    ]
 
     lines += ["", "=== TOP EXPENSE CATEGORIES ==="]
-    lines += [f"  {cat}: ${float(amt or 0):,.0f}" for cat, amt in top_expenses] or ["  (none)"]
+    lines += [f"  {cat}: ${float(amt or 0):,.0f}" for cat, amt in top_expenses] or [
+        "  (none)"
+    ]
 
     lines += ["", "=== RECENT REVENUE TREND (last 6 months) ==="]
     lines += trend_lines or ["  (no data)"]
 
     lines += ["", "=== ACCOUNTS RECEIVABLE (worst outstanding balances) ==="]
-    lines += [f"  {name}: ${amt:,.0f} open"
-              for name, amt in worst_ar] or ["  (nothing outstanding)"]
+    lines += [f"  {name}: ${amt:,.0f} open" for name, amt in worst_ar] or [
+        "  (nothing outstanding)"
+    ]
 
     lines += ["", "=== ACCOUNTS PAYABLE (worst outstanding balances) ==="]
-    lines += [f"  {name}: ${amt:,.0f} open"
-              for name, amt in worst_ap] or ["  (nothing outstanding)"]
+    lines += [f"  {name}: ${amt:,.0f} open" for name, amt in worst_ap] or [
+        "  (nothing outstanding)"
+    ]
 
     if forecast_summary:
         lines += ["", "=== CASH FORECAST ===", f"  {forecast_summary}"]
@@ -446,19 +454,28 @@ def build_request(
     if provider_key == "grok":
         return _openai_style_request(
             "https://api.x.ai/v1/chat/completions",
-            api_key, model, system, user,
+            api_key,
+            model,
+            system,
+            user,
         )
 
     if provider_key == "groq":
         return _openai_style_request(
             "https://api.groq.com/openai/v1/chat/completions",
-            api_key, model, system, user,
+            api_key,
+            model,
+            system,
+            user,
         )
 
     if provider_key == "openai":
         return _openai_style_request(
             "https://api.openai.com/v1/chat/completions",
-            api_key, model, system, user,
+            api_key,
+            model,
+            system,
+            user,
         )
 
     if provider_key == "cloudflare":
@@ -622,11 +639,13 @@ def call_provider(
     try:
         if client is None:
             with _hardened_client(timeout) as c:
-                resp = c.request(req["method"], req["url"],
-                                 headers=req["headers"], json=req["json"])
+                resp = c.request(
+                    req["method"], req["url"], headers=req["headers"], json=req["json"]
+                )
         else:
-            resp = client.request(req["method"], req["url"],
-                                  headers=req["headers"], json=req["json"])
+            resp = client.request(
+                req["method"], req["url"], headers=req["headers"], json=req["json"]
+            )
     except httpx.HTTPError as e:
         # Never include api_key in the exception — it might have been
         # substituted into the URL (Gemini).
@@ -638,9 +657,7 @@ def call_provider(
         text = resp.text
         if api_key and api_key in text:
             text = text.replace(api_key, "***REDACTED***")
-        raise AIProviderError(
-            f"{provider_key}: HTTP {resp.status_code} — {text[:500]}"
-        )
+        raise AIProviderError(f"{provider_key}: HTTP {resp.status_code} — {text[:500]}")
 
     try:
         body = resp.json()
@@ -649,9 +666,7 @@ def call_provider(
 
     text = parse_response(provider_key, body)
     if not text:
-        raise AIProviderError(
-            f"{provider_key}: empty response (body shape unexpected)"
-        )
+        raise AIProviderError(f"{provider_key}: empty response (body shape unexpected)")
     return text
 
 
@@ -748,8 +763,13 @@ def call_with_tools(
         if wire_format == "openai":
             # OpenAI format: include tools in the request
             req = build_request(
-                provider_key, api_key, model, "", user_question,
-                account_id, worker_url,
+                provider_key,
+                api_key,
+                model,
+                "",
+                user_question,
+                account_id,
+                worker_url,
             )
             req["json"]["messages"] = messages
             req["json"]["tools"] = [
@@ -767,8 +787,13 @@ def call_with_tools(
         elif wire_format == "anthropic":
             # Anthropic format: tools at top level
             req = build_request(
-                provider_key, api_key, model, "", user_question,
-                account_id, worker_url,
+                provider_key,
+                api_key,
+                model,
+                "",
+                user_question,
+                account_id,
+                worker_url,
             )
             req["json"]["messages"] = messages
             req["json"]["tools"] = [
@@ -787,8 +812,13 @@ def call_with_tools(
         elif wire_format == "gemini":
             # Gemini has a different tool format
             req = build_request(
-                provider_key, api_key, model, "", user_question,
-                account_id, worker_url,
+                provider_key,
+                api_key,
+                model,
+                "",
+                user_question,
+                account_id,
+                worker_url,
             )
             req["json"]["tools"] = [
                 {
@@ -798,30 +828,41 @@ def call_with_tools(
                             "description": tool.get("description", ""),
                             "parameters": {
                                 "type": "object",
-                                "properties": tool.get("parameters", {}).get("properties", {}),
+                                "properties": tool.get("parameters", {}).get(
+                                    "properties", {}
+                                ),
                             },
                         }
                         for tool in tools.values()
                     ]
                 }
             ]
-            req["json"]["contents"] = [{"role": "user", "parts": [{"text": user_question}]}]
+            req["json"]["contents"] = [
+                {"role": "user", "parts": [{"text": user_question}]}
+            ]
             # Remove the old messages/contents structure
             if "messages" in req["json"]:
                 del req["json"]["messages"]
         else:
-            raise ValueError(f"Tool calling not supported for wire format: {wire_format}")
+            raise ValueError(
+                f"Tool calling not supported for wire format: {wire_format}"
+            )
 
         # Make the call — reuses the same hardened-client profile as
         # call_provider (verify=True, follow_redirects=False, explicit UA).
         try:
             if client is None:
                 with _hardened_client(DEFAULT_TIMEOUT) as c:
-                    resp = c.request(req["method"], req["url"],
-                                     headers=req["headers"], json=req["json"])
+                    resp = c.request(
+                        req["method"],
+                        req["url"],
+                        headers=req["headers"],
+                        json=req["json"],
+                    )
             else:
-                resp = client.request(req["method"], req["url"],
-                                      headers=req["headers"], json=req["json"])
+                resp = client.request(
+                    req["method"], req["url"], headers=req["headers"], json=req["json"]
+                )
         except httpx.HTTPError as e:
             raise AIProviderError(f"{provider_key}: network error") from e
 
@@ -829,7 +870,9 @@ def call_with_tools(
             text = resp.text
             if api_key and api_key in text:
                 text = text.replace(api_key, "***REDACTED***")
-            raise AIProviderError(f"{provider_key}: HTTP {resp.status_code} — {text[:500]}")
+            raise AIProviderError(
+                f"{provider_key}: HTTP {resp.status_code} — {text[:500]}"
+            )
 
         try:
             body = resp.json()
@@ -856,48 +899,67 @@ def call_with_tools(
             tool_name = call.get("name")
             tool_params = call.get("arguments", {})
             result = tool_executor(tool_name, **tool_params)
-            tool_calls_made.append({
-                "tool_name": tool_name,
-                "params": tool_params,
-                "result": result,
-            })
+            tool_calls_made.append(
+                {
+                    "tool_name": tool_name,
+                    "params": tool_params,
+                    "result": result,
+                }
+            )
 
             # Add the assistant's response (tool call request) to messages
             if wire_format == "openai":
-                messages.append({
-                    "role": "assistant",
-                    "content": None,
-                    "tool_calls": [{
-                        "id": f"call_{len(tool_calls_made)}",
-                        "type": "function",
-                        "function": {"name": tool_name, "arguments": str(tool_params)},
-                    }],
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": f"call_{len(tool_calls_made)}",
+                                "type": "function",
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": str(tool_params),
+                                },
+                            }
+                        ],
+                    }
+                )
                 # Add tool result
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": f"call_{len(tool_calls_made)}",
-                    "content": str(result),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": f"call_{len(tool_calls_made)}",
+                        "content": str(result),
+                    }
+                )
 
             elif wire_format == "anthropic":
-                messages.append({
-                    "role": "assistant",
-                    "content": [{
-                        "type": "tool_use",
-                        "id": f"tool_use_{len(tool_calls_made)}",
-                        "name": tool_name,
-                        "input": tool_params,
-                    }],
-                })
-                messages.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": f"tool_use_{len(tool_calls_made)}",
-                        "content": str(result),
-                    }],
-                })
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "id": f"tool_use_{len(tool_calls_made)}",
+                                "name": tool_name,
+                                "input": tool_params,
+                            }
+                        ],
+                    }
+                )
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": f"tool_use_{len(tool_calls_made)}",
+                                "content": str(result),
+                            }
+                        ],
+                    }
+                )
 
             elif wire_format == "gemini":
                 # Gemini's tool results go in functionResponse
@@ -927,7 +989,9 @@ def _extract_tool_calls(wire_format: str, body: Dict[str, Any]) -> list:
             return [
                 {
                     "name": tc.get("function", {}).get("name"),
-                    "arguments": _parse_json_args(tc.get("function", {}).get("arguments", "{}")),
+                    "arguments": _parse_json_args(
+                        tc.get("function", {}).get("arguments", "{}")
+                    ),
                 }
                 for tc in message.get("tool_calls", [])
             ]
@@ -972,6 +1036,7 @@ def _parse_json_args(args_str: str) -> Dict[str, Any]:
         return args_str
     try:
         import json
+
         return json.loads(args_str)
     except (ValueError, TypeError):
         return {}

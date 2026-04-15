@@ -22,18 +22,18 @@ from __future__ import annotations
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from sqlalchemy import and_, or_
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.models.accounts import Account
 from app.models.bills import Bill, BillLine, BillPayment
 from app.models.contacts import Customer, Vendor
-from app.models.invoices import Invoice, InvoiceLine
-from app.models.items import Item
+from app.models.invoices import Invoice
 from app.models.payments import Payment
-from app.models.transactions import Transaction, TransactionLine
+from app.models.transactions import Transaction
+
 
 # Shared utility to convert Decimal → float for JSON serialization
 def _to_float(val: Optional[Decimal]) -> Optional[float]:
@@ -45,6 +45,7 @@ def _to_float(val: Optional[Decimal]) -> Optional[float]:
 # ============================================================================
 # Tool implementations — each returns a dict (never ORM objects)
 # ============================================================================
+
 
 def search_bills(
     db: Session,
@@ -346,7 +347,11 @@ def get_balance_sheet(
         "total_assets": _to_float(total_assets),
         "total_liabilities": _to_float(total_liabilities),
         "total_equity": _to_float(total_equity),
-        "accounting_equation_balanced": abs(_to_float(total_assets) - (_to_float(total_liabilities) + _to_float(total_equity))) < 0.01,
+        "accounting_equation_balanced": abs(
+            _to_float(total_assets)
+            - (_to_float(total_liabilities) + _to_float(total_equity))
+        )
+        < 0.01,
     }
 
 
@@ -381,7 +386,8 @@ def get_tax_summary(
         if bl.account:
             key = f"{bl.account.account_number or ''} {bl.account.name}"
             expenses_by_account[key] = _to_float(
-                (Decimal(expenses_by_account.get(key, 0)) or 0) + (Decimal(bl.amount or 0) or 0)
+                (Decimal(expenses_by_account.get(key, 0)) or 0)
+                + (Decimal(bl.amount or 0) or 0)
             )
 
     return {
@@ -417,7 +423,8 @@ def get_sales_by_customer(
     for inv in invoices:
         customer_name = inv.customer.name if inv.customer else "Unknown"
         sales_by_customer[customer_name] = _to_float(
-            (Decimal(sales_by_customer.get(customer_name, 0)) or 0) + (Decimal(inv.total or 0) or 0)
+            (Decimal(sales_by_customer.get(customer_name, 0)) or 0)
+            + (Decimal(inv.total or 0) or 0)
         )
 
     return {
@@ -456,15 +463,21 @@ def get_expenses_by_category(
     expenses_by_category = {}
     for bl in bill_lines:
         category_name = (
-            f"{bl.account.account_number or ''} {bl.account.name}" if bl.account else "Unclassified"
+            f"{bl.account.account_number or ''} {bl.account.name}"
+            if bl.account
+            else "Unclassified"
         )
         expenses_by_category[category_name] = _to_float(
-            (Decimal(expenses_by_category.get(category_name, 0)) or 0) + (Decimal(bl.amount or 0) or 0)
+            (Decimal(expenses_by_category.get(category_name, 0)) or 0)
+            + (Decimal(bl.amount or 0) or 0)
         )
 
     return {
         "results": sorted(
-            [{"category": k, "total_expenses": v} for k, v in expenses_by_category.items()],
+            [
+                {"category": k, "total_expenses": v}
+                for k, v in expenses_by_category.items()
+            ],
             key=lambda x: x["total_expenses"],
             reverse=True,
         ),
@@ -750,7 +763,14 @@ TOOLS: Dict[str, Dict[str, Any]] = {
             "properties": {
                 "account_type": {
                     "type": "string",
-                    "enum": ["asset", "liability", "equity", "income", "expense", "cogs"],
+                    "enum": [
+                        "asset",
+                        "liability",
+                        "equity",
+                        "income",
+                        "expense",
+                        "cogs",
+                    ],
                     "description": "Account type",
                 },
                 "limit": {

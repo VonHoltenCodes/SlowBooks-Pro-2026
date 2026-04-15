@@ -70,7 +70,7 @@ Wrangler prints your Worker URL, e.g.
 
 1. Open Slowbooks → Analytics → **⚙ AI**
 2. Provider: **Cloudflare Workers AI** (or the dedicated
-   *Cloudflare Worker Gateway* option if your version of Slowbooks
+   _Cloudflare Worker Gateway_ option if your version of Slowbooks
    ships one separately)
 3. Cloudflare account ID: your 32-char hex ID from the top right of
    https://dash.cloudflare.com/
@@ -123,10 +123,10 @@ immediately.
 - **Auditing:** every Worker invocation is visible in the Cloudflare
   dashboard under Workers & Pages → slowbooks-ai → Logs.
 
-## What this does *not* protect against
+## What this does _not_ protect against
 
 - A compromised Slowbooks install still has the shared secret, so it
-  can still invoke *your* Worker. Mitigation: rotate the secret if you
+  can still invoke _your_ Worker. Mitigation: rotate the secret if you
   suspect compromise; you'll detect unexpected Worker traffic in the
   Cloudflare dashboard.
 - Workers AI itself is a third-party service. Cloudflare's terms and
