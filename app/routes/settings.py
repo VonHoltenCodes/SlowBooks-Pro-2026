@@ -8,46 +8,30 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.settings import Settings, DEFAULT_SETTINGS
+from app.models.settings import DEFAULT_SETTINGS
+from app.services.settings_service import get_all_settings, set_setting
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
-def _get_all(db: Session) -> dict:
-    rows = db.query(Settings).all()
-    result = dict(DEFAULT_SETTINGS)
-    for row in rows:
-        result[row.key] = row.value
-    return result
-
-
-def _set(db: Session, key: str, value: str):
-    row = db.query(Settings).filter(Settings.key == key).first()
-    if row:
-        row.value = value
-    else:
-        row = Settings(key=key, value=value)
-        db.add(row)
-
-
 @router.get("")
 def get_settings(db: Session = Depends(get_db)):
-    return _get_all(db)
+    return get_all_settings(db)
 
 
 @router.put("")
 def update_settings(data: dict, db: Session = Depends(get_db)):
     for key, value in data.items():
         if key in DEFAULT_SETTINGS:
-            _set(db, key, str(value) if value is not None else "")
+            set_setting(db, key, str(value) if value is not None else "")
     db.commit()
-    return _get_all(db)
+    return get_all_settings(db)
 
 
 @router.post("/test-email")
 def test_email(db: Session = Depends(get_db)):
     """Feature 8: Send a test email to verify SMTP settings."""
-    settings = _get_all(db)
+    settings = get_all_settings(db)
     if not settings.get("smtp_host"):
         from fastapi import HTTPException
         raise HTTPException(status_code=400, detail="SMTP not configured")

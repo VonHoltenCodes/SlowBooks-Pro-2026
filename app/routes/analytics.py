@@ -14,19 +14,21 @@
 
 import csv
 import io
+import re
 import time
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.routes.settings import _get_all as get_all_settings, _set as set_setting
 from app.services.analytics import AnalyticsEngine
 from app.services.ai_service import (
     AIProviderError,
+    CLOUDFLARE_ACCOUNT_ID_RE,
     PROVIDERS as AI_PROVIDERS,
     generate_insights as ai_generate_insights,
     provider_list as ai_provider_list,
@@ -34,8 +36,39 @@ from app.services.ai_service import (
 )
 from app.services.ai_tools import TOOLS as AI_TOOLS, call_tool
 from app.services.crypto import decrypt_value, encrypt_value, is_encrypted
+from app.services.settings_service import get_all_settings, set_setting
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
+
+
+# ---------------------------------------------------------------------------
+# Pydantic schema for PUT /ai-config
+# ---------------------------------------------------------------------------
+
+
+class AIConfigUpdate(BaseModel):
+    provider: Optional[str] = None
+    model: Optional[str] = None
+    api_key: Optional[str] = None
+    cloudflare_account_id: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# CSV safety helper — prevents spreadsheet formula injection
+# ---------------------------------------------------------------------------
+
+
+def _csv_safe(value: str) -> str:
+    """Prefix formula-injection trigger characters with a literal apostrophe.
+
+    Spreadsheet apps (Excel, LibreOffice, Google Sheets) interpret cells that
+    start with =, +, -, @, TAB, or CR as formulas. Prefixing with ' causes
+    them to be treated as plain text without altering the displayed value.
+    """
+    s = str(value)
+    if s and s[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + s
+    return s
 
 
 def _resolve_period(
@@ -169,7 +202,9 @@ def export_csv(
     Google Sheets, or any BI tool without ceremony.
     """
     s, e, label = _resolve_period(period, start_date, end_date)
-    engine = AnalyticsEngine(db)
+
+    # Single DB round-trip for all metrics (reviewer fix: was 8 separate calls)
+    snap = AnalyticsEngine(db).get_dashboard(start_date=s, end_date=e)
 
     buf = io.StringIO()
     writer = csv.writer(buf)
@@ -179,26 +214,26 @@ def export_csv(
     writer.writerow(["period", "start", "", s.isoformat()])
     writer.writerow(["period", "end", "", e.isoformat()])
 
-    for customer, revenue in engine.revenue_by_customer(s, e).items():
-        writer.writerow(["revenue_by_customer", customer, "", f"{revenue:.2f}"])
+    for customer, revenue in (snap.get("revenue_by_customer") or {}).items():
+        writer.writerow(["revenue_by_customer", _csv_safe(customer), "", f"{revenue:.2f}"])
 
-    for month, total in engine.revenue_trend().items():
-        writer.writerow(["revenue_trend", month, "", f"{total:.2f}"])
+    for month, total in (snap.get("revenue_trend") or {}).items():
+        writer.writerow(["revenue_trend", _csv_safe(month), "", f"{total:.2f}"])
 
-    for category, amount in engine.expenses_by_category(s, e).items():
-        writer.writerow(["expenses_by_category", category, "", f"{amount:.2f}"])
+    for category, amount in (snap.get("expenses_by_category") or {}).items():
+        writer.writerow(["expenses_by_category", _csv_safe(category), "", f"{amount:.2f}"])
 
-    for bucket, by_customer in engine.ar_aging().items():
-        for customer, amount in by_customer.items():
-            writer.writerow(["ar_aging", bucket, customer, f"{amount:.2f}"])
+    for bucket, by_customer in (snap.get("ar_aging") or {}).items():
+        for customer, amount in (by_customer or {}).items():
+            writer.writerow(["ar_aging", bucket, _csv_safe(customer), f"{amount:.2f}"])
 
-    for bucket, by_vendor in engine.ap_aging().items():
-        for vendor, amount in by_vendor.items():
-            writer.writerow(["ap_aging", bucket, vendor, f"{amount:.2f}"])
+    for bucket, by_vendor in (snap.get("ap_aging") or {}).items():
+        for vendor, amount in (by_vendor or {}).items():
+            writer.writerow(["ap_aging", bucket, _csv_safe(vendor), f"{amount:.2f}"])
 
-    writer.writerow(["dso", "days", "", f"{engine.dso():.2f}"])
+    writer.writerow(["dso", "days", "", f"{float(snap.get('dso') or 0):.2f}"])
 
-    for entry in engine.cash_forecast():
+    for entry in (snap.get("cash_forecast") or []):
         writer.writerow(["cash_forecast", entry["date"], "collections",
                          f"{entry['collections']:.2f}"])
         writer.writerow(["cash_forecast", entry["date"], "payments",
@@ -206,8 +241,8 @@ def export_csv(
         writer.writerow(["cash_forecast", entry["date"], "net",
                          f"{entry['net']:.2f}"])
 
-    for customer, info in engine.customer_profit().items():
-        writer.writerow(["customer_profit", customer, "",
+    for customer, info in (snap.get("customer_profit") or {}).items():
+        writer.writerow(["customer_profit", _csv_safe(customer), "",
                          f"{info['revenue']:.2f}"])
 
     filename = f"slowbooks-analytics-{date.today().isoformat()}.csv"
@@ -323,7 +358,7 @@ def get_ai_config(db: Session = Depends(get_db)):
 
 @router.put("/ai-config")
 def put_ai_config(
-    payload: dict = Body(...),
+    payload: AIConfigUpdate,
     db: Session = Depends(get_db),
 ):
     """Update AI provider / model / key / account_id.
@@ -332,7 +367,7 @@ def put_ai_config(
     kept. If present and non-empty, it is encrypted with Fernet before
     being stored.
     """
-    provider = (payload.get("provider") or "").strip().lower()
+    provider = (payload.provider or "").strip().lower()
     if provider and provider not in AI_PROVIDERS:
         raise HTTPException(
             status_code=400,
@@ -340,9 +375,17 @@ def put_ai_config(
                    f"{sorted(AI_PROVIDERS.keys())}",
         )
 
-    model = (payload.get("model") or "").strip()
-    account_id = (payload.get("cloudflare_account_id") or "").strip()
-    new_api_key = payload.get("api_key")
+    model = (payload.model or "").strip()
+    account_id = (payload.cloudflare_account_id or "").strip()
+
+    # SSRF guard: validate before storing or interpolating into URLs.
+    if account_id and not CLOUDFLARE_ACCOUNT_ID_RE.match(account_id):
+        raise HTTPException(
+            status_code=400,
+            detail="cloudflare_account_id must be exactly 32 lowercase hex characters",
+        )
+
+    new_api_key = payload.api_key
     # Distinguish "absent" from "empty string" — treat both as "don't change".
     should_update_key = isinstance(new_api_key, str) and new_api_key.strip() != ""
 
@@ -406,7 +449,7 @@ def test_ai_config(db: Session = Depends(get_db)):
         "provider_label": spec.label,
         "model": model,
         "reply": text.strip()[:200],
-        "tested_at": datetime.utcnow().isoformat() + "Z",
+        "tested_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

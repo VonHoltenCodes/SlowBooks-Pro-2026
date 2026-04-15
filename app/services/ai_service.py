@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Dict, Optional
@@ -33,6 +34,10 @@ from typing import Any, Dict, Optional
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Cloudflare account IDs are exactly 32 lowercase hex chars.
+# Validate before interpolating into URLs to prevent SSRF.
+CLOUDFLARE_ACCOUNT_ID_RE = re.compile(r'^[a-f0-9]{32}$')
 
 DEFAULT_TIMEOUT = 60.0  # seconds
 MAX_TOKENS = 1024
@@ -318,6 +323,10 @@ def build_request(
     if provider_key == "cloudflare":
         if not account_id:
             raise ValueError("Cloudflare Workers AI requires an account_id")
+        if not CLOUDFLARE_ACCOUNT_ID_RE.match(account_id):
+            raise ValueError(
+                "cloudflare_account_id must be exactly 32 lowercase hex characters"
+            )
         url = (
             f"https://api.cloudflare.com/client/v4/accounts/"
             f"{account_id}/ai/v1/chat/completions"

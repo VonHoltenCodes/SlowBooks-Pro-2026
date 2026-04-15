@@ -20,7 +20,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -519,7 +519,7 @@ def get_current_date(
     """Get the current server date (useful for "as of today" queries)."""
     return {
         "current_date": date.today().isoformat(),
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 

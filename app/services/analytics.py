@@ -19,7 +19,7 @@
 # ============================================================================
 
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 
 from sqlalchemy import func
@@ -352,6 +352,5 @@ class AnalyticsEngine:
 
 
 def _days(n: int):
-    """Tiny helper so we don't have to import timedelta everywhere."""
-    from datetime import timedelta
+    """Tiny helper — wraps timedelta(days=n) for brevity."""
     return timedelta(days=n)
