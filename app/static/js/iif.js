@@ -14,6 +14,7 @@ const IIFPage = {
     _validated: false,
 
     async render() {
+        const canManageImports = App.hasPermission ? App.hasPermission('import_export.manage') : true;
         return `
             <div class="page-header">
                 <h2>QuickBooks Interop</h2>
@@ -65,7 +66,7 @@ const IIFPage = {
                     </div>
                 </div>
 
-                <!-- Import Section -->
+                ${canManageImports ? `<!-- Import Section -->
                 <div class="iif-section">
                     <h3>&#9650; Import from IIF</h3>
                     <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
@@ -96,7 +97,7 @@ const IIFPage = {
 
                     <div id="iif-validation-result"></div>
                     <div id="iif-import-result"></div>
-                </div>
+                </div>` : ''}
             </div>`;
     },
 
@@ -123,28 +124,8 @@ const IIFPage = {
     async _download(url, fallbackName) {
         try {
             App.setStatus('Exporting IIF...');
-            const res = await fetch(url);
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || 'Export failed');
-            }
-
-            // Get filename from Content-Disposition header if available
-            const disposition = res.headers.get('Content-Disposition');
-            let filename = fallbackName;
-            if (disposition) {
-                const match = disposition.match(/filename="?([^"]+)"?/);
-                if (match) filename = match[1];
-            }
-
-            const blob = await res.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(a.href);
-
-            toast(`Exported ${filename}`);
+            await API.download(url.replace('/api', ''), fallbackName);
+            toast(`Exported ${fallbackName}`);
             App.setStatus('QuickBooks Interop — Ready');
         } catch (err) {
             toast(err.message, 'error');

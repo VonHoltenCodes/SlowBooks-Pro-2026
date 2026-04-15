@@ -9,10 +9,11 @@
 const PaymentsPage = {
     async render() {
         const payments = await API.get('/payments');
+        const canManageSales = App.hasPermission ? App.hasPermission('sales.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Payments</h2>
-                <button class="btn btn-primary" onclick="PaymentsPage.showForm()">+ Record Payment</button>
+                ${canManageSales ? `<button class="btn btn-primary" onclick="PaymentsPage.showForm()">+ Record Payment</button>` : ''}
             </div>`;
 
         if (payments.length === 0) {

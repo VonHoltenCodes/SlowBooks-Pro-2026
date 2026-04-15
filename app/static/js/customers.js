@@ -8,10 +8,11 @@
 const CustomersPage = {
     async render() {
         const customers = await API.get('/customers');
+        const canManageCustomers = App.hasPermission ? App.hasPermission('contacts.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Customers</h2>
-                <button class="btn btn-primary" onclick="CustomersPage.showForm()">+ New Customer</button>
+                ${canManageCustomers ? `<button class="btn btn-primary" onclick="CustomersPage.showForm()">+ New Customer</button>` : ''}
             </div>
             <div class="toolbar">
                 <input type="text" placeholder="Search customers..." id="customer-search"
@@ -35,7 +36,7 @@ const CustomersPage = {
                     <td>${escapeHtml(c.email) || ''}</td>
                     <td class="amount">${formatCurrency(c.balance)}</td>
                     <td class="actions">
-                        <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); CustomersPage.showForm(${c.id})">Edit</button>
+                        ${canManageCustomers ? `<button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); CustomersPage.showForm(${c.id})">Edit</button>` : ''}
                     </td>
                 </tr>`;
             }

@@ -5,10 +5,11 @@
 const PurchaseOrdersPage = {
     async render() {
         const pos = await API.get('/purchase-orders');
+        const canManagePurchasing = App.hasPermission ? App.hasPermission('purchasing.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Purchase Orders</h2>
-                <button class="btn btn-primary" onclick="PurchaseOrdersPage.showForm()">+ New PO</button>
+                ${canManagePurchasing ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.showForm()">+ New PO</button>` : ''}
             </div>`;
 
         if (pos.length === 0) {
@@ -24,9 +25,9 @@ const PurchaseOrdersPage = {
                     <td>${statusBadge(po.status)}</td>
                     <td class="amount">${formatCurrency(po.total)}</td>
                     <td class="actions">
-                        <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.showForm(${po.id})">Edit</button>
+                        ${canManagePurchasing ? `<button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.showForm(${po.id})">Edit</button>
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.emailPurchaseOrder(${po.id})">Email</button>
-                        ${po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : ''}
+                        ${po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : ''}` : ''}
                     </td>
                 </tr>`;
             }

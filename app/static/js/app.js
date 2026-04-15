@@ -12,31 +12,31 @@ const App = {
 
     routes: {
         '/login':         { page: 'login',           label: 'Sign In',            render: () => AuthPage.render() },
-        '/':              { page: 'dashboard',       label: 'Dashboard',          render: () => App.renderDashboard() },
-        '/customers':     { page: 'customers',       label: 'Customer Center',    render: () => CustomersPage.render() },
-        '/vendors':       { page: 'vendors',         label: 'Vendor Center',      render: () => VendorsPage.render() },
-        '/items':         { page: 'items',           label: 'Item List',          render: () => ItemsPage.render() },
-        '/invoices':      { page: 'invoices',        label: 'Create Invoices',    render: () => InvoicesPage.render() },
-        '/estimates':     { page: 'estimates',       label: 'Create Estimates',   render: () => EstimatesPage.render() },
-        '/payments':      { page: 'payments',        label: 'Receive Payments',   render: () => PaymentsPage.render() },
-        '/banking':       { page: 'banking',         label: 'Bank Accounts',      render: () => BankingPage.render() },
+        '/':              { page: 'dashboard',       label: 'Dashboard',          authRequired: true, render: () => App.renderDashboard() },
+        '/customers':     { page: 'customers',       label: 'Customer Center',    permission: 'contacts.view', render: () => CustomersPage.render() },
+        '/vendors':       { page: 'vendors',         label: 'Vendor Center',      permission: 'contacts.view', render: () => VendorsPage.render() },
+        '/items':         { page: 'items',           label: 'Item List',          permission: 'items.view', render: () => ItemsPage.render() },
+        '/invoices':      { page: 'invoices',        label: 'Create Invoices',    permission: 'sales.view', render: () => InvoicesPage.render() },
+        '/estimates':     { page: 'estimates',       label: 'Create Estimates',   permission: 'sales.view', render: () => EstimatesPage.render() },
+        '/payments':      { page: 'payments',        label: 'Receive Payments',   permission: 'sales.view', render: () => PaymentsPage.render() },
+        '/banking':       { page: 'banking',         label: 'Bank Accounts',      permission: 'banking.view', render: () => BankingPage.render() },
         '/accounts':      { page: 'accounts',        label: 'Chart of Accounts',  permission: 'accounts.view', render: () => App.renderAccounts() },
-        '/reports':       { page: 'reports',         label: 'Report Center',      render: () => ReportsPage.render() },
+        '/reports':       { page: 'reports',         label: 'Report Center',      permission: 'accounts.manage', render: () => ReportsPage.render() },
         '/settings':      { page: 'settings',        label: 'Company Settings',   permission: 'settings.manage', render: () => SettingsPage.render() },
-        '/iif':           { page: 'iif',             label: 'QuickBooks Interop', render: () => IIFPage.render() },
+        '/iif':           { page: 'iif',             label: 'QuickBooks Interop', permission: 'import_export.view', render: () => IIFPage.render() },
         '/xero-import':   { page: 'xero-import',     label: 'Xero Import',        permission: 'accounts.manage', render: () => XeroImportPage.render() },
-        '/quick-entry':   { page: 'quick-entry',     label: 'Quick Entry',        render: () => App.renderQuickEntry() },
+        '/quick-entry':   { page: 'quick-entry',     label: 'Quick Entry',        permission: 'sales.manage', render: () => App.renderQuickEntry() },
         // Phase 1: Foundation
         '/audit':         { page: 'audit',           label: 'Audit Log',          permission: 'audit.view', render: () => AuditPage.render() },
         // Phase 2: Accounts Payable
-        '/purchase-orders': { page: 'purchase-orders', label: 'Purchase Orders',  render: () => PurchaseOrdersPage.render() },
-        '/bills':         { page: 'bills',           label: 'Bills',              render: () => BillsPage.render() },
-        '/credit-memos':  { page: 'credit-memos',    label: 'Credit Memos',       render: () => CreditMemosPage.render() },
+        '/purchase-orders': { page: 'purchase-orders', label: 'Purchase Orders',  permission: 'purchasing.view', render: () => PurchaseOrdersPage.render() },
+        '/bills':         { page: 'bills',           label: 'Bills',              permission: 'purchasing.view', render: () => BillsPage.render() },
+        '/credit-memos':  { page: 'credit-memos',    label: 'Credit Memos',       permission: 'sales.view', render: () => CreditMemosPage.render() },
         // Phase 3: Productivity
-        '/recurring':     { page: 'recurring',       label: 'Recurring Invoices', render: () => RecurringPage.render() },
-        '/batch-payments': { page: 'batch-payments', label: 'Batch Payments',     render: () => BatchPaymentsPage.render() },
+        '/recurring':     { page: 'recurring',       label: 'Recurring Invoices', permission: 'sales.view', render: () => RecurringPage.render() },
+        '/batch-payments': { page: 'batch-payments', label: 'Batch Payments',     permission: 'sales.manage', render: () => BatchPaymentsPage.render() },
         // Phase 4: CSV Import/Export
-        '/csv':           { page: 'csv',             label: 'CSV Import/Export',  render: () => App.renderCSV() },
+        '/csv':           { page: 'csv',             label: 'CSV Import/Export',  permission: 'import_export.view', render: () => App.renderCSV() },
         // Phase 5: Advanced Integration
         // Phase 6: Ambitious
         '/companies':     { page: 'companies',       label: 'Companies',          permission: 'companies.view', render: () => CompaniesPage.render() },
@@ -62,7 +62,8 @@ const App = {
     syncNavVisibility() {
         $$('.nav-link').forEach(link => {
             const route = Object.values(App.routes).find(entry => entry.page === link.dataset.page);
-            const shouldShow = !route?.permission || App.hasPermission(route.permission);
+            const requiresAuth = !!route?.permission || !!route?.authRequired;
+            const shouldShow = (!requiresAuth || App.authState.authenticated) && (!route?.permission || App.hasPermission(route.permission));
             link.parentElement.style.display = shouldShow ? '' : 'none';
         });
     },
@@ -111,7 +112,7 @@ const App = {
             location.hash = '#/';
             return;
         }
-        if (route.permission && !App.authState.authenticated) {
+        if ((route.permission || route.authRequired) && !App.authState.authenticated) {
             location.hash = '#/login';
             return;
         }
@@ -630,6 +631,7 @@ const App = {
 
     // CSV Import/Export page — Feature 14
     async renderCSV() {
+        const canManageImports = App.hasPermission ? App.hasPermission('import_export.manage') : true;
         return `
             <div class="page-header">
                 <h2>CSV Import / Export</h2>
@@ -639,16 +641,17 @@ const App = {
                     <h3>Export</h3>
                     <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Download data as CSV files.</p>
                     <div style="display:flex; flex-direction:column; gap:8px;">
-                        <a href="/api/csv/export/customers" class="btn btn-secondary" download>Export Customers</a>
-                        <a href="/api/csv/export/vendors" class="btn btn-secondary" download>Export Vendors</a>
-                        <a href="/api/csv/export/items" class="btn btn-secondary" download>Export Items</a>
-                        <a href="/api/csv/export/invoices" class="btn btn-secondary" download>Export Invoices</a>
-                        <a href="/api/csv/export/accounts" class="btn btn-secondary" download>Export Chart of Accounts</a>
+                        <button class="btn btn-secondary" onclick="API.download('/csv/export/customers', 'customers.csv')">Export Customers</button>
+                        <button class="btn btn-secondary" onclick="API.download('/csv/export/vendors', 'vendors.csv')">Export Vendors</button>
+                        <button class="btn btn-secondary" onclick="API.download('/csv/export/items', 'items.csv')">Export Items</button>
+                        <button class="btn btn-secondary" onclick="API.download('/csv/export/invoices', 'invoices.csv')">Export Invoices</button>
+                        <button class="btn btn-secondary" onclick="API.download('/csv/export/accounts', 'chart_of_accounts.csv')">Export Chart of Accounts</button>
                     </div>
                 </div>
                 <div class="settings-section">
                     <h3>Import</h3>
                     <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Upload CSV files to import data.</p>
+                    ${canManageImports ? `
                     <form id="csv-import-form" onsubmit="App.importCSV(event)">
                         <div class="form-group"><label>Entity Type</label>
                             <select name="entity_type" id="csv-entity">
@@ -660,7 +663,8 @@ const App = {
                             <input type="file" name="file" accept=".csv" required></div>
                         <button type="submit" class="btn btn-primary">Import</button>
                     </form>
-                    <div id="csv-import-results" style="margin-top:12px;"></div>
+                    <div id="csv-import-results" style="margin-top:12px;"></div>` : `
+                    <div class="empty-state"><p>Your account can export CSV data but cannot import files.</p></div>`}
                 </div>
             </div>`;
     },
@@ -672,9 +676,7 @@ const App = {
         const formData = new FormData();
         formData.append('file', form.file.files[0]);
         try {
-            const resp = await fetch(`/api/csv/import/${entity}`, { method: 'POST', body: formData });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
+            const data = await API.postForm(`/csv/import/${entity}`, formData);
             let html = `<div style="color:var(--success); font-size:11px;">Imported ${data.imported} ${entity}.</div>`;
             if (data.errors && data.errors.length > 0) {
                 html += `<div style="color:var(--danger); font-size:11px; margin-top:6px;">Errors:<br>${data.errors.map(e => escapeHtml(e)).join('<br>')}</div>`;

@@ -12,35 +12,42 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.payments import Payment, PaymentAllocation
-from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Customer
+from app.models.invoices import Invoice, InvoiceStatus
+from app.models.payments import Payment, PaymentAllocation
 from app.schemas.payments import PaymentCreate, PaymentResponse
-from app.services.accounting import (
-    create_journal_entry, get_ar_account_id, get_undeposited_funds_id,
-)
+from app.services.accounting import create_journal_entry, get_ar_account_id, get_undeposited_funds_id
+from app.services.auth import require_permissions
 from app.services.closing_date import check_closing_date
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 
 @router.get("", response_model=list[PaymentResponse])
-def list_payments(customer_id: int = None, db: Session = Depends(get_db)):
+def list_payments(
+    customer_id: int = None,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("sales.view")),
+):
     q = db.query(Payment)
     if customer_id:
         q = q.filter(Payment.customer_id == customer_id)
     payments = q.order_by(Payment.date.desc()).all()
     results = []
-    for p in payments:
-        resp = PaymentResponse.model_validate(p)
-        if p.customer:
-            resp.customer_name = p.customer.name
+    for payment in payments:
+        resp = PaymentResponse.model_validate(payment)
+        if payment.customer:
+            resp.customer_name = payment.customer.name
         results.append(resp)
     return results
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
-def get_payment(payment_id: int, db: Session = Depends(get_db)):
+def get_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("sales.view")),
+):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -51,13 +58,16 @@ def get_payment(payment_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=PaymentResponse, status_code=201)
-def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
+def create_payment(
+    data: PaymentCreate,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("sales.manage")),
+):
     check_closing_date(db, data.date)
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    # Validate allocations don't exceed payment
     alloc_total = sum(a.amount for a in data.allocations)
     if alloc_total > data.amount:
         raise HTTPException(status_code=400, detail="Allocations exceed payment amount")
@@ -75,7 +85,6 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
     db.add(payment)
     db.flush()
 
-    # Apply allocations to invoices
     for alloc_data in data.allocations:
         invoice = db.query(Invoice).filter(Invoice.id == alloc_data.invoice_id).first()
         if not invoice:
@@ -83,28 +92,16 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
         if alloc_data.amount > invoice.balance_due:
             raise HTTPException(
                 status_code=400,
-                detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}"
+                detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}",
             )
 
-        alloc = PaymentAllocation(
-            payment_id=payment.id,
-            invoice_id=alloc_data.invoice_id,
-            amount=alloc_data.amount,
-        )
+        alloc = PaymentAllocation(payment_id=payment.id, invoice_id=alloc_data.invoice_id, amount=alloc_data.amount)
         db.add(alloc)
 
         invoice.amount_paid += alloc_data.amount
         invoice.balance_due -= alloc_data.amount
-        if invoice.balance_due <= 0:
-            invoice.status = InvoiceStatus.PAID
-        else:
-            invoice.status = InvoiceStatus.PARTIAL
+        invoice.status = InvoiceStatus.PAID if invoice.balance_due <= 0 else InvoiceStatus.PARTIAL
 
-    # ================================================================
-    # Journal Entry — CReceivePayment::PostToJournal() @ 0x001A3A00
-    # DR  Bank/Undeposited Funds         payment amount
-    # CR  Accounts Receivable (1100)     payment amount
-    # ================================================================
     ar_id = get_ar_account_id(db)
     deposit_id = payment.deposit_to_account_id or get_undeposited_funds_id(db)
 
@@ -124,8 +121,12 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
             },
         ]
         txn = create_journal_entry(
-            db, data.date, f"Payment from {customer.name}",
-            journal_lines, source_type="payment", source_id=payment.id,
+            db,
+            data.date,
+            f"Payment from {customer.name}",
+            journal_lines,
+            source_type="payment",
+            source_id=payment.id,
             reference=data.reference or data.check_number or "",
         )
         payment.transaction_id = txn.id

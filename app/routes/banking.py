@@ -20,18 +20,19 @@ from app.schemas.banking import (
     ReconciliationCreate, ReconciliationResponse,
 )
 from app.services.closing_date import check_closing_date
+from app.services.auth import require_permissions
 
 router = APIRouter(prefix="/api/banking", tags=["banking"])
 
 
 # Bank Accounts
 @router.get("/accounts", response_model=list[BankAccountResponse])
-def list_bank_accounts(db: Session = Depends(get_db)):
+def list_bank_accounts(db: Session = Depends(get_db), auth=Depends(require_permissions("banking.view"))):
     return db.query(BankAccount).filter(BankAccount.is_active == True).order_by(BankAccount.name).all()
 
 
 @router.get("/accounts/{account_id}", response_model=BankAccountResponse)
-def get_bank_account(account_id: int, db: Session = Depends(get_db)):
+def get_bank_account(account_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.view"))):
     ba = db.query(BankAccount).filter(BankAccount.id == account_id).first()
     if not ba:
         raise HTTPException(status_code=404, detail="Bank account not found")
@@ -39,7 +40,7 @@ def get_bank_account(account_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/accounts", response_model=BankAccountResponse, status_code=201)
-def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
+def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.manage"))):
     ba = BankAccount(**data.model_dump())
     db.add(ba)
     db.commit()
@@ -48,7 +49,7 @@ def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/accounts/{account_id}", response_model=BankAccountResponse)
-def update_bank_account(account_id: int, data: BankAccountUpdate, db: Session = Depends(get_db)):
+def update_bank_account(account_id: int, data: BankAccountUpdate, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.manage"))):
     ba = db.query(BankAccount).filter(BankAccount.id == account_id).first()
     if not ba:
         raise HTTPException(status_code=404, detail="Bank account not found")
@@ -61,7 +62,7 @@ def update_bank_account(account_id: int, data: BankAccountUpdate, db: Session = 
 
 # Bank Transactions
 @router.get("/transactions", response_model=list[BankTransactionResponse])
-def list_bank_transactions(bank_account_id: int = None, db: Session = Depends(get_db)):
+def list_bank_transactions(bank_account_id: int = None, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.view"))):
     q = db.query(BankTransaction)
     if bank_account_id:
         q = q.filter(BankTransaction.bank_account_id == bank_account_id)
@@ -69,7 +70,7 @@ def list_bank_transactions(bank_account_id: int = None, db: Session = Depends(ge
 
 
 @router.post("/transactions", response_model=BankTransactionResponse, status_code=201)
-def create_bank_transaction(data: BankTransactionCreate, db: Session = Depends(get_db)):
+def create_bank_transaction(data: BankTransactionCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.manage"))):
     check_closing_date(db, data.date)
     ba = db.query(BankAccount).filter(BankAccount.id == data.bank_account_id).first()
     if not ba:
@@ -85,7 +86,7 @@ def create_bank_transaction(data: BankTransactionCreate, db: Session = Depends(g
 
 # Reconciliations — CReconcileEngine @ 0x001F0400
 @router.get("/reconciliations", response_model=list[ReconciliationResponse])
-def list_reconciliations(bank_account_id: int = None, db: Session = Depends(get_db)):
+def list_reconciliations(bank_account_id: int = None, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.view"))):
     q = db.query(Reconciliation)
     if bank_account_id:
         q = q.filter(Reconciliation.bank_account_id == bank_account_id)
@@ -93,7 +94,7 @@ def list_reconciliations(bank_account_id: int = None, db: Session = Depends(get_
 
 
 @router.post("/reconciliations", response_model=ReconciliationResponse, status_code=201)
-def create_reconciliation(data: ReconciliationCreate, db: Session = Depends(get_db)):
+def create_reconciliation(data: ReconciliationCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.manage"))):
     """Start a reconciliation — CReconcileEngine::Begin() @ 0x001F0500"""
     ba = db.query(BankAccount).filter(BankAccount.id == data.bank_account_id).first()
     if not ba:
@@ -106,7 +107,7 @@ def create_reconciliation(data: ReconciliationCreate, db: Session = Depends(get_
 
 
 @router.get("/reconciliations/{recon_id}/transactions")
-def get_reconciliation_transactions(recon_id: int, db: Session = Depends(get_db)):
+def get_reconciliation_transactions(recon_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.view"))):
     """Get unreconciled transactions for this bank account"""
     recon = db.query(Reconciliation).filter(Reconciliation.id == recon_id).first()
     if not recon:
@@ -147,7 +148,7 @@ def get_reconciliation_transactions(recon_id: int, db: Session = Depends(get_db)
 
 
 @router.post("/reconciliations/{recon_id}/toggle/{txn_id}")
-def toggle_cleared(recon_id: int, txn_id: int, db: Session = Depends(get_db)):
+def toggle_cleared(recon_id: int, txn_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.manage"))):
     """Toggle a transaction's cleared status — CReconcileEngine::ToggleItem()"""
     recon = db.query(Reconciliation).filter(Reconciliation.id == recon_id).first()
     if not recon:
@@ -165,7 +166,7 @@ def toggle_cleared(recon_id: int, txn_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/reconciliations/{recon_id}/complete")
-def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
+def complete_reconciliation(recon_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.manage"))):
     """CReconcileEngine::Finish() @ 0x001F0A00 — validates difference is 0"""
     recon = db.query(Reconciliation).filter(Reconciliation.id == recon_id).first()
     if not recon:

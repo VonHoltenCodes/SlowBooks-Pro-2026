@@ -5,10 +5,11 @@
 const CreditMemosPage = {
     async render() {
         const memos = await API.get('/credit-memos');
+        const canManageSales = App.hasPermission ? App.hasPermission('sales.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Credit Memos</h2>
-                <button class="btn btn-primary" onclick="CreditMemosPage.showForm()">+ New Credit Memo</button>
+                ${canManageSales ? `<button class="btn btn-primary" onclick="CreditMemosPage.showForm()">+ New Credit Memo</button>` : ''}
             </div>`;
 
         if (memos.length === 0) {
@@ -26,8 +27,8 @@ const CreditMemosPage = {
                     <td class="amount">${formatCurrency(m.total)}</td>
                     <td class="amount">${formatCurrency(m.balance_remaining)}</td>
                     <td class="actions">
-                        <button class="btn btn-sm btn-secondary" onclick="CreditMemosPage.emailCreditMemo(${m.id})">Email</button>
-                        ${m.status === 'issued' ? `<button class="btn btn-sm btn-primary" onclick="CreditMemosPage.showApply(${m.id})">Apply</button>` : ''}
+                        ${canManageSales ? `<button class="btn btn-sm btn-secondary" onclick="CreditMemosPage.emailCreditMemo(${m.id})">Email</button>
+                        ${m.status === 'issued' ? `<button class="btn btn-sm btn-primary" onclick="CreditMemosPage.showApply(${m.id})">Apply</button>` : ''}` : ''}
                     </td>
                 </tr>`;
             }

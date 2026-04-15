@@ -16,6 +16,7 @@ from app.schemas.bills import BillCreate, BillLineCreate
 from app.schemas.purchase_orders import POCreate, POUpdate, POResponse
 from app.services.email_service import render_document_email, send_document_email
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
+from app.services.auth import require_permissions
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
 from app.services.pdf_service import generate_purchase_order_pdf
 from app.routes.settings import _get_all as get_settings
@@ -32,7 +33,7 @@ def _next_po_number(db: Session) -> str:
 
 
 @router.get("", response_model=list[POResponse])
-def list_pos(vendor_id: int = None, status: str = None, db: Session = Depends(get_db)):
+def list_pos(vendor_id: int = None, status: str = None, db: Session = Depends(get_db), auth=Depends(require_permissions("purchasing.view"))):
     q = db.query(PurchaseOrder)
     if vendor_id:
         q = q.filter(PurchaseOrder.vendor_id == vendor_id)
@@ -49,7 +50,7 @@ def list_pos(vendor_id: int = None, status: str = None, db: Session = Depends(ge
 
 
 @router.get("/{po_id}", response_model=POResponse)
-def get_po(po_id: int, db: Session = Depends(get_db)):
+def get_po(po_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("purchasing.view"))):
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -60,7 +61,7 @@ def get_po(po_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=POResponse, status_code=201)
-def create_po(data: POCreate, db: Session = Depends(get_db)):
+def create_po(data: POCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("purchasing.manage"))):
     vendor = db.query(Vendor).filter(Vendor.id == data.vendor_id).first()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
@@ -102,7 +103,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{po_id}", response_model=POResponse)
-def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
+def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db), auth=Depends(require_permissions("purchasing.manage"))):
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -144,7 +145,7 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
 
 
 @router.get("/{po_id}/pdf")
-def purchase_order_pdf(po_id: int, db: Session = Depends(get_db)):
+def purchase_order_pdf(po_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("purchasing.view"))):
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -158,7 +159,7 @@ def purchase_order_pdf(po_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{po_id}/email")
-def email_purchase_order(po_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+def email_purchase_order(po_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db), auth=Depends(require_permissions("purchasing.manage"))):
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
@@ -190,7 +191,7 @@ def email_purchase_order(po_id: int, data: DocumentEmailRequest, db: Session = D
 
 
 @router.post("/{po_id}/convert-to-bill")
-def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
+def convert_to_bill(po_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("purchasing.manage"))):
     """Convert a PO to a bill — creates bill with PO's line items."""
     from app.routes.bills import create_bill
 

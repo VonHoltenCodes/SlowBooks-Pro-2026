@@ -144,11 +144,11 @@ const EmployeesPage = {
     },
 
     exportStarterFiling(id) {
-        window.open(`/api/employees/${id}/filing/starter/export`, '_blank');
+        API.open(`/employees/${id}/filing/starter/export`, `starter-${id}.csv`);
     },
 
     exportLeaverFiling(id) {
-        window.open(`/api/employees/${id}/filing/leaver/export`, '_blank');
+        API.open(`/employees/${id}/filing/leaver/export`, `leaver-${id}.csv`);
     },
 
     async markFilingStatus(employeeId, auditId, status) {

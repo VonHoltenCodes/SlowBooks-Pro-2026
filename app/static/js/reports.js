@@ -402,7 +402,7 @@ const ReportsPage = {
         const box9 = ($("#gst-box9-adjustments")?.value || "0.00");
         const box13 = ($("#gst-box13-adjustments")?.value || "0.00");
         const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
-        window.open(`/api/reports/gst-return/pdf?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`, "_blank");
+        API.open(`/reports/gst-return/pdf?start_date=${range.start}&end_date=${range.end}&box9_adjustments=${encodeURIComponent(box9)}&box13_adjustments=${encodeURIComponent(box13)}`, `gst-return-${range.start}-${range.end}.pdf`);
     },
 
     async confirmGstSettlement(bankTransactionId) {
@@ -516,7 +516,7 @@ const ReportsPage = {
         const form = e.target;
         const cid = form.customer_id.value;
         const asOf = form.as_of_date.value || todayISO();
-        window.open(`/api/reports/customer-statement/${cid}/pdf?as_of_date=${asOf}`, "_blank");
+        API.open(`/reports/customer-statement/${cid}/pdf?as_of_date=${asOf}`, `customer-statement-${cid}.pdf`);
         closeModal();
     },
 

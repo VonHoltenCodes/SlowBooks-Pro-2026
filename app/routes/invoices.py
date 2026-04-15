@@ -30,6 +30,7 @@ from app.services.closing_date import check_closing_date
 from app.services.email_service import render_invoice_email, send_document_email
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
+from app.services.auth import require_permissions
 
 router = APIRouter(prefix="/api/invoices", tags=["invoices"])
 
@@ -97,7 +98,7 @@ def _post_invoice_journal(db: Session, invoice: Invoice, customer: Customer, lin
 
 
 @router.get("", response_model=list[InvoiceResponse])
-def list_invoices(status: str = None, customer_id: int = None, db: Session = Depends(get_db)):
+def list_invoices(status: str = None, customer_id: int = None, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     q = db.query(Invoice)
     if status:
         q = q.filter(Invoice.status == status)
@@ -114,7 +115,7 @@ def list_invoices(status: str = None, customer_id: int = None, db: Session = Dep
 
 
 @router.get("/{invoice_id}", response_model=InvoiceResponse)
-def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
+def get_invoice(invoice_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -125,7 +126,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=InvoiceResponse, status_code=201)
-def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
+def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     check_closing_date(db, data.date)
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
@@ -203,7 +204,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{invoice_id}", response_model=InvoiceResponse)
-def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(get_db)):
+def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -279,7 +280,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
 
 
 @router.get("/{invoice_id}/pdf")
-def invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
+def invoice_pdf(invoice_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     """Generate PDF — CInvoicePrintLayout::RenderPage() @ 0x00220400"""
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
@@ -294,7 +295,7 @@ def invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{invoice_id}/void", response_model=InvoiceResponse)
-def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
+def void_invoice(invoice_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     """CInvoice::VoidTransaction() @ 0x0015DA00 — creates reversing entry"""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
@@ -326,7 +327,7 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{invoice_id}/send", response_model=InvoiceResponse)
-def mark_invoice_sent(invoice_id: int, db: Session = Depends(get_db)):
+def mark_invoice_sent(invoice_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     """Mark invoice as sent — CInvoice::SetSentFlag() @ 0x0015D400"""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
@@ -343,7 +344,7 @@ def mark_invoice_sent(invoice_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{invoice_id}/email")
-def email_invoice(invoice_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+def email_invoice(invoice_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     """Email invoice as PDF attachment — Feature 8"""
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
@@ -368,7 +369,7 @@ def email_invoice(invoice_id: int, data: DocumentEmailRequest, db: Session = Dep
 
 
 @router.post("/{invoice_id}/duplicate", response_model=InvoiceResponse, status_code=201)
-def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db)):
+def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     """CInvoice::Duplicate() @ 0x0015DC00 — copy invoice with new number"""
     original = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not original:

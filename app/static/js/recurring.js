@@ -5,12 +5,13 @@
 const RecurringPage = {
     async render() {
         const recs = await API.get('/recurring');
+        const canManageSales = App.hasPermission ? App.hasPermission('sales.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Recurring Invoices</h2>
                 <div class="btn-group">
-                    <button class="btn btn-primary" onclick="RecurringPage.showForm()">+ New Recurring</button>
-                    <button class="btn btn-secondary" onclick="RecurringPage.generateNow()">Generate Due Now</button>
+                    ${canManageSales ? `<button class="btn btn-primary" onclick="RecurringPage.showForm()">+ New Recurring</button>
+                    <button class="btn btn-secondary" onclick="RecurringPage.generateNow()">Generate Due Now</button>` : ''}
                 </div>
             </div>`;
 
@@ -27,8 +28,8 @@ const RecurringPage = {
                     <td>${r.is_active ? '<span class="badge badge-paid">Active</span>' : '<span class="badge badge-draft">Inactive</span>'}</td>
                     <td style="font-family:var(--font-mono);">${r.invoices_created}</td>
                     <td class="actions">
-                        <button class="btn btn-sm btn-secondary" onclick="RecurringPage.showForm(${r.id})">Edit</button>
-                        <button class="btn btn-sm btn-danger" onclick="RecurringPage.del(${r.id})">Delete</button>
+                        ${canManageSales ? `<button class="btn btn-sm btn-secondary" onclick="RecurringPage.showForm(${r.id})">Edit</button>
+                        <button class="btn btn-sm btn-danger" onclick="RecurringPage.del(${r.id})">Delete</button>` : ''}
                     </td>
                 </tr>`;
             }

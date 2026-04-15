@@ -29,6 +29,7 @@ from app.services.gst_calculations import calculate_document_gst, prices_include
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst, stored_gst_line_inputs
 from app.services.pdf_service import generate_credit_memo_pdf
 from app.routes.settings import _get_all as get_settings
+from app.services.auth import require_permissions
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -101,7 +102,7 @@ def _credit_memo_has_applications(cm: CreditMemo) -> bool:
 
 
 @router.get("", response_model=list[CreditMemoResponse])
-def list_credit_memos(customer_id: int = None, status: str = None, db: Session = Depends(get_db)):
+def list_credit_memos(customer_id: int = None, status: str = None, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     q = db.query(CreditMemo)
     if customer_id:
         q = q.filter(CreditMemo.customer_id == customer_id)
@@ -118,7 +119,7 @@ def list_credit_memos(customer_id: int = None, status: str = None, db: Session =
 
 
 @router.get("/{cm_id}", response_model=CreditMemoResponse)
-def get_credit_memo(cm_id: int, db: Session = Depends(get_db)):
+def get_credit_memo(cm_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Credit memo not found")
@@ -129,7 +130,7 @@ def get_credit_memo(cm_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=CreditMemoResponse, status_code=201)
-def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
+def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     check_closing_date(db, data.date)
 
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
@@ -173,7 +174,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{cm_id}", response_model=CreditMemoResponse)
-def update_credit_memo(cm_id: int, data: CreditMemoUpdate, db: Session = Depends(get_db)):
+def update_credit_memo(cm_id: int, data: CreditMemoUpdate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Credit memo not found")
@@ -241,7 +242,7 @@ def update_credit_memo(cm_id: int, data: CreditMemoUpdate, db: Session = Depends
 
 
 @router.get("/{cm_id}/pdf")
-def credit_memo_pdf(cm_id: int, db: Session = Depends(get_db)):
+def credit_memo_pdf(cm_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Credit memo not found")
@@ -255,7 +256,7 @@ def credit_memo_pdf(cm_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{cm_id}/email")
-def email_credit_memo(cm_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+def email_credit_memo(cm_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
     if not cm:
         raise HTTPException(status_code=404, detail="Credit memo not found")
@@ -289,7 +290,7 @@ def email_credit_memo(cm_id: int, data: DocumentEmailRequest, db: Session = Depe
 
 
 @router.post("/{cm_id}/apply")
-def apply_credit(cm_id: int, data: CreditApplicationCreate, db: Session = Depends(get_db)):
+def apply_credit(cm_id: int, data: CreditApplicationCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     """Apply credit memo to an invoice."""
     cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
     if not cm:

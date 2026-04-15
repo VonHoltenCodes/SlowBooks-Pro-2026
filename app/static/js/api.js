@@ -10,26 +10,76 @@ const API = {
         const token = typeof localStorage !== 'undefined' ? localStorage.getItem('slowbooks-auth-token') : null;
         return token ? { Authorization: `Bearer ${token}` } : {};
     },
-    async request(method, path, body = null) {
-        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('slowbooks-auth-token') : null;
+
+    async _parseError(res) {
+        const err = await res.json().catch(async () => ({ detail: await res.text().catch(() => res.statusText) }));
+        return err.detail || 'Request failed';
+    },
+
+    async raw(method, path, { body = null, headers = {} } = {}) {
         const opts = {
             method,
-            headers: { 'Content-Type': 'application/json' },
+            headers: { ...this.authHeaders(), ...headers },
         };
-        if (token) opts.headers.Authorization = `Bearer ${token}`;
-        if (body) opts.body = JSON.stringify(body);
+        if (body !== null) {
+            if (typeof FormData !== 'undefined' && body instanceof FormData) {
+                opts.body = body;
+            } else {
+                opts.headers['Content-Type'] = 'application/json';
+                opts.body = JSON.stringify(body);
+            }
+        }
         const res = await fetch(`/api${path}`, opts);
         if (!res.ok) {
-            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            const detail = await this._parseError(res);
             if (res.status === 401 && typeof App !== 'undefined' && typeof App.handleUnauthorized === 'function') {
-                App.handleUnauthorized(path, err.detail || 'Authentication required');
+                App.handleUnauthorized(path, detail || 'Authentication required');
             }
-            throw new Error(err.detail || 'Request failed');
+            throw new Error(detail || 'Request failed');
         }
+        return res;
+    },
+
+    async request(method, path, body = null) {
+        const res = await this.raw(method, path, { body });
         return res.json();
     },
-    get(path)       { return this.request('GET', path); },
+
+    get(path) { return this.request('GET', path); },
     post(path, data) { return this.request('POST', path, data); },
-    put(path, data)  { return this.request('PUT', path, data); },
-    del(path)       { return this.request('DELETE', path); },
+    put(path, data) { return this.request('PUT', path, data); },
+    del(path) { return this.request('DELETE', path); },
+    async postForm(path, formData) {
+        const res = await this.raw('POST', path, { body: formData });
+        return res.json();
+    },
+    async download(path, fallbackName = 'download.bin') {
+        const res = await this.raw('GET', path);
+        const disposition = res.headers.get('Content-Disposition');
+        let filename = fallbackName;
+        if (disposition) {
+            const match = disposition.match(/filename="?([^\"]+)"?/);
+            if (match) filename = match[1];
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+    },
+    async open(path, fallbackName = 'document.bin') {
+        const res = await this.raw('GET', path);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const opened = typeof window !== 'undefined' && typeof window.open === 'function' ? window.open(url, '_blank') : null;
+        if (!opened) {
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = fallbackName;
+            link.click();
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    },
 };

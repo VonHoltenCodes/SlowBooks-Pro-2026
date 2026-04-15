@@ -205,7 +205,7 @@ const PayrollPage = {
     },
 
     openPayslip(runId, employeeId) {
-        window.open(`/api/payroll/${runId}/payslips/${employeeId}/pdf`, '_blank');
+        API.open(`/payroll/${runId}/payslips/${employeeId}/pdf`, `payslip-${employeeId}.pdf`);
     },
 
     emailPayslip(runId, employeeId) {
@@ -219,7 +219,7 @@ const PayrollPage = {
     },
 
     exportEmploymentInformation(runId) {
-        window.open(`/api/payroll/${runId}/employment-information/export`, '_blank');
+        API.open(`/payroll/${runId}/employment-information/export`, `employment-information-${runId}.csv`);
     },
 
     async markFilingStatus(runId, auditId, status) {

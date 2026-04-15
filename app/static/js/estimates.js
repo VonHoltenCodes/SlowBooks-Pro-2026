@@ -9,10 +9,11 @@
 const EstimatesPage = {
     async render() {
         const estimates = await API.get('/estimates');
+        const canManageSales = App.hasPermission ? App.hasPermission('sales.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Estimates</h2>
-                <button class="btn btn-primary" onclick="EstimatesPage.showForm()">+ New Estimate</button>
+                ${canManageSales ? `<button class="btn btn-primary" onclick="EstimatesPage.showForm()">+ New Estimate</button>` : ''}
             </div>`;
 
         if (estimates.length === 0) {
@@ -33,8 +34,8 @@ const EstimatesPage = {
                     <td class="amount">${formatCurrency(est.total)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.view(${est.id})">View</button>
-                        <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>
-                        ${est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : ''}
+                        ${canManageSales ? `<button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>
+                        ${est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : ''}` : ''}
                     </td>
                 </tr>`;
             }
@@ -68,9 +69,9 @@ const EstimatesPage = {
             </div>
             ${est.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(est.notes)}</p>` : ''}
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Print / PDF</button>
-                <button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>
-                ${est.status !== 'converted' ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to Invoice</button>` : ''}
+                <button class="btn btn-secondary" onclick="API.open('/estimates/${est.id}/pdf', 'estimate-${est.estimate_number}.pdf')">Print / PDF</button>
+                ${App.hasPermission && !App.hasPermission('sales.manage') ? '' : `<button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>
+                ${est.status !== 'converted' ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to Invoice</button>` : ''}` }
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
     },

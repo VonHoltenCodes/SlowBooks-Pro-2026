@@ -24,6 +24,7 @@ from app.routes.settings import _get_all as get_settings, _set as set_setting
 from app.services.email_service import render_document_email, send_document_email
 from app.services.gst_calculations import calculate_document_gst, prices_include_gst
 from app.services.gst_lines import resolve_gst_line_inputs, resolve_line_gst
+from app.services.auth import require_permissions
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
@@ -46,7 +47,7 @@ def _next_estimate_number(db: Session) -> str:
 
 
 @router.get("", response_model=list[EstimateResponse])
-def list_estimates(status: str = None, customer_id: int = None, db: Session = Depends(get_db)):
+def list_estimates(status: str = None, customer_id: int = None, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     q = db.query(Estimate)
     if status:
         q = q.filter(Estimate.status == status)
@@ -63,7 +64,7 @@ def list_estimates(status: str = None, customer_id: int = None, db: Session = De
 
 
 @router.get("/{estimate_id}", response_model=EstimateResponse)
-def get_estimate(estimate_id: int, db: Session = Depends(get_db)):
+def get_estimate(estimate_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
@@ -74,7 +75,7 @@ def get_estimate(estimate_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=EstimateResponse, status_code=201)
-def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
+def create_estimate(data: EstimateCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -130,7 +131,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{estimate_id}", response_model=EstimateResponse)
-def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depends(get_db)):
+def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
@@ -177,7 +178,7 @@ def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depend
 
 
 @router.get("/{estimate_id}/pdf")
-def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
+def estimate_pdf(estimate_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     """Generate PDF — CEstimatePrintLayout::RenderPage() @ 0x00221800"""
     est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not est:
@@ -192,7 +193,7 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{estimate_id}/email")
-def email_estimate(estimate_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db)):
+def email_estimate(estimate_id: int, data: DocumentEmailRequest, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
@@ -224,7 +225,7 @@ def email_estimate(estimate_id: int, data: DocumentEmailRequest, db: Session = D
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)
-def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
+def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     """CEstimate::ConvertToInvoice() @ 0x001944A0 — deep-copies all fields/lines"""
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:

@@ -10,10 +10,11 @@
 const BankingPage = {
     async render() {
         const accounts = await API.get('/banking/accounts');
+        const canManageBanking = App.hasPermission ? App.hasPermission('banking.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Bank Accounts</h2>
-                <button class="btn btn-primary" onclick="BankingPage.showAccountForm()">+ New Bank Account</button>
+                ${canManageBanking ? `<button class="btn btn-primary" onclick="BankingPage.showAccountForm()">+ New Bank Account</button>` : ''}
             </div>`;
 
         if (accounts.length === 0) {
@@ -45,9 +46,9 @@ const BankingPage = {
                 <h2>${escapeHtml(ba.name)} Register</h2>
                 <div class="btn-group">
                     <button class="btn btn-secondary" onclick="App.navigate('#/banking')">Back</button>
-                    <button class="btn btn-primary" onclick="BankingPage.showTxnForm(${bankAccountId})">+ Transaction</button>
+                    ${App.hasPermission && !App.hasPermission('banking.manage') ? '' : `<button class="btn btn-primary" onclick="BankingPage.showTxnForm(${bankAccountId})">+ Transaction</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showOFXImport(${bankAccountId})">Import OFX/QFX</button>
-                    <button class="btn btn-secondary" onclick="BankingPage.startReconcile(${bankAccountId})">Reconcile</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.startReconcile(${bankAccountId})">Reconcile</button>` }
                 </div>
             </div>
             <div class="card" style="margin-bottom:16px;">
@@ -320,9 +321,7 @@ const BankingPage = {
         try {
             const formData = new FormData();
             formData.append('file', $('#ofx-file').files[0]);
-            const resp = await fetch(`/api/bank-import/import/${bankAccountId}`, { method: 'POST', body: formData });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
+            const data = await API.postForm(`/bank-import/import/${bankAccountId}`, formData);
             toast(`Imported ${data.imported} transactions (${data.skipped_duplicates} duplicates skipped)`);
             closeModal();
             BankingPage.viewRegister(bankAccountId);

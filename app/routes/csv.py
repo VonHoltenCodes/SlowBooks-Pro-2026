@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.auth import require_permissions
 from app.services.csv_export import (
     export_accounts,
     export_customers,
@@ -43,7 +44,10 @@ async def _run_csv_import(importer, file: UploadFile, db: Session) -> dict:
 
 
 @router.get("/export/customers")
-def csv_export_customers(db: Session = Depends(get_db)):
+def csv_export_customers(
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.view")),
+):
     csv_data = export_customers(db)
     return Response(
         content=csv_data,
@@ -53,7 +57,10 @@ def csv_export_customers(db: Session = Depends(get_db)):
 
 
 @router.get("/export/vendors")
-def csv_export_vendors(db: Session = Depends(get_db)):
+def csv_export_vendors(
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.view")),
+):
     csv_data = export_vendors(db)
     return Response(
         content=csv_data,
@@ -63,7 +70,10 @@ def csv_export_vendors(db: Session = Depends(get_db)):
 
 
 @router.get("/export/items")
-def csv_export_items(db: Session = Depends(get_db)):
+def csv_export_items(
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.view")),
+):
     csv_data = export_items(db)
     return Response(
         content=csv_data,
@@ -77,6 +87,7 @@ def csv_export_invoices(
     date_from: date = Query(default=None),
     date_to: date = Query(default=None),
     db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.view")),
 ):
     csv_data = export_invoices(db, date_from, date_to)
     return Response(
@@ -87,7 +98,10 @@ def csv_export_invoices(
 
 
 @router.get("/export/accounts")
-def csv_export_accounts(db: Session = Depends(get_db)):
+def csv_export_accounts(
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.view")),
+):
     csv_data = export_accounts(db)
     return Response(
         content=csv_data,
@@ -97,15 +111,27 @@ def csv_export_accounts(db: Session = Depends(get_db)):
 
 
 @router.post("/import/customers")
-async def csv_import_customers(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def csv_import_customers(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.manage")),
+):
     return await _run_csv_import(import_customers, file, db)
 
 
 @router.post("/import/vendors")
-async def csv_import_vendors(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def csv_import_vendors(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.manage")),
+):
     return await _run_csv_import(import_vendors, file, db)
 
 
 @router.post("/import/items")
-async def csv_import_items(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def csv_import_items(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("import_export.manage")),
+):
     return await _run_csv_import(import_items, file, db)

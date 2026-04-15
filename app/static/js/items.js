@@ -9,10 +9,11 @@
 const ItemsPage = {
     async render() {
         const items = await API.get('/items');
+        const canManageItems = App.hasPermission ? App.hasPermission('items.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Items & Services</h2>
-                <button class="btn btn-primary" onclick="ItemsPage.showForm()">+ New Item</button>
+                ${canManageItems ? `<button class="btn btn-primary" onclick="ItemsPage.showForm()">+ New Item</button>` : ''}
             </div>`;
 
         if (items.length === 0) {
@@ -31,7 +32,7 @@ const ItemsPage = {
                     <td class="amount">${formatCurrency(item.rate)}</td>
                     <td class="amount">${formatCurrency(item.cost)}</td>
                     <td class="actions">
-                        <button class="btn btn-sm btn-secondary" onclick="ItemsPage.showForm(${item.id})">Edit</button>
+                        ${canManageItems ? `<button class="btn btn-sm btn-secondary" onclick="ItemsPage.showForm(${item.id})">Edit</button>` : ''}
                     </td>
                 </tr>`;
             }

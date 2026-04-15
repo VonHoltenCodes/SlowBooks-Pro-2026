@@ -10,10 +10,11 @@
 const InvoicesPage = {
     async render() {
         const invoices = await API.get('/invoices');
+        const canManageSales = App.hasPermission ? App.hasPermission('sales.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Invoices</h2>
-                <button class="btn btn-primary" onclick="InvoicesPage.showForm()">+ New Invoice</button>
+                ${canManageSales ? `<button class="btn btn-primary" onclick="InvoicesPage.showForm()">+ New Invoice</button>` : ''}
             </div>
             <div class="toolbar">
                 <select id="inv-status-filter" onchange="InvoicesPage.applyFilter()">
@@ -45,7 +46,7 @@ const InvoicesPage = {
                     <td class="amount">${formatCurrency(inv.balance_due)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.view(${inv.id})">View</button>
-                        <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showForm(${inv.id})">Edit</button>
+                        ${canManageSales ? `<button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showForm(${inv.id})">Edit</button>` : ''}
                     </td>
                 </tr>`;
             }
@@ -89,11 +90,11 @@ const InvoicesPage = {
             </div>
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="window.open('/api/invoices/${inv.id}/pdf','_blank')">Print / PDF</button>
-                <button class="btn btn-secondary" onclick="InvoicesPage.duplicate(${inv.id})">Duplicate</button>
+                <button class="btn btn-secondary" onclick="API.open('/invoices/${inv.id}/pdf', 'invoice-${inv.invoice_number}.pdf')">Print / PDF</button>
+                ${App.hasPermission && !App.hasPermission('sales.manage') ? '' : `<button class="btn btn-secondary" onclick="InvoicesPage.duplicate(${inv.id})">Duplicate</button>
                 <button class="btn btn-secondary" onclick="InvoicesPage.emailInvoice(${inv.id})">Email Invoice</button>
                 ${inv.status === 'draft' ? `<button class="btn btn-primary" onclick="InvoicesPage.markSent(${inv.id})">Mark Sent</button>` : ''}
-                ${inv.status !== 'void' ? `<button class="btn btn-danger" onclick="InvoicesPage.void(${inv.id})">Void Invoice</button>` : ''}
+                ${inv.status !== 'void' ? `<button class="btn btn-danger" onclick="InvoicesPage.void(${inv.id})">Void Invoice</button>` : ''}` }
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
     },

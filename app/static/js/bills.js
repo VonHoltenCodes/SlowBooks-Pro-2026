@@ -5,12 +5,13 @@
 const BillsPage = {
     async render() {
         const bills = await API.get('/bills');
+        const canManagePurchasing = App.hasPermission ? App.hasPermission('purchasing.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Bills (Accounts Payable)</h2>
                 <div class="btn-group">
-                    <button class="btn btn-primary" onclick="BillsPage.showForm()">+ Enter Bill</button>
-                    <button class="btn btn-secondary" onclick="BillsPage.showPayForm()">Pay Bills</button>
+                    ${canManagePurchasing ? `<button class="btn btn-primary" onclick="BillsPage.showForm()">+ Enter Bill</button>
+                    <button class="btn btn-secondary" onclick="BillsPage.showPayForm()">Pay Bills</button>` : ''}
                 </div>
             </div>
             <div class="toolbar">
@@ -40,7 +41,7 @@ const BillsPage = {
                     <td class="amount">${formatCurrency(b.balance_due)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="BillsPage.view(${b.id})">View</button>
-                        ${b.status !== 'void' && b.status !== 'paid' ? `<button class="btn btn-sm btn-danger" onclick="BillsPage.void(${b.id})">Void</button>` : ''}
+                        ${canManagePurchasing && b.status !== 'void' && b.status !== 'paid' ? `<button class="btn btn-sm btn-danger" onclick="BillsPage.void(${b.id})">Void</button>` : ''}
                     </td>
                 </tr>`;
             }

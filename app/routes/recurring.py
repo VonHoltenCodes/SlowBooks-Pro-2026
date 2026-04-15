@@ -12,12 +12,13 @@ from app.models.contacts import Customer
 from app.schemas.recurring import RecurringCreate, RecurringUpdate, RecurringResponse
 from app.services.recurring_service import generate_due_invoices
 from app.services.gst_lines import resolve_line_gst
+from app.services.auth import require_permissions
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
 
 
 @router.get("", response_model=list[RecurringResponse])
-def list_recurring(active_only: bool = False, db: Session = Depends(get_db)):
+def list_recurring(active_only: bool = False, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     q = db.query(RecurringInvoice)
     if active_only:
         q = q.filter(RecurringInvoice.is_active == True)
@@ -32,7 +33,7 @@ def list_recurring(active_only: bool = False, db: Session = Depends(get_db)):
 
 
 @router.get("/{rec_id}", response_model=RecurringResponse)
-def get_recurring(rec_id: int, db: Session = Depends(get_db)):
+def get_recurring(rec_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.view"))):
     rec = db.query(RecurringInvoice).filter(RecurringInvoice.id == rec_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Recurring invoice not found")
@@ -43,7 +44,7 @@ def get_recurring(rec_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=RecurringResponse, status_code=201)
-def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
+def create_recurring(data: RecurringCreate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
@@ -74,7 +75,7 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{rec_id}", response_model=RecurringResponse)
-def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(get_db)):
+def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     rec = db.query(RecurringInvoice).filter(RecurringInvoice.id == rec_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Recurring invoice not found")
@@ -102,7 +103,7 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
 
 
 @router.delete("/{rec_id}")
-def delete_recurring(rec_id: int, db: Session = Depends(get_db)):
+def delete_recurring(rec_id: int, db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     rec = db.query(RecurringInvoice).filter(RecurringInvoice.id == rec_id).first()
     if not rec:
         raise HTTPException(status_code=404, detail="Recurring invoice not found")
@@ -112,7 +113,7 @@ def delete_recurring(rec_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/generate")
-def generate_now(db: Session = Depends(get_db)):
+def generate_now(db: Session = Depends(get_db), auth=Depends(require_permissions("sales.manage"))):
     """Manually trigger generation of all due recurring invoices."""
     created_ids = generate_due_invoices(db)
     return {"invoices_created": len(created_ids), "invoice_ids": created_ids}

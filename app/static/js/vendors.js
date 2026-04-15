@@ -8,10 +8,11 @@
 const VendorsPage = {
     async render() {
         const vendors = await API.get('/vendors');
+        const canManageVendors = App.hasPermission ? App.hasPermission('contacts.manage') : true;
         let html = `
             <div class="page-header">
                 <h2>Vendors</h2>
-                <button class="btn btn-primary" onclick="VendorsPage.showForm()">+ New Vendor</button>
+                ${canManageVendors ? `<button class="btn btn-primary" onclick="VendorsPage.showForm()">+ New Vendor</button>` : ''}
             </div>`;
 
         if (vendors.length === 0) {
@@ -30,7 +31,7 @@ const VendorsPage = {
                     <td>${escapeHtml(v.email) || ''}</td>
                     <td class="amount">${formatCurrency(v.balance)}</td>
                     <td class="actions">
-                        <button class="btn btn-sm btn-secondary" onclick="VendorsPage.showForm(${v.id})">Edit</button>
+                        ${canManageVendors ? `<button class="btn btn-sm btn-secondary" onclick="VendorsPage.showForm(${v.id})">Edit</button>` : ''}
                     </td>
                 </tr>`;
             }

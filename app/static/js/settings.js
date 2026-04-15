@@ -216,9 +216,7 @@ const SettingsPage = {
         const formData = new FormData();
         formData.append('file', input.files[0]);
         try {
-            const resp = await fetch('/api/uploads/logo', { method: 'POST', body: formData });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+            const data = await API.postForm('/uploads/logo', formData);
             toast('Logo uploaded');
             App.navigate('#/settings');
         } catch (err) { toast(err.message, 'error'); }
@@ -239,6 +237,12 @@ const SettingsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    async downloadBackup(filename) {
+        try {
+            await API.download(`/backups/download/${filename}`, filename);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     async loadBackups() {
         try {
             const backups = await API.get('/backups');
@@ -255,7 +259,7 @@ const SettingsPage = {
                     <td>${(b.file_size / 1024).toFixed(1)} KB</td>
                     <td>${formatDate(b.created_at)}</td>
                     <td class="actions">
-                        <a href="/api/backups/download/${encodeURIComponent(b.filename)}" class="btn btn-sm btn-secondary" download>Download</a>
+                        <button class="btn btn-sm btn-secondary" onclick="SettingsPage.downloadBackup('${encodeURIComponent(b.filename)}')">Download</button>
                     </td>
                 </tr>`).join('')}</tbody>
             </table></div>`;
