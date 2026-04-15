@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Slowbooks Analytics — {{ period.name|upper }}</title>
+    <style>
+        @page {
+            size: letter;
+            margin: 0.75in 0.6in;
+            @bottom-center {
+                content: "Slowbooks Pro 2026 · Page " counter(page) " of " counter(pages);
+                font-family: "Helvetica Neue", Arial, sans-serif;
+                font-size: 8pt;
+                color: #888;
+            }
+        }
+
+        body {
+            font-family: "Helvetica Neue", Arial, sans-serif;
+            color: #1a1a28;
+            font-size: 9pt;
+            margin: 0;
+        }
+
+        /* Header */
+        .pdf-header {
+            border-bottom: 2pt solid #336699;
+            padding-bottom: 8pt;
+            margin-bottom: 14pt;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-end;
+        }
+        .pdf-title {
+            font-size: 16pt;
+            font-weight: 700;
+            color: #336699;
+            margin: 0;
+        }
+        .pdf-company {
+            font-size: 11pt;
+            font-weight: 600;
+            color: #1a1a28;
+            margin: 0;
+        }
+        .pdf-period {
+            text-align: right;
+            font-size: 9pt;
+            color: #5a5a70;
+        }
+        .pdf-period strong {
+            color: #336699;
+            display: block;
+            font-size: 11pt;
+            text-transform: uppercase;
+            letter-spacing: 0.5pt;
+        }
+
+        h2.section {
+            font-size: 10pt;
+            font-weight: 700;
+            color: #336699;
+            text-transform: uppercase;
+            letter-spacing: 0.8pt;
+            margin: 14pt 0 4pt;
+            border-bottom: 0.5pt solid #c0c8d0;
+            padding-bottom: 2pt;
+        }
+
+        /* KPI strip */
+        .kpi-row {
+            display: table;
+            width: 100%;
+            border-collapse: separate;
+            border-spacing: 6pt 0;
+            margin-bottom: 10pt;
+        }
+        .kpi {
+            display: table-cell;
+            background: #f5f7fa;
+            border: 0.5pt solid #c0c8d0;
+            border-radius: 2pt;
+            padding: 8pt 10pt;
+            width: 25%;
+        }
+        .kpi-label {
+            font-size: 7pt;
+            text-transform: uppercase;
+            letter-spacing: 0.5pt;
+            color: #7a7a9a;
+            margin-bottom: 2pt;
+        }
+        .kpi-value {
+            font-size: 15pt;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .kpi-green  { color: #339966; }
+        .kpi-red    { color: #cc3333; }
+        .kpi-blue   { color: #336699; }
+        .kpi-purple { color: #7e22ce; }
+
+        /* Tables */
+        table.data {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 4pt;
+        }
+        table.data th, table.data td {
+            padding: 3pt 6pt;
+            border-bottom: 0.25pt solid #c0c8d0;
+            text-align: left;
+            font-size: 8.5pt;
+        }
+        table.data th {
+            background: #eef1f7;
+            font-weight: 600;
+            color: #336699;
+            text-transform: uppercase;
+            font-size: 7pt;
+            letter-spacing: 0.5pt;
+        }
+        table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+        table.data tr.totals td {
+            border-top: 1pt solid #336699;
+            background: #f5f7fa;
+            font-weight: 700;
+        }
+        .green { color: #339966; }
+        .red   { color: #cc3333; }
+        .amber { color: #cc6633; }
+
+        .two-col { display: table; width: 100%; border-collapse: separate; border-spacing: 8pt 0; }
+        .two-col > div { display: table-cell; width: 50%; vertical-align: top; }
+
+        .empty {
+            color: #7a7a9a;
+            font-size: 8pt;
+            font-style: italic;
+            padding: 6pt;
+        }
+
+        /* Avoid breaking tables awkwardly */
+        table.data, .kpi-row { page-break-inside: avoid; }
+        h2.section { page-break-after: avoid; }
+    </style>
+</head>
+<body>
+    <div class="pdf-header">
+        <div>
+            <p class="pdf-title">Analytics Snapshot</p>
+            <p class="pdf-company">{{ company.company_name or "Slowbooks Pro 2026" }}</p>
+        </div>
+        <div class="pdf-period">
+            <strong>{{ period.name|upper }}</strong>
+            {{ period.start }} &rarr; {{ period.end }}
+        </div>
+    </div>
+
+    {% set total_revenue  = dashboard.revenue_by_customer.values()  | sum %}
+    {% set total_expenses = dashboard.expenses_by_category.values() | sum %}
+    {% set dso = dashboard.dso or 0 %}
+    {% set margin = (((total_revenue - total_expenses) / total_revenue) * 100) if total_revenue > 0 else 0 %}
+
+    <h2 class="section">Key Metrics</h2>
+    <div class="kpi-row">
+        <div class="kpi">
+            <div class="kpi-label">Revenue</div>
+            <div class="kpi-value kpi-green">{{ total_revenue | currency }}</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Expenses</div>
+            <div class="kpi-value kpi-red">{{ total_expenses | currency }}</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">DSO (Days)</div>
+            <div class="kpi-value kpi-blue">{{ "%.1f"|format(dso) }}</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi-label">Margin %</div>
+            <div class="kpi-value kpi-purple">{{ "%.1f"|format(margin) }}%</div>
+        </div>
+    </div>
+
+    <h2 class="section">Revenue Trend — Last 12 Months</h2>
+    <table class="data">
+        <thead><tr><th>Month</th><th class="num">Paid Revenue</th></tr></thead>
+        <tbody>
+            {% for month, total in dashboard.revenue_trend.items() %}
+                <tr><td>{{ month }}</td><td class="num green">{{ total | currency }}</td></tr>
+            {% else %}
+                <tr><td colspan="2" class="empty">No revenue data.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="two-col">
+        <div>
+            <h2 class="section">Revenue by Customer</h2>
+            <table class="data">
+                <thead><tr><th>Customer</th><th class="num">Revenue</th></tr></thead>
+                <tbody>
+                {% for customer, revenue in dashboard.revenue_by_customer.items()|sort(attribute=1, reverse=true) %}
+                    <tr><td>{{ customer }}</td><td class="num green">{{ revenue | currency }}</td></tr>
+                {% else %}
+                    <tr><td colspan="2" class="empty">No paid invoices this period.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <div>
+            <h2 class="section">Expenses by Category</h2>
+            <table class="data">
+                <thead><tr><th>Category</th><th class="num">Expense</th></tr></thead>
+                <tbody>
+                {% for cat, amount in dashboard.expenses_by_category.items()|sort(attribute=1, reverse=true) %}
+                    <tr><td>{{ cat }}</td><td class="num red">{{ amount | currency }}</td></tr>
+                {% else %}
+                    <tr><td colspan="2" class="empty">No paid bills this period.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% macro aging_table(aging, name_header) %}
+        {% set names_set = [] %}
+        {% for bucket in ['current','30','60','90'] %}
+            {% for name in aging.get(bucket, {}).keys() %}
+                {% if name not in names_set %}{% set _ = names_set.append(name) %}{% endif %}
+            {% endfor %}
+        {% endfor %}
+        {% if names_set %}
+            {% set rows = [] %}
+            {% for name in names_set %}
+                {% set cur = aging.get('current', {}).get(name, 0) %}
+                {% set d30 = aging.get('30', {}).get(name, 0) %}
+                {% set d60 = aging.get('60', {}).get(name, 0) %}
+                {% set d90 = aging.get('90', {}).get(name, 0) %}
+                {% set total = cur + d30 + d60 + d90 %}
+                {% set _ = rows.append({'name': name, 'cur': cur, 'd30': d30, 'd60': d60, 'd90': d90, 'total': total}) %}
+            {% endfor %}
+            {% set sorted_rows = rows|sort(attribute='total', reverse=true) %}
+            {% set tcur = namespace(v=0) %}
+            {% set t30  = namespace(v=0) %}
+            {% set t60  = namespace(v=0) %}
+            {% set t90  = namespace(v=0) %}
+            {% set tall = namespace(v=0) %}
+            {% for r in sorted_rows %}
+                {% set tcur.v = tcur.v + r.cur %}
+                {% set t30.v  = t30.v  + r.d30 %}
+                {% set t60.v  = t60.v  + r.d60 %}
+                {% set t90.v  = t90.v  + r.d90 %}
+                {% set tall.v = tall.v + r.total %}
+            {% endfor %}
+            <table class="data">
+                <thead>
+                    <tr>
+                        <th>{{ name_header }}</th>
+                        <th class="num">Current</th>
+                        <th class="num">30+</th>
+                        <th class="num">60+</th>
+                        <th class="num">90+</th>
+                        <th class="num">Total</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for r in sorted_rows %}
+                    <tr>
+                        <td>{{ r.name }}</td>
+                        <td class="num">{{ r.cur | currency }}</td>
+                        <td class="num amber">{{ r.d30 | currency }}</td>
+                        <td class="num amber">{{ r.d60 | currency }}</td>
+                        <td class="num red">{{ r.d90 | currency }}</td>
+                        <td class="num green"><strong>{{ r.total | currency }}</strong></td>
+                    </tr>
+                    {% endfor %}
+                    <tr class="totals">
+                        <td>TOTAL</td>
+                        <td class="num">{{ tcur.v | currency }}</td>
+                        <td class="num">{{ t30.v  | currency }}</td>
+                        <td class="num">{{ t60.v  | currency }}</td>
+                        <td class="num">{{ t90.v  | currency }}</td>
+                        <td class="num green">{{ tall.v | currency }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        {% else %}
+            <div class="empty">Nothing outstanding.</div>
+        {% endif %}
+    {% endmacro %}
+
+    <h2 class="section">Accounts Receivable Aging</h2>
+    {{ aging_table(dashboard.ar_aging, 'Customer') }}
+
+    <h2 class="section">Accounts Payable Aging</h2>
+    {{ aging_table(dashboard.ap_aging, 'Vendor') }}
+
+    <h2 class="section">90-Day Cash Forecast</h2>
+    <table class="data">
+        <thead>
+            <tr>
+                <th>Due by</th>
+                <th class="num">Expected Collections</th>
+                <th class="num">Expected Payments</th>
+                <th class="num">Net</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in dashboard.cash_forecast %}
+            <tr>
+                <td>{{ row.date }}</td>
+                <td class="num green">{{ row.collections | currency }}</td>
+                <td class="num red">{{ row.payments | currency }}</td>
+                <td class="num {{ 'green' if row.net >= 0 else 'red' }}"><strong>{{ row.net | currency }}</strong></td>
+            </tr>
+            {% else %}
+            <tr><td colspan="4" class="empty">No forecast data.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

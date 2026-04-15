@@ -55,3 +55,19 @@ def generate_statement_pdf(customer, invoices, payments, company_settings: dict,
         company=company_settings, as_of_date=as_of_date,
     )
     return HTML(string=html_str).write_pdf()
+
+
+def generate_analytics_pdf(dashboard: dict, period: dict, company_settings: dict) -> bytes:
+    """Render the analytics dashboard snapshot as a printable PDF.
+
+    `dashboard` is the raw `AnalyticsEngine.get_dashboard()` dict;
+    `period` carries `{name, start, end}` metadata for the header;
+    `company_settings` is the usual key-value dict the other PDFs get.
+    """
+    template = _jinja_env.get_template("analytics_pdf.html")
+    html_str = template.render(
+        dashboard=dashboard,
+        period=period,
+        company=company_settings,
+    )
+    return HTML(string=html_str).write_pdf()

@@ -1236,3 +1236,153 @@ tr.clickable { cursor: pointer; }
     padding: 6px 8px;
     color: var(--qb-orange);
 }
+
+/* ===========================================================================
+   Phase 9: Analytics page (#/analytics)
+   Inline SPA page matching the QB2003 blue skin with light/dark support.
+   =========================================================================== */
+
+.analytics-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.analytics-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.analytics-controls label {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-right: 2px;
+}
+
+.analytics-controls select,
+.analytics-controls .btn-sm {
+    padding: 4px 10px;
+    font-size: 12px;
+    border-radius: 4px;
+}
+
+.analytics-controls select {
+    background: var(--panel-bg);
+    color: var(--text-muted);
+    border: 1px solid var(--panel-border);
+}
+
+.analytics-meta {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    letter-spacing: 0.5px;
+}
+
+.analytics-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+@media (max-width: 900px) {
+    .analytics-kpi-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+.analytics-kpi {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 14px 16px;
+}
+
+.analytics-kpi-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 6px;
+}
+
+.analytics-kpi-value {
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.analytics-kpi-value.kpi-green  { color: var(--qb-green); }
+.analytics-kpi-value.kpi-red    { color: var(--qb-red); }
+.analytics-kpi-value.kpi-blue   { color: var(--qb-blue); }
+.analytics-kpi-value.kpi-purple { color: #a855f7; }
+
+.analytics-section-title {
+    font-size: 10px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin: 20px 0 8px;
+    font-weight: 600;
+}
+
+.analytics-card {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 14px 16px;
+    margin-bottom: 8px;
+}
+
+.analytics-two-col {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+@media (max-width: 900px) {
+    .analytics-two-col { grid-template-columns: 1fr; }
+}
+
+.chart-wrap {
+    position: relative;
+    width: 100%;
+    height: 280px;
+    margin-bottom: 8px;
+}
+
+.chart-wrap-sm {
+    height: 220px;
+}
+
+.analytics-empty {
+    padding: 14px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+.analytics-error {
+    padding: 14px 16px;
+    background: #fff4f4;
+    border: 1px solid var(--qb-red);
+    border-radius: 4px;
+    color: var(--qb-red);
+    font-size: 12px;
+}
+
+.analytics-error strong { display: block; margin-bottom: 4px; }
+
+.amount.green { color: var(--qb-green); }
+.amount.red   { color: var(--qb-red); }
+.amount.amber { color: var(--qb-orange); }
+
+.totals-row td {
+    border-top: 2px solid var(--panel-border);
+    background: rgba(51, 102, 153, 0.04);
+}

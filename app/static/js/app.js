@@ -40,6 +40,8 @@ const App = {
         '/companies':     { page: 'companies',       label: 'Companies',          render: () => CompaniesPage.render() },
         '/employees':     { page: 'employees',       label: 'Employees',          render: () => EmployeesPage.render() },
         '/payroll':       { page: 'payroll',         label: 'Payroll',            render: () => PayrollPage.render() },
+        // Phase 9: Analytics (real-time business intelligence)
+        '/analytics':     { page: 'analytics',       label: 'Analytics',          render: () => AnalyticsPage.render() },
     },
 
     async navigate(hash) {

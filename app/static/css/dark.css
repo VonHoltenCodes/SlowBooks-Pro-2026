@@ -339,3 +339,16 @@
 /* Inline styles that use hardcoded colors — override common patterns */
 [data-theme="dark"] [style*="color:var(--qb-navy)"] { color: #8ab4e0 !important; }
 [data-theme="dark"] [style*="font-weight:700"] { color: var(--text-primary); }
+
+/* Phase 9: Analytics error box — dark variant */
+[data-theme="dark"] .analytics-error {
+    background: #2a1e1e;
+    border-color: #e05555;
+    color: #ff9f9f;
+}
+
+/* Phase 9: Totals row in aging tables */
+[data-theme="dark"] .totals-row td {
+    background: rgba(138, 180, 224, 0.08);
+    border-top-color: var(--panel-border);
+}

@@ -83,7 +83,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 ![Dashboard — Dark Mode](screenshots/dashboard-dark.png)
 
 ### Analytics (Phase 9)
-Real-time business intelligence layer that sits on top of the accounting engine. Powered by `AnalyticsEngine` (`app/services/analytics.py`) with 8 aggregation methods and 6 REST endpoints at `/api/analytics/*`. Accessible from the sidebar → **Analytics**, or directly at `http://localhost:3001/analytics`.
+Real-time business intelligence layer that sits on top of the accounting engine. Powered by `AnalyticsEngine` (`app/services/analytics.py`) with 8 aggregation methods and 7 REST endpoints at `/api/analytics/*`. **Fully integrated inline** into the main SPA as a hash-routed page — no separate shell, no full page reload. Click **Analytics** in the sidebar (under Accounting → Reports → Analytics → Tax Reports) to land on `#/analytics`.
 
 **Metrics computed:**
 - **Revenue by Customer** — Paid revenue per customer for the selected period, ranked high-to-low
@@ -92,18 +92,23 @@ Real-time business intelligence layer that sits on top of the accounting engine.
 - **A/R Aging** — Open invoice balances bucketed Current / 30 / 60 / 90+ days old, using `invoices.balance_due` so partial payments don't double-count. Table is sorted worst-offender first and includes a TOTAL row.
 - **A/P Aging** — Open bill balances bucketed Current / 30 / 60 / 90+ days old (same treatment as A/R)
 - **DSO (Days Sales Outstanding)** — `(open A/R balance ÷ last-30-day paid revenue) × 30`
-- **90-Day Cash Forecast** — 14 weekly cumulative buckets of expected A/R collections vs A/P payments due on-or-before each cutoff, with final bucket pinned at day 90. Net column color-coded green/red.
+- **90-Day Cash Forecast** — 14 weekly cumulative buckets of expected A/R collections vs A/P payments due on-or-before each cutoff. Net column color-coded green/red.
 - **Customer Profitability** — Lifetime paid revenue per customer (first pass; COGS attribution on the roadmap)
 
-**Dashboard page (`/analytics`):**
+**Dashboard UI (`#/analytics`, inline SPA page):**
 - **4 KPI cards** — Revenue, Expenses, DSO, Margin%
-- **Revenue-trend sparkline** — Inline SVG bar chart of the last 12 months with hover tooltips (no external chart library)
-- **Two-column table grid** — Revenue-by-Customer + Expenses-by-Category, then A/R Aging + A/P Aging, then full-width Cash Forecast
-- **Period selector** — Dropdown for Month / Quarter / Year to Date; re-fetches and re-renders instantly
-- **Refresh button** (`R` key) — Re-fetch without reloading the page
-- **CSV export** — One-click download of the current snapshot at `/api/analytics/export.csv?period=...`
-- **Theme toggle** (`T` key) — Light/dark support matching the main SPA. Honors `localStorage['slowbooks-theme']` so preference is shared with the rest of the app. Pre-paint script avoids flash-of-wrong-theme on load.
-- **Last-updated indicator** — Shows the resolved date window + wall clock time so you always know exactly what period you're looking at
+- **Chart.js visualizations** (self-hosted 206 KB UMD bundle at `/static/js/chart.umd.js` — no CDN, LAN-deployable):
+  - Revenue trend — 12-month line chart with filled area + hover tooltips
+  - Expenses by category — doughnut chart with legend
+  - A/R aging — horizontal stacked bar chart (one bar per customer, stacks = current/30/60/90)
+  - A/P aging — horizontal stacked bar chart (one bar per vendor)
+  - Cash forecast — dual-line (collections vs payments) + net bar chart overlay
+- **Detail tables** under every chart with sort-by-total-descending and TOTAL footer rows
+- **Period selector** — Dropdown for Month / Quarter / Year to Date; re-fetches dashboard + re-builds all charts instantly
+- **Refresh button** — Re-fetch without navigating away
+- **Export CSV** — Downloads flat CSV of the current snapshot at `/api/analytics/export.csv?period=...`
+- **Export PDF** — Downloads a print-optimized PDF rendered by WeasyPrint (same dep used for invoice PDFs)
+- **Theme-aware** — All Chart.js text/grid colors read from `<html data-theme>` so the charts flip with the main SPA theme toggle
 
 **Date-range filtering (all endpoints):**
 ```
@@ -116,15 +121,24 @@ Unknown period names and missing params fall back to month-to-date. Explicit dat
 ```bash
 curl 'http://localhost:3001/api/analytics/export.csv?period=year' -o analytics.csv
 ```
-Returns a flat CSV with columns `(section, key, subkey, value)` covering 9 sections: period, revenue_by_customer, revenue_trend, expenses_by_category, ar_aging, ap_aging, dso, cash_forecast, customer_profit. Drops straight into Excel / Google Sheets / any BI tool.
+Flat CSV with columns `(section, key, subkey, value)` covering 9 sections: period, revenue_by_customer, revenue_trend, expenses_by_category, ar_aging, ap_aging, dso, cash_forecast, customer_profit. Drops straight into Excel / Google Sheets / any BI tool.
 
-**Performance:** `GET /api/analytics/dashboard` issues exactly **10 SQL queries** regardless of dataset size — every method is single-query (or at most two) with no N+1 relationship loads. Measured on SQLite with 3,000 invoices + 1,500 bills: **~26 ms** engine / ~40 ms full HTTP round-trip; with 8,000 invoices + 4,000 bills: **~50 ms**. The `period` parameter adds zero extra queries.
+**PDF export:**
+```bash
+curl 'http://localhost:3001/api/analytics/export.pdf?period=year' -o analytics.pdf
+```
+Print-ready PDF via WeasyPrint + Jinja2 (`app/templates/analytics_pdf.html` → `app/services/pdf_service.py::generate_analytics_pdf`). Same template handles all periods. Output: letter-size, page numbers in footer, KPI strip + every table the UI shows. ~18 KB typical for a small business; renders in WeasyPrint in well under a second.
+
+**Performance:** `GET /api/analytics/dashboard` issues exactly **10 SQL queries** regardless of dataset size — every method is single-query (or at most two) with no N+1 relationship loads. Measured on SQLite with 3,000 invoices + 1,500 bills: **~26 ms** engine / ~40 ms full HTTP round-trip; with 8,000 invoices + 4,000 bills: **~50 ms**. The `period` parameter adds zero extra queries. PDF export renders end-to-end in ~100 ms on the medium dataset.
+
+**Tested** with 25-assertion backend regression + 42-assertion headless UI smoke test that loads the real Chart.js UMD bundle in a `vm` context and confirms all 5 chart instances initialize with the expected dataset shapes (1 line chart with 12 points, 1 doughnut with N slices, 2 stacked bars with 4 datasets each, 1 combo chart with 3 datasets).
 
 Quick smoke test once the app is running:
 ```bash
 curl http://localhost:3001/api/analytics/dashboard
 curl http://localhost:3001/api/analytics/dashboard?period=year
 curl http://localhost:3001/api/analytics/export.csv > snapshot.csv
+curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 ```
 
 ### Online Payments
@@ -181,10 +195,10 @@ curl http://localhost:3001/api/analytics/export.csv > snapshot.csv
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (32 routers, 150+ routes) |
+| Backend | Python 3.12 + FastAPI (32 routers, 151+ routes) |
 | Database | PostgreSQL 16 + SQLAlchemy 2.0 |
 | Migrations | Alembic |
-| Frontend | Vanilla HTML/CSS/JS (no framework) |
+| Frontend | Vanilla HTML/CSS/JS (no framework) + self-hosted Chart.js 4.4.6 for analytics |
 | PDF | WeasyPrint 60.2 + Jinja2 |
 | Bank Import | ofxparse (OFX/QFX) |
 | Payments | Stripe Checkout (hosted) |
@@ -246,7 +260,7 @@ SlowBooks-Pro-2026/
 ├── alembic.ini               # Alembic config
 ├── alembic/                  # Database migrations
 ├── app/
-│   ├── main.py               # FastAPI app + 32 routers (150+ routes)
+│   ├── main.py               # FastAPI app + 32 routers (151+ routes)
 │   ├── config.py             # Environment-based settings
 │   ├── database.py           # SQLAlchemy engine + session
 │   ├── models/               # 30+ SQLAlchemy models
@@ -293,13 +307,13 @@ SlowBooks-Pro-2026/
 │   │   ├── qbo_service.py    # QBO OAuth + token management + client factory
 │   │   ├── qbo_import.py     # Import 6 entity types from QBO
 │   │   └── qbo_export.py     # Export 6 entity types to QBO
-│   ├── templates/            # Jinja2 templates (PDF, email) + analytics.html
+│   ├── templates/            # Jinja2 templates (PDF, email) + analytics_pdf.html
 │   ├── seed/                 # Chart of Accounts seed data
 │   └── static/
 │       ├── css/
 │       │   ├── style.css     # QB2003 "Default Blue" skin
 │       │   └── dark.css      # Dark mode CSS overrides
-│       └── js/               # SPA router, API wrapper, 23 page modules + AnalyticsDashboard.js
+│       └── js/               # SPA router, API wrapper, 24 page modules (analytics.js) + chart.umd.js (self-hosted Chart.js 4.4.6)
 ├── scripts/
 │   ├── seed_database.py      # Seed the Chart of Accounts
 │   ├── seed_irs_mock_data.py # IRS Pub 583 mock data
@@ -358,7 +372,7 @@ SlowBooks-Pro-2026/
 
 ## API
 
-All endpoints under `/api/`. Swagger docs at `/docs`. 150+ routes across 32 routers.
+All endpoints under `/api/`. Swagger docs at `/docs`. 151+ routes across 32 routers.
 
 ### Core (Original)
 | Endpoint | Methods | Description |
@@ -473,7 +487,8 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 | `/api/analytics/cash-flow` | GET | Cash forecast + DSO + A/R and A/P aging (`?days=90`) |
 | `/api/analytics/profitability` | GET | Lifetime paid revenue per customer |
 | `/api/analytics/export.csv` | GET | Flat CSV of the full snapshot (`section,key,subkey,value`) — honors period params |
-| `/analytics` | GET | Standalone dashboard page (HTML) with period selector, refresh, CSV download, light/dark toggle |
+| `/api/analytics/export.pdf` | GET | Print-ready PDF via WeasyPrint — honors period params |
+| `/analytics` | GET | Backwards-compat 307 redirect to the SPA hash route `/#/analytics` |
 
 ---
 

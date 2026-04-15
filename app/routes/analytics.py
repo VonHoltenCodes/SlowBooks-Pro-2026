@@ -22,6 +22,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.routes.settings import _get_all as get_all_settings
 from app.services.analytics import AnalyticsEngine
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
@@ -203,5 +204,38 @@ def export_csv(
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/export.pdf")
+def export_pdf(
+    period: Optional[str] = Query("month"),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Render the full analytics snapshot as a print-ready PDF.
+
+    Uses WeasyPrint (already a project dep) via `pdf_service.
+    generate_analytics_pdf`. Honors the same period/date params as
+    every other analytics endpoint.
+    """
+    # Lazy import so test environments without weasyprint don't choke
+    # on `from app.routes import analytics`.
+    from app.services.pdf_service import generate_analytics_pdf
+
+    s, e, label = _resolve_period(period, start_date, end_date)
+    engine = AnalyticsEngine(db)
+    dashboard = engine.get_dashboard(start_date=s, end_date=e)
+
+    period_meta = {"name": label, "start": s.isoformat(), "end": e.isoformat()}
+    company_settings = get_all_settings(db)
+
+    pdf_bytes = generate_analytics_pdf(dashboard, period_meta, company_settings)
+    filename = f"slowbooks-analytics-{date.today().isoformat()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

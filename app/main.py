@@ -116,10 +116,6 @@ uploads_dir.mkdir(exist_ok=True)
 # SPA entry point
 index_path = Path(__file__).parent.parent / "index.html"
 
-# Standalone analytics dashboard page (Phase 9). Served outside the SPA
-# shell so it can evolve independently and be linked from /analytics.
-analytics_page_path = Path(__file__).parent / "templates" / "analytics.html"
-
 
 @app.get("/")
 async def serve_index():
@@ -127,5 +123,12 @@ async def serve_index():
 
 
 @app.get("/analytics")
-async def serve_analytics_page():
-    return FileResponse(str(analytics_page_path))
+async def serve_analytics_redirect():
+    """Backwards-compat: old /analytics bookmarks land on the SPA hash route.
+
+    The analytics UI is now integrated inline as #/analytics inside the
+    main SPA shell (see app/static/js/analytics.js). Anyone hitting the
+    bare path gets redirected to the same feature.
+    """
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/#/analytics", status_code=307)
