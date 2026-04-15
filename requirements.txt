@@ -15,3 +15,6 @@ python-dateutil>=2.9.0
 stripe>=8.0.0
 python-quickbooks>=0.9.0
 intuit-oauth>=1.2.0
+# Phase 9.5 — Analytics AI insights + secrets encryption
+cryptography>=41.0.0
+httpx>=0.27.0

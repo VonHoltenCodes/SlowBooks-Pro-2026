@@ -14,16 +14,24 @@
 
 import csv
 import io
-from datetime import date
+import time
+from datetime import date, datetime
 from typing import Optional, Tuple
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.routes.settings import _get_all as get_all_settings
+from app.routes.settings import _get_all as get_all_settings, _set as set_setting
 from app.services.analytics import AnalyticsEngine
+from app.services.ai_service import (
+    AIProviderError,
+    PROVIDERS as AI_PROVIDERS,
+    generate_insights as ai_generate_insights,
+    provider_list as ai_provider_list,
+)
+from app.services.crypto import decrypt_value, encrypt_value, is_encrypted
 
 router = APIRouter(prefix="/api/analytics", tags=["analytics"])
 
@@ -239,3 +247,233 @@ def export_pdf(
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+# ===========================================================================
+# AI Insights — Phase 9.5
+#
+# Configuration lives in the `settings` table under well-known keys:
+#   ai_provider          — machine id (grok / groq / cloudflare / anthropic /
+#                          openai / gemini)
+#   ai_model             — user-editable model string
+#   ai_api_key           — FERNET-ENCRYPTED api key (never returned raw)
+#   ai_cloudflare_account_id — only populated when provider == cloudflare
+#
+# The /ai-config endpoints treat the key as write-only: GET never returns
+# it, and PUT only touches it when a non-empty string is supplied (empty
+# string = "keep existing").
+# ===========================================================================
+
+
+# Settings keys — kept in one place so we don't typo them.
+_AI_PROVIDER_KEY        = "ai_provider"
+_AI_MODEL_KEY           = "ai_model"
+_AI_API_KEY             = "ai_api_key"            # STORED ENCRYPTED
+_AI_CF_ACCOUNT_KEY      = "ai_cloudflare_account_id"
+
+
+# Tiny in-process cache so the UI can poll without hammering paid APIs.
+# Keyed by (provider, model, period_name) → (expiry_epoch, payload_dict).
+# Cache TTL is 10 minutes. Cleared on config changes.
+_AI_CACHE: dict = {}
+_AI_CACHE_TTL_SECONDS = 600
+
+
+def _clear_ai_cache():
+    _AI_CACHE.clear()
+
+
+def _read_ai_config(db: Session) -> dict:
+    """Read the current AI config from settings, decrypting the key."""
+    settings = get_all_settings(db)
+    encrypted_key = settings.get(_AI_API_KEY, "") or ""
+    try:
+        api_key = decrypt_value(encrypted_key) if encrypted_key else ""
+    except Exception:
+        # Master key rotated or row tampered with — treat as no-key.
+        api_key = ""
+    return {
+        "provider": settings.get(_AI_PROVIDER_KEY, "") or "",
+        "model": settings.get(_AI_MODEL_KEY, "") or "",
+        "api_key": api_key,
+        "cloudflare_account_id": settings.get(_AI_CF_ACCOUNT_KEY, "") or "",
+    }
+
+
+@router.get("/ai-config")
+def get_ai_config(db: Session = Depends(get_db)):
+    """Return AI config suitable for display — NEVER the raw API key.
+
+    The UI uses `has_api_key` to know whether to show a "key saved ✓"
+    indicator vs prompting for input.
+    """
+    settings = get_all_settings(db)
+    raw_key = settings.get(_AI_API_KEY, "") or ""
+    return {
+        "provider": settings.get(_AI_PROVIDER_KEY, "") or "",
+        "model": settings.get(_AI_MODEL_KEY, "") or "",
+        "cloudflare_account_id": settings.get(_AI_CF_ACCOUNT_KEY, "") or "",
+        "has_api_key": bool(raw_key),
+        "api_key_encrypted": is_encrypted(raw_key),
+        "providers": ai_provider_list(),
+    }
+
+
+@router.put("/ai-config")
+def put_ai_config(
+    payload: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    """Update AI provider / model / key / account_id.
+
+    If `api_key` is omitted or empty, the existing encrypted value is
+    kept. If present and non-empty, it is encrypted with Fernet before
+    being stored.
+    """
+    provider = (payload.get("provider") or "").strip().lower()
+    if provider and provider not in AI_PROVIDERS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown AI provider '{provider}'. Valid: "
+                   f"{sorted(AI_PROVIDERS.keys())}",
+        )
+
+    model = (payload.get("model") or "").strip()
+    account_id = (payload.get("cloudflare_account_id") or "").strip()
+    new_api_key = payload.get("api_key")
+    # Distinguish "absent" from "empty string" — treat both as "don't change".
+    should_update_key = isinstance(new_api_key, str) and new_api_key.strip() != ""
+
+    set_setting(db, _AI_PROVIDER_KEY, provider)
+    set_setting(db, _AI_MODEL_KEY, model)
+    set_setting(db, _AI_CF_ACCOUNT_KEY, account_id)
+    if should_update_key:
+        encrypted = encrypt_value(new_api_key.strip())
+        set_setting(db, _AI_API_KEY, encrypted)
+
+    db.commit()
+    _clear_ai_cache()
+
+    # Return the same shape as GET so the client can refresh its state
+    # from a single round-trip.
+    return get_ai_config(db)
+
+
+@router.post("/ai-config/test")
+def test_ai_config(db: Session = Depends(get_db)):
+    """Smoke-test the configured AI provider with a trivial prompt.
+
+    Used by the Settings modal's "Test" button to validate the key
+    without running the full dashboard-analysis prompt (which is
+    expensive on paid APIs).
+    """
+    cfg = _read_ai_config(db)
+    provider = cfg.get("provider") or ""
+    api_key = cfg.get("api_key") or ""
+
+    if not provider:
+        raise HTTPException(status_code=400, detail="No AI provider configured")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No AI API key configured")
+    if provider == "cloudflare" and not cfg.get("cloudflare_account_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cloudflare provider requires cloudflare_account_id",
+        )
+
+    spec = AI_PROVIDERS[provider]
+    model = cfg.get("model") or spec.default_model
+
+    try:
+        # Smallest possible round-trip: ask for a one-word reply.
+        from app.services.ai_service import call_provider
+        text = call_provider(
+            provider_key=provider,
+            api_key=api_key,
+            model=model,
+            system="You are a connectivity check. Reply with exactly one word.",
+            user='Reply with the word "ok" and nothing else.',
+            account_id=cfg.get("cloudflare_account_id") or None,
+        )
+    except AIProviderError as e:
+        # AIProviderError messages already have the key redacted.
+        raise HTTPException(status_code=502, detail=str(e))
+
+    return {
+        "provider": provider,
+        "provider_label": spec.label,
+        "model": model,
+        "reply": text.strip()[:200],
+        "tested_at": datetime.utcnow().isoformat() + "Z",
+    }
+
+
+@router.post("/ai-insights")
+def ai_insights(
+    period: Optional[str] = Query("month"),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    force: bool = Query(False, description="Bypass the 10-minute cache"),
+    db: Session = Depends(get_db),
+):
+    """Run the configured AI provider over the current dashboard snapshot.
+
+    Returns `{insights, provider, provider_label, model, generated_at, cached}`.
+    Caches per (provider, model, period_name) for 10 minutes unless
+    `force=true` is supplied.
+    """
+    cfg = _read_ai_config(db)
+    provider = cfg.get("provider") or ""
+    api_key = cfg.get("api_key") or ""
+
+    if not provider or not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="AI provider not configured. POST /api/analytics/ai-config first.",
+        )
+    if provider == "cloudflare" and not cfg.get("cloudflare_account_id"):
+        raise HTTPException(
+            status_code=400,
+            detail="Cloudflare provider requires cloudflare_account_id",
+        )
+
+    spec = AI_PROVIDERS[provider]
+    model = cfg.get("model") or spec.default_model
+
+    s, e, label = _resolve_period(period, start_date, end_date)
+
+    # Cache check
+    cache_key = (provider, model, label, s.isoformat(), e.isoformat())
+    now = time.time()
+    if not force and cache_key in _AI_CACHE:
+        expiry, cached_payload = _AI_CACHE[cache_key]
+        if now < expiry:
+            return {**cached_payload, "cached": True}
+
+    # Build the dashboard + prompt
+    engine = AnalyticsEngine(db)
+    dashboard = engine.get_dashboard(start_date=s, end_date=e)
+    dashboard["period"] = {"name": label, "start": s.isoformat(), "end": e.isoformat()}
+
+    settings = get_all_settings(db)
+    company_name = settings.get("company_name") or ""
+
+    try:
+        result = ai_generate_insights(
+            provider_key=provider,
+            api_key=api_key,
+            model=model,
+            dashboard=dashboard,
+            company_name=company_name,
+            account_id=cfg.get("cloudflare_account_id") or None,
+        )
+    except AIProviderError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+    payload = {
+        **result,
+        "period": {"name": label, "start": s.isoformat(), "end": e.isoformat()},
+        "cached": False,
+    }
+    _AI_CACHE[cache_key] = (now + _AI_CACHE_TTL_SECONDS, payload)
+    return payload
