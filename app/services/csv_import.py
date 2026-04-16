@@ -51,8 +51,8 @@ def import_customers(db: Session, csv_text: str) -> dict:
                 terms=row.get("Terms", "Net 30"),
             ))
             created += 1
-        except Exception as e:
-            errors.append(f"Row {i}: {str(e)}")
+        except Exception as _exc:
+            errors.append(f"Row {i}: Invalid or unsupported data")
 
     db.commit()
     return {"created": created, "skipped": skipped, "errors": errors}
@@ -89,8 +89,8 @@ def import_vendors(db: Session, csv_text: str) -> dict:
                 terms=row.get("Terms", "Net 30"),
             ))
             created += 1
-        except Exception as e:
-            errors.append(f"Row {i}: {str(e)}")
+        except Exception as _exc:
+            errors.append(f"Row {i}: Invalid or unsupported data")
 
     db.commit()
     return {"created": created, "skipped": skipped, "errors": errors}
@@ -126,8 +126,8 @@ def import_items(db: Session, csv_text: str) -> dict:
                 cost=float(row.get("Cost", 0)),
             ))
             created += 1
-        except Exception as e:
-            errors.append(f"Row {i}: {str(e)}")
+        except Exception as _exc:
+            errors.append(f"Row {i}: Invalid or unsupported data")
 
     db.commit()
     return {"created": created, "skipped": skipped, "errors": errors}
