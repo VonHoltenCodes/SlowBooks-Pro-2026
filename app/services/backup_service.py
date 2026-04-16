@@ -98,27 +98,13 @@ def restore_backup(db: Session, filename: str) -> dict:
     """Restore a database from a backup file."""
     try:
         filepath = resolve_backup_path(filename)
-    except ValueError:
-    backup_root = BACKUP_DIR.resolve()
-    resolved_filepath = filepath.resolve()
-    try:
-        resolved_filepath.relative_to(backup_root)
-    except ValueError:
-        return {"success": False, "error": "Invalid backup filename", "status_code": 400}
+    except ValueError as exc:
+        return {"success": False, "error": str(exc), "status_code": 400}
 
-    if not resolved_filepath.exists():
-
-    backup_root = BACKUP_DIR.resolve()
-    resolved_filepath = filepath.resolve()
-    try:
-        resolved_filepath.relative_to(backup_root)
-    except ValueError:
-        return {"success": False, "error": "Invalid backup filename", "status_code": 400}
-
-    if not resolved_filepath.exists():
+    if not filepath.exists():
         return {"success": False, "error": "Backup file not found", "status_code": 404}
 
-             str(resolved_filepath)],
+    params = _parse_db_url(DATABASE_URL)
     env = {"PGPASSWORD": params["password"]}
     if params["sslmode"]:
         env["PGSSLMODE"] = params["sslmode"]
@@ -127,13 +113,13 @@ def restore_backup(db: Session, filename: str) -> dict:
         result = subprocess.run(
             ["pg_restore", "-h", params["host"], "-p", params["port"],
              "-U", params["user"], "-d", params["dbname"], "--clean", "--if-exists",
-             str(resolved_filepath)],
+             str(filepath)],
             env={**dict(__import__("os").environ), **env},
             capture_output=True, text=True, timeout=300,
         )
         # pg_restore may return non-zero even on partial success
         if result.returncode != 0 and "error" in result.stderr.lower():
-            return {"success": False, "error": "Restore failed"}
+            return {"success": False, "error": result.stderr[:500]}
 
         return {"success": True, "message": f"Restored from {filename}"}
 
