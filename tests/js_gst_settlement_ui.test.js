@@ -18,7 +18,7 @@ const context = {
 vm.createContext(context);
 vm.runInContext(code, context);
 
-const html = context.ReportsPage.renderGstReturn({
+const html = context.ReportsPage.renderGstReturnSummary({
     start_date: '2026-04-01',
     end_date: '2026-04-30',
     gst_basis: 'invoice',

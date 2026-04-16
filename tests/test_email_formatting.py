@@ -53,6 +53,29 @@ class EmailFormattingTests(unittest.TestCase):
         self.assertIn("$1,234.50", html)
         self.assertIn("20 Apr 2026", html)
 
+    def test_invoice_email_escapes_untrusted_html_fields(self):
+        invoice = SimpleNamespace(
+            invoice_number="1001",
+            date=date(2026, 4, 13),
+            due_date=date(2026, 4, 20),
+            terms="<b>Net 7</b>",
+            balance_due=Decimal("1234.5"),
+            customer=SimpleNamespace(name="<script>alert(1)</script>"),
+            notes="<img src=x onerror=alert(1)>",
+        )
+
+        html = render_invoice_email(
+            invoice,
+            {"company_name": "SlowBooks NZ", "locale": "en-NZ", "currency": "NZD"},
+        )
+
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html)
+        self.assertIn("&lt;b&gt;Net 7&lt;/b&gt;", html)
+        self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertNotIn("<img src=x onerror=alert(1)>", html)
+        self.assertNotIn("<b>Net 7</b>", html)
+
 
 if __name__ == "__main__":
     unittest.main()

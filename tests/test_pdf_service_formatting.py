@@ -196,6 +196,41 @@ class PdfServiceFormattingTests(unittest.TestCase):
         self.assertIn("20 Apr 2026", CapturingHTML.rendered[-1])
         self.assertIn("$1,419.68", CapturingHTML.rendered[-1])
 
+    def test_invoice_pdf_escapes_untrusted_html_fields(self):
+        invoice = SimpleNamespace(
+            invoice_number="1001",
+            date=date(2026, 4, 13),
+            due_date=date(2026, 4, 20),
+            terms="<b>Net 7</b>",
+            po_number=None,
+            customer_name="<script>alert(1)</script>",
+            bill_address1="",
+            bill_address2="",
+            bill_city="",
+            bill_state="",
+            bill_zip="",
+            ship_address1="",
+            lines=[SimpleNamespace(description="<img src=x onerror=alert(1)>", quantity=1, rate=Decimal("1234.5"), amount=Decimal("1234.5"))],
+            subtotal=Decimal("1234.5"),
+            tax_rate=Decimal("0"),
+            tax_amount=Decimal("0"),
+            total=Decimal("1234.5"),
+            amount_paid=Decimal("0"),
+            balance_due=Decimal("1234.5"),
+            notes="<svg onload=alert(1)>",
+        )
+
+        pdf_service.generate_invoice_pdf(invoice, self.company)
+
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", CapturingHTML.rendered[-1])
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", CapturingHTML.rendered[-1])
+        self.assertIn("&lt;svg onload=alert(1)&gt;", CapturingHTML.rendered[-1])
+        self.assertIn("&lt;b&gt;Net 7&lt;/b&gt;", CapturingHTML.rendered[-1])
+        self.assertNotIn("<script>alert(1)</script>", CapturingHTML.rendered[-1])
+        self.assertNotIn("<img src=x onerror=alert(1)>", CapturingHTML.rendered[-1])
+        self.assertNotIn("<svg onload=alert(1)>", CapturingHTML.rendered[-1])
+        self.assertNotIn("<b>Net 7</b>", CapturingHTML.rendered[-1])
+
 
 if __name__ == "__main__":
     unittest.main()

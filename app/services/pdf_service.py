@@ -15,7 +15,7 @@ from weasyprint import HTML
 from app.services.formatting import format_currency, format_date
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
-_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
+_jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
 
 
 @pass_context
