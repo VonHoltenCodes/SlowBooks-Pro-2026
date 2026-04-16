@@ -16,3 +16,13 @@ build/
 # NEVER commit this file; losing it means losing access to every
 # encrypted settings value (API keys etc.). Back it up separately.
 .slowbooks-master.key
+
+# Session signing key (auto-generated on first boot). NEVER commit.
+.slowbooks-session.key
+
+# Pytest / coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+.ruff_cache/
