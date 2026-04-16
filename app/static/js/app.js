@@ -36,6 +36,7 @@ const App = {
         '/audit':         { page: 'audit',           label: 'Audit Log',          permission: 'audit.view', render: () => AuditPage.render() },
         // Phase 2: Accounts Payable
         '/purchase-orders': { page: 'purchase-orders', label: 'Purchase Orders',  permission: 'purchasing.view', render: () => PurchaseOrdersPage.render() },
+        '/purchase-orders/detail': { page: 'purchase-orders', label: 'Purchase Order', permission: 'purchasing.view', render: () => PurchaseOrdersPage.renderDetailScreen() },
         '/bills':         { page: 'bills',           label: 'Bills',              permission: 'purchasing.view', render: () => BillsPage.render() },
         '/credit-memos':  { page: 'credit-memos',    label: 'Credit Memos',       permission: 'sales.view', render: () => CreditMemosPage.render() },
         // Phase 3: Productivity
