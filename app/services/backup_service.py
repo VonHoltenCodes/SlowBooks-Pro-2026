@@ -48,9 +48,11 @@ def resolve_backup_path(filename: str) -> Path:
         raise ValueError("Invalid backup filename")
 
     backup_root = BACKUP_DIR.resolve()
-    resolved = (BACKUP_DIR / candidate).resolve()
-    if resolved.parent != backup_root:
-        raise ValueError("Invalid backup filename")
+    resolved = (backup_root / candidate).resolve()
+    try:
+        resolved.relative_to(backup_root)
+    except ValueError as exc:
+        raise ValueError("Invalid backup filename") from exc
     return resolved
 
 
