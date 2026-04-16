@@ -13,7 +13,9 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
+from app.models.accounts import Account, AccountType
 from app.models.banking import BankAccount, BankTransaction, Reconciliation, ReconciliationStatus
+from app.models.transactions import Transaction, TransactionLine
 from app.schemas.banking import (
     BankAccountCreate, BankAccountUpdate, BankAccountResponse,
     BankTransactionCreate, BankTransactionResponse,
@@ -163,6 +165,51 @@ def toggle_cleared(recon_id: int, txn_id: int, db: Session = Depends(get_db), au
     txn.reconciled = not txn.reconciled
     db.commit()
     return {"id": txn.id, "reconciled": txn.reconciled}
+
+
+@router.get("/check-register")
+def check_register(account_id: int = None, db: Session = Depends(get_db), auth=Depends(require_permissions("banking.view"))):
+    if not account_id:
+        account = db.query(Account).filter(Account.account_type == AccountType.ASSET, Account.is_active == True).order_by(Account.account_number, Account.name).first()
+    else:
+        account = db.query(Account).filter(Account.id == account_id, Account.is_active == True).first()
+    if not account:
+        return {"account_id": None, "account_name": "", "account_number": "", "starting_balance": 0, "entries": []}
+    if account.account_type != AccountType.ASSET:
+        raise HTTPException(status_code=400, detail="Check register requires an asset account")
+
+    rows = (
+        db.query(TransactionLine, Transaction)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(TransactionLine.account_id == account.id)
+        .order_by(Transaction.date.asc(), Transaction.id.asc(), TransactionLine.id.asc())
+        .all()
+    )
+
+    total_effect = sum(Decimal(str(line.debit)) - Decimal(str(line.credit)) for line, _txn in rows)
+    running_balance = Decimal(str(account.balance or 0)) - total_effect
+    starting_balance = running_balance
+    entries = []
+    for line, txn in rows:
+        running_balance += Decimal(str(line.debit)) - Decimal(str(line.credit))
+        entries.append({
+            "transaction_id": txn.id,
+            "date": txn.date.isoformat(),
+            "description": txn.description or line.description or "",
+            "reference": txn.reference or "",
+            "source_type": txn.source_type or "",
+            "payment": float(line.credit) if Decimal(str(line.credit)) > 0 else 0,
+            "deposit": float(line.debit) if Decimal(str(line.debit)) > 0 else 0,
+            "balance": float(running_balance),
+        })
+
+    return {
+        "account_id": account.id,
+        "account_name": account.name,
+        "account_number": account.account_number,
+        "starting_balance": float(starting_balance),
+        "entries": entries,
+    }
 
 
 @router.post("/reconciliations/{recon_id}/complete")

@@ -16,11 +16,31 @@ from app.models.contacts import Customer
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.schemas.payments import PaymentCreate, PaymentResponse
-from app.services.accounting import create_journal_entry, get_ar_account_id, get_undeposited_funds_id
+from app.services.accounting import create_journal_entry, get_ar_account_id, get_undeposited_funds_id, reverse_journal_entry
 from app.services.auth import require_permissions
 from app.services.closing_date import check_closing_date
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
+
+
+def _payment_response(payment: Payment) -> PaymentResponse:
+    resp = PaymentResponse.model_validate(payment)
+    if payment.customer:
+        resp.customer_name = payment.customer.name
+    return resp
+
+
+def _restore_invoice_balance(invoice: Invoice, amount: Decimal) -> None:
+    invoice.amount_paid = max(Decimal("0"), Decimal(str(invoice.amount_paid or 0)) - amount)
+    invoice.balance_due = Decimal(str(invoice.balance_due or 0)) + amount
+    if invoice.status == InvoiceStatus.VOID:
+        return
+    if invoice.amount_paid <= 0:
+        invoice.status = InvoiceStatus.SENT
+    elif invoice.balance_due <= 0:
+        invoice.status = InvoiceStatus.PAID
+    else:
+        invoice.status = InvoiceStatus.PARTIAL
 
 
 @router.get("", response_model=list[PaymentResponse])
@@ -32,14 +52,8 @@ def list_payments(
     q = db.query(Payment)
     if customer_id:
         q = q.filter(Payment.customer_id == customer_id)
-    payments = q.order_by(Payment.date.desc()).all()
-    results = []
-    for payment in payments:
-        resp = PaymentResponse.model_validate(payment)
-        if payment.customer:
-            resp.customer_name = payment.customer.name
-        results.append(resp)
-    return results
+    payments = q.order_by(Payment.date.desc(), Payment.id.desc()).all()
+    return [_payment_response(payment) for payment in payments]
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
@@ -51,10 +65,7 @@ def get_payment(
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
-    resp = PaymentResponse.model_validate(payment)
-    if payment.customer:
-        resp.customer_name = payment.customer.name
-    return resp
+    return _payment_response(payment)
 
 
 @router.post("", response_model=PaymentResponse, status_code=201)
@@ -133,6 +144,42 @@ def create_payment(
 
     db.commit()
     db.refresh(payment)
-    resp = PaymentResponse.model_validate(payment)
-    resp.customer_name = customer.name
-    return resp
+    return _payment_response(payment)
+
+
+@router.post("/{payment_id}/void", response_model=PaymentResponse)
+def void_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("sales.manage")),
+):
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if payment.is_voided:
+        raise HTTPException(status_code=400, detail="Payment already voided")
+    if payment.deposit_transaction_id:
+        raise HTTPException(status_code=400, detail="Cannot void a payment that has been deposited")
+
+    check_closing_date(db, payment.date)
+
+    for alloc in payment.allocations:
+        invoice = db.query(Invoice).filter(Invoice.id == alloc.invoice_id).first()
+        if invoice:
+            _restore_invoice_balance(invoice, Decimal(str(alloc.amount)))
+
+    if payment.transaction_id:
+        reverse_journal_entry(
+            db,
+            payment.transaction_id,
+            payment.date,
+            f"VOID Payment #{payment.id}",
+            source_type="payment_void",
+            source_id=payment.id,
+            reference=payment.reference or payment.check_number or str(payment.id),
+        )
+
+    payment.is_voided = True
+    db.commit()
+    db.refresh(payment)
+    return _payment_response(payment)

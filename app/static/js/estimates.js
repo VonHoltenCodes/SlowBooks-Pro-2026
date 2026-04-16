@@ -123,14 +123,28 @@ const EstimatesPage = {
 
         EstimatesPage.lineCount = est.lines.length;
         EstimatesPage._items = items;
+        EstimatesPage._customers = customers;
 
-        const custOpts = customers.map(c => `<option value="${c.id}" ${est.customer_id==c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+        const canCreateCustomers = App.hasPermission ? App.hasPermission('contacts.manage') : true;
+        const custOpts = EstimatesPage.customerOptionsHtml(est.customer_id);
 
         openModal(id ? 'Edit Estimate' : 'New Estimate', `
             <form id="est-form" onsubmit="EstimatesPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Customer *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <select name="customer_id" required style="flex:1;"><option value="">Select...</option>${custOpts}</select>
+                            ${canCreateCustomers ? `<button type="button" class="btn btn-sm btn-secondary" onclick="EstimatesPage.toggleInlineCustomer()">+ New Customer</button>` : ''}
+                        </div>
+                        ${canCreateCustomers ? `<div id="estimate-inline-customer" class="card" style="display:none; margin-top:8px; padding:12px;">
+                            <div class="form-grid">
+                                <div class="form-group"><label>Name *</label><input name="inline_customer_name"></div>
+                                <div class="form-group"><label>Email</label><input name="inline_customer_email" type="email"></div>
+                                <div class="form-group"><label>Phone</label><input name="inline_customer_phone"></div>
+                                <div class="form-group"><label>Terms</label><select name="inline_customer_terms">${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t => `<option>${t}</option>`).join('')}</select></div>
+                            </div>
+                            <div class="form-actions" style="margin-top:8px;"><button type="button" class="btn btn-primary" onclick="EstimatesPage.createInlineCustomer(event)">Create Customer</button></div>
+                        </div>` : ''}</div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${est.date}"></div>
                     <div class="form-group"><label>Expiration Date</label>
@@ -161,6 +175,38 @@ const EstimatesPage = {
                 </div>
             </form>`);
         EstimatesPage.recalc();
+    },
+
+    customerOptionsHtml(selectedId = null) {
+        return (EstimatesPage._customers || []).map(c => `<option value="${c.id}" ${selectedId == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+    },
+
+    toggleInlineCustomer() {
+        const panel = $('#estimate-inline-customer');
+        if (!panel) return;
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    },
+
+    async createInlineCustomer(e) {
+        e.preventDefault();
+        const form = $('#est-form');
+        try {
+            const customer = await API.post('/customers', {
+                name: form.inline_customer_name.value,
+                email: form.inline_customer_email.value || null,
+                phone: form.inline_customer_phone.value || null,
+                terms: form.inline_customer_terms.value || 'Net 30',
+            });
+            EstimatesPage._customers.push(customer);
+            EstimatesPage._customers.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+            form.customer_id.innerHTML = `<option value="">Select...</option>${EstimatesPage.customerOptionsHtml(customer.id)}`;
+            form.customer_id.value = String(customer.id);
+            form.inline_customer_name.value = '';
+            form.inline_customer_email.value = '';
+            form.inline_customer_phone.value = '';
+            EstimatesPage.toggleInlineCustomer();
+            toast('Customer created');
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     lineRowHtml(idx, line, items) {

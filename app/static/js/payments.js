@@ -28,7 +28,7 @@ const PaymentsPage = {
                 html += `<tr>
                     <td>${formatDate(p.date)}</td>
                     <td>${escapeHtml(p.customer_name || '')}</td>
-                    <td>${escapeHtml(p.method || '')}</td>
+                    <td>${escapeHtml(p.method || '')}${p.is_voided ? ' <span style="color:var(--danger);font-weight:700;">[VOID]</span>' : ''}</td>
                     <td>${escapeHtml(p.reference || p.check_number || '')}</td>
                     <td class="amount">${formatCurrency(p.amount)}</td>
                     <td class="actions">
@@ -66,11 +66,23 @@ const PaymentsPage = {
                 ${checkHtml}
                 ${referenceHtml}
                 ${notesHtml}
+                ${p.is_voided ? '<div style="margin-top:8px; color:var(--danger); font-weight:700;">This payment has been voided.</div>' : ''}
             </div>
             ${allocHtml}
             <div class="form-actions">
+                ${!p.is_voided && (App.hasPermission ? App.hasPermission('sales.manage') : true) ? `<button class="btn btn-danger" onclick="PaymentsPage.void(${p.id})">Void Payment</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+    },
+
+    async void(id) {
+        if (!confirm('Void this payment? Invoice balances will be restored and a reversing journal will be posted.')) return;
+        try {
+            await API.post(`/payments/${id}/void`);
+            toast('Payment voided');
+            closeModal();
+            App.navigate(location.hash);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     _invoices: [],

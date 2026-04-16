@@ -21,7 +21,7 @@ const VendorsPage = {
             html += `<div class="table-container"><table>
                 <thead><tr>
                     <th>Name</th><th>Company</th><th>Phone</th><th>Email</th>
-                    <th class="amount">Balance</th><th>Actions</th>
+                    <th>Default Expense</th><th class="amount">Balance</th><th>Actions</th>
                 </tr></thead><tbody>`;
             for (const v of vendors) {
                 html += `<tr>
@@ -29,6 +29,7 @@ const VendorsPage = {
                     <td>${escapeHtml(v.company) || ''}</td>
                     <td>${escapeHtml(v.phone) || ''}</td>
                     <td>${escapeHtml(v.email) || ''}</td>
+                    <td>${v.default_expense_account_id ? `#${v.default_expense_account_id}` : ''}</td>
                     <td class="amount">${formatCurrency(v.balance)}</td>
                     <td class="actions">
                         ${canManageVendors ? `<button class="btn btn-sm btn-secondary" onclick="VendorsPage.showForm(${v.id})">Edit</button>` : ''}
@@ -41,10 +42,14 @@ const VendorsPage = {
     },
 
     async showForm(id = null) {
-        let v = { name:'', company:'', email:'', phone:'', fax:'', website:'',
+        const [accounts, vendor] = await Promise.all([
+            API.get('/accounts?active_only=true&account_type=expense'),
+            id ? API.get(`/vendors/${id}`) : Promise.resolve(null),
+        ]);
+        const v = vendor || { name:'', company:'', email:'', phone:'', fax:'', website:'',
             address1:'', address2:'', city:'', state:'', zip:'', country:'NZ',
-            terms:'Net 30', tax_id:'', account_number:'', notes:'' };
-        if (id) v = await API.get(`/vendors/${id}`);
+            terms:'Net 30', tax_id:'', account_number:'', default_expense_account_id:'', notes:'' };
+        const expenseOptions = accounts.map(account => `<option value="${account.id}" ${String(v.default_expense_account_id || '') === String(account.id) ? 'selected' : ''}>${escapeHtml(account.account_number || '')} - ${escapeHtml(account.name)}</option>`).join('');
 
         openModal(id ? 'Edit Vendor' : 'New Vendor', `
             <form id="vendor-form" onsubmit="VendorsPage.save(event, ${id})">
@@ -86,6 +91,8 @@ const VendorsPage = {
                         <input name="tax_id" value="${escapeHtml(v.tax_id || '')}"></div>
                     <div class="form-group"><label>Account #</label>
                         <input name="account_number" value="${escapeHtml(v.account_number || '')}"></div>
+                    <div class="form-group"><label>Default Expense Account</label>
+                        <select name="default_expense_account_id"><option value="">--</option>${expenseOptions}</select></div>
                     <div class="form-group full-width"><label>Notes</label>
                         <textarea name="notes">${escapeHtml(v.notes || '')}</textarea></div>
                 </div>
@@ -99,6 +106,7 @@ const VendorsPage = {
     async save(e, id) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target).entries());
+        data.default_expense_account_id = data.default_expense_account_id ? parseInt(data.default_expense_account_id) : null;
         try {
             if (id) { await API.put(`/vendors/${id}`, data); toast('Vendor updated'); }
             else { await API.post('/vendors', data); toast('Vendor created'); }

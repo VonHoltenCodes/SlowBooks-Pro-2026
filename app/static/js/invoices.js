@@ -191,13 +191,26 @@ const InvoicesPage = {
         InvoicesPage._customers = customers;
         InvoicesPage._gstCodes = gstCodes;
 
-        const custOpts = customers.map(c => `<option value="${c.id}" ${inv.customer_id==c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+        const canCreateCustomers = App.hasPermission ? App.hasPermission('contacts.manage') : true;
+        const custOpts = InvoicesPage.customerOptionsHtml(inv.customer_id);
 
         openModal(id ? 'Edit Invoice' : 'New Invoice', `
             <form id="invoice-form" onsubmit="InvoicesPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Customer *</label>
-                        <select name="customer_id" required onchange="InvoicesPage.customerSelected(this.value)"><option value="">Select...</option>${custOpts}</select></div>
+                        <div style="display:flex; gap:8px; align-items:center;">
+                            <select name="customer_id" required onchange="InvoicesPage.customerSelected(this.value)" style="flex:1;"><option value="">Select...</option>${custOpts}</select>
+                            ${canCreateCustomers ? `<button type="button" class="btn btn-sm btn-secondary" onclick="InvoicesPage.toggleInlineCustomer()">+ New Customer</button>` : ''}
+                        </div>
+                        ${canCreateCustomers ? `<div id="invoice-inline-customer" class="card" style="display:none; margin-top:8px; padding:12px;">
+                            <div class="form-grid">
+                                <div class="form-group"><label>Name *</label><input name="inline_customer_name"></div>
+                                <div class="form-group"><label>Email</label><input name="inline_customer_email" type="email"></div>
+                                <div class="form-group"><label>Phone</label><input name="inline_customer_phone"></div>
+                                <div class="form-group"><label>Terms</label><select name="inline_customer_terms">${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t => `<option>${t}</option>`).join('')}</select></div>
+                            </div>
+                            <div class="form-actions" style="margin-top:8px;"><button type="button" class="btn btn-primary" onclick="InvoicesPage.createInlineCustomer(event)">Create Customer</button></div>
+                        </div>` : ''}</div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${inv.date}"></div>
                     <div class="form-group"><label>Terms</label>
@@ -236,12 +249,45 @@ const InvoicesPage = {
         InvoicesPage.recalc();
     },
 
+    customerOptionsHtml(selectedId = null) {
+        return (InvoicesPage._customers || []).map(c => `<option value="${c.id}" ${selectedId == c.id ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+    },
+
     customerSelected(customerId) {
         const customer = InvoicesPage._customers.find(c => c.id == customerId);
         const termsField = $('#invoice-terms');
         if (customer && termsField && customer.terms) {
             termsField.value = customer.terms;
         }
+    },
+
+    toggleInlineCustomer() {
+        const panel = $('#invoice-inline-customer');
+        if (!panel) return;
+        panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    },
+
+    async createInlineCustomer(e) {
+        e.preventDefault();
+        const form = $('#invoice-form');
+        try {
+            const customer = await API.post('/customers', {
+                name: form.inline_customer_name.value,
+                email: form.inline_customer_email.value || null,
+                phone: form.inline_customer_phone.value || null,
+                terms: form.inline_customer_terms.value || 'Net 30',
+            });
+            InvoicesPage._customers.push(customer);
+            InvoicesPage._customers.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+            form.customer_id.innerHTML = `<option value="">Select...</option>${InvoicesPage.customerOptionsHtml(customer.id)}`;
+            form.customer_id.value = String(customer.id);
+            InvoicesPage.customerSelected(customer.id);
+            form.inline_customer_name.value = '';
+            form.inline_customer_email.value = '';
+            form.inline_customer_phone.value = '';
+            InvoicesPage.toggleInlineCustomer();
+            toast('Customer created');
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     lineRowHtml(idx, line, items) {

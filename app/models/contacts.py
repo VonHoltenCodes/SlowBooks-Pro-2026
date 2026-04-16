@@ -10,7 +10,7 @@
 # decompilation when field 0x02 was a char[41] with null terminator.
 # ============================================================================
 
-from sqlalchemy import Column, Integer, String, Boolean, Numeric, DateTime, Text, func
+from sqlalchemy import Column, Integer, String, Boolean, Numeric, DateTime, Text, ForeignKey, func
 
 from app.database import Base
 
@@ -85,6 +85,7 @@ class Vendor(Base):
     terms = Column(String(50), default="Net 30")
     tax_id = Column(String(50), nullable=True)
     account_number = Column(String(50), nullable=True)
+    default_expense_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     balance = Column(Numeric(12, 2), default=0)

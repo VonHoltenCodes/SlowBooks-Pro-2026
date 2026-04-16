@@ -2,11 +2,23 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.accounts import Account, AccountType
 from app.models.contacts import Vendor
 from app.schemas.contacts import VendorCreate, VendorResponse, VendorUpdate
 from app.services.auth import require_permissions
 
 router = APIRouter(prefix="/api/vendors", tags=["vendors"])
+
+
+def _validate_default_expense_account(db: Session, account_id: int | None) -> None:
+    if account_id is None:
+        return
+    account = db.query(Account).filter(Account.id == account_id, Account.is_active == True).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Default expense account not found")
+    if account.account_type != AccountType.EXPENSE:
+        raise HTTPException(status_code=400, detail="Default expense account must be an expense account")
+
 
 
 @router.get("", response_model=list[VendorResponse])
@@ -42,6 +54,7 @@ def create_vendor(
     db: Session = Depends(get_db),
     auth=Depends(require_permissions("contacts.manage")),
 ):
+    _validate_default_expense_account(db, data.default_expense_account_id)
     vendor = Vendor(**data.model_dump())
     db.add(vendor)
     db.commit()
@@ -59,7 +72,9 @@ def update_vendor(
     vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
-    for key, val in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    _validate_default_expense_account(db, updates.get("default_expense_account_id"))
+    for key, val in updates.items():
         setattr(vendor, key, val)
     db.commit()
     db.refresh(vendor)

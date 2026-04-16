@@ -8,7 +8,7 @@
 # ============================================================================
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text,
+    Column, Integer, String, Date, Numeric, DateTime, Text, Boolean,
     ForeignKey, func,
 )
 from sqlalchemy.orm import relationship
@@ -29,12 +29,15 @@ class Payment(Base):
     deposit_to_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     notes = Column(Text, nullable=True)
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    deposit_transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    is_voided = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     customer = relationship("Customer", backref="payments")
     deposit_to_account = relationship("Account", foreign_keys=[deposit_to_account_id])
     transaction = relationship("Transaction", foreign_keys=[transaction_id])
+    deposit_transaction = relationship("Transaction", foreign_keys=[deposit_transaction_id])
     allocations = relationship("PaymentAllocation", back_populates="payment", cascade="all, delete-orphan")
 
 

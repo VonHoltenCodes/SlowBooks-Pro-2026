@@ -35,13 +35,7 @@ def _post_bill_journal(db: Session, bill: Bill, vendor: Vendor, lines, gst_total
         line_amount = gst_totals.lines[i].net_amount
         if line_amount <= 0:
             continue
-        expense_acct = getattr(line_data, "account_id", None)
-        if not expense_acct and getattr(line_data, "item_id", None):
-            item = db.query(Item).filter(Item.id == line_data.item_id).first()
-            if item and item.expense_account_id:
-                expense_acct = item.expense_account_id
-        if not expense_acct:
-            expense_acct = default_expense_id
+        expense_acct = _resolve_bill_expense_account(db, vendor, line_data, default_expense_id)
         if not expense_acct:
             continue
         journal_lines.append({
@@ -76,18 +70,25 @@ def _post_bill_journal(db: Session, bill: Bill, vendor: Vendor, lines, gst_total
     return None
 
 
-def _replace_bill_lines(db: Session, bill_id: int, lines_data, gst_totals):
+def _resolve_bill_expense_account(db: Session, vendor: Vendor | None, line_data, default_expense_id: int | None):
+    expense_acct = getattr(line_data, "account_id", None)
+    if not expense_acct and getattr(line_data, "item_id", None):
+        item = db.query(Item).filter(Item.id == line_data.item_id).first()
+        if item and item.expense_account_id:
+            expense_acct = item.expense_account_id
+    if not expense_acct and vendor and vendor.default_expense_account_id:
+        expense_acct = vendor.default_expense_account_id
+    if not expense_acct:
+        expense_acct = default_expense_id
+    return expense_acct
+
+
+def _replace_bill_lines(db: Session, bill_id: int, lines_data, gst_totals, vendor: Vendor | None = None):
     db.query(BillLine).filter(BillLine.bill_id == bill_id).delete()
     default_expense_id = get_default_expense_account_id(db)
     for i, line_data in enumerate(lines_data):
         gst_code, gst_rate = resolve_line_gst(db, line_data)
-        expense_acct = getattr(line_data, "account_id", None)
-        if not expense_acct and getattr(line_data, "item_id", None):
-            item = db.query(Item).filter(Item.id == line_data.item_id).first()
-            if item and item.expense_account_id:
-                expense_acct = item.expense_account_id
-        if not expense_acct:
-            expense_acct = default_expense_id
+        expense_acct = _resolve_bill_expense_account(db, vendor, line_data, default_expense_id)
         db.add(BillLine(
             bill_id=bill_id, item_id=line_data.item_id, account_id=expense_acct,
             description=line_data.description, quantity=line_data.quantity,
@@ -161,16 +162,11 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db), auth=Depends(re
     db.add(bill)
     db.flush()
 
+    default_expense_id = get_default_expense_account_id(db)
     for i, line_data in enumerate(data.lines):
         gst_code, gst_rate = resolve_line_gst(db, line_data)
         amt = gst_totals.lines[i].net_amount
-        expense_acct = line_data.account_id
-        if not expense_acct and line_data.item_id:
-            item = db.query(Item).filter(Item.id == line_data.item_id).first()
-            if item and item.expense_account_id:
-                expense_acct = item.expense_account_id
-        if not expense_acct:
-            expense_acct = get_default_expense_account_id(db)
+        expense_acct = _resolve_bill_expense_account(db, vendor, line_data, default_expense_id)
 
         db.add(BillLine(
             bill_id=bill.id, item_id=line_data.item_id, account_id=expense_acct,
@@ -220,7 +216,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db), a
                 prices_include_gst=prices_include_gst(db),
                 gst_context="purchase",
             )
-            _replace_bill_lines(db, bill.id, data.lines, gst_totals)
+            _replace_bill_lines(db, bill.id, data.lines, gst_totals, vendor=bill.vendor)
         else:
             gst_totals = calculate_document_gst(
                 stored_gst_line_inputs(db, bill.lines),

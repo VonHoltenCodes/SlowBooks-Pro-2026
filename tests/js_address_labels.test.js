@@ -67,7 +67,10 @@ async function runPage(file, expression, apiGet) {
     const vendorsContext = await runPage(
         'app/static/js/vendors.js',
         'this.VendorsPage = VendorsPage;',
-        async () => { throw new Error('new vendor form should not load a vendor'); },
+        async path => {
+            if (path === '/accounts?active_only=true&account_type=expense') return [];
+            throw new Error('new vendor form should not load a vendor');
+        },
     );
     await vendorsContext.VendorsPage.showForm();
     assert.ok(vendorsContext.modalHtml.includes('<label>Region</label>'));

@@ -40,6 +40,8 @@ class PaymentResponse(BaseModel):
     reference: Optional[str]
     deposit_to_account_id: Optional[int]
     notes: Optional[str]
+    deposit_transaction_id: Optional[int] = None
+    is_voided: bool = False
     allocations: list[PaymentAllocationResponse] = []
     customer_name: Optional[str] = None
     created_at: datetime
