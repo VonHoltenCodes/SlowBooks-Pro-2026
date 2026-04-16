@@ -99,7 +99,14 @@ def restore_backup(db: Session, filename: str) -> dict:
     try:
         filepath = resolve_backup_path(filename)
     except ValueError:
+    backup_root = BACKUP_DIR.resolve()
+    resolved_filepath = filepath.resolve()
+    try:
+        resolved_filepath.relative_to(backup_root)
+    except ValueError:
         return {"success": False, "error": "Invalid backup filename", "status_code": 400}
+
+    if not resolved_filepath.exists():
 
     backup_root = BACKUP_DIR.resolve()
     resolved_filepath = filepath.resolve()
@@ -111,7 +118,7 @@ def restore_backup(db: Session, filename: str) -> dict:
     if not resolved_filepath.exists():
         return {"success": False, "error": "Backup file not found", "status_code": 404}
 
-    params = _parse_db_url(DATABASE_URL)
+             str(resolved_filepath)],
     env = {"PGPASSWORD": params["password"]}
     if params["sslmode"]:
         env["PGSSLMODE"] = params["sslmode"]
