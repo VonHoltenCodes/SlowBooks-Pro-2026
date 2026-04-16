@@ -42,4 +42,8 @@ def new_company(
             status_code=result.get("status_code", 400),
             detail=result.get("public_error", "Failed to create company"),
         )
-    return result
+    return {
+        "success": True,
+        "company_id": result.get("company_id"),
+        "database_name": result.get("database_name"),
+    }

@@ -79,9 +79,13 @@ def create_company(db: Session, name: str, database_name: str, description: str 
     """Create a new company database."""
     try:
         validated_database_name = _validate_database_name(database_name)
-    except ValueError as exc:
-        message = str(exc)
-        return {"success": False, "error": message, "public_error": message, "status_code": 400}
+    except ValueError:
+        return {
+            "success": False,
+            "error": "Invalid database name",
+            "public_error": DATABASE_NAME_ERROR,
+            "status_code": 400,
+        }
 
     existing = db.query(Company).filter(Company.database_name == validated_database_name).first()
     if existing:
