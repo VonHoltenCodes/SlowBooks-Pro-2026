@@ -101,7 +101,14 @@ def restore_backup(db: Session, filename: str) -> dict:
     except ValueError:
         return {"success": False, "error": "Invalid backup filename", "status_code": 400}
 
-    if not filepath.exists():
+    backup_root = BACKUP_DIR.resolve()
+    resolved_filepath = filepath.resolve()
+    try:
+        resolved_filepath.relative_to(backup_root)
+    except ValueError:
+        return {"success": False, "error": "Invalid backup filename", "status_code": 400}
+
+    if not resolved_filepath.exists():
         return {"success": False, "error": "Backup file not found", "status_code": 404}
 
     params = _parse_db_url(DATABASE_URL)
@@ -113,7 +120,7 @@ def restore_backup(db: Session, filename: str) -> dict:
         result = subprocess.run(
             ["pg_restore", "-h", params["host"], "-p", params["port"],
              "-U", params["user"], "-d", params["dbname"], "--clean", "--if-exists",
-             str(filepath)],
+             str(resolved_filepath)],
             env={**dict(__import__("os").environ), **env},
             capture_output=True, text=True, timeout=300,
         )
