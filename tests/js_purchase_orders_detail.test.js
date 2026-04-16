@@ -5,6 +5,8 @@ const vm = require('vm');
 const code = `${fs.readFileSync('app/static/js/purchase_orders.js', 'utf8')}
 this.PurchaseOrdersPage = PurchaseOrdersPage;`;
 const navigations = [];
+const openedDocs = [];
+const emailModals = [];
 
 const context = {
     console,
@@ -14,6 +16,7 @@ const context = {
         get: async (path) => {
             if (path === '/purchase-orders') return [{ id: 7, po_number: 'PO-0001', vendor_name: 'Harbour Supplies', date: '2026-04-16', status: 'draft', total: 115 }];
             if (path === '/vendors?active_only=true') return [{ id: 1, name: 'Harbour Supplies' }];
+            if (path === '/vendors/1') return { id: 1, name: 'Harbour Supplies', email: 'purchasing@harbour.test' };
             if (path === '/items?active_only=true') return [{ id: 2, name: 'Stationery', description: 'Pens', cost: 15 }];
             if (path === '/settings') return { default_tax_rate: '15', prices_include_gst: 'false' };
             if (path === '/gst-codes') return [{ code: 'GST15', rate: 0.15, name: 'GST 15%' }];
@@ -22,12 +25,14 @@ const context = {
         },
         post: async () => ({}),
         put: async () => ({}),
+        open: (path, filename) => openedDocs.push([path, filename]),
     },
     App: {
         navigate: (hash) => navigations.push(hash),
         hasPermission: () => true,
         gstCodes: [],
         settings: { prices_include_gst: 'false' },
+        showDocumentEmailModal: (payload) => emailModals.push(payload),
     },
     escapeHtml: value => String(value || ''),
     formatDate: value => String(value || ''),
@@ -68,6 +73,9 @@ vm.runInContext(code, context);
     assert.ok(detailHtml.includes('Delivery Address'));
     assert.ok(detailHtml.includes('Delivery Instructions / Notes'));
     assert.ok(detailHtml.includes('Assigned on save'));
+    assert.ok(detailHtml.includes('Email PO'));
+    assert.ok(detailHtml.includes('Print / PDF'));
+    assert.ok(detailHtml.includes('disabled'));
 
     navigations.length = 0;
     await context.PurchaseOrdersPage.open(7);
@@ -78,4 +86,18 @@ vm.runInContext(code, context);
     assert.ok(detailHtml.includes('Leave at front desk'));
     assert.ok(detailHtml.includes('Subtotal'));
     assert.ok(detailHtml.includes('Total'));
+    assert.ok(detailHtml.includes('PurchaseOrdersPage.emailPurchaseOrder(7)'));
+    assert.ok(detailHtml.includes('PurchaseOrdersPage.openPdf(7)'));
+
+    await context.PurchaseOrdersPage.emailPurchaseOrder(7);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(emailModals)), [{
+        title: 'Email Purchase Order #PO-0001',
+        endpoint: '/purchase-orders/7/email',
+        recipient: 'purchasing@harbour.test',
+        defaultSubject: 'Purchase Order #PO-0001',
+        successMessage: 'Purchase order emailed',
+    }]);
+
+    context.PurchaseOrdersPage.openPdf(7);
+    assert.deepStrictEqual(openedDocs, [['/purchase-orders/7/pdf', 'purchase-order-PO-0001.pdf']]);
 })();

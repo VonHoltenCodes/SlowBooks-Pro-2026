@@ -160,6 +160,11 @@ const PurchaseOrdersPage = {
                 </div>
                 ${canManagePurchasing ? `<div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="App.navigate('#/purchase-orders')">Cancel</button>
+                    ${po.id
+                        ? `<button type="button" class="btn btn-secondary" onclick="PurchaseOrdersPage.emailPurchaseOrder(${po.id})">Email PO</button>
+                           <button type="button" class="btn btn-secondary" onclick="PurchaseOrdersPage.openPdf(${po.id})">Print / PDF</button>`
+                        : `<button type="button" class="btn btn-secondary" disabled title="Save the purchase order first">Email PO</button>
+                           <button type="button" class="btn btn-secondary" disabled title="Save the purchase order first">Print / PDF</button>`}
                     <button type="submit" class="btn btn-primary">${po.id ? 'Update Purchase Order' : 'Create Purchase Order'}</button>
                 </div>` : ''}
             </form>`;
@@ -228,6 +233,14 @@ const PurchaseOrdersPage = {
             defaultSubject: `Purchase Order #${po.po_number}`,
             successMessage: 'Purchase order emailed',
         });
+    },
+
+    openPdf(id) {
+        const po = PurchaseOrdersPage._detailState && PurchaseOrdersPage._detailState.id === id
+            ? PurchaseOrdersPage._detailState
+            : null;
+        const poNumber = po?.po_number || `purchase-order-${id}`;
+        API.open(`/purchase-orders/${id}/pdf`, `purchase-order-${poNumber}.pdf`);
     },
 
     async save(e, id) {
