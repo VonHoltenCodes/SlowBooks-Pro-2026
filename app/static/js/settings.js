@@ -196,7 +196,11 @@ const SettingsPage = {
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Load the built-in NZ demo business for evaluation or training. Safe to rerun; the seed script skips when the demo business already exists.
                     </div>
-                    <button type="button" class="btn btn-secondary" onclick="SettingsPage.loadDemoData()">Load NZ Demo Data</button>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.loadDemoData()">Load NZ Demo Data</button>
+                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.loadChartTemplate('xero')">Load Xero Sample Default Chart</button>
+                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.loadChartTemplate('mas')">Load MAS Chart of Accounts</button>
+                    </div>
                 </div>
 
                 <div class="form-actions">
@@ -249,6 +253,13 @@ const SettingsPage = {
         try {
             await API.post('/settings/load-demo-data');
             toast('NZ demo data loaded');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async loadChartTemplate(templateKey) {
+        try {
+            const result = await API.post(`/settings/load-chart-template/${templateKey}`);
+            toast(`${result.template_label} loaded`);
         } catch (err) { toast(err.message, 'error'); }
     },
 

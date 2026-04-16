@@ -39,6 +39,8 @@ vm.runInContext(code, context);
     assert.ok(sampleHtml.includes('Employment Information and employee filing exports'));
     assert.ok(!sampleHtml.includes('payday filing'));
     assert.ok(sampleHtml.includes('Load NZ Demo Data'));
+    assert.ok(sampleHtml.includes('Load Xero Sample Default Chart'));
+    assert.ok(sampleHtml.includes('Load MAS Chart of Accounts'));
 
     await context.SettingsPage.save({
         preventDefault() {},
@@ -48,7 +50,9 @@ vm.runInContext(code, context);
     assert.deepStrictEqual(context.App.settings, updatedSettings);
 
     await context.SettingsPage.loadDemoData();
-    assert.deepStrictEqual(posts, ['/settings/load-demo-data']);
+    await context.SettingsPage.loadChartTemplate('xero');
+    await context.SettingsPage.loadChartTemplate('mas');
+    assert.deepStrictEqual(posts, ['/settings/load-demo-data', '/settings/load-chart-template/xero', '/settings/load-chart-template/mas']);
 })().catch((err) => {
     console.error(err);
     process.exit(1);

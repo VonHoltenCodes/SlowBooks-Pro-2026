@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.settings import Settings, DEFAULT_SETTINGS
 from app.services.auth import require_permissions
+from app.services.chart_template_loader import load_chart_template as run_chart_template_load
 from scripts.seed_nz_demo_data import seed as run_demo_seed
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
@@ -95,6 +96,19 @@ def test_email(
         from fastapi import HTTPException
         raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
 
+
+
+@router.post("/load-chart-template/{template_key}")
+def load_chart_template(
+    template_key: str,
+    db: Session = Depends(get_db),
+    auth=Depends(require_permissions("settings.manage")),
+):
+    from fastapi import HTTPException
+    try:
+        return run_chart_template_load(db, template_key)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.post("/load-demo-data")
 def load_demo_data(
