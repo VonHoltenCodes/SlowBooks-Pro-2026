@@ -7,10 +7,13 @@
 # General Ledger was CReportEngine::RunGLDetail() at 0x00211400.
 # ============================================================================
 
+import logging
 from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+
+logger = logging.getLogger(__name__)
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
@@ -676,8 +679,9 @@ def batch_email_statements(db: Session = Depends(get_db)):
                 entity_id=cid,
             )
             sent += 1
-        except Exception as e:
-            errors.append(f"Customer {customer.name}: {str(e)}")
+        except Exception:
+            logger.exception("Failed to send statement to customer %s", customer.id)
+            errors.append(f"Customer {customer.name}: unable to send statement")
             failed += 1
 
     return {"sent": sent, "failed": failed, "errors": errors}
@@ -748,8 +752,9 @@ def collection_letters(data: dict, db: Session = Depends(get_db)):
                     entity_id=cid,
                 )
                 emailed += 1
-        except Exception as e:
-            errors.append(f"{customer.name}: {str(e)}")
+        except Exception:
+            logger.exception("Failed to generate collection letter for customer %s", customer.id)
+            errors.append(f"{customer.name}: unable to generate collection letter")
 
     return {"generated": generated, "emailed": emailed, "errors": errors}
 

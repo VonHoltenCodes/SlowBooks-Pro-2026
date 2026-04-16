@@ -3,6 +3,7 @@
 # Feature 16: Most invasive change — routes to correct database
 # ============================================================================
 
+import logging
 import re
 import subprocess
 from datetime import datetime
@@ -12,6 +13,8 @@ from sqlalchemy.orm import Session
 
 from app.config import DATABASE_URL
 from app.models.companies import Company
+
+logger = logging.getLogger(__name__)
 
 # Strict pattern for database names: alphanumeric, underscores, hyphens only
 _VALID_DB_NAME = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]{0,62}$')
@@ -67,8 +70,9 @@ def create_company(db: Session, name: str, database_name: str, description: str 
 
         return {"success": True, "company_id": company.id, "database_name": database_name}
 
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Failed to create company database %s", database_name)
+        return {"success": False, "error": "Failed to create company database. Check server logs for details."}
 
 
 def get_company_db_url(database_name: str) -> str:
