@@ -10,13 +10,29 @@
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
+
+
+class SalesTaxPaymentRequest(BaseModel):
+    date: Optional[date] = None
+    amount: Decimal
+    pay_from_account_id: int
+    check_number: Optional[str] = ""
+    reference: Optional[str] = None
+
+
+class CollectionLetterRequest(BaseModel):
+    letter_type: str = "30"
+    customer_ids: Optional[list[int]] = None
+    send_email: bool = False
 
 from app.database import get_db
 from app.models.accounts import Account, AccountType
@@ -30,6 +46,43 @@ from app.routes.settings import _get_all as get_settings
 router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 
+# Debit-normal account types. For these, natural balance = debit - credit.
+# For the rest (liability, equity, income), natural balance = credit - debit.
+_DEBIT_NORMAL = {AccountType.ASSET, AccountType.EXPENSE, AccountType.COGS}
+
+
+def _totals_by_account(db, acct_type, date_start=None, date_end=None):
+    """Return a list of {account_name, account_number, amount} rows where amount
+    is signed by the account type's natural balance (always positive for a
+    normal-balance ledger).
+    """
+    q = (
+        db.query(
+            Account.name, Account.account_number,
+            sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
+            sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
+        )
+        .join(TransactionLine, TransactionLine.account_id == Account.id)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(Account.account_type == acct_type)
+    )
+    if date_start is not None:
+        q = q.filter(Transaction.date >= date_start)
+    if date_end is not None:
+        q = q.filter(Transaction.date <= date_end)
+    q = q.group_by(Account.id, Account.name, Account.account_number)
+
+    rows = []
+    for name, number, dr, cr in q.all():
+        amount = (dr - cr) if acct_type in _DEBIT_NORMAL else (cr - dr)
+        rows.append({
+            "account_name": name,
+            "account_number": number,
+            "amount": float(amount),
+        })
+    return rows
+
+
 @router.get("/profit-loss")
 def profit_loss(
     start_date: date = Query(default=None),
@@ -41,27 +94,13 @@ def profit_loss(
     if not end_date:
         end_date = date.today()
 
-    def get_account_totals(acct_type):
-        results = (
-            db.query(Account.name, Account.account_number,
-                     sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit - TransactionLine.debit), 0))
-            .join(TransactionLine, TransactionLine.account_id == Account.id)
-            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
-            .filter(Account.account_type == acct_type)
-            .filter(Transaction.date >= start_date)
-            .filter(Transaction.date <= end_date)
-            .group_by(Account.id, Account.name, Account.account_number)
-            .all()
-        )
-        return [{"account_name": r[0], "account_number": r[1], "amount": float(r[2])} for r in results]
-
-    income = get_account_totals(AccountType.INCOME)
-    cogs = get_account_totals(AccountType.COGS)
-    expenses = get_account_totals(AccountType.EXPENSE)
+    income = _totals_by_account(db, AccountType.INCOME, start_date, end_date)
+    cogs = _totals_by_account(db, AccountType.COGS, start_date, end_date)
+    expenses = _totals_by_account(db, AccountType.EXPENSE, start_date, end_date)
 
     total_income = sum(i["amount"] for i in income)
-    total_cogs = sum(abs(c["amount"]) for c in cogs)
-    total_expenses = sum(abs(e["amount"]) for e in expenses)
+    total_cogs = sum(c["amount"] for c in cogs)
+    total_expenses = sum(e["amount"] for e in expenses)
 
     return {
         "start_date": start_date.isoformat(),
@@ -82,26 +121,13 @@ def balance_sheet(as_of_date: date = Query(default=None), db: Session = Depends(
     if not as_of_date:
         as_of_date = date.today()
 
-    def get_balances(acct_type):
-        results = (
-            db.query(Account.name, Account.account_number,
-                     sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit - TransactionLine.credit), 0))
-            .join(TransactionLine, TransactionLine.account_id == Account.id)
-            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
-            .filter(Account.account_type == acct_type)
-            .filter(Transaction.date <= as_of_date)
-            .group_by(Account.id, Account.name, Account.account_number)
-            .all()
-        )
-        return [{"account_name": r[0], "account_number": r[1], "amount": float(r[2])} for r in results]
-
-    assets = get_balances(AccountType.ASSET)
-    liabilities = get_balances(AccountType.LIABILITY)
-    equity = get_balances(AccountType.EQUITY)
+    assets = _totals_by_account(db, AccountType.ASSET, date_end=as_of_date)
+    liabilities = _totals_by_account(db, AccountType.LIABILITY, date_end=as_of_date)
+    equity = _totals_by_account(db, AccountType.EQUITY, date_end=as_of_date)
 
     total_assets = sum(a["amount"] for a in assets)
-    total_liabilities = sum(abs(l["amount"]) for l in liabilities)
-    total_equity = sum(abs(e["amount"]) for e in equity)
+    total_liabilities = sum(l["amount"] for l in liabilities)
+    total_equity = sum(e["amount"] for e in equity)
 
     return {
         "as_of_date": as_of_date.isoformat(),
@@ -182,8 +208,11 @@ def sales_tax_report(
     if not end_date:
         end_date = date.today()
 
+    # joinedload avoids an N+1 on inv.customer access in the loop below.
+    from sqlalchemy.orm import joinedload
     invoices = (
         db.query(Invoice)
+        .options(joinedload(Invoice.customer))
         .filter(Invoice.date >= start_date, Invoice.date <= end_date)
         .filter(Invoice.status != InvoiceStatus.VOID)
         .order_by(Invoice.date)
@@ -221,23 +250,18 @@ def sales_tax_report(
 
 
 @router.post("/sales-tax/pay")
-def pay_sales_tax(data: dict, db: Session = Depends(get_db)):
+def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     """Record a sales tax payment — DR Sales Tax Payable, CR Bank Account"""
     from app.services.accounting import create_journal_entry, get_sales_tax_account_id
     from app.services.closing_date import check_closing_date
 
-    pay_date = date.fromisoformat(data.get("date", date.today().isoformat()))
+    pay_date = data.date or date.today()
     check_closing_date(db, pay_date)
 
-    amount = Decimal(str(data.get("amount", 0)))
-    if amount <= 0:
+    if data.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
-    pay_from_account_id = data.get("pay_from_account_id")
-    if not pay_from_account_id:
-        raise HTTPException(status_code=400, detail="Bank account required")
-
-    bank_account = db.query(Account).filter(Account.id == int(pay_from_account_id)).first()
+    bank_account = db.query(Account).filter(Account.id == data.pay_from_account_id).first()
     if not bank_account:
         raise HTTPException(status_code=404, detail="Bank account not found")
 
@@ -248,20 +272,19 @@ def pay_sales_tax(data: dict, db: Session = Depends(get_db)):
     journal_lines = [
         {
             "account_id": tax_account_id,
-            "debit": amount,
+            "debit": data.amount,
             "credit": Decimal("0"),
             "description": "Sales tax payment",
         },
         {
-            "account_id": int(pay_from_account_id),
+            "account_id": data.pay_from_account_id,
             "debit": Decimal("0"),
-            "credit": amount,
+            "credit": data.amount,
             "description": "Sales tax payment",
         },
     ]
 
-    check_number = data.get("check_number", "")
-    reference = data.get("reference", check_number)
+    reference = data.reference if data.reference is not None else data.check_number
 
     txn = create_journal_entry(
         db, pay_date, "Sales Tax Payment",
@@ -269,7 +292,7 @@ def pay_sales_tax(data: dict, db: Session = Depends(get_db)):
         reference=reference,
     )
     db.commit()
-    return {"status": "ok", "transaction_id": txn.id, "amount": float(amount)}
+    return {"status": "ok", "transaction_id": txn.id, "amount": float(data.amount)}
 
 
 @router.get("/general-ledger")
@@ -688,13 +711,13 @@ def batch_email_statements(db: Session = Depends(get_db)):
 
 
 @router.post("/collection-letters")
-def collection_letters(data: dict, db: Session = Depends(get_db)):
+def collection_letters(data: CollectionLetterRequest, db: Session = Depends(get_db)):
     """Generate and optionally email collection letters."""
     from app.services.email_service import send_email
 
-    letter_type = str(data.get("letter_type", "30"))
-    customer_ids = data.get("customer_ids")
-    send_email_flag = data.get("send_email", False)
+    letter_type = data.letter_type
+    customer_ids = data.customer_ids
+    send_email_flag = data.send_email
     settings = get_settings(db)
     today = date.today()
 
@@ -774,20 +797,25 @@ def report_1099_summary(
     if not vendors_1099:
         return {"year": year, "items": [], "total": 0, "vendors_above_threshold": 0}
 
+    # Single query: sum bill payment allocations grouped by vendor for the year.
+    # Replaces a query-per-vendor loop that made this O(N) in DB round-trips.
+    totals_by_vendor = dict(
+        db.query(
+            BillPayment.vendor_id,
+            sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
+        )
+        .join(BillPaymentAllocation, BillPaymentAllocation.bill_payment_id == BillPayment.id)
+        .filter(sqlfunc.extract("year", BillPayment.date) == year)
+        .group_by(BillPayment.vendor_id)
+        .all()
+    )
+
     items = []
     total = Decimal(0)
     above_threshold = 0
 
     for vendor in vendors_1099:
-        # Sum all bill payment allocations for this vendor in the year
-        vendor_total = (
-            db.query(sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0))
-            .join(BillPayment, BillPaymentAllocation.bill_payment_id == BillPayment.id)
-            .filter(BillPayment.vendor_id == vendor.id)
-            .filter(sqlfunc.extract("year", BillPayment.date) == year)
-            .scalar()
-        )
-        vendor_total = Decimal(str(vendor_total or 0))
+        vendor_total = Decimal(str(totals_by_vendor.get(vendor.id, 0) or 0))
         total += vendor_total
         flagged = vendor_total >= 600
         if flagged:

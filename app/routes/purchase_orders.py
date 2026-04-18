@@ -13,6 +13,7 @@ from app.database import get_db
 from app.models.purchase_orders import PurchaseOrder, PurchaseOrderLine, POStatus
 from app.models.contacts import Vendor
 from app.schemas.purchase_orders import POCreate, POUpdate, POResponse
+from app.services.accounting import compute_line_totals
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
 
@@ -60,9 +61,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Vendor not found")
 
     po_number = _next_po_number(db)
-    subtotal = sum(Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in data.lines)
-    tax_amount = subtotal * Decimal(str(data.tax_rate))
-    total = subtotal + tax_amount
+    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     po = PurchaseOrder(
         po_number=po_number, vendor_id=data.vendor_id, date=data.date,
@@ -103,19 +102,18 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
 
     if data.lines is not None:
         db.query(PurchaseOrderLine).filter(PurchaseOrderLine.purchase_order_id == po_id).delete()
-        subtotal = Decimal(0)
         for i, line_data in enumerate(data.lines):
             amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
-            subtotal += amt
             db.add(PurchaseOrderLine(
                 purchase_order_id=po_id, item_id=line_data.item_id,
                 description=line_data.description, quantity=line_data.quantity,
                 rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
             ))
-        tax_rate = Decimal(str(data.tax_rate)) if data.tax_rate is not None else po.tax_rate
+        tax_rate = data.tax_rate if data.tax_rate is not None else po.tax_rate
+        subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
         po.subtotal = subtotal
-        po.tax_amount = subtotal * tax_rate
-        po.total = subtotal + po.tax_amount
+        po.tax_amount = tax_amount
+        po.total = total
 
     db.commit()
     db.refresh(po)

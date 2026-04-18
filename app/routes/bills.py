@@ -15,7 +15,7 @@ from app.models.contacts import Vendor
 from app.models.items import Item
 from app.models.accounts import Account
 from app.schemas.bills import BillCreate, BillUpdate, BillResponse
-from app.services.accounting import create_journal_entry
+from app.services.accounting import create_journal_entry, compute_line_totals
 from app.services.closing_date import check_closing_date
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
@@ -70,9 +70,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         except ValueError:
             due_date = data.date + timedelta(days=30)
 
-    subtotal = sum(Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in data.lines)
-    tax_amount = subtotal * Decimal(str(data.tax_rate))
-    total = subtotal + tax_amount
+    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     bill = Bill(
         bill_number=data.bill_number, vendor_id=data.vendor_id, date=data.date,

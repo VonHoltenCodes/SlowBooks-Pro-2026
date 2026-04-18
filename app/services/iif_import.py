@@ -645,7 +645,17 @@ def import_transactions(db: Session, blocks: list) -> dict:
 
 
 def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
-    """Create an Invoice from IIF TRNS/SPL data."""
+    """Create an Invoice from IIF TRNS/SPL data.
+
+    Convention assumed: TRNS.AMOUNT is positive (AR debit = invoice total), each
+    SPL.AMOUNT is negative (the offsetting credit to income / sales-tax). This
+    matches a standard QuickBooks invoice export. The abs() calls below are
+    safe for that convention. Mixed-sign SPL rows (e.g. a positive "discount"
+    line that reduces the invoice total) are NOT correctly handled: they would
+    inflate the subtotal and trip the balance check, causing the journal to
+    fall back to default_income_id. Handling discount lines requires sign-
+    preserving parsing + test IIFs — separate work.
+    """
     doc_num = trns.get("DOCNUM", "").strip()
 
     # Skip if invoice number already exists

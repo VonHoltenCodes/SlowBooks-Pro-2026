@@ -17,6 +17,28 @@ router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
 UPLOAD_BASE = Path(__file__).parent.parent / "static" / "uploads" / "attachments"
 
+# Whitelist of MIME types we accept for attachments. Attachments are served
+# back from /static/ so we reject anything that a browser would render and
+# potentially execute (HTML, SVG with scripts, executables).
+ALLOWED_MIME_TYPES = {
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "text/plain",
+    "text/csv",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/zip",
+}
+ALLOWED_EXTENSIONS = {
+    ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".txt", ".csv", ".doc", ".docx", ".xls", ".xlsx", ".zip",
+}
+
 
 @router.post("/{entity_type}/{entity_id}", response_model=AttachmentResponse, status_code=201)
 async def upload_attachment(
@@ -30,19 +52,31 @@ async def upload_attachment(
     if entity_type not in allowed_types:
         raise HTTPException(status_code=400, detail=f"Invalid entity type. Allowed: {', '.join(allowed_types)}")
 
+    # Sanitize filename and validate extension. Checking both extension and
+    # Content-Type guards against Content-Type spoofing.
+    safe_filename = Path(file.filename or "").name
+    if not safe_filename or safe_filename.startswith('.'):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    extension = Path(safe_filename).suffix.lower()
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File extension '{extension}' not allowed",
+        )
+    if file.content_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"MIME type '{file.content_type}' not allowed",
+        )
+
     # Create upload directory
     upload_dir = UPLOAD_BASE / entity_type / str(entity_id)
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Sanitize filename to prevent path traversal
-    safe_filename = Path(file.filename).name
-    if not safe_filename or safe_filename.startswith('.'):
-        raise HTTPException(status_code=400, detail="Invalid filename")
     file_path = upload_dir / safe_filename
     if not file_path.resolve().is_relative_to(upload_dir.resolve()):
         raise HTTPException(status_code=400, detail="Invalid filename")
     content = await file.read()
-    # Limit file size to 50MB
     if len(content) > 50 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="File too large (max 50MB)")
     file_path.write_bytes(content)

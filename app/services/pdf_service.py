@@ -10,10 +10,24 @@ from pathlib import Path
 from io import BytesIO
 
 from jinja2 import Environment, FileSystemLoader
-from weasyprint import HTML
+from weasyprint import HTML, default_url_fetcher
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 _jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
+
+
+def _safe_url_fetcher(url, timeout=10, ssl_context=None):
+    """Restrict WeasyPrint to data: URIs only.
+
+    Without this, user-controlled HTML (e.g. invoice notes, customer name
+    fields) could embed <img src="file:///etc/passwd"> and have the server
+    read and embed local files into the generated PDF. Templates currently
+    need no external fetches; if that changes, whitelist specific https
+    origins here rather than opening up file:// broadly.
+    """
+    if url.startswith("data:"):
+        return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
+    raise ValueError(f"URL scheme not allowed in PDF templates: {url!r}")
 
 def _format_currency(value):
     try:
@@ -38,13 +52,13 @@ _jinja_env.filters["fdate"] = _format_date
 def generate_invoice_pdf(invoice, company_settings: dict) -> bytes:
     template = _jinja_env.get_template("invoice_pdf.html")
     html_str = template.render(inv=invoice, company=company_settings)
-    return HTML(string=html_str).write_pdf()
+    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 
 
 def generate_estimate_pdf(estimate, company_settings: dict) -> bytes:
     template = _jinja_env.get_template("estimate_pdf.html")
     html_str = template.render(est=estimate, company=company_settings)
-    return HTML(string=html_str).write_pdf()
+    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 
 
 def generate_statement_pdf(customer, invoices, payments, company_settings: dict, as_of_date=None) -> bytes:
@@ -53,7 +67,7 @@ def generate_statement_pdf(customer, invoices, payments, company_settings: dict,
         customer=customer, invoices=invoices, payments=payments,
         company=company_settings, as_of_date=as_of_date,
     )
-    return HTML(string=html_str).write_pdf()
+    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 
 
 def _amount_to_words(amount) -> str:
@@ -102,11 +116,11 @@ def generate_collection_letter_pdf(customer, invoices, company_settings: dict, l
         customer=customer, invoices=invoices, company=company_settings,
         letter_type=letter_type, total_due=total_due, today=_date.today(),
     )
-    return HTML(string=html_str).write_pdf()
+    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 
 
 def generate_check_pdf(check_data: dict, company_settings: dict) -> bytes:
     template = _jinja_env.get_template("check_pdf.html")
     check_data["amount_words"] = _amount_to_words(check_data.get("amount", 0))
     html_str = template.render(check=check_data, company=company_settings)
-    return HTML(string=html_str).write_pdf()
+    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()

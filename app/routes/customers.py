@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.contacts import Customer
 from app.schemas.contacts import CustomerCreate, CustomerUpdate, CustomerResponse
+from app.routes._helpers import get_or_404
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
 
@@ -20,10 +21,7 @@ def list_customers(active_only: bool = False, search: str = None, db: Session = 
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(customer_id: int, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
-    return customer
+    return get_or_404(db, Customer, customer_id)
 
 
 @router.post("", response_model=CustomerResponse, status_code=201)
@@ -37,9 +35,7 @@ def create_customer(data: CustomerCreate, db: Session = Depends(get_db)):
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
 def update_customer(customer_id: int, data: CustomerUpdate, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
+    customer = get_or_404(db, Customer, customer_id)
     for key, val in data.model_dump(exclude_unset=True).items():
         setattr(customer, key, val)
     db.commit()
@@ -49,9 +45,7 @@ def update_customer(customer_id: int, data: CustomerUpdate, db: Session = Depend
 
 @router.delete("/{customer_id}")
 def delete_customer(customer_id: int, db: Session = Depends(get_db)):
-    customer = db.query(Customer).filter(Customer.id == customer_id).first()
-    if not customer:
-        raise HTTPException(status_code=404, detail="Customer not found")
+    customer = get_or_404(db, Customer, customer_id)
     customer.is_active = False
     db.commit()
     return {"message": "Customer deactivated"}

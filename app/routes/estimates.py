@@ -22,6 +22,7 @@ from app.services.pdf_service import generate_estimate_pdf
 from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
     get_default_income_account_id, get_sales_tax_account_id,
+    compute_line_totals,
 )
 from app.routes.settings import _get_all as get_settings, _set as set_setting
 
@@ -80,9 +81,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     estimate_number = _next_estimate_number(db)
-    subtotal = sum(l.quantity * l.rate for l in data.lines)
-    tax_amount = subtotal * data.tax_rate
-    total = subtotal + tax_amount
+    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     estimate = Estimate(
         estimate_number=estimate_number,
@@ -147,10 +146,10 @@ def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depend
             db.add(line)
 
         tax_rate = data.tax_rate if data.tax_rate is not None else estimate.tax_rate
-        subtotal = sum(l.quantity * l.rate for l in data.lines)
+        subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
         estimate.subtotal = subtotal
-        estimate.tax_amount = subtotal * tax_rate
-        estimate.total = subtotal + estimate.tax_amount
+        estimate.tax_amount = tax_amount
+        estimate.total = total
 
     db.commit()
     db.refresh(estimate)

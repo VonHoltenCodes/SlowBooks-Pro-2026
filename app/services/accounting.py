@@ -7,13 +7,47 @@
 # with a tolerance of 0.004 (BCD rounding). We use exact Decimal math.
 # ============================================================================
 
-from datetime import date
-from decimal import Decimal
+from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy.orm import Session
 
 from app.models.transactions import Transaction, TransactionLine
 from app.models.accounts import Account
+
+CENT = Decimal("0.01")
+
+
+def _q(value) -> Decimal:
+    """Coerce to Decimal rounded to two places (half-up, matches PostgreSQL default)."""
+    if not isinstance(value, Decimal):
+        value = Decimal(str(value))
+    return value.quantize(CENT, rounding=ROUND_HALF_UP)
+
+
+def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
+    """Return (subtotal, tax_amount, total), each quantized to 2 decimals.
+
+    `lines` is any iterable of objects with .quantity and .rate attributes.
+    Rounds each line's amount before summing so per-line DB storage matches the
+    sum (prevents drift between stored invoice.total and DB-rounded journal
+    lines).
+    """
+    subtotal = _q(sum((_q(Decimal(str(l.quantity)) * Decimal(str(l.rate))) for l in lines), Decimal("0")))
+    tax_amount = _q(subtotal * Decimal(str(tax_rate or 0)))
+    total = _q(subtotal + tax_amount)
+    return subtotal, tax_amount, total
+
+
+def due_date_from_terms(txn_date: date, terms: str | None, default_days: int = 30) -> date:
+    """Parse 'Net N' terms to a due date. Falls back to default_days on parse failure."""
+    if not terms:
+        return txn_date + timedelta(days=default_days)
+    try:
+        days = int(terms.lower().replace("net ", "").strip())
+    except ValueError:
+        days = default_days
+    return txn_date + timedelta(days=days)
 
 
 def create_journal_entry(
