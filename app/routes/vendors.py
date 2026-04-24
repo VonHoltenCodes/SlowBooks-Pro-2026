@@ -1,9 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.contacts import Vendor
 from app.schemas.contacts import VendorCreate, VendorUpdate, VendorResponse
+from app.routes._helpers import get_or_404
 
 router = APIRouter(prefix="/api/vendors", tags=["vendors"])
 
@@ -20,10 +21,7 @@ def list_vendors(active_only: bool = False, search: str = None, db: Session = De
 
 @router.get("/{vendor_id}", response_model=VendorResponse)
 def get_vendor(vendor_id: int, db: Session = Depends(get_db)):
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
-    return vendor
+    return get_or_404(db, Vendor, vendor_id)
 
 
 @router.post("", response_model=VendorResponse, status_code=201)
@@ -37,9 +35,7 @@ def create_vendor(data: VendorCreate, db: Session = Depends(get_db)):
 
 @router.put("/{vendor_id}", response_model=VendorResponse)
 def update_vendor(vendor_id: int, data: VendorUpdate, db: Session = Depends(get_db)):
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    vendor = get_or_404(db, Vendor, vendor_id)
     for key, val in data.model_dump(exclude_unset=True).items():
         setattr(vendor, key, val)
     db.commit()
@@ -49,9 +45,7 @@ def update_vendor(vendor_id: int, data: VendorUpdate, db: Session = Depends(get_
 
 @router.delete("/{vendor_id}")
 def delete_vendor(vendor_id: int, db: Session = Depends(get_db)):
-    vendor = db.query(Vendor).filter(Vendor.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    vendor = get_or_404(db, Vendor, vendor_id)
     vendor.is_active = False
     db.commit()
     return {"message": "Vendor deactivated"}

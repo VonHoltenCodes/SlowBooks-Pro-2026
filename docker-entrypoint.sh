@@ -3,9 +3,15 @@ set -e
 
 echo "Slowbooks Pro 2026 — Starting up..."
 
-# Wait for PostgreSQL
+# Wait for PostgreSQL (max 30 seconds)
 echo "Waiting for PostgreSQL..."
+PG_WAIT=0
 until pg_isready -h "${PGHOST:-postgres}" -p "${PGPORT:-5432}" -U "${PGUSER:-bookkeeper}" -q; do
+    PG_WAIT=$((PG_WAIT + 1))
+    if [ "$PG_WAIT" -ge 30 ]; then
+        echo "ERROR: PostgreSQL did not become ready within 30 seconds."
+        exit 1
+    fi
     sleep 1
 done
 echo "PostgreSQL is ready."

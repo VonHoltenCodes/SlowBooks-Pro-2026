@@ -42,6 +42,7 @@ class PaymentResponse(BaseModel):
     notes: Optional[str]
     allocations: list[PaymentAllocationResponse] = []
     customer_name: Optional[str] = None
+    is_voided: bool = False
     created_at: datetime
 
     model_config = {"from_attributes": True}

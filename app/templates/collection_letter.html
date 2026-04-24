@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page { size: letter; margin: 0.75in 0.75in 0.6in 0.75in; }
+    body { font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11pt; color: #333; line-height: 1.5; }
+    .header { border-bottom: 3px solid #003366; padding-bottom: 12px; margin-bottom: 24px; }
+    .company-name { font-size: 18pt; font-weight: 700; color: #003366; }
+    .company-info { font-size: 9pt; color: #666; margin-top: 4px; }
+    .date { text-align: right; margin-bottom: 24px; font-size: 10pt; color: #666; }
+    .customer-address { margin-bottom: 24px; line-height: 1.6; }
+    .letter-type { font-size: 14pt; font-weight: 700; color: #003366; margin-bottom: 16px; text-transform: uppercase; }
+    .body-text { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin: 16px 0; }
+    th { background: #003366; color: white; padding: 6px 10px; text-align: left; font-size: 9pt; }
+    td { padding: 6px 10px; border-bottom: 1px solid #e0e0e0; font-size: 10pt; }
+    .amount { text-align: right; }
+    .total-row { font-weight: 700; background: #f5f5f5; border-top: 2px solid #003366; }
+    .closing { margin-top: 32px; }
+    .signature-line { margin-top: 48px; border-top: 1px solid #333; width: 250px; padding-top: 4px; font-size: 9pt; }
+    .footer { margin-top: 48px; font-size: 8pt; color: #999; text-align: center; border-top: 1px solid #e0e0e0; padding-top: 8px; }
+    .urgency-30 { border-left: 4px solid #f59e0b; padding-left: 12px; }
+    .urgency-60 { border-left: 4px solid #f97316; padding-left: 12px; }
+    .urgency-90 { border-left: 4px solid #dc2626; padding-left: 12px; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <div class="company-name">{{ company.company_name }}</div>
+        <div class="company-info">
+            {% if company.company_address1 %}{{ company.company_address1 }}{% endif %}
+            {% if company.company_city %}, {{ company.company_city }}{% endif %}
+            {% if company.company_state %}, {{ company.company_state }}{% endif %}
+            {% if company.company_zip %} {{ company.company_zip }}{% endif %}
+            {% if company.company_phone %}<br>Phone: {{ company.company_phone }}{% endif %}
+            {% if company.company_email %} | {{ company.company_email }}{% endif %}
+        </div>
+    </div>
+
+    <div class="date">{{ today | fdate }}</div>
+
+    <div class="customer-address">
+        {{ customer.name }}<br>
+        {% if customer.company %}{{ customer.company }}<br>{% endif %}
+        {% if customer.bill_address1 %}{{ customer.bill_address1 }}<br>{% endif %}
+        {% if customer.bill_address2 %}{{ customer.bill_address2 }}<br>{% endif %}
+        {% if customer.bill_city %}{{ customer.bill_city }}{% endif %}{% if customer.bill_state %}, {{ customer.bill_state }}{% endif %} {{ customer.bill_zip or '' }}
+    </div>
+
+    {% if letter_type == '30' %}
+    <div class="letter-type">Friendly Reminder</div>
+    <div class="body-text urgency-30">
+        <p>Dear {{ customer.name }},</p>
+        <p>Our records indicate that the following invoice(s) are past due. We understand that
+        oversights happen, and we wanted to bring this to your attention.</p>
+        <p>If you have already sent payment, please disregard this notice. Otherwise, we would
+        appreciate your prompt attention to this matter.</p>
+    </div>
+
+    {% elif letter_type == '60' %}
+    <div class="letter-type">Second Notice — Account Past Due</div>
+    <div class="body-text urgency-60">
+        <p>Dear {{ customer.name }},</p>
+        <p>Despite our previous reminder, the following invoice(s) remain unpaid. Your account
+        is now significantly past due.</p>
+        <p>Please arrange payment immediately to avoid any interruption to your account or
+        additional collection activity.</p>
+    </div>
+
+    {% elif letter_type == '90' %}
+    <div class="letter-type">Final Notice — Immediate Action Required</div>
+    <div class="body-text urgency-90">
+        <p>Dear {{ customer.name }},</p>
+        <p><strong>This is our final notice before we escalate collection efforts.</strong></p>
+        <p>The following invoice(s) are seriously past due. If payment is not received within
+        10 business days, we may be forced to pursue additional collection measures,
+        which may affect your credit standing.</p>
+        <p>Please contact us immediately to arrange payment or discuss a payment plan.</p>
+    </div>
+    {% endif %}
+
+    <table>
+        <thead>
+            <tr>
+                <th>Invoice #</th>
+                <th>Date</th>
+                <th>Due Date</th>
+                <th>Days Past Due</th>
+                <th class="amount">Balance Due</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for inv in invoices %}
+            <tr>
+                <td>{{ inv.invoice_number }}</td>
+                <td>{{ inv.date | fdate }}</td>
+                <td>{{ inv.due_date | fdate }}</td>
+                <td>{{ inv.days_overdue }}</td>
+                <td class="amount">{{ inv.balance_due | currency }}</td>
+            </tr>
+            {% endfor %}
+            <tr class="total-row">
+                <td colspan="4">Total Amount Due</td>
+                <td class="amount">{{ total_due | currency }}</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <div class="closing">
+        <p>Please remit payment to:</p>
+        <p><strong>{{ company.company_name }}</strong><br>
+        {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
+        {% if company.company_city %}{{ company.company_city }}{% endif %}{% if company.company_state %}, {{ company.company_state }}{% endif %} {{ company.company_zip or '' }}</p>
+
+        <p>If you have any questions about this notice, please contact us at
+        {% if company.company_phone %}{{ company.company_phone }}{% endif %}
+        {% if company.company_email %} or {{ company.company_email }}{% endif %}.</p>
+
+        <p>Sincerely,</p>
+        <div class="signature-line">{{ company.company_name }}</div>
+    </div>
+
+    <div class="footer">Generated by Slowbooks Pro 2026 — Build 12.0.3190-R</div>
+</body>
+</html>

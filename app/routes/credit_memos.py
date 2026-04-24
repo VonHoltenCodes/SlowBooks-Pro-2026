@@ -18,6 +18,7 @@ from app.schemas.credit_memos import CreditMemoCreate, CreditMemoResponse, Credi
 from app.services.accounting import (
     create_journal_entry, get_ar_account_id,
     get_default_income_account_id, get_sales_tax_account_id,
+    compute_line_totals,
 )
 from app.services.closing_date import check_closing_date
 
@@ -69,9 +70,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     memo_number = _next_cm_number(db)
-    subtotal = sum(Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in data.lines)
-    tax_amount = subtotal * Decimal(str(data.tax_rate))
-    total = subtotal + tax_amount
+    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     cm = CreditMemo(
         memo_number=memo_number, customer_id=data.customer_id, date=data.date,

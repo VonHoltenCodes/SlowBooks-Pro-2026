@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif", "image/svg+xml"}
+ALLOWED_IMAGE_TYPES = {"image/png", "image/jpeg", "image/gif"}
 
 
 @router.post("/logo")

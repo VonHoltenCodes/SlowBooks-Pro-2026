@@ -35,10 +35,10 @@ class Invoice(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     invoice_number = Column(String(50), unique=True, nullable=False)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
-    status = Column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    status = Column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT, index=True)
 
-    date = Column(Date, nullable=False)
+    date = Column(Date, nullable=False, index=True)
     due_date = Column(Date, nullable=True)
     terms = Column(String(50), default="Net 30")
     po_number = Column(String(100), nullable=True)

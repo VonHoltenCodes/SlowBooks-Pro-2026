@@ -135,3 +135,55 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
     resp = PaymentResponse.model_validate(payment)
     resp.customer_name = customer.name
     return resp
+
+
+@router.post("/{payment_id}/void", response_model=PaymentResponse)
+def void_payment(payment_id: int, db: Session = Depends(get_db)):
+    """Void a payment — reverses journal entry and restores invoice balances"""
+    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if payment.is_voided:
+        raise HTTPException(status_code=400, detail="Payment already voided")
+    check_closing_date(db, payment.date)
+
+    # Reverse journal entry
+    if payment.transaction_id:
+        from app.models.transactions import TransactionLine
+        original_lines = db.query(TransactionLine).filter(
+            TransactionLine.transaction_id == payment.transaction_id
+        ).all()
+        reverse_lines = [
+            {"account_id": ol.account_id, "debit": ol.credit, "credit": ol.debit,
+             "description": f"VOID: {ol.description or ''}"}
+            for ol in original_lines
+        ]
+        if reverse_lines:
+            customer = db.query(Customer).filter(Customer.id == payment.customer_id).first()
+            cname = customer.name if customer else "Unknown"
+            create_journal_entry(
+                db, payment.date,
+                f"VOID Payment from {cname}",
+                reverse_lines, source_type="payment_void", source_id=payment.id,
+            )
+
+    # Reverse invoice allocations
+    for alloc in payment.allocations:
+        invoice = db.query(Invoice).filter(Invoice.id == alloc.invoice_id).first()
+        if invoice:
+            invoice.amount_paid -= alloc.amount
+            invoice.balance_due += alloc.amount
+            if invoice.balance_due >= invoice.total:
+                invoice.status = InvoiceStatus.SENT
+            elif invoice.amount_paid > 0:
+                invoice.status = InvoiceStatus.PARTIAL
+            else:
+                invoice.status = InvoiceStatus.SENT
+
+    payment.is_voided = True
+    db.commit()
+    db.refresh(payment)
+    resp = PaymentResponse.model_validate(payment)
+    if payment.customer:
+        resp.customer_name = payment.customer.name
+    return resp

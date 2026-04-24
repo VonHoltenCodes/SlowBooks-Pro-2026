@@ -46,8 +46,8 @@ class BankTransaction(Base):
     __tablename__ = "bank_transactions"
 
     id = Column(Integer, primary_key=True, index=True)
-    bank_account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=False)
-    date = Column(Date, nullable=False)
+    bank_account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=False, index=True)
+    date = Column(Date, nullable=False, index=True)
     amount = Column(Numeric(12, 2), nullable=False)  # positive=deposit, negative=withdrawal
     payee = Column(String(200), nullable=True)
     description = Column(String(500), nullable=True)

@@ -68,7 +68,8 @@ const EstimatesPage = {
             </div>
             ${est.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(est.notes)}</p>` : ''}
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Print / PDF</button>
+                <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Save PDF</button>
+                <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/print-preview','_blank')">Print</button>
                 ${est.status !== 'converted' ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to Invoice</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
@@ -86,6 +87,40 @@ const EstimatesPage = {
 
     lineCount: 0,
     _items: [],
+    _customers: [],
+
+    customerSelected(customerId) {
+        if (customerId === '__new__') {
+            const form = $('#est-new-customer-form');
+            if (form) form.style.display = 'block';
+            return;
+        }
+        const ncf = $('#est-new-customer-form');
+        if (ncf) ncf.style.display = 'none';
+    },
+
+    async saveNewCustomer() {
+        const name = $('#est-new-cust-name').value.trim();
+        if (!name) { toast('Customer name is required', 'error'); return; }
+        try {
+            const cust = await API.post('/customers', {
+                name, email: $('#est-new-cust-email').value.trim() || null,
+                phone: $('#est-new-cust-phone').value.trim() || null,
+            });
+            EstimatesPage._customers.push(cust);
+            const sel = $('#est-customer-select');
+            const opt = document.createElement('option');
+            opt.value = cust.id; opt.textContent = cust.name; opt.selected = true;
+            sel.appendChild(opt);
+            $('#est-new-customer-form').style.display = 'none';
+            toast(`Customer "${cust.name}" created`);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    cancelNewCustomer() {
+        $('#est-new-customer-form').style.display = 'none';
+        $('#est-customer-select').value = '';
+    },
 
     async showForm(id = null) {
         const [customers, items, settings] = await Promise.all([
@@ -108,13 +143,24 @@ const EstimatesPage = {
         EstimatesPage.lineCount = est.lines.length;
         EstimatesPage._items = items;
 
+        EstimatesPage._customers = customers;
         const custOpts = customers.map(c => `<option value="${c.id}" ${est.customer_id==c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
 
         openModal(id ? 'Edit Estimate' : 'New Estimate', `
             <form id="est-form" onsubmit="EstimatesPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Customer *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+                        <select name="customer_id" id="est-customer-select" required onchange="EstimatesPage.customerSelected(this.value)"><option value="">Select...</option><option value="__new__">+ New Customer</option>${custOpts}</select>
+                        <div id="est-new-customer-form" style="display:none; margin-top:8px; padding:8px; border:1px solid var(--gray-300); border-radius:4px; background:var(--primary-light);">
+                            <div style="font-weight:700; font-size:11px; margin-bottom:6px;">Quick Add Customer</div>
+                            <input id="est-new-cust-name" placeholder="Name *" style="width:100%; margin-bottom:4px; padding:4px 8px; border:1px solid var(--gray-300); border-radius:4px;">
+                            <input id="est-new-cust-email" placeholder="Email" style="width:100%; margin-bottom:4px; padding:4px 8px; border:1px solid var(--gray-300); border-radius:4px;">
+                            <input id="est-new-cust-phone" placeholder="Phone" style="width:100%; margin-bottom:4px; padding:4px 8px; border:1px solid var(--gray-300); border-radius:4px;">
+                            <div style="display:flex; gap:6px;">
+                                <button type="button" class="btn btn-sm btn-primary" onclick="EstimatesPage.saveNewCustomer()">Save</button>
+                                <button type="button" class="btn btn-sm btn-secondary" onclick="EstimatesPage.cancelNewCustomer()">Cancel</button>
+                            </div>
+                        </div></div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${est.date}"></div>
                     <div class="form-group"><label>Expiration Date</label>

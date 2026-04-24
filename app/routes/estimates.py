@@ -19,6 +19,11 @@ from app.models.contacts import Customer
 from app.schemas.estimates import EstimateCreate, EstimateUpdate, EstimateResponse
 from app.schemas.invoices import InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
+from app.services.accounting import (
+    create_journal_entry, get_ar_account_id,
+    get_default_income_account_id, get_sales_tax_account_id,
+    compute_line_totals,
+)
 from app.routes.settings import _get_all as get_settings, _set as set_setting
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
@@ -76,9 +81,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     estimate_number = _next_estimate_number(db)
-    subtotal = sum(l.quantity * l.rate for l in data.lines)
-    tax_amount = subtotal * data.tax_rate
-    total = subtotal + tax_amount
+    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     estimate = Estimate(
         estimate_number=estimate_number,
@@ -143,10 +146,10 @@ def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depend
             db.add(line)
 
         tax_rate = data.tax_rate if data.tax_rate is not None else estimate.tax_rate
-        subtotal = sum(l.quantity * l.rate for l in data.lines)
+        subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
         estimate.subtotal = subtotal
-        estimate.tax_amount = subtotal * tax_rate
-        estimate.total = subtotal + estimate.tax_amount
+        estimate.tax_amount = tax_amount
+        estimate.total = total
 
     db.commit()
     db.refresh(estimate)
@@ -169,6 +172,29 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
         media_type="application/pdf",
         headers={"Content-Disposition": f"inline; filename=Estimate_{est.estimate_number}.pdf"},
     )
+
+
+@router.get("/{estimate_id}/print-preview")
+def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
+    """Render estimate as HTML page for browser print dialog (window.print())"""
+    est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    company = get_settings(db)
+    from jinja2 import Environment, FileSystemLoader
+    from pathlib import Path
+    template_dir = Path(__file__).parent.parent / "templates"
+    env = Environment(loader=FileSystemLoader(str(template_dir)), autoescape=True)
+    from app.services.pdf_service import _format_currency, _format_date
+    env.filters["currency"] = _format_currency
+    env.filters["fdate"] = _format_date
+    template = env.get_template("estimate_pdf.html")
+    if est.customer and not hasattr(est, 'customer_name'):
+        est.customer_name = est.customer.name
+    html_str = template.render(est=est, company=company)
+    html_str = html_str.replace("</body>", "<script>window.onload=function(){window.print();}</script></body>")
+    from fastapi.responses import HTMLResponse
+    return HTMLResponse(content=html_str)
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)
@@ -230,6 +256,56 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
 
     estimate.status = EstimateStatus.CONVERTED
     estimate.converted_invoice_id = invoice.id
+
+    # Journal Entry — DR A/R for total, CR income account per line item
+    ar_id = get_ar_account_id(db)
+    default_income_id = get_default_income_account_id(db)
+    tax_account_id = get_sales_tax_account_id(db)
+
+    if ar_id and default_income_id:
+        from decimal import Decimal
+        from app.models.items import Item
+        journal_lines = []
+        # Debit A/R for total
+        journal_lines.append({
+            "account_id": ar_id,
+            "debit": Decimal(str(invoice.total)),
+            "credit": Decimal("0"),
+            "description": f"Invoice #{invoice_number}",
+        })
+        # Credit income for each line item
+        for eline in estimate.lines:
+            line_amount = Decimal(str(eline.amount))
+            if line_amount == 0:
+                continue
+            income_id = default_income_id
+            if eline.item_id:
+                item = db.query(Item).filter(Item.id == eline.item_id).first()
+                if item and item.income_account_id:
+                    income_id = item.income_account_id
+            journal_lines.append({
+                "account_id": income_id,
+                "debit": Decimal("0"),
+                "credit": line_amount,
+                "description": eline.description or "",
+            })
+        # Credit sales tax if any
+        if invoice.tax_amount and invoice.tax_amount > 0 and tax_account_id:
+            journal_lines.append({
+                "account_id": tax_account_id,
+                "debit": Decimal("0"),
+                "credit": Decimal(str(invoice.tax_amount)),
+                "description": "Sales tax",
+            })
+
+        customer = estimate.customer
+        txn = create_journal_entry(
+            db, estimate.date,
+            f"Invoice #{invoice_number} - {customer.name if customer else ''}",
+            journal_lines, source_type="invoice", source_id=invoice.id,
+            reference=invoice_number,
+        )
+        invoice.transaction_id = txn.id
 
     db.commit()
     db.refresh(invoice)

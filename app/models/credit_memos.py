@@ -26,7 +26,7 @@ class CreditMemo(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     memo_number = Column(String(50), unique=True, nullable=False)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     status = Column(Enum(CreditMemoStatus), default=CreditMemoStatus.DRAFT)
     original_invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
 

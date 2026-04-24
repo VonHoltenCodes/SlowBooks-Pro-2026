@@ -42,7 +42,12 @@ from app.routes import companies, employees, payroll
 from app.routes import stripe_payments, public
 # Phase 8: QuickBooks Online
 from app.routes import qbo
+# Phase 9: Forum Bug Fixes & Missing Features
+from app.routes import journal, deposits, cc_charges, checks
+# Phase 10: Quick Wins + Medium Effort Features
+from app.routes import bank_rules, budgets, attachments, email_templates
 
+from app.config import CORS_ALLOW_ORIGINS
 from app.database import SessionLocal
 from app.services.audit import register_audit_hooks
 
@@ -50,7 +55,7 @@ app = FastAPI(title="Slowbooks Pro 2026", version="2.0.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -97,6 +102,16 @@ app.include_router(stripe_payments.router)
 app.include_router(public.router)
 # Phase 8: QuickBooks Online
 app.include_router(qbo.router)
+# Phase 9: Forum Bug Fixes & Missing Features
+app.include_router(journal.router)
+app.include_router(deposits.router)
+app.include_router(cc_charges.router)
+app.include_router(checks.router)
+# Phase 10: Quick Wins + Medium Effort Features
+app.include_router(bank_rules.router)
+app.include_router(budgets.router)
+app.include_router(attachments.router)
+app.include_router(email_templates.router)
 
 # Register audit log hooks
 register_audit_hooks(SessionLocal)

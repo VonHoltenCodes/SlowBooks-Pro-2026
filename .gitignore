@@ -12,3 +12,6 @@ build/
 *.swp
 *.swo
 *~
+.pytest_cache/
+# User-uploaded attachments / logos — runtime data, not source
+app/static/uploads/

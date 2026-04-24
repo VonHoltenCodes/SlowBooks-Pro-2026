@@ -8,7 +8,7 @@
 const SettingsPage = {
     async render() {
         const s = await API.get('/settings');
-        setTimeout(() => SettingsPage.loadBackups(), 0);
+        setTimeout(() => { SettingsPage.loadBackups(); SettingsPage.loadEmailTemplates(); }, 0);
         return `
             <div class="page-header">
                 <h2>Company Settings</h2>
@@ -169,6 +169,36 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section">
+                    <h3>Late Fees</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Automatically apply late fees to overdue invoices. Use "Apply Late Fees" on the AR Aging report.
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group"><label>Enable Late Fees</label>
+                            <select name="late_fee_enabled">
+                                <option value="false" ${s.late_fee_enabled !== 'true' ? 'selected' : ''}>Disabled</option>
+                                <option value="true" ${s.late_fee_enabled === 'true' ? 'selected' : ''}>Enabled</option>
+                            </select></div>
+                        <div class="form-group"><label>Late Fee Rate (%)</label>
+                            <input name="late_fee_rate" type="number" step="0.1" value="${escapeHtml(s.late_fee_rate || '1.5')}"></div>
+                        <div class="form-group"><label>Grace Days</label>
+                            <input name="late_fee_grace_days" type="number" value="${escapeHtml(s.late_fee_grace_days || '15')}"></div>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Email Templates</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Customize email templates for invoices, payment receipts, and collection notices.
+                        Templates use Jinja2 syntax. Available variables: {{ invoice }}, {{ customer_name }}, {{ company }}, {{ pay_url }}.
+                    </div>
+                    <div style="display:flex; gap:8px; margin-bottom:12px;">
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.seedTemplates()">Seed Default Templates</button>
+                    </div>
+                    <div id="email-template-list"></div>
+                </div>
+
+                <div class="settings-section">
                     <h3>Backup / Restore</h3>
                     <div style="display:flex; gap:8px; margin-bottom:12px;">
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.createBackup()">Create Backup</button>
@@ -244,5 +274,72 @@ const SettingsPage = {
                 </tr>`).join('')}</tbody>
             </table></div>`;
         } catch (e) { /* ignore */ }
+    },
+
+    async seedTemplates() {
+        try {
+            const result = await API.post('/email-templates/seed-defaults');
+            toast(`Created ${result.created} default templates`);
+            SettingsPage.loadEmailTemplates();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async loadEmailTemplates() {
+        try {
+            const templates = await API.get('/email-templates');
+            const el = $('#email-template-list');
+            if (!el) return;
+            if (templates.length === 0) {
+                el.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">No templates. Click "Seed Default Templates" to create them.</div>';
+                return;
+            }
+            el.innerHTML = `<div class="table-container"><table>
+                <thead><tr><th>Name</th><th>Type</th><th>Subject</th><th>Actions</th></tr></thead>
+                <tbody>${templates.map(t => `<tr>
+                    <td><strong>${escapeHtml(t.name)}</strong></td>
+                    <td>${escapeHtml(t.template_type)}</td>
+                    <td style="font-size:11px;">${escapeHtml(t.subject_template)}</td>
+                    <td class="actions">
+                        <button class="btn btn-sm btn-secondary" onclick="SettingsPage.editTemplate(${t.id})">Edit</button>
+                    </td>
+                </tr>`).join('')}</tbody>
+            </table></div>`;
+        } catch (e) { /* ignore */ }
+    },
+
+    async editTemplate(id) {
+        const t = await API.get(`/email-templates/${id}`);
+        openModal('Edit Email Template', `
+            <form onsubmit="SettingsPage.saveTemplate(event, ${id})">
+                <div class="form-grid">
+                    <div class="form-group"><label>Name</label>
+                        <input name="name" value="${escapeHtml(t.name)}" readonly style="background:var(--gray-100);"></div>
+                    <div class="form-group"><label>Type</label>
+                        <input name="template_type" value="${escapeHtml(t.template_type)}" readonly style="background:var(--gray-100);"></div>
+                    <div class="form-group full-width"><label>Subject Template</label>
+                        <input name="subject_template" value="${escapeHtml(t.subject_template)}"></div>
+                    <div class="form-group full-width"><label>Body Template (HTML + Jinja2)</label>
+                        <textarea name="body_template" rows="10" style="font-family:monospace; font-size:11px;">${escapeHtml(t.body_template)}</textarea></div>
+                </div>
+                <div style="font-size:10px; color:var(--text-muted); margin:8px 0;">
+                    Variables: {{ invoice.invoice_number }}, {{ invoice.total }}, {{ invoice.due_date }}, {{ customer_name }},
+                    {{ company.company_name }}, {{ pay_url }}, {{ amount }}. Filters: | currency, | fdate
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Template</button>
+                </div>
+            </form>`);
+    },
+
+    async saveTemplate(e, id) {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(e.target).entries());
+        try {
+            await API.put(`/email-templates/${id}`, { subject_template: data.subject_template, body_template: data.body_template });
+            toast('Template saved');
+            closeModal();
+            SettingsPage.loadEmailTemplates();
+        } catch (err) { toast(err.message, 'error'); }
     },
 };

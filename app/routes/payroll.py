@@ -6,7 +6,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models.payroll import PayRun, PayStub, PayRunStatus, Employee
@@ -20,13 +20,17 @@ router = APIRouter(prefix="/api/payroll", tags=["payroll"])
 
 @router.get("", response_model=list[PayRunResponse])
 def list_pay_runs(db: Session = Depends(get_db)):
-    runs = db.query(PayRun).order_by(PayRun.pay_date.desc()).all()
+    runs = (
+        db.query(PayRun)
+        .options(joinedload(PayRun.stubs).joinedload(PayStub.employee))
+        .order_by(PayRun.pay_date.desc())
+        .all()
+    )
     results = []
     for run in runs:
         resp = PayRunResponse.model_validate(run)
-        for stub_resp in resp.stubs:
-            stub = db.query(PayStub).filter(PayStub.id == stub_resp.id).first()
-            if stub and stub.employee:
+        for stub_resp, stub in zip(resp.stubs, run.stubs):
+            if stub.employee:
                 stub_resp.employee_name = f"{stub.employee.first_name} {stub.employee.last_name}"
         results.append(resp)
     return results
@@ -34,13 +38,17 @@ def list_pay_runs(db: Session = Depends(get_db)):
 
 @router.get("/{run_id}", response_model=PayRunResponse)
 def get_pay_run(run_id: int, db: Session = Depends(get_db)):
-    run = db.query(PayRun).filter(PayRun.id == run_id).first()
+    run = (
+        db.query(PayRun)
+        .options(joinedload(PayRun.stubs).joinedload(PayStub.employee))
+        .filter(PayRun.id == run_id)
+        .first()
+    )
     if not run:
         raise HTTPException(status_code=404, detail="Pay run not found")
     resp = PayRunResponse.model_validate(run)
-    for stub_resp in resp.stubs:
-        stub = db.query(PayStub).filter(PayStub.id == stub_resp.id).first()
-        if stub and stub.employee:
+    for stub_resp, stub in zip(resp.stubs, run.stubs):
+        if stub.employee:
             stub_resp.employee_name = f"{stub.employee.first_name} {stub.employee.last_name}"
     return resp
 

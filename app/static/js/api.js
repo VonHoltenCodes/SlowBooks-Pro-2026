@@ -11,6 +11,8 @@ const API = {
             method,
             headers: { 'Content-Type': 'application/json' },
         };
+        const companyId = localStorage.getItem('slowbooks_company');
+        if (companyId) opts.headers['X-Company-Id'] = companyId;
         if (body) opts.body = JSON.stringify(body);
         const res = await fetch(`/api${path}`, opts);
         if (!res.ok) {

@@ -27,7 +27,7 @@ const PaymentsPage = {
                 html += `<tr>
                     <td>${formatDate(p.date)}</td>
                     <td>${escapeHtml(p.customer_name || '')}</td>
-                    <td>${escapeHtml(p.method || '')}</td>
+                    <td>${escapeHtml(p.method || '')}${p.is_voided ? ' <span style="color:var(--danger);font-weight:700;">[VOID]</span>' : ''}</td>
                     <td>${escapeHtml(p.reference || p.check_number || '')}</td>
                     <td class="amount">${formatCurrency(p.amount)}</td>
                     <td class="actions">
@@ -64,9 +64,22 @@ const PaymentsPage = {
                 ${p.notes ? `<strong>Notes:</strong> ${escapeHtml(p.notes)}<br>` : ''}
             </div>
             ${allocHtml}
+            ${p.is_voided ? '<div style="color:var(--danger);font-weight:700;margin:12px 0;">This payment has been voided.</div>' : ''}
             <div class="form-actions">
+                ${!p.is_voided ? `<button class="btn btn-danger" onclick="PaymentsPage.void(${p.id})">Void Payment</button>` : ''}
+                ${p.method === 'Check' && p.check_number && !p.is_voided ? `<button class="btn btn-secondary" onclick="window.open('/api/checks/print?payment_id=${p.id}','_blank')">Print Check</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+    },
+
+    async void(id) {
+        if (!confirm('Void this payment? Invoice balances will be restored.')) return;
+        try {
+            await API.post(`/payments/${id}/void`);
+            toast('Payment voided');
+            closeModal();
+            App.navigate(location.hash);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     _invoices: [],
@@ -76,7 +89,7 @@ const PaymentsPage = {
             API.get('/customers?active_only=true'),
             API.get('/accounts'),
         ]);
-        const bankAccts = accounts.filter(a => a.account_type === 'asset' && ['1000','1010','1200'].includes(a.account_number));
+        const bankAccts = accounts.filter(a => a.account_type === 'asset');
 
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
         const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');

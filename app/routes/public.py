@@ -17,8 +17,7 @@ from app.routes.settings import _get_all as get_settings
 router = APIRouter(tags=["public"])
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
-_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
-
+_jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
 
 @router.get("/pay/{token}")
 def public_payment_page(token: str, status: str = None, db: Session = Depends(get_db)):

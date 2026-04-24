@@ -10,6 +10,7 @@ class IIFImportResult(BaseModel):
     payments: int = 0
     estimates: int = 0
     errors: list[dict] = []
+    warnings: list[str] = []
 
 
 class IIFValidationReport(BaseModel):

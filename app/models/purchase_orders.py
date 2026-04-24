@@ -27,7 +27,7 @@ class PurchaseOrder(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     po_number = Column(String(50), unique=True, nullable=False)
-    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False, index=True)
     status = Column(Enum(POStatus), default=POStatus.DRAFT)
 
     date = Column(Date, nullable=False)

@@ -40,6 +40,14 @@ const App = {
         '/companies':     { page: 'companies',       label: 'Companies',          render: () => CompaniesPage.render() },
         '/employees':     { page: 'employees',       label: 'Employees',          render: () => EmployeesPage.render() },
         '/payroll':       { page: 'payroll',         label: 'Payroll',            render: () => PayrollPage.render() },
+        // Phase 9: Forum Bug Fixes & Missing Features
+        '/journal':       { page: 'journal',         label: 'Journal Entries',    render: () => JournalPage.render() },
+        '/deposits':      { page: 'deposits',        label: 'Make Deposits',      render: () => DepositsPage.render() },
+        '/check-register': { page: 'check-register', label: 'Check Register',     render: () => CheckRegisterPage.render() },
+        '/cc-charges':    { page: 'cc-charges',      label: 'CC Charges',         render: () => CCChargesPage.render() },
+        // Phase 10: Quick Wins + Medium Effort Features
+        '/budgets':       { page: 'budgets',         label: 'Budget vs Actual',   render: () => BudgetsPage.render() },
+        '/bank-rules':    { page: 'bank-rules',      label: 'Bank Rules',         render: () => BankRulesPage.render() },
     },
 
     async navigate(hash) {

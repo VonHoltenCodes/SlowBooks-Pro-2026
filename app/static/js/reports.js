@@ -39,6 +39,22 @@ const ReportsPage = {
                     <div class="card-header">Customer Statement</div>
                     <p style="font-size:13px; color:var(--gray-500);">Invoice/payment history PDF</p>
                 </div>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.trialBalance()">
+                    <div class="card-header">Trial Balance</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Debits and credits by account</p>
+                </div>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.cashFlow()">
+                    <div class="card-header">Cash Flow</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Operating, investing, financing</p>
+                </div>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.report1099()">
+                    <div class="card-header">1099 Summary</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Vendor payments for 1099 filing</p>
+                </div>
+                <div class="card" style="cursor:pointer" onclick="BudgetsPage.showVariance()">
+                    <div class="card-header">Budget vs Actual</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Monthly budget variance analysis</p>
+                </div>
             </div>`;
     },
 
@@ -396,6 +412,16 @@ const ReportsPage = {
             </tr>`;
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
+                <div style="margin-bottom:12px; display:flex; gap:8px;">
+                    <button class="btn btn-sm btn-secondary" onclick="ReportsPage.applyLateFees()">Apply Late Fees</button>
+                    <button class="btn btn-sm btn-secondary" onclick="ReportsPage.batchEmailStatements()">Email All Overdue</button>
+                    <select id="collection-letter-type" style="font-size:11px; padding:2px 6px;">
+                        <option value="30">30-Day Letter</option>
+                        <option value="60">60-Day Letter</option>
+                        <option value="90">90-Day Letter</option>
+                    </select>
+                    <button class="btn btn-sm btn-secondary" onclick="ReportsPage.sendCollectionLetters()">Send Collection Letters</button>
+                </div>
                 <div class="table-container"><table>
                     <thead><tr>
                         <th>Customer</th><th class="amount">Current</th><th class="amount">1-30</th>
@@ -404,5 +430,138 @@ const ReportsPage = {
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
                 </table></div>`;
         }, "As Of", true);
+    },
+
+    async trialBalance() {
+        await ReportsPage.openPeriodModal("Trial Balance", "this_year_to_date", async (_period, range) => {
+            const data = await API.get(`/reports/trial-balance?start_date=${range.start}&end_date=${range.end}`);
+            let rows = data.items.map(i =>
+                `<tr>
+                    <td>${escapeHtml(i.account_number)}</td>
+                    <td>${escapeHtml(i.account_name)}</td>
+                    <td style="font-size:10px; color:var(--gray-400);">${i.account_type}</td>
+                    <td class="amount">${i.total_debit > 0 ? formatCurrency(i.total_debit) : ''}</td>
+                    <td class="amount">${i.total_credit > 0 ? formatCurrency(i.total_credit) : ''}</td>
+                    <td class="amount">${formatCurrency(i.net_balance)}</td>
+                </tr>`
+            ).join('');
+            const diffColor = Math.abs(data.difference) < 0.01 ? 'var(--success)' : 'var(--danger)';
+            rows += `<tr style="font-weight:700; background:var(--gray-50);">
+                <td colspan="3">TOTALS</td>
+                <td class="amount">${formatCurrency(data.total_debit)}</td>
+                <td class="amount">${formatCurrency(data.total_credit)}</td>
+                <td class="amount" style="color:${diffColor}">${formatCurrency(data.difference)}</td>
+            </tr>`;
+            return `
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
+                <div class="table-container"><table>
+                    <thead><tr><th>Number</th><th>Account</th><th>Type</th><th class="amount">Debit</th><th class="amount">Credit</th><th class="amount">Net</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>`;
+        });
+    },
+
+    async cashFlow() {
+        await ReportsPage.openPeriodModal("Cash Flow Statement", "this_year_to_date", async (_period, range) => {
+            const data = await API.get(`/reports/cash-flow?start_date=${range.start}&end_date=${range.end}`);
+            const section = (title, items, total) => {
+                let html = `<tr><td><strong>${title}</strong></td><td></td></tr>`;
+                if (items.length === 0) {
+                    html += `<tr><td style="padding-left:24px; color:var(--gray-400);">None</td><td></td></tr>`;
+                } else {
+                    html += items.map(i =>
+                        `<tr><td style="padding-left:24px;">${escapeHtml(i.account_name)}</td><td class="amount">${formatCurrency(i.amount)}</td></tr>`
+                    ).join('');
+                }
+                html += `<tr style="font-weight:600; background:var(--gray-50);"><td>Total ${title}</td><td class="amount">${formatCurrency(total)}</td></tr>`;
+                return html;
+            };
+            return `
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
+                <div class="table-container"><table>
+                    <thead><tr><th>Account</th><th class="amount">Amount</th></tr></thead>
+                    <tbody>
+                        ${section('Operating Activities', data.operating, data.total_operating)}
+                        ${section('Investing Activities', data.investing, data.total_investing)}
+                        ${section('Financing Activities', data.financing, data.total_financing)}
+                        <tr style="font-weight:700; font-size:15px; background:var(--primary-light);">
+                            <td>Net Change in Cash</td><td class="amount">${formatCurrency(data.net_change)}</td>
+                        </tr>
+                    </tbody>
+                </table></div>`;
+        });
+    },
+
+    async report1099() {
+        const currentYear = new Date().getFullYear();
+        openModal('1099 Summary', `
+            <div class="form-grid" style="margin-bottom:12px;">
+                <div class="form-group"><label>Year</label>
+                    <input id="report-1099-year" type="number" value="${currentYear}" style="width:100px;"></div>
+                <div class="form-group" style="align-self:end;">
+                    <button class="btn btn-primary" onclick="ReportsPage.load1099()">Generate</button></div>
+            </div>
+            <div id="report-1099-content"><div style="font-size:11px; color:var(--gray-500);">Select year and click Generate</div></div>
+            <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+    },
+
+    async load1099() {
+        const year = $('#report-1099-year').value;
+        const content = $('#report-1099-content');
+        content.innerHTML = '<div style="font-size:11px; color:var(--gray-500);">Loading...</div>';
+        try {
+            const data = await API.get(`/reports/1099-summary?year=${year}`);
+            if (data.items.length === 0) {
+                content.innerHTML = '<div class="empty-state"><p>No 1099 vendors found. Flag vendors as 1099 in the Vendors page.</p></div>';
+                return;
+            }
+            let rows = data.items.map(i =>
+                `<tr${i.above_threshold ? ' style="background:var(--primary-light);"' : ''}>
+                    <td>${escapeHtml(i.vendor_name)}</td>
+                    <td>${escapeHtml(i.tax_id)}</td>
+                    <td>${escapeHtml(i.vendor_1099_type)}</td>
+                    <td class="amount">${formatCurrency(i.total_paid)}</td>
+                    <td>${i.above_threshold ? '<span style="color:var(--danger); font-weight:700;">REPORT</span>' : ''}</td>
+                </tr>`
+            ).join('');
+            rows += `<tr style="font-weight:700; background:var(--gray-50);">
+                <td colspan="3">TOTAL</td><td class="amount">${formatCurrency(data.total)}</td>
+                <td>${data.vendors_above_threshold} vendor(s) above $${data.threshold}</td></tr>`;
+            content.innerHTML = `
+                <div class="table-container"><table>
+                    <thead><tr><th>Vendor</th><th>Tax ID</th><th>Type</th><th class="amount">Total Paid</th><th>Status</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>`;
+        } catch (err) { content.innerHTML = `<div style="color:var(--danger);">${escapeHtml(err.message)}</div>`; }
+    },
+
+    async applyLateFees() {
+        if (!confirm('Apply late fees to all overdue invoices past the grace period?')) return;
+        try {
+            const result = await API.post('/invoices/apply-late-fees');
+            toast(`Late fees applied to ${result.applied} of ${result.total_overdue} overdue invoices`);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async batchEmailStatements() {
+        if (!confirm('Email statements to all customers with overdue invoices?')) return;
+        try {
+            const result = await API.post('/reports/batch-email-statements');
+            let msg = `Sent ${result.sent} statements`;
+            if (result.failed > 0) msg += `, ${result.failed} failed`;
+            toast(msg);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async sendCollectionLetters() {
+        const letterType = $('#collection-letter-type')?.value || '30';
+        if (!confirm(`Send ${letterType}-day collection letters to all qualifying customers?`)) return;
+        try {
+            const result = await API.post('/reports/collection-letters', {
+                letter_type: letterType,
+                send_email: true,
+            });
+            toast(`Generated ${result.generated} letters, emailed ${result.emailed}`);
+        } catch (err) { toast(err.message, 'error'); }
     },
 };

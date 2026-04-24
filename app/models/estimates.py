@@ -31,7 +31,7 @@ class Estimate(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     estimate_number = Column(String(50), unique=True, nullable=False)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
     status = Column(Enum(EstimateStatus), default=EstimateStatus.PENDING)
 
     date = Column(Date, nullable=False)
@@ -49,7 +49,7 @@ class Estimate(Base):
     total = Column(Numeric(12, 2), default=0)
 
     notes = Column(Text, nullable=True)
-    converted_invoice_id = Column(Integer, ForeignKey("invoices.id"), nullable=True)
+    converted_invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

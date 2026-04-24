@@ -1,4 +1,5 @@
 #!/bin/bash
+set -eo pipefail
 # ============================================================================
 # Decompiled from qbw32.exe!CBackupManager::DoBackup()  Offset: 0x00248000
 # Original backed up the .QBW file (Btrieve database) to a user-specified

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.accounts import Account
 from app.schemas.accounts import AccountCreate, AccountUpdate, AccountResponse
+from app.routes._helpers import get_or_404
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -20,10 +21,7 @@ def list_accounts(active_only: bool = False, account_type: str = None, db: Sessi
 
 @router.get("/{account_id}", response_model=AccountResponse)
 def get_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    return account
+    return get_or_404(db, Account, account_id)
 
 
 @router.post("", response_model=AccountResponse, status_code=201)
@@ -37,9 +35,7 @@ def create_account(data: AccountCreate, db: Session = Depends(get_db)):
 
 @router.put("/{account_id}", response_model=AccountResponse)
 def update_account(account_id: int, data: AccountUpdate, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    account = get_or_404(db, Account, account_id)
     for key, val in data.model_dump(exclude_unset=True).items():
         setattr(account, key, val)
     db.commit()
@@ -49,9 +45,7 @@ def update_account(account_id: int, data: AccountUpdate, db: Session = Depends(g
 
 @router.delete("/{account_id}")
 def delete_account(account_id: int, db: Session = Depends(get_db)):
-    account = db.query(Account).filter(Account.id == account_id).first()
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
+    account = get_or_404(db, Account, account_id)
     if account.is_system:
         raise HTTPException(status_code=400, detail="Cannot delete system account")
     db.delete(account)

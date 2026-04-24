@@ -30,4 +30,7 @@ RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 3001
 
+RUN useradd -m -r slowbooks && chown -R slowbooks:slowbooks /app
+USER slowbooks
+
 ENTRYPOINT ["./docker-entrypoint.sh"]

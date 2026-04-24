@@ -3,6 +3,7 @@
 # Feature 10: Configurable closing date with optional password override
 # ============================================================================
 
+import hmac
 from datetime import date
 
 from fastapi import HTTPException
@@ -32,7 +33,7 @@ def check_closing_date(db: Session, txn_date: date, password: str = None):
     if txn_date <= closing:
         # Check if password override is available
         pw_row = db.query(Settings).filter(Settings.key == "closing_date_password").first()
-        if pw_row and pw_row.value and password and password == pw_row.value:
+        if pw_row and pw_row.value and password and hmac.compare_digest(password, pw_row.value):
             return  # Password override accepted
         raise HTTPException(
             status_code=403,

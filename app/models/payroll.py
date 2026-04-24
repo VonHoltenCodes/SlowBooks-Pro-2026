@@ -88,7 +88,7 @@ class PayStub(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     pay_run_id = Column(Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False)
-    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False)
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
 
     hours = Column(Numeric(10, 2), default=0)
     gross_pay = Column(Numeric(12, 2), default=0)

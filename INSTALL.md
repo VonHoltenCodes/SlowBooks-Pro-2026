@@ -54,6 +54,16 @@ APP_PORT=8080
 ```
 Then `docker compose up` — the app will be at http://localhost:8080.
 
+### Allowing a different browser origin
+
+CORS defaults to `http://localhost:APP_PORT` and `http://127.0.0.1:APP_PORT`.
+If the UI is served from a different host (reverse proxy, LAN IP, etc.), set
+`CORS_ALLOW_ORIGINS` in `.env` to a comma-separated allowlist:
+
+```
+CORS_ALLOW_ORIGINS=https://books.example.com,https://admin.example.com
+```
+
 ### Backups
 
 Backups created from the Settings UI are stored in a Docker volume. To copy them out:

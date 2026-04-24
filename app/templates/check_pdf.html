@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page { size: letter; margin: 0.25in 0.5in; }
+    body { font-family: 'Courier New', Courier, monospace; font-size: 10pt; color: #000; }
+    .check-page { height: 10in; display: flex; flex-direction: column; }
+    .stub { height: 3.33in; border-bottom: 1px dashed #999; padding: 0.25in 0.25in; box-sizing: border-box; }
+    .check-area { height: 3.33in; padding: 0.25in 0.25in; box-sizing: border-box; position: relative; }
+    .stub-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 9pt; }
+    .stub-company { font-weight: bold; font-size: 11pt; }
+    .stub-table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+    .stub-table th { text-align: left; padding: 2px 6px; border-bottom: 1px solid #333; font-size: 8pt; }
+    .stub-table td { padding: 2px 6px; border-bottom: 1px solid #ddd; }
+    .stub-table td.r { text-align: right; }
+    .check-number { position: absolute; top: 0.25in; right: 0.25in; font-size: 11pt; font-weight: bold; }
+    .check-date { position: absolute; top: 0.25in; right: 2.5in; font-size: 10pt; }
+    .check-date-label { font-size: 8pt; color: #666; }
+    .check-company { font-weight: bold; font-size: 11pt; margin-bottom: 4px; }
+    .check-company-addr { font-size: 8pt; color: #444; margin-bottom: 16px; }
+    .pay-to { margin-top: 0.5in; }
+    .pay-to-label { font-size: 8pt; color: #666; }
+    .pay-to-line { font-size: 12pt; font-weight: bold; border-bottom: 1px solid #000; padding-bottom: 2px; display: inline-block; min-width: 4in; }
+    .amount-box { position: absolute; top: 1in; right: 0.25in; border: 2px solid #000; padding: 4px 12px; font-size: 14pt; font-weight: bold; }
+    .amount-words { margin-top: 8px; font-size: 9pt; border-bottom: 1px solid #000; padding-bottom: 2px; }
+    .memo-line { position: absolute; bottom: 0.5in; left: 0.25in; font-size: 8pt; }
+    .memo-label { color: #666; }
+    .memo-text { border-bottom: 1px solid #000; display: inline-block; min-width: 3in; padding-bottom: 2px; }
+    .signature-line { position: absolute; bottom: 0.5in; right: 0.25in; border-bottom: 1px solid #000; width: 2.5in; }
+</style>
+</head>
+<body>
+    <div class="check-page">
+        <!-- Top Stub -->
+        <div class="stub">
+            <div class="stub-header">
+                <div class="stub-company">{{ company.company_name or 'Company' }}</div>
+                <div>Check #{{ check.check_number }} &bull; {{ check.date | fdate }}</div>
+            </div>
+            <div style="font-size:9pt; margin-bottom:6px;">
+                <strong>Pay To:</strong> {{ check.payee }}
+                &nbsp;&bull;&nbsp;
+                <strong>Amount:</strong> {{ check.amount | currency }}
+            </div>
+            <table class="stub-table">
+                <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
+                <tbody>
+                {% for d in check.details %}
+                <tr><td>{{ d.description }}</td><td class="r">{{ d.amount | currency }}</td></tr>
+                {% endfor %}
+                {% if not check.details %}
+                <tr><td>Payment</td><td class="r">{{ check.amount | currency }}</td></tr>
+                {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Middle Stub -->
+        <div class="stub">
+            <div class="stub-header">
+                <div class="stub-company">{{ company.company_name or 'Company' }}</div>
+                <div>Check #{{ check.check_number }} &bull; {{ check.date | fdate }}</div>
+            </div>
+            <div style="font-size:9pt; margin-bottom:6px;">
+                <strong>Pay To:</strong> {{ check.payee }}
+                &nbsp;&bull;&nbsp;
+                <strong>Amount:</strong> {{ check.amount | currency }}
+            </div>
+            <table class="stub-table">
+                <thead><tr><th>Description</th><th style="text-align:right;">Amount</th></tr></thead>
+                <tbody>
+                {% for d in check.details %}
+                <tr><td>{{ d.description }}</td><td class="r">{{ d.amount | currency }}</td></tr>
+                {% endfor %}
+                {% if not check.details %}
+                <tr><td>Payment</td><td class="r">{{ check.amount | currency }}</td></tr>
+                {% endif %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Actual Check -->
+        <div class="check-area">
+            <div class="check-company">{{ company.company_name or 'Company' }}</div>
+            <div class="check-company-addr">
+                {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
+                {% if company.company_city %}{{ company.company_city }}, {{ company.company_state }} {{ company.company_zip }}{% endif %}
+            </div>
+            <div class="check-number">#{{ check.check_number }}</div>
+            <div class="check-date">
+                <span class="check-date-label">DATE</span><br>
+                {{ check.date | fdate }}
+            </div>
+            <div class="pay-to">
+                <span class="pay-to-label">PAY TO THE ORDER OF</span><br>
+                <span class="pay-to-line">{{ check.payee }}</span>
+            </div>
+            <div class="amount-box">{{ check.amount | currency }}</div>
+            <div class="amount-words">{{ check.amount_words }} ******</div>
+            <div class="memo-line">
+                <span class="memo-label">MEMO</span>
+                <span class="memo-text">{{ check.memo or '' }}</span>
+            </div>
+            <div class="signature-line"></div>
+        </div>
+    </div>
+</body>
+</html>

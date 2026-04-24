@@ -52,6 +52,16 @@
     --warning:        #cc9933;
     --danger:         #cc3333;
 
+    /* -- Gray scale (used by JS components and dark theme overrides) -- */
+    --primary-light: #e8ecf2;
+    --gray-50:  #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+
     --sidebar-width: 200px;
     --topbar-height: 40px;
     --statusbar-height: 24px;
