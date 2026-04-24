@@ -15,7 +15,7 @@ from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from fastapi import HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from app.services.settings_service import get_all_settings, set_setting
+from app.services.settings_service import get_setting_raw, set_setting
 
 # Settings-table key where the argon2 hash lives
 AUTH_PASSWORD_KEY = "auth_password_hash"
@@ -70,19 +70,27 @@ def get_session_secret() -> str:
 
     new_key = secrets.token_urlsafe(48)
     try:
-        key_path.write_text(new_key)
-        key_path.chmod(0o600)
+        import tempfile
+
+        fd, tmp = tempfile.mkstemp(dir=str(key_path.parent), prefix=".session-key-")
+        os.write(fd, new_key.encode())
+        os.close(fd)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, str(key_path))
     except OSError:
-        # Read-only FS (e.g. some container layers) — use in-memory only.
-        # Sessions will invalidate on restart, which is acceptable fallback.
         pass
+    if key_path.exists():
+        try:
+            return key_path.read_text().strip() or new_key
+        except OSError:
+            pass
     return new_key
 
 
 def password_is_set(db: Session) -> bool:
     """Has the operator completed first-run setup?"""
-    settings = get_all_settings(db)
-    return bool((settings.get(AUTH_PASSWORD_KEY) or "").strip())
+    stored = get_setting_raw(db, AUTH_PASSWORD_KEY)
+    return bool((stored or "").strip())
 
 
 def set_password(db: Session, plain: str) -> None:
@@ -98,8 +106,7 @@ def set_password(db: Session, plain: str) -> None:
 
 def check_password(db: Session, plain: str) -> bool:
     """Check a submitted password against the stored hash."""
-    settings = get_all_settings(db)
-    stored = settings.get(AUTH_PASSWORD_KEY) or ""
+    stored = get_setting_raw(db, AUTH_PASSWORD_KEY) or ""
     if not stored:
         return False
     return verify_password(plain, stored)

@@ -49,10 +49,12 @@ def make_backup(data: BackupCreate = BackupCreate(), db: Session = Depends(get_d
 
 @router.get("/download/{filename}")
 def download_backup(filename: str):
-    filepath = BACKUP_DIR / filename
+    filepath = (BACKUP_DIR / filename).resolve()
+    if not filepath.parent == BACKUP_DIR.resolve():
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not filepath.exists():
         raise HTTPException(status_code=404, detail="Backup file not found")
-    return FileResponse(str(filepath), filename=filename, media_type="application/octet-stream")
+    return FileResponse(str(filepath), filename=filepath.name, media_type="application/octet-stream")
 
 
 @router.post("/restore")

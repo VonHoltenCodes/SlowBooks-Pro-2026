@@ -41,6 +41,9 @@ RUN python -m compileall -q -j 0 /usr/local/lib/python3.13/site-packages /app ||
 
 RUN chmod +x docker-entrypoint.sh
 
+RUN useradd -m -u 1000 slowbooks && chown -R slowbooks:slowbooks /app
+USER slowbooks
+
 EXPOSE 3001
 
 ENTRYPOINT ["./docker-entrypoint.sh"]

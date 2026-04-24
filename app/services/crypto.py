@@ -30,7 +30,6 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
 from typing import Optional
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -67,13 +66,22 @@ def _load_or_create_master_key() -> bytes:
     # the env var nor the file exists — so subsequent restarts will
     # pick up the same key from disk and decryption will be stable.
     key = Fernet.generate_key()
-    _KEY_FILE.write_bytes(key)
     try:
-        _KEY_FILE.chmod(0o600)
+        import tempfile
+
+        fd, tmp = tempfile.mkstemp(dir=str(_KEY_FILE.parent), prefix=".master-key-")
+        os.write(fd, key)
+        os.close(fd)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, str(_KEY_FILE))
     except OSError:
-        # Not fatal on filesystems that don't support chmod (e.g. some
-        # Docker-mounted volumes), but warn loudly so ops knows.
-        logger.warning("Could not set 0600 perms on %s — check volume permissions", _KEY_FILE)
+        try:
+            _KEY_FILE.write_bytes(key)
+            _KEY_FILE.chmod(0o600)
+        except OSError:
+            logger.warning(
+                "Could not persist key to %s — check volume permissions", _KEY_FILE
+            )
     logger.warning(
         "Generated new settings encryption key at %s. "
         "Back this file up — losing it means losing access to every "
@@ -127,7 +135,7 @@ def decrypt_value(stored: str) -> str:
         return stored or ""
     if not stored.startswith(CIPHERTEXT_PREFIX):
         return stored
-    token = stored[len(CIPHERTEXT_PREFIX):].encode("ascii")
+    token = stored[len(CIPHERTEXT_PREFIX) :].encode("ascii")
     try:
         return _fernet().decrypt(token).decode("utf-8")
     except InvalidToken:

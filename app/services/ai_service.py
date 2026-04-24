@@ -753,6 +753,7 @@ def call_with_tools(
 
     wire_format = spec.wire_format
     messages = [{"role": "user", "content": user_question}]
+    gemini_contents = [{"role": "user", "parts": [{"text": user_question}]}]
     tool_calls_made = []
     iteration = 0
 
@@ -837,10 +838,7 @@ def call_with_tools(
                     ]
                 }
             ]
-            req["json"]["contents"] = [
-                {"role": "user", "parts": [{"text": user_question}]}
-            ]
-            # Remove the old messages/contents structure
+            req["json"]["contents"] = gemini_contents
             if "messages" in req["json"]:
                 del req["json"]["messages"]
         else:
@@ -962,8 +960,32 @@ def call_with_tools(
                 )
 
             elif wire_format == "gemini":
-                # Gemini's tool results go in functionResponse
-                pass  # TODO: Implement Gemini tool result handling
+                gemini_contents.append(
+                    {
+                        "role": "model",
+                        "parts": [
+                            {
+                                "functionCall": {
+                                    "name": tool_name,
+                                    "args": tool_params,
+                                }
+                            }
+                        ],
+                    }
+                )
+                gemini_contents.append(
+                    {
+                        "role": "function",
+                        "parts": [
+                            {
+                                "functionResponse": {
+                                    "name": tool_name,
+                                    "response": {"content": str(result)},
+                                }
+                            }
+                        ],
+                    }
+                )
 
     # Max iterations reached
     return {

@@ -114,6 +114,17 @@ app.add_middleware(
 # which is a big win over LAN for /api/analytics/dashboard and friends.
 app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
+
+
 # ---- Auth gate (Phase 9.7) ----
 # Single middleware that lets through static assets, the SPA shell, the
 # auth routes themselves, /health, and the public customer pay page.

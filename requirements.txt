@@ -10,17 +10,17 @@ jinja2==3.1.6
 weasyprint==68.1
 pydyf==0.12.1
 python-multipart==0.0.26
-ofxparse>=0.21
-python-dateutil>=2.9.0
-stripe>=8.0.0
-python-quickbooks>=0.9.0
-intuit-oauth>=1.2.0
+ofxparse>=0.21,<1.0
+python-dateutil>=2.9.0,<3.0
+stripe>=8.0.0,<10.0
+python-quickbooks>=0.9.0,<1.0
+intuit-oauth>=1.2.0,<2.0
 # Phase 9.5 — Analytics AI insights + secrets encryption
-cryptography>=41.0.0
-httpx>=0.27.0
+cryptography>=41.0.0,<44.0
+httpx>=0.27.0,<1.0
 # Fast JSON encoder (used by FastAPI ORJSONResponse for all /api/* replies)
-orjson>=3.10.0
+orjson>=3.10.0,<4.0
 # Phase 9.7 - Single-user auth + rate limiting
-argon2-cffi>=23.1.0
-itsdangerous>=2.1.0  # Starlette SessionMiddleware signer
-slowapi>=0.1.9
+argon2-cffi>=23.1.0,<24.0
+itsdangerous>=2.1.0,<3.0  # Starlette SessionMiddleware signer
+slowapi>=0.1.9,<1.0
