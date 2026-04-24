@@ -251,6 +251,24 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         )
         invoice.transaction_id = txn.id
 
+    # ---- Phase 11: inventory/COGS posting ----
+    # For each line with an inventory-tracked item, decrement qty and post
+    # a DR COGS / CR Inventory journal at the current weighted-avg cost.
+    # Services/labor/non-inventory items skip this entirely.
+    from app.services.inventory_service import record_sale
+    for line_data in data.lines:
+        if not line_data.item_id:
+            continue
+        item = db.query(Item).filter(Item.id == line_data.item_id).first()
+        if item and item.track_inventory:
+            record_sale(
+                db, item,
+                quantity=Decimal(str(line_data.quantity)),
+                source_type="invoice", source_id=invoice.id,
+                memo=f"Invoice #{invoice_number}",
+                txn_date=data.date,
+            )
+
     db.commit()
     db.refresh(invoice)
     resp = InvoiceResponse.model_validate(invoice)
@@ -418,6 +436,20 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
                 f"VOID Invoice #{invoice.invoice_number}",
                 reverse_lines, source_type="invoice_void", source_id=invoice.id,
                 reference=invoice.invoice_number,
+            )
+
+    # ---- Phase 11: reverse inventory movements ----
+    from app.services.inventory_service import reverse_sale
+    for line in invoice.lines:
+        if not line.item_id:
+            continue
+        item = db.query(Item).filter(Item.id == line.item_id).first()
+        if item and item.track_inventory:
+            reverse_sale(
+                db, item,
+                quantity=Decimal(str(line.quantity)),
+                source_type="invoice_void", source_id=invoice.id,
+                txn_date=invoice.date,
             )
 
     invoice.status = InvoiceStatus.VOID

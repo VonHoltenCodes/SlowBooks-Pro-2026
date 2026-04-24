@@ -85,28 +85,50 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     default_expense_id = db.query(Account).filter(Account.account_number == "6000").first()
     default_expense_id = default_expense_id.id if default_expense_id else None
 
+    # Phase 11: track which lines are inventory receipts so we can write
+    # InventoryMovement rows after the JE posts.
+    from app.services.inventory_service import (
+        get_inventory_asset_account_id,
+        record_purchase,
+    )
+    inv_receipts = []  # [(item, quantity, unit_cost), ...]
+
     journal_lines = []
     for i, line_data in enumerate(data.lines):
         amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
-        expense_acct = line_data.account_id
-        if not expense_acct and line_data.item_id:
+        item = None
+        if line_data.item_id:
             item = db.query(Item).filter(Item.id == line_data.item_id).first()
-            if item and item.expense_account_id:
-                expense_acct = item.expense_account_id
-        if not expense_acct and vendor.default_expense_account_id:
-            expense_acct = vendor.default_expense_account_id
-        if not expense_acct:
-            expense_acct = default_expense_id
+
+        # Phase 11: for inventory-tracked items, the DR side goes to the
+        # Inventory Asset account (NOT the expense account). The item will
+        # move to COGS only when it's sold.
+        if item and item.track_inventory:
+            posting_acct = get_inventory_asset_account_id(db, item)
+            if line_data.quantity > 0:
+                inv_receipts.append((
+                    item,
+                    Decimal(str(line_data.quantity)),
+                    Decimal(str(line_data.rate)),  # unit cost from the bill
+                ))
+        else:
+            posting_acct = line_data.account_id
+            if not posting_acct and item and item.expense_account_id:
+                posting_acct = item.expense_account_id
+            if not posting_acct and vendor.default_expense_account_id:
+                posting_acct = vendor.default_expense_account_id
+            if not posting_acct:
+                posting_acct = default_expense_id
 
         db.add(BillLine(
-            bill_id=bill.id, item_id=line_data.item_id, account_id=expense_acct,
+            bill_id=bill.id, item_id=line_data.item_id, account_id=posting_acct,
             description=line_data.description, quantity=line_data.quantity,
             rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
         ))
 
-        if amt > 0 and expense_acct:
+        if amt > 0 and posting_acct:
             journal_lines.append({
-                "account_id": expense_acct,
+                "account_id": posting_acct,
                 "debit": amt, "credit": Decimal("0"),
                 "description": line_data.description or "",
             })
@@ -134,6 +156,17 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
             journal_lines, source_type="bill", source_id=bill.id,
         )
         bill.transaction_id = txn.id
+
+    # Phase 11: record inventory movements (no additional JE — the bill's
+    # existing JE already debits the Inventory Asset account for these lines)
+    for item, qty, unit_cost in inv_receipts:
+        record_purchase(
+            db, item, quantity=qty, unit_cost=unit_cost,
+            source_type="bill", source_id=bill.id,
+            memo=f"Bill {data.bill_number}",
+            post_journal=False,
+            txn_date=data.date,
+        )
 
     db.commit()
     db.refresh(bill)
@@ -163,6 +196,23 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
         if reverse_lines:
             create_journal_entry(db, bill.date, f"VOID Bill {bill.bill_number}",
                                  reverse_lines, source_type="bill_void", source_id=bill.id)
+
+    # Phase 11: reverse inventory receipts (the reversing JE already undoes
+    # the Inventory Asset side; we just need the movement rows)
+    from app.services.inventory_service import _append_movement
+    from app.models.items import MovementType as _MovementType
+    for line in bill.lines:
+        if not line.item_id:
+            continue
+        item = db.query(Item).filter(Item.id == line.item_id).first()
+        if item and item.track_inventory and line.quantity > 0:
+            _append_movement(
+                db, item, _MovementType.VOID,
+                quantity=-Decimal(str(line.quantity)),
+                unit_cost=Decimal(str(line.rate)),
+                source_type="bill_void", source_id=bill.id,
+                memo=f"VOID Bill {bill.bill_number}",
+            )
 
     bill.status = BillStatus.VOID
     bill.balance_due = Decimal("0")

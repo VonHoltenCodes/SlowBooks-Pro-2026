@@ -72,6 +72,9 @@ from app.routes import journal, deposits, cc_charges, checks
 # Phase 10: Quick Wins + Medium Effort Features
 from app.routes import bank_rules, budgets, attachments, email_templates
 
+# Phase 11: Inventory tracking + drill-down reports + saved reports
+from app.routes import saved_reports
+
 # Phase 9: Analytics (real-time business intelligence)
 from app.routes import analytics
 
@@ -230,6 +233,8 @@ app.include_router(bank_rules.router)
 app.include_router(budgets.router)
 app.include_router(attachments.router)
 app.include_router(email_templates.router)
+# Phase 11: Saved Reports (inventory endpoints live on the items router)
+app.include_router(saved_reports.router)
 
 # Register audit log hooks
 register_audit_hooks(SessionLocal)

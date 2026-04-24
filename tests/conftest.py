@@ -57,6 +57,7 @@ from app.models import recurring as _m_recurring  # noqa: F401,E402
 from app.models import settings as _m_settings  # noqa: F401,E402
 from app.models import tax as _m_tax  # noqa: F401,E402
 from app.models import transactions as _m_transactions  # noqa: F401,E402
+from app.models import saved_reports as _m_saved_reports  # noqa: F401,E402
 
 from app.main import app  # noqa: E402
 

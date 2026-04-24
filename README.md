@@ -230,7 +230,7 @@ Every tool is **strictly read-only**: it builds `db.query()` calls that cannot i
 
 Results are not cached (each question may be distinct). If you ask the same question twice you'll run the loop twice.
 
-**Test coverage:** 92 pytest tests cover AI security, analytics, auth flow, CORS, CSV safety, attachments, IIF import, invoice posting/editing, reporting, and rate limiting — all running in under 6 seconds with zero network dependencies.
+**Test coverage:** 119 pytest tests cover AI security, analytics, auth flow, CORS, CSV safety, attachments, IIF import, invoice posting/editing, reporting, rate limiting, inventory posting (COGS, weighted-avg cost, voids), drill-down queries, duplicate detection, and saved reports — all running in under 10 seconds with zero network dependencies.
 
 **PDF export:**
 ```bash
@@ -272,6 +272,17 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 - **Print Preview** — Browser print dialog for invoices and estimates via dedicated HTML preview endpoints. Native OS print dialog with "Save as PDF" option
 - **Print-Optimized PDF** — Enhanced invoice PDF template with company logo support
 - **IIF Import/Export** — Full QuickBooks 2003 Pro interoperability (see below)
+
+### Inventory, Drill-Down & Duplicate Detection (Phase 11)
+- **Real inventory tracking** — Items can be marked `track_inventory=True` to hit a perpetual-inventory ledger. Every purchase (bill) and sale (invoice) writes a row to `inventory_movements` and updates `quantity_on_hand` + weighted-average `avg_cost`
+- **Automatic COGS journal entries** — Selling an inventory item posts `DR COGS / CR Inventory Asset` at the current weighted-avg cost. Voids reverse the entry
+- **Weighted-average cost** — Standard perpetual-inventory model: `new_avg = (old_qty × old_avg + received_qty × received_cost) / (old_qty + received_qty)`
+- **Reorder points + low-stock report** — `GET /api/items/low-stock` returns items at or below their reorder point, worst-shortage first
+- **Inventory valuation** — `GET /api/items/valuation` sums `qty × avg_cost` across all tracked items
+- **Manual adjustments** — `POST /api/items/{id}/adjust` for count corrections, shrinkage, spoilage with an offsetting JE to #5900 (Inventory Adjustments) or COGS
+- **Drill-down reporting** — `GET /api/reports/account-transactions?account_id=X` returns every journal entry hitting an account in the date range, with source-doc links (`/#/invoices/42`, `/#/bills/17`, etc.) so the SPA can jump from a P&L row to the underlying transaction
+- **Fuzzy duplicate detection** — Customer/vendor creation warns with 409 on similar names (difflib similarity ≥ 0.85 after normalizing case, punctuation, and business suffixes like "Inc", "LLC", "Corp"). Pass `?force=true` to override, or use `GET /api/customers/check-duplicate?name=...` for a pre-submit preview
+- **Saved reports** — Full CRUD on named `(report_type, parameters)` tuples at `/api/saved-reports`. Lets users one-click rerun their favorite P&L, Balance Sheet, or account drill-down without re-entering dates
 
 ### Security & Authentication (Phase 9.7)
 - **Single-user authentication** — Password-protected access with setup wizard on first run. Session-based auth with secure cookie (`strict` SameSite, 30-day TTL)
@@ -321,7 +332,7 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (43 routers, 200+ routes) |
+| Backend | Python 3.12 + FastAPI (44 routers, 213+ routes) |
 | Database | PostgreSQL 16 / SQLite + SQLAlchemy 2.0 |
 | Migrations | Alembic |
 | Frontend | Vanilla HTML/CSS/JS (no framework) + self-hosted Chart.js 4.4.6 for analytics |
@@ -466,7 +477,7 @@ SlowBooks-Pro-2026/
 
 ## Database Schema
 
-40 tables with a double-entry accounting foundation:
+42 tables with a double-entry accounting foundation:
 
 | Table | Purpose |
 |-------|---------|
@@ -510,12 +521,14 @@ SlowBooks-Pro-2026/
 | `bank_rules` | Pattern-matching rules for auto-categorizing bank imports |
 | `budgets` | Budget amounts by account and period |
 | `email_templates` | Customizable email templates |
+| `inventory_movements` | Per-item qty/cost ledger (purchases, sales, adjustments) |
+| `saved_reports` | Named (report_type + parameters) tuples |
 
 ---
 
 ## API
 
-All endpoints under `/api/`. Swagger docs at `/docs`. 200+ routes across 43 routers. All routes (except `/api/auth/*`, `/health`, `/pay/*`, and `/api/stripe/webhook`) require an authenticated session.
+All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 routers. All routes (except `/api/auth/*`, `/health`, `/pay/*`, and `/api/stripe/webhook`) require an authenticated session.
 
 ### Authentication (Phase 9.7)
 | Endpoint | Methods | Description |
@@ -651,6 +664,23 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 200+ routes across 43 rout
 | `/api/budgets` | GET, POST, PUT, DELETE | Budget management |
 | `/api/email-templates` | GET, POST, PUT, DELETE | Custom email template management |
 | `/health` | GET | Liveness probe (no auth required) |
+
+### Inventory (Phase 11)
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/items/{id}/movements` | GET | Per-item inventory ledger (newest first) |
+| `/api/items/{id}/adjust` | POST | Manual quantity adjustment with offsetting JE |
+| `/api/items/low-stock` | GET | Items at or below their reorder point |
+| `/api/items/valuation` | GET | Sum of `qty × avg_cost` across tracked items |
+
+### Drill-Down & Saved Reports (Phase 11)
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/reports/account-transactions` | GET | Every journal line hitting an account, with source-doc links |
+| `/api/customers/check-duplicate` | GET | Pre-submit duplicate-name check (fuzzy) |
+| `/api/vendors/check-duplicate` | GET | Pre-submit duplicate-name check (fuzzy) |
+| `/api/saved-reports` | GET, POST | List/create named report parameter sets |
+| `/api/saved-reports/{id}` | GET, PUT, DELETE | Saved report CRUD |
 
 ### Analytics
 All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or explicit `?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`.
