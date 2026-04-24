@@ -105,6 +105,20 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         # move to COGS only when it's sold.
         if item and item.track_inventory:
             posting_acct = get_inventory_asset_account_id(db, item)
+            if not posting_acct:
+                # AUDIT FIX: don't silently drop the DR side when we can't
+                # find an inventory asset account. Refuse the bill with a
+                # clear error so the operator can fix the item's
+                # asset_account_id or seed #1300.
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Item '{item.name}' is inventory-tracked but has no "
+                        "asset_account_id and no account #1300 (Inventory) is "
+                        "seeded. Either set the item's inventory asset account "
+                        "or add the Inventory account to the chart of accounts."
+                    ),
+                )
             if line_data.quantity > 0:
                 inv_receipts.append((
                     item,

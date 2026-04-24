@@ -295,6 +295,14 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     # which left totals stale after a tax-rate-only edit.
     needs_recompute = data.lines is not None or tax_rate_changed
     if needs_recompute:
+        # Phase 11 (audit fix): snapshot the OLD lines before we rebuild so
+        # we can post compensating inventory movements for the delta.
+        from app.services.inventory_hooks import (
+            snapshot_invoice_lines,
+            reconcile_invoice_inventory_delta,
+        )
+        old_line_snapshot = snapshot_invoice_lines(invoice) if data.lines is not None else None
+
         if data.lines is not None:
             db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).delete()
             db.flush()
@@ -309,6 +317,9 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                     class_name=line_data.class_name,
                     line_order=line_data.line_order or i,
                 ))
+            db.flush()
+            # Reload so invoice.lines reflects the new rows
+            db.refresh(invoice)
             effective_lines = data.lines
         else:
             # Tax-rate-only edit: keep existing lines but recompute amounts.
@@ -357,6 +368,13 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                             account.balance += debit - credit
                         else:
                             account.balance += credit - debit
+
+        # Phase 11 (audit fix): post compensating inventory movements for
+        # lines that changed. No-op if nothing was inventory-tracked.
+        if old_line_snapshot is not None:
+            reconcile_invoice_inventory_delta(
+                db, invoice, old_line_snapshot, txn_date=invoice.date,
+            )
 
     db.commit()
     db.refresh(invoice)
@@ -439,6 +457,9 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
             )
 
     # ---- Phase 11: reverse inventory movements ----
+    # Pass the ORIGINAL (invoice, id) so reverse_sale looks up the sale's
+    # historical unit_cost — this keeps the reversal balanced even if
+    # avg_cost moved between the sale and the void.
     from app.services.inventory_service import reverse_sale
     for line in invoice.lines:
         if not line.item_id:
@@ -449,6 +470,7 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
                 db, item,
                 quantity=Decimal(str(line.quantity)),
                 source_type="invoice_void", source_id=invoice.id,
+                original_source_type="invoice", original_source_id=invoice.id,
                 txn_date=invoice.date,
             )
 
@@ -711,6 +733,13 @@ def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db)):
             reference=new_number,
         )
         new_invoice.transaction_id = txn.id
+
+    # Phase 11 (audit fix): a duplicated invoice is a FRESH sale, so it
+    # must hit the inventory ledger just like create_invoice does.
+    db.flush()
+    db.refresh(new_invoice)
+    from app.services.inventory_hooks import post_sale_for_invoice
+    post_sale_for_invoice(db, new_invoice, txn_date=today)
 
     db.commit()
     db.refresh(new_invoice)

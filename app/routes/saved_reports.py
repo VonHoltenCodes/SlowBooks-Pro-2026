@@ -6,12 +6,18 @@
 # cache the results — the SPA calls /api/reports/* with the stored params.
 # ============================================================================
 
+import json
 from datetime import datetime
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+# Cap serialized parameters at 64 KB. A saved report is just dates + a
+# handful of IDs — 64K is already a thousand times what it needs.
+# Prevents bloat/DoS via giant JSON payloads.
+_MAX_PARAMS_BYTES = 64 * 1024
 
 from app.database import get_db
 from app.models.saved_reports import SavedReport
@@ -67,6 +73,19 @@ def list_saved_reports(
     return q.order_by(SavedReport.name).all()
 
 
+def _validate_params_size(params: dict) -> None:
+    """Reject oversized parameter blobs before they bloat the DB."""
+    try:
+        size = len(json.dumps(params or {}))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="parameters must be JSON-serializable")
+    if size > _MAX_PARAMS_BYTES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"parameters exceed {_MAX_PARAMS_BYTES} bytes ({size} provided)",
+        )
+
+
 @router.post("", response_model=SavedReportResponse, status_code=201)
 def create_saved_report(data: SavedReportCreate, db: Session = Depends(get_db)):
     if data.report_type not in _ALLOWED_TYPES:
@@ -76,6 +95,7 @@ def create_saved_report(data: SavedReportCreate, db: Session = Depends(get_db)):
         )
     if not data.name.strip():
         raise HTTPException(status_code=400, detail="name is required")
+    _validate_params_size(data.parameters or {})
 
     report = SavedReport(
         name=data.name.strip(),
@@ -103,6 +123,7 @@ def update_saved_report(
     if data.name is not None:
         report.name = data.name.strip()
     if data.parameters is not None:
+        _validate_params_size(data.parameters)
         report.parameters = data.parameters
     db.commit()
     db.refresh(report)

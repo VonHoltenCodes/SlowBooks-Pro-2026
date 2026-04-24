@@ -307,10 +307,20 @@ def reverse_sale(
     quantity: Decimal,
     source_type: str,
     source_id: int,
+    original_source_type: Optional[str] = None,
+    original_source_id: Optional[int] = None,
     txn_date=None,
 ) -> Optional[InventoryMovement]:
-    """Reverse a previous sale (invoice void). Puts stock back at the current
-    avg_cost and reverses the COGS entry.
+    """Reverse a previous sale (invoice void).
+
+    CRITICAL: we must reverse at the ORIGINAL sale's unit_cost, not the
+    current avg_cost. If cost moved between sale and void, using the
+    current cost would leave a permanent GL imbalance (the original COGS
+    debit wouldn't match the reversal credit).
+
+    Looks up the original SALE movement by (source_type, source_id) and
+    uses its unit_cost. Falls back to current avg_cost if we can't find
+    the original (legacy rows, manual corrections) but logs the fact.
     """
     if not item.track_inventory:
         return None
@@ -319,7 +329,29 @@ def reverse_sale(
     if quantity <= 0:
         return None
 
-    unit_cost = Decimal(str(item.avg_cost or 0))
+    # Look up the original sale's unit_cost so the reversal matches.
+    # For invoice-void we know the original source is ("invoice", invoice_id).
+    unit_cost = None
+    if original_source_type and original_source_id:
+        original = (
+            db.query(InventoryMovement)
+            .filter(
+                InventoryMovement.item_id == item.id,
+                InventoryMovement.source_type == original_source_type,
+                InventoryMovement.source_id == original_source_id,
+                InventoryMovement.movement_type == MovementType.SALE,
+            )
+            .order_by(InventoryMovement.id.desc())
+            .first()
+        )
+        if original:
+            unit_cost = Decimal(str(original.unit_cost or 0))
+
+    if unit_cost is None:
+        # Fallback: use current avg_cost. This is the legacy behavior and
+        # may produce a small GL imbalance if cost moved between sale/void.
+        unit_cost = Decimal(str(item.avg_cost or 0))
+
     amount = _q(quantity * unit_cost)
 
     txn_id = None
