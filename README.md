@@ -230,7 +230,7 @@ Every tool is **strictly read-only**: it builds `db.query()` calls that cannot i
 
 Results are not cached (each question may be distinct). If you ask the same question twice you'll run the loop twice.
 
-**Test coverage (Phase 5):** 36 backend tests cover every tool with seeded mock data, all 3 wire-format extractors (`_extract_tool_calls`), argument parsing edge cases, and the full `/ai-query` endpoint with a stubbed provider. Plus 34 Phase 4 tests (28 Python + 6 headless Node UI) = **70 total tests** green, all running in under 60 seconds with zero network dependencies.
+**Test coverage:** 92 pytest tests cover AI security, analytics, auth flow, CORS, CSV safety, attachments, IIF import, invoice posting/editing, reporting, and rate limiting — all running in under 6 seconds with zero network dependencies.
 
 **PDF export:**
 ```bash
@@ -273,11 +273,27 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 - **Print-Optimized PDF** — Enhanced invoice PDF template with company logo support
 - **IIF Import/Export** — Full QuickBooks 2003 Pro interoperability (see below)
 
+### Security & Authentication (Phase 9.7)
+- **Single-user authentication** — Password-protected access with setup wizard on first run. Session-based auth with secure cookie (`strict` SameSite, 30-day TTL)
+- **Security headers** — X-Content-Type-Options, X-Frame-Options (DENY), Referrer-Policy, Permissions-Policy on all responses
+- **CORS lockdown** — No wildcard origins; defaults to localhost, configurable via `CORS_ALLOW_ORIGINS` env var
+- **Rate limiting** — Configurable via slowapi; disabled in tests, toggle via `RATE_LIMIT_ENABLED`
+- **Path traversal protection** — Backup download/restore and attachment uploads validated with `is_relative_to()`
+- **Sensitive key filtering** — Password hashes and session secrets never returned from the settings API
+- **Atomic secret writes** — Session key and encryption master key use `mkstemp` + `os.replace` to prevent race conditions
+- **Encrypted API keys** — AI provider keys encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256)
+- **Non-root Docker** — Container runs as `slowbooks` user (UID 1000), not root
+- **Pinned dependencies** — All `requirements.txt` entries have upper-bound version caps
+
 ### System & Administration
 - **Dark Mode** — Toggle between QB2003 Blue theme and dark mode (Alt+D or toolbar button). Persists in localStorage
 - **Backup/Restore** — Create and download PostgreSQL backups from the settings page
 - **Multi-Company** — Support for multiple company databases, switchable from UI
 - **Global Search** — Unified server-side search across customers, vendors, items, invoices, estimates, and payments
+- **Attachments** — Upload files (PDF, images) to invoices, bills, and other entities with MIME type and extension validation
+- **Bank Rules** — Auto-categorize imported bank transactions with pattern-matching rules
+- **Budgets** — Create and track budgets by account and period with actual-vs-budget comparison
+- **Email Templates** — Customizable email templates for invoices, estimates, and statements
 
 ### UI
 - Authentic QB2003 "Default Blue" skin with navy/gold color palette (+ dark mode)
@@ -285,7 +301,7 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 - Windows XP-era toolbar, sidebar navigator with icons, status bar
 - Keyboard shortcuts: `Alt+N` (new invoice), `Alt+P` (payment), `Alt+Q` (quick entry), `Alt+H` (home), `Alt+D` (dark mode), `Ctrl+S` (save modal form), `Ctrl+K` (search), `Escape` (close modal)
 - No frameworks — vanilla HTML/CSS/JS single-page app
-- 29 SPA routes, 28 sidebar nav links
+- 35+ SPA routes, 34 sidebar nav links
 
 ### QuickBooks 2003 Pro Interoperability
 - **IIF Export** — Export all Slowbooks data (accounts, customers, vendors, items, invoices, payments, estimates) as .iif files importable into QB2003 via File > Utilities > Import > IIF Files
@@ -305,8 +321,8 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (35 routers, 160+ routes) |
-| Database | PostgreSQL 16 + SQLAlchemy 2.0 |
+| Backend | Python 3.12 + FastAPI (43 routers, 200+ routes) |
+| Database | PostgreSQL 16 / SQLite + SQLAlchemy 2.0 |
 | Migrations | Alembic |
 | Frontend | Vanilla HTML/CSS/JS (no framework) + self-hosted Chart.js 4.4.6 for analytics |
 | PDF | WeasyPrint 60.2 + Jinja2 |
@@ -370,10 +386,10 @@ SlowBooks-Pro-2026/
 ├── alembic.ini               # Alembic config
 ├── alembic/                  # Database migrations
 ├── app/
-│   ├── main.py               # FastAPI app + 35 routers (160+ routes)
-│   ├── config.py             # Environment-based settings
+│   ├── main.py               # FastAPI app + 43 routers (200+ routes)
+│   ├── config.py             # Environment-based settings (CORS, origins)
 │   ├── database.py           # SQLAlchemy engine + session
-│   ├── models/               # 30+ SQLAlchemy models
+│   ├── models/               # 25 model modules (40 tables)
 │   │   ├── accounts.py       # Chart of Accounts (self-referencing)
 │   │   ├── contacts.py       # Customers + Vendors
 │   │   ├── items.py          # Products, services, materials, labor
@@ -393,9 +409,13 @@ SlowBooks-Pro-2026/
 │   │   ├── backups.py        # Backup records
 │   │   ├── companies.py      # Multi-company records
 │   │   ├── payroll.py        # Employees, pay runs, pay stubs
-│   │   └── qbo_mapping.py    # QBO ↔ Slowbooks ID mappings
+│   │   ├── qbo_mapping.py    # QBO ↔ Slowbooks ID mappings
+│   │   ├── attachments.py    # File attachments (Phase 10)
+│   │   ├── bank_rules.py     # Bank transaction categorization rules
+│   │   ├── budgets.py        # Budget tracking by account/period
+│   │   └── email_templates.py # Customizable email templates
 │   ├── schemas/              # Pydantic request/response models
-│   ├── routes/               # FastAPI routers (35 routers)
+│   ├── routes/               # FastAPI routers (43 routers)
 │   ├── services/
 │   │   ├── accounting.py     # Double-entry journal entry engine
 │   │   ├── analytics.py      # Phase 9: business intelligence aggregates (8 methods)
@@ -416,28 +436,37 @@ SlowBooks-Pro-2026/
 │   │   ├── stripe_service.py # Stripe Checkout + webhook verification
 │   │   ├── qbo_service.py    # QBO OAuth + token management + client factory
 │   │   ├── qbo_import.py     # Import 6 entity types from QBO
-│   │   └── qbo_export.py     # Export 6 entity types to QBO
-│   ├── templates/            # Jinja2 templates (PDF, email) + analytics_pdf.html
+│   │   ├── qbo_export.py     # Export 6 entity types to QBO
+│   │   ├── auth.py           # Phase 9.7: single-user password auth + session management
+│   │   ├── rate_limit.py     # Phase 9.7: slowapi rate limiting
+│   │   ├── settings_service.py # Settings CRUD with sensitive key filtering
+│   │   └── crypto.py         # Fernet encryption for API keys + master key management
+│   ├── templates/            # Jinja2 templates (PDF, email, checks, collection letters)
 │   ├── seed/                 # Chart of Accounts seed data
 │   └── static/
 │       ├── css/
 │       │   ├── style.css     # QB2003 "Default Blue" skin
 │       │   └── dark.css      # Dark mode CSS overrides
-│       └── js/               # SPA router, API wrapper, 27 page modules
+│       └── js/               # SPA router, API wrapper, 35+ page modules
 ├── scripts/
 │   ├── seed_database.py      # Seed the Chart of Accounts
 │   ├── seed_irs_mock_data.py # IRS Pub 583 mock data
 │   ├── run_recurring.py      # Cron script for recurring invoices
 │   └── backup.sh             # PostgreSQL backup with rotation
 ├── screenshots/              # README images
-└── index.html                # SPA shell (27 script tags)
+├── cloudflare/               # Self-hosted Cloudflare Worker AI gateway
+│   ├── worker.js             # Hardened proxy (model allowlist, rate limiting, security headers)
+│   ├── wrangler.toml         # Deployment config
+│   └── README.md             # Setup guide
+├── tests/                    # 92 pytest tests (auth, security, posting, reporting, import)
+└── index.html                # SPA shell (35+ script tags)
 ```
 
 ---
 
 ## Database Schema
 
-36 tables with a double-entry accounting foundation:
+40 tables with a double-entry accounting foundation:
 
 | Table | Purpose |
 |-------|---------|
@@ -477,12 +506,24 @@ SlowBooks-Pro-2026/
 | `pay_runs` | Pay run headers with totals |
 | `pay_stubs` | Individual pay stubs with withholding breakdowns |
 | `qbo_mappings` | QBO ID ↔ Slowbooks ID mapping for sync deduplication |
+| `attachments` | File attachments linked to invoices, bills, etc. |
+| `bank_rules` | Pattern-matching rules for auto-categorizing bank imports |
+| `budgets` | Budget amounts by account and period |
+| `email_templates` | Customizable email templates |
 
 ---
 
 ## API
 
-All endpoints under `/api/`. Swagger docs at `/docs`. 160+ routes across 35 routers.
+All endpoints under `/api/`. Swagger docs at `/docs`. 200+ routes across 43 routers. All routes (except `/api/auth/*`, `/health`, `/pay/*`, and `/api/stripe/webhook`) require an authenticated session.
+
+### Authentication (Phase 9.7)
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/auth/status` | GET | Auth state: `{setup_needed, authenticated}` |
+| `/api/auth/setup` | POST | First-run password setup (min 8 chars) |
+| `/api/auth/login` | POST | Login with password |
+| `/api/auth/logout` | POST | Clear session |
 
 ### Core (Original)
 | Endpoint | Methods | Description |
@@ -605,6 +646,11 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 160+ routes across 35 rout
 | `/api/backups/{id}/download` | GET | Download backup file |
 | `/api/companies` | GET, POST | Multi-company management |
 | `/api/uploads/logo` | POST | Upload company logo |
+| `/api/attachments/{type}/{id}` | GET, POST, DELETE | File attachments CRUD |
+| `/api/bank-rules` | GET, POST, PUT, DELETE | Bank transaction categorization rules |
+| `/api/budgets` | GET, POST, PUT, DELETE | Budget management |
+| `/api/email-templates` | GET, POST, PUT, DELETE | Custom email template management |
+| `/health` | GET | Liveness probe (no auth required) |
 
 ### Analytics
 All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or explicit `?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`.
@@ -730,6 +776,7 @@ You can use, modify, and run Slowbooks Pro for any personal, educational, or int
 ## Contributors
 
 - [VonHoltenCodes](https://github.com/VonHoltenCodes) — Creator
+- [PNWImport](https://github.com/PNWImport) — Security hardening (auth, CORS, path traversal, atomic writes, non-root Docker, rate limiting), analytics engine, AI insights with 7-provider support, Cloudflare Worker gateway
 - [jake-378](https://github.com/jake-378) — Backup UI fixes, report period selectors, invoice terms autofill, date validation fixes
 - [WC3D](https://github.com/WC3D) — Jinja2 XSS security fix
 

@@ -26,9 +26,10 @@ Open **http://localhost:3001** in your browser.
 ### What happens on first run
 
 1. PostgreSQL 16 starts and creates the `bookkeeper` database
-2. Alembic runs all migrations (creates 35 tables)
+2. Alembic runs all migrations (creates 40 tables)
 3. Chart of Accounts is seeded (39 accounts)
 4. Uvicorn starts serving the app on port 3001
+5. On first visit, you'll be prompted to set an operator password (min 8 characters)
 
 ### Loading demo data
 
