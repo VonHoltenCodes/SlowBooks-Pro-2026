@@ -164,6 +164,59 @@ def toggle_cleared(recon_id: int, txn_id: int, db: Session = Depends(get_db)):
     return {"id": txn.id, "reconciled": txn.reconciled}
 
 
+@router.get("/check-register")
+def check_register(account_id: int = None, db: Session = Depends(get_db)):
+    """Check register — filtered view of transactions for a bank account."""
+    from app.models.transactions import Transaction, TransactionLine
+    from app.models.accounts import Account
+
+    if not account_id:
+        # Default to first bank account (checking - 1000)
+        acct = db.query(Account).filter(Account.account_number == "1000").first()
+        if acct:
+            account_id = acct.id
+        else:
+            return {"account_id": None, "account_name": "", "entries": []}
+
+    account = db.query(Account).filter(Account.id == account_id).first()
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+
+    lines = (
+        db.query(TransactionLine, Transaction)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(TransactionLine.account_id == account_id)
+        .order_by(Transaction.date, Transaction.id)
+        .all()
+    )
+
+    entries = []
+    running_balance = Decimal("0")
+    for tl, txn in lines:
+        # For asset accounts: debits increase, credits decrease
+        if account.account_type.value in ("asset", "expense", "cogs"):
+            running_balance += tl.debit - tl.credit
+        else:
+            running_balance += tl.credit - tl.debit
+
+        entries.append({
+            "date": txn.date.isoformat(),
+            "description": txn.description or tl.description or "",
+            "reference": txn.reference or "",
+            "source_type": txn.source_type or "",
+            "payment": float(tl.credit) if tl.credit > 0 else 0,
+            "deposit": float(tl.debit) if tl.debit > 0 else 0,
+            "balance": float(running_balance),
+        })
+
+    return {
+        "account_id": account_id,
+        "account_name": account.name,
+        "account_number": account.account_number,
+        "entries": entries,
+    }
+
+
 @router.post("/reconciliations/{recon_id}/complete")
 def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
     """CReconcileEngine::Finish() @ 0x001F0A00 — validates difference is 0"""

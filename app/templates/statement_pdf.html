@@ -66,6 +66,10 @@
             <th class="r">Amount</th><th class="r">Balance</th>
         </tr></thead>
         <tbody>
+        {# NOTE: Invoices and payments are listed separately rather than in a single
+           chronological sequence. To display a true chronological activity list,
+           the backend should merge and sort both lists by date before passing
+           them to this template. #}
         {% set ns = namespace(running=0) %}
         {% for inv in invoices %}
             {% set ns.running = ns.running + (inv.total | float) %}
@@ -96,7 +100,7 @@
         <table>
             <tr><td class="label">Total Invoiced</td><td class="r">{{ invoices | sum(attribute='total') | currency }}</td></tr>
             <tr><td class="label">Total Payments</td><td class="r">{{ payments | sum(attribute='amount') | currency }}</td></tr>
-            <tr><td class="label grand">Balance Due</td><td class="r grand">{{ (invoices | sum(attribute='total') - payments | sum(attribute='amount')) | currency }}</td></tr>
+            <tr><td class="label grand">Balance Due</td><td class="r grand">{{ ((invoices | sum(attribute='total')) - (payments | sum(attribute='amount'))) | currency }}</td></tr>
         </table>
     </div>
 

@@ -69,4 +69,8 @@ DEFAULT_SETTINGS = {
     "qbo_realm_id": "",
     "qbo_token_expires_at": "",
     "qbo_oauth_state": "",
+    # Phase 10: Late Fee Automation
+    "late_fee_enabled": "false",
+    "late_fee_rate": "1.5",
+    "late_fee_grace_days": "15",
 }

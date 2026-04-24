@@ -8,11 +8,16 @@ from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
+
+
+class CheckoutSessionRequest(BaseModel):
+    payment_token: str
 from app.services.accounting import (
     create_journal_entry, get_ar_account_id, get_undeposited_funds_id,
 )
@@ -34,15 +39,11 @@ def _require_stripe(db: Session) -> dict:
 
 
 @router.post("/create-checkout-session")
-def create_checkout(data: dict, request: Request, db: Session = Depends(get_db)):
+def create_checkout(data: CheckoutSessionRequest, request: Request, db: Session = Depends(get_db)):
     """Create a Stripe Checkout Session for an invoice."""
     settings = _require_stripe(db)
 
-    token = data.get("payment_token")
-    if not token:
-        raise HTTPException(status_code=400, detail="Missing payment_token")
-
-    invoice = db.query(Invoice).filter(Invoice.payment_token == token).first()
+    invoice = db.query(Invoice).filter(Invoice.payment_token == data.payment_token).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.status in (InvoiceStatus.PAID, InvoiceStatus.VOID):

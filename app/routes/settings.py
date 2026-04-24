@@ -5,11 +5,23 @@
 # ============================================================================
 
 from fastapi import APIRouter, Depends
+from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.settings import DEFAULT_SETTINGS
 from app.services.settings_service import get_all_settings, set_setting
+
+# Aliases used by upstream Phase 9/10 routes that import from this module
+_get_all = get_all_settings
+_set = set_setting
+
+
+class SettingsUpdate(BaseModel):
+    # Accept any subset of DEFAULT_SETTINGS keys. Unknown keys are silently
+    # ignored by the handler (same as before). We keep this permissive because
+    # DEFAULT_SETTINGS is the authoritative key list, not the schema.
+    model_config = ConfigDict(extra="allow")
 
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
@@ -20,8 +32,10 @@ def get_settings(db: Session = Depends(get_db)):
 
 
 @router.put("")
-def update_settings(data: dict, db: Session = Depends(get_db)):
-    for key, value in data.items():
+def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
+    # model_dump returns extras plus any declared fields. Still whitelisted
+    # against DEFAULT_SETTINGS so unknown keys are silently dropped.
+    for key, value in data.model_dump().items():
         if key in DEFAULT_SETTINGS:
             set_setting(db, key, str(value) if value is not None else "")
     db.commit()

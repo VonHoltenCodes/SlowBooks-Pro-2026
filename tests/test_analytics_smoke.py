@@ -5,8 +5,8 @@ just that an authenticated client can reach the dashboard and the PUT
 """
 
 
-def test_dashboard_auth_required(client):
-    r = client.get("/api/analytics/dashboard")
+def test_dashboard_auth_required(unauthed_client):
+    r = unauthed_client.get("/api/analytics/dashboard")
     assert r.status_code == 401
 
 
@@ -39,6 +39,6 @@ def test_ai_config_rejects_bad_worker_url(authed_client):
     assert r.status_code == 400
 
 
-def test_ai_query_requires_auth(client):
-    r = client.post("/api/analytics/ai-query?question=hello")
+def test_ai_query_requires_auth(unauthed_client):
+    r = unauthed_client.post("/api/analytics/ai-query?question=hello")
     assert r.status_code == 401

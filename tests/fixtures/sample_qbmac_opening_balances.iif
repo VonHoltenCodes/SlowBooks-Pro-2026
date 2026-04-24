@@ -1,0 +1,388 @@
+!HDR	PROD	VER	REL	IIFVER	DATE	TIME
+HDR	QuickBooks 2019 for Macintosh	"Version 18.0.14.3469	"	Release R15	1	12/15/23	1702662919
+!ACCNT	NAME	REFNUM	TIMESTAMP	ACCNTTYPE	OBAMOUNT	DESC	ACCNUM	SCD	EXTRA
+ACCNT	Checking	2	0	BANK	"99,250.02"	Great Statewide Bank		0	
+ACCNT	Cash Expenditures	91	0	BANK	225.23	Wash acct for cash expenses		0	
+ACCNT	Savings	3	0	BANK	"5,987.50"	Great Statewide Bank		0	
+ACCNT	Barter Account	90	0	BANK	0.00	Business to Business Barter		0	
+ACCNT	Accounts Receivable	4	0	AR	"35,810.02"		1200	0	
+ACCNT	Prepaid Insurance	95	0	OCASSET	500.00			0	
+ACCNT	Employee advances	5	0	OCASSET	100.00			0	
+ACCNT	Inventory Asset	6	0	OCASSET	"6,937.08"		1300	0	INVENTORYASSET
+ACCNT	Undeposited Funds	7	0	OCASSET	110.00		1400	0	UNDEPOSIT
+ACCNT	Truck	8	0	FIXASSET	0.00		1500	0	
+ACCNT	Truck:Accumulated Depreciation	9	0	FIXASSET	"-1,725.00"		1520	0	
+ACCNT	Truck:Original Purchase	10	0	FIXASSET	"13,750.00"	Purchase Price of Asset	1510	0	
+ACCNT	Accounts Payable	11	0	AP	"-2,578.69"		2000	0	
+ACCNT	CalOil Card	12	0	CCARD	"-1,403.99"		2100	0	
+ACCNT	QuickBooks Credit Card	92	0	CCARD	0.00	Platinum MasterCard		0	
+ACCNT	QuickBooks Credit Card:QBCC Field Office	107	0	CCARD	-45.00	QBCC for Field Office Manager		0	
+ACCNT	QuickBooks Credit Card:QBCC Home Office	98	0	CCARD	-25.00	QBCC for Management Office		0	
+ACCNT	QuickBooks Credit Card:QBCC Sales Dept	106	0	CCARD	0.00	QBCC for Sales Office		0	
+ACCNT	Payroll Liabilities	94	0	OCLIAB	"-5,520.47"		2102	0	
+ACCNT	Direct Deposit Liabilities	13	0	OCLIAB	0.00		2111	0	
+ACCNT	Payments on Account	89	0	OCLIAB	"1,520.00"	Deposits rec'd from customers		0	
+ACCNT	Sales Tax Payable	15	0	OCLIAB	"-2,086.50"		2300	0	SALESTAX
+ACCNT	Bank of Anycity Loan	99	0	LTLIAB	"-19,932.65"			0	
+ACCNT	Equipment Loan	100	0	LTLIAB	"-3,911.32"			0	
+ACCNT	Bank Loan	16	0	LTLIAB	"-5,369.06"	Recapitalization Loan	2400	0	
+ACCNT	Opening Bal Equity	1	0	EQUITY	"-151,970.07"		3200	0	OPENBAL
+ACCNT	Owner's Equity	17	0	EQUITY	0.00		3000	0	
+ACCNT	Owner's Equity:Owner's Contributions	18	0	EQUITY	0.00		3020	0	
+ACCNT	Owner's Equity:Owner's Draw	19	0	EQUITY	"5,000.00"		3010	0	
+ACCNT	Retained Earnings	20	0	EQUITY	"-43,954.66"		3100	0	RETEARNINGS
+ACCNT	Discounts	22	0	INC	11.98		4200	293	
+ACCNT	Landscaping Services	23	0	INC	0.00		4100	293	
+ACCNT	Landscaping Services:Design Services	21	0	INC	"-13,840.00"		4000	293	
+ACCNT	Landscaping Services:Equipment Rental	24	0	INC	0.00		4130	293	
+ACCNT	Landscaping Services:Job Materials	25	0	INC	0.00		4110	293	
+ACCNT	Landscaping Services:Job Materials:Misc Materials	105	0	INC	-152.55			0	
+ACCNT	Landscaping Services:Job Materials:Decks & Patios	26	0	INC	-515.00		4111	293	
+ACCNT	Landscaping Services:Job Materials:Fountains & Garden Lighting	27	0	INC	"-12,082.89"		4112	293	
+ACCNT	Landscaping Services:Job Materials:Plants and Sod	28	0	INC	"-10,631.95"		4113	293	
+ACCNT	Landscaping Services:Job Materials:Sprinklers & Drip systems	29	0	INC	"-8,216.16"		4114	293	
+ACCNT	Landscaping Services:Labor	30	0	INC	0.00		4120	293	
+ACCNT	Landscaping Services:Labor:Installation	31	0	INC	"-43,477.00"		4121	293	
+ACCNT	Landscaping Services:Labor:Maintenance & Repairs	32	0	INC	"-5,149.50"		4122	293	
+ACCNT	Markup Income	33	0	INC	-815.00		4400	293	
+ACCNT	Other Income	34	0	INC	0.00		4300	303	
+ACCNT	Retail Sales	96	0	INC	-784.60			0	
+ACCNT	Service	97	0	INC	"-9,053.00"			0	
+ACCNT	Uncategorized Income	35	0	INC	0.00		4999	303	UNCATINC
+ACCNT	Cost of Goods Sold	36	0	COGS	"8,776.98"		5000	495	COGS
+ACCNT	Payroll Expenses	93	0	EXP	"145,243.15"		6561	0	
+ACCNT	Advertising	37	0	EXP	240.00		6000	304	
+ACCNT	Amortization Expense	38	0	EXP	0.00		6100	0	
+ACCNT	Automobile	39	0	EXP	0.00		6200	306	
+ACCNT	Automobile:Insurance	103	0	EXP	427.62			0	
+ACCNT	Automobile:License & Fees	104	0	EXP	0.00			0	
+ACCNT	Automobile:Fuel	40	0	EXP	"1,411.42"		6210	306	
+ACCNT	Automobile:Maintenance & Repairs	41	0	EXP	254.50		6220	306	
+ACCNT	Bad Debt	42	0	EXP	0.00		6300	305	
+ACCNT	Bank Service Charges	43	0	EXP	379.50		6400	312	
+ACCNT	Bond Expense	44	0	EXP	0.00		6500	312	
+ACCNT	Delivery Fee	45	0	EXP	175.00		6600	302	
+ACCNT	Depreciation	46	0	EXP	"1,150.00"		6700	309	
+ACCNT	Dues and Subscription	47	0	EXP	0.00		6800	298	
+ACCNT	Insurance	48	0	EXP	700.00		6900	310	
+ACCNT	Insurance:Disability	49	0	EXP	150.00		6910	310	
+ACCNT	Insurance:Liability	50	0	EXP	855.00		6920	310	
+ACCNT	Insurance:Worker's Comp	51	0	EXP	630.00		6930	310	
+ACCNT	Interest Expense	52	0	EXP	"1,843.03"		7000	312	
+ACCNT	Interest Expense:Finance Charges	53	0	EXP	0.00		7010	312	
+ACCNT	Interest Expense:Interest on Loan	54	0	EXP	0.00		7020	312	
+ACCNT	Job Expenses	55	0	EXP	0.00		7100	496	
+ACCNT	Job Expenses:Equipmental Rental	56	0	EXP	48.90		7120	299	
+ACCNT	Job Expenses:Job Materials	57	0	EXP	0.00		7110	495	
+ACCNT	Job Expenses:Job Materials:Decks & Patio	58	0	EXP	"1,540.00"		7111	495	
+ACCNT	Job Expenses:Job Materials:Fountains & Garden Lighting	59	0	EXP	"1,150.00"		7112	495	
+ACCNT	Job Expenses:Job Materials:Plants & Sod	60	0	EXP	"1,151.25"		7113	495	
+ACCNT	Job Expenses:Job Materials:Sprinkler's & Drip Systems	61	0	EXP	0.00		7114	495	
+ACCNT	Job Expenses:Permits	62	0	EXP	0.00		7130	496	
+ACCNT	Job Expenses:Subcontractors	63	0	EXP	375.00		7140	494	
+ACCNT	Mileage Reimbursement	64	0	EXP	0.00		7250	306	
+ACCNT	Miscellaneous	65	0	EXP	847.00		7200	302	
+ACCNT	Office Supplies	66	0	EXP	295.87		7300	313	
+ACCNT	Professional Fees	68	0	EXP	0.00		7400	298	
+ACCNT	Professional Fees:Accounting	69	0	EXP	0.00		7410	298	
+ACCNT	Professional Fees:Legal	70	0	EXP	375.00		7420	298	
+ACCNT	Rent	71	0	EXP	"2,400.00"		7500	300	
+ACCNT	Repairs	72	0	EXP	0.00		7550	315	
+ACCNT	Repairs:Building Repairs	73	0	EXP	0.00		7551	315	
+ACCNT	Repairs:Computer Repairs	74	0	EXP	250.00		7552	315	
+ACCNT	Repairs:Equipment Repairs	75	0	EXP	45.00		7553	315	
+ACCNT	Taxes	76	0	EXP	0.00		7600	316	
+ACCNT	Taxes:Federal	77	0	EXP	0.00		7610	316	
+ACCNT	Taxes:Property	78	0	EXP	0.00		7620	316	
+ACCNT	Taxes:State	79	0	EXP	0.00		7630	316	
+ACCNT	Tools and Misc. Equipment	80	0	EXP	735.00		7700	302	
+ACCNT	Uncategorized Expenses	81	0	EXP	0.00		6999	0	UNCATEXP
+ACCNT	Utilities	82	0	EXP	0.00		7750	318	
+ACCNT	Utilities:Gas and Electric	83	0	EXP	"2,155.30"		7751	318	
+ACCNT	Utilities:Telephone	84	0	EXP	855.62		7753	313	
+ACCNT	Utilities:Water	85	0	EXP	517.78		7752	318	
+ACCNT	Misc Income	102	0	EXINC	-842.00			0	
+ACCNT	Interest Income	86	0	EXINC	-97.69		8000	303	
+ACCNT	Other Expenses	87	0	EXEXP	0.00		9000	302	
+ACCNT	Sales Orders	101	0	NONPOSTING	0.00		5	0	
+ACCNT	Purchase Orders	88	0	NONPOSTING	0.00			0	PURCHORDER
+!INVITEM	NAME	REFNUM	TIMESTAMP	INVITEMTYPE	DESC	PURCHASEDESC	ACCNT	ASSETACCNT	COGSACCNT	PRICE	COST	TAXABLE	PAYMETH	TAXVEND	TAXDIST	PREFVEND	REORDERPOINT	EXTRA	CUSTFLD1	CUSTFLD2	CUSTFLD3	CUSTFLD4	CUSTFLD5	DEP_TYPE	ISPASSEDTHRU
+INVITEM	Delivery	36	0	SERV	Delivery Service Fee \n(free for orders over $100)		Service			15.00	0	N												0	N
+INVITEM	Design	1	0	SERV	Custom Landscape Design		Landscaping Services:Design Services			55.00	0	N												0	N
+INVITEM	Gardening	2	0	SERV	Weekly gardening services		Landscaping Services:Labor:Installation			0.00	0	N												0	N
+INVITEM	Installation	3	0	SERV	Installation of landscape design		Landscaping Services:Labor:Installation			35.00	0	N												0	N
+INVITEM	Pest Control	4	0	SERV	Pest control services		Landscaping Services:Labor:Maintenance & Repairs			0.00	0	N												0	N
+INVITEM	Tree Removal	46	0	SERV	Tree Removal Service		Service			0.00	0	N												0	N
+INVITEM	Trimming	5	0	SERV	Tree and shrub trimming		Landscaping Services:Labor:Maintenance & Repairs			35.00	0	N												0	N
+INVITEM	Irrigation Hose	37	0	INVENTORY	Parent Item \nVinyl Irrigation Line\n- Do Not Purchase or Sell	Vinyl Irrigation Line\n\nParent Item - Do Not Purchase or Sell	Landscaping Services:Job Materials:Misc Materials	Inventory Asset	Cost of Goods Sold	0.00	0	Y					-1							0	N
+INVITEM	Irrigation Hose:1/2' Line	39	0	INVENTORY	1/2'  Vinyl Irrigation Line	1/2'  Vinyl Irrigation Line	Landscaping Services:Job Materials:Misc Materials	Inventory Asset	Cost of Goods Sold	0.15	0.12	Y					"1,500"							0	N
+INVITEM	Irrigation Hose:1/4' Line	38	0	INVENTORY	1/4'  Vinyl Irrigation Line	1/4'  Vinyl Irrigation Line	Landscaping Services:Job Materials:Misc Materials	Inventory Asset	Cost of Goods Sold	0.10	0.07	Y					500							0	N
+INVITEM	Irrigation Hose:3/4' Line	40	0	INVENTORY	3/4'  Vinyl Irrigation Line	3/4'  Vinyl Irrigation Line	Landscaping Services:Job Materials:Misc Materials	Inventory Asset	Cost of Goods Sold	0.27	0.18	Y					"1,500"							0	N
+INVITEM	Lighting	6	0	INVENTORY	Garden Lighting	Garden Lighting	Landscaping Services:Job Materials:Fountains & Garden Lighting	Inventory Asset	Cost of Goods Sold	0.00	0	Y												0	N
+INVITEM	Pump	7	0	INVENTORY	Fountain pump	Fountain pump #198-30	Landscaping Services:Job Materials:Fountains & Garden Lighting	Inventory Asset	Cost of Goods Sold	75.00	56	Y												0	N
+INVITEM	Soil	8	0	INVENTORY	"Soil, 2 cubic ft bag"	"Soil, 2 cubic ft bag"	Landscaping Services:Job Materials:Plants and Sod	Inventory Asset	Cost of Goods Sold	6.75	5.3	Y				Middlefield Nursery	25							0	N
+INVITEM	Sprinkler Hds	9	0	INVENTORY	Sprinkler heads	Sprinkler head #BLS9081-09	Landscaping Services:Job Materials:Sprinklers & Drip systems	Inventory Asset	Cost of Goods Sold	0.00	0	Y												0	N
+INVITEM	Sprkl pipes	10	0	INVENTORY	Plastic sprinkler piping	Plastic sprinkler piping #1098-20	Landscaping Services:Job Materials:Sprinklers & Drip systems	Inventory Asset	Cost of Goods Sold	2.75	2.1	Y					250							0	N
+INVITEM	Concrete	11	0	PART	Concrete for fountain installation		Landscaping Services:Job Materials:Fountains & Garden Lighting			0.00	0	Y												0	N
+INVITEM	Deck Lumber	12	0	PART	Deck Lumber		Landscaping Services:Job Materials:Decks & Patios			0.00	0	Y												0	N
+INVITEM	Fertilizer	33	0	PART	Parent Item - Do Not Use		Retail Sales			0.00	0	Y												0	N
+INVITEM	Fertilizer:Lawn & Garden	34	0	PART	Lawn & Garden Fertilizer 20-14-7		Retail Sales			1.89	0	Y												0	N
+INVITEM	Fertilizer:Plants & Trees	35	0	PART	Plant & Tree Fertilizer 6-6-10		Retail Sales			1.49	0	Y												0	N
+INVITEM	Foliage Tags/Markers	48	0	PART	In-ground signs describing foliage		Misc Income			0.00	0	Y												0	N
+INVITEM	Fountain	13	0	PART	Rock Fountain		Landscaping Services:Job Materials:Fountains & Garden Lighting			275.00	0	Y												0	N
+INVITEM	Plants/Trees	14	0	PART	Plants\nParent Item - Do Not Use		Landscaping Services:Job Materials:Plants and Sod			0.00	0	Y												0	N
+INVITEM	Plants/Trees:Citrus Trees	41	0	PART	Citrus Tree - 50 gal.	"Tree, Citrus - 50 gal."	Landscaping Services:Job Materials:Plants and Sod		Job Expenses:Job Materials:Plants & Sod	66.00	46	Y				Gussman's Nursery								0	Y
+INVITEM	Plants/Trees:Fruit Trees	44	0	PART	Fruit Tree -		Job Expenses:Job Materials:Plants & Sod			55.00	0	Y												0	N
+INVITEM	Plants/Trees:Hedges & Shrubs	42	0	PART	Hedges & Shrubs		Landscaping Services:Job Materials:Plants and Sod			30.00	0	Y												0	N
+INVITEM	Plants/Trees:Misc Plants & Flowers	45	0	PART	Misc Plants & Flowers		Landscaping Services:Job Materials:Plants and Sod			0.00	0	Y												0	N
+INVITEM	Plants/Trees:Ornamental	43	0	PART	Ornamental		Landscaping Services:Job Materials:Plants and Sod			36.25	0	Y												0	N
+INVITEM	Ponds	15	0	PART	Fish Pond		Landscaping Services:Job Materials:Fountains & Garden Lighting			0.00	0	Y												0	N
+INVITEM	Rocks	16	0	PART	Garden rocks		Landscaping Services:Job Materials:Plants and Sod			9.75	0	Y												0	N
+INVITEM	Fin Chg	17	0	OTHC	Finance Charges on Overdue Balance		Interest Income			10.0%	0	N												0	N
+INVITEM	Permits	18	0	OTHC	Permits	Permits	Other Income		Job Expenses:Permits	0.00	0	N												0	Y
+INVITEM	Shipping	19	0	OTHC	Shipping and handling		Other Income			0.00	0	N												0	N
+INVITEM	Reimb Subt	20	0	SUBT	Reimbursable Expenses Subtotal						0	N						REXPSUBTOT						0	N
+INVITEM	Subtotal	21	0	SUBT	Subtotal						0	N												0	N
+INVITEM	10% Discount	22	0	DISC	10% Discount		Discounts			-10.0%	0	Y												0	N
+INVITEM	5% Discount	47	0	DISC	5% Discount		Discounts			0.00	0	Y												0	N
+INVITEM	Deposit Credit	32	0	DISC	Applied Payment on Account		Payments on Account			0.00	0	Y												0	N
+INVITEM	Assessment	23	0	COMPTAX	San Thomas County - Earthquake assessment		Sales Tax Payable			1.75%	0	N		State Board of Equalization										0	N
+INVITEM	"County, San Thomas"	24	0	COMPTAX	"CA sales tax, San Tomas County"		Sales Tax Payable			6.5%	0	N		State Board of Equalization										0	N
+INVITEM	Out of State	25	0	COMPTAX	"Out-of-state sale, exempt from sales tax"		Sales Tax Payable			0.0%	0	N												0	N
+INVITEM	San Domingo	26	0	COMPTAX	Sales Tax - San Domingo County Tax		Sales Tax Payable			7.75%	0	N		State Board of Equalization										0	N
+!INVITEM	NAME	REFNUM	TIMESTAMP	INVITEMTYPE	DESC	TOPRINT	EXTRA	QNTY	CUSTFLD1	CUSTFLD2	CUSTFLD3	CUSTFLD4	CUSTFLD5
+!ENDGRP
+INVITEM	Reimb Group	27	0	GRP	Total Reimbursable Expenses	Y	REXPGROUP						
+ENDGRP
+INVITEM	Rock Fountain	28	0	GRP	Custom rock fountain	Y							
+INVITEM	Fountain	13	0	PART		Y							
+INVITEM	Pump	7	0	INVENTORY		Y							
+INVITEM	Concrete	11	0	PART		Y							
+INVITEM	Installation	3	0	SERV		Y							
+ENDGRP
+INVITEM	Sprinkler Systems	29	0	GRP	Sprinkler system	Y							
+INVITEM	Sprinkler Hds	9	0	INVENTORY		Y							
+INVITEM	Sprkl pipes	10	0	INVENTORY		Y							
+INVITEM	Installation	3	0	SERV		Y							
+ENDGRP
+INVITEM	Walkway	30	0	GRP	Walkway lighting	Y							
+INVITEM	Lighting	6	0	INVENTORY		Y							
+INVITEM	Installation	3	0	SERV		Y							
+ENDGRP
+INVITEM	San Thomas Group	31	0	STAX	Sales Tax - San Thomas County	N							
+INVITEM	"County, San Thomas"	24	0	COMPTAX		N							
+INVITEM	Assessment	23	0	COMPTAX		N		0					
+ENDTAX
+!CLASS	NAME	REFNUM	TIMESTAMP
+CLASS	Design	1	0
+CLASS	Landscaping	2	0
+CLASS	Maintenance	4	0
+CLASS	Overhead	3	0
+!CTYPE	NAME	REFNUM	TIMESTAMP
+CTYPE	Commercial	1	0
+CTYPE	Residential	2	0
+!CUST	NAME	REFNUM	TIMESTAMP	BADDR1	BADDR2	BADDR3	BADDR4	BADDR5	SADDR1	SADDR2	SADDR3	SADDR4	SADDR5	PHONE1	PHONE2	FAXNUM	EMAIL	CONT1	CONT2	CTYPE	TERMS	TAXABLE	LIMIT	RESALENUM	REP	TAXITEM	NOTEPAD	SALUTATION	COMPANYNAME	FIRSTNAME	MIDINIT	LASTNAME	CUSTFLD1	CUSTFLD2	CUSTFLD3	CUSTFLD4	CUSTFLD5	CUSTFLD6	CUSTFLD7	CUSTFLD8	CUSTFLD9	CUSTFLD10	CUSTFLD11	CUSTFLD12	CUSTFLD13	CUSTFLD14	CUSTFLD15	JOBDESC	JOBTYPE	JOBSTATUS	JOBSTART	JOBPROJEND	JOBEND
+CUST	Adam's Candy Shop	110	0	Adam's Candy Shop	Adam Bradley	1528 Kitty Bang Bang St.	"Fudge, CA 94555"		Adam's Candy Shop	Adam Bradley	1528 Kitty Bang Bang St.	"Fudge, CA 94555"		707 555 5734				Adam Bradley				Y				"County, San Thomas"		Mr.	Adam's Candy Shop	Adam		Bradley																		0	0/0/0	0/0/0	0/0/0
+CUST	"Andres, Cristina"	60	0	Cristina Andres	4242 Cypress Hill Rd	Bayshore CA 94326								415-555-2174			cristina@samplename.com	Cristina Andres		Residential	2% 10 Net 30	Y				San Domingo				Cristina		Andres																		0	0/0/0	0/0/0	0/0/0
+CUST	"Balak, Mike"	61	0	Mike Balak	1800 Appleseed Ct	Bayshore CA 94326								415-555-6453	415-555-6453	none	mbalak@samplename.com	Mike Balak		Residential	Net 30	Y				San Domingo				Mike		Balak																		0	0/0/0	0/0/0	0/0/0
+CUST	"Balak, Mike:330 Main St"	98	0	Mike Balak	1800 Appleseed Ct	Bayshore CA 94326			Mike Balak	"Hair, Nails and Supply"	330 Main St	Bayshore CA  94326		415-555-6453	415-555-6453	none		Mike Balak		Residential	Net 30	N				San Domingo			"Hair, Nails and Supply"	Mike		Balak																		0	0/0/0	0/0/0	0/0/0
+CUST	"Balak, Mike:Residential"	97	0	Mike Balak	1800 Appleseed Ct	Bayshore CA 94326								415-555-6453	415-555-6453	none		Mike Balak		Residential	Net 30	N				San Domingo				Mike		Balak																		0	0/0/0	0/0/0	0/0/0
+CUST	"Blackwell, Edward"	59	0	Wild Garden Restaurant	Edward Blackwell	431 Hampshire Blvd	Bayshore CA 94326							415-555-3221			eblackwell@samplename.com	Edward Blackwell	Chris Baker	Commercial	Due on receipt	Y				San Domingo			Wild Garden Restaurant	Edward		Blackwell																		0	0/0/0	0/0/0	0/0/0
+CUST	"Chapman, Natalie"	82	0	Natalie Chapman	429 Silverbell Ave	East Bayshore CA  94327								415-555-3232			natalie@samplename.com	Natalie Chapman		Residential	Net 15	Y				"County, San Thomas"				Natalie		Chapman																		0	0/0/0	0/0/0	0/0/0
+CUST	"Cheknis, Benjamin"	58	0	E. Benjamin Cheknis	431 Wyatt Ave	East Bayshore CA 98727								415-555-4356	none	none	benc@samplename.com	Benjamin Cheknis		Residential	Net 30	Y				San Domingo				Benjamin		Cheknis																		0	0/0/0	0/0/0	0/0/0
+CUST	"Corcoran, Carol"	83	0	Carol Corcoran	7521 W. Vista Del Mar	Middlefield CA 98727								415-555-8825			carolc@samplename.com	Carol Corcoran		Residential	Net 30	Y				"County, San Thomas"				Carol		Corcoran																		0	0/0/0	0/0/0	0/0/0
+CUST	"Crenshaw, Bob"	6	0	Bob Crenshaw	345 Cherry Lane	"Middlefield, CA 94482"								415-555-2248	415-555-0220	N/A		Bob or Carol	Bob's Cellular	Commercial	Net 30	Y				San Thomas Group			Scrounger's Auto	Bob		Crenshaw	Carol	5/11																0	0/0/0	0/0/0	0/0/0
+CUST	"Crider, Craig"	7	0	Crider's Critters	300 Main Street	"Bayshore, CA 94326"								415-555-8900	415-555-6711		ccrider@samplename.com	Craig Crider		Residential	Net 30	Y				San Domingo			Crider's Ciritters	Craig		Crider	Ronnie	10/20																0	0/0/0	0/0/0	0/0/0
+CUST	DJ's Computers	105	0	Computer Services by DJ	101 Bayshore Blvd.	Bayshore CA 94326			Computer Services by DJ	101 Bayshore Blvd.	Bayshore CA 94326			415-555-1515		415-555-1510	DJ@samplename.com	Donald Kucsmas		Commercial	Net 60	Y				"County, San Thomas"			Computer Services by DJ																					0	0/0/0	0/0/0	0/0/0
+CUST	Ecker Design	8	0	Ecker Design	109 N. Elm Street	"Middlefield, CA 94482"								415-555-7896		415-555-4563	deana_ecker@samplename.com	Deana Ecker		Commercial	Net 30	Y				San Domingo				Deana		Ecker		5/15																0	0/0/0	0/0/0	0/0/0
+CUST	Golliday Sporting Goods	9	0	Golliday Sporting Goods	370 Easy Steet	"Middlefield, CA 94482"								415-555-9837		415-555-0987	mgolliday@samplename.com	Michael Golliday	Stephanie Wilson	Commercial	1% 10 Net 30	Y				San Thomas Group			Golliday Sporting Goods	Michael		Golliday		9/9																0	0/0/0	0/0/0	0/0/0
+CUST	Golliday Sporting Goods:155 Wilks Blvd.	10	0	Golliday Sporting Goods	370 Easy Steet	"Middlefield, CA 94482"			Golliday Sporting Goods	155 Wilks Blvd.	"Middlefield, CA 94482"			415-555-9837		415-555-0987				Commercial	1% 10 Net 30	N				San Thomas Group																								3	0/0/0	0/0/0	0/0/0
+CUST	Golliday Sporting Goods:75 Sunset Rd.	11	0	Sporting Goods	370 Easy Steet	"Middlefield, CA 94482"			Sporting Goods	75 Sunset Road	"Bayshore, CA 94326"			415-555-9837		415-555-0987				Commercial	1% 10 Net 30	N				San Thomas Group																								3	0/0/0	0/0/0	0/0/0
+CUST	"Gregory, Dru"	56	0	Dru's Pharmacy	Dru Gregory	529 Main St	Bayshore CA 94326		Dru's Pharmacy	Dru Gregory	529 Main St	Bayshore CA 94326		415-555-8046				Dru Gregory	Kathleen Santo	Commercial	2% 10 Net 30	Y				San Domingo			Dru's Pharmacy	Dru		Gregory																		0	0/0/0	0/0/0	0/0/0
+CUST	"Heldt, Bob"	74	0	Bob Heldt	459 Saxon Ave	East Bayshore CA 94327								415-555-7663			bob_heldt@samplename.com	Bob or Tracy Heldt		Residential	Net 15	Y				San Domingo				Bob		Heldt	Tracy																	0	0/0/0	0/0/0	0/0/0
+CUST	"Hermann, Jennifer"	75	0	Jennifer Hermann	7221 W. Sun Valley Rd	"Bayshore, CA 94482"			Jennifer Hermann	7221 W. Sun Valley Rd	"Bayshore, CA 94482"			415-555-4695	415-555-9936	415-555-4696	jhermann@samplename.com	Jennifer	John	Residential	Net 30	Y	"3,000.00"		Shane B. Hamby<SBH>Employee	"County, San Thomas"		Mrs		Jennifer		Hermann	John	05/11/1979																0	0/0/0	0/0/0	0/0/0
+CUST	"Hermann, Jennifer:Residential Maintenance"	76	0	Jennifer Hermann	7221 W. Sun Valley Rd	"Bayshore, CA  94482"			Jennifer Hermann	7221 W. Sun Valley Rd	"Bayshore, CA  94482"			415-555-4695	415-555-9936	415-555-4696		Jennifer	John	Residential	Net 30	N	300.00		Shane B. Hamby<SBH>Employee	"County, San Thomas"		Mrs		Jennifer		Hermann	John	05/11/1979														Monthly Lawn Maintenance	Contract	2	6/1/23	5/31/24	0/0/0
+CUST	"Hughes, David"	12	0	David Hughes	95 Amber Street	"Bayshore, CA 94326"								415-555-6687			dhughes@samplename.com	David	James Bussey	Residential	Net 15	Y				San Domingo				David		Hughes	Deana	1/11																0	0/0/0	0/0/0	0/0/0
+CUST	Jasmine Park	72	0	Jasmine Park	Cristina Jimenez	421 Jasmine Parkway	East Bayshore CA 94327										cjimenez@samplename.com	Cristina Jimenez	Robert D. Schmucker	Residential	Net 60	Y			Shane B. Hamby<SBH>Employee	San Domingo			Jasmine Park	Cristina		Jimenez																		0	0/0/0	0/0/0	0/0/0
+CUST	Jim's Family Store	13	0	Jim's Family Store	5647 Cypress Hill Rd	Bayshore CA 94326								415-555-6579		415-555-7845	jthomas@samplename.com	Jim Thomas		Commercial	Net 30	Y				San Thomas Group		Mr.	Jim's Family Store	Jim		Thomas		10/4														Commercial	Contract	2	7/1/23	6/30/24	0/0/0
+CUST	Julie's Doll House	112	0	Julie's Doll House	Julie Bradley	1060 Dear Dr.	"Ken, CA 94423"		Julie's Doll House	Julie Bradley	1060 Dear Dr.	"Ken, CA 94423"		909 555 9389			JBradley@DollHouse.com	Julie Bradley				Y				"County, San Thomas"		Ms.	Julie's Doll House	Julie		Bradley																		0	0/0/0	0/0/0	0/0/0
+CUST	"Lee, Laurel"	14	0	Laurel Lee	376 Pine Street	"Bayshore, CA 94326"								415-555-9811			laurellee@samplename.com	Laurel Lee	Helmet	Residential	Net 30	Y				San Domingo				Laurel		Lee	Helmet	2/14																0	0/0/0	0/0/0	0/0/0
+CUST	"Lee, Laurel:Lee Advertising"	15	0	Laurel Lee	376 Pine Street	"Bayshore, CA 94326"			Lee Advertising	900 Amber Street	"Middlefield, CA 94482"			415-555-3709		415-555-0011		Laurel Lee	Helmet	Commercial		N				San Domingo			Lee Advertising	Laurel		Lee																		4	0/0/0	0/0/0	0/0/0
+CUST	"Lee, Laurel:Lee Residence"	16	0	Laurel Lee	376 Pine Street	"Bayshore, CA 94326"								415-555-9811				Laurel Lee	Helmet	Residential	Net 30	N				San Domingo				Laurel		Lee																		4	0/0/0	0/0/0	0/0/0
+CUST	"Leon, Richard"	17	0	Rick's Bar & Grill	222 Middlefield Ave.	"Middlefield, CA 94482"								415-555-2222			richard@samplename.com	Richard Leon		Commercial	Net 15	Y				San Thomas Group		Mr.	Rick's Bar & Grill	Richard		Leon	Michele	3/21																0	0/0/0	0/0/0	0/0/0
+CUST	"Lo, David"	88	0	David Lo	4631 W. Indian Trail	"Middlefield, CA  98731"								415-555-8164			david_lo@samplename.com	David Lo			8% 30 Net 60	Y				"County, San Thomas"				David		Lo																		0	0/0/0	0/0/0	0/0/0
+CUST	"Lo, David:4631 W Indian Trail"	100	0	David Lo	4631 W. Indian Trail	"Middlefield, CA  98731"								415-555-8164				David Lo		Commercial	8% 30 Net 60	N				"County, San Thomas"				David		Lo																		0	0/0/0	0/0/0	0/0/0
+CUST	"Lo, David:Landscaping"	99	0	David Lo	4631 W. Indian Trail	"Middlefield, CA  98731"								415-555-8164				David Lo		Commercial	8% 30 Net 60	N				"County, San Thomas"				David		Lo																		0	0/0/0	0/0/0	0/0/0
+CUST	"Lochrie, Steven"	71	0	Mr Steven Lochrie	1921 Appleseed Lane	Bayshore CA 94326			Mr Steven Lochrie	1921 Appleseed Lane	Bayshore CA 94326			415-555-2850		none	slochrie@samplename.com	Steven Lochrie	Lakshmi Balakrishna	Residential	Net 15	Y				San Domingo		Mr		Steven		Lochrie																		0	0/0/0	0/0/0	0/0/0
+CUST	"Loomis, Anne"	73	0	Anne Loomis	1572 Appleseed Lane	Bayshore CA 94326								415-555-7336			anne@samplename.com	Anne Loomis	David Overfield	Residential	Due on receipt	Y				San Domingo				Anne		Loomis																		0	0/0/0	0/0/0	0/0/0
+CUST	"McCale, Ron"	92	0	"Mccale, Ron"	4589 S. McNalley Rd	"Bayshore, CA  94482"			"Mccale, Ron"	4589 S. McNalley Rd	"Bayshore, CA  94482"			415-555-7664			rmccale@samplename.com	Ron McCale		Residential	Net 15	Y								Ron		McCale		11/09																0	0/0/0	0/0/0	0/0/0
+CUST	"McCale, Ron:Residential"	96	0	"Mccale, Ron"	4589 S. McNalley Rd	"Bayshore, CA  94482"			"Mccale, Ron"	4589 S. McNalley Rd	"Bayshore, CA  94482"			415-555-7664				Ron McCale		Residential	Net 15	N								Ron		McCale		11/09																0	0/0/0	0/0/0	0/0/0
+CUST	Middlefield Elementary School	18	0	Middlefield Elementary School	100 Montecito Drive	MIddlefield CA 94482								415-565-8932		415-565-1230		Carol Corcoran	Kellie Mecham	Commercial	Net 30	N				San Thomas Group																								0	0/0/0	0/0/0	0/0/0
+CUST	"Molotsi, Hugh"	69	0	Hugh Molotsi	6856 Ocean View	Bayshore CA 94326								415-555-4535			hugh@samplename.com	Hugh Molotsi			Net 15	Y				San Domingo				Hugh		Molotsi																		0	0/0/0	0/0/0	0/0/0
+CUST	"Molotsi, Hugh:1487 Silverbell Ave"	94	0	Hugh Molotsi	6856 Ocean View	Bayshore CA 94326			Hugh Molotsi	1487 Silverbell Ave	East Bayshore CA 94327			415-555-4535				Hugh Molotsi		Commercial	Net 15	N				San Domingo				Hugh		Molotsi																		0	0/0/0	0/0/0	0/0/0
+CUST	"Molotsi, Hugh:4697 W. Indian Trail"	95	0	Hugh Molotsi	6856 Ocean View	Bayshore CA 94326			hugh Molotsi	4697 W. Indian Trail	"Middlefield, CA  98731"			415-555-4535				Hugh Molotsi		Commercial		N				San Domingo				Hugh		Molotsi																		0	0/0/0	0/0/0	0/0/0
+CUST	"Molotsi, Hugh:6856 Ocean View"	93	0	Hugh Molotsi	6856 Ocean View	Bayshore CA 94326								415-555-4535				Hugh Molotsi		Commercial		N				San Domingo				Hugh		Molotsi																		0	0/0/0	0/0/0	0/0/0
+CUST	"Morearty, Brian"	57	0	Brian Morearty	782 Skyline Drive	East Bayshore CA 94327								415-555-7938	415-555-9611		brian_m@samplename.com	Brian Morearty	J. Clark Mitchell	Commercial	Net 30	Y				San Domingo		Mr.		Brian		Morearty																		0	0/0/0	0/0/0	0/0/0
+CUST	"Muchemu, Margaret"	67	0	Margaret Muchemu	8292 Orange Blossom Dr	Bayshore CA 94326								415-555-4187				Margaret Muchemu	Lori Siegerman	Residential	Net 30	Y				San Domingo				Margaret		Muchemu																		0	0/0/0	0/0/0	0/0/0
+CUST	Paxton Consulting	19	0	Drew Paxton	608 Main St	"Bayshore, CA 94326"								415-555-8462		415-555-8463	drew@samplename.com	Drew Paxton		Commercial	Net 30	Y				San Thomas Group		Mr.		Drew		Paxton		4/10	5/09															0	0/0/0	0/0/0	0/0/0
+CUST	"Perry, Dave"	89	0	Dave Perry	215 W. Jupiter	"Middlefield, CA  98737"								415-555-8439				Dave Perry				Y				"County, San Thomas"				Dave		Perry																		0	0/0/0	0/0/0	0/0/0
+CUST	"Pretell, Erika"	20	0	Erika Pretell	450 Happy Hollow Ave.	"Bayshore, CA 94623"								415-555-0352			erika@samplename.com	Erika Pretell		Residential	Net 30	Y				San Thomas Group				Erika		Pretell		11-23																0	0/0/0	0/0/0	0/0/0
+CUST	"Pretell, Erika:Pretell Estates"	103	0	Erika Pretell	450 Happy Hollow Ave.	"Bayshore, CA 94623"			Erika Pretell	Pretell Estates Apartments				415-555-0352	415-555-7336			Erika Pretell		Commercial	Net 15	N				San Thomas Group				Erika		Pretell		11-23																0	0/0/0	0/0/0	0/0/0
+CUST	"Pretell, Erika:Residential"	104	0	Erika Pretell	450 Happy Hollow Ave.	"Bayshore, CA 94623"								415-555-0352				Erika Pretell		Residential	Net 15	N				San Thomas Group				Erika		Pretell		11-23																0	0/0/0	0/0/0	0/0/0
+CUST	"Price,  Gwen"	62	0	Gwen Price	1421 Silverbell Ave	East Bayshore CA 94327								415-555-1154			gprice@samplename.com	Gwen Price	Katherine Kuplis	Residential	Net 30	Y				San Domingo				Gwen		Price																		0	0/0/0	0/0/0	0/0/0
+CUST	Retail Sales	90	0	Retail Sales																		Y																												0	0/0/0	0/0/0	0/0/0
+CUST	"Rosenstock, Amy"	70	0	Rosenstock Books	Amy Rosenstock	451 Main St	Bayshore CA 94326							415-555-3331	415-555-3332	415-555-2404	amy@samplename.com	Amy Rosenstock	Mary Sloan	Commercial	Net 30	Y	"3,000.00"		Shane B. Hamby<SBH>Employee	San Domingo			Rosenstock Books	Amy		Rosenstock																		3	0/0/0	0/0/0	0/0/0
+CUST	"Rummens, Susie"	87	0	Susie Rummens	2877 S. Rosebush	"Middlefield, CA  98731"								415-55-54155				Susie Rummens			Due on receipt	Y				"County, San Thomas"				Susie		Rummens																		0	0/0/0	0/0/0	0/0/0
+CUST	"Rummens, Susie:2877 S Rosebush"	101	0	Susie Rummens	2877 S. Rosebush	"Middlefield, CA  98731"								415-55-54155				Susie Rummens				N				"County, San Thomas"				Susie		Rummens																		0	0/0/0	0/0/0	0/0/0
+CUST	"Rummens, Susie:721 Fern Lane"	102	0	Susie Rummens	2877 S. Rosebush	"Middlefield, CA  98731"			Fran Smallson	721 Fern Lane	Bayshore CA  94326			415-555-4155	415-555-3321			Susie Rummens	Fran Smallson		Due on receipt	N				"County, San Thomas"				Susie		Rummens																		0	0/0/0	0/0/0	0/0/0
+CUST	Russell Chiropractic	63	0	Russell Chiropractic	Mark Russell	320 Main St	Bayshore CA 94326							415-555-9050	415-555-9045	415-555-9007		Mark Russell		Commercial	Net 30	Y			Shane B. Hamby<SBH>Employee	San Domingo			Russell Chiropractic	Mark		Russell																Monthly Maintenance	Contract	3	0/0/0	0/0/0	0/0/0
+CUST	"Sage, Robert"	86	0	Robert Sage	610 N. Mission Ave	"Middlefield, CA 98731"								415-555-5612				Robert Sage			Net 30	Y				"County, San Thomas"				Robert		Sage																		0	0/0/0	0/0/0	0/0/0
+CUST	"Sonnenschein, Russ"	68	0	Russ Sonnenschein	2353 Lisa Lane	Bayshore CA 94326								415-555-2174				Russ Sonnenschein	Jason Burch	Residential		Y				San Domingo				Russ		Sonnenschein																		0	0/0/0	0/0/0	0/0/0
+CUST	"Stinson, Tracy"	85	0	Tracy Stinson	70122 N. Charleston Lane	East Bayshore CA 94327								415-555-2351			tstinson@samplename.com	Tracy Stinson			Net 15	Y				"County, San Thomas"				Tracy		Stinson																		0	0/0/0	0/0/0	0/0/0
+CUST	"Theurer-Davis, Vicki"	66	0	Vicki Theurer-Davis	213 Fern Lane	Bayshore CA 94326								415-555-2335	415-555-2900		vicki@samplename.com	Vicki Theurer-Davis	Keiffer	Residential	8% 30 Net 60	Y				San Domingo				Vicki		Theurer-Davis	Keiffer	6/30																0	0/0/0	0/0/0	0/0/0
+CUST	"Theurer-Davis, Vicki:Irrigation & Lawn"	81	0	Vicki Theurer-Davis	213 Fern Lane	Bayshore CA 94326								415-555-2335				Vicki Theurer-Davis			8% 30 Net 60	N				San Domingo				Vicki		Theurer-Davis																Install 4 Zone In-ground Irregation & Sod	Installation	3	11/3/23	12/19/23	0/0/0
+CUST	"Theurer-Davis, Vicki:Spa"	80	0	Vicki Theurer-Davis	213 Fern Lane	Bayshore CA 94326								415-555-2335				Vicki Theurer-Davis		Residential		N				San Domingo				Vicki		Theurer-Davis																Install - 6 Man Spa	New Construction	3	9/15/23	12/19/23	12/19/23
+CUST	"Theurer-Davis, Vicki:Sun Deck"	79	0	Vicki Theurer-Davis	213 Fern Lane	Bayshore CA 94326								415-555-2335	415-555-2900	n/a		Vicki Theurer-Davis	Keiffer	Residential		N	"5,000.00"			San Domingo				Vicki		Theurer-Davis	Keiffer	6/30														Pergola Deck 14' x 20'	New Construction	4	10/13/23	10/31/23	10/31/23
+CUST	"Tumacder, Jacint"	65	0	Jacint Tumacder	143 Bay View Dr	Esat Bayshore CA 94327								415-555-4132		415-555-4133	jtumacder@samplename.com	Jacint Tumacder			Due on receipt	Y				San Domingo				Jacint		Tumacder																		0	0/0/0	0/0/0	0/0/0
+CUST	"Walker, Rich"	64	0	Rich Walker	3219 Lisa Lane	Bayshore CA 94326								415-555-8046				Rich Walker		Residential	Net 30	Y			Shane B. Hamby<SBH>Employee	San Domingo		Mr.		Rich		Walker																		0	0/0/0	0/0/0	0/0/0
+CUST	"Williams, Abraham"	21	0	Abe's Lock & Key	6845 Ocean View Rd.	"Bayshore, CA 94326"								415-555-4411				Abraham J. Williams		Residential	Due on receipt	Y				San Domingo		Mr.	Abe's Lock & Key	Abraham	J.	Williams	Linda	8/13																4	0/0/0	0/0/0	0/0/0
+CUST	Wood's Garden Cafe	84	0	Deborah Wood	609 N. Mission Ave	"Middlefield, CA  94331"								415-555-9444			dwood@samplename.com	Deborah Wood		Commercial	Net 30	Y	750.00			"County, San Thomas"			Wood's Garden Cafe	Deborah		Wood																		0	0/0/0	0/0/0	0/0/0
+!VTYPE	NAME	REFNUM	TIMESTAMP
+VTYPE	Consultant	1	0
+VTYPE	Equipment	2	0
+VTYPE	Materials	3	0
+VTYPE	Professional Services	6	0
+VTYPE	Subcontractors	4	0
+VTYPE	Tax agency	5	0
+VTYPE	Utilities	7	0
+!VEND	NAME	REFNUM	TIMESTAMP	PRINTAS	ADDR1	ADDR2	ADDR3	ADDR4	ADDR5	VTYPE	CONT1	CONT2	PHONE1	PHONE2	FAXNUM	EMAIL	NOTE	TAXID	LIMIT	TERMS	NOTEPAD	SALUTATION	COMPANYNAME	FIRSTNAME	MIDINIT	LASTNAME	CUSTFLD1	CUSTFLD2	CUSTFLD3	CUSTFLD4	CUSTFLD5	CUSTFLD6	CUSTFLD7	CUSTFLD8	CUSTFLD9	CUSTFLD10	CUSTFLD11	CUSTFLD12	CUSTFLD13	CUSTFLD14	CUSTFLD15	1099
+VEND	Bank of Anycity	111	0	Bank of Anycity	Bank of Anycity	Lisa Holzhauser	1935 Main Street	"Middlefield, CA 94482"			Lisa Holzhauser		415-555-9135		415-555-9153	lisah@samplename.com							Bank of Anycity	Lisa		Holzhauser																N
+VEND	Bayshore CalOil Service	22	0	Bayshore CalOil Service	Bayshore CalOil Service	771 S. Larimore	"Bayshore, CA 98323"				Kurt Rutherford		415-555-7378				12260-98765						Bayshore CalOil Service							N/A												N
+VEND	Bayshore Water	23	0		Bayshore Water	P.O. Box 61	Bayshore CA 94326			Utilities			415-555-0111				370C-99336622			Net 15																						N
+VEND	Brown Equipment Rental	24	0		Brown Equipment Rental	33 Old Bayshore Rd	Bayshore CA 94326			Equipment	Sylvester Brown		415-555-2366		415-555-2367					Net 15										5%												N
+VEND	Cal Gas & Electric	25	0		Cal Gas & Electric	P.O. Box 5037	Middlefield CA 94482						415-555-0202				769369-370R			Net 15																						N
+VEND	Cal Telephone	26	0		Cal Telephone	P.O. Box 1100	Middlefield CA 94482						415-555-5555				415-555-9876-8053			Net 30																						N
+VEND	CalOil Company	27	0		CalOil Company	PO Box 628	Middlefield CA 94482						800-555-7896				98-4567-432			Net 15																						N
+VEND	"Campion, Patrick, CPA"	28	0	Patrick Campion	"Patrick Campion, CPA"	200 Royal Rd	Bayshore CA 94326			Consultant		Warner Onstine	415-555-2381		415-555-2382		89-P			Net 30				Patrick		Campion																N
+VEND	Chris Markley	29	0		Chris Markley	610 W. Bush St.	Apt 201	Middlefield CA 94482		Subcontractors	Chris Markley		415-555-0046				12530	333-33-3334		Net 30				Chris		Markley																Y
+VEND	City of Bayshore	30	0		City of Bayshore	100 Main St	Bayshore CA 94326						415-555-1000							Net 15																						N
+VEND	City of Middlefield	31	0		City of Middlefield	City Hall	P.O. Box 1	Middlefield CA 94482					415-555-8500				MO-890k			Due on receipt																						N
+VEND	Computer Services by DJ	32	0	Computer Services by DJ	Computer Services by DJ	101 Main St	Bayshore CA 94326			Consultant	Donald Kucsmas		415-555-1515		415-555-1510	DJ@samplename.com	1JK90			8% 30 Net 60			Computer Services by DJ					jeff@lennon.com														N
+VEND	Conner Garden Supplies	33	0		Conner Garden Supplies	189 Old Bayshore Rd	"Bayshore, CA 94326"			Materials	Evelyn	Scott Zufelt	415-555-2436			evec@samplename.com	R 594							Evelyn		Conner																N
+VEND	Employment Development Department	5	0		Employment Development Department	P.O. Box 123456	Sacramento CA 94280						(916) 555-1234																													N
+VEND	Express Delivery Service	35	0		Express Delivery Service																																					N
+VEND	Great Statewide Bank	4	0		Great Statewide Bank	P.O. Box 522	Bayshore CA 94326				Cristina Jimenez		415-555-2400											Cristina		Jimenez																N
+VEND	Gussman's Nursery	34	0	Gussman's Nursery	Gussman's Nursery	P.O. Box 5033	Bayshore CA 94326			Materials	Lara Gussman	Ed	415-555-9533	415-555-9936	415-555-9534	ggrowers@samplename.com	1V-2345-00		"-6,000.00"	Net 15		Ms.	Gussman's Nursery	Lara	F.	Gussman				15%	<insert URL here>											N
+VEND	Internal Revenue Service	36	0	Internal Revenue Service	Internal Revenue Service																																					N
+VEND	Mendoza Mechanical	109	0	Mendoza Mechanical	Mendoza Mechanical	Kevin Mendoza	456 E Bayshore Frwy	"Bayshore, CA 94400"	USA		Kevin Mendoza		888-555-5858			mendoza@samplename.com	123123123					Mr	Mendoza Mechanical	Kevin		Mendoza																N
+VEND	Metal Works	37	0		Metal Works	740 Washington Rd	Middlefield CA 94482			Subcontractors			415-555-7422		415-555-7426	metals@samplename.com	85-93117			2% 10 Net 30										5%												N
+VEND	Middlefield Nursery	1	0	Middlefield Nursery	Middlefield Nursery	P.O. Box 620	Middlefield CA 94482			Materials	Scott		415-555-0305				09876	12-3456789		Net 30			Middlefield Nursery	Scott		Metzger																Y
+VEND	Mike Scopellite	78	0	Michael J. Scopellite	Mike Scopellite	1029 N. Chesin St	Apt 7	"Bayshore, CA 94482"		Subcontractors	Mike Scopellite		415-555-8426			scopeman@samplename.com	1099-12385	621-78-2089		Due on receipt				Mike		Scopellite																Y
+VEND	Nolan Hardware and Supplies	38	0		Nolan Hardware and Supplies	221 Old Bayshore Rd	Bayshore CA 94326			Materials	Thomas		415-555-5483				5-487-00	12-3456789		Net 15				Thomas	A.	Nolan																Y
+VEND	Nye Properties	39	0		Carl Nye	101 N. Main Street	"Bayshore, CA 94326"				Carl Nye		415-555-7530			carln@aol.com	176-MO							Carl		Nye				carln@aol.com												N
+VEND	ODI	91	0	"Organic Distributors, Inc."	"Organic Distributors, Inc."	5701 N. Baseline Rd	"Tucson, AZ 85751"						520-555-1212	520-555-6241	520-555-2403	od_service@samplename.com							"Organic Distributors, Inc."																			N
+VEND	Patio & Desk Designs	40	0		Patio & Desk Designs	270 Old Bayshore Rd	Bayshore CA 94326			Consultant		Susan	415-555-8965			susan@intuit99.com	DE-0918	13-2456789												susan@intuit99.com												Y
+VEND	QBCC - 0109	108	0	QuickBooks Credit Card - 0109	QuickBooks Credit Card	PO BOX 0000	"Bayshore, Ca 94400"																QuickBooks Credit Card																			N
+VEND	QBCC - 5678	107	0	QuickBooks Credit Card - 5678	QuickBooks Credit Card	PO BOX 0000	"Bayshore, CA 94400"																QuickBooks Credit Card																			N
+VEND	QBCC - 8201	106	0	QuickBooks Credit Card - 8201	QuickBooks Credit Card	PO BOX 0000	"Bayshore, Ca 94400"																QuickBooks Credit Card																			N
+VEND	Robert Carr Masonry	41	0	Robert Carr	Robert Carr Masonry	2780 County Rd	Bayshore CA 94326			Subcontractors	Robert	Steve Washuta	415-555-2046		415-555-2047		678J-09	98-7654321		Net 30										N/A												Y
+VEND	Sena Lumber & Building Materials	42	0		Sena Lumber & Building Materials	P.O. Box 2816	Bayshore CA 94326			Materials	Emory		415-555-0797		415-555-7283					Net 15				Emory		Sena																N
+VEND	Smallson & Associates	43	0		Smallson & Associates	"Fran Smallson, Attorney"	P.O. Box 2836	Middlefield CA 94482		Consultant	Fran	Celso Guillermo Reyes	415-555-7900			fran@samplename.com	2907			Net 30				Fran		Smallson				N/A												N
+VEND	Sowers Office Equipment	44	0		Sowers Office Equipment	4872 County Rd	Bayshore CA 94326			Materials	Cam Patton		415-555-1370		415-555-1371		RC 93			Net 30				Robert	W.	Sowers				N/A												N
+VEND	State Board of Equalization	2	0		State Board of Equalization	P.O. Box 3456	Sacramento CA 94280			Tax agency			415-555-0000				ABCD 11-234567													N/A												N
+VEND	Sult Advertising	45	0	Wayne Sult Advertising	Wayne Sult Advertising	P.O. Box 783	Bayshore CA 94326			Subcontractors	Wayne	Renee Barley	415-555-1813		415-555-1883	wayne@samplename.com	8409	98-7654321		Net 30										0%												Y
+VEND	Townley Insurance Agency	3	0	Mark Townley Insurance Agency	Mark Townley Insurance Agency	P.O. Box 6257	Middlefield CA 94482			Professional Services	David Toering		415-555-1919		415-555-2929		786-35-009-201			Net 30				Mark		Townley				N/A												N
+VEND	Willis Orchards	46	0	"Willis Orchards, Inc."	Willis Orchards	650 Old Bayshore Rd	Bayshore CA 94326			Subcontractors	Edward	Scott Turnbull	415-555-9977		415-555-9991	edw@samplename.com	189-WAD	99-8877665		Due on receipt				Edward	D.	Willis				3%												Y
+!EMP	NAME	REFNUM	TIMESTAMP	INIT	ADDR1	ADDR2	ADDR3	ADDR4	ADDR5	SSNO	PHONE1	PHONE2	EMAIL	NOTEPAD	FIRSTNAME	MIDINIT	LASTNAME	SALUTATION	CUSTFLD1	CUSTFLD2	CUSTFLD3	CUSTFLD4	CUSTFLD5	CUSTFLD6	CUSTFLD7	CUSTFLD8	CUSTFLD9	CUSTFLD10	CUSTFLD11	CUSTFLD12	CUSTFLD13	CUSTFLD14	CUSTFLD15	HIDDEN
+EMP	Duncan Fisher	47	0		Duncan Fisher	331 Poplar Rd	"Bayshore, CA 94326"			444-55-6666	555-3286				Duncan		Fisher		Ronit	7/7/77	4-20-72													N
+EMP	Jenny Miller	48	0		Jenny Miller	45 N. Elm Street	"Middlefield, CA 93242"			785-63-1759	525-7891				Jenny		Miller																	N
+EMP	Shane B. Hamby	49	0		Shane B. Hamby	2453 West 25th St.	"Bayshore, CA 94326"			555-96-9999					Shane	B.	Hamby		Loleta		9/30/97													N
+!OTHERNAME	NAME	REFNUM	TIMESTAMP	BADDR1	BADDR2	BADDR3	BADDR4	BADDR5	PHONE1	PHONE2	FAXNUM	EMAIL	CONT1	NOTEPAD	SALUTATION	COMPANYNAME	FIRSTNAME	MIDINIT	LASTNAME
+OTHERNAME	Accumulated Depreciation	77	0	Accumulated Depreciation															
+OTHERNAME	ATM Withdrawal	50	0																
+OTHERNAME	Deposit	51	0																
+OTHERNAME	Larry Wadford	52	0																
+OTHERNAME	Opening Bal Adj to Retain Earnings	53	0	Transfer to Retained Earnings															
+OTHERNAME	Transfer from Savings	54	0																
+OTHERNAME	Transfer to Savings	55	0																
+!SHIPMETH	NAME	REFNUM	TIMESTAMP
+SHIPMETH	Airborne	1	0
+SHIPMETH	DHL	2	0
+SHIPMETH	Federal Express	3	0
+SHIPMETH	UPS	4	0
+SHIPMETH	US Mail	5	0
+!PAYMETH	NAME	REFNUM	TIMESTAMP
+PAYMETH	American Express	3	0
+PAYMETH	Barter	7	0
+PAYMETH	Cash	1	0
+PAYMETH	Check	2	0
+PAYMETH	Discover	4	0
+PAYMETH	E-Check	8	0
+PAYMETH	Master Card	5	0
+PAYMETH	VISA	6	0
+!INVMEMO	NAME	REFNUM	TIMESTAMP
+INVMEMO	All work is complete!	1	0
+INVMEMO	It's been a pleasure working with you!	2	0
+INVMEMO	Please remit to above address.	3	0
+INVMEMO	Thank you for your business.	4	0
+INVMEMO	We appreciate your prompt payment.	5	0
+!TERMS	NAME	REFNUM	TIMESTAMP	DUEDAYS	MINDAYS	DISCPER	DISCDAYS	TERMSTYPE
+TERMS	1% 10 Net 30	2	0	30	5	1	10	0
+TERMS	2% 10 Net 30	5	0	30	5	2	10	0
+TERMS	8% 30 Net 60	7	0	60	5	8	30	0
+TERMS	Due on receipt	4	0	0	5	0	0	0
+TERMS	Net 15	1	0	15	5	0	0	0
+TERMS	Net 30	3	0	30	5	0	0	0
+TERMS	Net 60	6	0	60	5	0	0	0
+!BUD	ACCNT	PERIOD	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	AMOUNT	STARTDATE	CLASS	CUSTOMER
+BUD	Tools and Misc. Equipment	MONTH	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00				1/1/2019	Landscaping	
+BUD	Rent	MONTH	475.00	475.00	475.00	475.00	475.00	475.00	475.00	475.00	475.00				1/1/2019	Landscaping	
+BUD	Rent	MONTH	475.00	475.00	475.00	475.00	475.00	475.00	475.00	475.00	475.00				1/1/2019	Design	
+BUD	Office Supplies	MONTH	35.00	35.00	35.00	35.00	35.00	35.00	35.00	35.00	35.00				1/1/2019	Landscaping	
+BUD	Office Supplies	MONTH	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00				1/1/2019	Design	
+BUD	Mileage Reimbursement	MONTH	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00				1/1/2019	Landscaping	
+BUD	Job Expenses:Subcontractors	MONTH	150.00	150.00	150.00	150.00	150.00	150.00	150.00	150.00	150.00				1/1/2019	Landscaping	
+BUD	Job Expenses:Permits	MONTH	100.00			100.00			100.00						1/1/2019	Landscaping	
+BUD	Job Expenses:Job Materials:Sprinkler's & Drip Systems	MONTH	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00				1/1/2019	Landscaping	
+BUD	Job Expenses:Job Materials:Plants & Sod	MONTH	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00				1/1/2019	Landscaping	
+BUD	Job Expenses:Job Materials:Fountains & Garden Lighting	MONTH	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00				1/1/2019	Landscaping	
+BUD	Job Expenses:Job Materials:Decks & Patio	MONTH	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00				1/1/2019	Landscaping	
+BUD	Job Expenses:Job Materials	MONTH	250.00	250.00	250.00	250.00	250.00	250.00	250.00	250.00	250.00				1/1/2019	Landscaping	
+BUD	Job Expenses:Equipmental Rental	MONTH	50.00	50.00	50.00	50.00	50.00	50.00	50.00	50.00	50.00				1/1/2019	Landscaping	
+BUD	Insurance:Worker's Comp	MONTH	135.00	135.00	135.00	135.00	135.00	135.00	135.00	135.00	135.00				1/1/2019	Landscaping	
+BUD	Insurance:Worker's Comp	MONTH	42.10	42.10	42.10	42.10	42.10	42.10	42.10	42.10	42.10				1/1/2019	Design	
+BUD	Insurance:Liability	MONTH	110.00	110.00	110.00	110.00	110.00	110.00	110.00	110.00	110.00				1/1/2019	Landscaping	
+BUD	Insurance:Liability	MONTH	45.00	45.00	45.00	45.00	45.00	45.00	45.00	45.00	45.00				1/1/2019	Design	
+BUD	Insurance:Disability	MONTH	62.50	62.50	62.50	62.50	62.50	62.50	62.50	62.50	62.50				1/1/2019	Landscaping	
+BUD	Insurance:Disability	MONTH	31.25	31.25	31.25	31.25	31.25	31.25	31.25	31.25	31.25				1/1/2019	Design	
+BUD	Automobile:Maintenance & Repairs	MONTH	100.00			100.00			100.00						1/1/2019	Landscaping	
+BUD	Automobile:Fuel	MONTH	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00				1/1/2019	Landscaping	
+BUD	Automobile	MONTH	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00	100.00				1/1/2019	Landscaping	
+BUD	Advertising	MONTH	75.00			75.00			75.00						1/1/2019	Landscaping	
+BUD	Advertising	MONTH	75.00			75.00			75.00						1/1/2019	Design	
+BUD	Other Income	MONTH	-100.00			-100.00			-100.00						1/1/2019	Landscaping	
+BUD	Landscaping Services:Labor:Maintenance & Repairs	MONTH	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00				1/1/2019	Landscaping	
+BUD	Landscaping Services:Labor:Installation	MONTH	-500.00	-500.00	-500.00	-500.00	-500.00	-500.00	-500.00	-500.00	-500.00				1/1/2019	Landscaping	
+BUD	Landscaping Services:Job Materials:Sprinklers & Drip systems	MONTH	-250.00			-250.00			-250.00						1/1/2019	Landscaping	
+BUD	Landscaping Services:Job Materials:Plants and Sod	MONTH	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00	-250.00				1/1/2019	Landscaping	
+BUD	Landscaping Services:Job Materials:Fountains & Garden Lighting	MONTH	-150.00			-150.00			-150.00						1/1/2019	Landscaping	
+BUD	Landscaping Services	MONTH	"-10,000.00"	"-10,000.00"	"-10,000.00"	"-10,000.00"	"-10,000.00"	"-10,000.00"	"-10,000.00"	"-10,000.00"	"-10,000.00"				1/1/2019	Landscaping	
+BUD	Landscaping Services:Design Services	MONTH	"-4,000.00"	"-4,000.00"	"-4,000.00"	"-4,000.00"	"-4,000.00"	"-4,000.00"	"-4,000.00"	"-4,000.00"	"-4,000.00"				1/1/2019	Design	
+BUD	Depreciation	MONTH												500.00	1/1/2018	Landscaping	
+BUD	Utilities:Water	MONTH	25.00	25.00	25.00	25.00	25.00	25.00	25.00	25.00	25.00				1/1/2023		
+BUD	Utilities:Telephone	MONTH	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00	75.00				1/1/2023		
+BUD	Utilities:Gas and Electric	MONTH	135.00	135.00	135.00	135.00	135.00	135.00	135.00	135.00	135.00				1/1/2023		
+BUD	Rent	MONTH	800.00	800.00	800.00	800.00	800.00	800.00	800.00	800.00	800.00				1/1/2023		
+!TODO	REFNUM	ISDONE	DATE	DESC
+TODO	5	N	8/1/18	Call David Hughes back about pest control charges.
+TODO	3	N	8/1/18	Call Drew Paxton about doing landscaping for personal residence.
+TODO	6	N	8/1/18	Call Willis Orchards fruit trees for Laurel Lee
+TODO	4	N	8/1/18	Finish design work on Richard Leon's rock garden
+TODO	1	Y	8/1/18	Call Jim Thomas about fountain repairs
+TODO	2	Y	8/1/18	Spray fruit trees on 12/15/2003 visit to Golliday Sporting Goods on 155 Wilks Blvs.
+!VEHICLE	NAME	REFNUM	DESC	
+VEHICLE	1998 Saturn	2		N
+VEHICLE	2001 Chevy Minivan	3		N
+VEHICLE	2002 Ford Truck	1		N
+!SALESREP	INIT	REFNUM	NAME	TYPE	
+SALESREP	SBH	1	Shane B. Hamby	Employee	N

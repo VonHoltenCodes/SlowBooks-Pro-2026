@@ -12,10 +12,13 @@
 # or document number (invoices, payments) to prevent re-import collisions.
 # ============================================================================
 
+import logging
 from datetime import datetime, date
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
+
+logger = logging.getLogger(__name__)
 
 from app.models.accounts import Account, AccountType
 from app.models.contacts import Customer, Vendor
@@ -23,7 +26,7 @@ from app.models.items import Item, ItemType
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
-from app.services.accounting import create_journal_entry, get_ar_account_id, get_sales_tax_account_id
+from app.services.accounting import create_journal_entry, get_ar_account_id, get_sales_tax_account_id, get_default_income_account_id
 
 
 # ============================================================================
@@ -132,13 +135,75 @@ def _parse_iif_date(s: str) -> date:
 
 
 def _parse_decimal(s: str) -> Decimal:
-    """Parse a decimal string, returning 0 on failure."""
+    """Parse a decimal string, returning 0 on failure.
+
+    Handles QB Mac / international formats that wrap amounts in double quotes
+    with thousands separators, e.g. `"99,250.02"` or `"-1,725.00"`.
+    """
     if not s:
         return Decimal("0")
     try:
-        return Decimal(s.strip().replace(",", ""))
+        cleaned = s.strip().strip('"').replace(",", "")
+        if not cleaned:
+            return Decimal("0")
+        return Decimal(cleaned)
     except InvalidOperation:
         return Decimal("0")
+
+
+# Well-known IIF account names mapped to standard Slowbooks account numbers.
+# Used as fallback when name-based lookup fails during import.
+_WELL_KNOWN_ACCOUNTS = {
+    "accounts receivable": "1100",
+    "a/r": "1100",
+    "trade receivables": "1100",
+    "undeposited funds": "1200",
+    "accounts payable": "2000",
+    "a/p": "2000",
+    "trade payables": "2000",
+    "sales tax payable": "2200",
+    "checking": "1000",
+    "savings": "1010",
+    "service income": "4000",
+    "product sales": "4100",
+    "material income": "4200",
+    "labor income": "4300",
+    "other income": "4900",
+    "cost of goods sold": "5000",
+    "cogs": "5000",
+}
+
+
+def _find_account(db: Session, name: str) -> Account:
+    """Find an account by name with fallback strategies.
+
+    1. Exact name match
+    2. Case-insensitive name match
+    3. Well-known account name → account number mapping
+    """
+    if not name:
+        return None
+
+    # 1. Exact match
+    acct = db.query(Account).filter(Account.name == name).first()
+    if acct:
+        return acct
+
+    # 2. Case-insensitive match
+    acct = db.query(Account).filter(
+        Account.name.ilike(name)
+    ).first()
+    if acct:
+        return acct
+
+    # 3. Well-known name → account number fallback
+    acct_num = _WELL_KNOWN_ACCOUNTS.get(name.lower().strip())
+    if acct_num:
+        acct = db.query(Account).filter(Account.account_number == acct_num).first()
+        if acct:
+            return acct
+
+    return None
 
 
 # ============================================================================
@@ -181,10 +246,24 @@ def import_accounts(db: Session, rows: list) -> dict:
     """Import account rows from IIF into Slowbooks.
 
     Handles colon-separated parent:child names by creating parents first.
-    Skips accounts that already exist (matched by name).
+    Skips accounts that already exist (matched by name or account_number).
+
+    Collects per-account OBAMOUNT values so the caller can build a single
+    opening-balance journal entry. Mac QuickBooks exports often carry all
+    opening balances in the ACCNT rows themselves and omit the TRNS section
+    entirely, so without this the imported books have zero balances.
     """
     imported = 0
     errors = []
+    warnings = []
+    # {account_id: Decimal} — summed per account, fed to _create_opening_balance_entry.
+    # Multiple IIF rows can collapse onto the same DB account when dedup matches
+    # by account_number (e.g. IIF "Opening Bal Equity" #3200 + our seeded
+    # "Retained Earnings" #3200); we sum their OBAMOUNTs and warn.
+    ob_map: dict = {}
+    # {account_id: source_name} — track which IIF row first set an OBAMOUNT so
+    # we can warn on collisions.
+    ob_first_source: dict = {}
 
     # Sort so parents come before children (fewer colons first)
     rows.sort(key=lambda r: r.get("NAME", "").count(":"))
@@ -223,9 +302,28 @@ def import_accounts(db: Session, rows: list) -> dict:
                 dup_q = db.query(Account).filter(
                     (Account.name == name) | (Account.account_number == acct_num)
                 )
-            if dup_q.first():
+            existing = dup_q.first()
+
+            # Parse OBAMOUNT (QB convention: positive = debit-side).
+            # Applied to either the newly-created account or an existing
+            # duplicate that still has a zero balance.
+            obamount = _parse_decimal(row.get("OBAMOUNT", ""))
+
+            if existing:
                 sp.rollback()
-                continue  # skip duplicate
+                if obamount != 0:
+                    if existing.id in ob_map:
+                        warnings.append(
+                            f"IIF account '{full_name}' deduplicated onto existing "
+                            f"'{existing.name}' which already received an opening "
+                            f"balance from '{ob_first_source[existing.id]}'. Summing "
+                            f"both OBAMOUNTs into '{existing.name}'."
+                        )
+                        ob_map[existing.id] += obamount
+                    else:
+                        ob_map[existing.id] = obamount
+                        ob_first_source[existing.id] = full_name
+                continue
 
             acct = Account(
                 name=name,
@@ -237,6 +335,9 @@ def import_accounts(db: Session, rows: list) -> dict:
             )
             db.add(acct)
             db.flush()
+            if obamount != 0:
+                ob_map[acct.id] = obamount
+                ob_first_source[acct.id] = full_name
             sp.commit()
             imported += 1
 
@@ -244,7 +345,103 @@ def import_accounts(db: Session, rows: list) -> dict:
             sp.rollback()
             errors.append({"row": i + 1, "message": str(e)})
 
-    return {"imported": imported, "errors": errors}
+    # Build a single opening-balance journal entry from OBAMOUNT values
+    # (dropping any that summed to exactly zero after merging).
+    opening_balances = [(aid, amt) for aid, amt in ob_map.items() if amt != 0]
+    ob_result = _create_opening_balance_entry(db, opening_balances)
+    if ob_result.get("warning"):
+        warnings.append(ob_result["warning"])
+
+    return {
+        "imported": imported,
+        "errors": errors,
+        "warnings": warnings,
+        "opening_balance": ob_result,
+    }
+
+
+def _create_opening_balance_entry(db: Session, balances: list) -> dict:
+    """Create a single balanced journal entry for account opening balances.
+
+    QB IIF convention: OBAMOUNT is the debit-side value.
+      positive  -> DR the account
+      negative  -> CR the account (abs value)
+    Any residual imbalance (rounding, or accounts we couldn't resolve) is
+    plugged to Retained Earnings (account 3200) so the entry always balances.
+    """
+    from datetime import date as _date
+    from app.services.accounting import create_journal_entry
+
+    if not balances:
+        return {"created": False}
+
+    lines = []
+    total = Decimal("0")
+    for acct_id, amount in balances:
+        if amount > 0:
+            lines.append({
+                "account_id": acct_id,
+                "debit": amount,
+                "credit": Decimal("0"),
+                "description": "Opening balance (IIF import)",
+            })
+        else:
+            lines.append({
+                "account_id": acct_id,
+                "debit": Decimal("0"),
+                "credit": -amount,
+                "description": "Opening balance (IIF import)",
+            })
+        total += amount
+
+    # Plug any residual to Retained Earnings so the JE balances
+    if total != 0:
+        plug = (
+            db.query(Account).filter(Account.account_number == "3200").first()
+            or db.query(Account).filter(Account.name.ilike("Opening%Balance%Equity%")).first()
+            or db.query(Account).filter(Account.name.ilike("Retained%Earnings%")).first()
+        )
+        if not plug:
+            return {
+                "created": False,
+                "warning": "Could not find Retained Earnings / Opening Balance Equity "
+                           "account to balance opening entry; opening balances skipped.",
+            }
+        if total > 0:
+            lines.append({
+                "account_id": plug.id,
+                "debit": Decimal("0"),
+                "credit": total,
+                "description": "Opening balance plug",
+            })
+        else:
+            lines.append({
+                "account_id": plug.id,
+                "debit": -total,
+                "credit": Decimal("0"),
+                "description": "Opening balance plug",
+            })
+
+    try:
+        txn = create_journal_entry(
+            db,
+            _date.today(),
+            "Opening balances (IIF import)",
+            lines,
+            source_type="iif_import",
+            reference="IIF-OPENING",
+        )
+        return {
+            "created": True,
+            "transaction_id": txn.id,
+            "line_count": len(lines),
+        }
+    except Exception as e:
+        logger.exception("Failed to create opening balance journal entry")
+        return {
+            "created": False,
+            "warning": f"Opening balance journal entry failed: {e}",
+        }
 
 
 def import_customers(db: Session, rows: list) -> dict:
@@ -373,11 +570,11 @@ def import_items(db: Session, rows: list) -> dict:
             iif_type = row.get("INVITEMTYPE", "").strip().upper()
             item_type = _IIF_TO_ITEM_TYPE.get(iif_type, ItemType.SERVICE)
 
-            # Resolve income account by name
+            # Resolve income account by name (with fallback)
             income_account_id = None
             acct_name = row.get("ACCNT", "").strip()
             if acct_name:
-                acct = db.query(Account).filter(Account.name == acct_name).first()
+                acct = _find_account(db, acct_name)
                 if acct:
                     income_account_id = acct.id
 
@@ -411,6 +608,7 @@ def import_transactions(db: Session, blocks: list) -> dict:
     """
     counts = {"invoices": 0, "payments": 0, "estimates": 0}
     errors = []
+    warnings = []
 
     for i, block in enumerate(blocks):
         sp = db.begin_nested()
@@ -423,10 +621,15 @@ def import_transactions(db: Session, blocks: list) -> dict:
                 result = _import_invoice(db, trns, spls)
                 if result:
                     counts["invoices"] += 1
+                    if not result.transaction_id:
+                        doc = result.invoice_number or f"block {i+1}"
+                        warnings.append(f"Invoice {doc}: imported but journal entry could not be created (account mismatch)")
             elif trns_type == "PAYMENT":
                 result = _import_payment(db, trns, spls)
                 if result:
                     counts["payments"] += 1
+                    if not result.transaction_id:
+                        warnings.append(f"Payment block {i+1}: imported but journal entry could not be created (account mismatch)")
             elif trns_type == "ESTIMATE":
                 result = _import_estimate(db, trns, spls)
                 if result:
@@ -438,11 +641,21 @@ def import_transactions(db: Session, blocks: list) -> dict:
             sp.rollback()
             errors.append({"row": i + 1, "message": f"Transaction block {i + 1}: {str(e)}"})
 
-    return {"imported": counts, "errors": errors}
+    return {"imported": counts, "errors": errors, "warnings": warnings}
 
 
 def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
-    """Create an Invoice from IIF TRNS/SPL data."""
+    """Create an Invoice from IIF TRNS/SPL data.
+
+    Convention assumed: TRNS.AMOUNT is positive (AR debit = invoice total), each
+    SPL.AMOUNT is negative (the offsetting credit to income / sales-tax). This
+    matches a standard QuickBooks invoice export. The abs() calls below are
+    safe for that convention. Mixed-sign SPL rows (e.g. a positive "discount"
+    line that reduces the invoice total) are NOT correctly handled: they would
+    inflate the subtotal and trip the balance check, causing the journal to
+    fall back to default_income_id. Handling discount lines requires sign-
+    preserving parsing + test IIFs — separate work.
+    """
     doc_num = trns.get("DOCNUM", "").strip()
 
     # Skip if invoice number already exists
@@ -528,6 +741,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
 
     # Create journal entry
     ar_id = get_ar_account_id(db)
+    unmatched_accounts = []
     if ar_id and subtotal > 0:
         journal_lines = [
             {"account_id": ar_id, "debit": invoice.total, "credit": Decimal("0"),
@@ -540,7 +754,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
             spl_amount = abs(_parse_decimal(spl.get("AMOUNT", "")))
             if spl_amount == 0:
                 continue
-            acct = db.query(Account).filter(Account.name == acct_name).first()
+            acct = _find_account(db, acct_name)
             if acct:
                 journal_lines.append({
                     "account_id": acct.id,
@@ -548,6 +762,8 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
                     "credit": spl_amount,
                     "description": f"Invoice {doc_num}",
                 })
+            else:
+                unmatched_accounts.append(acct_name)
 
         # Only post if balanced
         total_dr = sum(Decimal(str(l["debit"])) for l in journal_lines)
@@ -561,6 +777,25 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
                 source_id=invoice.id,
             )
             invoice.transaction_id = txn.id
+        elif total_dr != total_cr:
+            # Journal unbalanced because account(s) not found — use default income
+            default_income_id = get_default_income_account_id(db)
+            if default_income_id:
+                shortfall = total_dr - total_cr
+                journal_lines.append({
+                    "account_id": default_income_id,
+                    "debit": Decimal("0"),
+                    "credit": shortfall,
+                    "description": f"Invoice {doc_num} (unmatched: {', '.join(unmatched_accounts)})",
+                })
+                txn = create_journal_entry(
+                    db, invoice.date,
+                    f"IIF Import — Invoice {doc_num}",
+                    journal_lines,
+                    source_type="invoice",
+                    source_id=invoice.id,
+                )
+                invoice.transaction_id = txn.id
 
     db.flush()
     return invoice
@@ -592,9 +827,15 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     pmt_date = _parse_iif_date(trns.get("DATE", ""))
     amount = abs(_parse_decimal(trns.get("AMOUNT", "")))
 
-    # Resolve deposit account
+    # Resolve deposit account (with fallback to well-known names and Undeposited Funds)
     deposit_acct_name = trns.get("ACCNT", "").strip()
-    deposit_acct = db.query(Account).filter(Account.name == deposit_acct_name).first()
+    deposit_acct = _find_account(db, deposit_acct_name)
+    if not deposit_acct:
+        # Last resort: use Undeposited Funds
+        from app.services.accounting import get_undeposited_funds_id
+        uf_id = get_undeposited_funds_id(db)
+        if uf_id:
+            deposit_acct = db.query(Account).filter(Account.id == uf_id).first()
 
     payment = Payment(
         customer_id=customer.id,
@@ -867,6 +1108,7 @@ def import_all(db: Session, content: str) -> dict:
     """
     result = {
         "accounts": 0,
+        "opening_balance_lines": 0,
         "customers": 0,
         "vendors": 0,
         "items": 0,
@@ -874,6 +1116,7 @@ def import_all(db: Session, content: str) -> dict:
         "payments": 0,
         "estimates": 0,
         "errors": [],
+        "warnings": [],
     }
 
     parsed = parse_iif(content)
@@ -883,6 +1126,10 @@ def import_all(db: Session, content: str) -> dict:
         r = import_accounts(db, parsed["ACCNT"])
         result["accounts"] = r["imported"]
         result["errors"].extend(r["errors"])
+        result["warnings"].extend(r.get("warnings", []))
+        ob = r.get("opening_balance") or {}
+        if ob.get("created"):
+            result["opening_balance_lines"] = ob.get("line_count", 0)
 
     if parsed["CUST"]:
         r = import_customers(db, parsed["CUST"])
@@ -907,6 +1154,7 @@ def import_all(db: Session, content: str) -> dict:
         result["payments"] = counts.get("payments", 0)
         result["estimates"] = counts.get("estimates", 0)
         result["errors"].extend(r["errors"])
+        result["warnings"].extend(r.get("warnings", []))
 
     db.commit()
     return result

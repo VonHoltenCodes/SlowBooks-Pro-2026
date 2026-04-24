@@ -67,6 +67,10 @@ from app.routes import stripe_payments, public
 
 # Phase 8: QuickBooks Online
 from app.routes import qbo
+# Phase 9: Forum Bug Fixes & Missing Features
+from app.routes import journal, deposits, cc_charges, checks
+# Phase 10: Quick Wins + Medium Effort Features
+from app.routes import bank_rules, budgets, attachments, email_templates
 
 # Phase 9: Analytics (real-time business intelligence)
 from app.routes import analytics
@@ -75,6 +79,7 @@ from app.routes import analytics
 from app.routes import auth as auth_routes
 from app.services.auth import get_session_secret
 
+from app.config import CORS_ALLOW_ORIGINS
 from app.database import SessionLocal
 from app.services.audit import register_audit_hooks
 
@@ -96,15 +101,9 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Wildcard origins with credentials is a CSRF amplifier. Default to just
 # localhost; override with ALLOWED_ORIGINS env var (comma-separated) for
 # a custom LAN hostname like http://slowbooks.local:3001.
-_default_origins = "http://localhost:3001,http://127.0.0.1:3001"
-_allowed_origins = [
-    o.strip()
-    for o in os.environ.get("ALLOWED_ORIGINS", _default_origins).split(",")
-    if o.strip()
-]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_allowed_origins,
+    allow_origins=CORS_ALLOW_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -221,6 +220,16 @@ app.include_router(public.router)
 app.include_router(qbo.router)
 # Phase 9: Analytics (real-time business intelligence)
 app.include_router(analytics.router)
+# Phase 9: Forum Bug Fixes & Missing Features
+app.include_router(journal.router)
+app.include_router(deposits.router)
+app.include_router(cc_charges.router)
+app.include_router(checks.router)
+# Phase 10: Quick Wins + Medium Effort Features
+app.include_router(bank_rules.router)
+app.include_router(budgets.router)
+app.include_router(attachments.router)
+app.include_router(email_templates.router)
 
 # Register audit log hooks
 register_audit_hooks(SessionLocal)

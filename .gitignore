@@ -26,3 +26,6 @@ build/
 htmlcov/
 .pytest_cache/
 .ruff_cache/
+
+# User-uploaded attachments / logos — runtime data, not source
+app/static/uploads/

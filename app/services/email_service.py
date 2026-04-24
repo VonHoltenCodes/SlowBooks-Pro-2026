@@ -16,7 +16,7 @@ from app.models.email_log import EmailLog
 from app.models.settings import Settings
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
-_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
+_jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=True)
 
 
 def _get_smtp_settings(db: Session) -> dict:
@@ -50,6 +50,10 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
         db.commit()
         return False
 
+    # Sanitize email headers to prevent injection
+    to_email = to_email.replace('\r', '').replace('\n', '').strip()
+    subject = subject.replace('\r', '').replace('\n', ' ').strip()
+
     msg = MIMEMultipart()
     msg["From"] = f"{from_name} <{from_email}>"
     msg["To"] = to_email
@@ -61,6 +65,7 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
         part["Content-Disposition"] = f'attachment; filename="{attachment_name}"'
         msg.attach(part)
 
+    server = None
     try:
         if use_tls:
             server = smtplib.SMTP(host, port, timeout=30)
@@ -73,6 +78,7 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
 
         server.sendmail(from_email, [to_email], msg.as_string())
         server.quit()
+        server = None
 
         log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
                        recipient=to_email, subject=subject, status="sent")
@@ -81,12 +87,34 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
         return True
 
     except Exception as e:
+        if server:
+            try:
+                server.quit()
+            except Exception:
+                pass
         log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
                        recipient=to_email, subject=subject, status="failed",
                        error_message=str(e))
         db.add(log)
         db.commit()
         return False
+
+
+def render_template_from_db(db: Session, template_name: str, context: dict) -> tuple:
+    """Load template from DB, render with Jinja2 SandboxedEnvironment, fall back to file."""
+    from app.models.email_templates import EmailTemplate
+    from jinja2.sandbox import SandboxedEnvironment
+
+    tpl = db.query(EmailTemplate).filter(EmailTemplate.name == template_name).first()
+    if tpl:
+        env = SandboxedEnvironment()
+        from app.services.pdf_service import _format_currency, _format_date
+        env.filters["currency"] = _format_currency
+        env.filters["fdate"] = _format_date
+        subject = env.from_string(tpl.subject_template).render(**context)
+        body = env.from_string(tpl.body_template).render(**context)
+        return subject, body
+    return None, None
 
 
 def render_invoice_email(invoice, company_settings: dict, pay_url: str = None) -> str:

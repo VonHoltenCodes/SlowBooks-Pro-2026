@@ -101,4 +101,47 @@ def import_transactions(db: Session, bank_account_id: int, transactions: list[di
         imported += 1
 
     db.commit()
+
+    # Auto-apply bank rules to newly imported transactions
+    if imported > 0:
+        try:
+            from app.models.bank_rules import BankRule
+            rules = (
+                db.query(BankRule)
+                .filter(BankRule.is_active == True)
+                .order_by(BankRule.priority.desc())
+                .all()
+            )
+            if rules:
+                unmatched = (
+                    db.query(BankTransaction)
+                    .filter(
+                        BankTransaction.bank_account_id == bank_account_id,
+                        BankTransaction.match_status == "unmatched",
+                    )
+                    .all()
+                )
+                auto_matched = 0
+                for txn in unmatched:
+                    payee = (txn.payee or "").lower()
+                    for rule in rules:
+                        pattern = rule.pattern.lower()
+                        hit = False
+                        if rule.rule_type == "contains" and pattern in payee:
+                            hit = True
+                        elif rule.rule_type == "starts_with" and payee.startswith(pattern):
+                            hit = True
+                        elif rule.rule_type == "exact" and payee == pattern:
+                            hit = True
+                        if hit:
+                            if rule.account_id:
+                                txn.category_account_id = rule.account_id
+                            txn.match_status = "auto"
+                            auto_matched += 1
+                            break
+                if auto_matched > 0:
+                    db.commit()
+        except ImportError:
+            pass  # bank_rules model not available yet
+
     return {"imported": imported, "skipped": skipped, "total": len(transactions)}

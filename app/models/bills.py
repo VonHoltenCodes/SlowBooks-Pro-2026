@@ -29,9 +29,9 @@ class Bill(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     bill_number = Column(String(100), nullable=False)
-    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False)
-    status = Column(Enum(BillStatus), default=BillStatus.UNPAID)
-    po_id = Column(Integer, ForeignKey("purchase_orders.id"), nullable=True)
+    vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False, index=True)
+    status = Column(Enum(BillStatus), default=BillStatus.UNPAID, index=True)
+    po_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True)
 
     date = Column(Date, nullable=False)
     due_date = Column(Date, nullable=True)
@@ -62,7 +62,7 @@ class BillLine(Base):
     __tablename__ = "bill_lines"
 
     id = Column(Integer, primary_key=True, index=True)
-    bill_id = Column(Integer, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False)
+    bill_id = Column(Integer, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False, index=True)
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)  # expense account
     description = Column(Text, nullable=True)
@@ -103,7 +103,7 @@ class BillPaymentAllocation(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     bill_payment_id = Column(Integer, ForeignKey("bill_payments.id", ondelete="CASCADE"), nullable=False)
-    bill_id = Column(Integer, ForeignKey("bills.id"), nullable=False)
+    bill_id = Column(Integer, ForeignKey("bills.id", ondelete="RESTRICT"), nullable=False)
     amount = Column(Numeric(12, 2), nullable=False)
 
     bill_payment = relationship("BillPayment", back_populates="allocations")

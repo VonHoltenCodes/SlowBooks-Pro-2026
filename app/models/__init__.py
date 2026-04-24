@@ -33,6 +33,12 @@ from app.models.payroll import Employee, PayRun, PayStub
 # Phase 8: QuickBooks Online
 from app.models.qbo_mapping import QBOMapping
 
+# Phase 10: Quick Wins + Medium Effort Features
+from app.models.bank_rules import BankRule
+from app.models.budgets import Budget
+from app.models.attachments import Attachment
+from app.models.email_templates import EmailTemplate
+
 __all__ = [
     "Account", "Customer", "Vendor", "Item",
     "Transaction", "TransactionLine",
@@ -57,4 +63,6 @@ __all__ = [
     "Company", "Employee", "PayRun", "PayStub",
     # Phase 8
     "QBOMapping",
+    # Phase 10
+    "BankRule", "Budget", "Attachment", "EmailTemplate",
 ]

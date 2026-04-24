@@ -3,6 +3,8 @@
 # Feature 16: Most invasive change — routes to correct database
 # ============================================================================
 
+import logging
+import re
 import subprocess
 from datetime import datetime
 
@@ -11,6 +13,11 @@ from sqlalchemy.orm import Session
 
 from app.config import DATABASE_URL
 from app.models.companies import Company
+
+logger = logging.getLogger(__name__)
+
+# Strict pattern for database names: alphanumeric, underscores, hyphens only
+_VALID_DB_NAME = re.compile(r'^[a-zA-Z][a-zA-Z0-9_-]{0,62}$')
 
 
 def _base_url():
@@ -31,6 +38,10 @@ def list_companies(db: Session) -> list[dict]:
 
 def create_company(db: Session, name: str, database_name: str, description: str = None) -> dict:
     """Create a new company database."""
+    # Validate database_name to prevent SQL injection
+    if not _VALID_DB_NAME.match(database_name):
+        return {"success": False, "error": "Invalid database name. Use only letters, numbers, underscores, and hyphens."}
+
     # Check if company already exists
     existing = db.query(Company).filter(Company.database_name == database_name).first()
     if existing:
@@ -42,6 +53,7 @@ def create_company(db: Session, name: str, database_name: str, description: str 
         # Connect to postgres system database to create new DB
         system_engine = create_engine(base_url + "postgres", isolation_level="AUTOCOMMIT")
         with system_engine.connect() as conn:
+            # database_name is validated above against strict alphanumeric pattern
             conn.execute(text(f'CREATE DATABASE "{database_name}"'))
         system_engine.dispose()
 
@@ -58,8 +70,9 @@ def create_company(db: Session, name: str, database_name: str, description: str 
 
         return {"success": True, "company_id": company.id, "database_name": database_name}
 
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        logger.exception("Failed to create company database %s", database_name)
+        return {"success": False, "error": "Failed to create company database. Check server logs for details."}
 
 
 def get_company_db_url(database_name: str) -> str:
