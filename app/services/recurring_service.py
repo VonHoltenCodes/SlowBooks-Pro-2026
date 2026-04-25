@@ -125,6 +125,13 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
             )
             invoice.transaction_id = txn.id
 
+        # Phase 11 (audit fix): recurring-generated invoices are real sales
+        # and must hit the inventory ledger.
+        db.flush()
+        db.refresh(invoice)
+        from app.services.inventory_hooks import post_sale_for_invoice
+        post_sale_for_invoice(db, invoice, txn_date=rec.next_due)
+
         # Advance next due date
         rec.next_due = _advance_next_due(rec.next_due, rec.frequency)
         rec.invoices_created += 1

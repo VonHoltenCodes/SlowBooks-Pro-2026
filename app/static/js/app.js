@@ -40,6 +40,8 @@ const App = {
         '/companies':     { page: 'companies',       label: 'Companies',          render: () => CompaniesPage.render() },
         '/employees':     { page: 'employees',       label: 'Employees',          render: () => EmployeesPage.render() },
         '/payroll':       { page: 'payroll',         label: 'Payroll',            render: () => PayrollPage.render() },
+        // Phase 9: Analytics (real-time business intelligence)
+        '/analytics':     { page: 'analytics',       label: 'Analytics',          render: () => AnalyticsPage.render() },
         // Phase 9: Forum Bug Fixes & Missing Features
         '/journal':       { page: 'journal',         label: 'Journal Entries',    render: () => JournalPage.render() },
         '/deposits':      { page: 'deposits',        label: 'Make Deposits',      render: () => DepositsPage.render() },

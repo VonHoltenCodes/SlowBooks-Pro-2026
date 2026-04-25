@@ -68,7 +68,9 @@ def create_backup(db: Session, notes: str = None, backup_type: str = "manual") -
 
 def restore_backup(db: Session, filename: str) -> dict:
     """Restore a database from a backup file."""
-    filepath = BACKUP_DIR / filename
+    filepath = (BACKUP_DIR / filename).resolve()
+    if not filepath.parent == BACKUP_DIR.resolve():
+        return {"success": False, "error": "Invalid filename"}
     if not filepath.exists():
         return {"success": False, "error": f"Backup file not found: {filename}"}
 

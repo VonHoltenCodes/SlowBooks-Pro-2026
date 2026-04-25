@@ -39,6 +39,10 @@ from app.models.budgets import Budget
 from app.models.attachments import Attachment
 from app.models.email_templates import EmailTemplate
 
+# Phase 11: Inventory + Saved Reports
+from app.models.items import InventoryMovement
+from app.models.saved_reports import SavedReport
+
 __all__ = [
     "Account", "Customer", "Vendor", "Item",
     "Transaction", "TransactionLine",
@@ -65,4 +69,6 @@ __all__ = [
     "QBOMapping",
     # Phase 10
     "BankRule", "Budget", "Attachment", "EmailTemplate",
+    # Phase 11
+    "InventoryMovement", "SavedReport",
 ]

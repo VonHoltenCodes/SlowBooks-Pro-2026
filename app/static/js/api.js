@@ -9,12 +9,21 @@ const API = {
     async request(method, path, body = null) {
         const opts = {
             method,
+            credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
         };
         const companyId = localStorage.getItem('slowbooks_company');
         if (companyId) opts.headers['X-Company-Id'] = companyId;
         if (body) opts.body = JSON.stringify(body);
         const res = await fetch(`/api${path}`, opts);
+        if (res.status === 401 && window.SlowbooksAuth) {
+            // Session expired or never authed -- pop the login modal.
+            window.SlowbooksAuth.promptLogin();
+            throw new Error('Not authenticated');
+        }
+        if (res.status === 429) {
+            throw new Error('Rate limit exceeded -- slow down and try again');
+        }
         if (!res.ok) {
             const err = await res.json().catch(() => ({ detail: res.statusText }));
             throw new Error(err.detail || 'Request failed');

@@ -798,6 +798,12 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
                 invoice.transaction_id = txn.id
 
     db.flush()
+    # Phase 11 (audit fix): IIF-imported invoices must also move inventory
+    # for any inventory-tracked line item. Without this, bulk historical
+    # import leaves a phantom COGS gap.
+    db.refresh(invoice)
+    from app.services.inventory_hooks import post_sale_for_invoice
+    post_sale_for_invoice(db, invoice, txn_date=invoice.date)
     return invoice
 
 

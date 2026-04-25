@@ -1,0 +1,6 @@
+# Dev / test dependencies. NOT installed into the production Docker image.
+# Pull in with:  pip install -r requirements.txt -r requirements-dev.txt
+pytest>=8.3.0
+pytest-cov>=5.0.0
+black>=24.8.0
+ruff>=0.6.0

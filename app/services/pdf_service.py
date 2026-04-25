@@ -70,9 +70,19 @@ def generate_statement_pdf(customer, invoices, payments, company_settings: dict,
     return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 
 
+def generate_analytics_pdf(dashboard: dict, period: dict, company_settings: dict) -> bytes:
+    """Render the analytics dashboard snapshot as a printable PDF."""
+    template = _jinja_env.get_template("analytics_pdf.html")
+    html_str = template.render(
+        dashboard=dashboard,
+        period=period,
+        company=company_settings,
+    )
+    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+
+
 def _amount_to_words(amount) -> str:
-    """Convert a decimal amount to words for check printing.
-    E.g., 1234.56 -> 'One Thousand Two Hundred Thirty-Four and 56/100'"""
+    """Convert a decimal amount to words for check printing."""
     ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
             'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen',
             'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
