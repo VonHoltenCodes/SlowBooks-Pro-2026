@@ -49,7 +49,7 @@ const SettingsPage = {
                         <div class="form-group">
                             ${s.company_logo_path ? `<img src="${escapeHtml(s.company_logo_path)}" style="max-width:200px; max-height:80px; margin-bottom:8px; display:block;">` : ''}
                             <input type="file" id="logo-upload" accept="image/*" onchange="SettingsPage.uploadLogo(this)">
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">PNG, JPG, or SVG. Max 200x80px recommended.</div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.</div>
                         </div>
                     </div>
                 </div>
@@ -231,8 +231,17 @@ const SettingsPage = {
         formData.append('file', input.files[0]);
         try {
             const resp = await fetch('/api/uploads/logo', { method: 'POST', body: formData });
-            const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Upload failed');
+            // Parse JSON defensively — a reverse-proxy or framework error can
+            // return a non-JSON body, and the raw SyntaxError ("Unexpected
+            // token <") confuses end users worse than the actual problem.
+            let data = null;
+            try { data = await resp.json(); }
+            catch (_) { data = null; }
+            if (!resp.ok) {
+                const msg = (data && data.detail) ||
+                    `Upload failed (HTTP ${resp.status}). The file may be too large or the server returned an unexpected response.`;
+                throw new Error(msg);
+            }
             toast('Logo uploaded');
             App.navigate('#/settings');
         } catch (err) { toast(err.message, 'error'); }
