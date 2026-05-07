@@ -8,7 +8,12 @@
 const SettingsPage = {
     async render() {
         const s = await API.get('/settings');
-        setTimeout(() => { SettingsPage.loadBackups(); SettingsPage.loadEmailTemplates(); }, 0);
+        setTimeout(() => {
+            SettingsPage.loadBackups();
+            SettingsPage.loadEmailTemplates();
+            SettingsPage.loadAiConfig();
+            SettingsPage.scrollToFocus();
+        }, 0);
         return `
             <div class="page-header">
                 <h2>Company Settings</h2>
@@ -165,6 +170,18 @@ const SettingsPage = {
                         <div class="form-group full-width"><label>Redirect URI</label>
                             <input name="qbo_redirect_uri" value="${escapeHtml(s.qbo_redirect_uri || 'http://localhost:8000/api/qbo/callback')}"
                                 placeholder="http://localhost:8000/api/qbo/callback"></div>
+                    </div>
+                </div>
+
+                <div class="settings-section" id="settings-ai">
+                    <h3>AI Insights</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Bring-your-own-key access to xAI Grok, Groq, Cloudflare Workers AI, Anthropic Claude, OpenAI, or Google Gemini.
+                        Used by the Analytics dashboard to generate observations, risks, and recommendations.
+                        API keys are encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256).
+                    </div>
+                    <div id="ai-config-container" class="ai-settings-form">
+                        <div style="font-size:11px; color:var(--text-muted);">Loading…</div>
                     </div>
                 </div>
 
@@ -341,5 +358,226 @@ const SettingsPage = {
             closeModal();
             SettingsPage.loadEmailTemplates();
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // ----- AI Insights config (provider/model/key/etc.) ------------------
+    // Backed by /api/analytics/ai-config (GET/PUT) and
+    // /api/analytics/ai-config/test (POST). Same endpoints the Analytics
+    // page's gear button used to call from a modal — now consolidated here
+    // so AI config is discoverable without opening Analytics.
+
+    aiConfigState: null,
+
+    async loadAiConfig() {
+        const host = document.getElementById('ai-config-container');
+        if (!host) return;
+        try {
+            const cfg = await API.get('/analytics/ai-config');
+            SettingsPage.aiConfigState = cfg;
+            host.innerHTML = SettingsPage._renderAiConfig(cfg);
+            SettingsPage._wireAiConfig(cfg);
+        } catch (err) {
+            host.innerHTML =
+                `<div style="font-size:11px; color:var(--danger,#c00);">` +
+                `Failed to load AI config: ${escapeHtml(err.message || String(err))}</div>`;
+        }
+    },
+
+    _renderAiConfig(cfg) {
+        const providers = cfg.providers || [];
+        const currentProvider =
+            cfg.provider || (providers[0] && providers[0].key) || '';
+        const currentSpec =
+            providers.find(p => p.key === currentProvider) || providers[0] || {};
+        const needsAccount = !!currentSpec.needs_account_id;
+        const needsWorker = !!currentSpec.needs_worker_url;
+        const hasKey = !!cfg.has_api_key;
+        const currentModel = cfg.model || '';
+
+        const providerOptions = providers.map(p =>
+            `<option value="${escapeHtml(p.key)}"${p.key === currentProvider ? ' selected' : ''}>` +
+            `${escapeHtml(p.label)}</option>`
+        ).join('');
+
+        return `
+            <label class="form-field">
+                <span>Provider</span>
+                <select id="ai-settings-provider">${providerOptions}</select>
+            </label>
+            <div id="ai-settings-hint" class="ai-settings-hint">
+                ${escapeHtml(currentSpec.free_tier_hint || '')}
+                ${currentSpec.docs_url ? ` &middot; <a href="${escapeHtml(currentSpec.docs_url)}" target="_blank" rel="noopener">Get a key</a>` : ''}
+            </div>
+            <label class="form-field">
+                <span>Model</span>
+                <select id="ai-settings-model-select">
+                    ${SettingsPage._modelOptionsHtml(currentSpec, currentModel)}
+                </select>
+                <input type="text" id="ai-settings-model-custom"
+                       value="${escapeHtml(currentModel || '')}"
+                       placeholder="Type a model ID"
+                       style="margin-top:6px; ${SettingsPage._isCustomModel(currentSpec, currentModel) ? '' : 'display:none;'}">
+            </label>
+            <label class="form-field" id="ai-settings-cf-wrap" style="${needsAccount ? '' : 'display:none'}">
+                <span>Cloudflare Account ID</span>
+                <input type="text" id="ai-settings-cf-account"
+                       value="${escapeHtml(cfg.cloudflare_account_id || '')}"
+                       placeholder="32-char hex (from dash.cloudflare.com)">
+            </label>
+            <fieldset id="ai-settings-worker-wrap" class="ai-worker-section"
+                      style="${needsWorker ? '' : 'display:none'}">
+                <legend>Cloudflare Worker Gateway</legend>
+                <p class="ai-worker-help">
+                    Deploy <code>cloudflare/worker.js</code> in your own
+                    Cloudflare account — the real AI credentials live inside
+                    Cloudflare as a Worker secret, not in Slowbooks' database.
+                    Slowbooks only holds the shared Bearer token. See
+                    <code>cloudflare/README.md</code> for the 5-minute setup.
+                </p>
+                <label class="form-field">
+                    <span>Worker URL <em class="ai-worker-required">(https only)</em></span>
+                    <input type="url" id="ai-settings-worker-url"
+                           value="${escapeHtml(cfg.worker_url || '')}"
+                           placeholder="https://slowbooks-ai.yourname.workers.dev/v1/chat/completions"
+                           autocomplete="off" spellcheck="false">
+                </label>
+                <p class="ai-worker-security">
+                    <strong>Security:</strong> only <code>https://</code> URLs
+                    are accepted; private/loopback IPs, embedded credentials,
+                    and non-HTTPS schemes are rejected. Redirects are disabled
+                    and TLS certificates are always verified.
+                </p>
+            </fieldset>
+            <label class="form-field">
+                <span>API Key / Shared Secret ${hasKey ? '<em class="ai-key-saved">(saved &#10003;)</em>' : ''}</span>
+                <input type="password" id="ai-settings-key"
+                       placeholder="${hasKey ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32'}"
+                       autocomplete="new-password">
+            </label>
+            <div class="ai-settings-buttons">
+                <button type="button" class="btn btn-secondary btn-sm" id="ai-settings-test">Test</button>
+                <span id="ai-settings-test-result" class="ai-settings-test-result"></span>
+                <div class="ai-settings-spacer"></div>
+                <button type="button" class="btn btn-primary btn-sm" id="ai-settings-save">Save</button>
+            </div>
+        `;
+    },
+
+    // True when the saved model isn't in the curated list — the dropdown
+    // should show "Custom…" pre-selected and reveal the text input.
+    _isCustomModel(spec, model) {
+        if (!model) return false;
+        const choices = (spec && spec.model_choices) || [];
+        return choices.indexOf(model) === -1;
+    },
+
+    _modelOptionsHtml(spec, currentModel) {
+        const choices = (spec && spec.model_choices) || [];
+        const isCustom = SettingsPage._isCustomModel(spec, currentModel);
+        // Default to default_model if no choice saved yet; otherwise echo
+        // the saved one (or pick Custom if it's not in the list).
+        const selected = currentModel || (spec && spec.default_model) || '';
+        const opts = choices.map(m =>
+            `<option value="${escapeHtml(m)}"${m === selected && !isCustom ? ' selected' : ''}>${escapeHtml(m)}</option>`
+        ).join('');
+        return opts +
+            `<option value="__custom__"${isCustom ? ' selected' : ''}>Custom…</option>`;
+    },
+
+    _wireAiConfig(cfg) {
+        const providers = cfg.providers || [];
+        const providerSel = document.getElementById('ai-settings-provider');
+        const hintEl = document.getElementById('ai-settings-hint');
+        const modelSel = document.getElementById('ai-settings-model-select');
+        const modelCustom = document.getElementById('ai-settings-model-custom');
+        const cfWrap = document.getElementById('ai-settings-cf-wrap');
+        const workerWrap = document.getElementById('ai-settings-worker-wrap');
+        const saveBtn = document.getElementById('ai-settings-save');
+        const testBtn = document.getElementById('ai-settings-test');
+        const testRes = document.getElementById('ai-settings-test-result');
+
+        if (!providerSel) return; // render failed; nothing to wire
+
+        // Show the custom text input only when "Custom…" is selected.
+        const syncCustomVisibility = () => {
+            modelCustom.style.display =
+                modelSel.value === '__custom__' ? '' : 'none';
+        };
+        modelSel.addEventListener('change', syncCustomVisibility);
+
+        providerSel.addEventListener('change', () => {
+            const spec = providers.find(p => p.key === providerSel.value) || {};
+            hintEl.innerHTML =
+                escapeHtml(spec.free_tier_hint || '') +
+                (spec.docs_url
+                    ? ` &middot; <a href="${escapeHtml(spec.docs_url)}" target="_blank" rel="noopener">Get a key</a>`
+                    : '');
+            // Repopulate model dropdown for the new provider — the old
+            // provider's options aren't valid for this one. Reset custom
+            // input too so we don't carry a stale model ID over.
+            modelSel.innerHTML =
+                SettingsPage._modelOptionsHtml(spec, spec.default_model || '');
+            modelCustom.value = '';
+            syncCustomVisibility();
+            cfWrap.style.display = spec.needs_account_id ? '' : 'none';
+            workerWrap.style.display = spec.needs_worker_url ? '' : 'none';
+        });
+
+        const resolveModel = () => {
+            if (modelSel.value === '__custom__') return modelCustom.value.trim();
+            return modelSel.value;
+        };
+
+        const collectPayload = () => ({
+            provider: providerSel.value,
+            model: resolveModel(),
+            cloudflare_account_id: document.getElementById('ai-settings-cf-account').value.trim(),
+            worker_url: document.getElementById('ai-settings-worker-url').value.trim(),
+            api_key: document.getElementById('ai-settings-key').value,
+        });
+
+        saveBtn.addEventListener('click', async () => {
+            try {
+                const updated = await API.put('/analytics/ai-config', collectPayload());
+                SettingsPage.aiConfigState = updated;
+                toast('AI settings saved', 'success');
+                // Re-render to reflect "(saved ✓)" state and clear the key input
+                SettingsPage.loadAiConfig();
+            } catch (err) {
+                toast('Save failed: ' + (err.message || err), 'error');
+            }
+        });
+
+        testBtn.addEventListener('click', async () => {
+            // Save first so the test uses any just-entered key, then call /test.
+            testRes.textContent = 'Saving…';
+            testRes.className = 'ai-settings-test-result';
+            try {
+                await API.put('/analytics/ai-config', collectPayload());
+            } catch (err) {
+                testRes.textContent = 'Save failed: ' + (err.message || err);
+                testRes.classList.add('ai-test-fail');
+                return;
+            }
+            testRes.textContent = 'Testing…';
+            try {
+                const res = await API.post('/analytics/ai-config/test', {});
+                testRes.textContent = `✓ ${res.provider_label} replied: "${res.reply}"`;
+                testRes.classList.add('ai-test-ok');
+            } catch (err) {
+                testRes.textContent = '✗ ' + (err.message || err);
+                testRes.classList.add('ai-test-fail');
+            }
+        });
+    },
+
+    // Honors a sessionStorage hint from other pages (e.g., Analytics' gear)
+    // requesting that the Settings page open scrolled to a specific section.
+    scrollToFocus() {
+        const target = sessionStorage.getItem('settings_focus');
+        if (!target) return;
+        sessionStorage.removeItem('settings_focus');
+        const el = document.getElementById(target);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     },
 };

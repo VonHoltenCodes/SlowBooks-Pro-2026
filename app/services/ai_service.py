@@ -183,6 +183,10 @@ class ProviderSpec:
     wire_format: str  # "openai" | "anthropic" | "gemini"
     docs_url: str  # where users go to get a key
     free_tier_hint: str  # 1-line description for the UI
+    # Curated known-good model IDs, shown as a dropdown in the UI. The user
+    # can always pick "Custom…" and type a new one when vendors ship things
+    # we haven't catalogued yet — these lists rot fast.
+    model_choices: tuple = ()
     needs_account_id: bool = False  # Cloudflare direct REST
     needs_worker_url: bool = False  # Self-hosted CF Worker gateway
 
@@ -191,10 +195,16 @@ PROVIDERS: Dict[str, ProviderSpec] = {
     "grok": ProviderSpec(
         key="grok",
         label="xAI Grok",
-        default_model="grok-4.1-fast",
+        default_model="grok-4-fast",
         wire_format="openai",
         docs_url="https://console.x.ai/",
         free_tier_hint="$25 promotional credit on signup",
+        # xAI renames models often — verify against
+        # https://docs.x.ai/docs/models. Use Custom… for anything newer.
+        model_choices=(
+            "grok-4-fast",
+            "grok-3",
+        ),
     ),
     "groq": ProviderSpec(
         key="groq",
@@ -203,6 +213,13 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         wire_format="openai",
         docs_url="https://console.groq.com/keys",
         free_tier_hint="Free tier with generous rate limits — no credit card",
+        # Conservative list — verify against
+        # https://console.groq.com/docs/models. Use Custom… for newer ones.
+        model_choices=(
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768",
+        ),
     ),
     "cloudflare": ProviderSpec(
         key="cloudflare",
@@ -212,6 +229,13 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         docs_url="https://dash.cloudflare.com/profile/api-tokens",
         free_tier_hint="10,000 neurons/day free — requires CF API token",
         needs_account_id=True,
+        # Subset of CF's catalogue — full list at
+        # https://developers.cloudflare.com/workers-ai/models/
+        model_choices=(
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/mistral/mistral-7b-instruct-v0.1",
+        ),
     ),
     "cloudflare_worker": ProviderSpec(
         key="cloudflare_worker",
@@ -225,6 +249,11 @@ PROVIDERS: Dict[str, ProviderSpec] = {
             "holds a shared secret"
         ),
         needs_worker_url=True,
+        model_choices=(
+            "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
+            "@cf/meta/llama-3.1-8b-instruct",
+            "@cf/mistral/mistral-7b-instruct-v0.1",
+        ),
     ),
     "anthropic": ProviderSpec(
         key="anthropic",
@@ -233,6 +262,11 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         wire_format="anthropic",
         docs_url="https://console.anthropic.com/",
         free_tier_hint="Paid only (no free tier)",
+        model_choices=(
+            "claude-opus-4-7",
+            "claude-sonnet-4-6",
+            "claude-haiku-4-5-20251001",
+        ),
     ),
     "openai": ProviderSpec(
         key="openai",
@@ -241,6 +275,11 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         wire_format="openai",
         docs_url="https://platform.openai.com/api-keys",
         free_tier_hint="Paid only (no free tier)",
+        # OpenAI naming changes per release — verify against
+        # https://platform.openai.com/docs/models. Use Custom… for new ones.
+        model_choices=(
+            "gpt-5.4-mini",
+        ),
     ),
     "gemini": ProviderSpec(
         key="gemini",
@@ -249,6 +288,12 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         wire_format="gemini",
         docs_url="https://aistudio.google.com/app/apikey",
         free_tier_hint="Free tier for Flash models via AI Studio",
+        model_choices=(
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-lite",
+        ),
     ),
 }
 
@@ -260,6 +305,7 @@ def provider_list() -> list:
             "key": p.key,
             "label": p.label,
             "default_model": p.default_model,
+            "model_choices": list(p.model_choices),
             "docs_url": p.docs_url,
             "free_tier_hint": p.free_tier_hint,
             "needs_account_id": p.needs_account_id,

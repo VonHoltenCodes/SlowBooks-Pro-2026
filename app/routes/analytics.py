@@ -36,6 +36,11 @@ from app.services.ai_service import (
     validate_worker_url,
 )
 from app.services.ai_tools import TOOLS as AI_TOOLS, call_tool
+from app.services.ai_actions import (
+    ACTIONS as AI_ACTIONS,
+    list_actions as ai_list_actions,
+    run_action as ai_run_action,
+)
 from app.services.crypto import decrypt_value, encrypt_value, is_encrypted
 from app.services.settings_service import get_all_settings, set_setting
 
@@ -208,8 +213,21 @@ def export_csv(
     # Single DB round-trip for all metrics (reviewer fix: was 8 separate calls)
     snap = AnalyticsEngine(db).get_dashboard(start_date=s, end_date=e)
 
+    company_settings = get_all_settings(db)
+    company_name = (company_settings.get("company_name") or "").strip() or "My Company"
+
     buf = io.StringIO()
     writer = csv.writer(buf)
+
+    # Branded header — written as comment-style rows above the data table.
+    # Excel/Sheets will treat them as text rows above the headerline. The
+    # _csv_safe wrapping prevents formula-injection on company_name.
+    writer.writerow(["# Slowbooks Pro 2026 — Analytics Snapshot"])
+    writer.writerow([f"# Company: {_csv_safe(company_name)}"])
+    writer.writerow([f"# Period: {label} ({s.isoformat()} to {e.isoformat()})"])
+    writer.writerow([f"# Generated: {datetime.now(timezone.utc).isoformat()}"])
+    writer.writerow([])  # blank separator
+
     writer.writerow(["section", "key", "subkey", "value"])
 
     writer.writerow(["period", "name", "", label])
@@ -575,7 +593,86 @@ def ai_insights(
 
 
 # ===========================================================================
-# AI Q&A with Tool Calling — Phase 9.5b
+# AI Predefined Analyses — replaces free-form chat with curated dropdown
+# actions. Each action pre-fetches its data via app/services/ai_tools.py
+# and sends a one-shot prompt (no tool calling) so it works on every
+# provider — including Groq, whose Llama models intermittently emit the
+# legacy <function=...> syntax that breaks server-side tool-call parsing.
+# ===========================================================================
+
+
+@router.get("/ai-actions")
+def list_ai_actions():
+    """List the curated AI analysis actions, grouped by category for the
+    UI dropdown. No secrets, no per-row LLM calls — purely catalogue."""
+    return {"groups": ai_list_actions()}
+
+
+@router.post("/ai-actions/{action_key}")
+@limiter.limit("20/minute")
+def run_ai_action(
+    request: Request,
+    action_key: str,
+    period: Optional[str] = Query("month"),
+    start_date: Optional[date] = Query(None),
+    end_date: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Run one curated analysis: fetch data + LLM narrative.
+
+    Returns `{action_key, label, category, analysis, data, provider, model,
+    period}`.
+    """
+    if action_key not in AI_ACTIONS:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown analysis action '{action_key}'.",
+        )
+
+    cfg = _read_ai_config(db)
+    provider = cfg.get("provider") or ""
+    api_key = cfg.get("api_key") or ""
+
+    if not provider or not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="AI provider not configured. Set one in Settings → AI Insights.",
+        )
+    _require_provider_extras(provider, cfg)
+
+    spec = AI_PROVIDERS[provider]
+    model = cfg.get("model") or spec.default_model
+
+    # Period is only meaningful for actions that declared uses_period=True;
+    # actions that don't use it just ignore the dates. Always resolve so
+    # the response can echo back what window the user was looking at.
+    s, e, label = _resolve_period(period, start_date, end_date)
+
+    try:
+        result = ai_run_action(
+            action_key=action_key,
+            db=db,
+            period_start=s,
+            period_end=e,
+            provider=provider,
+            model=model,
+            api_key=api_key,
+            account_id=cfg.get("cloudflare_account_id") or None,
+            worker_url=cfg.get("worker_url") or None,
+        )
+    except AIProviderError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {
+        **result,
+        "period": {"name": label, "start": s.isoformat(), "end": e.isoformat()},
+    }
+
+
+# ===========================================================================
+# AI Q&A with Tool Calling — Phase 9.5b (legacy; UI replaced by ai-actions)
 # ===========================================================================
 
 

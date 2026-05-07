@@ -11,6 +11,8 @@
 # how you become authenticated in the first place.
 # ============================================================================
 
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
@@ -22,12 +24,59 @@ from app.services.auth import (
     set_password,
 )
 from app.services.rate_limit import limiter
+from app.services.settings_service import set_setting
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
 class PasswordPayload(BaseModel):
     password: str = Field(..., min_length=1, max_length=512)
+
+
+class SetupPayload(BaseModel):
+    """First-run setup. Password is required; everything else is optional and
+    falls back to the DEFAULT_SETTINGS values if blank."""
+
+    password: str = Field(..., min_length=1, max_length=512)
+
+    # Company
+    company_name: Optional[str] = Field(None, max_length=200)
+    company_address1: Optional[str] = Field(None, max_length=200)
+    company_address2: Optional[str] = Field(None, max_length=200)
+    company_city: Optional[str] = Field(None, max_length=100)
+    company_state: Optional[str] = Field(None, max_length=50)
+    company_zip: Optional[str] = Field(None, max_length=20)
+    company_phone: Optional[str] = Field(None, max_length=50)
+    company_email: Optional[str] = Field(None, max_length=200)
+    company_website: Optional[str] = Field(None, max_length=200)
+    company_tax_id: Optional[str] = Field(None, max_length=50)
+
+    # Operator
+    operator_name: Optional[str] = Field(None, max_length=200)
+    operator_email: Optional[str] = Field(None, max_length=200)
+
+    # Defaults applied to new invoices
+    default_terms: Optional[str] = Field(None, max_length=100)
+    default_tax_rate: Optional[str] = Field(None, max_length=20)
+
+
+# Settings keys we accept on /setup (anything else on the payload is ignored)
+_SETUP_SETTINGS_KEYS = (
+    "company_name",
+    "company_address1",
+    "company_address2",
+    "company_city",
+    "company_state",
+    "company_zip",
+    "company_phone",
+    "company_email",
+    "company_website",
+    "company_tax_id",
+    "operator_name",
+    "operator_email",
+    "default_terms",
+    "default_tax_rate",
+)
 
 
 @router.get("/status")
@@ -42,16 +91,27 @@ def auth_status(request: Request, db: Session = Depends(get_db)):
 
 @router.post("/setup")
 def setup(
-    payload: PasswordPayload,
+    payload: SetupPayload,
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """First-run password set. Returns 409 if a password is already set."""
+    """First-run setup: store company/operator info and the operator password
+    in one transaction, then issue a session. Returns 409 if a password is
+    already set."""
     if password_is_set(db):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Password already set — use /login",
         )
+
+    # Persist any non-blank settings the user provided. set_password() will
+    # commit at the end, so all writes land in a single transaction.
+    payload_dict = payload.model_dump()
+    for key in _SETUP_SETTINGS_KEYS:
+        value = payload_dict.get(key)
+        if value is not None and value != "":
+            set_setting(db, key, value)
+
     set_password(db, payload.password)
     request.session["authenticated"] = True
     return {"status": "ok", "authenticated": True}

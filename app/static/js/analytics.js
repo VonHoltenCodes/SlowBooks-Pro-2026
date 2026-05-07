@@ -34,9 +34,12 @@ const AnalyticsPage = {
     aiInsights: null, // { insights, provider_label, model, generated_at, cached }
     aiBusy: false,
     aiConfig: null, // last-known provider config (no raw key)
-    // Phase 9.5b: Tool-calling Q&A assistant
-    chatMessages: [], // array of {role: 'user'|'assistant', content, tool_calls?, timestamp}
-    chatBusy: false,
+    // AI Predefined Analyses — replaces the free-form chat with a curated
+    // dropdown. One result at a time; switching pages keeps the last one.
+    aiActions: null, // [{category, actions: [{key, label, uses_period}]}] cached catalogue
+    aiActionKey: "", // currently selected action in the dropdown
+    aiActionResult: null, // last run result (analysis + meta)
+    aiActionBusy: false,
   },
 
   // ------------------------------------------------------------------
@@ -101,7 +104,6 @@ const AnalyticsPage = {
                     <button class="btn btn-secondary btn-sm" id="analytics-refresh" title="Refresh (R)">&#x21bb; Refresh</button>
                     <button class="btn btn-secondary btn-sm" id="analytics-csv" title="Export CSV">Export CSV</button>
                     <button class="btn btn-secondary btn-sm" id="analytics-pdf" title="Export PDF">Export PDF</button>
-                    <button class="btn btn-secondary btn-sm" id="analytics-ai-settings" title="Configure AI provider">&#9881; AI</button>
                     <button class="btn btn-primary btn-sm"   id="analytics-ai-run" title="Generate AI insights">&#10024; AI Insights</button>
                 </div>
             </div>
@@ -110,7 +112,7 @@ const AnalyticsPage = {
 
             ${this._aiPanelHtml()}
 
-            ${this._aiChatHtml()}
+            ${this._aiActionsHtml()}
 
             <div class="analytics-kpi-grid">
                 <div class="analytics-kpi"><div class="analytics-kpi-label">Revenue</div><div class="analytics-kpi-value kpi-green">${formatCurrency(totalRevenue)}</div></div>
@@ -336,15 +338,15 @@ const AnalyticsPage = {
     if (csv) csv.addEventListener("click", () => this._download("csv"));
     const pdf = $("#analytics-pdf");
     if (pdf) pdf.addEventListener("click", () => this._download("pdf"));
-    // Phase 9.5 AI buttons
+    // Phase 9.5 AI button. The gear was removed — provider config lives in
+    // Settings → AI Insights, reachable via the main nav or via this button
+    // when no provider is configured (see _openAiSettings call below).
     const aiRun = $("#analytics-ai-run");
     if (aiRun)
       aiRun.addEventListener("click", () => this._runAiInsights(false));
-    const aiSettings = $("#analytics-ai-settings");
-    if (aiSettings)
-      aiSettings.addEventListener("click", () => this._openAiSettings());
-    // Phase 9.5b chat listeners
-    this._wireChatListeners();
+    // AI predefined-analyses panel
+    this._wireAiActionsListeners();
+    if (!this.state.aiActions) this._loadAiActions();
 
     // Charts
     if (this.state.data && typeof Chart !== "undefined") {
@@ -767,366 +769,185 @@ const AnalyticsPage = {
     if (fresh) host.innerHTML = fresh.innerHTML;
   },
 
-  async _openAiSettings() {
-    // Fetch current config so the form reflects the stored values.
-    let cfg;
-    try {
-      cfg = await API.get("/analytics/ai-config");
-      this.state.aiConfig = cfg;
-    } catch (err) {
-      toast("Failed to load AI config: " + (err.message || err), "error");
-      return;
-    }
-
-    const providers = cfg.providers || [];
-    const currentProvider =
-      cfg.provider || (providers[0] && providers[0].key) || "";
-    const currentModel = cfg.model || "";
-    const hasKey = !!cfg.has_api_key;
-
-    const providerOptions = providers
-      .map(
-        (p) => `
-            <option value="${escapeHtml(p.key)}"${p.key === currentProvider ? " selected" : ""}>
-                ${escapeHtml(p.label)}
-            </option>
-        `,
-      )
-      .join("");
-
-    const currentSpec =
-      providers.find((p) => p.key === currentProvider) || providers[0] || {};
-    const needsAccount = !!currentSpec.needs_account_id;
-    const needsWorker = !!currentSpec.needs_worker_url;
-
-    const html = `
-            <form id="ai-settings-form" class="ai-settings-form" autocomplete="off">
-                <label class="form-field">
-                    <span>Provider</span>
-                    <select id="ai-settings-provider">${providerOptions}</select>
-                </label>
-                <div id="ai-settings-hint" class="ai-settings-hint">
-                    ${escapeHtml(currentSpec.free_tier_hint || "")}
-                    ${currentSpec.docs_url ? ` &middot; <a href="${escapeHtml(currentSpec.docs_url)}" target="_blank" rel="noopener">Get a key</a>` : ""}
-                </div>
-                <label class="form-field">
-                    <span>Model</span>
-                    <input type="text" id="ai-settings-model"
-                           value="${escapeHtml(currentModel || currentSpec.default_model || "")}"
-                           placeholder="${escapeHtml(currentSpec.default_model || "")}">
-                </label>
-                <label class="form-field" id="ai-settings-cf-wrap" style="${needsAccount ? "" : "display:none"}">
-                    <span>Cloudflare Account ID</span>
-                    <input type="text" id="ai-settings-cf-account"
-                           value="${escapeHtml(cfg.cloudflare_account_id || "")}"
-                           placeholder="32-char hex (from dash.cloudflare.com)">
-                </label>
-                <fieldset id="ai-settings-worker-wrap" class="ai-worker-section"
-                          style="${needsWorker ? "" : "display:none"}">
-                    <legend>Cloudflare Worker Gateway</legend>
-                    <p class="ai-worker-help">
-                        Deploy <code>cloudflare/worker.js</code> in your own
-                        Cloudflare account — the real AI credentials live
-                        inside Cloudflare as a Worker secret, not in Slowbooks'
-                        database. Slowbooks only holds the shared Bearer
-                        token. See <code>cloudflare/README.md</code> for the
-                        5-minute setup.
-                    </p>
-                    <label class="form-field">
-                        <span>Worker URL <em class="ai-worker-required">(https only)</em></span>
-                        <input type="url" id="ai-settings-worker-url"
-                               value="${escapeHtml(cfg.worker_url || "")}"
-                               placeholder="https://slowbooks-ai.yourname.workers.dev/v1/chat/completions"
-                               autocomplete="off"
-                               spellcheck="false">
-                    </label>
-                    <p class="ai-worker-security">
-                        <strong>Security:</strong> only <code>https://</code>
-                        URLs are accepted; private/loopback IPs, embedded
-                        credentials, and non-HTTPS schemes are rejected.
-                        Redirects are disabled and TLS certificates are
-                        always verified.
-                    </p>
-                </fieldset>
-                <label class="form-field">
-                    <span>API Key / Shared Secret ${hasKey ? '<em class="ai-key-saved">(saved ✓)</em>' : ""}</span>
-                    <input type="password" id="ai-settings-key"
-                           placeholder="${hasKey ? "Leave blank to keep existing" : "Paste key or openssl rand -hex 32"}"
-                           autocomplete="new-password">
-                </label>
-                <div class="ai-settings-buttons">
-                    <button type="button" class="btn btn-secondary btn-sm" id="ai-settings-test">Test</button>
-                    <span id="ai-settings-test-result" class="ai-settings-test-result"></span>
-                    <div class="ai-settings-spacer"></div>
-                    <button type="button" class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
-                    <button type="button" class="btn btn-primary btn-sm" id="ai-settings-save">Save</button>
-                </div>
-            </form>
-        `;
-
-    openModal("AI Provider Settings", html);
-
-    // Wire up dynamic bits
-    const providerSel = document.getElementById("ai-settings-provider");
-    const hintEl = document.getElementById("ai-settings-hint");
-    const modelEl = document.getElementById("ai-settings-model");
-    const cfWrap = document.getElementById("ai-settings-cf-wrap");
-    const workerWrap = document.getElementById("ai-settings-worker-wrap");
-    const saveBtn = document.getElementById("ai-settings-save");
-    const testBtn = document.getElementById("ai-settings-test");
-    const testRes = document.getElementById("ai-settings-test-result");
-
-    providerSel.addEventListener("change", () => {
-      const spec = providers.find((p) => p.key === providerSel.value) || {};
-      hintEl.innerHTML =
-        escapeHtml(spec.free_tier_hint || "") +
-        (spec.docs_url
-          ? ` &middot; <a href="${escapeHtml(spec.docs_url)}" target="_blank" rel="noopener">Get a key</a>`
-          : "");
-      modelEl.placeholder = spec.default_model || "";
-      // Only clear the model input if it's empty — don't trample user edits.
-      if (!modelEl.value) modelEl.value = spec.default_model || "";
-      cfWrap.style.display = spec.needs_account_id ? "" : "none";
-      workerWrap.style.display = spec.needs_worker_url ? "" : "none";
-    });
-
-    // Build the payload once — every save/test uses the same shape.
-    const collectPayload = () => ({
-      provider: providerSel.value,
-      model: modelEl.value.trim(),
-      cloudflare_account_id: document
-        .getElementById("ai-settings-cf-account")
-        .value.trim(),
-      worker_url: document
-        .getElementById("ai-settings-worker-url")
-        .value.trim(),
-      api_key: document.getElementById("ai-settings-key").value,
-    });
-
-    saveBtn.addEventListener("click", async () => {
-      const payload = collectPayload();
-      try {
-        const updated = await API.put("/analytics/ai-config", payload);
-        this.state.aiConfig = updated;
-        toast("AI settings saved", "success");
-        closeModal();
-      } catch (err) {
-        toast("Save failed: " + (err.message || err), "error");
-      }
-    });
-
-    testBtn.addEventListener("click", async () => {
-      // Save first (so the test uses the just-entered key), then /test.
-      testRes.textContent = "Saving…";
-      testRes.className = "ai-settings-test-result";
-      const payload = collectPayload();
-      try {
-        await API.put("/analytics/ai-config", payload);
-      } catch (err) {
-        testRes.textContent = "Save failed: " + (err.message || err);
-        testRes.classList.add("ai-test-fail");
-        return;
-      }
-      testRes.textContent = "Testing…";
-      try {
-        const res = await API.post("/analytics/ai-config/test", {});
-        testRes.textContent = `✓ ${res.provider_label} replied: "${res.reply}"`;
-        testRes.classList.add("ai-test-ok");
-      } catch (err) {
-        testRes.textContent = "✗ " + (err.message || err);
-        testRes.classList.add("ai-test-fail");
-      }
-    });
-  },
-
-  // ------------------------------------------------------------------
-  // Phase 9.5b — Tool-calling Q&A chat assistant
-  // ------------------------------------------------------------------
-  _aiChatHtml() {
-    const messages = this.state.chatMessages || [];
-    const busy = this.state.chatBusy;
-
-    let messagesHtml = "";
-    if (messages.length === 0) {
-      messagesHtml = `
-                <div class="ai-chat-empty">
-                    <p>Ask me anything about your books:</p>
-                    <ul class="ai-chat-examples">
-                        <li>&ldquo;How much did I spend at Jack in the Box in 2025?&rdquo;</li>
-                        <li>&ldquo;What are my unpaid invoices from ABC Corp?&rdquo;</li>
-                        <li>&ldquo;Show me my top 5 customers by revenue&rdquo;</li>
-                        <li>&ldquo;What were my HSA-tagged payments in 2024?&rdquo;</li>
-                    </ul>
-                </div>
-            `;
+  // Deep-link into Settings → AI Insights. Single source of truth for the
+  // provider/key/model form lives there now; this just routes the user.
+  // Use location.hash (not App.navigate) so the URL stays in sync with the
+  // rendered page — otherwise the next nav click to Analytics is a no-op
+  // because the hash never moved off "#/analytics".
+  _openAiSettings() {
+    sessionStorage.setItem("settings_focus", "settings-ai");
+    if (location.hash === "#/settings") {
+      // Already on the URL we want — force a re-render + scroll
+      App.navigate("#/settings");
     } else {
-      messagesHtml = messages
-        .map((msg) => this._renderChatMessage(msg))
+      location.hash = "#/settings";
+    }
+  },
+
+  // ------------------------------------------------------------------
+  // AI Predefined Analyses (replaces the free-form chat panel).
+  // The dropdown options come from /api/analytics/ai-actions; running an
+  // action POSTs to /api/analytics/ai-actions/{key}?period=…
+  // ------------------------------------------------------------------
+  _aiActionsHtml() {
+    const groups = this.state.aiActions;
+    const result = this.state.aiActionResult;
+    const busy = this.state.aiActionBusy;
+    const selected = this.state.aiActionKey;
+
+    let dropdown;
+    if (!groups) {
+      dropdown = '<select disabled><option>Loading analyses…</option></select>';
+    } else if (groups.length === 0) {
+      dropdown = '<select disabled><option>(none available)</option></select>';
+    } else {
+      const opts = groups
+        .map(
+          (g) => `
+            <optgroup label="${escapeHtml(g.category)}">
+                ${g.actions
+                  .map(
+                    (a) => `
+                    <option value="${escapeHtml(a.key)}"${a.key === selected ? " selected" : ""}>
+                        ${escapeHtml(a.label)}
+                    </option>`,
+                  )
+                  .join("")}
+            </optgroup>`,
+        )
         .join("");
+      dropdown = `<select id="ai-actions-select" ${busy ? "disabled" : ""}>
+            <option value="" disabled${selected ? "" : " selected"}>Choose an analysis…</option>
+            ${opts}
+        </select>`;
     }
 
+    let resultHtml = "";
     if (busy) {
-      messagesHtml += `
-                <div class="ai-chat-message ai-chat-assistant">
-                    <div class="ai-chat-avatar">&#10024;</div>
-                    <div class="ai-chat-bubble">
-                        <span class="spinner"></span> Thinking&hellip;
-                    </div>
-                </div>
-            `;
+      resultHtml = `
+            <div class="ai-actions-body ai-actions-busy">
+                <span class="spinner"></span> Running analysis&hellip;
+            </div>`;
+    } else if (result) {
+      resultHtml = `
+            <div class="ai-actions-meta">
+                <strong>${escapeHtml(result.label || "")}</strong>
+                &middot; ${escapeHtml(result.provider || "")}
+                &middot; ${escapeHtml(result.model || "")}
+                ${result.period ? `&middot; ${escapeHtml(result.period.start)} → ${escapeHtml(result.period.end)}` : ""}
+            </div>
+            <div class="ai-actions-body">${this._renderMarkdownish(result.analysis || "")}</div>`;
+    } else if (groups) {
+      resultHtml = `
+            <div class="ai-actions-body ai-actions-empty">
+                Pick an analysis from the dropdown and click Run.
+                Your selection runs through the AI provider configured in
+                Settings → AI Insights.
+            </div>`;
     }
 
     return `
-            <div class="analytics-card ai-chat-card">
-                <div class="analytics-section-title ai-chat-title">
-                    <span>&#128172; Ask AI</span>
-                    ${messages.length > 0 ? '<button class="btn btn-secondary btn-sm" id="ai-chat-clear" style="margin-left:auto">Clear</button>' : ""}
-                </div>
-                <div class="ai-chat-messages" id="ai-chat-messages">
-                    ${messagesHtml}
-                </div>
-                <form class="ai-chat-form" id="ai-chat-form">
-                    <input type="text" id="ai-chat-input"
-                           placeholder="Ask a question..."
-                           ${busy ? "disabled" : ""}
-                           autocomplete="off">
-                    <button type="submit" class="btn btn-primary btn-sm" ${busy ? "disabled" : ""}>
-                        Send
-                    </button>
-                </form>
+        <div class="analytics-card ai-actions-card">
+            <div class="analytics-section-title ai-actions-title">
+                <span>&#129504; AI Analysis</span>
+                ${result ? '<button class="btn btn-secondary btn-sm" id="ai-actions-clear" style="margin-left:auto">Clear</button>' : ""}
             </div>
-        `;
+            <form class="ai-actions-form" id="ai-actions-form">
+                ${dropdown}
+                <button type="submit" class="btn btn-primary btn-sm" ${busy ? "disabled" : ""}>
+                    Run Analysis
+                </button>
+            </form>
+            ${resultHtml}
+        </div>`;
   },
 
-  _renderChatMessage(msg) {
-    if (msg.role === "user") {
-      return `
-                <div class="ai-chat-message ai-chat-user">
-                    <div class="ai-chat-avatar">&#128100;</div>
-                    <div class="ai-chat-bubble">${escapeHtml(msg.content)}</div>
-                </div>
-            `;
+  async _loadAiActions() {
+    try {
+      const res = await API.get("/analytics/ai-actions");
+      this.state.aiActions = res.groups || [];
+      this._updateAiActionsPanel();
+    } catch (err) {
+      // Soft-fail — leave dropdown disabled with an error in the body.
+      this.state.aiActions = [];
+      this._updateAiActionsPanel();
+      toast(
+        "Failed to load AI analyses: " + (err.message || err),
+        "error",
+      );
     }
-    // Assistant message may include tool calls
-    let toolCallsHtml = "";
-    if (msg.tool_calls && msg.tool_calls.length > 0) {
-      toolCallsHtml = `
-                <details class="ai-chat-tools">
-                    <summary>&#128296; Used ${msg.tool_calls.length} tool${msg.tool_calls.length === 1 ? "" : "s"}</summary>
-                    <ul>
-                        ${msg.tool_calls
-                          .map(
-                            (tc) => `
-                            <li>
-                                <code>${escapeHtml(tc.tool_name)}</code>
-                                ${
-                                  tc.params && Object.keys(tc.params).length > 0
-                                    ? `(${Object.entries(tc.params)
-                                        .map(
-                                          ([k, v]) =>
-                                            `${escapeHtml(k)}=${escapeHtml(String(v))}`,
-                                        )
-                                        .join(", ")})`
-                                    : ""
-                                }
-                            </li>
-                        `,
-                          )
-                          .join("")}
-                    </ul>
-                </details>
-            `;
-    }
-    return `
-            <div class="ai-chat-message ai-chat-assistant">
-                <div class="ai-chat-avatar">&#10024;</div>
-                <div class="ai-chat-bubble">
-                    ${this._renderMarkdownish(msg.content || "")}
-                    ${toolCallsHtml}
-                </div>
-            </div>
-        `;
   },
 
-  async _submitChatQuery(question) {
-    if (!question || !question.trim()) return;
-    question = question.trim();
-
-    // Add user message to history
-    this.state.chatMessages.push({
-      role: "user",
-      content: question,
-      timestamp: new Date().toISOString(),
-    });
-    this.state.chatBusy = true;
-    this._updateChatPanel();
-    App.setStatus("Asking AI...");
+  async _runAiAction(key) {
+    if (!key) return;
+    this.state.aiActionKey = key;
+    this.state.aiActionBusy = true;
+    this.state.aiActionResult = null;
+    this._updateAiActionsPanel();
+    App.setStatus("Running AI analysis...");
 
     try {
-      const url = `/analytics/ai-query?question=${encodeURIComponent(question)}`;
-      const res = await API.post(url, {});
-      this.state.chatMessages.push({
-        role: "assistant",
-        content: res.final_response || "(no response)",
-        tool_calls: res.tool_calls || [],
-        call_count: res.call_count || 0,
-        success: res.success,
-        timestamp: new Date().toISOString(),
-      });
+      const period = this.state.period || "month";
+      const url = `/analytics/ai-actions/${encodeURIComponent(key)}?period=${encodeURIComponent(period)}`;
+      const result = await API.post(url, {});
+      this.state.aiActionResult = result;
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       if (/not configured/i.test(msg)) {
         toast("Configure an AI provider first", "error");
         this._openAiSettings();
       } else {
-        toast("Query failed: " + msg, "error");
-        this.state.chatMessages.push({
-          role: "assistant",
-          content: `*Error:* ${msg}`,
-          tool_calls: [],
-          timestamp: new Date().toISOString(),
-        });
+        toast("Analysis failed: " + msg, "error");
       }
     } finally {
-      this.state.chatBusy = false;
-      this._updateChatPanel();
+      this.state.aiActionBusy = false;
+      this._updateAiActionsPanel();
       App.setStatus("Analytics — Ready");
     }
   },
 
-  _updateChatPanel() {
-    const host = document.querySelector(".ai-chat-card");
+  _updateAiActionsPanel() {
+    const host = document.querySelector(".ai-actions-card");
     if (!host) return;
     const tmp = document.createElement("div");
-    tmp.innerHTML = this._aiChatHtml();
-    const fresh = tmp.querySelector(".ai-chat-card");
+    tmp.innerHTML = this._aiActionsHtml();
+    const fresh = tmp.querySelector(".ai-actions-card");
     if (fresh) {
       host.innerHTML = fresh.innerHTML;
-      this._wireChatListeners();
+      this._wireAiActionsListeners();
     }
   },
 
-  _wireChatListeners() {
-    const form = document.getElementById("ai-chat-form");
+  _wireAiActionsListeners() {
+    const form = document.getElementById("ai-actions-form");
     if (form) {
       form.addEventListener("submit", (e) => {
         e.preventDefault();
-        const input = document.getElementById("ai-chat-input");
-        if (input && input.value.trim()) {
-          const q = input.value;
-          input.value = "";
-          this._submitChatQuery(q);
-        }
+        const sel = document.getElementById("ai-actions-select");
+        if (sel && sel.value) this._runAiAction(sel.value);
       });
     }
-    const clearBtn = document.getElementById("ai-chat-clear");
+    const sel = document.getElementById("ai-actions-select");
+    if (sel) {
+      // Track current selection so re-renders preselect the right option.
+      sel.addEventListener("change", () => {
+        this.state.aiActionKey = sel.value;
+      });
+    }
+    const clearBtn = document.getElementById("ai-actions-clear");
     if (clearBtn) {
       clearBtn.addEventListener("click", () => {
-        this.state.chatMessages = [];
-        this._updateChatPanel();
+        this.state.aiActionResult = null;
+        this._updateAiActionsPanel();
       });
     }
   },
+
+  // ------------------------------------------------------------------
+  // [removed] Phase 9.5b free-form chat panel — replaced by curated
+  // dropdown above. Backend /api/analytics/ai-query still exists for
+  // any external callers but is no longer wired into the UI.
+  // ------------------------------------------------------------------
 
   // ------------------------------------------------------------------
   // Helpers
