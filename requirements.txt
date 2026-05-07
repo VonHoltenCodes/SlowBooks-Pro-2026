@@ -9,7 +9,7 @@ python-dotenv==1.2.2  # CVE-2026-28684 — set_key()/unset_key() symlink followi
 jinja2==3.1.6
 weasyprint==68.1
 pydyf==0.12.1
-python-multipart==0.0.26
+python-multipart==0.0.27  # GHSA — DoS via unbounded multipart part headers (< 0.0.27)
 ofxparse>=0.21,<1.0
 python-dateutil>=2.9.0,<3.0
 stripe>=8.0.0,<10.0
