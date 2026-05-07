@@ -2,7 +2,7 @@ fastapi==0.115.0
 uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 alembic==1.13.3
-psycopg2-binary==2.9.9
+psycopg2-binary==2.9.10  # 2.9.10+ ships Python 3.13 wheels; 2.9.9 forces source build on slim images
 pydantic==2.9.2
 pydantic-settings==2.5.2
 python-dotenv==1.2.2  # CVE-2026-28684 — set_key()/unset_key() symlink following; we only use load_dotenv() but bumping anyway
