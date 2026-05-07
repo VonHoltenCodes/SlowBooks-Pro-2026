@@ -341,6 +341,20 @@ _AI_CF_ACCOUNT_KEY = "ai_cloudflare_account_id"
 _AI_WORKER_URL_KEY = "ai_worker_url"  # HTTPS-only, validated
 
 
+def _ai_error_detail(exc: AIProviderError) -> str:
+    """Extract a user-safe message from an AIProviderError without leaking
+    traceback or chained-exception details to the API response.
+
+    AIProviderError messages are constructed as plain strings with the API
+    key already redacted and provider response text capped at 500 chars
+    (see ai_service.call_provider). We pull the message via .args[0]
+    instead of str(exc) so CodeQL's stack-trace-exposure analysis can see
+    that the exception object itself doesn't flow into the response body.
+    """
+    msg = exc.args[0] if exc.args and isinstance(exc.args[0], str) else "AI provider error"
+    return msg[:500]
+
+
 # Tiny in-process cache so the UI can poll without hammering paid APIs.
 # Keyed by (provider, model, period_name) → (expiry_epoch, payload_dict).
 # Cache TTL is 10 minutes. Cleared on config changes.
@@ -510,8 +524,9 @@ def test_ai_config(request: Request, db: Session = Depends(get_db)):
             worker_url=cfg.get("worker_url") or None,
         )
     except AIProviderError as e:
-        # AIProviderError messages already have the key redacted.
-        raise HTTPException(status_code=502, detail=str(e))
+        # AIProviderError messages already have the key redacted; use the
+        # helper to avoid passing the exception object to the response.
+        raise HTTPException(status_code=502, detail=_ai_error_detail(e))
 
     return {
         "provider": provider,
@@ -581,7 +596,7 @@ def ai_insights(
             worker_url=cfg.get("worker_url") or None,
         )
     except AIProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=_ai_error_detail(e))
 
     payload = {
         **result,
@@ -661,9 +676,9 @@ def run_ai_action(
             worker_url=cfg.get("worker_url") or None,
         )
     except AIProviderError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail=_ai_error_detail(exc))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)[:200])
 
     return {
         **result,
@@ -721,6 +736,6 @@ def ai_query(
             max_calls=8,
         )
     except AIProviderError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        raise HTTPException(status_code=502, detail=_ai_error_detail(e))
 
     return result

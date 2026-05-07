@@ -3,6 +3,8 @@
 # Feature 11: Database backup and restore accessible from settings
 # ============================================================================
 
+import os
+import re
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -14,6 +16,31 @@ from app.models.backups import Backup
 
 BACKUP_DIR = Path(__file__).parent.parent.parent / "backups"
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+
+# Strict filename allow-list. Backup files we create are named
+# "slowbooks_YYYYMMDD_HHMMSS.sql"; we accept any safe basename matching
+# this character class with a known backup extension. NO path separators,
+# NO ".." components -- this is the trust boundary that CodeQL needs to
+# see at the start of restore_backup() before BACKUP_DIR / filename is
+# constructed.
+_BACKUP_FILENAME_RE = re.compile(r"^[A-Za-z0-9_.-]+\.(sql|dump|backup)$")
+
+
+def _safe_backup_filename(filename: str) -> str | None:
+    """Return filename if it's a safe basename for a backup file, else None.
+
+    Rejects: empty, path separators, parent-dir traversal, leading dots,
+    anything that doesn't match _BACKUP_FILENAME_RE.
+    """
+    if not filename or len(filename) > 255:
+        return None
+    if os.sep in filename or (os.altsep and os.altsep in filename):
+        return None
+    if filename.startswith(".") or ".." in filename:
+        return None
+    if not _BACKUP_FILENAME_RE.match(filename):
+        return None
+    return filename
 
 
 def _parse_db_url(url: str) -> dict:
@@ -68,11 +95,19 @@ def create_backup(db: Session, notes: str = None, backup_type: str = "manual") -
 
 def restore_backup(db: Session, filename: str) -> dict:
     """Restore a database from a backup file."""
-    filepath = (BACKUP_DIR / filename).resolve()
-    if not filepath.parent == BACKUP_DIR.resolve():
+    # Trust boundary: validate filename as a safe basename BEFORE using it
+    # to construct any filesystem path. is_relative_to is the
+    # belt-and-suspenders check after.
+    safe_name = _safe_backup_filename(filename)
+    if safe_name is None:
+        return {"success": False, "error": "Invalid filename"}
+
+    backup_root = BACKUP_DIR.resolve()
+    filepath = (backup_root / safe_name).resolve()
+    if not filepath.is_relative_to(backup_root):
         return {"success": False, "error": "Invalid filename"}
     if not filepath.exists():
-        return {"success": False, "error": f"Backup file not found: {filename}"}
+        return {"success": False, "error": f"Backup file not found: {safe_name}"}
 
     params = _parse_db_url(DATABASE_URL)
     env = {"PGPASSWORD": params["password"]}

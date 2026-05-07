@@ -478,6 +478,55 @@ def _openai_style_request(
     }
 
 
+# ---------------------------------------------------------------------------
+# Outbound URL allowlist (defense-in-depth + CodeQL trust boundary)
+# ---------------------------------------------------------------------------
+
+# Per-provider hardcoded URL prefixes. The cloudflare_worker provider is the
+# only one whose URL is user-supplied; that one runs through
+# validate_worker_url() and is re-validated here at call time.
+_PROVIDER_URL_PREFIXES = {
+    "grok":       "https://api.x.ai/",
+    "groq":       "https://api.groq.com/",
+    "openai":     "https://api.openai.com/",
+    "anthropic":  "https://api.anthropic.com/",
+    "gemini":     "https://generativelanguage.googleapis.com/",
+    "cloudflare": "https://api.cloudflare.com/",
+    # cloudflare_worker has no static prefix — see _check_outbound_url
+}
+
+
+def _check_outbound_url(provider_key: str, url: str) -> str:
+    """Last-line allowlist on the outbound HTTP URL.
+
+    `build_request()` already constructs URLs from validated inputs, but
+    re-validating here:
+      1. Acts as defense-in-depth — a future regression in build_request
+         can't accidentally let a user-controlled URL through.
+      2. Gives static analyzers (CodeQL) a clear trust boundary right at
+         the network sink, instead of having to trace through helpers.
+
+    Returns the URL unchanged on success; raises AIProviderError otherwise.
+    """
+    if not isinstance(url, str) or not url:
+        raise AIProviderError(f"{provider_key}: empty outbound URL")
+
+    if provider_key == "cloudflare_worker":
+        # Re-run validate_worker_url() against the URL. Same function
+        # build_request used; idempotent on already-validated URLs.
+        validate_worker_url(url)
+        return url
+
+    prefix = _PROVIDER_URL_PREFIXES.get(provider_key)
+    if not prefix:
+        raise AIProviderError(f"{provider_key}: unknown provider")
+    if not url.startswith(prefix):
+        raise AIProviderError(
+            f"{provider_key}: outbound URL not on allowlist"
+        )
+    return url
+
+
 def build_request(
     provider_key: str,
     api_key: str,
@@ -681,16 +730,19 @@ def call_provider(
     req = build_request(
         provider_key, api_key, model, system, user, account_id, worker_url
     )
+    # Re-validate outbound URL against the per-provider allowlist before
+    # any network IO. Defense-in-depth + CodeQL trust boundary at the sink.
+    safe_url = _check_outbound_url(provider_key, req["url"])
 
     try:
         if client is None:
             with _hardened_client(timeout) as c:
                 resp = c.request(
-                    req["method"], req["url"], headers=req["headers"], json=req["json"]
+                    req["method"], safe_url, headers=req["headers"], json=req["json"]
                 )
         else:
             resp = client.request(
-                req["method"], req["url"], headers=req["headers"], json=req["json"]
+                req["method"], safe_url, headers=req["headers"], json=req["json"]
             )
     except httpx.HTTPError as e:
         # Never include api_key in the exception — it might have been
@@ -892,6 +944,10 @@ def call_with_tools(
                 f"Tool calling not supported for wire format: {wire_format}"
             )
 
+        # Re-validate outbound URL against the per-provider allowlist before
+        # any network IO. Defense-in-depth + CodeQL trust boundary at the sink.
+        safe_url = _check_outbound_url(provider_key, req["url"])
+
         # Make the call — reuses the same hardened-client profile as
         # call_provider (verify=True, follow_redirects=False, explicit UA).
         try:
@@ -899,13 +955,13 @@ def call_with_tools(
                 with _hardened_client(DEFAULT_TIMEOUT) as c:
                     resp = c.request(
                         req["method"],
-                        req["url"],
+                        safe_url,
                         headers=req["headers"],
                         json=req["json"],
                     )
             else:
                 resp = client.request(
-                    req["method"], req["url"], headers=req["headers"], json=req["json"]
+                    req["method"], safe_url, headers=req["headers"], json=req["json"]
                 )
         except httpx.HTTPError as e:
             raise AIProviderError(f"{provider_key}: network error") from e
