@@ -6,14 +6,65 @@
 # We're using WeasyPrint + Jinja2 because Crystal Reports can go to hell.
 # ============================================================================
 
-from pathlib import Path
+import base64
+import mimetypes
 from io import BytesIO
+from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 from weasyprint import HTML, default_url_fetcher
 
 TEMPLATE_DIR = Path(__file__).parent.parent / "templates"
 _jinja_env = Environment(autoescape=True, loader=FileSystemLoader(str(TEMPLATE_DIR)))
+
+# Where uploaded company logos live. Anything outside this directory is
+# refused — keeps a tampered settings.company_logo_path from reading
+# arbitrary files like /etc/passwd into the rendered PDF.
+_UPLOADS_DIR = (Path(__file__).parent.parent / "static" / "uploads").resolve()
+
+# MIME types we'll embed as data URIs. Keep this tight — WeasyPrint will
+# happily render whatever, but we don't want a path traversal turning into
+# a binary smuggle vector.
+_LOGO_ALLOWED_MIMES = {"image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"}
+
+
+def _company_logo_data_uri(company_settings: dict) -> str:
+    """Return the company logo as a base64 data URI, or empty string.
+
+    Constrains the file to live inside app/static/uploads so a tampered
+    `company_logo_path` setting can't be used to read files outside the
+    upload directory.
+    """
+    logo_path = (company_settings or {}).get("company_logo_path") or ""
+    if not logo_path:
+        return ""
+
+    # Stored value is "/static/uploads/company_logo.png" — strip the URL
+    # prefix and resolve relative to the static dir.
+    relative = logo_path.lstrip("/")
+    if relative.startswith("static/"):
+        relative = relative[len("static/"):]
+    candidate = (_UPLOADS_DIR.parent / relative).resolve()
+
+    # Path containment check — reject if the resolved path escapes the
+    # uploads directory (defends against ../ in stored value).
+    try:
+        candidate.relative_to(_UPLOADS_DIR)
+    except ValueError:
+        return ""
+
+    if not candidate.is_file():
+        return ""
+
+    mime = mimetypes.guess_type(candidate.name)[0] or ""
+    if mime not in _LOGO_ALLOWED_MIMES:
+        return ""
+
+    try:
+        encoded = base64.b64encode(candidate.read_bytes()).decode("ascii")
+    except OSError:
+        return ""
+    return f"data:{mime};base64,{encoded}"
 
 
 def _safe_url_fetcher(url, timeout=10, ssl_context=None):
@@ -77,6 +128,7 @@ def generate_analytics_pdf(dashboard: dict, period: dict, company_settings: dict
         dashboard=dashboard,
         period=period,
         company=company_settings,
+        company_logo_data_uri=_company_logo_data_uri(company_settings),
     )
     return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 

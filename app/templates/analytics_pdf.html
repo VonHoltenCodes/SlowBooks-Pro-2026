@@ -22,38 +22,78 @@
             margin: 0;
         }
 
-        /* Header */
+        /* Header — table-based so flex behaves consistently in WeasyPrint */
         .pdf-header {
+            width: 100%;
             border-bottom: 2pt solid #336699;
-            padding-bottom: 8pt;
+            padding-bottom: 10pt;
             margin-bottom: 14pt;
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-end;
+            display: table;
         }
-        .pdf-title {
-            font-size: 16pt;
-            font-weight: 700;
-            color: #336699;
-            margin: 0;
+        .pdf-header-left,
+        .pdf-header-right {
+            display: table-cell;
+            vertical-align: bottom;
+        }
+        .pdf-header-right {
+            text-align: right;
+            white-space: nowrap;
+        }
+        .pdf-company-logo {
+            max-height: 48pt;
+            max-width: 180pt;
+            margin-bottom: 4pt;
+            display: block;
         }
         .pdf-company {
-            font-size: 11pt;
-            font-weight: 600;
+            font-size: 12pt;
+            font-weight: 700;
             color: #1a1a28;
             margin: 0;
         }
+        .pdf-title {
+            font-size: 14pt;
+            font-weight: 700;
+            color: #336699;
+            margin: 4pt 0 0 0;
+            text-transform: uppercase;
+            letter-spacing: 0.4pt;
+        }
         .pdf-period {
-            text-align: right;
             font-size: 9pt;
             color: #5a5a70;
+            margin-top: 2pt;
         }
         .pdf-period strong {
             color: #336699;
             display: block;
-            font-size: 11pt;
+            font-size: 10pt;
             text-transform: uppercase;
             letter-spacing: 0.5pt;
+        }
+        /* Slowbooks Pro 2026 wordmark — text-based, no asset required */
+        .sb-brand {
+            display: inline-block;
+            padding: 3pt 7pt;
+            border: 0.75pt solid #336699;
+            border-radius: 2pt;
+            font-size: 7pt;
+            font-weight: 700;
+            color: #336699;
+            text-transform: uppercase;
+            letter-spacing: 1pt;
+            line-height: 1.1;
+        }
+        .sb-brand .sb-brand-mark {
+            display: block;
+            font-size: 10pt;
+            letter-spacing: 1.5pt;
+        }
+        .sb-brand .sb-brand-tag {
+            display: block;
+            font-weight: 600;
+            color: #6e8aaa;
+            letter-spacing: 0.6pt;
         }
 
         h2.section {
@@ -147,13 +187,22 @@
 </head>
 <body>
     <div class="pdf-header">
-        <div>
+        <div class="pdf-header-left">
+            {% if company_logo_data_uri %}
+                <img class="pdf-company-logo" src="{{ company_logo_data_uri }}" alt="">
+            {% endif %}
+            <p class="pdf-company">{{ company.company_name or "My Company" }}</p>
             <p class="pdf-title">Analytics Snapshot</p>
-            <p class="pdf-company">{{ company.company_name or "Slowbooks Pro 2026" }}</p>
         </div>
-        <div class="pdf-period">
-            <strong>{{ period.name|upper }}</strong>
-            {{ period.start }} &rarr; {{ period.end }}
+        <div class="pdf-header-right">
+            <span class="sb-brand">
+                <span class="sb-brand-mark">SlowBooks Pro</span>
+                <span class="sb-brand-tag">2026</span>
+            </span>
+            <div class="pdf-period">
+                <strong>{{ period.name|upper }}</strong>
+                {{ period.start }} &rarr; {{ period.end }}
+            </div>
         </div>
     </div>
 

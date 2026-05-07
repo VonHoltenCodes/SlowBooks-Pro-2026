@@ -113,17 +113,65 @@ const VendorsPage = {
             </form>`);
     },
 
-    async save(e, id) {
+    async save(e, id, force) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target).entries());
         data.default_expense_account_id = data.default_expense_account_id ? parseInt(data.default_expense_account_id) : null;
         data.is_1099_vendor = data.is_1099_vendor === 'true';
         data.vendor_1099_type = data.vendor_1099_type || null;
         try {
-            if (id) { await API.put(`/vendors/${id}`, data); toast('Vendor updated'); }
-            else { await API.post('/vendors', data); toast('Vendor created'); }
+            if (id) {
+                await API.put(`/vendors/${id}`, data);
+                toast('Vendor updated');
+            } else {
+                await API.post('/vendors', data, force ? { query: { force: true } } : undefined);
+                toast('Vendor created');
+            }
             closeModal();
             App.navigate(location.hash);
-        } catch (err) { toast(err.message, 'error'); }
+        } catch (err) {
+            // Phase 11: backend returns 409 with {duplicates:[...]} when a
+            // similarly-named active vendor already exists. Show the matches
+            // and let the user confirm-and-create-anyway.
+            if (err.status === 409 && err.detail && err.detail.duplicates) {
+                VendorsPage._confirmDuplicate(e.target, id, data, err.detail.duplicates);
+                return;
+            }
+            toast(err.message, 'error');
+        }
+    },
+
+    _confirmDuplicate(formEl, id, data, duplicates) {
+        const list = duplicates.map(d =>
+            `<li><strong>${escapeHtml(d.name)}</strong>
+              <span style="color:var(--text-muted);font-size:11px">
+              (${Math.round(d.similarity * 100)}% match)</span></li>`
+        ).join('');
+        openModal('Possible Duplicate Vendor', `
+            <div style="font-size:13px; line-height:1.5;">
+              <p>A similar vendor name already exists:</p>
+              <ul style="margin:8px 0 12px 20px;">${list}</ul>
+              <p>Create <strong>${escapeHtml(data.name)}</strong> anyway, or cancel and reuse the existing one?</p>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="button" class="btn btn-primary"
+                onclick="VendorsPage._forceCreate(${id ? id : 'null'})">
+                Create Anyway
+              </button>
+            </div>
+        `);
+        // Stash the form so _forceCreate can resubmit it without re-rendering
+        VendorsPage._pendingForm = formEl;
+    },
+
+    async _forceCreate(id) {
+        const formEl = VendorsPage._pendingForm;
+        if (!formEl) { closeModal(); return; }
+        // Synthesize a submit-like event and replay save() with force=true
+        const fakeEvt = { preventDefault: () => {}, target: formEl };
+        closeModal();
+        await VendorsPage.save(fakeEvt, id, true);
+        VendorsPage._pendingForm = null;
     },
 };

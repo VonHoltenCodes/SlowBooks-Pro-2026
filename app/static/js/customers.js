@@ -123,7 +123,7 @@ const CustomersPage = {
             </form>`);
     },
 
-    async save(e, id) {
+    async save(e, id, force) {
         e.preventDefault();
         const form = new FormData(e.target);
         const data = Object.fromEntries(form.entries());
@@ -135,13 +135,51 @@ const CustomersPage = {
                 await API.put(`/customers/${id}`, data);
                 toast('Customer updated');
             } else {
-                await API.post('/customers', data);
+                await API.post('/customers', data, force ? { query: { force: true } } : undefined);
                 toast('Customer created');
             }
             closeModal();
             App.navigate(location.hash);
         } catch (err) {
+            // Phase 11: backend returns 409 with {duplicates:[...]} when a
+            // similarly-named active customer already exists.
+            if (err.status === 409 && err.detail && err.detail.duplicates) {
+                CustomersPage._confirmDuplicate(e.target, id, data, err.detail.duplicates);
+                return;
+            }
             toast(err.message, 'error');
         }
+    },
+
+    _confirmDuplicate(formEl, id, data, duplicates) {
+        const list = duplicates.map(d =>
+            `<li><strong>${escapeHtml(d.name)}</strong>
+              <span style="color:var(--text-muted);font-size:11px">
+              (${Math.round(d.similarity * 100)}% match)</span></li>`
+        ).join('');
+        openModal('Possible Duplicate Customer', `
+            <div style="font-size:13px; line-height:1.5;">
+              <p>A similar customer name already exists:</p>
+              <ul style="margin:8px 0 12px 20px;">${list}</ul>
+              <p>Create <strong>${escapeHtml(data.name)}</strong> anyway, or cancel and reuse the existing one?</p>
+            </div>
+            <div class="form-actions">
+              <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+              <button type="button" class="btn btn-primary"
+                onclick="CustomersPage._forceCreate(${id ? id : 'null'})">
+                Create Anyway
+              </button>
+            </div>
+        `);
+        CustomersPage._pendingForm = formEl;
+    },
+
+    async _forceCreate(id) {
+        const formEl = CustomersPage._pendingForm;
+        if (!formEl) { closeModal(); return; }
+        const fakeEvt = { preventDefault: () => {}, target: formEl };
+        closeModal();
+        await CustomersPage.save(fakeEvt, id, true);
+        CustomersPage._pendingForm = null;
     },
 };

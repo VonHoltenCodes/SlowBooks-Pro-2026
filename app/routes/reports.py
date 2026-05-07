@@ -52,13 +52,16 @@ _DEBIT_NORMAL = {AccountType.ASSET, AccountType.EXPENSE, AccountType.COGS}
 
 
 def _totals_by_account(db, acct_type, date_start=None, date_end=None):
-    """Return a list of {account_name, account_number, amount} rows where amount
-    is signed by the account type's natural balance (always positive for a
-    normal-balance ledger).
+    """Return a list of {account_id, account_name, account_number, amount}
+    rows where amount is signed by the account type's natural balance
+    (always positive for a normal-balance ledger).
+
+    `account_id` is included so the SPA can drill into /account-transactions
+    for any line — Phase 11 drill-down support.
     """
     q = (
         db.query(
-            Account.name, Account.account_number,
+            Account.id, Account.name, Account.account_number,
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
         )
@@ -73,9 +76,10 @@ def _totals_by_account(db, acct_type, date_start=None, date_end=None):
     q = q.group_by(Account.id, Account.name, Account.account_number)
 
     rows = []
-    for name, number, dr, cr in q.all():
+    for acct_id, name, number, dr, cr in q.all():
         amount = (dr - cr) if acct_type in _DEBIT_NORMAL else (cr - dr)
         rows.append({
+            "account_id": acct_id,
             "account_name": name,
             "account_number": number,
             "amount": float(amount),
