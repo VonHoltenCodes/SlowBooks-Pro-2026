@@ -58,6 +58,7 @@ CHART_OF_ACCOUNTS = [
     {"account_number": "6110", "name": "Wages & Salaries", "account_type": "expense"},
     {"account_number": "6120", "name": "Payroll Tax Expense", "account_type": "expense"},
     {"account_number": "6130", "name": "Workers Compensation Insurance", "account_type": "expense"},
+    {"account_number": "6140", "name": "Employee Expense Reimbursements", "account_type": "expense"},
     {"account_number": "6200", "name": "Bank Charges & Fees", "account_type": "expense"},
     {"account_number": "6300", "name": "Insurance", "account_type": "expense"},
     {"account_number": "6400", "name": "Office Supplies", "account_type": "expense"},

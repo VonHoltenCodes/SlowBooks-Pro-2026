@@ -33,6 +33,7 @@ from app.models import (  # noqa: F401
     companies,
     contacts,
     credit_memos,
+    deductions,
     email_log,
     email_templates,
     estimates,

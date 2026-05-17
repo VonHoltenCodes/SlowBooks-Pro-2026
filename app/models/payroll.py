@@ -94,6 +94,9 @@ class Employee(Base):
     # Tax situs — which state's withholding engine applies. Defaults to the
     # mailing-address state when unset (see schema/route logic).
     work_state = Column(String(2), nullable=True)
+    # State of residence — drives reciprocity (withhold for the residence
+    # state instead of the work state when an agreement exists).
+    residence_state = Column(String(2), nullable=True)
     # Workers' comp / WA L&I risk classification code.
     wc_class_code = Column(String(20), nullable=True)
 
@@ -161,7 +164,15 @@ class PayStub(Base):
     medicare_tax = Column(Numeric(12, 2), default=0)        # Medicare 1.45% + 0.9% addl
     pretax_deductions = Column(Numeric(12, 2), default=0)
     posttax_deductions = Column(Numeric(12, 2), default=0)
+    garnishments = Column(Numeric(12, 2), default=0)
+    # Non-taxable accountable-plan reimbursements — added to the check but not
+    # part of gross wages and not taxed.
+    reimbursements = Column(Numeric(12, 2), default=0)
     net_pay = Column(Numeric(12, 2), default=0)
+
+    # Work-location state for this stub (multi-state employees) — drives SUTA
+    # situs and state withholding independently of the employee's home state.
+    work_state = Column(String(2), nullable=True)
 
     # Employer-side taxes (not withheld from the employee — company expense)
     employer_ss_tax = Column(Numeric(12, 2), default=0)

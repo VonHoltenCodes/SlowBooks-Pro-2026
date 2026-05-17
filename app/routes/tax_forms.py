@@ -7,7 +7,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.services.tax_forms import form_941, form_940, w2_w3, state_sui
+from app.services.tax_forms import form_941, form_940, w2_w3, state_sui, tax_liability
 from app.services import form_1099
 from app import config
 
@@ -85,6 +85,15 @@ def get_sui(year: int = Query(...), quarter: int = Query(...),
             state: str = Query(default=None), db: Session = Depends(get_db)):
     _check_quarter(quarter)
     return state_sui.compute_sui(db, year, quarter, state)
+
+
+# --- Quarterly tax liability schedule --------------------------------------
+@router.get("/liability")
+def get_tax_liability(year: int = Query(...), quarter: int = Query(...),
+                      db: Session = Depends(get_db)):
+    """What payroll tax is owed for the quarter, and when it is due."""
+    _check_quarter(quarter)
+    return tax_liability.compute_tax_liability(db, year, quarter)
 
 
 # --- 1099-NEC / 1096 -------------------------------------------------------

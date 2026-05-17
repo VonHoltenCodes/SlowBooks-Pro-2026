@@ -33,6 +33,8 @@ from app.models.payroll import Employee, PayRun, PayStub
 from app.models.time_entries import TimeEntry
 from app.models.pto import PTOPolicy, PTOAccrual, PTORequest
 from app.models.bank_accounts import EmployeeBankAccount
+# Tier 2: deductions and garnishments
+from app.models.deductions import DeductionType, EmployeeDeduction, GarnishmentOrder
 
 # Phase 8: QuickBooks Online
 from app.models.qbo_mapping import QBOMapping
@@ -67,6 +69,8 @@ __all__ = [
     "Company", "Employee", "PayRun", "PayStub",
     # Tier 1: Full payroll / HR
     "TimeEntry", "PTOPolicy", "PTOAccrual", "PTORequest", "EmployeeBankAccount",
+    # Tier 2: deductions and garnishments
+    "DeductionType", "EmployeeDeduction", "GarnishmentOrder",
     # Phase 8
     "QBOMapping",
     # Phase 10

@@ -177,6 +177,36 @@ def supplemental_federal_tax(
     return _q(tax)
 
 
+def supplemental_aggregate_tax(
+    supplemental: Decimal,
+    regular_wages: Decimal,
+    pay_periods: int,
+    filing_status: str = "single",
+    multiple_jobs: bool = False,
+    dependents_amount: Decimal = Decimal("0"),
+    other_income_annual: Decimal = Decimal("0"),
+    deductions_annual: Decimal = Decimal("0"),
+) -> Decimal:
+    """Aggregate-method federal withholding on supplemental wages.
+
+    Withhold the difference between the tax on (regular + supplemental) wages
+    and the tax on the regular wages alone — the alternative to the flat 22%.
+    """
+    supplemental = Decimal(str(supplemental))
+    regular_wages = Decimal(str(regular_wages))
+    if supplemental <= 0:
+        return Decimal("0")
+    combined = federal_income_tax(
+        regular_wages + supplemental, pay_periods, filing_status, multiple_jobs,
+        dependents_amount, other_income_annual, deductions_annual,
+    )
+    base = federal_income_tax(
+        regular_wages, pay_periods, filing_status, multiple_jobs,
+        dependents_amount, other_income_annual, deductions_annual,
+    )
+    return _q(max(Decimal("0"), combined - base))
+
+
 def _capped_wages(gross: Decimal, ytd_gross: Decimal, wage_base: Decimal) -> Decimal:
     """Portion of `gross` that is still below an annual wage-base cap."""
     if ytd_gross >= wage_base:
@@ -240,13 +270,22 @@ def calculate_withholdings(
     extra_withholding=Decimal("0"),
     ytd_gross=Decimal("0"),
     work_state: str = "WA",
+    withholding_state: str = None,
     wc_class_code: str = None,
     hours=Decimal("0"),
     pretax_deductions=Decimal("0"),
+    pretax_fica=Decimal("0"),
     supplemental: bool = False,
+    supplemental_method: str = "flat",
+    regular_wages=Decimal("0"),
     suta_rate: Decimal = None,
 ) -> dict:
     """Compute a full set of payroll taxes for one employee for one pay period.
+
+    ``pretax_deductions`` is the total of pre-tax deductions that reduce
+    income-tax wages; ``pretax_fica`` is the subset of those that ALSO reduce
+    FICA wages (Section 125 cafeteria plans, HSA) — a traditional 401(k)
+    reduces income tax but not FICA, so it belongs only in pretax_deductions.
 
     Returns employee-side withholding, employer-side taxes, the per-state
     results, and an itemized ``detail`` map for pay-stub / form rendering.
@@ -256,6 +295,7 @@ def calculate_withholdings(
     gross = _q(gross_pay)
     ytd = Decimal(str(ytd_gross))
     pretax = Decimal(str(pretax_deductions))
+    pretax_fica_amt = min(Decimal(str(pretax_fica)), pretax)
     pay_periods = periods_per_year(pay_frequency)
 
     if gross <= 0:
@@ -269,15 +309,21 @@ def calculate_withholdings(
             "net": zero, "detail": {},
         }
 
-    # Pre-tax deductions reduce federal/state taxable wages. (The distinct
-    # FICA treatment of Section 125 vs 401(k) is a Tier 2 concern.)
-    fed_taxable = gross - pretax
-    if fed_taxable < 0:
-        fed_taxable = Decimal("0")
+    # Income-tax wages drop the full pre-tax total; FICA wages drop only the
+    # cafeteria-plan / HSA subset.
+    fed_taxable = max(Decimal("0"), gross - pretax)
+    fica_wages = max(Decimal("0"), gross - pretax_fica_amt)
 
     # --- Federal income tax ---
     if supplemental:
-        federal = supplemental_federal_tax(fed_taxable)
+        if supplemental_method == "aggregate":
+            federal = supplemental_aggregate_tax(
+                fed_taxable, regular_wages, pay_periods, filing_status,
+                multiple_jobs, dependents_amount, other_income_annual,
+                deductions_annual,
+            )
+        else:
+            federal = supplemental_federal_tax(fed_taxable)
     else:
         federal = federal_income_tax(
             fed_taxable, pay_periods, filing_status, multiple_jobs,
@@ -285,14 +331,17 @@ def calculate_withholdings(
             extra_withholding,
         )
 
-    # --- FICA (on gross; pre-tax 401(k) does not reduce FICA wages) ---
-    ss_emp, ss_empr = social_security(gross, ytd)
-    med_emp, med_empr = medicare(gross, ytd)
+    # --- FICA (on FICA wages — Section 125 / HSA reduce these) ---
+    ss_emp, ss_empr = social_security(fica_wages, ytd)
+    med_emp, med_empr = medicare(fica_wages, ytd)
 
     # --- Employer unemployment taxes ---
-    futa_tax = futa(gross, ytd)
+    futa_tax = futa(fica_wages, ytd)
 
     # --- State engine ---
+    # The work-state engine drives SUTA situs and state disability/leave
+    # premiums; income tax may instead follow the residence state under a
+    # reciprocity agreement (see state_tax.reciprocity).
     engine = get_engine(work_state)
     state = engine.calculate(
         gross=gross, taxable=fed_taxable, ytd_gross=ytd,
@@ -300,10 +349,20 @@ def calculate_withholdings(
         filing_status=filing_status, wc_class_code=wc_class_code,
     )
 
-    rate = Decimal(str(suta_rate)) if suta_rate is not None else Decimal(str(SUTA_RATE))
-    suta_tax = suta(gross, ytd, rate, engine.suta_wage_base)
+    state_income = state.income_tax
+    if withholding_state and (work_state or "").strip().upper() != \
+            withholding_state.strip().upper():
+        wh = get_engine(withholding_state).calculate(
+            gross=gross, taxable=fed_taxable, ytd_gross=ytd,
+            pay_periods=pay_periods, hours=Decimal(str(hours)),
+            filing_status=filing_status, wc_class_code=wc_class_code,
+        )
+        state_income = wh.income_tax
 
-    total_employee = (federal + state.income_tax + state.employee_other
+    rate = Decimal(str(suta_rate)) if suta_rate is not None else Decimal(str(SUTA_RATE))
+    suta_tax = suta(fica_wages, ytd, rate, engine.suta_wage_base)
+
+    total_employee = (federal + state_income + state.employee_other
                       + ss_emp + med_emp)
     total_employer = (ss_empr + med_empr + futa_tax + suta_tax
                       + state.employer_other)
@@ -313,7 +372,7 @@ def calculate_withholdings(
         "federal_income_tax": federal,
         "social_security_employee": ss_emp,
         "medicare_employee": med_emp,
-        "state_income_tax": state.income_tax,
+        "state_income_tax": state_income,
         "pretax_deductions": _q(pretax),
         "employer_social_security": ss_empr,
         "employer_medicare": med_empr,
@@ -321,13 +380,14 @@ def calculate_withholdings(
         "suta": suta_tax,
     }
     detail.update(state.detail)
+    detail["state_income_tax"] = state_income
 
     return {
         "gross": gross,
         "federal": federal,
         "ss": ss_emp,
         "medicare": med_emp,
-        "state_income": state.income_tax,
+        "state_income": state_income,
         "state_other_employee": state.employee_other,
         "employer_ss": ss_empr,
         "employer_medicare": med_empr,

@@ -26,6 +26,7 @@ class EmployeeCreate(BaseModel):
     state: Optional[str] = None
     zip: Optional[str] = None
     work_state: Optional[str] = None
+    residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
     hire_date: Optional[date] = None
     notes: Optional[str] = None
@@ -50,6 +51,7 @@ class EmployeeUpdate(BaseModel):
     state: Optional[str] = None
     zip: Optional[str] = None
     work_state: Optional[str] = None
+    residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
     hire_date: Optional[date] = None
     is_active: Optional[bool] = None
@@ -76,6 +78,7 @@ class EmployeeResponse(BaseModel):
     state: Optional[str] = None
     zip: Optional[str] = None
     work_state: Optional[str] = None
+    residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
     is_active: bool = True
     hire_date: Optional[date] = None
@@ -92,9 +95,12 @@ class PayStubInput(BaseModel):
     overtime_hours: float = 0
     doubletime_hours: float = 0
     gross_override: Optional[float] = None  # explicit gross (bonuses / off-cycle runs)
-    pretax_deductions: float = 0
+    pretax_deductions: float = 0     # ad-hoc; configured EmployeeDeductions are auto-applied
     posttax_deductions: float = 0
+    reimbursements: float = 0        # non-taxable accountable-plan reimbursements
     supplemental: bool = False       # treat as supplemental wages (bonus/off-cycle)
+    supplemental_method: str = "flat"  # "flat" 22% or "aggregate"
+    work_state: Optional[str] = None   # per-stub work location (multi-state)
     use_time_entries: bool = False   # pull approved time entries for the period instead of `hours`
 
 
@@ -122,7 +128,10 @@ class PayStubResponse(BaseModel):
     medicare_tax: float = 0
     pretax_deductions: float = 0
     posttax_deductions: float = 0
+    garnishments: float = 0
+    reimbursements: float = 0
     net_pay: float = 0
+    work_state: Optional[str] = None
     employer_ss_tax: float = 0
     employer_medicare_tax: float = 0
     futa_tax: float = 0

@@ -48,6 +48,8 @@ from app.routes import journal, deposits, cc_charges, checks
 from app.routes import bank_rules, budgets, attachments, email_templates
 # Tier 1: Full payroll / HR system
 from app.routes import time_entries, pto, tax_forms
+# Tier 2: deductions, garnishments
+from app.routes import deductions
 
 from app.config import CORS_ALLOW_ORIGINS
 from app.database import SessionLocal
@@ -118,6 +120,8 @@ app.include_router(email_templates.router)
 app.include_router(time_entries.router)
 app.include_router(pto.router)
 app.include_router(tax_forms.router)
+# Tier 2: deductions, garnishments
+app.include_router(deductions.router)
 
 # Register audit log hooks
 register_audit_hooks(SessionLocal)
