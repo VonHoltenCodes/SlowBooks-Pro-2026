@@ -20,10 +20,10 @@ from sqlalchemy.orm import Session
 
 from app.models.settings import Settings, DEFAULT_SETTINGS
 
-
 # ============================================================================
 # Settings helpers (mirror app/routes/settings.py pattern)
 # ============================================================================
+
 
 def _get_setting(db: Session, key: str) -> str:
     """Get a single setting value, falling back to DEFAULT_SETTINGS."""
@@ -55,6 +55,7 @@ def get_all_qbo_settings(db: Session) -> dict:
 # ============================================================================
 # OAuth helpers
 # ============================================================================
+
 
 def _make_auth_client(db: Session) -> AuthClient:
     """Create an Intuit AuthClient from stored settings."""
@@ -113,8 +114,13 @@ def handle_callback(db: Session, code: str, state: str, realm_id: str):
 
 def disconnect(db: Session):
     """Clear all stored QBO tokens."""
-    for key in ("qbo_access_token", "qbo_refresh_token", "qbo_realm_id",
-                "qbo_token_expires_at", "qbo_oauth_state"):
+    for key in (
+        "qbo_access_token",
+        "qbo_refresh_token",
+        "qbo_realm_id",
+        "qbo_token_expires_at",
+        "qbo_oauth_state",
+    ):
         _set_setting(db, key, "")
     db.commit()
 
@@ -129,6 +135,7 @@ def is_connected(db: Session) -> bool:
 # ============================================================================
 # QBO client factory
 # ============================================================================
+
 
 def _refresh_if_needed(db: Session):
     """Auto-refresh access token if expired."""
@@ -194,6 +201,7 @@ def get_company_name(db: Session) -> str:
     try:
         client = get_qbo_client(db)
         from quickbooks.objects.company_info import CompanyInfo
+
         info_list = CompanyInfo.all(qb=client)
         if info_list:
             return getattr(info_list[0], "CompanyName", "") or ""

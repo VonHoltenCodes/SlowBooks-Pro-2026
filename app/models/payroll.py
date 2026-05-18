@@ -7,8 +7,17 @@
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text, Enum, Boolean,
-    ForeignKey, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+    DateTime,
+    Text,
+    Enum,
+    Boolean,
+    ForeignKey,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -22,8 +31,8 @@ class PayType(str, enum.Enum):
 
 class FilingStatus(str, enum.Enum):
     # Maps to the three checkboxes on the 2020+ Form W-4, Step 1(c).
-    SINGLE = "single"                    # Single or Married filing separately
-    MARRIED = "married"                  # Married filing jointly
+    SINGLE = "single"  # Single or Married filing separately
+    MARRIED = "married"  # Married filing jointly
     HEAD_OF_HOUSEHOLD = "head_of_household"
 
 
@@ -85,11 +94,13 @@ class Employee(Base):
     filing_status = Column(Enum(FilingStatus), default=FilingStatus.SINGLE)
 
     # --- 2020+ Form W-4 (the redesign removed "allowances" entirely) ---
-    multiple_jobs = Column(Boolean, default=False)            # Step 2(c) checkbox
-    dependents_amount = Column(Numeric(12, 2), default=0)     # Step 3 ($2000/child + $500/other)
+    multiple_jobs = Column(Boolean, default=False)  # Step 2(c) checkbox
+    dependents_amount = Column(
+        Numeric(12, 2), default=0
+    )  # Step 3 ($2000/child + $500/other)
     other_income_annual = Column(Numeric(12, 2), default=0)  # Step 4(a)
-    deductions_annual = Column(Numeric(12, 2), default=0)    # Step 4(b)
-    extra_withholding = Column(Numeric(12, 2), default=0)    # Step 4(c) per pay period
+    deductions_annual = Column(Numeric(12, 2), default=0)  # Step 4(b)
+    extra_withholding = Column(Numeric(12, 2), default=0)  # Step 4(c) per pay period
 
     address1 = Column(String(200), nullable=True)
     address2 = Column(String(200), nullable=True)
@@ -120,11 +131,14 @@ class Employee(Base):
     everify_case_number = Column(String(30), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     pay_stubs = relationship("PayStub", back_populates="employee")
     bank_accounts = relationship(
-        "EmployeeBankAccount", back_populates="employee",
+        "EmployeeBankAccount",
+        back_populates="employee",
         cascade="all, delete-orphan",
     )
 
@@ -152,15 +166,21 @@ class PayRun(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     transaction = relationship("Transaction", foreign_keys=[transaction_id])
-    stubs = relationship("PayStub", back_populates="pay_run", cascade="all, delete-orphan")
+    stubs = relationship(
+        "PayStub", back_populates="pay_run", cascade="all, delete-orphan"
+    )
 
 
 class PayStub(Base):
     __tablename__ = "pay_stubs"
 
     id = Column(Integer, primary_key=True, index=True)
-    pay_run_id = Column(Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False)
-    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    pay_run_id = Column(
+        Integer, ForeignKey("pay_runs.id", ondelete="CASCADE"), nullable=False
+    )
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
 
     # Hours — total kept for backwards compatibility, plus the itemized split
     # that overtime law and pay-stub disclosure rules require.
@@ -173,10 +193,12 @@ class PayStub(Base):
 
     # Employee-side withholding
     federal_tax = Column(Numeric(12, 2), default=0)
-    state_tax = Column(Numeric(12, 2), default=0)           # state income tax
-    state_other_employee = Column(Numeric(12, 2), default=0)  # WA PFML/Cares, SDI, PFL...
-    ss_tax = Column(Numeric(12, 2), default=0)              # Social Security 6.2% (employee)
-    medicare_tax = Column(Numeric(12, 2), default=0)        # Medicare 1.45% + 0.9% addl
+    state_tax = Column(Numeric(12, 2), default=0)  # state income tax
+    state_other_employee = Column(
+        Numeric(12, 2), default=0
+    )  # WA PFML/Cares, SDI, PFL...
+    ss_tax = Column(Numeric(12, 2), default=0)  # Social Security 6.2% (employee)
+    medicare_tax = Column(Numeric(12, 2), default=0)  # Medicare 1.45% + 0.9% addl
     pretax_deductions = Column(Numeric(12, 2), default=0)
     posttax_deductions = Column(Numeric(12, 2), default=0)
     garnishments = Column(Numeric(12, 2), default=0)

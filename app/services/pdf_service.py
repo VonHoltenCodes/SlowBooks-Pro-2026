@@ -25,7 +25,13 @@ _UPLOADS_DIR = (Path(__file__).parent.parent / "static" / "uploads").resolve()
 # MIME types we'll embed as data URIs. Keep this tight — WeasyPrint will
 # happily render whatever, but we don't want a path traversal turning into
 # a binary smuggle vector.
-_LOGO_ALLOWED_MIMES = {"image/png", "image/jpeg", "image/gif", "image/svg+xml", "image/webp"}
+_LOGO_ALLOWED_MIMES = {
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/svg+xml",
+    "image/webp",
+}
 
 
 def _company_logo_data_uri(company_settings: dict) -> str:
@@ -43,7 +49,7 @@ def _company_logo_data_uri(company_settings: dict) -> str:
     # prefix and resolve relative to the static dir.
     relative = logo_path.lstrip("/")
     if relative.startswith("static/"):
-        relative = relative[len("static/"):]
+        relative = relative[len("static/") :]
     candidate = (_UPLOADS_DIR.parent / relative).resolve()
 
     # Path containment check — reject if the resolved path escapes the
@@ -80,6 +86,7 @@ def _safe_url_fetcher(url, timeout=10, ssl_context=None):
         return default_url_fetcher(url, timeout=timeout, ssl_context=ssl_context)
     raise ValueError(f"URL scheme not allowed in PDF templates: {url!r}")
 
+
 def _format_currency(value):
     try:
         v = float(value or 0)
@@ -112,16 +119,23 @@ def generate_estimate_pdf(estimate, company_settings: dict) -> bytes:
     return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 
 
-def generate_statement_pdf(customer, invoices, payments, company_settings: dict, as_of_date=None) -> bytes:
+def generate_statement_pdf(
+    customer, invoices, payments, company_settings: dict, as_of_date=None
+) -> bytes:
     template = _jinja_env.get_template("statement_pdf.html")
     html_str = template.render(
-        customer=customer, invoices=invoices, payments=payments,
-        company=company_settings, as_of_date=as_of_date,
+        customer=customer,
+        invoices=invoices,
+        payments=payments,
+        company=company_settings,
+        as_of_date=as_of_date,
     )
     return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 
 
-def generate_analytics_pdf(dashboard: dict, period: dict, company_settings: dict) -> bytes:
+def generate_analytics_pdf(
+    dashboard: dict, period: dict, company_settings: dict
+) -> bytes:
     """Render the analytics dashboard snapshot as a printable PDF."""
     template = _jinja_env.get_template("analytics_pdf.html")
     html_str = template.render(
@@ -135,35 +149,64 @@ def generate_analytics_pdf(dashboard: dict, period: dict, company_settings: dict
 
 def _amount_to_words(amount) -> str:
     """Convert a decimal amount to words for check printing."""
-    ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven',
-            'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen',
-            'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen']
-    tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty',
-            'Sixty', 'Seventy', 'Eighty', 'Ninety']
+    ones = [
+        "",
+        "One",
+        "Two",
+        "Three",
+        "Four",
+        "Five",
+        "Six",
+        "Seven",
+        "Eight",
+        "Nine",
+        "Ten",
+        "Eleven",
+        "Twelve",
+        "Thirteen",
+        "Fourteen",
+        "Fifteen",
+        "Sixteen",
+        "Seventeen",
+        "Eighteen",
+        "Nineteen",
+    ]
+    tens = [
+        "",
+        "",
+        "Twenty",
+        "Thirty",
+        "Forty",
+        "Fifty",
+        "Sixty",
+        "Seventy",
+        "Eighty",
+        "Ninety",
+    ]
 
     def _int_to_words(n):
         if n == 0:
-            return 'Zero'
+            return "Zero"
         if n < 0:
-            return 'Negative ' + _int_to_words(-n)
+            return "Negative " + _int_to_words(-n)
         parts = []
         if n >= 1000000:
-            parts.append(_int_to_words(n // 1000000) + ' Million')
+            parts.append(_int_to_words(n // 1000000) + " Million")
             n %= 1000000
         if n >= 1000:
-            parts.append(_int_to_words(n // 1000) + ' Thousand')
+            parts.append(_int_to_words(n // 1000) + " Thousand")
             n %= 1000
         if n >= 100:
-            parts.append(ones[n // 100] + ' Hundred')
+            parts.append(ones[n // 100] + " Hundred")
             n %= 100
         if n >= 20:
             word = tens[n // 10]
             if n % 10:
-                word += '-' + ones[n % 10]
+                word += "-" + ones[n % 10]
             parts.append(word)
         elif n > 0:
             parts.append(ones[n])
-        return ' '.join(parts)
+        return " ".join(parts)
 
     amt = float(amount or 0)
     dollars = int(amt)
@@ -171,12 +214,19 @@ def _amount_to_words(amount) -> str:
     return f"{_int_to_words(dollars)} and {cents:02d}/100"
 
 
-def generate_collection_letter_pdf(customer, invoices, company_settings: dict, letter_type: str, total_due) -> bytes:
+def generate_collection_letter_pdf(
+    customer, invoices, company_settings: dict, letter_type: str, total_due
+) -> bytes:
     from datetime import date as _date
+
     template = _jinja_env.get_template("collection_letter.html")
     html_str = template.render(
-        customer=customer, invoices=invoices, company=company_settings,
-        letter_type=letter_type, total_due=total_due, today=_date.today(),
+        customer=customer,
+        invoices=invoices,
+        company=company_settings,
+        letter_type=letter_type,
+        total_due=total_due,
+        today=_date.today(),
     )
     return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
 

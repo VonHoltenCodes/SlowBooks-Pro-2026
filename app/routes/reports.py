@@ -34,13 +34,17 @@ class CollectionLetterRequest(BaseModel):
     customer_ids: Optional[list[int]] = None
     send_email: bool = False
 
+
 from app.database import get_db
 from app.models.accounts import Account, AccountType
 from app.models.transactions import Transaction, TransactionLine
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment
 from app.models.contacts import Customer, Vendor
-from app.services.pdf_service import generate_statement_pdf, generate_collection_letter_pdf
+from app.services.pdf_service import (
+    generate_statement_pdf,
+    generate_collection_letter_pdf,
+)
 from app.services.settings_service import get_all_settings as get_settings
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -61,7 +65,9 @@ def _totals_by_account(db, acct_type, date_start=None, date_end=None):
     """
     q = (
         db.query(
-            Account.id, Account.name, Account.account_number,
+            Account.id,
+            Account.name,
+            Account.account_number,
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
         )
@@ -78,12 +84,14 @@ def _totals_by_account(db, acct_type, date_start=None, date_end=None):
     rows = []
     for acct_id, name, number, dr, cr in q.all():
         amount = (dr - cr) if acct_type in _DEBIT_NORMAL else (cr - dr)
-        rows.append({
-            "account_id": acct_id,
-            "account_name": name,
-            "account_number": number,
-            "amount": float(amount),
-        })
+        rows.append(
+            {
+                "account_id": acct_id,
+                "account_name": name,
+                "account_number": number,
+                "amount": float(amount),
+            }
+        )
     return rows
 
 
@@ -121,7 +129,9 @@ def profit_loss(
 
 
 @router.get("/balance-sheet")
-def balance_sheet(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
+def balance_sheet(
+    as_of_date: date = Query(default=None), db: Session = Depends(get_db)
+):
     if not as_of_date:
         as_of_date = date.today()
 
@@ -164,9 +174,13 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
         cid = inv.customer_id
         if cid not in aging:
             aging[cid] = {
-                "customer_name": customer_names.get(cid, "Unknown"), "customer_id": cid,
-                "current": Decimal(0), "over_30": Decimal(0),
-                "over_60": Decimal(0), "over_90": Decimal(0), "total": Decimal(0),
+                "customer_name": customer_names.get(cid, "Unknown"),
+                "customer_id": cid,
+                "current": Decimal(0),
+                "over_30": Decimal(0),
+                "over_60": Decimal(0),
+                "over_90": Decimal(0),
+                "total": Decimal(0),
             }
 
         days = (as_of_date - inv.due_date).days if inv.due_date else 0
@@ -183,7 +197,8 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
 
     items = list(aging.values())
     totals = {
-        "customer_name": "TOTAL", "customer_id": 0,
+        "customer_name": "TOTAL",
+        "customer_id": 0,
         "current": sum(i["current"] for i in items),
         "over_30": sum(i["over_30"] for i in items),
         "over_60": sum(i["over_60"] for i in items),
@@ -214,6 +229,7 @@ def sales_tax_report(
 
     # joinedload avoids an N+1 on inv.customer access in the loop below.
     from sqlalchemy.orm import joinedload
+
     invoices = (
         db.query(Invoice)
         .options(joinedload(Invoice.customer))
@@ -233,14 +249,16 @@ def sales_tax_report(
         if inv.tax_amount and inv.tax_amount > 0:
             total_taxable += inv.subtotal
             total_tax += inv.tax_amount
-        items.append({
-            "date": inv.date.isoformat(),
-            "invoice_number": inv.invoice_number,
-            "customer_name": inv.customer.name if inv.customer else "",
-            "subtotal": float(inv.subtotal),
-            "tax_rate": float(inv.tax_rate),
-            "tax_amount": float(inv.tax_amount),
-        })
+        items.append(
+            {
+                "date": inv.date.isoformat(),
+                "invoice_number": inv.invoice_number,
+                "customer_name": inv.customer.name if inv.customer else "",
+                "subtotal": float(inv.subtotal),
+                "tax_rate": float(inv.tax_rate),
+                "tax_amount": float(inv.tax_amount),
+            }
+        )
 
     return {
         "start_date": start_date.isoformat(),
@@ -265,13 +283,17 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     if data.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
-    bank_account = db.query(Account).filter(Account.id == data.pay_from_account_id).first()
+    bank_account = (
+        db.query(Account).filter(Account.id == data.pay_from_account_id).first()
+    )
     if not bank_account:
         raise HTTPException(status_code=404, detail="Bank account not found")
 
     tax_account_id = get_sales_tax_account_id(db)
     if not tax_account_id:
-        raise HTTPException(status_code=400, detail="Sales Tax Payable account (2200) not found")
+        raise HTTPException(
+            status_code=400, detail="Sales Tax Payable account (2200) not found"
+        )
 
     journal_lines = [
         {
@@ -291,8 +313,11 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     reference = data.reference if data.reference is not None else data.check_number
 
     txn = create_journal_entry(
-        db, pay_date, "Sales Tax Payment",
-        journal_lines, source_type="sales_tax_payment",
+        db,
+        pay_date,
+        "Sales Tax Payment",
+        journal_lines,
+        source_type="sales_tax_payment",
         reference=reference,
     )
     db.commit()
@@ -337,13 +362,15 @@ def general_ledger(
                 "total_debit": Decimal(0),
                 "total_credit": Decimal(0),
             }
-        entries_by_account[key]["entries"].append({
-            "date": txn.date.isoformat(),
-            "description": txn.description or tl.description or "",
-            "reference": txn.reference or "",
-            "debit": float(tl.debit),
-            "credit": float(tl.credit),
-        })
+        entries_by_account[key]["entries"].append(
+            {
+                "date": txn.date.isoformat(),
+                "description": txn.description or tl.description or "",
+                "reference": txn.reference or "",
+                "debit": float(tl.debit),
+                "credit": float(tl.credit),
+            }
+        )
         entries_by_account[key]["total_debit"] += tl.debit
         entries_by_account[key]["total_credit"] += tl.credit
 
@@ -427,20 +454,26 @@ def account_transactions(
         elif txn.source_type in ("journal", "manual_journal") and txn.source_id:
             source_link = f"/#/journal/{txn.source_id}"
 
-        entries.append({
-            "transaction_id": txn.id,
-            "date": txn.date.isoformat(),
-            "description": txn.description or tl.description or "",
-            "reference": txn.reference or "",
-            "debit": float(dr),
-            "credit": float(cr),
-            "running_balance": float(running),
-            "source_type": txn.source_type,
-            "source_id": txn.source_id,
-            "source_link": source_link,
-        })
+        entries.append(
+            {
+                "transaction_id": txn.id,
+                "date": txn.date.isoformat(),
+                "description": txn.description or tl.description or "",
+                "reference": txn.reference or "",
+                "debit": float(dr),
+                "credit": float(cr),
+                "running_balance": float(running),
+                "source_type": txn.source_type,
+                "source_id": txn.source_id,
+                "source_link": source_link,
+            }
+        )
 
-    period_net = (period_debit - period_credit) if debit_normal else (period_credit - period_debit)
+    period_net = (
+        (period_debit - period_credit)
+        if debit_normal
+        else (period_credit - period_debit)
+    )
 
     return {
         "account": {
@@ -496,7 +529,9 @@ def income_by_customer(
         by_customer[cid]["total_paid"] += inv.amount_paid
         by_customer[cid]["total_balance"] += inv.balance_due
 
-    items = sorted(by_customer.values(), key=lambda x: float(x["total_sales"]), reverse=True)
+    items = sorted(
+        by_customer.values(), key=lambda x: float(x["total_sales"]), reverse=True
+    )
     for item in items:
         item["total_sales"] = float(item["total_sales"])
         item["total_paid"] = float(item["total_paid"])
@@ -540,9 +575,13 @@ def ap_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
             vid = bill.vendor_id
             if vid not in aging:
                 aging[vid] = {
-                    "vendor_name": vendor_names.get(vid, "Unknown"), "vendor_id": vid,
-                    "current": Decimal(0), "over_30": Decimal(0),
-                    "over_60": Decimal(0), "over_90": Decimal(0), "total": Decimal(0),
+                    "vendor_name": vendor_names.get(vid, "Unknown"),
+                    "vendor_id": vid,
+                    "current": Decimal(0),
+                    "over_30": Decimal(0),
+                    "over_60": Decimal(0),
+                    "over_90": Decimal(0),
+                    "total": Decimal(0),
                 }
 
             days = (as_of_date - bill.due_date).days if bill.due_date else 0
@@ -559,7 +598,8 @@ def ap_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
 
         items = list(aging.values())
         totals = {
-            "vendor_name": "TOTAL", "vendor_id": 0,
+            "vendor_name": "TOTAL",
+            "vendor_id": 0,
             "current": sum(i["current"] for i in items),
             "over_30": sum(i["over_30"] for i in items),
             "over_60": sum(i["over_60"] for i in items),
@@ -574,10 +614,19 @@ def ap_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
 
         return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
     except ImportError:
-        return {"as_of_date": as_of_date.isoformat(), "items": [], "totals": {
-            "vendor_name": "TOTAL", "vendor_id": 0,
-            "current": 0, "over_30": 0, "over_60": 0, "over_90": 0, "total": 0,
-        }}
+        return {
+            "as_of_date": as_of_date.isoformat(),
+            "items": [],
+            "totals": {
+                "vendor_name": "TOTAL",
+                "vendor_id": 0,
+                "current": 0,
+                "over_30": 0,
+                "over_60": 0,
+                "over_90": 0,
+                "total": 0,
+            },
+        }
 
 
 @router.get("/customer-statement/{customer_id}/pdf")
@@ -612,11 +661,15 @@ def customer_statement_pdf(
     )
 
     company = get_settings(db)
-    pdf_bytes = generate_statement_pdf(customer, invoices, payments, company, as_of_date)
+    pdf_bytes = generate_statement_pdf(
+        customer, invoices, payments, company, as_of_date
+    )
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=Statement_{customer.name}.pdf"},
+        headers={
+            "Content-Disposition": f"inline; filename=Statement_{customer.name}.pdf"
+        },
     )
 
 
@@ -624,6 +677,7 @@ def customer_statement_pdf(
 # Phase 10: Quick Wins — Trial Balance, Cash Flow, Batch Email,
 #            Collection Letters, 1099 Summary
 # ============================================================================
+
 
 @router.get("/trial-balance")
 def trial_balance(
@@ -639,14 +693,19 @@ def trial_balance(
 
     results = (
         db.query(
-            Account.id, Account.account_number, Account.name, Account.account_type,
+            Account.id,
+            Account.account_number,
+            Account.name,
+            Account.account_type,
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
         )
         .join(TransactionLine, TransactionLine.account_id == Account.id)
         .join(Transaction, TransactionLine.transaction_id == Transaction.id)
         .filter(Transaction.date >= start_date, Transaction.date <= end_date)
-        .group_by(Account.id, Account.account_number, Account.name, Account.account_type)
+        .group_by(
+            Account.id, Account.account_number, Account.name, Account.account_type
+        )
         .order_by(Account.account_number)
         .all()
     )
@@ -657,15 +716,17 @@ def trial_balance(
     for acct_id, acct_num, acct_name, acct_type, debit, credit in results:
         total_debit += debit
         total_credit += credit
-        items.append({
-            "account_id": acct_id,
-            "account_number": acct_num or "",
-            "account_name": acct_name,
-            "account_type": acct_type.value,
-            "total_debit": float(debit),
-            "total_credit": float(credit),
-            "net_balance": float(debit - credit),
-        })
+        items.append(
+            {
+                "account_id": acct_id,
+                "account_number": acct_num or "",
+                "account_name": acct_name,
+                "account_type": acct_type.value,
+                "total_debit": float(debit),
+                "total_credit": float(credit),
+                "net_balance": float(debit - credit),
+            }
+        )
 
     return {
         "start_date": start_date.isoformat(),
@@ -701,13 +762,19 @@ def cash_flow(
 
     results = (
         db.query(
-            Account.name, Account.account_number, Account.account_type,
-            sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit - TransactionLine.debit), 0),
+            Account.name,
+            Account.account_number,
+            Account.account_type,
+            sqlfunc.coalesce(
+                sqlfunc.sum(TransactionLine.credit - TransactionLine.debit), 0
+            ),
         )
         .join(TransactionLine, TransactionLine.account_id == Account.id)
         .join(Transaction, TransactionLine.transaction_id == Transaction.id)
         .filter(Transaction.date >= start_date, Transaction.date <= end_date)
-        .group_by(Account.id, Account.name, Account.account_number, Account.account_type)
+        .group_by(
+            Account.id, Account.name, Account.account_number, Account.account_type
+        )
         .order_by(Account.account_number)
         .all()
     )
@@ -722,11 +789,13 @@ def cash_flow(
         # (buying assets = cash outflow)
         if section == "investing":
             amount = -amount
-        sections[section].append({
-            "account_name": acct_name,
-            "account_number": acct_num or "",
-            "amount": amount,
-        })
+        sections[section].append(
+            {
+                "account_name": acct_name,
+                "account_number": acct_num or "",
+                "amount": amount,
+            }
+        )
         totals[section] += Decimal(str(amount))
 
     net_change = totals["operating"] + totals["investing"] + totals["financing"]
@@ -772,7 +841,9 @@ def batch_email_statements(db: Session = Depends(get_db)):
     for cid, invs in by_customer.items():
         customer = db.query(Customer).filter(Customer.id == cid).first()
         if not customer or not customer.email:
-            errors.append(f"Customer {customer.name if customer else cid}: no email address")
+            errors.append(
+                f"Customer {customer.name if customer else cid}: no email address"
+            )
             failed += 1
             continue
 
@@ -793,7 +864,9 @@ def batch_email_statements(db: Session = Depends(get_db)):
                 .all()
             )
 
-            pdf_bytes = generate_statement_pdf(customer, all_invoices, payments, settings, as_of_date)
+            pdf_bytes = generate_statement_pdf(
+                customer, all_invoices, payments, settings, as_of_date
+            )
 
             send_email(
                 db=db,
@@ -867,7 +940,11 @@ def collection_letters(data: CollectionLetterRequest, db: Session = Depends(get_
             generated += 1
 
             if send_email_flag and customer.email:
-                type_labels = {"30": "Payment Reminder", "60": "Second Notice", "90": "Final Notice"}
+                type_labels = {
+                    "30": "Payment Reminder",
+                    "60": "Second Notice",
+                    "90": "Final Notice",
+                }
                 send_email(
                     db=db,
                     to_email=customer.email,
@@ -880,7 +957,9 @@ def collection_letters(data: CollectionLetterRequest, db: Session = Depends(get_
                 )
                 emailed += 1
         except Exception:
-            logger.exception("Failed to generate collection letter for customer %s", customer.id)
+            logger.exception(
+                "Failed to generate collection letter for customer %s", customer.id
+            )
             errors.append(f"{customer.name}: unable to generate collection letter")
 
     return {"generated": generated, "emailed": emailed, "errors": errors}
@@ -908,7 +987,10 @@ def report_1099_summary(
             BillPayment.vendor_id,
             sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
         )
-        .join(BillPaymentAllocation, BillPaymentAllocation.bill_payment_id == BillPayment.id)
+        .join(
+            BillPaymentAllocation,
+            BillPaymentAllocation.bill_payment_id == BillPayment.id,
+        )
         .filter(sqlfunc.extract("year", BillPayment.date) == year)
         .group_by(BillPayment.vendor_id)
         .all()
@@ -925,14 +1007,16 @@ def report_1099_summary(
         if flagged:
             above_threshold += 1
 
-        items.append({
-            "vendor_id": vendor.id,
-            "vendor_name": vendor.name,
-            "tax_id": vendor.tax_id or "",
-            "vendor_1099_type": vendor.vendor_1099_type or "NEC",
-            "total_paid": float(vendor_total),
-            "above_threshold": flagged,
-        })
+        items.append(
+            {
+                "vendor_id": vendor.id,
+                "vendor_name": vendor.name,
+                "tax_id": vendor.tax_id or "",
+                "vendor_1099_type": vendor.vendor_1099_type or "NEC",
+                "total_paid": float(vendor_total),
+                "above_threshold": flagged,
+            }
+        )
 
     items.sort(key=lambda x: x["total_paid"], reverse=True)
 

@@ -23,7 +23,9 @@ def _build_fernet() -> Fernet:
         salt=_SALT,
         iterations=480000,
     )
-    key = base64.urlsafe_b64encode(kdf.derive(PAYROLL_ENCRYPTION_SECRET.encode("utf-8")))
+    key = base64.urlsafe_b64encode(
+        kdf.derive(PAYROLL_ENCRYPTION_SECRET.encode("utf-8"))
+    )
     return Fernet(key)
 
 

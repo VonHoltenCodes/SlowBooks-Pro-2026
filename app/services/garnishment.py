@@ -57,28 +57,29 @@ def _non_negative(value: Decimal) -> Decimal:
 @dataclass
 class GarnishmentSpec:
     order_id: int
-    garnishment_type: str   # one of: child_support, federal_levy, student_loan,
-                            #         bankruptcy, creditor, state_tax_levy
-    calc_method: str        # "fixed" (a dollar amount) or
-                            # "percent_disposable" (a percent of disposable)
-    amount: Decimal         # dollars when fixed; percent 0-100 when percent
-    priority: int = 0       # lower number = applied first (ties: order_id)
+    garnishment_type: str  # one of: child_support, federal_levy, student_loan,
+    #         bankruptcy, creditor, state_tax_levy
+    calc_method: str  # "fixed" (a dollar amount) or
+    # "percent_disposable" (a percent of disposable)
+    amount: Decimal  # dollars when fixed; percent 0-100 when percent
+    priority: int = 0  # lower number = applied first (ties: order_id)
     supports_secondary_family: bool = False  # True -> 50% base cap, else 60%
-    in_arrears_12_weeks: bool = False        # adds 5% to the child-support cap
+    in_arrears_12_weeks: bool = False  # adds 5% to the child-support cap
 
 
 @dataclass
 class GarnishmentResult:
     order_id: int
     garnishment_type: str
-    requested: Decimal      # amount the order asked for
-    amount: Decimal         # amount actually garnished after CCPA caps
-    capped: bool            # True if a CCPA limit reduced the requested amount
-    note: str = ""          # short human explanation
+    requested: Decimal  # amount the order asked for
+    amount: Decimal  # amount actually garnished after CCPA caps
+    capped: bool  # True if a CCPA limit reduced the requested amount
+    note: str = ""  # short human explanation
 
 
-def compute_disposable_earnings(gross: Decimal,
-                                mandatory_withholding: Decimal) -> Decimal:
+def compute_disposable_earnings(
+    gross: Decimal, mandatory_withholding: Decimal
+) -> Decimal:
     """Disposable earnings = gross pay minus legally-required deductions.
 
     Legally-required deductions are federal/state/local income tax, Social
@@ -119,10 +120,12 @@ def _child_support_cap_percent(spec: GarnishmentSpec) -> Decimal:
     return base
 
 
-def apply_garnishments(disposable: Decimal, specs: list[GarnishmentSpec],
-                       weeks_in_period: int = 2,
-                       federal_min_wage: Decimal = Decimal("7.25")
-                       ) -> list[GarnishmentResult]:
+def apply_garnishments(
+    disposable: Decimal,
+    specs: list[GarnishmentSpec],
+    weeks_in_period: int = 2,
+    federal_min_wage: Decimal = Decimal("7.25"),
+) -> list[GarnishmentResult]:
     """Apply garnishment orders against disposable earnings under CCPA limits.
 
     Orders are processed in priority order (child support, then federal levy /
@@ -142,27 +145,28 @@ def apply_garnishments(disposable: Decimal, specs: list[GarnishmentSpec],
 
     # Pre-compute the shared child-support cap. Multiple child-support orders
     # share one cap; if their requests exceed it they are pro-rated.
-    support_specs = [s for s in ordered
-                     if (s.garnishment_type or "").lower() == "child_support"]
+    support_specs = [
+        s for s in ordered if (s.garnishment_type or "").lower() == "child_support"
+    ]
     support_cap = Decimal("0")
     for spec in support_specs:
-        support_cap = max(support_cap,
-                          _child_support_cap_percent(spec) * disposable)
+        support_cap = max(support_cap, _child_support_cap_percent(spec) * disposable)
     support_cap = _q(support_cap)
 
     # Ordinary-creditor cap: lesser of 25% of disposable, or disposable minus
     # the protected 30x-minimum-wage-per-week floor. Never below 0.
     creditor_cap_pct = _q(_CREDITOR_CAP_PERCENT * disposable)
-    protected = (_PROTECTED_HOURS_PER_WEEK * federal_min_wage
-                 * Decimal(str(weeks_in_period)))
+    protected = (
+        _PROTECTED_HOURS_PER_WEEK * federal_min_wage * Decimal(str(weeks_in_period))
+    )
     creditor_cap_floor = _q(_non_negative(disposable - protected))
     creditor_cap = min(creditor_cap_pct, creditor_cap_floor)
 
     # Aggregate 25% cap covers everything except child support.
     non_support_aggregate_cap = _q(_NON_SUPPORT_AGGREGATE_PERCENT * disposable)
 
-    remaining = disposable           # disposable still available
-    support_used = Decimal("0")      # child-support total so far
+    remaining = disposable  # disposable still available
+    support_used = Decimal("0")  # child-support total so far
     non_support_used = Decimal("0")  # non-child-support total so far
 
     # Total child support requested, for pro-rating against the shared cap.
@@ -208,8 +212,7 @@ def apply_garnishments(disposable: Decimal, specs: list[GarnishmentSpec],
             if allowed > loan_cap:
                 allowed = loan_cap
                 notes.append("capped at 15% of disposable earnings")
-            aggregate_room = _non_negative(
-                non_support_aggregate_cap - non_support_used)
+            aggregate_room = _non_negative(non_support_aggregate_cap - non_support_used)
             if allowed > aggregate_room:
                 allowed = aggregate_room
                 notes.append("25% aggregate non-support cap reached")
@@ -219,8 +222,7 @@ def apply_garnishments(disposable: Decimal, specs: list[GarnishmentSpec],
             if allowed > creditor_room:
                 allowed = creditor_room
                 notes.append("CCPA 25% creditor cap reached")
-            aggregate_room = _non_negative(
-                non_support_aggregate_cap - non_support_used)
+            aggregate_room = _non_negative(non_support_aggregate_cap - non_support_used)
             if allowed > aggregate_room:
                 allowed = aggregate_room
                 notes.append("25% aggregate non-support cap reached")
@@ -238,14 +240,16 @@ def apply_garnishments(disposable: Decimal, specs: list[GarnishmentSpec],
             non_support_used = _q(non_support_used + allowed)
 
         capped = allowed < requested
-        results.append(GarnishmentResult(
-            order_id=spec.order_id,
-            garnishment_type=spec.garnishment_type,
-            requested=requested,
-            amount=allowed,
-            capped=capped,
-            note="; ".join(notes),
-        ))
+        results.append(
+            GarnishmentResult(
+                order_id=spec.order_id,
+                garnishment_type=spec.garnishment_type,
+                requested=requested,
+                amount=allowed,
+                capped=capped,
+                note="; ".join(notes),
+            )
+        )
 
     return results
 

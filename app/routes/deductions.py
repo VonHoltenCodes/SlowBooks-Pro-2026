@@ -9,13 +9,21 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.payroll import Employee
 from app.models.deductions import (
-    DeductionType, EmployeeDeduction, GarnishmentOrder,
-    DeductionCategory, CalcMethod, GarnishmentType, GarnishmentMethod,
+    DeductionType,
+    EmployeeDeduction,
+    GarnishmentOrder,
+    DeductionCategory,
+    CalcMethod,
+    GarnishmentType,
+    GarnishmentMethod,
 )
 from app.schemas.deductions import (
-    DeductionTypeCreate, DeductionTypeResponse,
-    EmployeeDeductionCreate, EmployeeDeductionResponse,
-    GarnishmentOrderCreate, GarnishmentOrderResponse,
+    DeductionTypeCreate,
+    DeductionTypeResponse,
+    EmployeeDeductionCreate,
+    EmployeeDeductionResponse,
+    GarnishmentOrderCreate,
+    GarnishmentOrderResponse,
 )
 
 router = APIRouter(prefix="/api/deductions", tags=["deductions"])
@@ -45,10 +53,15 @@ def create_deduction_type(data: DeductionTypeCreate, db: Session = Depends(get_d
     try:
         category = DeductionCategory(data.category)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid category: {data.category}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid category: {data.category}"
+        )
     dt = DeductionType(
-        name=data.name, code=data.code, category=category,
-        reduces_federal=data.reduces_federal, reduces_state=data.reduces_state,
+        name=data.name,
+        code=data.code,
+        category=category,
+        reduces_federal=data.reduces_federal,
+        reduces_state=data.reduces_state,
         reduces_fica=data.reduces_fica,
     )
     db.add(dt)
@@ -64,10 +77,16 @@ def seed_standard_types(db: Session = Depends(get_db)):
     for name, code, category, red_fed, red_state, red_fica in STANDARD_TYPES:
         if code in existing:
             continue
-        db.add(DeductionType(
-            name=name, code=code, category=DeductionCategory(category),
-            reduces_federal=red_fed, reduces_state=red_state, reduces_fica=red_fica,
-        ))
+        db.add(
+            DeductionType(
+                name=name,
+                code=code,
+                category=DeductionCategory(category),
+                reduces_federal=red_fed,
+                reduces_state=red_state,
+                reduces_fica=red_fica,
+            )
+        )
     db.commit()
     return db.query(DeductionType).order_by(DeductionType.name).all()
 
@@ -83,18 +102,29 @@ def list_employee_deductions(emp_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/employee", response_model=EmployeeDeductionResponse, status_code=201)
-def add_employee_deduction(data: EmployeeDeductionCreate, db: Session = Depends(get_db)):
+def add_employee_deduction(
+    data: EmployeeDeductionCreate, db: Session = Depends(get_db)
+):
     if not db.query(Employee).filter(Employee.id == data.employee_id).first():
         raise HTTPException(status_code=404, detail="Employee not found")
-    if not db.query(DeductionType).filter(DeductionType.id == data.deduction_type_id).first():
+    if (
+        not db.query(DeductionType)
+        .filter(DeductionType.id == data.deduction_type_id)
+        .first()
+    ):
         raise HTTPException(status_code=404, detail="Deduction type not found")
     try:
         method = CalcMethod(data.calc_method)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid calc_method: {data.calc_method}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid calc_method: {data.calc_method}"
+        )
     ded = EmployeeDeduction(
-        employee_id=data.employee_id, deduction_type_id=data.deduction_type_id,
-        calc_method=method, amount=data.amount, annual_limit=data.annual_limit,
+        employee_id=data.employee_id,
+        deduction_type_id=data.deduction_type_id,
+        calc_method=method,
+        amount=data.amount,
+        annual_limit=data.annual_limit,
     )
     db.add(ded)
     db.commit()
@@ -104,7 +134,9 @@ def add_employee_deduction(data: EmployeeDeductionCreate, db: Session = Depends(
 
 @router.delete("/employee/{deduction_id}")
 def remove_employee_deduction(deduction_id: int, db: Session = Depends(get_db)):
-    ded = db.query(EmployeeDeduction).filter(EmployeeDeduction.id == deduction_id).first()
+    ded = (
+        db.query(EmployeeDeduction).filter(EmployeeDeduction.id == deduction_id).first()
+    )
     if not ded:
         raise HTTPException(status_code=404, detail="Deduction not found")
     db.delete(ded)
@@ -114,8 +146,9 @@ def remove_employee_deduction(deduction_id: int, db: Session = Depends(get_db)):
 
 # --- Garnishment orders ----------------------------------------------------
 @router.get("/garnishments", response_model=list[GarnishmentOrderResponse])
-def list_garnishments(employee_id: int = Query(default=None),
-                      db: Session = Depends(get_db)):
+def list_garnishments(
+    employee_id: int = Query(default=None), db: Session = Depends(get_db)
+):
     q = db.query(GarnishmentOrder)
     if employee_id:
         q = q.filter(GarnishmentOrder.employee_id == employee_id)
@@ -132,8 +165,12 @@ def create_garnishment(data: GarnishmentOrderCreate, db: Session = Depends(get_d
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
     order = GarnishmentOrder(
-        employee_id=data.employee_id, garnishment_type=gtype, calc_method=method,
-        amount=data.amount, priority=data.priority, case_number=data.case_number,
+        employee_id=data.employee_id,
+        garnishment_type=gtype,
+        calc_method=method,
+        amount=data.amount,
+        priority=data.priority,
+        case_number=data.case_number,
         supports_secondary_family=data.supports_secondary_family,
         in_arrears_12_weeks=data.in_arrears_12_weeks,
     )

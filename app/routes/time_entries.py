@@ -14,7 +14,10 @@ from app.database import get_db
 from app.models.payroll import Employee
 from app.models.time_entries import TimeEntry, TimeEntryStatus
 from app.schemas.time_entries import (
-    TimeEntryCreate, TimeEntryUpdate, TimeEntryResponse, TimeEntryApprove,
+    TimeEntryCreate,
+    TimeEntryUpdate,
+    TimeEntryResponse,
+    TimeEntryApprove,
 )
 from app.services.overtime import classify_period
 
@@ -63,13 +66,17 @@ def create_time_entry(data: TimeEntryCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{entry_id}", response_model=TimeEntryResponse)
-def update_time_entry(entry_id: int, data: TimeEntryUpdate, db: Session = Depends(get_db)):
+def update_time_entry(
+    entry_id: int, data: TimeEntryUpdate, db: Session = Depends(get_db)
+):
     entry = db.query(TimeEntry).filter(TimeEntry.id == entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
     if entry.pay_run_id is not None:
-        raise HTTPException(status_code=400,
-                            detail="Time entry is locked to a pay run and cannot be edited")
+        raise HTTPException(
+            status_code=400,
+            detail="Time entry is locked to a pay run and cannot be edited",
+        )
     fields = data.model_dump(exclude_unset=True)
     if "status" in fields:
         try:
@@ -89,8 +96,10 @@ def delete_time_entry(entry_id: int, db: Session = Depends(get_db)):
     if not entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
     if entry.pay_run_id is not None:
-        raise HTTPException(status_code=400,
-                            detail="Time entry is locked to a pay run and cannot be deleted")
+        raise HTTPException(
+            status_code=400,
+            detail="Time entry is locked to a pay run and cannot be deleted",
+        )
     db.delete(entry)
     db.commit()
     return {"status": "deleted", "id": entry_id}
@@ -108,8 +117,9 @@ def submit_time_entry(entry_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{entry_id}/approve", response_model=TimeEntryResponse)
-def approve_time_entry(entry_id: int, data: TimeEntryApprove,
-                       db: Session = Depends(get_db)):
+def approve_time_entry(
+    entry_id: int, data: TimeEntryApprove, db: Session = Depends(get_db)
+):
     entry = db.query(TimeEntry).filter(TimeEntry.id == entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
@@ -133,7 +143,7 @@ def reject_time_entry(entry_id: int, db: Session = Depends(get_db)):
 
 
 class ClassifyRequest(BaseModel):
-    weeks: list[list[float]]   # each inner list = daily hours for one workweek
+    weeks: list[list[float]]  # each inner list = daily hours for one workweek
     state: str = "WA"
 
 

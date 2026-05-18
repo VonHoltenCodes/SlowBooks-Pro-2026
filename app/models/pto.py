@@ -6,8 +6,17 @@
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text, Enum,
-    ForeignKey, Boolean, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+    DateTime,
+    Text,
+    Enum,
+    ForeignKey,
+    Boolean,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -21,9 +30,9 @@ class PTOType(str, enum.Enum):
 
 
 class AccrualMethod(str, enum.Enum):
-    PER_HOUR_WORKED = "per_hour_worked"   # e.g. WA sick: 1 hr per 40 worked
-    PER_PAY_PERIOD = "per_pay_period"     # fixed hours each pay run
-    ANNUAL_GRANT = "annual_grant"         # lump grant once a year
+    PER_HOUR_WORKED = "per_hour_worked"  # e.g. WA sick: 1 hr per 40 worked
+    PER_PAY_PERIOD = "per_pay_period"  # fixed hours each pay run
+    ANNUAL_GRANT = "annual_grant"  # lump grant once a year
 
 
 class PTORequestStatus(str, enum.Enum):
@@ -61,14 +70,18 @@ class PTOAccrual(Base):
     __tablename__ = "pto_accruals"
 
     id = Column(Integer, primary_key=True, index=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
     policy_id = Column(Integer, ForeignKey("pto_policies.id"), nullable=False)
 
     balance = Column(Numeric(10, 2), default=0)
     accrued_ytd = Column(Numeric(10, 2), default=0)
     used_ytd = Column(Numeric(10, 2), default=0)
 
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     employee = relationship("Employee")
     policy = relationship("PTOPolicy", back_populates="accruals")
@@ -78,7 +91,9 @@ class PTORequest(Base):
     __tablename__ = "pto_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
     start_date = Column(Date, nullable=False)
     end_date = Column(Date, nullable=False)
     hours = Column(Numeric(10, 2), default=0)

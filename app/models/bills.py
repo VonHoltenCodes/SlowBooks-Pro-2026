@@ -8,8 +8,16 @@
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text, Enum,
-    ForeignKey, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+    DateTime,
+    Text,
+    Enum,
+    ForeignKey,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -31,7 +39,9 @@ class Bill(Base):
     bill_number = Column(String(100), nullable=False)
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=False, index=True)
     status = Column(Enum(BillStatus), default=BillStatus.UNPAID, index=True)
-    po_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True)
+    po_id = Column(
+        Integer, ForeignKey("purchase_orders.id", ondelete="SET NULL"), nullable=True
+    )
 
     date = Column(Date, nullable=False)
     due_date = Column(Date, nullable=True)
@@ -49,12 +59,18 @@ class Bill(Base):
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     vendor = relationship("Vendor", backref="bills")
     purchase_order = relationship("PurchaseOrder", foreign_keys=[po_id])
-    lines = relationship("BillLine", back_populates="bill", cascade="all, delete-orphan",
-                         order_by="BillLine.line_order")
+    lines = relationship(
+        "BillLine",
+        back_populates="bill",
+        cascade="all, delete-orphan",
+        order_by="BillLine.line_order",
+    )
     transaction = relationship("Transaction", foreign_keys=[transaction_id])
 
 
@@ -62,9 +78,13 @@ class BillLine(Base):
     __tablename__ = "bill_lines"
 
     id = Column(Integer, primary_key=True, index=True)
-    bill_id = Column(Integer, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False, index=True)
+    bill_id = Column(
+        Integer, ForeignKey("bills.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
-    account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)  # expense account
+    account_id = Column(
+        Integer, ForeignKey("accounts.id"), nullable=True
+    )  # expense account
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)
     rate = Column(Numeric(12, 2), default=0)
@@ -94,16 +114,23 @@ class BillPayment(Base):
     vendor = relationship("Vendor", backref="bill_payments")
     pay_from_account = relationship("Account", foreign_keys=[pay_from_account_id])
     transaction = relationship("Transaction", foreign_keys=[transaction_id])
-    allocations = relationship("BillPaymentAllocation", back_populates="bill_payment",
-                               cascade="all, delete-orphan")
+    allocations = relationship(
+        "BillPaymentAllocation",
+        back_populates="bill_payment",
+        cascade="all, delete-orphan",
+    )
 
 
 class BillPaymentAllocation(Base):
     __tablename__ = "bill_payment_allocations"
 
     id = Column(Integer, primary_key=True, index=True)
-    bill_payment_id = Column(Integer, ForeignKey("bill_payments.id", ondelete="CASCADE"), nullable=False)
-    bill_id = Column(Integer, ForeignKey("bills.id", ondelete="RESTRICT"), nullable=False)
+    bill_payment_id = Column(
+        Integer, ForeignKey("bill_payments.id", ondelete="CASCADE"), nullable=False
+    )
+    bill_id = Column(
+        Integer, ForeignKey("bills.id", ondelete="RESTRICT"), nullable=False
+    )
     amount = Column(Numeric(12, 2), nullable=False)
 
     bill_payment = relationship("BillPayment", back_populates="allocations")

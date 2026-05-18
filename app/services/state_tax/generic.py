@@ -23,9 +23,17 @@ class GenericStateEngine(StateEngine):
     def __init__(self, flat_rate: Decimal = Decimal("0")) -> None:
         self.flat_rate = Decimal(str(flat_rate))
 
-    def calculate(self, *, gross: Decimal, taxable: Decimal, ytd_gross: Decimal,
-                  pay_periods: int, hours: Decimal, filing_status: str,
-                  wc_class_code: str | None) -> StateTaxResult:
+    def calculate(
+        self,
+        *,
+        gross: Decimal,
+        taxable: Decimal,
+        ytd_gross: Decimal,
+        pay_periods: int,
+        hours: Decimal,
+        filing_status: str,
+        wc_class_code: str | None
+    ) -> StateTaxResult:
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()
 

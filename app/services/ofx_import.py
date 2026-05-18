@@ -21,7 +21,7 @@ def parse_ofx(content: str) -> list[dict]:
         from io import BytesIO
 
         if isinstance(content, str):
-            content_bytes = content.encode('utf-8')
+            content_bytes = content.encode("utf-8")
         else:
             content_bytes = content
 
@@ -29,18 +29,23 @@ def parse_ofx(content: str) -> list[dict]:
 
         for account in ofx.accounts:
             for txn in account.statement.transactions:
-                transactions.append({
-                    "fitid": txn.id,
-                    "date": txn.date.date() if hasattr(txn.date, 'date') else txn.date,
-                    "amount": Decimal(str(txn.amount)),
-                    "payee": txn.payee or txn.memo or "",
-                    "memo": txn.memo or "",
-                    "type": txn.type or "",
-                })
+                transactions.append(
+                    {
+                        "fitid": txn.id,
+                        "date": (
+                            txn.date.date() if hasattr(txn.date, "date") else txn.date
+                        ),
+                        "amount": Decimal(str(txn.amount)),
+                        "payee": txn.payee or txn.memo or "",
+                        "memo": txn.memo or "",
+                        "type": txn.type or "",
+                    }
+                )
     except ImportError:
         # Fallback: simple OFX text parser
         import re
-        txn_blocks = re.findall(r'<STMTTRN>(.*?)</STMTTRN>', content, re.DOTALL)
+
+        txn_blocks = re.findall(r"<STMTTRN>(.*?)</STMTTRN>", content, re.DOTALL)
         for block in txn_blocks:
             fitid = _extract_tag(block, "FITID")
             dt = _extract_tag(block, "DTPOSTED")
@@ -50,14 +55,16 @@ def parse_ofx(content: str) -> list[dict]:
 
             if dt and amt:
                 txn_date = date(int(dt[:4]), int(dt[4:6]), int(dt[6:8]))
-                transactions.append({
-                    "fitid": fitid or "",
-                    "date": txn_date,
-                    "amount": Decimal(amt),
-                    "payee": name or "",
-                    "memo": memo or "",
-                    "type": "",
-                })
+                transactions.append(
+                    {
+                        "fitid": fitid or "",
+                        "date": txn_date,
+                        "amount": Decimal(amt),
+                        "payee": name or "",
+                        "memo": memo or "",
+                        "type": "",
+                    }
+                )
 
     return transactions
 
@@ -65,11 +72,14 @@ def parse_ofx(content: str) -> list[dict]:
 def _extract_tag(block: str, tag: str) -> str:
     """Extract value from OFX tag."""
     import re
-    match = re.search(rf'<{tag}>([^<\n]+)', block)
+
+    match = re.search(rf"<{tag}>([^<\n]+)", block)
     return match.group(1).strip() if match else ""
 
 
-def import_transactions(db: Session, bank_account_id: int, transactions: list[dict]) -> dict:
+def import_transactions(
+    db: Session, bank_account_id: int, transactions: list[dict]
+) -> dict:
     """Import parsed transactions, deduplicating by FITID."""
     imported = 0
     skipped = 0
@@ -79,10 +89,14 @@ def import_transactions(db: Session, bank_account_id: int, transactions: list[di
 
         # Dedup by FITID
         if fitid:
-            existing = db.query(BankTransaction).filter(
-                BankTransaction.bank_account_id == bank_account_id,
-                BankTransaction.import_id == fitid,
-            ).first()
+            existing = (
+                db.query(BankTransaction)
+                .filter(
+                    BankTransaction.bank_account_id == bank_account_id,
+                    BankTransaction.import_id == fitid,
+                )
+                .first()
+            )
             if existing:
                 skipped += 1
                 continue
@@ -106,6 +120,7 @@ def import_transactions(db: Session, bank_account_id: int, transactions: list[di
     if imported > 0:
         try:
             from app.models.bank_rules import BankRule
+
             rules = (
                 db.query(BankRule)
                 .filter(BankRule.is_active == True)
@@ -129,7 +144,9 @@ def import_transactions(db: Session, bank_account_id: int, transactions: list[di
                         hit = False
                         if rule.rule_type == "contains" and pattern in payee:
                             hit = True
-                        elif rule.rule_type == "starts_with" and payee.startswith(pattern):
+                        elif rule.rule_type == "starts_with" and payee.startswith(
+                            pattern
+                        ):
                             hit = True
                         elif rule.rule_type == "exact" and payee == pattern:
                             hit = True

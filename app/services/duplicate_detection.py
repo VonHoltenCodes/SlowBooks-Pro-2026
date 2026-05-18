@@ -60,7 +60,9 @@ def similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, na, nb).ratio()
 
 
-def find_duplicates(candidate_name: str, existing_rows, threshold: float = DEFAULT_THRESHOLD):
+def find_duplicates(
+    candidate_name: str, existing_rows, threshold: float = DEFAULT_THRESHOLD
+):
     """Return rows whose name similarity to `candidate_name` meets `threshold`.
 
     `existing_rows` is any iterable of ORM objects with `.id` and `.name`.

@@ -49,55 +49,73 @@ def compute_tax_liability(db, year: int, quarter: int) -> dict:
     stubs = (
         db.query(PayStub)
         .join(PayRun, PayStub.pay_run_id == PayRun.id)
-        .filter(PayRun.status == PayRunStatus.PROCESSED,
-                PayRun.pay_date >= start, PayRun.pay_date <= end)
+        .filter(
+            PayRun.status == PayRunStatus.PROCESSED,
+            PayRun.pay_date >= start,
+            PayRun.pay_date <= end,
+        )
         .all()
     )
 
     federal_income = sum((_q(s.federal_tax) for s in stubs), Decimal("0"))
     ss = sum((_q(s.ss_tax) + _q(s.employer_ss_tax) for s in stubs), Decimal("0"))
-    medicare = sum((_q(s.medicare_tax) + _q(s.employer_medicare_tax)
-                    for s in stubs), Decimal("0"))
+    medicare = sum(
+        (_q(s.medicare_tax) + _q(s.employer_medicare_tax) for s in stubs), Decimal("0")
+    )
     futa = sum((_q(s.futa_tax) for s in stubs), Decimal("0"))
     suta = sum((_q(s.suta_tax) for s in stubs), Decimal("0"))
     state_income = sum((_q(s.state_tax) for s in stubs), Decimal("0"))
-    state_other = sum((_q(s.state_other_employee) + _q(s.state_other_employer)
-                       for s in stubs), Decimal("0"))
+    state_other = sum(
+        (_q(s.state_other_employee) + _q(s.state_other_employer) for s in stubs),
+        Decimal("0"),
+    )
 
     federal_941 = _q(federal_income + ss + medicare)
 
     liabilities = [
         {
-            "form": "941", "agency": "IRS",
+            "form": "941",
+            "agency": "IRS",
             "description": "Federal employment tax (income tax withheld + Social Security + Medicare)",
-            "amount": float(federal_941), "due_date": due.isoformat(),
+            "amount": float(federal_941),
+            "due_date": due.isoformat(),
         },
         {
-            "form": "940", "agency": "IRS",
+            "form": "940",
+            "agency": "IRS",
             "description": "Federal unemployment tax (FUTA)",
-            "amount": float(_q(futa)), "due_date": due.isoformat(),
+            "amount": float(_q(futa)),
+            "due_date": due.isoformat(),
         },
         {
-            "form": "State SUI", "agency": "State",
+            "form": "State SUI",
+            "agency": "State",
             "description": "State unemployment insurance",
-            "amount": float(_q(suta)), "due_date": due.isoformat(),
+            "amount": float(_q(suta)),
+            "due_date": due.isoformat(),
         },
         {
-            "form": "State WH", "agency": "State",
+            "form": "State WH",
+            "agency": "State",
             "description": "State income tax withheld",
-            "amount": float(_q(state_income)), "due_date": due.isoformat(),
+            "amount": float(_q(state_income)),
+            "due_date": due.isoformat(),
         },
         {
-            "form": "State Other", "agency": "State",
+            "form": "State Other",
+            "agency": "State",
             "description": "State disability / paid-leave / L&I premiums",
-            "amount": float(_q(state_other)), "due_date": due.isoformat(),
+            "amount": float(_q(state_other)),
+            "due_date": due.isoformat(),
         },
     ]
     total_due = _q(federal_941 + futa + suta + state_income + state_other)
 
     return {
-        "year": year, "quarter": quarter,
-        "quarter_start": start.isoformat(), "quarter_end": end.isoformat(),
+        "year": year,
+        "quarter": quarter,
+        "quarter_start": start.isoformat(),
+        "quarter_end": end.isoformat(),
         "num_stubs": len(stubs),
         "liabilities": liabilities,
         "total_due": float(total_due),

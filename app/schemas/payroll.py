@@ -99,18 +99,22 @@ class EmployeeResponse(BaseModel):
 # ---------------------------------------------------------------------------
 class PayStubInput(BaseModel):
     employee_id: int
-    hours: float = 0                 # total hours (hourly employees)
+    hours: float = 0  # total hours (hourly employees)
     regular_hours: Optional[float] = None
     overtime_hours: float = 0
     doubletime_hours: float = 0
     gross_override: Optional[float] = None  # explicit gross (bonuses / off-cycle runs)
-    pretax_deductions: float = 0     # ad-hoc; configured EmployeeDeductions are auto-applied
+    pretax_deductions: float = (
+        0  # ad-hoc; configured EmployeeDeductions are auto-applied
+    )
     posttax_deductions: float = 0
-    reimbursements: float = 0        # non-taxable accountable-plan reimbursements
-    supplemental: bool = False       # treat as supplemental wages (bonus/off-cycle)
+    reimbursements: float = 0  # non-taxable accountable-plan reimbursements
+    supplemental: bool = False  # treat as supplemental wages (bonus/off-cycle)
     supplemental_method: str = "flat"  # "flat" 22% or "aggregate"
-    work_state: Optional[str] = None   # per-stub work location (multi-state)
-    use_time_entries: bool = False   # pull approved time entries for the period instead of `hours`
+    work_state: Optional[str] = None  # per-stub work location (multi-state)
+    use_time_entries: bool = (
+        False  # pull approved time entries for the period instead of `hours`
+    )
 
 
 class PayRunCreate(BaseModel):

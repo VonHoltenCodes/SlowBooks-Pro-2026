@@ -63,7 +63,9 @@ def _run_top_customers(db: Session, start: date, end: date) -> Dict[str, Any]:
     )
 
 
-def _run_unpaid_invoices(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[str, Any]:
+def _run_unpaid_invoices(
+    db: Session, _s: Optional[date], _e: Optional[date]
+) -> Dict[str, Any]:
     # Combine the three open statuses; balance_due > 0 is the truth source.
     statuses = ("sent", "partial", "draft")
     combined: list = []
@@ -80,7 +82,9 @@ def _run_unpaid_invoices(db: Session, _s: Optional[date], _e: Optional[date]) ->
     }
 
 
-def _run_ar_aging(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[str, Any]:
+def _run_ar_aging(
+    db: Session, _s: Optional[date], _e: Optional[date]
+) -> Dict[str, Any]:
     full = ai_tools.get_aging_report(db)
     return {
         "ar_aging": full["ar_aging"],
@@ -88,7 +92,9 @@ def _run_ar_aging(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[s
     }
 
 
-def _run_ap_aging(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[str, Any]:
+def _run_ap_aging(
+    db: Session, _s: Optional[date], _e: Optional[date]
+) -> Dict[str, Any]:
     full = ai_tools.get_aging_report(db)
     return {
         "ap_aging": full["ap_aging"],
@@ -102,7 +108,9 @@ def _run_expenses_by_category(db: Session, start: date, end: date) -> Dict[str, 
     )
 
 
-def _run_unpaid_bills(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[str, Any]:
+def _run_unpaid_bills(
+    db: Session, _s: Optional[date], _e: Optional[date]
+) -> Dict[str, Any]:
     statuses = ("unpaid", "partial", "draft")
     combined: list = []
     for status in statuses:
@@ -118,7 +126,9 @@ def _run_unpaid_bills(db: Session, _s: Optional[date], _e: Optional[date]) -> Di
     }
 
 
-def _run_cash_position(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[str, Any]:
+def _run_cash_position(
+    db: Session, _s: Optional[date], _e: Optional[date]
+) -> Dict[str, Any]:
     # Bank-style assets only — full asset tree is too noisy here.
     accounts = ai_tools.list_accounts(db, account_type="asset", limit=100)
     bank_like = [
@@ -145,13 +155,17 @@ def _run_recent_payments(db: Session, start: date, end: date) -> Dict[str, Any]:
     )
 
 
-def _run_pl_summary(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[str, Any]:
+def _run_pl_summary(
+    db: Session, _s: Optional[date], _e: Optional[date]
+) -> Dict[str, Any]:
     # get_pl_summary uses live balances (not period-bounded). Period UI
     # selector is currently informational for this action.
     return ai_tools.get_pl_summary(db)
 
 
-def _run_balance_sheet(db: Session, _s: Optional[date], _e: Optional[date]) -> Dict[str, Any]:
+def _run_balance_sheet(
+    db: Session, _s: Optional[date], _e: Optional[date]
+) -> Dict[str, Any]:
     return ai_tools.get_balance_sheet(db)
 
 
@@ -290,9 +304,7 @@ def _format_user_prompt(
     period_end: Optional[date],
 ) -> str:
     if spec.uses_period and period_start and period_end:
-        period_line = (
-            f"Period: {period_start.isoformat()} to {period_end.isoformat()}"
-        )
+        period_line = f"Period: {period_start.isoformat()} to {period_end.isoformat()}"
     else:
         period_line = f"As of: {date.today().isoformat()}"
 

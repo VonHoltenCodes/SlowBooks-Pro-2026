@@ -19,12 +19,12 @@ from app.services.state_tax.base import StateEngine, StateTaxResult
 CENT = Decimal("0.01")
 
 # --- WA Paid Family & Medical Leave -----------------------------------------
-PFML_TOTAL_RATE = Decimal("0.0074")          # total premium as a fraction of gross
-PFML_EMPLOYEE_SHARE = Decimal("0.7143")      # employee pays 71.43% of the premium
-PFML_EMPLOYER_SHARE = Decimal("0.2857")      # employer pays 28.57% of the premium
+PFML_TOTAL_RATE = Decimal("0.0074")  # total premium as a fraction of gross
+PFML_EMPLOYEE_SHARE = Decimal("0.7143")  # employee pays 71.43% of the premium
+PFML_EMPLOYER_SHARE = Decimal("0.2857")  # employer pays 28.57% of the premium
 
 # --- WA Cares Fund (long-term care) -----------------------------------------
-WA_CARES_RATE = Decimal("0.0058")            # employee-only, fraction of gross
+WA_CARES_RATE = Decimal("0.0058")  # employee-only, fraction of gross
 
 
 def _q(value: Decimal) -> Decimal:
@@ -35,9 +35,17 @@ class WAEngine(StateEngine):
     state_code: str = "WA"
     suta_wage_base: Decimal = Decimal("72800")
 
-    def calculate(self, *, gross: Decimal, taxable: Decimal, ytd_gross: Decimal,
-                  pay_periods: int, hours: Decimal, filing_status: str,
-                  wc_class_code: str | None) -> StateTaxResult:
+    def calculate(
+        self,
+        *,
+        gross: Decimal,
+        taxable: Decimal,
+        ytd_gross: Decimal,
+        pay_periods: int,
+        hours: Decimal,
+        filing_status: str,
+        wc_class_code: str | None
+    ) -> StateTaxResult:
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()
 

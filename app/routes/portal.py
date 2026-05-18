@@ -42,7 +42,8 @@ def _render(name: str, **ctx) -> HTMLResponse:
 def _processed_stub_count(emp: Employee) -> int:
     """Count the employee's pay stubs belonging to a processed pay run."""
     return sum(
-        1 for stub in emp.pay_stubs
+        1
+        for stub in emp.pay_stubs
         if stub.pay_run and stub.pay_run.status.value == "processed"
     )
 
@@ -52,7 +53,9 @@ def portal_dashboard(token: str, db: Session = Depends(get_db)):
     """Portal home — greeting, employee summary, and navigation."""
     emp = _get_employee(token, db)
     return _render(
-        "dashboard.html", token=token, emp=emp,
+        "dashboard.html",
+        token=token,
+        emp=emp,
         stub_count=_processed_stub_count(emp),
     )
 
@@ -62,7 +65,8 @@ def portal_paystubs(token: str, db: Session = Depends(get_db)):
     """List the employee's pay stubs (newest first), linking to the PDF."""
     emp = _get_employee(token, db)
     stubs = [
-        stub for stub in emp.pay_stubs
+        stub
+        for stub in emp.pay_stubs
         if stub.pay_run and stub.pay_run.status.value == "processed"
     ]
     stubs.sort(key=lambda s: s.pay_run.pay_date, reverse=True)
@@ -119,8 +123,9 @@ def portal_profile_save(
 
 
 @router.get("/portal/{token}/bank")
-def portal_bank(token: str, saved: int = 0, error: str = "",
-                db: Session = Depends(get_db)):
+def portal_bank(
+    token: str, saved: int = 0, error: str = "", db: Session = Depends(get_db)
+):
     """List the employee's bank accounts plus an add-account form."""
     emp = _get_employee(token, db)
     accounts = (
@@ -175,16 +180,18 @@ def portal_bank_add(
             status_code=303,
         )
 
-    db.add(EmployeeBankAccount(
-        employee_id=emp.id,
-        nickname=nickname or None,
-        account_kind=kind,
-        routing_number_enc=encrypt(routing),
-        account_number_enc=encrypt(account),
-        account_last_four=account[-4:],
-        deposit_type=dtype,
-        is_active=True,
-    ))
+    db.add(
+        EmployeeBankAccount(
+            employee_id=emp.id,
+            nickname=nickname or None,
+            account_kind=kind,
+            routing_number_enc=encrypt(routing),
+            account_number_enc=encrypt(account),
+            account_last_four=account[-4:],
+            deposit_type=dtype,
+            is_active=True,
+        )
+    )
     db.commit()
     return RedirectResponse(url=f"/portal/{token}/bank?saved=1", status_code=303)
 
@@ -239,13 +246,15 @@ def portal_pto_request(
     except ValueError:
         raise HTTPException(status_code=400, detail="Dates must be YYYY-MM-DD")
 
-    db.add(PTORequest(
-        employee_id=emp.id,
-        start_date=start,
-        end_date=end,
-        hours=hours,
-        pto_type=ptype,
-        notes=notes or None,
-    ))
+    db.add(
+        PTORequest(
+            employee_id=emp.id,
+            start_date=start,
+            end_date=end,
+            hours=hours,
+            pto_type=ptype,
+            notes=notes or None,
+        )
+    )
     db.commit()
     return RedirectResponse(url=f"/portal/{token}/pto?saved=1", status_code=303)

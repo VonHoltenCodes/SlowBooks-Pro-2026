@@ -52,9 +52,13 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Allocations exceed payment amount")
 
     payment = BillPayment(
-        vendor_id=data.vendor_id, date=data.date, amount=data.amount,
-        method=data.method, check_number=data.check_number,
-        pay_from_account_id=data.pay_from_account_id, notes=data.notes,
+        vendor_id=data.vendor_id,
+        date=data.date,
+        amount=data.amount,
+        method=data.method,
+        check_number=data.check_number,
+        pay_from_account_id=data.pay_from_account_id,
+        notes=data.notes,
     )
     db.add(payment)
     db.flush()
@@ -62,14 +66,21 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
     for alloc_data in data.allocations:
         bill = db.query(Bill).filter(Bill.id == alloc_data.bill_id).first()
         if not bill:
-            raise HTTPException(status_code=404, detail=f"Bill {alloc_data.bill_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Bill {alloc_data.bill_id} not found"
+            )
         if alloc_data.amount > float(bill.balance_due):
-            raise HTTPException(status_code=400, detail=f"Allocation exceeds bill balance")
+            raise HTTPException(
+                status_code=400, detail=f"Allocation exceeds bill balance"
+            )
 
-        db.add(BillPaymentAllocation(
-            bill_payment_id=payment.id, bill_id=alloc_data.bill_id,
-            amount=alloc_data.amount,
-        ))
+        db.add(
+            BillPaymentAllocation(
+                bill_payment_id=payment.id,
+                bill_id=alloc_data.bill_id,
+                amount=alloc_data.amount,
+            )
+        )
 
         bill.amount_paid += Decimal(str(alloc_data.amount))
         bill.balance_due -= Decimal(str(alloc_data.amount))
@@ -88,14 +99,26 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
 
     if ap_id and bank_id:
         journal_lines = [
-            {"account_id": ap_id, "debit": Decimal(str(data.amount)),
-             "credit": Decimal("0"), "description": f"Bill payment to {vendor.name}"},
-            {"account_id": bank_id, "debit": Decimal("0"),
-             "credit": Decimal(str(data.amount)), "description": f"Bill payment to {vendor.name}"},
+            {
+                "account_id": ap_id,
+                "debit": Decimal(str(data.amount)),
+                "credit": Decimal("0"),
+                "description": f"Bill payment to {vendor.name}",
+            },
+            {
+                "account_id": bank_id,
+                "debit": Decimal("0"),
+                "credit": Decimal(str(data.amount)),
+                "description": f"Bill payment to {vendor.name}",
+            },
         ]
         txn = create_journal_entry(
-            db, data.date, f"Bill payment to {vendor.name}",
-            journal_lines, source_type="bill_payment", source_id=payment.id,
+            db,
+            data.date,
+            f"Bill payment to {vendor.name}",
+            journal_lines,
+            source_type="bill_payment",
+            source_id=payment.id,
         )
         payment.transaction_id = txn.id
 

@@ -10,7 +10,9 @@ router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
 
 @router.get("", response_model=list[AccountResponse])
-def list_accounts(active_only: bool = False, account_type: str = None, db: Session = Depends(get_db)):
+def list_accounts(
+    active_only: bool = False, account_type: str = None, db: Session = Depends(get_db)
+):
     q = db.query(Account)
     if active_only:
         q = q.filter(Account.is_active == True)

@@ -48,20 +48,29 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     rec = RecurringInvoice(
-        customer_id=data.customer_id, frequency=data.frequency,
-        start_date=data.start_date, end_date=data.end_date,
-        next_due=data.start_date, terms=data.terms,
-        tax_rate=data.tax_rate, notes=data.notes,
+        customer_id=data.customer_id,
+        frequency=data.frequency,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        next_due=data.start_date,
+        terms=data.terms,
+        tax_rate=data.tax_rate,
+        notes=data.notes,
     )
     db.add(rec)
     db.flush()
 
     for i, line_data in enumerate(data.lines):
-        db.add(RecurringInvoiceLine(
-            recurring_invoice_id=rec.id, item_id=line_data.item_id,
-            description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, line_order=line_data.line_order or i,
-        ))
+        db.add(
+            RecurringInvoiceLine(
+                recurring_invoice_id=rec.id,
+                item_id=line_data.item_id,
+                description=line_data.description,
+                quantity=line_data.quantity,
+                rate=line_data.rate,
+                line_order=line_data.line_order or i,
+            )
+        )
 
     db.commit()
     db.refresh(rec)
@@ -80,13 +89,20 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
         setattr(rec, key, val)
 
     if data.lines is not None:
-        db.query(RecurringInvoiceLine).filter(RecurringInvoiceLine.recurring_invoice_id == rec_id).delete()
+        db.query(RecurringInvoiceLine).filter(
+            RecurringInvoiceLine.recurring_invoice_id == rec_id
+        ).delete()
         for i, line_data in enumerate(data.lines):
-            db.add(RecurringInvoiceLine(
-                recurring_invoice_id=rec_id, item_id=line_data.item_id,
-                description=line_data.description, quantity=line_data.quantity,
-                rate=line_data.rate, line_order=line_data.line_order or i,
-            ))
+            db.add(
+                RecurringInvoiceLine(
+                    recurring_invoice_id=rec_id,
+                    item_id=line_data.item_id,
+                    description=line_data.description,
+                    quantity=line_data.quantity,
+                    rate=line_data.rate,
+                    line_order=line_data.line_order or i,
+                )
+            )
 
     db.commit()
     db.refresh(rec)

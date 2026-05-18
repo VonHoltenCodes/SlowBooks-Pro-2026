@@ -34,11 +34,15 @@ def list_budgets(
 
 @router.post("", response_model=BudgetResponse, status_code=201)
 def create_budget(data: BudgetCreate, db: Session = Depends(get_db)):
-    existing = db.query(Budget).filter(
-        Budget.account_id == data.account_id,
-        Budget.year == data.year,
-        Budget.month == data.month,
-    ).first()
+    existing = (
+        db.query(Budget)
+        .filter(
+            Budget.account_id == data.account_id,
+            Budget.year == data.year,
+            Budget.month == data.month,
+        )
+        .first()
+    )
     if existing:
         existing.amount = data.amount
         db.commit()
@@ -56,11 +60,15 @@ def bulk_upsert(items: list[BudgetCreate], db: Session = Depends(get_db)):
     """Batch upsert budget entries."""
     count = 0
     for item in items:
-        existing = db.query(Budget).filter(
-            Budget.account_id == item.account_id,
-            Budget.year == item.year,
-            Budget.month == item.month,
-        ).first()
+        existing = (
+            db.query(Budget)
+            .filter(
+                Budget.account_id == item.account_id,
+                Budget.year == item.year,
+                Budget.month == item.month,
+            )
+            .first()
+        )
         if existing:
             existing.amount = item.amount
         else:
@@ -90,7 +98,10 @@ def budget_variance(
         return {"year": year, "accounts": []}
 
     accounts = db.query(Account).filter(Account.id.in_(account_ids)).all()
-    account_info = {a.id: {"name": a.name, "number": a.account_number, "type": a.account_type.value} for a in accounts}
+    account_info = {
+        a.id: {"name": a.name, "number": a.account_number, "type": a.account_type.value}
+        for a in accounts
+    }
 
     # Get actual amounts per account per month
     actuals = (
@@ -102,7 +113,9 @@ def budget_variance(
         .join(Transaction, TransactionLine.transaction_id == Transaction.id)
         .filter(TransactionLine.account_id.in_(account_ids))
         .filter(sqlfunc.extract("year", Transaction.date) == year)
-        .group_by(TransactionLine.account_id, sqlfunc.extract("month", Transaction.date))
+        .group_by(
+            TransactionLine.account_id, sqlfunc.extract("month", Transaction.date)
+        )
         .all()
     )
 
@@ -121,21 +134,25 @@ def budget_variance(
             # For income accounts, actual is debit-credit (negative = earned), flip sign
             if info.get("type") in ("income", "liability", "equity"):
                 actual_amt = -actual_amt
-            months.append({
-                "month": m,
-                "budget": budget_amt,
-                "actual": round(actual_amt, 2),
-                "variance": round(budget_amt - actual_amt, 2),
-            })
-        result.append({
-            "account_id": acct_id,
-            "account_name": info.get("name", ""),
-            "account_number": info.get("number", ""),
-            "account_type": info.get("type", ""),
-            "months": months,
-            "total_budget": sum(m["budget"] for m in months),
-            "total_actual": sum(m["actual"] for m in months),
-            "total_variance": sum(m["variance"] for m in months),
-        })
+            months.append(
+                {
+                    "month": m,
+                    "budget": budget_amt,
+                    "actual": round(actual_amt, 2),
+                    "variance": round(budget_amt - actual_amt, 2),
+                }
+            )
+        result.append(
+            {
+                "account_id": acct_id,
+                "account_name": info.get("name", ""),
+                "account_number": info.get("number", ""),
+                "account_type": info.get("type", ""),
+                "months": months,
+                "total_budget": sum(m["budget"] for m in months),
+                "total_actual": sum(m["actual"] for m in months),
+                "total_variance": sum(m["variance"] for m in months),
+            }
+        )
 
     return {"year": year, "accounts": result}

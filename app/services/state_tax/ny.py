@@ -20,12 +20,12 @@ CENT = Decimal("0.01")
 WEEKS_PER_YEAR = Decimal("52")
 
 # --- NY State Disability Insurance ------------------------------------------
-SDI_RATE = Decimal("0.005")              # 0.5% of gross, employee
-SDI_WEEKLY_CAP = Decimal("0.60")         # statutory weekly maximum
+SDI_RATE = Decimal("0.005")  # 0.5% of gross, employee
+SDI_WEEKLY_CAP = Decimal("0.60")  # statutory weekly maximum
 
 # --- NY Paid Family Leave ---------------------------------------------------
-PFL_RATE = Decimal("0.00388")            # 2026-approximate fraction of gross
-PFL_ANNUAL_MAX = Decimal("354.00")       # 2026-approximate annual premium cap
+PFL_RATE = Decimal("0.00388")  # 2026-approximate fraction of gross
+PFL_ANNUAL_MAX = Decimal("354.00")  # 2026-approximate annual premium cap
 
 # --- NY income tax (2026-approximate, simplified) ---------------------------
 STD_DEDUCTION = {
@@ -85,9 +85,17 @@ class NYEngine(StateEngine):
     state_code: str = "NY"
     suta_wage_base: Decimal = Decimal("12800")
 
-    def calculate(self, *, gross: Decimal, taxable: Decimal, ytd_gross: Decimal,
-                  pay_periods: int, hours: Decimal, filing_status: str,
-                  wc_class_code: str | None) -> StateTaxResult:
+    def calculate(
+        self,
+        *,
+        gross: Decimal,
+        taxable: Decimal,
+        ytd_gross: Decimal,
+        pay_periods: int,
+        hours: Decimal,
+        filing_status: str,
+        wc_class_code: str | None
+    ) -> StateTaxResult:
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()
 

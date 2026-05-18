@@ -23,6 +23,7 @@ class SettingsUpdate(BaseModel):
     # DEFAULT_SETTINGS is the authoritative key list, not the schema.
     model_config = ConfigDict(extra="allow")
 
+
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
@@ -48,9 +49,11 @@ def test_email(db: Session = Depends(get_db)):
     settings = get_all_settings(db)
     if not settings.get("smtp_host"):
         from fastapi import HTTPException
+
         raise HTTPException(status_code=400, detail="SMTP not configured")
     try:
         from app.services.email_service import send_email
+
         send_email(
             to_email=settings.get("smtp_from_email") or settings.get("smtp_user", ""),
             subject="Slowbooks Pro 2026 — Test Email",
@@ -60,4 +63,5 @@ def test_email(db: Session = Depends(get_db)):
         return {"status": "sent"}
     except Exception as e:
         from fastapi import HTTPException
+
         raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")

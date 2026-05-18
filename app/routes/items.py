@@ -20,7 +20,12 @@ router = APIRouter(prefix="/api/items", tags=["items"])
 
 
 @router.get("", response_model=list[ItemResponse])
-def list_items(active_only: bool = False, item_type: str = None, search: str = None, db: Session = Depends(get_db)):
+def list_items(
+    active_only: bool = False,
+    item_type: str = None,
+    search: str = None,
+    db: Session = Depends(get_db),
+):
     q = db.query(Item)
     if active_only:
         q = q.filter(Item.is_active == True)
@@ -47,17 +52,21 @@ def low_stock_items(db: Session = Depends(get_db)):
     )
     out = []
     for it in rows:
-        shortage = Decimal(str(it.reorder_point or 0)) - Decimal(str(it.quantity_on_hand or 0))
+        shortage = Decimal(str(it.reorder_point or 0)) - Decimal(
+            str(it.quantity_on_hand or 0)
+        )
         if shortage < 0:
             shortage = Decimal("0")
-        out.append(LowStockResponse(
-            id=it.id,
-            name=it.name,
-            quantity_on_hand=it.quantity_on_hand,
-            reorder_point=it.reorder_point,
-            avg_cost=it.avg_cost,
-            shortage=shortage,
-        ))
+        out.append(
+            LowStockResponse(
+                id=it.id,
+                name=it.name,
+                quantity_on_hand=it.quantity_on_hand,
+                reorder_point=it.reorder_point,
+                avg_cost=it.avg_cost,
+                shortage=shortage,
+            )
+        )
     out.sort(key=lambda r: r.shortage, reverse=True)
     return out
 
@@ -106,13 +115,16 @@ def adjust_inventory(
         raise HTTPException(status_code=400, detail="Item is not inventory-tracked")
 
     mv = record_adjustment(
-        db, item,
+        db,
+        item,
         quantity_delta=data.quantity_delta,
         unit_cost=data.unit_cost,
         memo=data.memo,
     )
     if mv is None:
-        raise HTTPException(status_code=400, detail="No adjustment recorded (zero delta?)")
+        raise HTTPException(
+            status_code=400, detail="No adjustment recorded (zero delta?)"
+        )
     db.commit()
     db.refresh(mv)
     return mv

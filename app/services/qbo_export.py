@@ -21,7 +21,6 @@ from app.models.payments import Payment, PaymentAllocation
 from app.models.qbo_mapping import QBOMapping
 from app.services.qbo_service import get_qbo_client
 
-
 # ============================================================================
 # Slowbooks -> QBO type mappings (reverse of import)
 # ============================================================================
@@ -47,24 +46,38 @@ _SLOWBOOKS_TO_QBO_ITEM_TYPE = {
 # Mapping helpers
 # ============================================================================
 
+
 def _get_mapping(db: Session, entity_type: str, slowbooks_id: int) -> QBOMapping:
     """Look up existing mapping by Slowbooks ID."""
-    return db.query(QBOMapping).filter(
-        QBOMapping.entity_type == entity_type,
-        QBOMapping.slowbooks_id == slowbooks_id,
-    ).first()
+    return (
+        db.query(QBOMapping)
+        .filter(
+            QBOMapping.entity_type == entity_type,
+            QBOMapping.slowbooks_id == slowbooks_id,
+        )
+        .first()
+    )
 
 
 def _get_mapping_by_qbo_id(db: Session, entity_type: str, qbo_id: str) -> QBOMapping:
     """Look up existing mapping by QBO ID."""
-    return db.query(QBOMapping).filter(
-        QBOMapping.entity_type == entity_type,
-        QBOMapping.qbo_id == str(qbo_id),
-    ).first()
+    return (
+        db.query(QBOMapping)
+        .filter(
+            QBOMapping.entity_type == entity_type,
+            QBOMapping.qbo_id == str(qbo_id),
+        )
+        .first()
+    )
 
 
-def _create_mapping(db: Session, entity_type: str, slowbooks_id: int,
-                    qbo_id: str, sync_token: str = None):
+def _create_mapping(
+    db: Session,
+    entity_type: str,
+    slowbooks_id: int,
+    qbo_id: str,
+    sync_token: str = None,
+):
     """Create a new QBO <-> Slowbooks mapping."""
     m = QBOMapping(
         entity_type=entity_type,
@@ -78,6 +91,7 @@ def _create_mapping(db: Session, entity_type: str, slowbooks_id: int,
 # ============================================================================
 # Export functions
 # ============================================================================
+
 
 def export_accounts(db: Session) -> dict:
     """Export Slowbooks accounts to QBO."""
@@ -118,13 +132,20 @@ def export_accounts(db: Session) -> dict:
                     qbo_acct.SubAccount = True
 
             saved = qbo_acct.save(qb=client)
-            _create_mapping(db, "account", acct.id,
-                            saved.Id, getattr(saved, "SyncToken", None))
+            _create_mapping(
+                db, "account", acct.id, saved.Id, getattr(saved, "SyncToken", None)
+            )
             exported += 1
 
         except Exception as e:
-            errors.append({"entity": "account", "id": acct.id,
-                           "name": acct.name, "message": str(e)})
+            errors.append(
+                {
+                    "entity": "account",
+                    "id": acct.id,
+                    "name": acct.name,
+                    "message": str(e),
+                }
+            )
 
     return {"exported": exported, "errors": errors}
 
@@ -181,13 +202,20 @@ def export_customers(db: Session) -> dict:
                 qbo_cust.Notes = cust.notes
 
             saved = qbo_cust.save(qb=client)
-            _create_mapping(db, "customer", cust.id,
-                            saved.Id, getattr(saved, "SyncToken", None))
+            _create_mapping(
+                db, "customer", cust.id, saved.Id, getattr(saved, "SyncToken", None)
+            )
             exported += 1
 
         except Exception as e:
-            errors.append({"entity": "customer", "id": cust.id,
-                           "name": cust.name, "message": str(e)})
+            errors.append(
+                {
+                    "entity": "customer",
+                    "id": cust.id,
+                    "name": cust.name,
+                    "message": str(e),
+                }
+            )
 
     return {"exported": exported, "errors": errors}
 
@@ -233,13 +261,20 @@ def export_vendors(db: Session) -> dict:
                 qbo_vend.AcctNum = vend.account_number
 
             saved = qbo_vend.save(qb=client)
-            _create_mapping(db, "vendor", vend.id,
-                            saved.Id, getattr(saved, "SyncToken", None))
+            _create_mapping(
+                db, "vendor", vend.id, saved.Id, getattr(saved, "SyncToken", None)
+            )
             exported += 1
 
         except Exception as e:
-            errors.append({"entity": "vendor", "id": vend.id,
-                           "name": vend.name, "message": str(e)})
+            errors.append(
+                {
+                    "entity": "vendor",
+                    "id": vend.id,
+                    "name": vend.name,
+                    "message": str(e),
+                }
+            )
 
     return {"exported": exported, "errors": errors}
 
@@ -283,25 +318,33 @@ def export_items(db: Session) -> dict:
                     qbo_item.ExpenseAccountRef = {"value": acct_map.qbo_id}
 
             # QBO requires IncomeAccountRef for Service/NonInventory items
-            if not item.income_account_id or not _get_mapping(db, "account", item.income_account_id):
+            if not item.income_account_id or not _get_mapping(
+                db, "account", item.income_account_id
+            ):
                 # Find a default income account in QBO mappings
-                default_income = db.query(Account).filter(
-                    Account.account_type == AccountType.INCOME,
-                    Account.is_active == True,
-                ).first()
+                default_income = (
+                    db.query(Account)
+                    .filter(
+                        Account.account_type == AccountType.INCOME,
+                        Account.is_active == True,
+                    )
+                    .first()
+                )
                 if default_income:
                     acct_map = _get_mapping(db, "account", default_income.id)
                     if acct_map:
                         qbo_item.IncomeAccountRef = {"value": acct_map.qbo_id}
 
             saved = qbo_item.save(qb=client)
-            _create_mapping(db, "item", item.id,
-                            saved.Id, getattr(saved, "SyncToken", None))
+            _create_mapping(
+                db, "item", item.id, saved.Id, getattr(saved, "SyncToken", None)
+            )
             exported += 1
 
         except Exception as e:
-            errors.append({"entity": "item", "id": item.id,
-                           "name": item.name, "message": str(e)})
+            errors.append(
+                {"entity": "item", "id": item.id, "name": item.name, "message": str(e)}
+            )
 
     return {"exported": exported, "errors": errors}
 
@@ -324,8 +367,13 @@ def export_invoices(db: Session) -> dict:
             # Customer must be mapped
             cust_map = _get_mapping(db, "customer", inv.customer_id)
             if not cust_map:
-                errors.append({"entity": "invoice", "id": inv.id,
-                               "message": f"Customer {inv.customer_id} not mapped to QBO"})
+                errors.append(
+                    {
+                        "entity": "invoice",
+                        "id": inv.id,
+                        "message": f"Customer {inv.customer_id} not mapped to QBO",
+                    }
+                )
                 continue
 
             qbo_inv = QBOInvoice()
@@ -340,9 +388,12 @@ def export_invoices(db: Session) -> dict:
 
             # Build line items
             lines = []
-            inv_lines = db.query(InvoiceLine).filter(
-                InvoiceLine.invoice_id == inv.id
-            ).order_by(InvoiceLine.line_order).all()
+            inv_lines = (
+                db.query(InvoiceLine)
+                .filter(InvoiceLine.invoice_id == inv.id)
+                .order_by(InvoiceLine.line_order)
+                .all()
+            )
 
             for inv_line in inv_lines:
                 detail = {
@@ -370,13 +421,13 @@ def export_invoices(db: Session) -> dict:
                 qbo_inv.CustomerMemo = {"value": inv.notes}
 
             saved = qbo_inv.save(qb=client)
-            _create_mapping(db, "invoice", inv.id,
-                            saved.Id, getattr(saved, "SyncToken", None))
+            _create_mapping(
+                db, "invoice", inv.id, saved.Id, getattr(saved, "SyncToken", None)
+            )
             exported += 1
 
         except Exception as e:
-            errors.append({"entity": "invoice", "id": inv.id,
-                           "message": str(e)})
+            errors.append({"entity": "invoice", "id": inv.id, "message": str(e)})
 
     return {"exported": exported, "errors": errors}
 
@@ -399,8 +450,13 @@ def export_payments(db: Session) -> dict:
             # Customer must be mapped
             cust_map = _get_mapping(db, "customer", pmt.customer_id)
             if not cust_map:
-                errors.append({"entity": "payment", "id": pmt.id,
-                               "message": f"Customer {pmt.customer_id} not mapped to QBO"})
+                errors.append(
+                    {
+                        "entity": "payment",
+                        "id": pmt.id,
+                        "message": f"Customer {pmt.customer_id} not mapped to QBO",
+                    }
+                )
                 continue
 
             qbo_pmt = QBOPayment()
@@ -418,33 +474,39 @@ def export_payments(db: Session) -> dict:
                     qbo_pmt.DepositToAccountRef = {"value": acct_map.qbo_id}
 
             # Build payment lines from allocations
-            allocations = db.query(PaymentAllocation).filter(
-                PaymentAllocation.payment_id == pmt.id
-            ).all()
+            allocations = (
+                db.query(PaymentAllocation)
+                .filter(PaymentAllocation.payment_id == pmt.id)
+                .all()
+            )
 
             lines = []
             for alloc in allocations:
                 inv_map = _get_mapping(db, "invoice", alloc.invoice_id)
                 if inv_map:
-                    lines.append({
-                        "Amount": float(alloc.amount),
-                        "LinkedTxn": [{
-                            "TxnId": inv_map.qbo_id,
-                            "TxnType": "Invoice",
-                        }],
-                    })
+                    lines.append(
+                        {
+                            "Amount": float(alloc.amount),
+                            "LinkedTxn": [
+                                {
+                                    "TxnId": inv_map.qbo_id,
+                                    "TxnType": "Invoice",
+                                }
+                            ],
+                        }
+                    )
 
             if lines:
                 qbo_pmt.Line = lines
 
             saved = qbo_pmt.save(qb=client)
-            _create_mapping(db, "payment", pmt.id,
-                            saved.Id, getattr(saved, "SyncToken", None))
+            _create_mapping(
+                db, "payment", pmt.id, saved.Id, getattr(saved, "SyncToken", None)
+            )
             exported += 1
 
         except Exception as e:
-            errors.append({"entity": "payment", "id": pmt.id,
-                           "message": str(e)})
+            errors.append({"entity": "payment", "id": pmt.id, "message": str(e)})
 
     return {"exported": exported, "errors": errors}
 
@@ -452,6 +514,7 @@ def export_payments(db: Session) -> dict:
 # ============================================================================
 # Master export orchestrator
 # ============================================================================
+
 
 def export_all(db: Session) -> dict:
     """Export all entity types to QBO in dependency order.

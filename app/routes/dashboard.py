@@ -17,19 +17,31 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 @router.get("")
 def get_dashboard(db: Session = Depends(get_db)):
-    total_receivables = db.query(func.coalesce(func.sum(Invoice.balance_due), 0)).filter(
-        Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL])
-    ).scalar()
+    total_receivables = (
+        db.query(func.coalesce(func.sum(Invoice.balance_due), 0))
+        .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
+        .scalar()
+    )
 
-    overdue_count = db.query(func.count(Invoice.id)).filter(
-        Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]),
-        Invoice.due_date < func.current_date()
-    ).scalar()
+    overdue_count = (
+        db.query(func.count(Invoice.id))
+        .filter(
+            Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]),
+            Invoice.due_date < func.current_date(),
+        )
+        .scalar()
+    )
 
-    customer_count = db.query(func.count(Customer.id)).filter(Customer.is_active == True).scalar()
+    customer_count = (
+        db.query(func.count(Customer.id)).filter(Customer.is_active == True).scalar()
+    )
 
-    recent_invoices = db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
-    recent_payments = db.query(Payment).order_by(Payment.created_at.desc()).limit(5).all()
+    recent_invoices = (
+        db.query(Invoice).order_by(Invoice.created_at.desc()).limit(5).all()
+    )
+    recent_payments = (
+        db.query(Payment).order_by(Payment.created_at.desc()).limit(5).all()
+    )
 
     bank_balances = db.query(BankAccount).filter(BankAccount.is_active == True).all()
 
@@ -38,13 +50,20 @@ def get_dashboard(db: Session = Depends(get_db)):
     overdue_bills = 0
     try:
         from app.models.bills import Bill, BillStatus
-        total_payables = float(db.query(func.coalesce(func.sum(Bill.balance_due), 0)).filter(
-            Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL])
-        ).scalar())
-        overdue_bills = db.query(func.count(Bill.id)).filter(
-            Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]),
-            Bill.due_date < func.current_date()
-        ).scalar()
+
+        total_payables = float(
+            db.query(func.coalesce(func.sum(Bill.balance_due), 0))
+            .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
+            .scalar()
+        )
+        overdue_bills = (
+            db.query(func.count(Bill.id))
+            .filter(
+                Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]),
+                Bill.due_date < func.current_date(),
+            )
+            .scalar()
+        )
     except Exception:
         pass
 
@@ -124,15 +143,22 @@ def get_dashboard_charts(db: Session = Depends(get_db)):
         start = date(year, month, 1)
         end = date(year, month, last_day)
 
-        total = db.query(func.coalesce(func.sum(Invoice.total), 0)).filter(
-            Invoice.date >= start, Invoice.date <= end,
-            Invoice.status != InvoiceStatus.VOID,
-        ).scalar()
+        total = (
+            db.query(func.coalesce(func.sum(Invoice.total), 0))
+            .filter(
+                Invoice.date >= start,
+                Invoice.date <= end,
+                Invoice.status != InvoiceStatus.VOID,
+            )
+            .scalar()
+        )
 
-        monthly_revenue.append({
-            "month": start.strftime("%b"),
-            "amount": float(total),
-        })
+        monthly_revenue.append(
+            {
+                "month": start.strftime("%b"),
+                "amount": float(total),
+            }
+        )
 
     return {
         "aging_current": float(aging_current),

@@ -45,11 +45,13 @@ def _vendor_address(vendor: Vendor) -> str:
     if vendor.address2:
         parts.append(vendor.address2)
     locality = " ".join(
-        p for p in [
+        p
+        for p in [
             f"{vendor.city}," if vendor.city else "",
             vendor.state or "",
             vendor.zip or "",
-        ] if p
+        ]
+        if p
     ).strip()
     if locality:
         parts.append(locality)
@@ -87,17 +89,19 @@ def compute_1099_data(db: Session, year: int) -> list[dict]:
     results: list[dict] = []
     for vendor in vendors:
         total = totals.get(vendor.id, Decimal("0.00"))
-        results.append({
-            "vendor_id": vendor.id,
-            "name": vendor.name,
-            "company": vendor.company,
-            "address": _vendor_address(vendor),
-            "tax_id": vendor.tax_id,
-            "total_paid": total,
-            "reportable": total >= NEC_THRESHOLD,
-            "w9_on_file": bool(vendor.w9_on_file),
-            "year": year,
-        })
+        results.append(
+            {
+                "vendor_id": vendor.id,
+                "name": vendor.name,
+                "company": vendor.company,
+                "address": _vendor_address(vendor),
+                "tax_id": vendor.tax_id,
+                "total_paid": total,
+                "reportable": total >= NEC_THRESHOLD,
+                "w9_on_file": bool(vendor.w9_on_file),
+                "year": year,
+            }
+        )
     return results
 
 
@@ -113,8 +117,7 @@ def compute_1096(db: Session, year: int) -> dict:
     }
 
 
-def generate_1099_nec_pdf(db: Session, year: int, vendor_id: int,
-                          payer: dict) -> bytes:
+def generate_1099_nec_pdf(db: Session, year: int, vendor_id: int, payer: dict) -> bytes:
     """Render a 1099-NEC PDF for a single vendor.
 
     `payer` is a company-info dict (name / address / ein), read defensively.
@@ -124,9 +127,7 @@ def generate_1099_nec_pdf(db: Session, year: int, vendor_id: int,
         None,
     )
     if record is None:
-        raise ValueError(
-            f"Vendor {vendor_id} is not 1099-eligible or does not exist"
-        )
+        raise ValueError(f"Vendor {vendor_id} is not 1099-eligible or does not exist")
 
     template = _jinja_env.get_template("form_1099nec.html")
     html_str = template.render(rec=record, payer=payer, year=year)
@@ -140,6 +141,9 @@ def generate_1096_pdf(db: Session, year: int, payer: dict) -> bytes:
 
     template = _jinja_env.get_template("form_1096.html")
     html_str = template.render(
-        summary=summary, vendors=reportable, payer=payer, year=year,
+        summary=summary,
+        vendors=reportable,
+        payer=payer,
+        year=year,
     )
     return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()

@@ -25,7 +25,10 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.payroll import PayRun, PayRunStatus, PayStub
 from app.models.bank_accounts import (
-    EmployeeBankAccount, BankAccountKind, DepositType, PrenoteStatus,
+    EmployeeBankAccount,
+    BankAccountKind,
+    DepositType,
+    PrenoteStatus,
 )
 from app.services.encryption import decrypt
 
@@ -34,7 +37,7 @@ RECORD_LENGTH = 94
 BLOCKING_FACTOR = 10
 
 # Service Class Codes
-SCC_MIXED = "200"          # mixed debits and credits
+SCC_MIXED = "200"  # mixed debits and credits
 # Standard Entry Class — PPD is the consumer direct-deposit code.
 SEC_CODE = "PPD"
 
@@ -46,6 +49,7 @@ TXN_SAVINGS_PRENOTE = "33"
 
 
 # --- fixed-width field formatting helpers -----------------------------------
+
 
 def _num(value, width: int) -> str:
     """Right-justified, zero-filled numeric field, truncated to width."""
@@ -88,6 +92,7 @@ def _check_digit(routing: str | None) -> str:
 
 
 # --- credit allocation ------------------------------------------------------
+
 
 def _split_net_pay(net_pay: Decimal, accounts: list) -> list[tuple]:
     """Allocate net pay across an employee's bank accounts.
@@ -134,48 +139,59 @@ def _split_net_pay(net_pay: Decimal, accounts: list) -> list[tuple]:
 
 # --- record builders --------------------------------------------------------
 
+
 def _file_header(originating: dict, created: date) -> str:
     rec = (
-        "1"                                                  # record type
+        "1"  # record type
         + "01"
-        + " " + _num(originating.get("immediate_destination"), 9)
-        + " " + _num(originating.get("immediate_origin"), 9)
+        + " "
+        + _num(originating.get("immediate_destination"), 9)
+        + " "
+        + _num(originating.get("immediate_origin"), 9)
         + created.strftime("%y%m%d")
-        + "0000"                                             # file creation time
-        + "A"                                                # file id modifier
-        + _num(RECORD_LENGTH, 3)                             # record size
-        + _num(BLOCKING_FACTOR, 2)                           # blocking factor
-        + "1"                                                # format code
+        + "0000"  # file creation time
+        + "A"  # file id modifier
+        + _num(RECORD_LENGTH, 3)  # record size
+        + _num(BLOCKING_FACTOR, 2)  # blocking factor
+        + "1"  # format code
         + _alpha(originating.get("destination_name"), 23)
         + _alpha(originating.get("origin_name"), 23)
-        + _alpha("", 8)                                      # reference code
+        + _alpha("", 8)  # reference code
     )
     return rec[:RECORD_LENGTH].ljust(RECORD_LENGTH)
 
 
-def _batch_header(originating: dict, effective_date: date,
-                  batch_number: int, entry_desc: str) -> str:
+def _batch_header(
+    originating: dict, effective_date: date, batch_number: int, entry_desc: str
+) -> str:
     rec = (
         "5"
         + SCC_MIXED
         + _alpha(originating.get("company_name"), 16)
-        + _alpha("", 20)                                     # company discretionary data
+        + _alpha("", 20)  # company discretionary data
         + _alpha(originating.get("company_id"), 10)
         + SEC_CODE
         + _alpha(entry_desc, 10)
-        + _alpha("", 6)                                      # company descriptive date
+        + _alpha("", 6)  # company descriptive date
         + effective_date.strftime("%y%m%d")
-        + _alpha("", 3)                                      # settlement date (bank fills)
-        + "1"                                                # originator status code
+        + _alpha("", 3)  # settlement date (bank fills)
+        + "1"  # originator status code
         + _num(originating.get("originating_dfi_id"), 8)
         + _num(batch_number, 7)
     )
     return rec[:RECORD_LENGTH].ljust(RECORD_LENGTH)
 
 
-def _entry_detail(txn_code: str, routing: str, account_number: str,
-                  amount_cents: int, individual_id: str, individual_name: str,
-                  originating_dfi: str, trace_seq: int) -> str:
+def _entry_detail(
+    txn_code: str,
+    routing: str,
+    account_number: str,
+    amount_cents: int,
+    individual_id: str,
+    individual_name: str,
+    originating_dfi: str,
+    trace_seq: int,
+) -> str:
     rec = (
         "6"
         + txn_code
@@ -185,16 +201,22 @@ def _entry_detail(txn_code: str, routing: str, account_number: str,
         + _num(amount_cents, 10)
         + _alpha(individual_id, 15)
         + _alpha(individual_name, 22)
-        + _alpha("", 2)                                      # discretionary data
-        + "0"                                                # addenda record indicator
-        + _num(originating_dfi, 8) + _num(trace_seq, 7)      # trace number
+        + _alpha("", 2)  # discretionary data
+        + "0"  # addenda record indicator
+        + _num(originating_dfi, 8)
+        + _num(trace_seq, 7)  # trace number
     )
     return rec[:RECORD_LENGTH].ljust(RECORD_LENGTH)
 
 
-def _batch_control(entry_count: int, entry_hash: int, total_debit: int,
-                   total_credit: int, originating: dict,
-                   batch_number: int) -> str:
+def _batch_control(
+    entry_count: int,
+    entry_hash: int,
+    total_debit: int,
+    total_credit: int,
+    originating: dict,
+    batch_number: int,
+) -> str:
     rec = (
         "8"
         + SCC_MIXED
@@ -203,16 +225,22 @@ def _batch_control(entry_count: int, entry_hash: int, total_debit: int,
         + _num(total_debit, 12)
         + _num(total_credit, 12)
         + _alpha(originating.get("company_id"), 10)
-        + _alpha("", 19)                                     # message authentication code
-        + _alpha("", 6)                                      # reserved
+        + _alpha("", 19)  # message authentication code
+        + _alpha("", 6)  # reserved
         + _num(originating.get("originating_dfi_id"), 8)
         + _num(batch_number, 7)
     )
     return rec[:RECORD_LENGTH].ljust(RECORD_LENGTH)
 
 
-def _file_control(batch_count: int, block_count: int, entry_count: int,
-                  entry_hash: int, total_debit: int, total_credit: int) -> str:
+def _file_control(
+    batch_count: int,
+    block_count: int,
+    entry_count: int,
+    entry_hash: int,
+    total_debit: int,
+    total_credit: int,
+) -> str:
     rec = (
         "9"
         + _num(batch_count, 6)
@@ -221,7 +249,7 @@ def _file_control(batch_count: int, block_count: int, entry_count: int,
         + _num(entry_hash, 10)
         + _num(total_debit, 12)
         + _num(total_credit, 12)
-        + _alpha("", 39)                                     # reserved
+        + _alpha("", 39)  # reserved
     )
     return rec[:RECORD_LENGTH].ljust(RECORD_LENGTH)
 
@@ -230,8 +258,13 @@ def _padding_record() -> str:
     return "9" * RECORD_LENGTH
 
 
-def _assemble(header: str, batch_header: str, entries: list[str],
-              batch_control: str, file_control: str) -> str:
+def _assemble(
+    header: str,
+    batch_header: str,
+    entries: list[str],
+    batch_control: str,
+    file_control: str,
+) -> str:
     """Join all records and 9-fill pad to a multiple of the blocking factor."""
     records = [header, batch_header] + entries + [batch_control, file_control]
     while len(records) % BLOCKING_FACTOR != 0:
@@ -240,6 +273,7 @@ def _assemble(header: str, batch_header: str, entries: list[str],
 
 
 # --- public API -------------------------------------------------------------
+
 
 def generate_nacha_file(db: Session, pay_run_id: int, originating: dict) -> str:
     """Generate a NACHA ACH credit file for a processed pay run.
@@ -277,7 +311,8 @@ def generate_nacha_file(db: Session, pay_run_id: int, originating: dict) -> str:
         if employee is None:
             continue
         accounts = [
-            a for a in employee.bank_accounts
+            a
+            for a in employee.bank_accounts
             if a.is_active and a.prenote_status != PrenoteStatus.PENDING
         ]
         if not accounts:
@@ -293,11 +328,18 @@ def generate_nacha_file(db: Session, pay_run_id: int, originating: dict) -> str:
             )
             amount_cents = _cents(amount)
             trace_seq += 1
-            entries.append(_entry_detail(
-                txn_code, routing, account_number, amount_cents,
-                str(employee.id), employee.full_name,
-                originating_dfi, trace_seq,
-            ))
+            entries.append(
+                _entry_detail(
+                    txn_code,
+                    routing,
+                    account_number,
+                    amount_cents,
+                    str(employee.id),
+                    employee.full_name,
+                    originating_dfi,
+                    trace_seq,
+                )
+            )
             entry_hash += int(_routing_prefix(routing))
             total_credit += amount_cents
 
@@ -305,42 +347,56 @@ def generate_nacha_file(db: Session, pay_run_id: int, originating: dict) -> str:
     # all the credits. Banks typically expect a balanced file.
     if entries:
         trace_seq += 1
-        entries.append(_entry_detail(
-            "27",  # checking debit (offsetting company account)
-            str(originating.get("immediate_destination") or ""),
-            str(originating.get("company_account") or ""),
-            total_credit,
-            str(originating.get("company_id") or ""),
-            originating.get("company_name") or "",
-            originating_dfi, trace_seq,
-        ))
-        entry_hash += int(_routing_prefix(
-            str(originating.get("immediate_destination") or "")
-        ))
+        entries.append(
+            _entry_detail(
+                "27",  # checking debit (offsetting company account)
+                str(originating.get("immediate_destination") or ""),
+                str(originating.get("company_account") or ""),
+                total_credit,
+                str(originating.get("company_id") or ""),
+                originating.get("company_name") or "",
+                originating_dfi,
+                trace_seq,
+            )
+        )
+        entry_hash += int(
+            _routing_prefix(str(originating.get("immediate_destination") or ""))
+        )
 
     total_debit = total_credit
     # Entry hash is truncated to its rightmost 10 digits.
-    entry_hash = entry_hash % (10 ** 10)
+    entry_hash = entry_hash % (10**10)
     entry_count = len(entries)
 
     header = _file_header(originating, created)
     batch_header = _batch_header(originating, effective_date, 1, "PAYROLL")
     batch_control = _batch_control(
-        entry_count, entry_hash, total_debit, total_credit, originating, 1,
+        entry_count,
+        entry_hash,
+        total_debit,
+        total_credit,
+        originating,
+        1,
     )
 
     # Block count: total records rounded up to a multiple of the blocking factor.
     raw_count = 2 + entry_count + 2  # header + batch header + entries + 2 controls
     block_count = -(-raw_count // BLOCKING_FACTOR)
     file_control = _file_control(
-        1, block_count, entry_count, entry_hash, total_debit, total_credit,
+        1,
+        block_count,
+        entry_count,
+        entry_hash,
+        total_debit,
+        total_credit,
     )
 
     return _assemble(header, batch_header, entries, batch_control, file_control)
 
 
-def generate_prenote_file(db: Session, employee_bank_account_ids: list[int],
-                          originating: dict) -> str:
+def generate_prenote_file(
+    db: Session, employee_bank_account_ids: list[int], originating: dict
+) -> str:
     """Generate a NACHA file of zero-dollar prenote entries.
 
     Prenotes validate routing/account numbers before the first real deposit.
@@ -375,25 +431,43 @@ def generate_prenote_file(db: Session, employee_bank_account_ids: list[int],
         ind_id = str(employee.id) if employee else str(acct.employee_id)
         ind_name = employee.full_name if employee else (acct.nickname or "")
         trace_seq += 1
-        entries.append(_entry_detail(
-            txn_code, routing, account_number, 0,
-            ind_id, ind_name, originating_dfi, trace_seq,
-        ))
+        entries.append(
+            _entry_detail(
+                txn_code,
+                routing,
+                account_number,
+                0,
+                ind_id,
+                ind_name,
+                originating_dfi,
+                trace_seq,
+            )
+        )
         entry_hash += int(_routing_prefix(routing))
 
-    entry_hash = entry_hash % (10 ** 10)
+    entry_hash = entry_hash % (10**10)
     entry_count = len(entries)
 
     header = _file_header(originating, created)
     batch_header = _batch_header(originating, effective_date, 1, "PRENOTE")
     batch_control = _batch_control(
-        entry_count, entry_hash, 0, 0, originating, 1,
+        entry_count,
+        entry_hash,
+        0,
+        0,
+        originating,
+        1,
     )
 
     raw_count = 2 + entry_count + 2
     block_count = -(-raw_count // BLOCKING_FACTOR)
     file_control = _file_control(
-        1, block_count, entry_count, entry_hash, 0, 0,
+        1,
+        block_count,
+        entry_count,
+        entry_hash,
+        0,
+        0,
     )
 
     return _assemble(header, batch_header, entries, batch_control, file_control)

@@ -17,7 +17,9 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Customer
 from app.schemas.payments import PaymentCreate, PaymentResponse
 from app.services.accounting import (
-    create_journal_entry, get_ar_account_id, get_undeposited_funds_id,
+    create_journal_entry,
+    get_ar_account_id,
+    get_undeposited_funds_id,
 )
 from app.services.closing_date import check_closing_date
 
@@ -79,11 +81,13 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
     for alloc_data in data.allocations:
         invoice = db.query(Invoice).filter(Invoice.id == alloc_data.invoice_id).first()
         if not invoice:
-            raise HTTPException(status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+            )
         if alloc_data.amount > invoice.balance_due:
             raise HTTPException(
                 status_code=400,
-                detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}"
+                detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}",
             )
 
         alloc = PaymentAllocation(
@@ -124,8 +128,12 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
             },
         ]
         txn = create_journal_entry(
-            db, data.date, f"Payment from {customer.name}",
-            journal_lines, source_type="payment", source_id=payment.id,
+            db,
+            data.date,
+            f"Payment from {customer.name}",
+            journal_lines,
+            source_type="payment",
+            source_id=payment.id,
             reference=data.reference or data.check_number or "",
         )
         payment.transaction_id = txn.id
@@ -150,21 +158,33 @@ def void_payment(payment_id: int, db: Session = Depends(get_db)):
     # Reverse journal entry
     if payment.transaction_id:
         from app.models.transactions import TransactionLine
-        original_lines = db.query(TransactionLine).filter(
-            TransactionLine.transaction_id == payment.transaction_id
-        ).all()
+
+        original_lines = (
+            db.query(TransactionLine)
+            .filter(TransactionLine.transaction_id == payment.transaction_id)
+            .all()
+        )
         reverse_lines = [
-            {"account_id": ol.account_id, "debit": ol.credit, "credit": ol.debit,
-             "description": f"VOID: {ol.description or ''}"}
+            {
+                "account_id": ol.account_id,
+                "debit": ol.credit,
+                "credit": ol.debit,
+                "description": f"VOID: {ol.description or ''}",
+            }
             for ol in original_lines
         ]
         if reverse_lines:
-            customer = db.query(Customer).filter(Customer.id == payment.customer_id).first()
+            customer = (
+                db.query(Customer).filter(Customer.id == payment.customer_id).first()
+            )
             cname = customer.name if customer else "Unknown"
             create_journal_entry(
-                db, payment.date,
+                db,
+                payment.date,
                 f"VOID Payment from {cname}",
-                reverse_lines, source_type="payment_void", source_id=payment.id,
+                reverse_lines,
+                source_type="payment_void",
+                source_id=payment.id,
             )
 
     # Reverse invoice allocations

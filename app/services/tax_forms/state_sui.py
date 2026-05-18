@@ -95,15 +95,17 @@ def compute_sui(db, year: int, quarter: int, state: str | None = None) -> dict:
     total_taxable = Decimal("0")
     for entry in sorted(by_employee.values(), key=lambda e: e["name"]):
         total_taxable += entry["suta_taxable_wages"]
-        breakdown.append({
-            "employee_id": entry["employee_id"],
-            "name": entry["name"],
-            "ssn_last_four": entry["ssn_last_four"],
-            "work_state": entry["work_state"],
-            "total_wages": _q(entry["total_wages"]),
-            "suta_taxable_wages": _q(entry["suta_taxable_wages"]),
-            "suta_tax": _q(entry["suta_tax"]),
-        })
+        breakdown.append(
+            {
+                "employee_id": entry["employee_id"],
+                "name": entry["name"],
+                "ssn_last_four": entry["ssn_last_four"],
+                "work_state": entry["work_state"],
+                "total_wages": _q(entry["total_wages"]),
+                "suta_taxable_wages": _q(entry["suta_taxable_wages"]),
+                "suta_tax": _q(entry["suta_tax"]),
+            }
+        )
 
     return {
         "year": year,

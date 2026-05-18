@@ -38,7 +38,9 @@ def has_reciprocity(work_state: str | None, residence_state: str | None) -> bool
     return rs in RECIPROCITY.get(ws, set())
 
 
-def withholding_state(work_state: str | None, residence_state: str | None) -> str | None:
+def withholding_state(
+    work_state: str | None, residence_state: str | None
+) -> str | None:
     """Resolve which state's income tax should be withheld.
 
     Returns the residence state when a reciprocity agreement applies, otherwise

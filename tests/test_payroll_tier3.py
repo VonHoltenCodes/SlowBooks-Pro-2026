@@ -8,9 +8,13 @@ portal.
 
 def _create_employee(client, **overrides):
     body = {
-        "first_name": "Jordan", "last_name": "Hire",
-        "pay_type": "hourly", "pay_rate": 30, "pay_frequency": "biweekly",
-        "filing_status": "single", "work_state": "WA",
+        "first_name": "Jordan",
+        "last_name": "Hire",
+        "pay_type": "hourly",
+        "pay_rate": 30,
+        "pay_frequency": "biweekly",
+        "filing_status": "single",
+        "work_state": "WA",
         "hire_date": "2026-05-01",
     }
     body.update(overrides)
@@ -45,8 +49,9 @@ def test_completing_onboarding_task_advances_progress(client):
     checklist = client.get(f"/api/onboarding/{emp['id']}").json()
     task_id = checklist["tasks"][0]["id"]
 
-    done = client.post(f"/api/onboarding/tasks/{task_id}/complete",
-                       params={"completed_by": "hr_admin"})
+    done = client.post(
+        f"/api/onboarding/tasks/{task_id}/complete", params={"completed_by": "hr_admin"}
+    )
     assert done.status_code == 200, done.text
     assert done.json()["status"] == "complete"
     assert done.json()["completed_at"] is not None
@@ -99,8 +104,9 @@ def test_new_hire_report_pdf(client):
 def test_employee_roles_and_manager(client):
     boss = _create_employee(client, first_name="Casey", role="manager")
     assert boss["role"] == "manager"
-    report = _create_employee(client, first_name="Dana", role="employee",
-                              manager_id=boss["id"])
+    report = _create_employee(
+        client, first_name="Dana", role="employee", manager_id=boss["id"]
+    )
     assert report["role"] == "employee"
     assert report["manager_id"] == boss["id"]
 
@@ -150,21 +156,32 @@ def test_portal_requires_valid_token(client):
 def test_portal_token_can_be_rotated(client):
     emp = _create_employee(client)
     first = _portal_token(client, emp["id"])
-    rotated = client.post(f"/api/employees/{emp['id']}/portal-token").json()["portal_token"]
+    rotated = client.post(f"/api/employees/{emp['id']}/portal-token").json()[
+        "portal_token"
+    ]
     assert rotated != first
-    assert client.get(f"/portal/{first}").status_code == 404      # old link dead
+    assert client.get(f"/portal/{first}").status_code == 404  # old link dead
     assert client.get(f"/portal/{rotated}").status_code == 200
 
 
 def test_portal_profile_update_persists_w4(client):
     emp = _create_employee(client)
     token = _portal_token(client, emp["id"])
-    r = client.post(f"/portal/{token}/profile", data={
-        "filing_status": "married", "multiple_jobs": "true",
-        "dependents_amount": "2000", "other_income_annual": "0",
-        "deductions_annual": "0", "extra_withholding": "25",
-        "address1": "1 New St", "city": "Seattle", "state": "WA", "zip": "98101",
-    })
+    r = client.post(
+        f"/portal/{token}/profile",
+        data={
+            "filing_status": "married",
+            "multiple_jobs": "true",
+            "dependents_amount": "2000",
+            "other_income_annual": "0",
+            "deductions_annual": "0",
+            "extra_withholding": "25",
+            "address1": "1 New St",
+            "city": "Seattle",
+            "state": "WA",
+            "zip": "98101",
+        },
+    )
     assert r.status_code == 200, r.text  # 303 redirect, followed to the GET
     updated = client.get(f"/api/employees/{emp['id']}").json()
     assert updated["filing_status"] == "married"
@@ -175,10 +192,16 @@ def test_portal_profile_update_persists_w4(client):
 def test_portal_pto_request_submission(client):
     emp = _create_employee(client)
     token = _portal_token(client, emp["id"])
-    r = client.post(f"/portal/{token}/pto", data={
-        "start_date": "2026-07-01", "end_date": "2026-07-03",
-        "hours": "24", "pto_type": "vacation", "notes": "summer trip",
-    })
+    r = client.post(
+        f"/portal/{token}/pto",
+        data={
+            "start_date": "2026-07-01",
+            "end_date": "2026-07-03",
+            "hours": "24",
+            "pto_type": "vacation",
+            "notes": "summer trip",
+        },
+    )
     assert r.status_code == 200, r.text
     requests = client.get(f"/api/pto/requests?employee_id={emp['id']}").json()
     assert len(requests) == 1
@@ -189,11 +212,16 @@ def test_portal_pto_request_submission(client):
 def test_portal_bank_account_add(client, db_session):
     emp = _create_employee(client)
     token = _portal_token(client, emp["id"])
-    r = client.post(f"/portal/{token}/bank", data={
-        "nickname": "Main", "account_kind": "checking",
-        "routing_number": "123456789", "account_number": "5550009999",
-        "deposit_type": "full",
-    })
+    r = client.post(
+        f"/portal/{token}/bank",
+        data={
+            "nickname": "Main",
+            "account_kind": "checking",
+            "routing_number": "123456789",
+            "account_number": "5550009999",
+            "deposit_type": "full",
+        },
+    )
     assert r.status_code == 200, r.text
     accounts = client.get(f"/api/employees/{emp['id']}/bank-accounts").json()
     assert len(accounts) == 1

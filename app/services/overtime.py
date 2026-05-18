@@ -29,9 +29,11 @@ def _q(value) -> Decimal:
 
 
 def _zero_result() -> dict:
-    return {"regular": _q(Decimal("0")),
-            "overtime": _q(Decimal("0")),
-            "doubletime": _q(Decimal("0"))}
+    return {
+        "regular": _q(Decimal("0")),
+        "overtime": _q(Decimal("0")),
+        "doubletime": _q(Decimal("0")),
+    }
 
 
 def _classify_flsa(daily_hours: list) -> dict:
@@ -41,9 +43,11 @@ def _classify_flsa(daily_hours: list) -> dict:
         regular, overtime = total, Decimal("0")
     else:
         regular, overtime = WEEKLY_THRESHOLD, total - WEEKLY_THRESHOLD
-    return {"regular": _q(regular),
-            "overtime": _q(overtime),
-            "doubletime": _q(Decimal("0"))}
+    return {
+        "regular": _q(regular),
+        "overtime": _q(overtime),
+        "doubletime": _q(Decimal("0")),
+    }
 
 
 def _classify_daily(daily_hours: list, seventh_day_rule: bool) -> dict:
@@ -73,8 +77,9 @@ def _classify_daily(daily_hours: list, seventh_day_rule: bool) -> dict:
             day_reg = Decimal("0")
         else:
             day_reg = min(hours, DAILY_OT_THRESHOLD)
-            day_ot = max(min(hours, DAILY_DT_THRESHOLD) - DAILY_OT_THRESHOLD,
-                         Decimal("0"))
+            day_ot = max(
+                min(hours, DAILY_DT_THRESHOLD) - DAILY_OT_THRESHOLD, Decimal("0")
+            )
             day_dt = max(hours - DAILY_DT_THRESHOLD, Decimal("0"))
 
         regular += day_reg
@@ -86,9 +91,11 @@ def _classify_daily(daily_hours: list, seventh_day_rule: bool) -> dict:
         overtime += regular - WEEKLY_THRESHOLD
         regular = WEEKLY_THRESHOLD
 
-    return {"regular": _q(regular),
-            "overtime": _q(overtime),
-            "doubletime": _q(doubletime)}
+    return {
+        "regular": _q(regular),
+        "overtime": _q(overtime),
+        "doubletime": _q(doubletime),
+    }
 
 
 def classify_week(daily_hours: list, state: str = "WA") -> dict:
@@ -116,9 +123,11 @@ def classify_period(weeks: list, state: str = "WA") -> dict:
     Each week is classified with classify_week; the per-week results are
     summed into a single {"regular", "overtime", "doubletime"} dict.
     """
-    totals = {"regular": Decimal("0"),
-              "overtime": Decimal("0"),
-              "doubletime": Decimal("0")}
+    totals = {
+        "regular": Decimal("0"),
+        "overtime": Decimal("0"),
+        "doubletime": Decimal("0"),
+    }
     if not weeks:
         return _zero_result()
 

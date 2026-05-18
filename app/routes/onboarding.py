@@ -13,12 +13,15 @@ from app.database import get_db
 from app.models.payroll import Employee
 from app.models.hr import OnboardingTask, OnboardingTaskType, OnboardingTaskStatus
 from app.schemas.hr import (
-    OnboardingTaskCreate, OnboardingTaskUpdate, OnboardingTaskResponse,
+    OnboardingTaskCreate,
+    OnboardingTaskUpdate,
+    OnboardingTaskResponse,
     OnboardingChecklistResponse,
 )
 from app.services.onboarding import seed_onboarding_tasks, checklist_summary
 from app.services.new_hire_report import (
-    compute_new_hire_report, generate_new_hire_report_pdf,
+    compute_new_hire_report,
+    generate_new_hire_report_pdf,
 )
 from app import config
 
@@ -27,8 +30,10 @@ router = APIRouter(prefix="/api/onboarding", tags=["onboarding"])
 
 def _employer() -> dict:
     return {
-        "name": config.COMPANY_NAME, "address": config.COMPANY_ADDRESS,
-        "ein": config.EMPLOYER_EIN, "state": config.EMPLOYER_STATE,
+        "name": config.COMPANY_NAME,
+        "address": config.COMPANY_ADDRESS,
+        "ein": config.EMPLOYER_EIN,
+        "state": config.EMPLOYER_STATE,
     }
 
 
@@ -41,8 +46,10 @@ def _checklist(db: Session, emp: Employee) -> OnboardingChecklistResponse:
     )
     summary = checklist_summary(tasks)
     return OnboardingChecklistResponse(
-        employee_id=emp.id, employee_name=emp.full_name,
-        complete=summary["complete"], total=summary["total"],
+        employee_id=emp.id,
+        employee_name=emp.full_name,
+        complete=summary["complete"],
+        total=summary["total"],
         percent_complete=summary["percent_complete"],
         tasks=[OnboardingTaskResponse.model_validate(t) for t in tasks],
     )
@@ -54,7 +61,11 @@ def get_checklist(emp_id: int, db: Session = Depends(get_db)):
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    if not db.query(OnboardingTask).filter(OnboardingTask.employee_id == emp_id).first():
+    if (
+        not db.query(OnboardingTask)
+        .filter(OnboardingTask.employee_id == emp_id)
+        .first()
+    ):
         seed_onboarding_tasks(db, emp_id)
         db.commit()
     return _checklist(db, emp)
@@ -77,9 +88,12 @@ def create_task(data: OnboardingTaskCreate, db: Session = Depends(get_db)):
     try:
         task_type = OnboardingTaskType(data.task_type)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid task_type: {data.task_type}")
-    task = OnboardingTask(employee_id=data.employee_id, task_type=task_type,
-                          notes=data.notes)
+        raise HTTPException(
+            status_code=400, detail=f"Invalid task_type: {data.task_type}"
+        )
+    task = OnboardingTask(
+        employee_id=data.employee_id, task_type=task_type, notes=data.notes
+    )
     db.add(task)
     db.commit()
     db.refresh(task)
@@ -87,7 +101,9 @@ def create_task(data: OnboardingTaskCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/tasks/{task_id}", response_model=OnboardingTaskResponse)
-def update_task(task_id: int, data: OnboardingTaskUpdate, db: Session = Depends(get_db)):
+def update_task(
+    task_id: int, data: OnboardingTaskUpdate, db: Session = Depends(get_db)
+):
     task = db.query(OnboardingTask).filter(OnboardingTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Onboarding task not found")
@@ -99,7 +115,9 @@ def update_task(task_id: int, data: OnboardingTaskUpdate, db: Session = Depends(
             task.status = OnboardingTaskStatus(fields["status"])
         except ValueError:
             raise HTTPException(status_code=400, detail="Invalid status")
-        task.completed_at = now if task.status == OnboardingTaskStatus.COMPLETE else None
+        task.completed_at = (
+            now if task.status == OnboardingTaskStatus.COMPLETE else None
+        )
     if "signed" in fields:
         task.signed = bool(fields["signed"])
         task.signed_at = now if task.signed else None
@@ -113,8 +131,9 @@ def update_task(task_id: int, data: OnboardingTaskUpdate, db: Session = Depends(
 
 
 @router.post("/tasks/{task_id}/complete", response_model=OnboardingTaskResponse)
-def complete_task(task_id: int, completed_by: str = "admin",
-                  db: Session = Depends(get_db)):
+def complete_task(
+    task_id: int, completed_by: str = "admin", db: Session = Depends(get_db)
+):
     task = db.query(OnboardingTask).filter(OnboardingTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Onboarding task not found")
@@ -141,5 +160,8 @@ def new_hire_report_pdf(emp_id: int, db: Session = Depends(get_db)):
         pdf = generate_new_hire_report_pdf(db, emp_id, _employer())
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f"inline; filename=new_hire_{emp_id}.pdf"})
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename=new_hire_{emp_id}.pdf"},
+    )

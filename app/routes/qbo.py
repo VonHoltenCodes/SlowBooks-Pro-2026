@@ -31,6 +31,7 @@ router = APIRouter(prefix="/api/qbo", tags=["qbo"])
 # OAuth endpoints
 # ============================================================================
 
+
 @router.get("/auth-url")
 def get_auth_url(db: Session = Depends(get_db)):
     """Generate the Intuit OAuth authorization URL."""
@@ -38,8 +39,11 @@ def get_auth_url(db: Session = Depends(get_db)):
         url = qbo_service.get_auth_url(db)
         return {"url": url}
     except Exception as e:
-        raise HTTPException(400, f"Failed to generate auth URL: {str(e)}. "
-                            "Check that Client ID and Client Secret are configured in Settings.")
+        raise HTTPException(
+            400,
+            f"Failed to generate auth URL: {str(e)}. "
+            "Check that Client ID and Client Secret are configured in Settings.",
+        )
 
 
 @router.get("/callback")
@@ -124,8 +128,11 @@ def import_entity(entity: str, db: Session = Depends(get_db)):
         raise HTTPException(400, "Not connected to QuickBooks Online")
 
     if entity not in _IMPORT_ENTITY_MAP:
-        raise HTTPException(400, f"Unknown entity type: {entity}. "
-                            f"Valid types: {', '.join(_IMPORT_ENTITY_MAP.keys())}")
+        raise HTTPException(
+            400,
+            f"Unknown entity type: {entity}. "
+            f"Valid types: {', '.join(_IMPORT_ENTITY_MAP.keys())}",
+        )
 
     try:
         result = _IMPORT_ENTITY_MAP[entity](db)
@@ -171,8 +178,11 @@ def export_entity(entity: str, db: Session = Depends(get_db)):
         raise HTTPException(400, "Not connected to QuickBooks Online")
 
     if entity not in _EXPORT_ENTITY_MAP:
-        raise HTTPException(400, f"Unknown entity type: {entity}. "
-                            f"Valid types: {', '.join(_EXPORT_ENTITY_MAP.keys())}")
+        raise HTTPException(
+            400,
+            f"Unknown entity type: {entity}. "
+            f"Valid types: {', '.join(_EXPORT_ENTITY_MAP.keys())}",
+        )
 
     try:
         result = _EXPORT_ENTITY_MAP[entity](db)

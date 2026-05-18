@@ -10,14 +10,25 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
-from app.models.credit_memos import CreditMemo, CreditMemoLine, CreditMemoStatus, CreditApplication
+from app.models.credit_memos import (
+    CreditMemo,
+    CreditMemoLine,
+    CreditMemoStatus,
+    CreditApplication,
+)
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Customer
 from app.models.items import Item
-from app.schemas.credit_memos import CreditMemoCreate, CreditMemoResponse, CreditApplicationCreate
+from app.schemas.credit_memos import (
+    CreditMemoCreate,
+    CreditMemoResponse,
+    CreditApplicationCreate,
+)
 from app.services.accounting import (
-    create_journal_entry, get_ar_account_id,
-    get_default_income_account_id, get_sales_tax_account_id,
+    create_journal_entry,
+    get_ar_account_id,
+    get_default_income_account_id,
+    get_sales_tax_account_id,
     compute_line_totals,
 )
 from app.services.closing_date import check_closing_date
@@ -34,7 +45,9 @@ def _next_cm_number(db: Session) -> str:
 
 
 @router.get("", response_model=list[CreditMemoResponse])
-def list_credit_memos(customer_id: int = None, status: str = None, db: Session = Depends(get_db)):
+def list_credit_memos(
+    customer_id: int = None, status: str = None, db: Session = Depends(get_db)
+):
     q = db.query(CreditMemo)
     if customer_id:
         q = q.filter(CreditMemo.customer_id == customer_id)
@@ -73,10 +86,16 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     cm = CreditMemo(
-        memo_number=memo_number, customer_id=data.customer_id, date=data.date,
+        memo_number=memo_number,
+        customer_id=data.customer_id,
+        date=data.date,
         original_invoice_id=data.original_invoice_id,
-        subtotal=subtotal, tax_rate=data.tax_rate, tax_amount=tax_amount,
-        total=total, balance_remaining=total, notes=data.notes,
+        subtotal=subtotal,
+        tax_rate=data.tax_rate,
+        tax_amount=tax_amount,
+        total=total,
+        balance_remaining=total,
+        notes=data.notes,
         status=CreditMemoStatus.ISSUED,
     )
     db.add(cm)
@@ -89,11 +108,17 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
 
     for i, line_data in enumerate(data.lines):
         amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
-        db.add(CreditMemoLine(
-            credit_memo_id=cm.id, item_id=line_data.item_id,
-            description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
-        ))
+        db.add(
+            CreditMemoLine(
+                credit_memo_id=cm.id,
+                item_id=line_data.item_id,
+                description=line_data.description,
+                quantity=line_data.quantity,
+                rate=line_data.rate,
+                amount=amt,
+                line_order=line_data.line_order or i,
+            )
+        )
         if amt > 0:
             income_id = default_income_id
             if line_data.item_id:
@@ -101,27 +126,43 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
                 if item and item.income_account_id:
                     income_id = item.income_account_id
             if income_id:
-                journal_lines.append({
-                    "account_id": income_id, "debit": amt, "credit": Decimal("0"),
-                    "description": line_data.description or "",
-                })
+                journal_lines.append(
+                    {
+                        "account_id": income_id,
+                        "debit": amt,
+                        "credit": Decimal("0"),
+                        "description": line_data.description or "",
+                    }
+                )
 
     # DR Sales Tax Payable if tax
     if tax_amount > 0 and tax_account_id:
-        journal_lines.append({
-            "account_id": tax_account_id, "debit": tax_amount, "credit": Decimal("0"),
-            "description": "Sales tax credit",
-        })
+        journal_lines.append(
+            {
+                "account_id": tax_account_id,
+                "debit": tax_amount,
+                "credit": Decimal("0"),
+                "description": "Sales tax credit",
+            }
+        )
 
     # CR Accounts Receivable
     if ar_id and journal_lines:
-        journal_lines.append({
-            "account_id": ar_id, "debit": Decimal("0"), "credit": total,
-            "description": f"Credit Memo {memo_number}",
-        })
+        journal_lines.append(
+            {
+                "account_id": ar_id,
+                "debit": Decimal("0"),
+                "credit": total,
+                "description": f"Credit Memo {memo_number}",
+            }
+        )
         txn = create_journal_entry(
-            db, data.date, f"Credit Memo {memo_number} - {customer.name}",
-            journal_lines, source_type="credit_memo", source_id=cm.id,
+            db,
+            data.date,
+            f"Credit Memo {memo_number} - {customer.name}",
+            journal_lines,
+            source_type="credit_memo",
+            source_id=cm.id,
         )
         cm.transaction_id = txn.id
 
@@ -131,6 +172,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     db.flush()
     db.refresh(cm)
     from app.services.inventory_hooks import post_return_for_credit_memo
+
     post_return_for_credit_memo(db, cm, txn_date=data.date)
 
     db.commit()
@@ -141,7 +183,9 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/{cm_id}/apply")
-def apply_credit(cm_id: int, data: CreditApplicationCreate, db: Session = Depends(get_db)):
+def apply_credit(
+    cm_id: int, data: CreditApplicationCreate, db: Session = Depends(get_db)
+):
     """Apply credit memo to an invoice."""
     cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
     if not cm:
@@ -158,9 +202,13 @@ def apply_credit(cm_id: int, data: CreditApplicationCreate, db: Session = Depend
     if Decimal(str(data.amount)) > invoice.balance_due:
         raise HTTPException(status_code=400, detail="Amount exceeds invoice balance")
 
-    db.add(CreditApplication(
-        credit_memo_id=cm.id, invoice_id=data.invoice_id, amount=data.amount,
-    ))
+    db.add(
+        CreditApplication(
+            credit_memo_id=cm.id,
+            invoice_id=data.invoice_id,
+            amount=data.amount,
+        )
+    )
 
     amount = Decimal(str(data.amount))
     cm.amount_applied += amount

@@ -71,9 +71,9 @@ def compute_940(db, year: int) -> dict:
         else:
             taxable = gross
         paid_by_employee[emp_id] = prior + gross
-        taxable_by_employee[emp_id] = taxable_by_employee.get(
-            emp_id, Decimal("0")
-        ) + taxable
+        taxable_by_employee[emp_id] = (
+            taxable_by_employee.get(emp_id, Decimal("0")) + taxable
+        )
 
     total_taxable = sum(taxable_by_employee.values(), Decimal("0"))
     # Payments exempt from FUTA = total payments above the per-employee cap.

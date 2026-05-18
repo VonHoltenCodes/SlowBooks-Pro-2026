@@ -74,7 +74,7 @@ class GarnishmentOrderResponse(BaseModel):
 class GrossUpRequest(BaseModel):
     employee_id: int
     target_net: float
-    supplemental: bool = True   # gross-ups are typically bonuses
+    supplemental: bool = True  # gross-ups are typically bonuses
 
 
 class GrossUpResponse(BaseModel):

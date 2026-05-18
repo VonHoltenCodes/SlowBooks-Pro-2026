@@ -20,8 +20,9 @@ def compute_new_hire_report(db, employee_id: int, employer: dict) -> dict:
         raise ValueError(f"Employee {employee_id} not found")
 
     hire_date = emp.hire_date
-    deadline = (hire_date + timedelta(days=NEW_HIRE_REPORT_DEADLINE_DAYS)
-                if hire_date else None)
+    deadline = (
+        hire_date + timedelta(days=NEW_HIRE_REPORT_DEADLINE_DAYS) if hire_date else None
+    )
     overdue = bool(deadline and date.today() > deadline)
 
     return {
@@ -29,8 +30,11 @@ def compute_new_hire_report(db, employee_id: int, employer: dict) -> dict:
         "employee_name": emp.full_name,
         "ssn_last_four": emp.ssn_last_four,
         "address": {
-            "address1": emp.address1, "address2": emp.address2,
-            "city": emp.city, "state": emp.state, "zip": emp.zip,
+            "address1": emp.address1,
+            "address2": emp.address2,
+            "city": emp.city,
+            "state": emp.state,
+            "zip": emp.zip,
         },
         "work_state": emp.work_state or emp.state,
         "hire_date": hire_date.isoformat() if hire_date else None,

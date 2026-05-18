@@ -10,7 +10,17 @@
 # decompilation when field 0x02 was a char[41] with null terminator.
 # ============================================================================
 
-from sqlalchemy import Column, Integer, String, Boolean, Numeric, DateTime, Text, ForeignKey, func
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Boolean,
+    Numeric,
+    DateTime,
+    Text,
+    ForeignKey,
+    func,
+)
 
 from app.database import Base
 
@@ -52,7 +62,9 @@ class Customer(Base):
     balance = Column(Numeric(12, 2), default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Vendor(Base):
@@ -76,7 +88,9 @@ class Vendor(Base):
     terms = Column(String(50), default="Net 30")
     tax_id = Column(String(50), nullable=True)
     account_number = Column(String(50), nullable=True)
-    default_expense_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    default_expense_account_id = Column(
+        Integer, ForeignKey("accounts.id"), nullable=True
+    )
     is_1099_vendor = Column(Boolean, default=False)
     vendor_1099_type = Column(String(10), nullable=True)
     # 1099-NEC workflow (Tier 1.6)
@@ -88,4 +102,6 @@ class Vendor(Base):
     balance = Column(Numeric(12, 2), default=0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

@@ -15,19 +15,29 @@ from app.database import get_db
 from app.models.payroll import Employee
 from app.models.attachments import Attachment
 from app.models.bank_accounts import (
-    EmployeeBankAccount, BankAccountKind, DepositType,
+    EmployeeBankAccount,
+    BankAccountKind,
+    DepositType,
 )
 from app.schemas.payroll import (
-    EmployeeCreate, EmployeeUpdate, EmployeeResponse,
-    BankAccountCreate, BankAccountResponse, YTDResponse,
+    EmployeeCreate,
+    EmployeeUpdate,
+    EmployeeResponse,
+    BankAccountCreate,
+    BankAccountResponse,
+    YTDResponse,
 )
 from app.schemas.hr import EmployeeDocumentResponse
 from app.services.encryption import encrypt
 from app.services.onboarding import seed_onboarding_tasks
 from app.routes.payroll import employee_ytd
 from app.routes.attachments import (
-    _sanitize_filename, _resolve_within, STATIC_BASE, UPLOAD_BASE,
-    ALLOWED_EXTENSIONS, ALLOWED_MIME_TYPES,
+    _sanitize_filename,
+    _resolve_within,
+    STATIC_BASE,
+    UPLOAD_BASE,
+    ALLOWED_EXTENSIONS,
+    ALLOWED_MIME_TYPES,
 )
 
 router = APIRouter(prefix="/api/employees", tags=["employees"])
@@ -84,8 +94,11 @@ def get_portal_token(emp_id: int, db: Session = Depends(get_db)):
     if not emp.portal_token:
         emp.portal_token = secrets.token_urlsafe(24)
         db.commit()
-    return {"employee_id": emp.id, "portal_token": emp.portal_token,
-            "portal_url": f"/portal/{emp.portal_token}"}
+    return {
+        "employee_id": emp.id,
+        "portal_token": emp.portal_token,
+        "portal_url": f"/portal/{emp.portal_token}",
+    }
 
 
 @router.post("/{emp_id}/portal-token")
@@ -96,14 +109,18 @@ def regenerate_portal_token(emp_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Employee not found")
     emp.portal_token = secrets.token_urlsafe(24)
     db.commit()
-    return {"employee_id": emp.id, "portal_token": emp.portal_token,
-            "portal_url": f"/portal/{emp.portal_token}"}
+    return {
+        "employee_id": emp.id,
+        "portal_token": emp.portal_token,
+        "portal_url": f"/portal/{emp.portal_token}",
+    }
 
 
 # --- Year-to-date ----------------------------------------------------------
 @router.get("/{emp_id}/ytd", response_model=YTDResponse)
-def get_employee_ytd(emp_id: int, year: int = Query(default=None),
-                     db: Session = Depends(get_db)):
+def get_employee_ytd(
+    emp_id: int, year: int = Query(default=None), db: Session = Depends(get_db)
+):
     """Year-to-date payroll totals for an employee (exposes the Bug 1 fix)."""
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
@@ -111,10 +128,14 @@ def get_employee_ytd(emp_id: int, year: int = Query(default=None),
     year = year or date.today().year
     totals = employee_ytd(db, emp_id, year)
     return YTDResponse(
-        employee_id=emp_id, year=year,
-        gross=float(totals["gross"]), federal=float(totals["federal"]),
-        state=float(totals["state"]), state_other=float(totals["state_other"]),
-        ss=float(totals["ss"]), medicare=float(totals["medicare"]),
+        employee_id=emp_id,
+        year=year,
+        gross=float(totals["gross"]),
+        federal=float(totals["federal"]),
+        state=float(totals["state"]),
+        state_other=float(totals["state_other"]),
+        ss=float(totals["ss"]),
+        medicare=float(totals["medicare"]),
         pretax_deductions=float(totals["pretax_deductions"]),
         net=float(totals["net"]),
     )
@@ -134,8 +155,12 @@ def list_bank_accounts(emp_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/{emp_id}/bank-accounts", response_model=BankAccountResponse, status_code=201)
-def add_bank_account(emp_id: int, data: BankAccountCreate, db: Session = Depends(get_db)):
+@router.post(
+    "/{emp_id}/bank-accounts", response_model=BankAccountResponse, status_code=201
+)
+def add_bank_account(
+    emp_id: int, data: BankAccountCreate, db: Session = Depends(get_db)
+):
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
@@ -153,11 +178,14 @@ def add_bank_account(emp_id: int, data: BankAccountCreate, db: Session = Depends
         raise HTTPException(status_code=400, detail="Account number must be numeric")
 
     ba = EmployeeBankAccount(
-        employee_id=emp_id, nickname=data.nickname, account_kind=kind,
+        employee_id=emp_id,
+        nickname=data.nickname,
+        account_kind=kind,
         routing_number_enc=encrypt(routing),
         account_number_enc=encrypt(account),
         account_last_four=account[-4:],
-        deposit_type=deposit, deposit_value=data.deposit_value,
+        deposit_type=deposit,
+        deposit_value=data.deposit_value,
         priority=data.priority,
     )
     db.add(ba)
@@ -170,8 +198,9 @@ def add_bank_account(emp_id: int, data: BankAccountCreate, db: Session = Depends
 def remove_bank_account(emp_id: int, ba_id: int, db: Session = Depends(get_db)):
     ba = (
         db.query(EmployeeBankAccount)
-        .filter(EmployeeBankAccount.id == ba_id,
-                EmployeeBankAccount.employee_id == emp_id)
+        .filter(
+            EmployeeBankAccount.id == ba_id, EmployeeBankAccount.employee_id == emp_id
+        )
         .first()
     )
     if not ba:
@@ -195,8 +224,9 @@ def list_employee_documents(emp_id: int, db: Session = Depends(get_db)):
     )
 
 
-@router.post("/{emp_id}/documents", response_model=EmployeeDocumentResponse,
-             status_code=201)
+@router.post(
+    "/{emp_id}/documents", response_model=EmployeeDocumentResponse, status_code=201
+)
 async def upload_employee_document(
     emp_id: int,
     doc_category: str = Form(default="general"),
@@ -210,11 +240,13 @@ async def upload_employee_document(
     safe_filename = _sanitize_filename(file.filename or "")
     extension = Path(safe_filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(status_code=400,
-                            detail=f"File extension '{extension}' not allowed")
+        raise HTTPException(
+            status_code=400, detail=f"File extension '{extension}' not allowed"
+        )
     if file.content_type not in ALLOWED_MIME_TYPES:
-        raise HTTPException(status_code=400,
-                            detail=f"MIME type '{file.content_type}' not allowed")
+        raise HTTPException(
+            status_code=400, detail=f"MIME type '{file.content_type}' not allowed"
+        )
 
     content = await file.read()
     if len(content) > 50 * 1024 * 1024:
@@ -227,11 +259,14 @@ async def upload_employee_document(
     file_path.write_bytes(content)
 
     doc = Attachment(
-        entity_type="employee", entity_id=emp_id, employee_id=emp_id,
+        entity_type="employee",
+        entity_id=emp_id,
+        employee_id=emp_id,
         doc_category=(doc_category or "general")[:50],
         filename=safe_filename,
         file_path=str(file_path.relative_to(STATIC_BASE)),
-        mime_type=file.content_type, file_size=len(content),
+        mime_type=file.content_type,
+        file_size=len(content),
     )
     db.add(doc)
     db.commit()
@@ -251,8 +286,11 @@ def download_employee_document(emp_id: int, doc_id: int, db: Session = Depends(g
     full_path = _resolve_within(STATIC_BASE, doc.file_path)
     if not full_path.exists():
         raise HTTPException(status_code=404, detail="File missing from storage")
-    return FileResponse(str(full_path), filename=doc.filename,
-                        media_type=doc.mime_type or "application/octet-stream")
+    return FileResponse(
+        str(full_path),
+        filename=doc.filename,
+        media_type=doc.mime_type or "application/octet-stream",
+    )
 
 
 @router.delete("/{emp_id}/documents/{doc_id}")

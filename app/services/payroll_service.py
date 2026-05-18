@@ -25,10 +25,10 @@ def _q(value) -> Decimal:
 
 
 # --- FICA -------------------------------------------------------------------
-SS_RATE = Decimal("0.062")           # Social Security 6.2% (employee & employer each)
-SS_WAGE_BASE = Decimal("184500")     # 2026 SS wage base (approximate)
-MEDICARE_RATE = Decimal("0.0145")    # Medicare 1.45% (employee & employer each)
-MEDICARE_ADDITIONAL_RATE = Decimal("0.009")        # extra 0.9% (employee only)
+SS_RATE = Decimal("0.062")  # Social Security 6.2% (employee & employer each)
+SS_WAGE_BASE = Decimal("184500")  # 2026 SS wage base (approximate)
+MEDICARE_RATE = Decimal("0.0145")  # Medicare 1.45% (employee & employer each)
+MEDICARE_ADDITIONAL_RATE = Decimal("0.009")  # extra 0.9% (employee only)
 MEDICARE_ADDITIONAL_THRESHOLD = Decimal("200000")  # withhold the extra above this
 
 # --- Federal unemployment (FUTA) -------------------------------------------
@@ -48,22 +48,34 @@ STD_DEDUCTION_ADDBACK = {
 # stay internally consistent regardless of transcription.
 _STANDARD = {
     "single": [
-        (Decimal("0"), Decimal("0")), (Decimal("6000"), Decimal("0.10")),
-        (Decimal("17600"), Decimal("0.12")), (Decimal("53150"), Decimal("0.22")),
-        (Decimal("106525"), Decimal("0.24")), (Decimal("197950"), Decimal("0.32")),
-        (Decimal("249725"), Decimal("0.35")), (Decimal("615350"), Decimal("0.37")),
+        (Decimal("0"), Decimal("0")),
+        (Decimal("6000"), Decimal("0.10")),
+        (Decimal("17600"), Decimal("0.12")),
+        (Decimal("53150"), Decimal("0.22")),
+        (Decimal("106525"), Decimal("0.24")),
+        (Decimal("197950"), Decimal("0.32")),
+        (Decimal("249725"), Decimal("0.35")),
+        (Decimal("615350"), Decimal("0.37")),
     ],
     "married": [
-        (Decimal("0"), Decimal("0")), (Decimal("17100"), Decimal("0.10")),
-        (Decimal("40300"), Decimal("0.12")), (Decimal("111400"), Decimal("0.22")),
-        (Decimal("218150"), Decimal("0.24")), (Decimal("400000"), Decimal("0.32")),
-        (Decimal("503550"), Decimal("0.35")), (Decimal("747200"), Decimal("0.37")),
+        (Decimal("0"), Decimal("0")),
+        (Decimal("17100"), Decimal("0.10")),
+        (Decimal("40300"), Decimal("0.12")),
+        (Decimal("111400"), Decimal("0.22")),
+        (Decimal("218150"), Decimal("0.24")),
+        (Decimal("400000"), Decimal("0.32")),
+        (Decimal("503550"), Decimal("0.35")),
+        (Decimal("747200"), Decimal("0.37")),
     ],
     "head_of_household": [
-        (Decimal("0"), Decimal("0")), (Decimal("13300"), Decimal("0.10")),
-        (Decimal("29850"), Decimal("0.12")), (Decimal("76400"), Decimal("0.22")),
-        (Decimal("113800"), Decimal("0.24")), (Decimal("205250"), Decimal("0.32")),
-        (Decimal("257000"), Decimal("0.35")), (Decimal("622650"), Decimal("0.37")),
+        (Decimal("0"), Decimal("0")),
+        (Decimal("13300"), Decimal("0.10")),
+        (Decimal("29850"), Decimal("0.12")),
+        (Decimal("76400"), Decimal("0.22")),
+        (Decimal("113800"), Decimal("0.24")),
+        (Decimal("205250"), Decimal("0.32")),
+        (Decimal("257000"), Decimal("0.35")),
+        (Decimal("622650"), Decimal("0.37")),
     ],
 }
 
@@ -71,22 +83,34 @@ _STANDARD = {
 # multiple-jobs box. Roughly the standard schedule with the brackets halved.
 _CHECKBOX = {
     "single": [
-        (Decimal("0"), Decimal("0")), (Decimal("7300"), Decimal("0.10")),
-        (Decimal("13100"), Decimal("0.12")), (Decimal("30875"), Decimal("0.22")),
-        (Decimal("57563"), Decimal("0.24")), (Decimal("103275"), Decimal("0.32")),
-        (Decimal("129163"), Decimal("0.35")), (Decimal("311975"), Decimal("0.37")),
+        (Decimal("0"), Decimal("0")),
+        (Decimal("7300"), Decimal("0.10")),
+        (Decimal("13100"), Decimal("0.12")),
+        (Decimal("30875"), Decimal("0.22")),
+        (Decimal("57563"), Decimal("0.24")),
+        (Decimal("103275"), Decimal("0.32")),
+        (Decimal("129163"), Decimal("0.35")),
+        (Decimal("311975"), Decimal("0.37")),
     ],
     "married": [
-        (Decimal("0"), Decimal("0")), (Decimal("14600"), Decimal("0.10")),
-        (Decimal("26200"), Decimal("0.12")), (Decimal("61750"), Decimal("0.22")),
-        (Decimal("115125"), Decimal("0.24")), (Decimal("206550"), Decimal("0.32")),
-        (Decimal("258325"), Decimal("0.35")), (Decimal("380200"), Decimal("0.37")),
+        (Decimal("0"), Decimal("0")),
+        (Decimal("14600"), Decimal("0.10")),
+        (Decimal("26200"), Decimal("0.12")),
+        (Decimal("61750"), Decimal("0.22")),
+        (Decimal("115125"), Decimal("0.24")),
+        (Decimal("206550"), Decimal("0.32")),
+        (Decimal("258325"), Decimal("0.35")),
+        (Decimal("380200"), Decimal("0.37")),
     ],
     "head_of_household": [
-        (Decimal("0"), Decimal("0")), (Decimal("10800"), Decimal("0.10")),
-        (Decimal("19075"), Decimal("0.12")), (Decimal("42350"), Decimal("0.22")),
-        (Decimal("61050"), Decimal("0.24")), (Decimal("106775"), Decimal("0.32")),
-        (Decimal("132650"), Decimal("0.35")), (Decimal("224100"), Decimal("0.37")),
+        (Decimal("0"), Decimal("0")),
+        (Decimal("10800"), Decimal("0.10")),
+        (Decimal("19075"), Decimal("0.12")),
+        (Decimal("42350"), Decimal("0.22")),
+        (Decimal("61050"), Decimal("0.24")),
+        (Decimal("106775"), Decimal("0.32")),
+        (Decimal("132650"), Decimal("0.35")),
+        (Decimal("224100"), Decimal("0.37")),
     ],
 }
 
@@ -197,12 +221,22 @@ def supplemental_aggregate_tax(
     if supplemental <= 0:
         return Decimal("0")
     combined = federal_income_tax(
-        regular_wages + supplemental, pay_periods, filing_status, multiple_jobs,
-        dependents_amount, other_income_annual, deductions_annual,
+        regular_wages + supplemental,
+        pay_periods,
+        filing_status,
+        multiple_jobs,
+        dependents_amount,
+        other_income_annual,
+        deductions_annual,
     )
     base = federal_income_tax(
-        regular_wages, pay_periods, filing_status, multiple_jobs,
-        dependents_amount, other_income_annual, deductions_annual,
+        regular_wages,
+        pay_periods,
+        filing_status,
+        multiple_jobs,
+        dependents_amount,
+        other_income_annual,
+        deductions_annual,
     )
     return _q(max(Decimal("0"), combined - base))
 
@@ -245,7 +279,9 @@ def medicare(gross: Decimal, ytd_gross: Decimal = Decimal("0")) -> tuple:
 
 def futa(gross: Decimal, ytd_gross: Decimal = Decimal("0")) -> Decimal:
     """Employer FUTA tax (effective 0.6% on the first $7,000 of wages)."""
-    taxable = _capped_wages(Decimal(str(gross)), Decimal(str(ytd_gross)), FUTA_WAGE_BASE)
+    taxable = _capped_wages(
+        Decimal(str(gross)), Decimal(str(ytd_gross)), FUTA_WAGE_BASE
+    )
     return _q(taxable * FUTA_EFFECTIVE_RATE)
 
 
@@ -253,8 +289,9 @@ def suta(
     gross: Decimal, ytd_gross: Decimal, rate: Decimal, wage_base: Decimal
 ) -> Decimal:
     """Employer state unemployment tax on wages below the state wage base."""
-    taxable = _capped_wages(Decimal(str(gross)), Decimal(str(ytd_gross)),
-                            Decimal(str(wage_base)))
+    taxable = _capped_wages(
+        Decimal(str(gross)), Decimal(str(ytd_gross)), Decimal(str(wage_base))
+    )
     return _q(taxable * Decimal(str(rate)))
 
 
@@ -301,12 +338,21 @@ def calculate_withholdings(
     if gross <= 0:
         zero = Decimal("0")
         return {
-            "gross": zero, "federal": zero, "ss": zero, "medicare": zero,
-            "state_income": zero, "state_other_employee": zero,
-            "employer_ss": zero, "employer_medicare": zero, "futa": zero,
-            "suta": zero, "state_other_employer": zero,
-            "total_employee_tax": zero, "total_employer_tax": zero,
-            "net": zero, "detail": {},
+            "gross": zero,
+            "federal": zero,
+            "ss": zero,
+            "medicare": zero,
+            "state_income": zero,
+            "state_other_employee": zero,
+            "employer_ss": zero,
+            "employer_medicare": zero,
+            "futa": zero,
+            "suta": zero,
+            "state_other_employer": zero,
+            "total_employee_tax": zero,
+            "total_employer_tax": zero,
+            "net": zero,
+            "detail": {},
         }
 
     # Income-tax wages drop the full pre-tax total; FICA wages drop only the
@@ -318,16 +364,26 @@ def calculate_withholdings(
     if supplemental:
         if supplemental_method == "aggregate":
             federal = supplemental_aggregate_tax(
-                fed_taxable, regular_wages, pay_periods, filing_status,
-                multiple_jobs, dependents_amount, other_income_annual,
+                fed_taxable,
+                regular_wages,
+                pay_periods,
+                filing_status,
+                multiple_jobs,
+                dependents_amount,
+                other_income_annual,
                 deductions_annual,
             )
         else:
             federal = supplemental_federal_tax(fed_taxable)
     else:
         federal = federal_income_tax(
-            fed_taxable, pay_periods, filing_status, multiple_jobs,
-            dependents_amount, other_income_annual, deductions_annual,
+            fed_taxable,
+            pay_periods,
+            filing_status,
+            multiple_jobs,
+            dependents_amount,
+            other_income_annual,
+            deductions_annual,
             extra_withholding,
         )
 
@@ -344,28 +400,36 @@ def calculate_withholdings(
     # reciprocity agreement (see state_tax.reciprocity).
     engine = get_engine(work_state)
     state = engine.calculate(
-        gross=gross, taxable=fed_taxable, ytd_gross=ytd,
-        pay_periods=pay_periods, hours=Decimal(str(hours)),
-        filing_status=filing_status, wc_class_code=wc_class_code,
+        gross=gross,
+        taxable=fed_taxable,
+        ytd_gross=ytd,
+        pay_periods=pay_periods,
+        hours=Decimal(str(hours)),
+        filing_status=filing_status,
+        wc_class_code=wc_class_code,
     )
 
     state_income = state.income_tax
-    if withholding_state and (work_state or "").strip().upper() != \
-            withholding_state.strip().upper():
+    if (
+        withholding_state
+        and (work_state or "").strip().upper() != withholding_state.strip().upper()
+    ):
         wh = get_engine(withholding_state).calculate(
-            gross=gross, taxable=fed_taxable, ytd_gross=ytd,
-            pay_periods=pay_periods, hours=Decimal(str(hours)),
-            filing_status=filing_status, wc_class_code=wc_class_code,
+            gross=gross,
+            taxable=fed_taxable,
+            ytd_gross=ytd,
+            pay_periods=pay_periods,
+            hours=Decimal(str(hours)),
+            filing_status=filing_status,
+            wc_class_code=wc_class_code,
         )
         state_income = wh.income_tax
 
     rate = Decimal(str(suta_rate)) if suta_rate is not None else Decimal(str(SUTA_RATE))
     suta_tax = suta(fica_wages, ytd, rate, engine.suta_wage_base)
 
-    total_employee = (federal + state_income + state.employee_other
-                      + ss_emp + med_emp)
-    total_employer = (ss_empr + med_empr + futa_tax + suta_tax
-                      + state.employer_other)
+    total_employee = federal + state_income + state.employee_other + ss_emp + med_emp
+    total_employer = ss_empr + med_empr + futa_tax + suta_tax + state.employer_other
     net = gross - total_employee - pretax
 
     detail = {

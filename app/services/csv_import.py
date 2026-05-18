@@ -33,17 +33,19 @@ def import_customers(db: Session, csv_text: str) -> dict:
                 skipped += 1
                 continue
 
-            db.add(Customer(
-                name=name,
-                company=row.get("Company", ""),
-                email=row.get("Email", ""),
-                phone=row.get("Phone", ""),
-                bill_address1=row.get("Address", ""),
-                bill_city=row.get("City", ""),
-                bill_state=row.get("State", ""),
-                bill_zip=row.get("ZIP", ""),
-                terms=row.get("Terms", "Net 30"),
-            ))
+            db.add(
+                Customer(
+                    name=name,
+                    company=row.get("Company", ""),
+                    email=row.get("Email", ""),
+                    phone=row.get("Phone", ""),
+                    bill_address1=row.get("Address", ""),
+                    bill_city=row.get("City", ""),
+                    bill_state=row.get("State", ""),
+                    bill_zip=row.get("ZIP", ""),
+                    terms=row.get("Terms", "Net 30"),
+                )
+            )
             created += 1
         except Exception:
             logger.exception("Failed to import customer row %d", i)
@@ -71,17 +73,19 @@ def import_vendors(db: Session, csv_text: str) -> dict:
                 skipped += 1
                 continue
 
-            db.add(Vendor(
-                name=name,
-                company=row.get("Company", ""),
-                email=row.get("Email", ""),
-                phone=row.get("Phone", ""),
-                address1=row.get("Address", ""),
-                city=row.get("City", ""),
-                state=row.get("State", ""),
-                zip=row.get("ZIP", ""),
-                terms=row.get("Terms", "Net 30"),
-            ))
+            db.add(
+                Vendor(
+                    name=name,
+                    company=row.get("Company", ""),
+                    email=row.get("Email", ""),
+                    phone=row.get("Phone", ""),
+                    address1=row.get("Address", ""),
+                    city=row.get("City", ""),
+                    state=row.get("State", ""),
+                    zip=row.get("ZIP", ""),
+                    terms=row.get("Terms", "Net 30"),
+                )
+            )
             created += 1
         except Exception:
             logger.exception("Failed to import vendor row %d", i)
@@ -97,8 +101,12 @@ def import_items(db: Session, csv_text: str) -> dict:
     skipped = 0
     errors = []
 
-    type_map = {"product": ItemType.PRODUCT, "service": ItemType.SERVICE,
-                "material": ItemType.MATERIAL, "labor": ItemType.LABOR}
+    type_map = {
+        "product": ItemType.PRODUCT,
+        "service": ItemType.SERVICE,
+        "material": ItemType.MATERIAL,
+        "labor": ItemType.LABOR,
+    }
 
     for i, row in enumerate(reader, start=2):
         try:
@@ -112,14 +120,18 @@ def import_items(db: Session, csv_text: str) -> dict:
                 skipped += 1
                 continue
 
-            item_type = type_map.get(row.get("Type", "service").lower(), ItemType.SERVICE)
-            db.add(Item(
-                name=name,
-                item_type=item_type,
-                description=row.get("Description", ""),
-                rate=float(row.get("Rate", 0)),
-                cost=float(row.get("Cost", 0)),
-            ))
+            item_type = type_map.get(
+                row.get("Type", "service").lower(), ItemType.SERVICE
+            )
+            db.add(
+                Item(
+                    name=name,
+                    item_type=item_type,
+                    description=row.get("Description", ""),
+                    rate=float(row.get("Rate", 0)),
+                    cost=float(row.get("Cost", 0)),
+                )
+            )
             created += 1
         except Exception:
             logger.exception("Failed to import item row %d", i)

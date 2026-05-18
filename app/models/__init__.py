@@ -29,12 +29,15 @@ from app.models.backups import Backup
 # Phase 6: Ambitious
 from app.models.companies import Company
 from app.models.payroll import Employee, PayRun, PayStub
+
 # Tier 1: Full payroll / HR system
 from app.models.time_entries import TimeEntry
 from app.models.pto import PTOPolicy, PTOAccrual, PTORequest
 from app.models.bank_accounts import EmployeeBankAccount
+
 # Tier 2: deductions and garnishments
 from app.models.deductions import DeductionType, EmployeeDeduction, GarnishmentOrder
+
 # Tier 3: HR onboarding
 from app.models.hr import OnboardingTask
 
@@ -52,37 +55,67 @@ from app.models.items import InventoryMovement
 from app.models.saved_reports import SavedReport
 
 __all__ = [
-    "Account", "Customer", "Vendor", "Item",
-    "Transaction", "TransactionLine",
-    "Invoice", "InvoiceLine",
-    "Estimate", "EstimateLine",
-    "Payment", "PaymentAllocation",
-    "BankAccount", "BankTransaction", "Reconciliation",
+    "Account",
+    "Customer",
+    "Vendor",
+    "Item",
+    "Transaction",
+    "TransactionLine",
+    "Invoice",
+    "InvoiceLine",
+    "Estimate",
+    "EstimateLine",
+    "Payment",
+    "PaymentAllocation",
+    "BankAccount",
+    "BankTransaction",
+    "Reconciliation",
     "Settings",
     # Phase 1
     "AuditLog",
     # Phase 2
-    "PurchaseOrder", "PurchaseOrderLine",
-    "Bill", "BillLine", "BillPayment", "BillPaymentAllocation",
-    "CreditMemo", "CreditMemoLine", "CreditApplication",
+    "PurchaseOrder",
+    "PurchaseOrderLine",
+    "Bill",
+    "BillLine",
+    "BillPayment",
+    "BillPaymentAllocation",
+    "CreditMemo",
+    "CreditMemoLine",
+    "CreditApplication",
     # Phase 3
-    "RecurringInvoice", "RecurringInvoiceLine",
+    "RecurringInvoice",
+    "RecurringInvoiceLine",
     # Phase 4
     "EmailLog",
     # Phase 5
-    "TaxCategoryMapping", "Backup",
+    "TaxCategoryMapping",
+    "Backup",
     # Phase 6
-    "Company", "Employee", "PayRun", "PayStub",
+    "Company",
+    "Employee",
+    "PayRun",
+    "PayStub",
     # Tier 1: Full payroll / HR
-    "TimeEntry", "PTOPolicy", "PTOAccrual", "PTORequest", "EmployeeBankAccount",
+    "TimeEntry",
+    "PTOPolicy",
+    "PTOAccrual",
+    "PTORequest",
+    "EmployeeBankAccount",
     # Tier 2: deductions and garnishments
-    "DeductionType", "EmployeeDeduction", "GarnishmentOrder",
+    "DeductionType",
+    "EmployeeDeduction",
+    "GarnishmentOrder",
     # Tier 3: HR onboarding
     "OnboardingTask",
     # Phase 8
     "QBOMapping",
     # Phase 10
-    "BankRule", "Budget", "Attachment", "EmailTemplate",
+    "BankRule",
+    "Budget",
+    "Attachment",
+    "EmailTemplate",
     # Phase 11
-    "InventoryMovement", "SavedReport",
+    "InventoryMovement",
+    "SavedReport",
 ]

@@ -20,7 +20,7 @@ from app.services.state_tax.base import StateEngine, StateTaxResult
 CENT = Decimal("0.01")
 
 # --- Oregon statewide transit tax -------------------------------------------
-TRANSIT_TAX_RATE = Decimal("0.001")      # 0.1% of gross, employee
+TRANSIT_TAX_RATE = Decimal("0.001")  # 0.1% of gross, employee
 
 # --- Oregon income tax (2026-approximate, simplified) -----------------------
 STD_DEDUCTION = {
@@ -70,9 +70,17 @@ class OregonEngine(StateEngine):
     state_code: str = "OR"
     suta_wage_base: Decimal = Decimal("54300")
 
-    def calculate(self, *, gross: Decimal, taxable: Decimal, ytd_gross: Decimal,
-                  pay_periods: int, hours: Decimal, filing_status: str,
-                  wc_class_code: str | None) -> StateTaxResult:
+    def calculate(
+        self,
+        *,
+        gross: Decimal,
+        taxable: Decimal,
+        ytd_gross: Decimal,
+        pay_periods: int,
+        hours: Decimal,
+        filing_status: str,
+        wc_class_code: str | None
+    ) -> StateTaxResult:
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()
 

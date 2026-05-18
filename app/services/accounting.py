@@ -33,13 +33,20 @@ def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
     sum (prevents drift between stored invoice.total and DB-rounded journal
     lines).
     """
-    subtotal = _q(sum((_q(Decimal(str(l.quantity)) * Decimal(str(l.rate))) for l in lines), Decimal("0")))
+    subtotal = _q(
+        sum(
+            (_q(Decimal(str(l.quantity)) * Decimal(str(l.rate))) for l in lines),
+            Decimal("0"),
+        )
+    )
     tax_amount = _q(subtotal * Decimal(str(tax_rate or 0)))
     total = _q(subtotal + tax_amount)
     return subtotal, tax_amount, total
 
 
-def due_date_from_terms(txn_date: date, terms: str | None, default_days: int = 30) -> date:
+def due_date_from_terms(
+    txn_date: date, terms: str | None, default_days: int = 30
+) -> date:
     """Parse 'Net N' terms to a due date. Falls back to default_days on parse failure."""
     if not terms:
         return txn_date + timedelta(days=default_days)
@@ -78,7 +85,9 @@ def create_journal_entry(
     total_credit = sum(Decimal(str(l.get("credit", 0))) for l in lines)
 
     if total_debit != total_credit:
-        raise ValueError(f"Journal entry not balanced: debits={total_debit}, credits={total_credit}")
+        raise ValueError(
+            f"Journal entry not balanced: debits={total_debit}, credits={total_credit}"
+        )
 
     txn = Transaction(
         date=txn_date,
@@ -106,7 +115,9 @@ def create_journal_entry(
         db.add(txn_line)
 
         # Update account balance
-        account = db.query(Account).filter(Account.id == line_data["account_id"]).first()
+        account = (
+            db.query(Account).filter(Account.id == line_data["account_id"]).first()
+        )
         if account:
             if account.account_type.value in ("asset", "expense", "cogs"):
                 account.balance += debit - credit

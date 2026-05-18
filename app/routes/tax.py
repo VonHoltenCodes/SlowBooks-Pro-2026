@@ -43,8 +43,13 @@ def schedule_c_csv(
         end_date = date(date.today().year, 12, 31)
     data = get_schedule_c_data(db, start_date, end_date)
     csv_text = export_schedule_c_csv(data)
-    return Response(content=csv_text, media_type="text/csv",
-                    headers={"Content-Disposition": f"attachment; filename=schedule_c_{start_date}_{end_date}.csv"})
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=schedule_c_{start_date}_{end_date}.csv"
+        },
+    )
 
 
 @router.get("/mappings", response_model=list[TaxMappingResponse])
@@ -62,11 +67,17 @@ def list_mappings(db: Session = Depends(get_db)):
 
 @router.post("/mappings", response_model=TaxMappingResponse, status_code=201)
 def create_mapping(data: TaxMappingCreate, db: Session = Depends(get_db)):
-    existing = db.query(TaxCategoryMapping).filter(TaxCategoryMapping.account_id == data.account_id).first()
+    existing = (
+        db.query(TaxCategoryMapping)
+        .filter(TaxCategoryMapping.account_id == data.account_id)
+        .first()
+    )
     if existing:
         existing.tax_line = data.tax_line
     else:
-        existing = TaxCategoryMapping(account_id=data.account_id, tax_line=data.tax_line)
+        existing = TaxCategoryMapping(
+            account_id=data.account_id, tax_line=data.tax_line
+        )
         db.add(existing)
     db.commit()
     db.refresh(existing)

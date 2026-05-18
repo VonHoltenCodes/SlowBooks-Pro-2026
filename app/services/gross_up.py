@@ -27,10 +27,12 @@ def _as_decimal(value) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value))
 
 
-def gross_up(target_net: Decimal,
-             net_of_gross: Callable[[Decimal], Decimal],
-             tolerance: Decimal = Decimal("0.01"),
-             max_iterations: int = 80) -> Decimal:
+def gross_up(
+    target_net: Decimal,
+    net_of_gross: Callable[[Decimal], Decimal],
+    tolerance: Decimal = Decimal("0.01"),
+    max_iterations: int = 80,
+) -> Decimal:
     """Return the gross pay whose resulting net equals target_net.
 
     net_of_gross(gross) -> net must be monotonically non-decreasing.
@@ -72,10 +74,12 @@ def gross_up(target_net: Decimal,
     return _q(guess)
 
 
-def gross_up_detail(target_net,
-                    net_of_gross: Callable[[Decimal], Decimal],
-                    taxes_of_gross: Callable[[Decimal], Decimal] = None,
-                    **kw) -> dict:
+def gross_up_detail(
+    target_net,
+    net_of_gross: Callable[[Decimal], Decimal],
+    taxes_of_gross: Callable[[Decimal], Decimal] = None,
+    **kw
+) -> dict:
     """Solve for gross and report the gross, resulting net, and withholding.
 
     Extra keyword arguments (tolerance, max_iterations) pass through to

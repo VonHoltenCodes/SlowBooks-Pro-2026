@@ -21,16 +21,30 @@ _jinja_env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=
 
 def _get_smtp_settings(db: Session) -> dict:
     """Load SMTP settings from the settings table."""
-    keys = ["smtp_host", "smtp_port", "smtp_user", "smtp_password",
-            "smtp_from_email", "smtp_from_name", "smtp_use_tls"]
+    keys = [
+        "smtp_host",
+        "smtp_port",
+        "smtp_user",
+        "smtp_password",
+        "smtp_from_email",
+        "smtp_from_name",
+        "smtp_use_tls",
+    ]
     rows = db.query(Settings).filter(Settings.key.in_(keys)).all()
     settings = {r.key: r.value for r in rows}
     return settings
 
 
-def send_email(db: Session, to_email: str, subject: str, html_body: str,
-               attachment_bytes: bytes = None, attachment_name: str = None,
-               entity_type: str = None, entity_id: int = None) -> bool:
+def send_email(
+    db: Session,
+    to_email: str,
+    subject: str,
+    html_body: str,
+    attachment_bytes: bytes = None,
+    attachment_name: str = None,
+    entity_type: str = None,
+    entity_id: int = None,
+) -> bool:
     """Send an email via SMTP. Returns True on success."""
     smtp = _get_smtp_settings(db)
 
@@ -43,16 +57,21 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
     use_tls = smtp.get("smtp_use_tls", "true").lower() == "true"
 
     if not host or not from_email:
-        log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
-                       recipient=to_email, subject=subject, status="failed",
-                       error_message="SMTP not configured")
+        log = EmailLog(
+            entity_type=entity_type or "",
+            entity_id=entity_id or 0,
+            recipient=to_email,
+            subject=subject,
+            status="failed",
+            error_message="SMTP not configured",
+        )
         db.add(log)
         db.commit()
         return False
 
     # Sanitize email headers to prevent injection
-    to_email = to_email.replace('\r', '').replace('\n', '').strip()
-    subject = subject.replace('\r', '').replace('\n', ' ').strip()
+    to_email = to_email.replace("\r", "").replace("\n", "").strip()
+    subject = subject.replace("\r", "").replace("\n", " ").strip()
 
     msg = MIMEMultipart()
     msg["From"] = f"{from_name} <{from_email}>"
@@ -80,8 +99,13 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
         server.quit()
         server = None
 
-        log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
-                       recipient=to_email, subject=subject, status="sent")
+        log = EmailLog(
+            entity_type=entity_type or "",
+            entity_id=entity_id or 0,
+            recipient=to_email,
+            subject=subject,
+            status="sent",
+        )
         db.add(log)
         db.commit()
         return True
@@ -92,9 +116,14 @@ def send_email(db: Session, to_email: str, subject: str, html_body: str,
                 server.quit()
             except Exception:
                 pass
-        log = EmailLog(entity_type=entity_type or "", entity_id=entity_id or 0,
-                       recipient=to_email, subject=subject, status="failed",
-                       error_message=str(e))
+        log = EmailLog(
+            entity_type=entity_type or "",
+            entity_id=entity_id or 0,
+            recipient=to_email,
+            subject=subject,
+            status="failed",
+            error_message=str(e),
+        )
         db.add(log)
         db.commit()
         return False
@@ -109,6 +138,7 @@ def render_template_from_db(db: Session, template_name: str, context: dict) -> t
     if tpl:
         env = SandboxedEnvironment()
         from app.services.pdf_service import _format_currency, _format_date
+
         env.filters["currency"] = _format_currency
         env.filters["fdate"] = _format_date
         subject = env.from_string(tpl.subject_template).render(**context)

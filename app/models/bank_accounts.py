@@ -6,8 +6,16 @@
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Numeric, DateTime, Enum, Boolean, Date,
-    ForeignKey, func,
+    Column,
+    Integer,
+    String,
+    Numeric,
+    DateTime,
+    Enum,
+    Boolean,
+    Date,
+    ForeignKey,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -20,15 +28,15 @@ class BankAccountKind(str, enum.Enum):
 
 
 class DepositType(str, enum.Enum):
-    FULL = "full"            # entire net pay to this account
-    PERCENT = "percent"      # a percentage of net pay
-    FIXED = "fixed"          # a fixed dollar amount
+    FULL = "full"  # entire net pay to this account
+    PERCENT = "percent"  # a percentage of net pay
+    FIXED = "fixed"  # a fixed dollar amount
     REMAINDER = "remainder"  # whatever is left after FIXED/PERCENT splits
 
 
 class PrenoteStatus(str, enum.Enum):
     NOT_SENT = "not_sent"
-    PENDING = "pending"      # zero-dollar test transaction sent, in waiting period
+    PENDING = "pending"  # zero-dollar test transaction sent, in waiting period
     CONFIRMED = "confirmed"  # cleared the prenote window, safe to credit
 
 
@@ -36,7 +44,9 @@ class EmployeeBankAccount(Base):
     __tablename__ = "employee_bank_accounts"
 
     id = Column(Integer, primary_key=True, index=True)
-    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=False, index=True)
+    employee_id = Column(
+        Integer, ForeignKey("employees.id"), nullable=False, index=True
+    )
 
     nickname = Column(String(100), nullable=True)
     account_kind = Column(Enum(BankAccountKind), default=BankAccountKind.CHECKING)
@@ -50,7 +60,9 @@ class EmployeeBankAccount(Base):
     # Split-deposit configuration. priority orders multiple accounts; the
     # REMAINDER account is always applied last.
     deposit_type = Column(Enum(DepositType), default=DepositType.FULL)
-    deposit_value = Column(Numeric(12, 2), default=0)  # percent (0-100) or dollar amount
+    deposit_value = Column(
+        Numeric(12, 2), default=0
+    )  # percent (0-100) or dollar amount
     priority = Column(Integer, default=0)
 
     prenote_status = Column(Enum(PrenoteStatus), default=PrenoteStatus.NOT_SENT)

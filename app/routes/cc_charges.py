@@ -42,15 +42,21 @@ def list_cc_charges(db: Session = Depends(get_db)):
                 expense_line = line
             elif line.credit > 0:
                 cc_line = line
-        acct = db.query(Account).filter(Account.id == expense_line.account_id).first() if expense_line else None
-        results.append({
-            "id": txn.id,
-            "date": txn.date.isoformat(),
-            "description": txn.description or "",
-            "reference": txn.reference or "",
-            "amount": float(expense_line.debit) if expense_line else 0,
-            "account_name": acct.name if acct else "",
-        })
+        acct = (
+            db.query(Account).filter(Account.id == expense_line.account_id).first()
+            if expense_line
+            else None
+        )
+        results.append(
+            {
+                "id": txn.id,
+                "date": txn.date.isoformat(),
+                "description": txn.description or "",
+                "reference": txn.reference or "",
+                "amount": float(expense_line.debit) if expense_line else 0,
+                "account_name": acct.name if acct else "",
+            }
+        )
     return results
 
 
@@ -60,7 +66,9 @@ def create_cc_charge(data: CCChargeCreate, db: Session = Depends(get_db)):
 
     cc_account_id = _get_cc_account_id(db)
     if not cc_account_id:
-        raise HTTPException(status_code=400, detail="Credit Card account (2100) not found")
+        raise HTTPException(
+            status_code=400, detail="Credit Card account (2100) not found"
+        )
 
     expense_account = db.query(Account).filter(Account.id == data.account_id).first()
     if not expense_account:
@@ -87,8 +95,11 @@ def create_cc_charge(data: CCChargeCreate, db: Session = Depends(get_db)):
 
     desc = f"CC Charge: {data.payee}" if data.payee else "Credit Card Charge"
     txn = create_journal_entry(
-        db, data.date, desc,
-        journal_lines, source_type="cc_charge",
+        db,
+        data.date,
+        desc,
+        journal_lines,
+        source_type="cc_charge",
         reference=data.reference or "",
     )
 

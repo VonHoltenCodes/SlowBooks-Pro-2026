@@ -24,7 +24,6 @@ from app.models.payments import Payment, PaymentAllocation
 from app.models.qbo_mapping import QBOMapping
 from app.services.qbo_service import get_qbo_client
 
-
 # ============================================================================
 # QBO -> Slowbooks type mappings
 # ============================================================================
@@ -59,16 +58,26 @@ _QBO_ITEM_TYPE_MAP = {
 # Mapping helpers
 # ============================================================================
 
+
 def _get_mapping(db: Session, entity_type: str, qbo_id: str) -> QBOMapping:
     """Look up existing mapping by QBO ID."""
-    return db.query(QBOMapping).filter(
-        QBOMapping.entity_type == entity_type,
-        QBOMapping.qbo_id == str(qbo_id),
-    ).first()
+    return (
+        db.query(QBOMapping)
+        .filter(
+            QBOMapping.entity_type == entity_type,
+            QBOMapping.qbo_id == str(qbo_id),
+        )
+        .first()
+    )
 
 
-def _create_mapping(db: Session, entity_type: str, slowbooks_id: int,
-                    qbo_id: str, sync_token: str = None):
+def _create_mapping(
+    db: Session,
+    entity_type: str,
+    slowbooks_id: int,
+    qbo_id: str,
+    sync_token: str = None,
+):
     """Create a new QBO <-> Slowbooks mapping."""
     m = QBOMapping(
         entity_type=entity_type,
@@ -101,6 +110,7 @@ def _parse_qbo_date(s) -> date:
         return date.today()
     try:
         from datetime import datetime
+
         return datetime.strptime(str(s), "%Y-%m-%d").date()
     except (ValueError, TypeError):
         return date.today()
@@ -109,6 +119,7 @@ def _parse_qbo_date(s) -> date:
 # ============================================================================
 # Import functions
 # ============================================================================
+
 
 def import_accounts(db: Session) -> dict:
     """Import accounts from QBO into Slowbooks."""
@@ -122,9 +133,13 @@ def import_accounts(db: Session) -> dict:
         # Query all active accounts, sorted by depth (parents first)
         qbo_accounts = QBOAccount.all(qb=client)
         # Sort by FullyQualifiedName depth so parents come first
-        qbo_accounts.sort(key=lambda a: (_safe(a, "FullyQualifiedName", "") or "").count(":"))
+        qbo_accounts.sort(
+            key=lambda a: (_safe(a, "FullyQualifiedName", "") or "").count(":")
+        )
     except Exception as e:
-        errors.append({"entity": "accounts", "message": f"Failed to query QBO: {str(e)}"})
+        errors.append(
+            {"entity": "accounts", "message": f"Failed to query QBO: {str(e)}"}
+        )
         return {"imported": 0, "errors": errors}
 
     for qbo_acct in qbo_accounts:
@@ -144,8 +159,9 @@ def import_accounts(db: Session) -> dict:
             # Check if name already exists in Slowbooks
             existing = db.query(Account).filter(Account.name == name).first()
             if existing:
-                _create_mapping(db, "account", existing.id, qbo_id,
-                                _safe(qbo_acct, "SyncToken"))
+                _create_mapping(
+                    db, "account", existing.id, qbo_id, _safe(qbo_acct, "SyncToken")
+                )
                 db.flush()
                 continue
 
@@ -174,13 +190,15 @@ def import_accounts(db: Session) -> dict:
             db.add(acct)
             db.flush()
 
-            _create_mapping(db, "account", acct.id, qbo_id,
-                            _safe(qbo_acct, "SyncToken"))
+            _create_mapping(
+                db, "account", acct.id, qbo_id, _safe(qbo_acct, "SyncToken")
+            )
             imported += 1
 
         except Exception as e:
-            errors.append({"entity": "account", "qbo_id": str(qbo_id),
-                           "message": str(e)})
+            errors.append(
+                {"entity": "account", "qbo_id": str(qbo_id), "message": str(e)}
+            )
 
     return {"imported": imported, "errors": errors}
 
@@ -196,7 +214,9 @@ def import_customers(db: Session) -> dict:
     try:
         qbo_customers = QBOCustomer.all(qb=client)
     except Exception as e:
-        errors.append({"entity": "customers", "message": f"Failed to query QBO: {str(e)}"})
+        errors.append(
+            {"entity": "customers", "message": f"Failed to query QBO: {str(e)}"}
+        )
         return {"imported": 0, "errors": errors}
 
     for qbo_cust in qbo_customers:
@@ -215,8 +235,9 @@ def import_customers(db: Session) -> dict:
             # Check by name
             existing = db.query(Customer).filter(Customer.name == display_name).first()
             if existing:
-                _create_mapping(db, "customer", existing.id, qbo_id,
-                                _safe(qbo_cust, "SyncToken"))
+                _create_mapping(
+                    db, "customer", existing.id, qbo_id, _safe(qbo_cust, "SyncToken")
+                )
                 db.flush()
                 continue
 
@@ -225,7 +246,9 @@ def import_customers(db: Session) -> dict:
             bill_address1 = _safe(bill_addr, "Line1") if bill_addr else None
             bill_address2 = _safe(bill_addr, "Line2") if bill_addr else None
             bill_city = _safe(bill_addr, "City") if bill_addr else None
-            bill_state = _safe(bill_addr, "CountrySubDivisionCode") if bill_addr else None
+            bill_state = (
+                _safe(bill_addr, "CountrySubDivisionCode") if bill_addr else None
+            )
             bill_zip = _safe(bill_addr, "PostalCode") if bill_addr else None
 
             # Extract shipping address
@@ -233,7 +256,9 @@ def import_customers(db: Session) -> dict:
             ship_address1 = _safe(ship_addr, "Line1") if ship_addr else None
             ship_address2 = _safe(ship_addr, "Line2") if ship_addr else None
             ship_city = _safe(ship_addr, "City") if ship_addr else None
-            ship_state = _safe(ship_addr, "CountrySubDivisionCode") if ship_addr else None
+            ship_state = (
+                _safe(ship_addr, "CountrySubDivisionCode") if ship_addr else None
+            )
             ship_zip = _safe(ship_addr, "PostalCode") if ship_addr else None
 
             # Extract primary email/phone
@@ -262,7 +287,11 @@ def import_customers(db: Session) -> dict:
                 phone=phone,
                 mobile=mobile,
                 fax=fax,
-                website=_safe(qbo_cust, "WebAddr", {}).get("URI") if isinstance(_safe(qbo_cust, "WebAddr"), dict) else None,
+                website=(
+                    _safe(qbo_cust, "WebAddr", {}).get("URI")
+                    if isinstance(_safe(qbo_cust, "WebAddr"), dict)
+                    else None
+                ),
                 bill_address1=bill_address1,
                 bill_address2=bill_address2,
                 bill_city=bill_city,
@@ -283,13 +312,15 @@ def import_customers(db: Session) -> dict:
             db.add(cust)
             db.flush()
 
-            _create_mapping(db, "customer", cust.id, qbo_id,
-                            _safe(qbo_cust, "SyncToken"))
+            _create_mapping(
+                db, "customer", cust.id, qbo_id, _safe(qbo_cust, "SyncToken")
+            )
             imported += 1
 
         except Exception as e:
-            errors.append({"entity": "customer", "qbo_id": str(qbo_id),
-                           "message": str(e)})
+            errors.append(
+                {"entity": "customer", "qbo_id": str(qbo_id), "message": str(e)}
+            )
 
     return {"imported": imported, "errors": errors}
 
@@ -305,7 +336,9 @@ def import_vendors(db: Session) -> dict:
     try:
         qbo_vendors = QBOVendor.all(qb=client)
     except Exception as e:
-        errors.append({"entity": "vendors", "message": f"Failed to query QBO: {str(e)}"})
+        errors.append(
+            {"entity": "vendors", "message": f"Failed to query QBO: {str(e)}"}
+        )
         return {"imported": 0, "errors": errors}
 
     for qbo_vend in qbo_vendors:
@@ -323,8 +356,9 @@ def import_vendors(db: Session) -> dict:
 
             existing = db.query(Vendor).filter(Vendor.name == display_name).first()
             if existing:
-                _create_mapping(db, "vendor", existing.id, qbo_id,
-                                _safe(qbo_vend, "SyncToken"))
+                _create_mapping(
+                    db, "vendor", existing.id, qbo_id, _safe(qbo_vend, "SyncToken")
+                )
                 db.flush()
                 continue
 
@@ -371,13 +405,13 @@ def import_vendors(db: Session) -> dict:
             db.add(vend)
             db.flush()
 
-            _create_mapping(db, "vendor", vend.id, qbo_id,
-                            _safe(qbo_vend, "SyncToken"))
+            _create_mapping(db, "vendor", vend.id, qbo_id, _safe(qbo_vend, "SyncToken"))
             imported += 1
 
         except Exception as e:
-            errors.append({"entity": "vendor", "qbo_id": str(qbo_id),
-                           "message": str(e)})
+            errors.append(
+                {"entity": "vendor", "qbo_id": str(qbo_id), "message": str(e)}
+            )
 
     return {"imported": imported, "errors": errors}
 
@@ -411,8 +445,9 @@ def import_items(db: Session) -> dict:
 
             existing = db.query(Item).filter(Item.name == name).first()
             if existing:
-                _create_mapping(db, "item", existing.id, qbo_id,
-                                _safe(qbo_item, "SyncToken"))
+                _create_mapping(
+                    db, "item", existing.id, qbo_id, _safe(qbo_item, "SyncToken")
+                )
                 db.flush()
                 continue
 
@@ -451,13 +486,11 @@ def import_items(db: Session) -> dict:
             db.add(item)
             db.flush()
 
-            _create_mapping(db, "item", item.id, qbo_id,
-                            _safe(qbo_item, "SyncToken"))
+            _create_mapping(db, "item", item.id, qbo_id, _safe(qbo_item, "SyncToken"))
             imported += 1
 
         except Exception as e:
-            errors.append({"entity": "item", "qbo_id": str(qbo_id),
-                           "message": str(e)})
+            errors.append({"entity": "item", "qbo_id": str(qbo_id), "message": str(e)})
 
     return {"imported": imported, "errors": errors}
 
@@ -473,7 +506,9 @@ def import_invoices(db: Session) -> dict:
     try:
         qbo_invoices = QBOInvoice.all(qb=client)
     except Exception as e:
-        errors.append({"entity": "invoices", "message": f"Failed to query QBO: {str(e)}"})
+        errors.append(
+            {"entity": "invoices", "message": f"Failed to query QBO: {str(e)}"}
+        )
         return {"imported": 0, "errors": errors}
 
     for qbo_inv in qbo_invoices:
@@ -489,12 +524,13 @@ def import_invoices(db: Session) -> dict:
 
             # Check by invoice number for dedup
             if doc_num:
-                existing = db.query(Invoice).filter(
-                    Invoice.invoice_number == doc_num
-                ).first()
+                existing = (
+                    db.query(Invoice).filter(Invoice.invoice_number == doc_num).first()
+                )
                 if existing:
-                    _create_mapping(db, "invoice", existing.id, qbo_id,
-                                    _safe(qbo_inv, "SyncToken"))
+                    _create_mapping(
+                        db, "invoice", existing.id, qbo_id, _safe(qbo_inv, "SyncToken")
+                    )
                     db.flush()
                     continue
 
@@ -515,8 +551,13 @@ def import_invoices(db: Session) -> dict:
                     if cust:
                         customer_id = cust.id
                 if not customer_id:
-                    errors.append({"entity": "invoice", "qbo_id": str(qbo_id),
-                                   "message": "Customer not found"})
+                    errors.append(
+                        {
+                            "entity": "invoice",
+                            "qbo_id": str(qbo_id),
+                            "message": "Customer not found",
+                        }
+                    )
                     continue
 
             # Determine status from balance
@@ -548,7 +589,11 @@ def import_invoices(db: Session) -> dict:
                 customer_id=customer_id,
                 date=inv_date,
                 due_date=due_date,
-                terms=_safe(qbo_inv, "SalesTermRef", {}).get("name", "Net 30") if isinstance(_safe(qbo_inv, "SalesTermRef"), dict) else "Net 30",
+                terms=(
+                    _safe(qbo_inv, "SalesTermRef", {}).get("name", "Net 30")
+                    if isinstance(_safe(qbo_inv, "SalesTermRef"), dict)
+                    else "Net 30"
+                ),
                 status=status,
                 subtotal=subtotal,
                 tax_rate=Decimal("0"),
@@ -556,7 +601,11 @@ def import_invoices(db: Session) -> dict:
                 total=total_amt,
                 amount_paid=amount_paid,
                 balance_due=balance,
-                notes=_safe(qbo_inv, "CustomerMemo", {}).get("value") if isinstance(_safe(qbo_inv, "CustomerMemo"), dict) else None,
+                notes=(
+                    _safe(qbo_inv, "CustomerMemo", {}).get("value")
+                    if isinstance(_safe(qbo_inv, "CustomerMemo"), dict)
+                    else None
+                ),
             )
             db.add(invoice)
             db.flush()
@@ -598,8 +647,9 @@ def import_invoices(db: Session) -> dict:
                 db.add(inv_line)
                 line_order += 1
 
-            _create_mapping(db, "invoice", invoice.id, qbo_id,
-                            _safe(qbo_inv, "SyncToken"))
+            _create_mapping(
+                db, "invoice", invoice.id, qbo_id, _safe(qbo_inv, "SyncToken")
+            )
 
             # Phase 11 (audit fix): QBO-imported invoices must also move
             # inventory for tracked items. QBO itself manages inventory so
@@ -607,13 +657,15 @@ def import_invoices(db: Session) -> dict:
             db.flush()
             db.refresh(invoice)
             from app.services.inventory_hooks import post_sale_for_invoice
+
             post_sale_for_invoice(db, invoice, txn_date=invoice.date)
 
             imported += 1
 
         except Exception as e:
-            errors.append({"entity": "invoice", "qbo_id": str(qbo_id),
-                           "message": str(e)})
+            errors.append(
+                {"entity": "invoice", "qbo_id": str(qbo_id), "message": str(e)}
+            )
 
     return {"imported": imported, "errors": errors}
 
@@ -629,7 +681,9 @@ def import_payments(db: Session) -> dict:
     try:
         qbo_payments = QBOPayment.all(qb=client)
     except Exception as e:
-        errors.append({"entity": "payments", "message": f"Failed to query QBO: {str(e)}"})
+        errors.append(
+            {"entity": "payments", "message": f"Failed to query QBO: {str(e)}"}
+        )
         return {"imported": 0, "errors": errors}
 
     for qbo_pmt in qbo_payments:
@@ -657,8 +711,13 @@ def import_payments(db: Session) -> dict:
                     if cust:
                         customer_id = cust.id
                 if not customer_id:
-                    errors.append({"entity": "payment", "qbo_id": str(qbo_id),
-                                   "message": "Customer not found"})
+                    errors.append(
+                        {
+                            "entity": "payment",
+                            "qbo_id": str(qbo_id),
+                            "message": "Customer not found",
+                        }
+                    )
                     continue
 
             amount = _safe_decimal(qbo_pmt, "TotalAmt")
@@ -677,7 +736,11 @@ def import_payments(db: Session) -> dict:
                 customer_id=customer_id,
                 date=pmt_date,
                 amount=amount,
-                method=_safe(qbo_pmt, "PaymentMethodRef", {}).get("name") if isinstance(_safe(qbo_pmt, "PaymentMethodRef"), dict) else None,
+                method=(
+                    _safe(qbo_pmt, "PaymentMethodRef", {}).get("name")
+                    if isinstance(_safe(qbo_pmt, "PaymentMethodRef"), dict)
+                    else None
+                ),
                 reference=_safe(qbo_pmt, "PaymentRefNum") or None,
                 deposit_to_account_id=deposit_account_id,
             )
@@ -695,9 +758,11 @@ def import_payments(db: Session) -> dict:
                     if txn_type == "Invoice" and txn_id:
                         inv_map = _get_mapping(db, "invoice", txn_id)
                         if inv_map:
-                            inv = db.query(Invoice).filter(
-                                Invoice.id == inv_map.slowbooks_id
-                            ).first()
+                            inv = (
+                                db.query(Invoice)
+                                .filter(Invoice.id == inv_map.slowbooks_id)
+                                .first()
+                            )
                             if inv:
                                 alloc = PaymentAllocation(
                                     payment_id=payment.id,
@@ -707,20 +772,24 @@ def import_payments(db: Session) -> dict:
                                 db.add(alloc)
 
                                 # Update invoice status
-                                inv.amount_paid = (inv.amount_paid or Decimal("0")) + (line_amount or amount)
+                                inv.amount_paid = (inv.amount_paid or Decimal("0")) + (
+                                    line_amount or amount
+                                )
                                 inv.balance_due = inv.total - inv.amount_paid
                                 if inv.balance_due <= 0:
                                     inv.status = InvoiceStatus.PAID
                                 elif inv.amount_paid > 0:
                                     inv.status = InvoiceStatus.PARTIAL
 
-            _create_mapping(db, "payment", payment.id, qbo_id,
-                            _safe(qbo_pmt, "SyncToken"))
+            _create_mapping(
+                db, "payment", payment.id, qbo_id, _safe(qbo_pmt, "SyncToken")
+            )
             imported += 1
 
         except Exception as e:
-            errors.append({"entity": "payment", "qbo_id": str(qbo_id),
-                           "message": str(e)})
+            errors.append(
+                {"entity": "payment", "qbo_id": str(qbo_id), "message": str(e)}
+            )
 
     return {"imported": imported, "errors": errors}
 
@@ -728,6 +797,7 @@ def import_payments(db: Session) -> dict:
 # ============================================================================
 # Master import orchestrator
 # ============================================================================
+
 
 def import_all(db: Session) -> dict:
     """Import all entity types from QBO in dependency order.

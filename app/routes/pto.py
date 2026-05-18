@@ -11,13 +11,21 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.payroll import Employee
 from app.models.pto import (
-    PTOPolicy, PTOAccrual, PTORequest,
-    PTOType, AccrualMethod, PTORequestStatus,
+    PTOPolicy,
+    PTOAccrual,
+    PTORequest,
+    PTOType,
+    AccrualMethod,
+    PTORequestStatus,
 )
 from app.schemas.pto import (
-    PTOPolicyCreate, PTOPolicyResponse,
-    PTOAccrualCreate, PTOAccrualResponse,
-    PTORequestCreate, PTORequestDecision, PTORequestResponse,
+    PTOPolicyCreate,
+    PTOPolicyResponse,
+    PTOAccrualCreate,
+    PTOAccrualResponse,
+    PTORequestCreate,
+    PTORequestDecision,
+    PTORequestResponse,
 )
 from app.services.pto_accrual import compute_period_accrual, apply_accrual
 
@@ -38,8 +46,11 @@ def create_policy(data: PTOPolicyCreate, db: Session = Depends(get_db)):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
     policy = PTOPolicy(
-        name=data.name, pto_type=pto_type, accrual_method=method,
-        accrual_rate=data.accrual_rate, max_carryover=data.max_carryover,
+        name=data.name,
+        pto_type=pto_type,
+        accrual_method=method,
+        accrual_rate=data.accrual_rate,
+        max_carryover=data.max_carryover,
         max_balance=data.max_balance,
     )
     db.add(policy)
@@ -50,7 +61,9 @@ def create_policy(data: PTOPolicyCreate, db: Session = Depends(get_db)):
 
 # --- Accruals --------------------------------------------------------------
 @router.get("/accruals", response_model=list[PTOAccrualResponse])
-def list_accruals(employee_id: int = Query(default=None), db: Session = Depends(get_db)):
+def list_accruals(
+    employee_id: int = Query(default=None), db: Session = Depends(get_db)
+):
     q = db.query(PTOAccrual)
     if employee_id:
         q = q.filter(PTOAccrual.employee_id == employee_id)
@@ -65,15 +78,19 @@ def create_accrual(data: PTOAccrualCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Policy not found")
     existing = (
         db.query(PTOAccrual)
-        .filter(PTOAccrual.employee_id == data.employee_id,
-                PTOAccrual.policy_id == data.policy_id)
+        .filter(
+            PTOAccrual.employee_id == data.employee_id,
+            PTOAccrual.policy_id == data.policy_id,
+        )
         .first()
     )
     if existing:
-        raise HTTPException(status_code=400,
-                            detail="Employee already enrolled in this policy")
+        raise HTTPException(
+            status_code=400, detail="Employee already enrolled in this policy"
+        )
     accrual = PTOAccrual(
-        employee_id=data.employee_id, policy_id=data.policy_id,
+        employee_id=data.employee_id,
+        policy_id=data.policy_id,
         balance=data.balance,
     )
     db.add(accrual)
@@ -83,7 +100,7 @@ def create_accrual(data: PTOAccrualCreate, db: Session = Depends(get_db)):
 
 
 class AccrueRequest(BaseModel):
-    hours_worked: float = 0   # required for per-hour-worked policies (e.g. WA sick)
+    hours_worked: float = 0  # required for per-hour-worked policies (e.g. WA sick)
 
 
 @router.post("/accruals/{accrual_id}/accrue", response_model=PTOAccrualResponse)
@@ -98,7 +115,9 @@ def run_accrual(accrual_id: int, data: AccrueRequest, db: Session = Depends(get_
 
     earned = compute_period_accrual(policy, Decimal(str(data.hours_worked or 0)))
     new_balance = apply_accrual(
-        Decimal(str(accrual.balance or 0)), earned, Decimal("0"),
+        Decimal(str(accrual.balance or 0)),
+        earned,
+        Decimal("0"),
         Decimal(str(policy.max_balance)) if policy.max_balance is not None else None,
     )
     accrual.accrued_ytd = (accrual.accrued_ytd or 0) + earned
@@ -141,10 +160,15 @@ def create_request(data: PTORequestCreate, db: Session = Depends(get_db)):
     try:
         pto_type = PTOType(data.pto_type)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid pto_type: {data.pto_type}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid pto_type: {data.pto_type}"
+        )
     req = PTORequest(
-        employee_id=data.employee_id, start_date=data.start_date,
-        end_date=data.end_date, hours=data.hours, pto_type=pto_type,
+        employee_id=data.employee_id,
+        start_date=data.start_date,
+        end_date=data.end_date,
+        hours=data.hours,
+        pto_type=pto_type,
         notes=data.notes,
     )
     db.add(req)
@@ -154,8 +178,9 @@ def create_request(data: PTORequestCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/requests/{request_id}/decision", response_model=PTORequestResponse)
-def decide_request(request_id: int, data: PTORequestDecision,
-                   db: Session = Depends(get_db)):
+def decide_request(
+    request_id: int, data: PTORequestDecision, db: Session = Depends(get_db)
+):
     req = db.query(PTORequest).filter(PTORequest.id == request_id).first()
     if not req:
         raise HTTPException(status_code=404, detail="PTO request not found")
@@ -172,13 +197,17 @@ def decide_request(request_id: int, data: PTORequestDecision,
         accrual = (
             db.query(PTOAccrual)
             .join(PTOPolicy, PTOAccrual.policy_id == PTOPolicy.id)
-            .filter(PTOAccrual.employee_id == req.employee_id,
-                    PTOPolicy.pto_type == req.pto_type)
+            .filter(
+                PTOAccrual.employee_id == req.employee_id,
+                PTOPolicy.pto_type == req.pto_type,
+            )
             .first()
         )
         if accrual:
             hours = Decimal(str(req.hours or 0))
-            accrual.balance = max(Decimal("0"), Decimal(str(accrual.balance or 0)) - hours)
+            accrual.balance = max(
+                Decimal("0"), Decimal(str(accrual.balance or 0)) - hours
+            )
             accrual.used_ytd = (accrual.used_ytd or 0) + hours
 
     db.commit()

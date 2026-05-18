@@ -3,7 +3,9 @@
 # ============================================================================
 
 from app.models.hr import (
-    OnboardingTask, OnboardingTaskType, OnboardingTaskStatus,
+    OnboardingTask,
+    OnboardingTaskType,
+    OnboardingTaskStatus,
     DEFAULT_ONBOARDING_TASKS,
 )
 
@@ -14,15 +16,20 @@ def seed_onboarding_tasks(db, employee_id: int) -> list:
     Idempotent — only adds task types that are not already present.
     """
     existing = {
-        t.task_type for t in
-        db.query(OnboardingTask).filter(OnboardingTask.employee_id == employee_id).all()
+        t.task_type
+        for t in db.query(OnboardingTask)
+        .filter(OnboardingTask.employee_id == employee_id)
+        .all()
     }
     created = []
     for task_type in DEFAULT_ONBOARDING_TASKS:
         if task_type in existing:
             continue
-        task = OnboardingTask(employee_id=employee_id, task_type=task_type,
-                              status=OnboardingTaskStatus.PENDING)
+        task = OnboardingTask(
+            employee_id=employee_id,
+            task_type=task_type,
+            status=OnboardingTaskStatus.PENDING,
+        )
         db.add(task)
         created.append(task)
     if created:

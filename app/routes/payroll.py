@@ -15,17 +15,30 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models.payroll import (
-    PayRun, PayStub, PayRunStatus, PayRunType, Employee, periods_per_year,
+    PayRun,
+    PayStub,
+    PayRunStatus,
+    PayRunType,
+    Employee,
+    periods_per_year,
 )
 from app.models.time_entries import TimeEntry, TimeEntryStatus
-from app.models.deductions import EmployeeDeduction, GarnishmentOrder, DeductionCategory, CalcMethod
+from app.models.deductions import (
+    EmployeeDeduction,
+    GarnishmentOrder,
+    DeductionCategory,
+    CalcMethod,
+)
 from app.models.accounts import Account
 from app.schemas.payroll import PayRunCreate, PayRunResponse, YTDResponse
 from app.schemas.deductions import GrossUpRequest, GrossUpResponse
 from app.services.payroll_service import calculate_withholdings
 from app.services.accounting import create_journal_entry
 from app.services.garnishment import (
-    GarnishmentSpec, apply_garnishments, compute_disposable_earnings, total_garnished,
+    GarnishmentSpec,
+    apply_garnishments,
+    compute_disposable_earnings,
+    total_garnished,
 )
 from app.services.gross_up import gross_up
 from app.services.state_tax.reciprocity import withholding_state
@@ -59,9 +72,14 @@ def _ytd_stubs(db: Session, employee_id: int, year: int, before: date = None):
 def employee_ytd(db: Session, employee_id: int, year: int, before: date = None) -> dict:
     """Aggregate an employee's pay-stub figures for a calendar year."""
     totals = {
-        "gross": Decimal("0"), "federal": Decimal("0"), "state": Decimal("0"),
-        "state_other": Decimal("0"), "ss": Decimal("0"), "medicare": Decimal("0"),
-        "pretax_deductions": Decimal("0"), "net": Decimal("0"),
+        "gross": Decimal("0"),
+        "federal": Decimal("0"),
+        "state": Decimal("0"),
+        "state_other": Decimal("0"),
+        "ss": Decimal("0"),
+        "medicare": Decimal("0"),
+        "pretax_deductions": Decimal("0"),
+        "net": Decimal("0"),
     }
     for s in _ytd_stubs(db, employee_id, year, before):
         totals["gross"] += s.gross_pay or 0
@@ -117,8 +135,10 @@ def _employee_deductions(db: Session, employee_id: int, gross: Decimal) -> tuple
     pretax = pretax_fica = posttax = Decimal("0")
     rows = (
         db.query(EmployeeDeduction)
-        .filter(EmployeeDeduction.employee_id == employee_id,
-                EmployeeDeduction.is_active == True)  # noqa: E712
+        .filter(
+            EmployeeDeduction.employee_id == employee_id,
+            EmployeeDeduction.is_active == True,
+        )  # noqa: E712
         .all()
     )
     for d in rows:
@@ -143,18 +163,24 @@ def _garnishment_specs(db: Session, employee_id: int) -> list:
     specs = []
     rows = (
         db.query(GarnishmentOrder)
-        .filter(GarnishmentOrder.employee_id == employee_id,
-                GarnishmentOrder.is_active == True)  # noqa: E712
+        .filter(
+            GarnishmentOrder.employee_id == employee_id,
+            GarnishmentOrder.is_active == True,
+        )  # noqa: E712
         .all()
     )
     for g in rows:
-        specs.append(GarnishmentSpec(
-            order_id=g.id, garnishment_type=g.garnishment_type.value,
-            calc_method=g.calc_method.value, amount=Decimal(str(g.amount or 0)),
-            priority=g.priority or 0,
-            supports_secondary_family=bool(g.supports_secondary_family),
-            in_arrears_12_weeks=bool(g.in_arrears_12_weeks),
-        ))
+        specs.append(
+            GarnishmentSpec(
+                order_id=g.id,
+                garnishment_type=g.garnishment_type.value,
+                calc_method=g.calc_method.value,
+                amount=Decimal(str(g.amount or 0)),
+                priority=g.priority or 0,
+                supports_secondary_family=bool(g.supports_secondary_family),
+                in_arrears_12_weeks=bool(g.in_arrears_12_weeks),
+            )
+        )
     return specs
 
 
@@ -163,10 +189,12 @@ def _last_regular_gross(db: Session, employee_id: int, before: date) -> Decimal:
     stub = (
         db.query(PayStub)
         .join(PayRun, PayStub.pay_run_id == PayRun.id)
-        .filter(PayStub.employee_id == employee_id,
-                PayRun.run_type == PayRunType.REGULAR,
-                PayRun.status != PayRunStatus.VOID,
-                PayRun.pay_date < before)
+        .filter(
+            PayStub.employee_id == employee_id,
+            PayRun.run_type == PayRunType.REGULAR,
+            PayRun.status != PayRunStatus.VOID,
+            PayRun.pay_date < before,
+        )
         .order_by(PayRun.pay_date.desc())
         .first()
     )
@@ -178,11 +206,15 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     try:
         run_type = PayRunType(data.run_type)
     except ValueError:
-        raise HTTPException(status_code=400, detail=f"Invalid run_type: {data.run_type}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid run_type: {data.run_type}"
+        )
 
     run = PayRun(
-        period_start=data.period_start, period_end=data.period_end,
-        pay_date=data.pay_date, run_type=run_type,
+        period_start=data.period_start,
+        period_end=data.period_end,
+        pay_date=data.pay_date,
+        run_type=run_type,
     )
     db.add(run)
     db.flush()
@@ -193,8 +225,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     for stub_input in data.stubs:
         emp = db.query(Employee).filter(Employee.id == stub_input.employee_id).first()
         if not emp:
-            raise HTTPException(status_code=404,
-                                detail=f"Employee {stub_input.employee_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Employee {stub_input.employee_id} not found"
+            )
 
         reg = ot = dt = Decimal("0")
         rate = Decimal(str(emp.pay_rate or 0))
@@ -243,7 +276,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
 
         # Pre-tax / post-tax deductions: configured recurring ones plus any
         # ad-hoc amounts passed on the request.
-        ded_pretax, ded_pretax_fica, ded_posttax = _employee_deductions(db, emp.id, gross)
+        ded_pretax, ded_pretax_fica, ded_posttax = _employee_deductions(
+            db, emp.id, gross
+        )
         pretax = ded_pretax + Decimal(str(stub_input.pretax_deductions or 0))
         posttax = ded_posttax + Decimal(str(stub_input.posttax_deductions or 0))
         reimbursements = Decimal(str(stub_input.reimbursements or 0)).quantize(CENT)
@@ -284,8 +319,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         # legally-required tax withholding) under CCPA limits.
         disposable = compute_disposable_earnings(gross, result["total_employee_tax"])
         weeks = max(1, round(52 / periods_per_year(emp.pay_frequency)))
-        garn_results = apply_garnishments(disposable, _garnishment_specs(db, emp.id),
-                                          weeks_in_period=weeks)
+        garn_results = apply_garnishments(
+            disposable, _garnishment_specs(db, emp.id), weeks_in_period=weeks
+        )
         garnish_total = total_garnished(garn_results)
 
         net = (result["net"] - posttax - garnish_total + reimbursements).quantize(CENT)
@@ -299,18 +335,28 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             detail["reimbursements"] = str(reimbursements)
 
         stub = PayStub(
-            pay_run_id=run.id, employee_id=emp.id,
-            hours=total_hours, regular_hours=reg, overtime_hours=ot,
-            doubletime_hours=dt, gross_pay=gross,
-            federal_tax=result["federal"], state_tax=result["state_income"],
+            pay_run_id=run.id,
+            employee_id=emp.id,
+            hours=total_hours,
+            regular_hours=reg,
+            overtime_hours=ot,
+            doubletime_hours=dt,
+            gross_pay=gross,
+            federal_tax=result["federal"],
+            state_tax=result["state_income"],
             state_other_employee=result["state_other_employee"],
-            ss_tax=result["ss"], medicare_tax=result["medicare"],
-            pretax_deductions=pretax, posttax_deductions=posttax,
-            garnishments=garnish_total, reimbursements=reimbursements,
-            work_state=work_state, net_pay=net,
+            ss_tax=result["ss"],
+            medicare_tax=result["medicare"],
+            pretax_deductions=pretax,
+            posttax_deductions=posttax,
+            garnishments=garnish_total,
+            reimbursements=reimbursements,
+            work_state=work_state,
+            net_pay=net,
             employer_ss_tax=result["employer_ss"],
             employer_medicare_tax=result["employer_medicare"],
-            futa_tax=result["futa"], suta_tax=result["suta"],
+            futa_tax=result["futa"],
+            suta_tax=result["suta"],
             state_other_employer=result["state_other_employer"],
             detail_json=json.dumps(detail),
         )
@@ -378,8 +424,10 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
     other_acct = _acct("2370", "2300")
 
     if not wage_expense or not bank:
-        raise HTTPException(status_code=400,
-                            detail="Required payroll accounts not found (need 6110/6000 and 1000).")
+        raise HTTPException(
+            status_code=400,
+            detail="Required payroll accounts not found (need 6110/6000 and 1000).",
+        )
 
     def _s(field):
         return sum((getattr(s, field) or Decimal("0")) for s in run.stubs)
@@ -391,24 +439,51 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
     total_medicare = _s("medicare_tax") + _s("employer_medicare_tax")
     total_futa = _s("futa_tax")
     total_suta = _s("suta_tax")
-    total_other = (_s("state_other_employee") + _s("state_other_employer")
-                   + _s("pretax_deductions") + _s("posttax_deductions")
-                   + _s("garnishments"))
-    total_employer = (_s("employer_ss_tax") + _s("employer_medicare_tax")
-                      + total_futa + total_suta + _s("state_other_employer"))
+    total_other = (
+        _s("state_other_employee")
+        + _s("state_other_employer")
+        + _s("pretax_deductions")
+        + _s("posttax_deductions")
+        + _s("garnishments")
+    )
+    total_employer = (
+        _s("employer_ss_tax")
+        + _s("employer_medicare_tax")
+        + total_futa
+        + total_suta
+        + _s("state_other_employer")
+    )
     total_reimb = _s("reimbursements")
     total_net = _s("net_pay")
 
     lines = []
     if total_gross > 0:
-        lines.append({"account_id": wage_expense, "debit": total_gross,
-                      "credit": Decimal("0"), "description": "Gross wages"})
+        lines.append(
+            {
+                "account_id": wage_expense,
+                "debit": total_gross,
+                "credit": Decimal("0"),
+                "description": "Gross wages",
+            }
+        )
     if total_employer > 0:
-        lines.append({"account_id": payroll_tax_expense, "debit": total_employer,
-                      "credit": Decimal("0"), "description": "Employer payroll taxes"})
+        lines.append(
+            {
+                "account_id": payroll_tax_expense,
+                "debit": total_employer,
+                "credit": Decimal("0"),
+                "description": "Employer payroll taxes",
+            }
+        )
     if total_reimb > 0 and reimb_expense:
-        lines.append({"account_id": reimb_expense, "debit": total_reimb,
-                      "credit": Decimal("0"), "description": "Employee reimbursements"})
+        lines.append(
+            {
+                "account_id": reimb_expense,
+                "debit": total_reimb,
+                "credit": Decimal("0"),
+                "description": "Employee reimbursements",
+            }
+        )
 
     for amount, acct, desc in [
         (total_fed, fed, "Federal income tax withheld"),
@@ -421,20 +496,33 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
         (total_net, bank, "Net payroll"),
     ]:
         if amount and amount > 0 and acct:
-            lines.append({"account_id": acct, "debit": Decimal("0"),
-                          "credit": amount, "description": desc})
+            lines.append(
+                {
+                    "account_id": acct,
+                    "debit": Decimal("0"),
+                    "credit": amount,
+                    "description": desc,
+                }
+            )
 
     if lines:
         txn = create_journal_entry(
-            db, run.pay_date, f"Payroll {run.period_start} - {run.period_end}",
-            lines, source_type="payroll", source_id=run.id,
+            db,
+            run.pay_date,
+            f"Payroll {run.period_start} - {run.period_end}",
+            lines,
+            source_type="payroll",
+            source_id=run.id,
         )
         run.transaction_id = txn.id
 
     run.status = PayRunStatus.PROCESSED
     db.commit()
-    return {"status": "processed", "pay_run_id": run.id,
-            "transaction_id": run.transaction_id}
+    return {
+        "status": "processed",
+        "pay_run_id": run.id,
+        "transaction_id": run.transaction_id,
+    }
 
 
 @router.post("/gross-up", response_model=GrossUpResponse)
@@ -462,7 +550,8 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
             deductions_annual=emp.deductions_annual or 0,
             extra_withholding=emp.extra_withholding or 0,
             ytd_gross=ytd["gross"],
-            work_state=work_state, withholding_state=wh_state,
+            work_state=work_state,
+            withholding_state=wh_state,
             wc_class_code=emp.wc_class_code,
             supplemental=bool(data.supplemental),
         )["net"]
@@ -471,8 +560,11 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
     gross = gross_up(target, net_of)
     net = net_of(gross)
     return GrossUpResponse(
-        employee_id=emp.id, target_net=data.target_net,
-        gross=float(gross), net=float(net), withholding=float(gross - net),
+        employee_id=emp.id,
+        target_net=data.target_net,
+        gross=float(gross),
+        net=float(net),
+        withholding=float(gross - net),
     )
 
 
@@ -493,31 +585,38 @@ def download_paystub(run_id: int, stub_id: int, db: Session = Depends(get_db)):
 
     ytd = employee_ytd(db, stub.employee_id, run.pay_date.year)
     company = {
-        "name": config.COMPANY_NAME, "address": config.COMPANY_ADDRESS,
-        "phone": config.COMPANY_PHONE, "ein": config.EMPLOYER_EIN,
+        "name": config.COMPANY_NAME,
+        "address": config.COMPANY_ADDRESS,
+        "phone": config.COMPANY_PHONE,
+        "ein": config.EMPLOYER_EIN,
     }
-    pdf = generate_paystub_pdf(stub, emp, run, company,
-                               {k: str(v) for k, v in ytd.items()})
+    pdf = generate_paystub_pdf(
+        stub, emp, run, company, {k: str(v) for k, v in ytd.items()}
+    )
     filename = f"paystub_{run_id}_{stub_id}.pdf"
-    return Response(content=pdf, media_type="application/pdf",
-                    headers={"Content-Disposition": f"inline; filename={filename}"})
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}"},
+    )
 
 
 class NachaOriginating(BaseModel):
-    immediate_destination: str          # receiving bank routing number
-    immediate_origin: str               # company identifier (10 chars)
+    immediate_destination: str  # receiving bank routing number
+    immediate_origin: str  # company identifier (10 chars)
     destination_name: str = "BANK"
     origin_name: str = ""
     company_name: str = ""
-    company_id: str = ""                # usually the employer EIN
-    originating_dfi_id: str             # 8-digit routing prefix of the company's bank
+    company_id: str = ""  # usually the employer EIN
+    originating_dfi_id: str  # 8-digit routing prefix of the company's bank
     company_account: str = ""
     effective_date: date = None
 
 
 @router.post("/{run_id}/nacha", response_class=PlainTextResponse)
-def export_nacha(run_id: int, originating: NachaOriginating,
-                 db: Session = Depends(get_db)):
+def export_nacha(
+    run_id: int, originating: NachaOriginating, db: Session = Depends(get_db)
+):
     """Generate a NACHA ACH file for direct deposit of a processed pay run."""
     from app.services.nacha_export import generate_nacha_file
 
@@ -525,8 +624,9 @@ def export_nacha(run_id: int, originating: NachaOriginating,
     if not run:
         raise HTTPException(status_code=404, detail="Pay run not found")
     if run.status != PayRunStatus.PROCESSED:
-        raise HTTPException(status_code=400,
-                            detail="Pay run must be processed before ACH export")
+        raise HTTPException(
+            status_code=400, detail="Pay run must be processed before ACH export"
+        )
 
     orig = originating.model_dump()
     if not orig.get("effective_date"):

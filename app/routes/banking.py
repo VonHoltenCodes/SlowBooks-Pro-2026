@@ -13,11 +13,20 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
-from app.models.banking import BankAccount, BankTransaction, Reconciliation, ReconciliationStatus
+from app.models.banking import (
+    BankAccount,
+    BankTransaction,
+    Reconciliation,
+    ReconciliationStatus,
+)
 from app.schemas.banking import (
-    BankAccountCreate, BankAccountUpdate, BankAccountResponse,
-    BankTransactionCreate, BankTransactionResponse,
-    ReconciliationCreate, ReconciliationResponse,
+    BankAccountCreate,
+    BankAccountUpdate,
+    BankAccountResponse,
+    BankTransactionCreate,
+    BankTransactionResponse,
+    ReconciliationCreate,
+    ReconciliationResponse,
 )
 from app.services.closing_date import check_closing_date
 
@@ -27,7 +36,12 @@ router = APIRouter(prefix="/api/banking", tags=["banking"])
 # Bank Accounts
 @router.get("/accounts", response_model=list[BankAccountResponse])
 def list_bank_accounts(db: Session = Depends(get_db)):
-    return db.query(BankAccount).filter(BankAccount.is_active == True).order_by(BankAccount.name).all()
+    return (
+        db.query(BankAccount)
+        .filter(BankAccount.is_active == True)
+        .order_by(BankAccount.name)
+        .all()
+    )
 
 
 @router.get("/accounts/{account_id}", response_model=BankAccountResponse)
@@ -48,7 +62,9 @@ def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/accounts/{account_id}", response_model=BankAccountResponse)
-def update_bank_account(account_id: int, data: BankAccountUpdate, db: Session = Depends(get_db)):
+def update_bank_account(
+    account_id: int, data: BankAccountUpdate, db: Session = Depends(get_db)
+):
     ba = db.query(BankAccount).filter(BankAccount.id == account_id).first()
     if not ba:
         raise HTTPException(status_code=404, detail="Bank account not found")
@@ -199,15 +215,17 @@ def check_register(account_id: int = None, db: Session = Depends(get_db)):
         else:
             running_balance += tl.credit - tl.debit
 
-        entries.append({
-            "date": txn.date.isoformat(),
-            "description": txn.description or tl.description or "",
-            "reference": txn.reference or "",
-            "source_type": txn.source_type or "",
-            "payment": float(tl.credit) if tl.credit > 0 else 0,
-            "deposit": float(tl.debit) if tl.debit > 0 else 0,
-            "balance": float(running_balance),
-        })
+        entries.append(
+            {
+                "date": txn.date.isoformat(),
+                "description": txn.description or tl.description or "",
+                "reference": txn.reference or "",
+                "source_type": txn.source_type or "",
+                "payment": float(tl.credit) if tl.credit > 0 else 0,
+                "deposit": float(tl.debit) if tl.debit > 0 else 0,
+                "balance": float(running_balance),
+            }
+        )
 
     return {
         "account_id": account_id,
@@ -238,7 +256,7 @@ def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
     if abs(cleared_total - recon.statement_balance) > Decimal("0.01"):
         raise HTTPException(
             status_code=400,
-            detail=f"Difference is ${float(recon.statement_balance - cleared_total):.2f} — must be $0.00 to complete"
+            detail=f"Difference is ${float(recon.statement_balance - cleared_total):.2f} — must be $0.00 to complete",
         )
 
     recon.status = ReconciliationStatus.COMPLETED

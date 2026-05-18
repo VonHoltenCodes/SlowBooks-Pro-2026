@@ -19,7 +19,7 @@ from decimal import Decimal, ROUND_HALF_UP
 CENT = Decimal("0.01")
 
 # WA paid-sick-leave mandate: 1 hour accrued per 40 hours worked.
-WA_SICK_ACCRUAL_RATE: Decimal = Decimal("0.025")   # 1 / 40
+WA_SICK_ACCRUAL_RATE: Decimal = Decimal("0.025")  # 1 / 40
 # WA caps the unused paid-sick balance carried into the new year at 40 hours.
 WA_SICK_CARRYOVER_CAP: Decimal = Decimal("40")
 
@@ -37,8 +37,9 @@ def _non_negative(value) -> Decimal:
     return value if value > 0 else Decimal("0")
 
 
-def accrual_for_period(accrual_method: str, accrual_rate: Decimal,
-                       hours_worked: Decimal = Decimal("0")) -> Decimal:
+def accrual_for_period(
+    accrual_method: str, accrual_rate: Decimal, hours_worked: Decimal = Decimal("0")
+) -> Decimal:
     """Hours accrued for a single pay period under the given accrual method.
 
     accrual_method: one of "per_hour_worked", "per_pay_period", "annual_grant".
@@ -59,16 +60,19 @@ def accrual_for_period(accrual_method: str, accrual_rate: Decimal,
     return _q(accrued)
 
 
-def apply_accrual(current_balance: Decimal, accrued: Decimal,
-                  used: Decimal = Decimal("0"),
-                  max_balance: Decimal | None = None) -> Decimal:
+def apply_accrual(
+    current_balance: Decimal,
+    accrued: Decimal,
+    used: Decimal = Decimal("0"),
+    max_balance: Decimal | None = None,
+) -> Decimal:
     """New balance = current_balance + accrued - used.
 
     Clamped to >= 0, and to max_balance when a cap is set (None = no cap).
     """
-    balance = (_non_negative(current_balance)
-               + _non_negative(accrued)
-               - _non_negative(used))
+    balance = (
+        _non_negative(current_balance) + _non_negative(accrued) - _non_negative(used)
+    )
     if balance < 0:
         balance = Decimal("0")
     if max_balance is not None:
@@ -78,8 +82,9 @@ def apply_accrual(current_balance: Decimal, accrued: Decimal,
     return _q(balance)
 
 
-def apply_carryover(year_end_balance: Decimal,
-                    max_carryover: Decimal | None) -> Decimal:
+def apply_carryover(
+    year_end_balance: Decimal, max_carryover: Decimal | None
+) -> Decimal:
     """Balance carried into the new year, capped at max_carryover when set.
 
     max_carryover None means unlimited carryover.

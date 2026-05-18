@@ -11,7 +11,9 @@ router = APIRouter(prefix="/api/customers", tags=["customers"])
 
 
 @router.get("", response_model=list[CustomerResponse])
-def list_customers(active_only: bool = False, search: str = None, db: Session = Depends(get_db)):
+def list_customers(
+    active_only: bool = False, search: str = None, db: Session = Depends(get_db)
+):
     q = db.query(Customer)
     if active_only:
         q = q.filter(Customer.is_active == True)
@@ -21,7 +23,9 @@ def list_customers(active_only: bool = False, search: str = None, db: Session = 
 
 
 @router.get("/check-duplicate")
-def check_duplicate(name: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+def check_duplicate(
+    name: str = Query(..., min_length=1), db: Session = Depends(get_db)
+):
     """Phase 11: standalone duplicate-check endpoint the UI can call BEFORE
     submitting a create form to warn the user proactively."""
     existing = db.query(Customer).filter(Customer.is_active == True).all()  # noqa
@@ -61,7 +65,9 @@ def create_customer(
 
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
-def update_customer(customer_id: int, data: CustomerUpdate, db: Session = Depends(get_db)):
+def update_customer(
+    customer_id: int, data: CustomerUpdate, db: Session = Depends(get_db)
+):
     customer = get_or_404(db, Customer, customer_id)
     for key, val in data.model_dump(exclude_unset=True).items():
         setattr(customer, key, val)

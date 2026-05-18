@@ -21,9 +21,9 @@ def _serialize_value(val):
         return val
     if isinstance(val, datetime):
         return val.isoformat()
-    if hasattr(val, 'isoformat'):
+    if hasattr(val, "isoformat"):
         return val.isoformat()
-    if hasattr(val, 'value'):  # enum
+    if hasattr(val, "value"):  # enum
         return val.value
     try:
         return float(val)
@@ -42,9 +42,16 @@ def _get_instance_dict(instance):
     return result
 
 
-def log_event(db: Session, table_name: str, record_id: int, action: str,
-              old_values: dict = None, new_values: dict = None,
-              changed_fields: list = None, source: str = "api"):
+def log_event(
+    db: Session,
+    table_name: str,
+    record_id: int,
+    action: str,
+    old_values: dict = None,
+    new_values: dict = None,
+    changed_fields: list = None,
+    source: str = "api",
+):
     """Manually log an audit event."""
     entry = AuditLog(
         table_name=table_name,
@@ -64,27 +71,33 @@ def _after_flush(session, flush_context):
 
     # New objects (INSERT)
     for obj in session.new:
-        table = getattr(obj, '__tablename__', None)
+        table = getattr(obj, "__tablename__", None)
         if not table or table in _SKIP_TABLES:
             continue
-        record_id = getattr(obj, 'id', None)
+        record_id = getattr(obj, "id", None)
         if record_id is None:
             continue
         new_vals = _get_instance_dict(obj)
-        audit_entries.append(AuditLog(
-            table_name=table, record_id=record_id, action="INSERT",
-            old_values=None, new_values=new_vals, changed_fields=list(new_vals.keys()),
-            source="api",
-        ))
+        audit_entries.append(
+            AuditLog(
+                table_name=table,
+                record_id=record_id,
+                action="INSERT",
+                old_values=None,
+                new_values=new_vals,
+                changed_fields=list(new_vals.keys()),
+                source="api",
+            )
+        )
 
     # Modified objects (UPDATE)
     for obj in session.dirty:
-        table = getattr(obj, '__tablename__', None)
+        table = getattr(obj, "__tablename__", None)
         if not table or table in _SKIP_TABLES:
             continue
         if not session.is_modified(obj, include_collections=False):
             continue
-        record_id = getattr(obj, 'id', None)
+        record_id = getattr(obj, "id", None)
         if record_id is None:
             continue
 
@@ -103,26 +116,38 @@ def _after_flush(session, flush_context):
                 changed.append(key)
 
         if changed:
-            audit_entries.append(AuditLog(
-                table_name=table, record_id=record_id, action="UPDATE",
-                old_values=old_vals, new_values=new_vals, changed_fields=changed,
-                source="api",
-            ))
+            audit_entries.append(
+                AuditLog(
+                    table_name=table,
+                    record_id=record_id,
+                    action="UPDATE",
+                    old_values=old_vals,
+                    new_values=new_vals,
+                    changed_fields=changed,
+                    source="api",
+                )
+            )
 
     # Deleted objects (DELETE)
     for obj in session.deleted:
-        table = getattr(obj, '__tablename__', None)
+        table = getattr(obj, "__tablename__", None)
         if not table or table in _SKIP_TABLES:
             continue
-        record_id = getattr(obj, 'id', None)
+        record_id = getattr(obj, "id", None)
         if record_id is None:
             continue
         old_vals = _get_instance_dict(obj)
-        audit_entries.append(AuditLog(
-            table_name=table, record_id=record_id, action="DELETE",
-            old_values=old_vals, new_values=None, changed_fields=None,
-            source="api",
-        ))
+        audit_entries.append(
+            AuditLog(
+                table_name=table,
+                record_id=record_id,
+                action="DELETE",
+                old_values=old_vals,
+                new_values=None,
+                changed_fields=None,
+                source="api",
+            )
+        )
 
     # Add audit entries to session (they'll be flushed in the next flush)
     for entry in audit_entries:

@@ -78,7 +78,9 @@ def _validate_params_size(params: dict) -> None:
     try:
         size = len(json.dumps(params or {}))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="parameters must be JSON-serializable")
+        raise HTTPException(
+            status_code=400, detail="parameters must be JSON-serializable"
+        )
     if size > _MAX_PARAMS_BYTES:
         raise HTTPException(
             status_code=400,

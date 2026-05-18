@@ -113,40 +113,64 @@ def _full_account_name(db: Session, acct: Account) -> str:
 # Export Functions — each returns IIF-formatted string content
 # ============================================================================
 
+
 def export_accounts(db: Session) -> str:
     """Export Chart of Accounts as !ACCNT section."""
     header = _iif_line(["!ACCNT", "NAME", "ACCNTTYPE", "DESC", "ACCNUM", "EXTRA"])
 
-    accounts = db.query(Account).filter(Account.is_active == True).order_by(
-        Account.account_number
-    ).all()
+    accounts = (
+        db.query(Account)
+        .filter(Account.is_active == True)
+        .order_by(Account.account_number)
+        .all()
+    )
 
     lines = header
     for acct in accounts:
         name = _full_account_name(db, acct)
-        lines += _iif_line([
-            "ACCNT",
-            name,
-            _map_account_type(acct),
-            acct.description or "",
-            acct.account_number or "",
-            "",  # EXTRA field (unused, but QB expects the column)
-        ])
+        lines += _iif_line(
+            [
+                "ACCNT",
+                name,
+                _map_account_type(acct),
+                acct.description or "",
+                acct.account_number or "",
+                "",  # EXTRA field (unused, but QB expects the column)
+            ]
+        )
 
     return lines
 
 
 def export_customers(db: Session) -> str:
     """Export customers as !CUST section."""
-    header = _iif_line([
-        "!CUST", "NAME", "COMPANYNAME", "FIRSTNAME", "LASTNAME",
-        "ADDR1", "ADDR2", "ADDR3", "ADDR4", "ADDR5",
-        "PHONE1", "PHONE2", "EMAIL", "TERMS", "TAXID", "LIMIT",
-    ])
+    header = _iif_line(
+        [
+            "!CUST",
+            "NAME",
+            "COMPANYNAME",
+            "FIRSTNAME",
+            "LASTNAME",
+            "ADDR1",
+            "ADDR2",
+            "ADDR3",
+            "ADDR4",
+            "ADDR5",
+            "PHONE1",
+            "PHONE2",
+            "EMAIL",
+            "TERMS",
+            "TAXID",
+            "LIMIT",
+        ]
+    )
 
-    customers = db.query(Customer).filter(Customer.is_active == True).order_by(
-        Customer.name
-    ).all()
+    customers = (
+        db.query(Customer)
+        .filter(Customer.is_active == True)
+        .order_by(Customer.name)
+        .all()
+    )
 
     lines = header
     for c in customers:
@@ -159,92 +183,132 @@ def export_customers(db: Session) -> str:
         addr1 = c.company or c.name or ""
         addr2 = c.bill_address1 or ""
         addr3 = c.bill_address2 or ""
-        city_st_zip = ", ".join(filter(None, [
-            c.bill_city,
-            f"{c.bill_state} {c.bill_zip}".strip() if (c.bill_state or c.bill_zip) else None,
-        ]))
+        city_st_zip = ", ".join(
+            filter(
+                None,
+                [
+                    c.bill_city,
+                    (
+                        f"{c.bill_state} {c.bill_zip}".strip()
+                        if (c.bill_state or c.bill_zip)
+                        else None
+                    ),
+                ],
+            )
+        )
 
-        lines += _iif_line([
-            "CUST",
-            c.name or "",
-            c.company or "",
-            first,
-            last,
-            addr1,
-            addr2,
-            addr3,
-            city_st_zip,
-            "",  # ADDR5
-            c.phone or "",
-            c.mobile or "",
-            c.email or "",
-            c.terms or "",
-            c.tax_id or "",
-            str(c.credit_limit) if c.credit_limit else "",
-        ])
+        lines += _iif_line(
+            [
+                "CUST",
+                c.name or "",
+                c.company or "",
+                first,
+                last,
+                addr1,
+                addr2,
+                addr3,
+                city_st_zip,
+                "",  # ADDR5
+                c.phone or "",
+                c.mobile or "",
+                c.email or "",
+                c.terms or "",
+                c.tax_id or "",
+                str(c.credit_limit) if c.credit_limit else "",
+            ]
+        )
 
     return lines
 
 
 def export_vendors(db: Session) -> str:
     """Export vendors as !VEND section."""
-    header = _iif_line([
-        "!VEND", "NAME", "ADDR1", "ADDR2", "ADDR3", "ADDR4", "ADDR5",
-        "PHONE1", "PHONE2", "EMAIL", "TERMS", "TAXID",
-    ])
+    header = _iif_line(
+        [
+            "!VEND",
+            "NAME",
+            "ADDR1",
+            "ADDR2",
+            "ADDR3",
+            "ADDR4",
+            "ADDR5",
+            "PHONE1",
+            "PHONE2",
+            "EMAIL",
+            "TERMS",
+            "TAXID",
+        ]
+    )
 
-    vendors = db.query(Vendor).filter(Vendor.is_active == True).order_by(
-        Vendor.name
-    ).all()
+    vendors = (
+        db.query(Vendor).filter(Vendor.is_active == True).order_by(Vendor.name).all()
+    )
 
     lines = header
     for v in vendors:
         addr1 = v.company or v.name or ""
         addr2 = v.address1 or ""
         addr3 = v.address2 or ""
-        city_st_zip = ", ".join(filter(None, [
-            v.city,
-            f"{v.state} {v.zip}".strip() if (v.state or v.zip) else None,
-        ]))
+        city_st_zip = ", ".join(
+            filter(
+                None,
+                [
+                    v.city,
+                    f"{v.state} {v.zip}".strip() if (v.state or v.zip) else None,
+                ],
+            )
+        )
 
-        lines += _iif_line([
-            "VEND",
-            v.name or "",
-            addr1,
-            addr2,
-            addr3,
-            city_st_zip,
-            "",  # ADDR5
-            v.phone or "",
-            v.fax or "",
-            v.email or "",
-            v.terms or "",
-            v.tax_id or "",
-        ])
+        lines += _iif_line(
+            [
+                "VEND",
+                v.name or "",
+                addr1,
+                addr2,
+                addr3,
+                city_st_zip,
+                "",  # ADDR5
+                v.phone or "",
+                v.fax or "",
+                v.email or "",
+                v.terms or "",
+                v.tax_id or "",
+            ]
+        )
 
     return lines
 
 
 def export_items(db: Session) -> str:
     """Export items as !INVITEM section."""
-    header = _iif_line([
-        "!INVITEM", "NAME", "INVITEMTYPE", "DESC", "ACCNT", "PRICE", "TAXABLE",
-    ])
+    header = _iif_line(
+        [
+            "!INVITEM",
+            "NAME",
+            "INVITEMTYPE",
+            "DESC",
+            "ACCNT",
+            "PRICE",
+            "TAXABLE",
+        ]
+    )
 
     items = db.query(Item).filter(Item.is_active == True).order_by(Item.name).all()
 
     lines = header
     for item in items:
         acct_name = _resolve_account_name(db, item.income_account_id)
-        lines += _iif_line([
-            "INVITEM",
-            item.name or "",
-            _map_item_type(item),
-            item.description or "",
-            acct_name,
-            str(item.rate) if item.rate else "0",
-            "Y" if item.is_taxable else "N",
-        ])
+        lines += _iif_line(
+            [
+                "INVITEM",
+                item.name or "",
+                _map_item_type(item),
+                item.description or "",
+                acct_name,
+                str(item.rate) if item.rate else "0",
+                "Y" if item.is_taxable else "N",
+            ]
+        )
 
     return lines
 
@@ -259,17 +323,45 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
     """
     # Transaction header — defines columns for both TRNS and SPL lines
     header = (
-        _iif_line(["!TRNS", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT",
-                    "DOCNUM", "DUEDATE", "TERMS", "MEMO"]) +
-        _iif_line(["!SPL", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT",
-                    "DOCNUM", "DUEDATE", "TERMS", "MEMO"]) +
-        _iif_line(["!ENDTRNS"])
+        _iif_line(
+            [
+                "!TRNS",
+                "TRNSTYPE",
+                "DATE",
+                "ACCNT",
+                "NAME",
+                "AMOUNT",
+                "DOCNUM",
+                "DUEDATE",
+                "TERMS",
+                "MEMO",
+            ]
+        )
+        + _iif_line(
+            [
+                "!SPL",
+                "TRNSTYPE",
+                "DATE",
+                "ACCNT",
+                "NAME",
+                "AMOUNT",
+                "DOCNUM",
+                "DUEDATE",
+                "TERMS",
+                "MEMO",
+            ]
+        )
+        + _iif_line(["!ENDTRNS"])
     )
 
-    query = db.query(Invoice).options(
-        joinedload(Invoice.customer),
-        joinedload(Invoice.lines).joinedload(InvoiceLine.item),
-    ).filter(Invoice.status != InvoiceStatus.VOID)
+    query = (
+        db.query(Invoice)
+        .options(
+            joinedload(Invoice.customer),
+            joinedload(Invoice.lines).joinedload(InvoiceLine.item),
+        )
+        .filter(Invoice.status != InvoiceStatus.VOID)
+    )
 
     if date_from:
         query = query.filter(Invoice.date >= date_from)
@@ -286,10 +378,20 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
         total = Decimal(str(inv.total or 0))
 
         # TRNS line — debit A/R for full invoice amount
-        lines += _iif_line([
-            "TRNS", "INVOICE", inv_date, "Accounts Receivable", cust_name,
-            str(total), inv.invoice_number or "", due_date, inv.terms or "", "",
-        ])
+        lines += _iif_line(
+            [
+                "TRNS",
+                "INVOICE",
+                inv_date,
+                "Accounts Receivable",
+                cust_name,
+                str(total),
+                inv.invoice_number or "",
+                due_date,
+                inv.terms or "",
+                "",
+            ]
+        )
 
         # SPL lines — credit income accounts for each line item
         for il in inv.lines:
@@ -303,19 +405,38 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
             if not acct_name:
                 acct_name = "Service Income"  # fallback
 
-            lines += _iif_line([
-                "SPL", "INVOICE", inv_date, acct_name, cust_name,
-                str(-amt), inv.invoice_number or "", "", "",
-                il.description or "",
-            ])
+            lines += _iif_line(
+                [
+                    "SPL",
+                    "INVOICE",
+                    inv_date,
+                    acct_name,
+                    cust_name,
+                    str(-amt),
+                    inv.invoice_number or "",
+                    "",
+                    "",
+                    il.description or "",
+                ]
+            )
 
         # SPL line for tax if applicable
         tax_amt = Decimal(str(inv.tax_amount or 0))
         if tax_amt > 0:
-            lines += _iif_line([
-                "SPL", "INVOICE", inv_date, "Sales Tax Payable", cust_name,
-                str(-tax_amt), inv.invoice_number or "", "", "", "Sales Tax",
-            ])
+            lines += _iif_line(
+                [
+                    "SPL",
+                    "INVOICE",
+                    inv_date,
+                    "Sales Tax Payable",
+                    cust_name,
+                    str(-tax_amt),
+                    inv.invoice_number or "",
+                    "",
+                    "",
+                    "Sales Tax",
+                ]
+            )
 
         lines += _iif_line(["ENDTRNS"])
 
@@ -330,18 +451,24 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
       SPL line:  negative amount (credit to Accounts Receivable)
     """
     header = (
-        _iif_line(["!TRNS", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT",
-                    "DOCNUM", "MEMO"]) +
-        _iif_line(["!SPL", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT",
-                    "DOCNUM", "MEMO"]) +
-        _iif_line(["!ENDTRNS"])
+        _iif_line(
+            ["!TRNS", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+        )
+        + _iif_line(
+            ["!SPL", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+        )
+        + _iif_line(["!ENDTRNS"])
     )
 
-    query = db.query(Payment).options(
-        joinedload(Payment.customer),
-        joinedload(Payment.deposit_to_account),
-        joinedload(Payment.allocations).joinedload(PaymentAllocation.invoice),
-    ).filter(Payment.is_voided == False)
+    query = (
+        db.query(Payment)
+        .options(
+            joinedload(Payment.customer),
+            joinedload(Payment.deposit_to_account),
+            joinedload(Payment.allocations).joinedload(PaymentAllocation.invoice),
+        )
+        .filter(Payment.is_voided == False)
+    )
 
     if date_from:
         query = query.filter(Payment.date >= date_from)
@@ -364,10 +491,18 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
         ref = pmt.reference or pmt.check_number or ""
 
         # TRNS line — debit bank/deposit account
-        lines += _iif_line([
-            "TRNS", "PAYMENT", pmt_date, deposit_acct, cust_name,
-            str(amount), ref, pmt.notes or "",
-        ])
+        lines += _iif_line(
+            [
+                "TRNS",
+                "PAYMENT",
+                pmt_date,
+                deposit_acct,
+                cust_name,
+                str(amount),
+                ref,
+                pmt.notes or "",
+            ]
+        )
 
         # SPL lines — credit A/R (one per allocation, or single if no allocations)
         if pmt.allocations:
@@ -376,15 +511,31 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
                 doc_num = ""
                 if alloc.invoice:
                     doc_num = alloc.invoice.invoice_number or ""
-                lines += _iif_line([
-                    "SPL", "PAYMENT", pmt_date, "Accounts Receivable", cust_name,
-                    str(-alloc_amt), doc_num, "",
-                ])
+                lines += _iif_line(
+                    [
+                        "SPL",
+                        "PAYMENT",
+                        pmt_date,
+                        "Accounts Receivable",
+                        cust_name,
+                        str(-alloc_amt),
+                        doc_num,
+                        "",
+                    ]
+                )
         else:
-            lines += _iif_line([
-                "SPL", "PAYMENT", pmt_date, "Accounts Receivable", cust_name,
-                str(-amount), "", "",
-            ])
+            lines += _iif_line(
+                [
+                    "SPL",
+                    "PAYMENT",
+                    pmt_date,
+                    "Accounts Receivable",
+                    cust_name,
+                    str(-amount),
+                    "",
+                    "",
+                ]
+            )
 
         lines += _iif_line(["ENDTRNS"])
 
@@ -398,17 +549,24 @@ def export_estimates(db: Session) -> str:
     But the IIF format is identical to invoices with ESTIMATE type.
     """
     header = (
-        _iif_line(["!TRNS", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT",
-                    "DOCNUM", "MEMO"]) +
-        _iif_line(["!SPL", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT",
-                    "DOCNUM", "MEMO"]) +
-        _iif_line(["!ENDTRNS"])
+        _iif_line(
+            ["!TRNS", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+        )
+        + _iif_line(
+            ["!SPL", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+        )
+        + _iif_line(["!ENDTRNS"])
     )
 
-    estimates = db.query(Estimate).options(
-        joinedload(Estimate.customer),
-        joinedload(Estimate.lines).joinedload(EstimateLine.item),
-    ).order_by(Estimate.date, Estimate.id).all()
+    estimates = (
+        db.query(Estimate)
+        .options(
+            joinedload(Estimate.customer),
+            joinedload(Estimate.lines).joinedload(EstimateLine.item),
+        )
+        .order_by(Estimate.date, Estimate.id)
+        .all()
+    )
 
     lines = header
     for est in estimates:
@@ -416,10 +574,18 @@ def export_estimates(db: Session) -> str:
         est_date = _iif_date(est.date)
         total = Decimal(str(est.total or 0))
 
-        lines += _iif_line([
-            "TRNS", "ESTIMATE", est_date, "Accounts Receivable", cust_name,
-            str(total), est.estimate_number or "", est.notes or "",
-        ])
+        lines += _iif_line(
+            [
+                "TRNS",
+                "ESTIMATE",
+                est_date,
+                "Accounts Receivable",
+                cust_name,
+                str(total),
+                est.estimate_number or "",
+                est.notes or "",
+            ]
+        )
 
         for el in est.lines:
             amt = Decimal(str(el.amount or 0))
@@ -431,18 +597,33 @@ def export_estimates(db: Session) -> str:
             if not acct_name:
                 acct_name = "Service Income"
 
-            lines += _iif_line([
-                "SPL", "ESTIMATE", est_date, acct_name, cust_name,
-                str(-amt), est.estimate_number or "",
-                el.description or "",
-            ])
+            lines += _iif_line(
+                [
+                    "SPL",
+                    "ESTIMATE",
+                    est_date,
+                    acct_name,
+                    cust_name,
+                    str(-amt),
+                    est.estimate_number or "",
+                    el.description or "",
+                ]
+            )
 
         tax_amt = Decimal(str(est.tax_amount or 0))
         if tax_amt > 0:
-            lines += _iif_line([
-                "SPL", "ESTIMATE", est_date, "Sales Tax Payable", cust_name,
-                str(-tax_amt), est.estimate_number or "", "Sales Tax",
-            ])
+            lines += _iif_line(
+                [
+                    "SPL",
+                    "ESTIMATE",
+                    est_date,
+                    "Sales Tax Payable",
+                    cust_name,
+                    str(-tax_amt),
+                    est.estimate_number or "",
+                    "Sales Tax",
+                ]
+            )
 
         lines += _iif_line(["ENDTRNS"])
 

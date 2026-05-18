@@ -43,5 +43,7 @@ def list_audit_logs(
 @router.get("/tables")
 def list_audited_tables(db: Session = Depends(get_db)):
     """Get list of tables that have audit entries."""
-    tables = db.query(AuditLog.table_name).distinct().order_by(AuditLog.table_name).all()
+    tables = (
+        db.query(AuditLog.table_name).distinct().order_by(AuditLog.table_name).all()
+    )
     return [t[0] for t in tables]

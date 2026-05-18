@@ -39,10 +39,12 @@ def print_check(
             "details": [],
         }
         for alloc in payment.allocations:
-            check_data["details"].append({
-                "description": f"Invoice #{alloc.invoice_id}",
-                "amount": alloc.amount,
-            })
+            check_data["details"].append(
+                {
+                    "description": f"Invoice #{alloc.invoice_id}",
+                    "amount": alloc.amount,
+                }
+            )
     elif bill_payment_id:
         bp = db.query(BillPayment).filter(BillPayment.id == bill_payment_id).first()
         if not bp:
@@ -58,17 +60,27 @@ def print_check(
         }
         for alloc in bp.allocations:
             bill = db.query(Bill).filter(Bill.id == alloc.bill_id).first()
-            check_data["details"].append({
-                "description": f"Bill #{bill.bill_number}" if bill else f"Bill #{alloc.bill_id}",
-                "amount": alloc.amount,
-            })
+            check_data["details"].append(
+                {
+                    "description": (
+                        f"Bill #{bill.bill_number}"
+                        if bill
+                        else f"Bill #{alloc.bill_id}"
+                    ),
+                    "amount": alloc.amount,
+                }
+            )
     else:
-        raise HTTPException(status_code=400, detail="Provide payment_id or bill_payment_id")
+        raise HTTPException(
+            status_code=400, detail="Provide payment_id or bill_payment_id"
+        )
 
     company = get_settings(db)
     pdf_bytes = generate_check_pdf(check_data, company)
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=Check_{check_data['check_number']}.pdf"},
+        headers={
+            "Content-Disposition": f"inline; filename=Check_{check_data['check_number']}.pdf"
+        },
     )

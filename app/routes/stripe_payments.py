@@ -18,11 +18,17 @@ from app.models.payments import Payment, PaymentAllocation
 
 class CheckoutSessionRequest(BaseModel):
     payment_token: str
+
+
 from app.services.accounting import (
-    create_journal_entry, get_ar_account_id, get_undeposited_funds_id,
+    create_journal_entry,
+    get_ar_account_id,
+    get_undeposited_funds_id,
 )
 from app.services.stripe_service import (
-    get_stripe_settings, create_checkout_session, verify_webhook_event,
+    get_stripe_settings,
+    create_checkout_session,
+    verify_webhook_event,
 )
 
 router = APIRouter(prefix="/api/stripe", tags=["stripe"])
@@ -39,11 +45,15 @@ def _require_stripe(db: Session) -> dict:
 
 
 @router.post("/create-checkout-session")
-def create_checkout(data: CheckoutSessionRequest, request: Request, db: Session = Depends(get_db)):
+def create_checkout(
+    data: CheckoutSessionRequest, request: Request, db: Session = Depends(get_db)
+):
     """Create a Stripe Checkout Session for an invoice."""
     settings = _require_stripe(db)
 
-    invoice = db.query(Invoice).filter(Invoice.payment_token == data.payment_token).first()
+    invoice = (
+        db.query(Invoice).filter(Invoice.payment_token == data.payment_token).first()
+    )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.status in (InvoiceStatus.PAID, InvoiceStatus.VOID):
@@ -151,9 +161,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             },
         ]
         txn = create_journal_entry(
-            db, date.today(),
+            db,
+            date.today(),
             f"Stripe payment — Invoice #{invoice.invoice_number}",
-            journal_lines, source_type="payment", source_id=payment.id,
+            journal_lines,
+            source_type="payment",
+            source_id=payment.id,
             reference=session_id,
         )
         payment.transaction_id = txn.id

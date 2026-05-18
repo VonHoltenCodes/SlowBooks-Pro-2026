@@ -34,8 +34,13 @@ _DEDUCTION_KEYS = {
 
 # Employer-side / informational keys excluded from the employee deduction list.
 _EMPLOYER_KEYS = {
-    "employer_social_security", "employer_medicare", "futa", "suta",
-    "employer_ss_tax", "employer_medicare_tax", "state_other_employer",
+    "employer_social_security",
+    "employer_medicare",
+    "futa",
+    "suta",
+    "employer_ss_tax",
+    "employer_medicare_tax",
+    "state_other_employer",
 }
 
 
