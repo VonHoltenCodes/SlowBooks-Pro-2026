@@ -32,6 +32,8 @@ DEFAULT_SETTINGS = {
     "company_email": "",
     "company_website": "",
     "company_tax_id": "",
+    "operator_name": "",
+    "operator_email": "",
     "default_terms": "Net 30",
     "default_tax_rate": "0.0",
     "invoice_prefix": "",

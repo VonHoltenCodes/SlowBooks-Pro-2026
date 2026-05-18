@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.invoices import Invoice
-from app.routes.settings import _get_all as get_settings
+from app.services.settings_service import get_all_settings as get_settings
 
 router = APIRouter(tags=["public"])
 

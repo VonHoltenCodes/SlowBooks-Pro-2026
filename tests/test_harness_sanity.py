@@ -3,6 +3,7 @@
 
 def test_chart_of_accounts_seeds(db_session, seed_accounts):
     from app.models.accounts import Account
+
     assert db_session.query(Account).count() == len(seed_accounts)
     # Accounts Receivable is the anchor for most posting tests.
     ar = next(a for a in seed_accounts.values() if a.account_number == "1100")

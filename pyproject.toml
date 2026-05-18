@@ -1,0 +1,11 @@
+# Project-level Python tool config. Currently only ruff lives here so its
+# per-file-ignores apply consistently in CI and locally. Black is configured
+# via its own defaults (88-char line length).
+
+[tool.ruff.lint.per-file-ignores]
+# E741 (ambiguous variable name 'l'): tests have several legacy loops like
+#   for l in lines: ...
+# where `l` shadows neither a builtin nor an outer scope. Allow it in tests
+# rather than churning a dozen unrelated test files; production code still
+# enforces the rule.
+"tests/*" = ["E741"]

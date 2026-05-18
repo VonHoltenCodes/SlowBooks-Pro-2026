@@ -600,6 +600,15 @@ def import_invoices(db: Session) -> dict:
 
             _create_mapping(db, "invoice", invoice.id, qbo_id,
                             _safe(qbo_inv, "SyncToken"))
+
+            # Phase 11 (audit fix): QBO-imported invoices must also move
+            # inventory for tracked items. QBO itself manages inventory so
+            # we only touch items that are track_inventory=True on OUR side.
+            db.flush()
+            db.refresh(invoice)
+            from app.services.inventory_hooks import post_sale_for_invoice
+            post_sale_for_invoice(db, invoice, txn_date=invoice.date)
+
             imported += 1
 
         except Exception as e:

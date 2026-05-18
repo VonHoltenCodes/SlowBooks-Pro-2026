@@ -125,8 +125,19 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
 
 @router.post("/{po_id}/convert-to-bill")
 def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
-    """Convert a PO to a bill — creates bill with PO's line items."""
+    """Convert a PO to a bill — creates bill with PO's line items AND the
+    corresponding double-entry journal + inventory movements.
+
+    Pre-Phase-11 this function created an orphan Bill row with no JE at all
+    (expense + AP side were both missing). That was a silent accounting bug.
+    """
     from app.models.bills import Bill, BillLine, BillStatus
+    from app.models.accounts import Account
+    from app.models.items import Item as ItemModel
+    from app.services.accounting import create_journal_entry
+    from app.services.inventory_service import (
+        get_inventory_asset_account_id, record_purchase,
+    )
 
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
@@ -134,6 +145,7 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
     if po.status == POStatus.CLOSED:
         raise HTTPException(status_code=400, detail="PO already closed")
 
+    vendor = po.vendor
     bill = Bill(
         bill_number=f"BILL-{po.po_number}", vendor_id=po.vendor_id, status=BillStatus.UNPAID,
         po_id=po.id, date=po.date, terms="Net 30",
@@ -143,12 +155,88 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
     db.add(bill)
     db.flush()
 
+    # Build the same journal-line structure bills.create_bill uses so the
+    # PO→Bill path produces a fully balanced, inventory-aware JE.
+    default_expense = db.query(Account).filter(Account.account_number == "6000").first()
+    default_expense_id = default_expense.id if default_expense else None
+    ap_acct = db.query(Account).filter(Account.account_number == "2000").first()
+
+    journal_lines: list[dict] = []
+    inv_receipts: list[tuple] = []
     for poline in po.lines:
+        amt = Decimal(str(poline.quantity)) * Decimal(str(poline.rate))
+        item = db.query(ItemModel).filter(ItemModel.id == poline.item_id).first() if poline.item_id else None
+
+        if item and item.track_inventory:
+            posting_acct = get_inventory_asset_account_id(db, item)
+            if not posting_acct:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Item '{item.name}' is inventory-tracked but has no "
+                        "asset account and no #1300 is seeded."
+                    ),
+                )
+            if poline.quantity and poline.quantity > 0:
+                inv_receipts.append((
+                    item,
+                    Decimal(str(poline.quantity)),
+                    Decimal(str(poline.rate)),
+                ))
+        else:
+            posting_acct = None
+            if item and item.expense_account_id:
+                posting_acct = item.expense_account_id
+            elif vendor and vendor.default_expense_account_id:
+                posting_acct = vendor.default_expense_account_id
+            else:
+                posting_acct = default_expense_id
+
         db.add(BillLine(
-            bill_id=bill.id, item_id=poline.item_id, description=poline.description,
+            bill_id=bill.id, item_id=poline.item_id, account_id=posting_acct,
+            description=poline.description,
             quantity=poline.quantity, rate=poline.rate, amount=poline.amount,
             line_order=poline.line_order,
         ))
+        if amt > 0 and posting_acct:
+            journal_lines.append({
+                "account_id": posting_acct,
+                "debit": amt, "credit": Decimal("0"),
+                "description": poline.description or "",
+            })
+
+    if bill.tax_amount and bill.tax_amount > 0:
+        tax_acct = db.query(Account).filter(Account.account_number == "2200").first()
+        if tax_acct:
+            journal_lines.append({
+                "account_id": tax_acct.id,
+                "debit": Decimal(str(bill.tax_amount)),
+                "credit": Decimal("0"),
+                "description": "Sales tax on bill",
+            })
+
+    if ap_acct and journal_lines:
+        journal_lines.append({
+            "account_id": ap_acct.id,
+            "debit": Decimal("0"),
+            "credit": Decimal(str(bill.total)),
+            "description": f"From PO {po.po_number}",
+        })
+        txn = create_journal_entry(
+            db, po.date, f"Bill {bill.bill_number} - {vendor.name if vendor else ''}",
+            journal_lines, source_type="bill", source_id=bill.id,
+        )
+        bill.transaction_id = txn.id
+
+    # Write inventory movement rows for tracked receipts
+    for item, qty, unit_cost in inv_receipts:
+        record_purchase(
+            db, item, quantity=qty, unit_cost=unit_cost,
+            source_type="bill", source_id=bill.id,
+            memo=f"PO {po.po_number}",
+            post_journal=False,
+            txn_date=po.date,
+        )
 
     po.status = POStatus.CLOSED
     db.commit()

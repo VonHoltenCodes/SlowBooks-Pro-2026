@@ -7,9 +7,50 @@
  * for print preview. We do not miss Crystal Reports.
  */
 const ReportsPage = {
+    // Map of report_type → opener method, for re-opening saved reports.
+    // Keys here MUST match the report_type strings the openers pass to
+    // openPeriodModal so save-then-reload roundtrips cleanly.
+    _OPENERS: {
+        profit_loss:        (params) => ReportsPage.profitLoss(params),
+        balance_sheet:      (params) => ReportsPage.balanceSheet(params),
+        ar_aging:           (params) => ReportsPage.arAging(params),
+        sales_tax:          (params) => ReportsPage.salesTax(params),
+        general_ledger:     (params) => ReportsPage.generalLedger(params),
+        income_by_customer: (params) => ReportsPage.incomeByCustomer(params),
+        cash_flow:          (params) => ReportsPage.cashFlow(params),
+    },
+
     async render() {
+        // Fetch saved reports separately so the page still renders if the
+        // call fails (network blip, table missing, etc.).
+        let savedHtml = '';
+        try {
+            const saved = await API.get('/saved-reports');
+            if (saved && saved.length) {
+                const items = saved.map(s => `
+                    <div class="card" style="cursor:pointer; position:relative; border-left:3px solid var(--qb-blue,#0066cc);"
+                         onclick="ReportsPage.openSaved(${s.id})">
+                        <div class="card-header">${escapeHtml(s.name)}</div>
+                        <p style="font-size:11px; color:var(--text-muted);">
+                            ${escapeHtml(s.report_type.replace(/_/g, ' '))}
+                            ${s.parameters && s.parameters.start_date ? '· ' + escapeHtml(s.parameters.start_date) + ' → ' + escapeHtml(s.parameters.end_date || '') : ''}
+                        </p>
+                        <button class="btn btn-sm btn-secondary"
+                                style="position:absolute; top:8px; right:8px;"
+                                onclick="event.stopPropagation(); ReportsPage.deleteSaved(${s.id})"
+                                title="Delete saved report">×</button>
+                    </div>`).join('');
+                savedHtml = `
+                    <h3 style="font-size:13px; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted); margin:0 0 8px;">
+                        Saved Reports
+                    </h3>
+                    <div class="card-grid" style="margin-bottom:24px;">${items}</div>`;
+            }
+        } catch (e) { /* render anyway */ }
+
         return `
             <div class="page-header"><h2>Reports</h2></div>
+            ${savedHtml}
             <div class="card-grid">
                 <div class="card" style="cursor:pointer" onclick="ReportsPage.profitLoss()">
                     <div class="card-header">Profit & Loss</div>
@@ -56,6 +97,101 @@ const ReportsPage = {
                     <p style="font-size:13px; color:var(--gray-500);">Monthly budget variance analysis</p>
                 </div>
             </div>`;
+    },
+
+    // ----- Saved Reports (Phase 11) -----
+
+    async openSaved(id) {
+        try {
+            const all = await API.get('/saved-reports');
+            const saved = all.find(s => s.id === id);
+            if (!saved) { toast('Saved report not found', 'error'); return; }
+            const opener = ReportsPage._OPENERS[saved.report_type];
+            if (!opener) {
+                toast(`No opener registered for "${saved.report_type}"`, 'error');
+                return;
+            }
+            await opener(saved.parameters || {});
+        } catch (err) { toast(err.message || 'Failed to open', 'error'); }
+    },
+
+    async saveCurrent(reportType, params) {
+        const name = prompt('Save report as:');
+        if (!name || !name.trim()) return;
+        try {
+            await API.post('/saved-reports', {
+                name: name.trim(),
+                report_type: reportType,
+                parameters: params || {},
+            });
+            toast('Saved');
+            // Refresh the page so the new one shows in the Saved section
+            App.navigate(location.hash);
+        } catch (err) { toast(err.message || 'Save failed', 'error'); }
+    },
+
+    async deleteSaved(id) {
+        if (!confirm('Delete this saved report?')) return;
+        try {
+            await API.del(`/saved-reports/${id}`);
+            toast('Deleted');
+            App.navigate(location.hash);
+        } catch (err) { toast(err.message || 'Delete failed', 'error'); }
+    },
+
+    // ----- Drill-down (Phase 11) -----
+    // Hits /api/reports/account-transactions for one account in the date
+    // range and shows the journal entries that rolled up into the row the
+    // user clicked. Each entry's source_link routes to the originating
+    // invoice / bill / payment / journal entry.
+    async openDrillDown(accountId, accountName, startDate, endDate) {
+        if (!accountId) { toast('No account_id on this row', 'error'); return; }
+        const params = new URLSearchParams();
+        params.set('account_id', accountId);
+        if (startDate) params.set('start_date', startDate);
+        if (endDate) params.set('end_date', endDate);
+
+        openModal(`Drill-down — ${accountName}`, `
+            <div id="drilldown-body" style="font-size:11px; color:var(--gray-500);">Loading…</div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+        `);
+
+        try {
+            const data = await API.get(`/reports/account-transactions?${params.toString()}`);
+            const rows = (data.entries || []).map(e => {
+                const src = e.source_link
+                    ? `<a href="${escapeHtml(e.source_link)}" style="color:var(--qb-blue,#0066cc); text-decoration:none;">${escapeHtml(e.source_type || '')} #${e.source_id}</a>`
+                    : escapeHtml(e.source_type || '');
+                return `<tr>
+                    <td>${formatDate(e.date)}</td>
+                    <td>${escapeHtml(e.reference || '')}</td>
+                    <td>${escapeHtml(e.description || '')}</td>
+                    <td>${src}</td>
+                    <td class="amount">${e.debit > 0 ? formatCurrency(e.debit) : ''}</td>
+                    <td class="amount">${e.credit > 0 ? formatCurrency(e.credit) : ''}</td>
+                    <td class="amount">${formatCurrency(e.running_balance)}</td>
+                </tr>`;
+            }).join('');
+
+            $('#drilldown-body').innerHTML = `
+                <p style="margin-bottom:8px; color:var(--gray-500); font-size:12px;">
+                    ${escapeHtml(data.account.number || '')} · ${escapeHtml(data.account.name)}
+                    &middot; ${formatDate(data.start_date)} → ${formatDate(data.end_date)}
+                    &middot; Net: <strong>${formatCurrency(data.period_net)}</strong>
+                </p>
+                <div class="table-container"><table>
+                    <thead><tr>
+                        <th>Date</th><th>Ref</th><th>Description</th><th>Source</th>
+                        <th class="amount">Debit</th><th class="amount">Credit</th><th class="amount">Running</th>
+                    </tr></thead>
+                    <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No entries in range</td></tr>'}</tbody>
+                </table></div>`;
+        } catch (err) {
+            $('#drilldown-body').innerHTML =
+                `<div class="empty-state"><p>${escapeHtml(err.message || 'Failed to load drill-down')}</p></div>`;
+        }
     },
 
     periodOptions(selected) {
@@ -171,16 +307,29 @@ const ReportsPage = {
         row.style.display = select.value === "custom" ? "flex" : "none";
     },
 
-    async openPeriodModal(title, initialPeriod, loadContent, label = "Dates", useAsOfOnly = false) {
+    async openPeriodModal(title, initialPeriod, loadContent, label = "Dates", useAsOfOnly = false, opts = {}) {
+        // opts.reportType (string) — when set, adds a "Save Report" button
+        // that captures the current period/range as parameters.
+        // opts.prefill ({period?, start_date?, end_date?, as_of_date?}) —
+        // used when reopening a saved report; overrides initialPeriod and
+        // pre-populates the date inputs.
+        const reportType = opts.reportType || null;
+        const prefill = opts.prefill || {};
+
         const currentYear = new Date().getFullYear();
-        const defaultCustomStart = `${currentYear}-01-01`;
-        const defaultCustomEnd = todayISO();
+        const defaultCustomStart = prefill.start_date || `${currentYear}-01-01`;
+        const defaultCustomEnd = prefill.end_date || prefill.as_of_date || todayISO();
+        const startingPeriod = prefill.period || initialPeriod;
+
+        const saveBtn = reportType
+            ? `<button class="btn btn-secondary" id="report-save-btn">Save Report…</button>`
+            : '';
 
         openModal(title, `
             <div class="form-grid" style="margin-bottom:4px;">
                 <div class="form-group">
                     <label>${label}</label>
-                    <select id="report-period-select">${ReportsPage.periodOptions(initialPeriod)}</select>
+                    <select id="report-period-select">${ReportsPage.periodOptions(startingPeriod)}</select>
                 </div>
             </div>
             ${ReportsPage.customRangeHtml(defaultCustomStart, defaultCustomEnd)}
@@ -188,6 +337,7 @@ const ReportsPage = {
                 <div style="font-size:11px; color:var(--gray-500);">Loading report...</div>
             </div>
             <div class="form-actions">
+                ${saveBtn}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
 
@@ -196,15 +346,20 @@ const ReportsPage = {
         const endInput = $("#report-custom-end");
         const content = $("#report-content");
 
+        // Track current params so the Save button captures fresh values.
+        let currentParams = {};
+
         const render = async () => {
             ReportsPage.toggleCustomRange();
             content.innerHTML = `<div style="font-size:11px; color:var(--gray-500);">Loading report...</div>`;
             try {
                 if (useAsOfOnly) {
                     const asOfDate = ReportsPage.getAsOfDate(select.value, endInput.value || todayISO());
+                    currentParams = { period: select.value, as_of_date: asOfDate };
                     content.innerHTML = await loadContent(select.value, { as_of_date: asOfDate });
                 } else {
                     const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
+                    currentParams = { period: select.value, start_date: range.start, end_date: range.end };
                     content.innerHTML = await loadContent(select.value, range);
                 }
             } catch (err) {
@@ -215,16 +370,33 @@ const ReportsPage = {
         select.addEventListener("change", render);
         startInput.addEventListener("change", () => { if (select.value === "custom" && !useAsOfOnly) render(); });
         endInput.addEventListener("change", () => { if (select.value === "custom") render(); });
+
+        if (reportType) {
+            const sb = $("#report-save-btn");
+            if (sb) sb.addEventListener("click", () => {
+                ReportsPage.saveCurrent(reportType, currentParams);
+            });
+        }
+
         await render();
     },
 
-    async profitLoss() {
+    async profitLoss(prefill) {
         await ReportsPage.openPeriodModal("Profit & Loss", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/profit-loss?start_date=${range.start}&end_date=${range.end}`);
+            // Build the onclick payload outside the template so we can
+            // HTML-escape the embedded double quotes from JSON.stringify().
+            // Otherwise the inner " breaks the outer onclick="…" attribute.
+            const drillCall = (i) => escapeHtml(
+                `ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_name)},${JSON.stringify(range.start)},${JSON.stringify(range.end)})`
+            );
             const section = (items) => {
                 if (!items.length) return `<tr><td colspan="2" style="color:var(--gray-400);">None</td></tr>`;
                 return items.map(i =>
-                    `<tr><td style="padding-left:24px;">${escapeHtml(i.account_name)}</td><td class="amount">${formatCurrency(Math.abs(i.amount))}</td></tr>`
+                    `<tr><td style="padding-left:24px;">
+                        <a href="javascript:void(0)" style="color:var(--qb-blue,#0066cc); text-decoration:none;"
+                           onclick="${drillCall(i)}">${escapeHtml(i.account_name)}</a>
+                        </td><td class="amount">${formatCurrency(Math.abs(i.amount))}</td></tr>`
                 ).join("");
             };
             return `
@@ -244,14 +416,20 @@ const ReportsPage = {
                         <tr style="font-weight:700; font-size:15px; background:var(--primary-light);"><td>Net Income</td><td class="amount">${formatCurrency(data.net_income)}</td></tr>
                     </tbody>
                 </table></div>`;
-        });
+        }, "Dates", false, { reportType: 'profit_loss', prefill });
     },
 
-    async balanceSheet() {
+    async balanceSheet(prefill) {
         await ReportsPage.openPeriodModal("Balance Sheet", "this_year_to_date", async (_period, params) => {
             const data = await API.get(`/reports/balance-sheet?as_of_date=${params.as_of_date}`);
+            const drillCall = (i) => escapeHtml(
+                `ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_name)},null,${JSON.stringify(params.as_of_date)})`
+            );
             const section = (items) => items.map(i =>
-                `<tr><td style="padding-left:24px;">${escapeHtml(i.account_name)}</td><td class="amount">${formatCurrency(Math.abs(i.amount))}</td></tr>`
+                `<tr><td style="padding-left:24px;">
+                    <a href="javascript:void(0)" style="color:var(--qb-blue,#0066cc); text-decoration:none;"
+                       onclick="${drillCall(i)}">${escapeHtml(i.account_name)}</a>
+                    </td><td class="amount">${formatCurrency(Math.abs(i.amount))}</td></tr>`
             ).join("") || `<tr><td colspan="2" style="color:var(--gray-400);">None</td></tr>`;
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
@@ -269,10 +447,10 @@ const ReportsPage = {
                         <tr style="font-weight:600; background:var(--gray-50);"><td>Total Equity</td><td class="amount">${formatCurrency(data.total_equity)}</td></tr>
                     </tbody>
                 </table></div>`;
-        }, "As Of", true);
+        }, "As Of", true, { reportType: 'balance_sheet', prefill });
     },
 
-    async salesTax() {
+    async salesTax(prefill) {
         await ReportsPage.openPeriodModal("Sales Tax Report", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/sales-tax?start_date=${range.start}&end_date=${range.end}`);
             const rows = data.items.map(i =>
@@ -299,10 +477,10 @@ const ReportsPage = {
                     </div>
                     <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">Tax Collected: ${formatCurrency(data.total_tax)}</div>
                 </div>`;
-        });
+        }, "Dates", false, { reportType: 'sales_tax', prefill });
     },
 
-    async generalLedger() {
+    async generalLedger(prefill) {
         await ReportsPage.openPeriodModal("General Ledger", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/general-ledger?start_date=${range.start}&end_date=${range.end}`);
             let html = `<p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>`;
@@ -330,10 +508,10 @@ const ReportsPage = {
                 }
             }
             return html;
-        });
+        }, "Dates", false, { reportType: 'general_ledger', prefill });
     },
 
-    async incomeByCustomer() {
+    async incomeByCustomer(prefill) {
         await ReportsPage.openPeriodModal("Income by Customer", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}`);
             let rows = data.items.map(i =>
@@ -358,7 +536,7 @@ const ReportsPage = {
                     <thead><tr><th>Customer</th><th class="amount">Invoices</th><th class="amount">Sales</th><th class="amount">Paid</th><th class="amount">Balance</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
-        });
+        }, "Dates", false, { reportType: 'income_by_customer', prefill });
     },
 
     async customerStatementPicker() {
@@ -388,7 +566,7 @@ const ReportsPage = {
         closeModal();
     },
 
-    async arAging() {
+    async arAging(prefill) {
         await ReportsPage.openPeriodModal("Accounts Receivable Aging", "this_year_to_date", async (_period, params) => {
             const data = await API.get(`/reports/ar-aging?as_of_date=${params.as_of_date}`);
             let rows = data.items.map(i =>
@@ -429,7 +607,7 @@ const ReportsPage = {
                     </tr></thead>
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
                 </table></div>`;
-        }, "As Of", true);
+        }, "As Of", true, { reportType: 'ar_aging', prefill });
     },
 
     async trialBalance() {
@@ -461,7 +639,7 @@ const ReportsPage = {
         });
     },
 
-    async cashFlow() {
+    async cashFlow(prefill) {
         await ReportsPage.openPeriodModal("Cash Flow Statement", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/cash-flow?start_date=${range.start}&end_date=${range.end}`);
             const section = (title, items, total) => {
@@ -489,7 +667,7 @@ const ReportsPage = {
                         </tr>
                     </tbody>
                 </table></div>`;
-        });
+        }, "Dates", false, { reportType: 'cash_flow', prefill });
     },
 
     async report1099() {

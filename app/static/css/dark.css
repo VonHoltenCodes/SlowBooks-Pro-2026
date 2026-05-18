@@ -40,7 +40,10 @@
 
     --primary-light:  #1e2838;
 
+    --gray-50:        #14161c;   /* Used for "Total" / subtotal table rows */
+    --gray-100:       #181a22;
     --gray-200:       #2e3240;
+    --gray-300:       #3a3e48;
     --gray-400:       #606878;
     --gray-500:       #7a8498;
     --gray-600:       #a0a8b8;
@@ -72,6 +75,18 @@
 [data-theme="dark"] .tb-btn { color: var(--text-secondary); }
 [data-theme="dark"] .tb-btn:hover { background: rgba(255,255,255,0.08); border-color: #4a4e58; color: #e0e4ec; }
 [data-theme="dark"] .topbar-clock { color: var(--text-secondary); }
+
+/* Sun icon (shown in dark mode — click to return to light) gets warm amber */
+[data-theme="dark"] #theme-toggle {
+    color: #ffc94a;
+    text-shadow: 0 0 8px rgba(255, 201, 74, 0.65);
+}
+[data-theme="dark"] #theme-toggle:hover {
+    color: #ffd970;
+    text-shadow: 0 0 12px rgba(255, 201, 74, 0.9);
+    background: rgba(255, 201, 74, 0.12);
+    border-color: rgba(255, 201, 74, 0.45);
+}
 
 /* Sidebar */
 [data-theme="dark"] #sidebar {
@@ -339,3 +354,16 @@
 /* Inline styles that use hardcoded colors — override common patterns */
 [data-theme="dark"] [style*="color:var(--qb-navy)"] { color: #8ab4e0 !important; }
 [data-theme="dark"] [style*="font-weight:700"] { color: var(--text-primary); }
+
+/* Phase 9: Analytics error box — dark variant */
+[data-theme="dark"] .analytics-error {
+    background: #2a1e1e;
+    border-color: #e05555;
+    color: #ff9f9f;
+}
+
+/* Phase 9: Totals row in aging tables */
+[data-theme="dark"] .totals-row td {
+    background: rgba(138, 180, 224, 0.08);
+    border-top-color: var(--panel-border);
+}

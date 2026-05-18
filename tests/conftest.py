@@ -1,22 +1,32 @@
-"""Shared pytest fixtures.
+# ============================================================================
+# Slowbooks Pro 2026 — pytest configuration
+#
+# Each test gets a fresh in-memory SQLite database via the db_engine fixture.
+# The `client` fixture wires the app's get_db dependency to that same engine
+# so API calls and direct db_session queries hit the same tables.
+# Rate limiting is disabled by default so per-test counters don't collide.
+# ============================================================================
 
-Uses an in-memory SQLite database per test. The app schema (SQLAlchemy models)
-is created directly with Base.metadata.create_all rather than running Alembic —
-this is intentional: tests don't exercise the migration path, they exercise the
-ORM/route code against the current model definitions.
-"""
+import os
+import sys
 from decimal import Decimal
+from pathlib import Path
 
-import pytest
-from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+# ---- Environment overrides (must run BEFORE any app imports) ----
+os.environ["SESSION_SECRET_KEY"] = "test-secret-key-not-for-production"
+os.environ["ALLOWED_ORIGINS"] = "http://testserver,http://localhost:3001"
+os.environ["CORS_ALLOW_ORIGINS"] = "http://testserver,http://localhost:3001"
+os.environ["RATE_LIMIT_ENABLED"] = "0"
+# Point the app at an in-memory DB by default; fixtures override per-test.
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
-import app.database as db_module
-from app.database import Base
-from app.seed.chart_of_accounts import CHART_OF_ACCOUNTS
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest  # noqa: E402
+from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import create_engine  # noqa: E402
+from sqlalchemy.orm import sessionmaker  # noqa: E402
+from sqlalchemy.pool import StaticPool  # noqa: E402
 
 # Import all model modules so Base.metadata sees every table before create_all.
 # Without these imports, tables defined in unimported modules wouldn't be created.
@@ -51,16 +61,32 @@ from app.models import (  # noqa: F401
     time_entries,
     transactions,
 )
+import app.database as db_module  # noqa: E402
+from app.database import Base, get_db  # noqa: E402
+from app.seed.chart_of_accounts import CHART_OF_ACCOUNTS  # noqa: E402
+
+from app.main import app  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Per-test in-memory engine — every test gets a clean slate
+# ---------------------------------------------------------------------------
 
 
 @pytest.fixture
 def db_engine():
+    """Per-test in-memory SQLite engine with full schema."""
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
     Base.metadata.create_all(bind=engine)
+    # Point the app module at this engine so SessionLocal-based code (audit
+    # hooks, etc.) also land in the same DB.
+    db_module.engine = engine
+    db_module.SessionLocal = sessionmaker(
+        autocommit=False, autoflush=False, bind=engine
+    )
     yield engine
     engine.dispose()
 
@@ -72,6 +98,7 @@ def TestSession(db_engine):
 
 @pytest.fixture
 def db_session(TestSession):
+    """Isolated session backed by the per-test in-memory engine."""
     session = TestSession()
     try:
         yield session
@@ -81,8 +108,9 @@ def db_session(TestSession):
 
 @pytest.fixture
 def seed_accounts(db_session):
-    """Seed the default chart of accounts. Returns a name->Account map for convenience."""
+    """Seed the standard chart of accounts; returns dict keyed by account_number."""
     from app.models.accounts import Account, AccountType
+
     accounts_by_number = {}
     for data in CHART_OF_ACCOUNTS:
         acct = Account(
@@ -100,26 +128,22 @@ def seed_accounts(db_session):
 
 @pytest.fixture
 def seed_customer(db_session):
+    """Seed a single active Customer and return it."""
     from app.models.contacts import Customer
-    c = Customer(name="Test Customer", is_active=True)
-    db_session.add(c)
+
+    customer = Customer(name="Test Customer", is_active=True)
+    db_session.add(customer)
     db_session.commit()
-    return c
+    return customer
 
 
-@pytest.fixture
-def client(db_engine, TestSession):
-    """TestClient with get_db overridden to use the test session.
+# ---------------------------------------------------------------------------
+# Client fixtures — both wire get_db to the per-test in-memory engine
+# ---------------------------------------------------------------------------
 
-    Important: we import app.main here (after the engine fixture has run) so that
-    register_audit_hooks etc don't fire against the production SessionLocal.
-    """
-    # Point the module-level SessionLocal at the test engine before importing app
-    db_module.engine = db_engine
-    db_module.SessionLocal = TestSession
 
-    from app.main import app
-    from app.database import get_db
+def _wire_app(TestSession):
+    """Override app's get_db dependency to use the per-test session factory."""
 
     def override_get_db():
         session = TestSession()
@@ -129,6 +153,52 @@ def client(db_engine, TestSession):
             session.close()
 
     app.dependency_overrides[get_db] = override_get_db
+
+
+@pytest.fixture
+def unauthed_client(db_engine, TestSession):
+    """Unauthenticated TestClient backed by the per-test in-memory DB.
+
+    Use this fixture in tests that exercise the auth flow itself (setup, login,
+    logout) where you need to start from an unauthenticated state.
+    """
+    _wire_app(TestSession)
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def client(db_engine, TestSession):
+    """Authenticated TestClient backed by the per-test in-memory DB.
+
+    Auth setup is performed during fixture setup so every API call
+    made through this client is already authenticated.
+    """
+    _wire_app(TestSession)
+    with TestClient(app) as c:
+        r = c.post("/api/auth/setup", json={"password": "test-password-123"})
+        assert r.status_code == 200, f"Auth setup failed: {r.text}"
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def authed_client(client):
+    """Alias for client (already authenticated). Kept for backwards compatibility."""
+    return client
+
+
+@pytest.fixture
+def db():
+    """Legacy fixture: fresh session against the module-level engine.
+
+    Tests that import this fixture directly (not via client) get a session
+    backed by whatever engine db_module.SessionLocal points at.
+    """
+    session = db_module.SessionLocal()
+    try:
+        yield session
+    finally:
+        session.rollback()
+        session.close()

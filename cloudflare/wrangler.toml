@@ -1,0 +1,56 @@
+# Slowbooks Pro 2026 — Cloudflare Worker AI Gateway
+#
+# Per-installation deploy config. Each LAN owner gets their own Worker,
+# their own secret, their own quota.
+#
+# Deploy:
+#   wrangler secret put AUTH_TOKEN     # paste output of `openssl rand -hex 32`
+#   wrangler deploy
+#
+# Rotate the shared secret:
+#   wrangler secret put AUTH_TOKEN     # paste a new one
+#   (then update Slowbooks → ⚙ AI → API key)
+#
+# Tail live logs:
+#   wrangler tail
+
+name = "slowbooks-ai"
+main = "worker.js"
+compatibility_date = "2026-04-01"
+
+# Workers AI binding — gives the Worker implicit access to this account's
+# Workers AI quota without needing an API token anywhere.
+[ai]
+binding = "AI"
+
+# Secrets (set via `wrangler secret put`, NOT committed here):
+#   AUTH_TOKEN — shared-secret string Slowbooks sends as Bearer token.
+#                Generate with: openssl rand -hex 32
+#                REQUIRED. Set it before deploying: wrangler secret put AUTH_TOKEN
+
+# Optional configuration variables (uncomment and customize as needed).
+# Set these via this [vars] section OR via the Cloudflare dashboard.
+[vars]
+# Comma-separated list of allowed model IDs.
+# If not set, defaults to:
+#   @cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct,@cf/mistral/mistral-7b-instruct-v0.2-lora
+# ALLOWED_MODELS = ""
+
+# Default model to use if request doesn't specify one.
+# Must be in ALLOWED_MODELS. Defaults to @cf/meta/llama-3.3-70b-instruct-fp8-fast
+# DEFAULT_MODEL = ""
+
+# Comma-separated list of origins allowed for CORS (browser requests).
+# If not set, CORS checks are skipped (useful for same-origin deployments).
+# Example: http://localhost:3000,https://slowbooks.local
+# ALLOWED_ORIGINS = ""
+
+# Set to "1" to enable request/response logging to stdout (visible in `wrangler tail`).
+# Defaults to "0" (logging disabled to avoid logging sensitive data).
+# LOG_VERBOSE = "0"
+
+# Observability: keep a 3-day log tail so you can debug without storing
+# the full request body anywhere.
+[observability]
+enabled = true
+head_sampling_rate = 1.0

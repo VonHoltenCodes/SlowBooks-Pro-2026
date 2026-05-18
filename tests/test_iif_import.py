@@ -5,8 +5,8 @@ common-case QB export convention (SPL amounts stored with opposite sign from
 the AR debit), the abs()-based parse is correct. Edge cases like mixed-sign
 SPL lines (e.g. discount lines) are a known limitation — separate work item.
 """
-from decimal import Decimal
 
+from decimal import Decimal
 
 INVOICE_IIF = (
     "!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tTERMS\n"
@@ -43,9 +43,14 @@ def test_iif_import_invoice_common_case(db_session, seed_accounts):
     # Journal entry should exist and be balanced
     assert invoice.transaction_id is not None
     from app.models.transactions import TransactionLine
-    lines = db_session.query(TransactionLine).filter_by(
-        transaction_id=invoice.transaction_id,
-    ).all()
+
+    lines = (
+        db_session.query(TransactionLine)
+        .filter_by(
+            transaction_id=invoice.transaction_id,
+        )
+        .all()
+    )
     total_dr = sum((Decimal(str(l.debit)) for l in lines), Decimal("0"))
     total_cr = sum((Decimal(str(l.credit)) for l in lines), Decimal("0"))
     assert total_dr == total_cr == Decimal("108.75")

@@ -19,12 +19,14 @@ from app.models.contacts import Customer
 from app.schemas.estimates import EstimateCreate, EstimateUpdate, EstimateResponse
 from app.schemas.invoices import InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
+from app.services.settings_service import get_all_settings as get_settings, set_setting
 from app.services.accounting import (
-    create_journal_entry, get_ar_account_id,
-    get_default_income_account_id, get_sales_tax_account_id,
     compute_line_totals,
+    create_journal_entry,
+    get_ar_account_id,
+    get_default_income_account_id,
+    get_sales_tax_account_id,
 )
-from app.routes.settings import _get_all as get_settings, _set as set_setting
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
 
@@ -306,6 +308,14 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
             reference=invoice_number,
         )
         invoice.transaction_id = txn.id
+
+    # Phase 11 (audit fix): estimate→invoice conversion is a NEW sale from
+    # an accounting standpoint. Post inventory movements for each inventory
+    # line so the ledger stays consistent with the A/R journal entry.
+    db.flush()
+    db.refresh(invoice)
+    from app.services.inventory_hooks import post_sale_for_invoice
+    post_sale_for_invoice(db, invoice, txn_date=estimate.date)
 
     db.commit()
     db.refresh(invoice)

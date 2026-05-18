@@ -5,7 +5,19 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:17-alpine
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=100
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-bookkeeper}
@@ -36,6 +48,9 @@ services:
       APP_HOST: "0.0.0.0"
       APP_PORT: "3001"
       APP_DEBUG: "${APP_DEBUG:-false}"
+      APP_WORKERS: "${APP_WORKERS:-2}"
+      # Python 3.13 experimental JIT - uncomment for ~5-10% extra on hot loops
+      # PYTHON_JIT: "1"
     ports:
       - "${APP_PORT:-3001}:3001"
     volumes:

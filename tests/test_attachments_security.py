@@ -2,10 +2,18 @@
 
 Covers the fix for CodeQL py/path-injection alert #19.
 """
+
 import io
 
 
-def _upload(client, entity_type, entity_id, filename, content=b"hi", content_type="application/pdf"):
+def _upload(
+    client,
+    entity_type,
+    entity_id,
+    filename,
+    content=b"hi",
+    content_type="application/pdf",
+):
     return client.post(
         f"/api/attachments/{entity_type}/{entity_id}",
         files={"file": (filename, io.BytesIO(content), content_type)},
@@ -29,11 +37,13 @@ def test_rejects_path_traversal_filename(client, seed_accounts):
 
     # Confirm no file was written under /tmp/secret.pdf or similar
     from pathlib import Path
-    attached = (
-        Path("/home/devbase1/Development/bookkeeper/app/static/uploads/attachments").resolve()
-    )
+
+    attached = Path(
+        "/home/devbase1/Development/bookkeeper/app/static/uploads/attachments"
+    ).resolve()
     # no matter where we ran the test from, there should not be an escape
     import os
+
     for root, _, files in os.walk(attached):
         for f in files:
             assert "etc" not in root and "passwd" not in f
@@ -52,7 +62,14 @@ def test_rejects_disallowed_extension(client, seed_accounts):
 
 
 def test_accepts_valid_pdf(client, seed_accounts):
-    r = _upload(client, "invoice", 42, "report.pdf", content=b"%PDF-1.4\n", content_type="application/pdf")
+    r = _upload(
+        client,
+        "invoice",
+        42,
+        "report.pdf",
+        content=b"%PDF-1.4\n",
+        content_type="application/pdf",
+    )
     assert r.status_code == 201, r.text
     body = r.json()
     assert body["filename"] == "report.pdf"

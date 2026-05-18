@@ -6,7 +6,7 @@ Free and open source. Runs on Windows, macOS, and Linux. No Intuit activation se
 
 **Get started:** `docker compose up` — see **[INSTALL.md](INSTALL.md)** for all install options.
 
-![Slowbooks Pro 2026 — Splash Screen](screenshots/splash.png)
+![Slowbooks Pro 2026 — Company Snapshot](screenshots/dashboard-light.png)
 
 ---
 
@@ -19,6 +19,38 @@ So I built my own replacement. I transferred all my data from the old .QBW file 
 The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` offsets, Btrieve table layouts, and MFC class names — a tribute to the software that served me well for 14 years before its maker decided it should stop working.
 
 **This is a clean-room reimplementation.** No Intuit source code was available or used.
+
+---
+
+## What's New in v2.0.0 *(May 2026)*
+
+A major release rolling up Phase 9–11 plus a community walkthrough that closed several UI gaps.
+
+**Analytics & AI**
+- New analytics dashboard at `#/analytics` — KPI cards, 4 charts (12-month revenue line, expenses doughnut, A/R+A/P stacked bar, 90-day cash forecast), period selector (MTD/QTD/YTD), CSV/PDF export with branded headers (SlowBooks Pro 2026 wordmark + your company logo)
+- **AI Insights** one-shot brief (3 observations / 3 risks / 3 recommendations) on demand
+- **AI Predefined Analyses** — 11-action curated dropdown across 5 categories, replacing the earlier free-form chat (more reliable across providers)
+- **7 AI providers** supported: xAI Grok, Groq, Cloudflare Workers AI, Cloudflare Worker Gateway (self-hosted), Anthropic Claude, OpenAI, Google Gemini — bring-your-own-key, encrypted at rest with Fernet
+- **Settings → AI Insights** centralizes provider/model/key config with a curated model dropdown + Custom escape hatch
+
+**Phase 11 — Inventory, Drill-Down, Duplicate Detection, Saved Reports**
+- Real perpetual-inventory ledger with weighted-average cost, COGS journal entries, manual adjustments, reorder points
+- Items form exposes the full inventory toolset; Adjust modal handles add/remove/set-to-count with cost re-weighting
+- P&L and Balance Sheet rows are now click-through — drill into source transactions with running balance and source-doc links
+- Fuzzy duplicate detection on customer/vendor names with confirm-and-create-anyway
+- Saved Reports — name and one-click rerun favorite report configs
+
+**Auth, security, ops**
+- Single-user setup wizard collects operator name + email + company name + email + password (Phase 9.7)
+- argon2id password hashing, slowapi rate limiting (5 logins/minute), session cookie auth
+- External security audit pass: SSRF guards on Cloudflare account ID + Worker URL, CSV formula injection protection, schema-validated AI config payloads, constant-time secret compare in the Worker
+- Dark mode now actually works on every report subtotal row (missing `--gray-50` definition fixed)
+
+**Performance**
+- Analytics dashboard: 10 SQL queries, ~26 ms engine on 3000 invoices + 1500 bills
+- 119 pytest tests, runs in under 10 seconds, zero network deps
+
+See the [v2.0.0 release notes on GitHub](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/tag/v2.0.0) for the full changelog.
 
 ---
 
@@ -87,6 +119,159 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 
 ![Dashboard — Dark Mode](screenshots/dashboard-dark.png)
 
+### Analytics (Phase 9)
+Real-time business intelligence layer that sits on top of the accounting engine. Powered by `AnalyticsEngine` (`app/services/analytics.py`) with 8 aggregation methods and 7 REST endpoints at `/api/analytics/*`. **Fully integrated inline** into the main SPA as a hash-routed page — no separate shell, no full page reload. Click **Analytics** in the sidebar (under Accounting → Reports → Analytics → Tax Reports) to land on `#/analytics`.
+
+**Metrics computed:**
+- **Revenue by Customer** — Paid revenue per customer for the selected period, ranked high-to-low
+- **12-Month Revenue Trend** — Monthly paid-revenue history with proper calendar-month bucketing
+- **Expenses by Category** — Paid-bill expenses grouped by expense account number
+- **A/R Aging** — Open invoice balances bucketed Current / 30 / 60 / 90+ days old, using `invoices.balance_due` so partial payments don't double-count. Table is sorted worst-offender first and includes a TOTAL row.
+- **A/P Aging** — Open bill balances bucketed Current / 30 / 60 / 90+ days old (same treatment as A/R)
+- **DSO (Days Sales Outstanding)** — `(open A/R balance ÷ last-30-day paid revenue) × 30`
+- **90-Day Cash Forecast** — 14 weekly cumulative buckets of expected A/R collections vs A/P payments due on-or-before each cutoff. Net column color-coded green/red.
+- **Customer Profitability** — Lifetime paid revenue per customer (first pass; COGS attribution on the roadmap)
+
+**Dashboard UI (`#/analytics`, inline SPA page):**
+- **4 KPI cards** — Revenue, Expenses, DSO, Margin%
+- **Chart.js visualizations** (self-hosted 206 KB UMD bundle at `/static/js/chart.umd.js` — no CDN, LAN-deployable):
+  - Revenue trend — 12-month line chart with filled area + hover tooltips
+  - Expenses by category — doughnut chart with legend
+  - A/R aging — horizontal stacked bar chart (one bar per customer, stacks = current/30/60/90)
+  - A/P aging — horizontal stacked bar chart (one bar per vendor)
+  - Cash forecast — dual-line (collections vs payments) + net bar chart overlay
+- **Detail tables** under every chart with sort-by-total-descending and TOTAL footer rows
+- **Period selector** — Dropdown for Month / Quarter / Year to Date; re-fetches dashboard + re-builds all charts instantly
+- **Refresh button** — Re-fetch without navigating away
+- **Export CSV** — Downloads flat CSV of the current snapshot at `/api/analytics/export.csv?period=...`
+- **Export PDF** — Downloads a print-optimized PDF rendered by WeasyPrint (same dep used for invoice PDFs)
+- **Theme-aware** — All Chart.js text/grid colors read from `<html data-theme>` so the charts flip with the main SPA theme toggle
+
+**Date-range filtering (all endpoints):**
+```
+?period=month|quarter|year          (also accepts mtd/qtd/ytd)
+?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD    (explicit override)
+```
+Unknown period names and missing params fall back to month-to-date. Explicit dates take precedence over named periods.
+
+**CSV export:**
+```bash
+curl 'http://localhost:3001/api/analytics/export.csv?period=year' -o analytics.csv
+```
+Flat CSV with columns `(section, key, subkey, value)` covering 9 sections: period, revenue_by_customer, revenue_trend, expenses_by_category, ar_aging, ap_aging, dso, cash_forecast, customer_profit. Drops straight into Excel / Google Sheets / any BI tool.
+
+#### AI Insights (Phase 9.5)
+An optional LLM layer sits on top of the analytics snapshot and produces a compact **3 observations / 3 risks / 3 recommendations** executive brief. Nothing is sent until you click the **AI Insights** button — the feature is zero-cost by default.
+
+**Seven providers supported out of the box** (verified April 2026):
+
+| Provider | Wire format | Default model | Free tier |
+|---|---|---|---|
+| **xAI Grok** | OpenAI-compat | `grok-4-fast` | $25 signup credit |
+| **Groq (LPU Cloud)** | OpenAI-compat | `llama-3.3-70b-versatile` | Generous free tier, no card |
+| **Cloudflare Workers AI** | OpenAI-compat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | 10k neurons/day, no card |
+| **Cloudflare Worker Gateway** (self-hosted) | OpenAI-compat | `@cf/meta/llama-3.3-70b-instruct-fp8-fast` | Same 10k neurons/day — **your keys stay in *your* Cloudflare account** |
+| **Anthropic Claude** | `/v1/messages` | `claude-sonnet-4-6` | Paid only |
+| **OpenAI** | `/v1/chat/completions` | `gpt-5.4-mini` | Paid only |
+| **Google Gemini** | `generateContent` | `gemini-2.5-flash` | Free Flash tier via AI Studio |
+
+Each provider's model string is configurable from **Settings → AI Insights** — a curated dropdown per provider with a **Custom…** escape hatch for new model IDs the vendors ship between releases. So renames ("gemini-2.5-flash" → "gemini-3.0-nano") are a Custom-field entry, not a code change. Cloudflare gets an extra field for your account ID since its endpoint is account-scoped. The dedicated **Cloudflare Worker Gateway** provider adds a second field for your Worker URL — see the self-hosted gateway section below.
+
+![AI Insights provider configuration](screenshots/ai-insights-settings.png)
+
+> **Verified providers as of v2.0.0:** Only **Groq** has been validated end-to-end against a live key (both the AI Insights button and the predefined-analysis dropdown). The other six providers' wire formats are implemented and unit-tested but have not been exercised against live credentials. **Accepting working PRs that confirm or fix any provider's config** — open an issue or PR with provider name, working model ID, and any quirks discovered (e.g., headers, payload shape, error mapping).
+
+**Settings encryption.** API keys are stored in the `settings` table under `ai_api_key`, encrypted with **Fernet** (AES-128-CBC + HMAC-SHA256) via `app/services/crypto.py`. Ciphertext rows carry the prefix `fernet:v1:` so legacy plaintext rows are detected and migrated gracefully. The master key is resolved in priority order:
+
+1. `SETTINGS_ENCRYPTION_KEY` environment variable (ops-preferred)
+2. `.slowbooks-master.key` file next to the repo (zero-config default; auto-created at 0600)
+3. Fresh generation on first run (logged as a warning)
+
+**Never commit `.slowbooks-master.key`** — it is in `.gitignore`. Losing it means losing every encrypted secret.
+
+`GET /api/analytics/ai-config` returns `{provider, model, cloudflare_account_id, worker_url, has_api_key, api_key_encrypted, providers}` — the raw key is **never** in the response body. `PUT /api/analytics/ai-config` accepts a Pydantic `AIConfigUpdate` model — `{provider, model, cloudflare_account_id, worker_url, api_key}` — so malformed payloads are rejected with a 422 before they reach the service layer. An empty/missing `api_key` is interpreted as "keep the existing encrypted value", so re-saving the provider won't clobber the stored key.
+
+**Endpoints:**
+- `GET  /api/analytics/ai-config` — read display config (no secrets)
+- `PUT  /api/analytics/ai-config` — update provider/model/key/account_id (key is encrypted on save)
+- `POST /api/analytics/ai-config/test` — one-word smoke test against the configured provider
+- `POST /api/analytics/ai-insights?period=month|quarter|year[&force=true]` — run the full dashboard analysis; results are cached in-process for 10 minutes per `(provider, model, period)`, unless `force=true`
+
+All calls go through a **hardened** `httpx.Client` with a 60-second timeout, `verify=True` (TLS cert validation), `follow_redirects=False` (no sneaky 302-to-metadata tricks), and a minimal `User-Agent`. Error messages redact the API key before raising, so logs and 502 responses never leak your secret.
+
+**Security hardening (April 2026 external audit pass):**
+- **SSRF guard #1** — Cloudflare account IDs must match `^[a-f0-9]{32}$` (regex enforced both at request-build time and in `PUT /ai-config`)
+- **SSRF guard #2** — `validate_worker_url()` in `app/services/ai_service.py` rejects plain `http://`, embedded credentials, localhost, `127.0.0.1`, all RFC1918 private ranges, link-local (`169.254.x.x` including the AWS metadata endpoint), multicast, and reserved blocks. URLs are capped at 2048 chars
+- **MITM protection** — `verify=True`, `follow_redirects=False`, HTTPS-only enforcement on the Worker URL
+- **CSV formula injection** — `_csv_safe()` in `export_csv()` prefixes any user-controlled cell starting with `=`, `+`, `-`, `@`, `\t`, or `\r` with a leading apostrophe before writing to CSV, neutralizing Excel/Sheets formula execution
+- **Request schema validation** — `PUT /ai-config` uses a Pydantic `AIConfigUpdate` model instead of a raw `dict`, so malformed payloads are rejected with a 422 before they reach the service layer
+- **Constant-time secret compare** — the shared-secret auth in `cloudflare/worker.js` uses a byte-wise constant-time compare instead of `===`, closing timing side-channels
+
+#### Self-hosted Cloudflare Worker Gateway (per-LAN-owner)
+
+For installations where you don't want **any** AI credentials stored inside Slowbooks (even encrypted), the `cloudflare/` directory ships a minimal Worker that you deploy to **your own** Cloudflare account. Slowbooks only ever holds a shared secret scoped to your one Worker, so dumping the SQLite file doesn't expose enough to talk to Workers AI as you.
+
+**What it buys you:**
+- **Your keys never touch Slowbooks' DB.** Workers AI is accessed via the `env.AI.run()` binding — no Cloudflare API token is stored anywhere, in Slowbooks or in the Worker source
+- **Per-installation isolation.** Every LAN owner installs their own Worker in their own Cloudflare account. One compromised install can't reach another; one abused install can't burn someone else's quota
+- **Free tier friendly.** Cloudflare gives every account 10,000 neurons/day for free — plenty for hundreds of AI Insights runs and tool-calling Q&A sessions
+- **Bearer-token auth.** Slowbooks sends `Authorization: Bearer <shared-secret>`; the Worker compares it against `env.AUTH_TOKEN` in constant time and rejects anything else with a 401
+- **OpenAI wire format.** The Worker translates Workers AI's native response into OpenAI-shaped JSON (including `tool_calls`) so Slowbooks' existing OpenAI-compat code path works unchanged
+
+**5-minute setup:** `wrangler login` → `openssl rand -hex 32` → `wrangler secret put AUTH_TOKEN` → `wrangler deploy` → paste the Worker URL + shared secret into Slowbooks **⚙ AI** → Provider: **Cloudflare Worker Gateway (self-hosted)**. Full step-by-step in **[cloudflare/README.md](cloudflare/README.md)**.
+
+**What it does *not* protect against:** a compromised Slowbooks install still has the shared secret, so it can still invoke *your* Worker — rotate the secret if you suspect compromise; abnormal Worker traffic shows up in the Cloudflare dashboard immediately.
+
+#### AI Predefined Analyses
+
+Beyond the headline insights brief, the analytics page exposes a **curated dropdown of 11 predefined analyses** spanning the full ledger surface. Each action pre-fetches its data server-side via the existing `app/services/ai_tools.py` helpers and sends a focused **one-shot** prompt to the LLM (no tool calling, no multi-turn). This avoids the brittle "model emits legacy `<function=...>` syntax" path that some Llama-on-Groq combos still hit, so it works reliably across every provider.
+
+![Analytics with AI predefined analysis output](screenshots/analytics-dashboard.png)
+
+**Categories and actions** (registered in `app/services/ai_actions.py`):
+
+| Category | Action | Tool used |
+|---|---|---|
+| **Customers & Sales** | Top customers by revenue | `get_sales_by_customer` |
+| | Unpaid invoices summary | `search_invoices` |
+| | A/R aging | `get_aging_report` |
+| **Vendors & Bills** | Expenses by category | `get_expenses_by_category` |
+| | Unpaid bills summary | `search_bills` |
+| | A/P aging | `get_aging_report` |
+| **Banking & Cash** | Cash position by account | `list_accounts` + `get_account_balance` |
+| | Recent payment activity | `search_payments` |
+| **Financial Reports** | P&L analysis | `get_pl_summary` |
+| | Balance sheet analysis | `get_balance_sheet` |
+| **Tax** | Sales tax position | `get_tax_summary` |
+
+The page-level period selector (MTD / QTD / YTD) flows through to date-bounded actions automatically; "as of today" actions ignore it. Adding a new action is a single `ActionSpec` registration — point it at one of the existing tool functions and define a one-line framing prompt.
+
+**Endpoints:**
+- `GET  /api/analytics/ai-actions` — list catalogue grouped by category
+- `POST /api/analytics/ai-actions/{key}?period=…` — run one analysis; returns `{action_key, label, category, analysis, data, provider, model, period}`
+
+The 16 underlying read-only tool functions in `ai_tools.py` are still available (and unit-tested) for any future code path that wants tool calling. The **`POST /api/analytics/ai-query`** endpoint that drove the legacy chat panel is retained as a power-user API but is no longer wired into the UI.
+
+**Test coverage:** 119 pytest tests cover AI security, analytics, auth flow, CORS, CSV safety, attachments, IIF import, invoice posting/editing, reporting, rate limiting, inventory posting (COGS, weighted-avg cost, voids), drill-down queries, duplicate detection, and saved reports — all running in under 10 seconds with zero network dependencies.
+
+**PDF export:**
+```bash
+curl 'http://localhost:3001/api/analytics/export.pdf?period=year' -o analytics.pdf
+```
+Print-ready PDF via WeasyPrint + Jinja2 (`app/templates/analytics_pdf.html` → `app/services/pdf_service.py::generate_analytics_pdf`). Same template handles all periods. Output: letter-size, page numbers in footer, KPI strip + every table the UI shows. ~18 KB typical for a small business; renders in WeasyPrint in well under a second.
+
+**Performance:** `GET /api/analytics/dashboard` issues exactly **10 SQL queries** regardless of dataset size — every method is single-query (or at most two) with no N+1 relationship loads. Measured on SQLite with 3,000 invoices + 1,500 bills: **~26 ms** engine / ~40 ms full HTTP round-trip; with 8,000 invoices + 4,000 bills: **~50 ms**. The `period` parameter adds zero extra queries. PDF export renders end-to-end in ~100 ms on the medium dataset.
+
+**Tested** with 25-assertion backend regression + 42-assertion headless UI smoke test that loads the real Chart.js UMD bundle in a `vm` context and confirms all 5 chart instances initialize with the expected dataset shapes (1 line chart with 12 points, 1 doughnut with N slices, 2 stacked bars with 4 datasets each, 1 combo chart with 3 datasets).
+
+Quick smoke test once the app is running:
+```bash
+curl http://localhost:3001/api/analytics/dashboard
+curl http://localhost:3001/api/analytics/dashboard?period=year
+curl http://localhost:3001/api/analytics/export.csv > snapshot.csv
+curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
+```
+
 ### Online Payments
 - **Stripe Checkout** — Accept online payments via Stripe's hosted checkout page. Customers click "Pay Online" in emailed invoices, pay on Stripe, and the payment auto-records with journal entries (DR Undeposited Funds, CR A/R)
 - **Public Payment Page** — Standalone `/pay/{token}` page (no login required) shows invoice summary with "Pay with Stripe" button. Supports light/dark mode
@@ -110,11 +295,43 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - **Print-Optimized PDF** — Enhanced invoice PDF template with company logo support
 - **IIF Import/Export** — Full QuickBooks 2003 Pro interoperability (see below)
 
+### Inventory, Drill-Down & Duplicate Detection (Phase 11)
+
+![Inventory tracking on the item form](screenshots/inventory-tracking.png)
+
+- **Real inventory tracking** — Items can be marked `track_inventory=True` to hit a perpetual-inventory ledger. Every purchase (bill) and sale (invoice) writes a row to `inventory_movements` and updates `quantity_on_hand` + weighted-average `avg_cost`
+- **Automatic COGS journal entries** — Selling an inventory item posts `DR COGS / CR Inventory Asset` at the current weighted-avg cost. Voids reverse the entry
+- **Weighted-average cost** — Standard perpetual-inventory model: `new_avg = (old_qty × old_avg + received_qty × received_cost) / (old_qty + received_qty)`
+- **Reorder points + low-stock report** — `GET /api/items/low-stock` returns items at or below their reorder point, worst-shortage first
+- **Inventory valuation** — `GET /api/items/valuation` sums `qty × avg_cost` across all tracked items
+- **Manual adjustments** — `POST /api/items/{id}/adjust` for count corrections, shrinkage, spoilage with an offsetting JE to #5900 (Inventory Adjustments) or COGS
+- **Drill-down reporting** — `GET /api/reports/account-transactions?account_id=X` returns every journal entry hitting an account in the date range, with source-doc links (`/#/invoices/42`, `/#/bills/17`, etc.) so the SPA can jump from a P&L row to the underlying transaction
+- **Fuzzy duplicate detection** — Customer/vendor creation warns with 409 on similar names (difflib similarity ≥ 0.85 after normalizing case, punctuation, and business suffixes like "Inc", "LLC", "Corp"). The form shows a confirm-and-create-anyway dialog with the matched names + similarity %; pass `?force=true` to override programmatically, or use `GET /api/customers/check-duplicate?name=...` for a pre-submit preview
+
+![Duplicate detection warning](screenshots/duplicate-detection.png)
+- **Saved reports** — Full CRUD on named `(report_type, parameters)` tuples at `/api/saved-reports`. Lets users one-click rerun their favorite P&L, Balance Sheet, or account drill-down without re-entering dates
+
+### Security & Authentication (Phase 9.7)
+- **Single-user authentication** — Password-protected access with setup wizard on first run. Session-based auth with secure cookie (`strict` SameSite, 30-day TTL)
+- **Security headers** — X-Content-Type-Options, X-Frame-Options (DENY), Referrer-Policy, Permissions-Policy on all responses
+- **CORS lockdown** — No wildcard origins; defaults to localhost, configurable via `CORS_ALLOW_ORIGINS` env var
+- **Rate limiting** — Configurable via slowapi; disabled in tests, toggle via `RATE_LIMIT_ENABLED`
+- **Path traversal protection** — Backup download/restore and attachment uploads validated with `is_relative_to()`
+- **Sensitive key filtering** — Password hashes and session secrets never returned from the settings API
+- **Atomic secret writes** — Session key and encryption master key use `mkstemp` + `os.replace` to prevent race conditions
+- **Encrypted API keys** — AI provider keys encrypted at rest with Fernet (AES-128-CBC + HMAC-SHA256)
+- **Non-root Docker** — Container runs as `slowbooks` user (UID 1000), not root
+- **Pinned dependencies** — All `requirements.txt` entries have upper-bound version caps
+
 ### System & Administration
 - **Dark Mode** — Toggle between QB2003 Blue theme and dark mode (Alt+D or toolbar button). Persists in localStorage
 - **Backup/Restore** — Create and download PostgreSQL backups from the settings page
 - **Multi-Company** — Support for multiple company databases, switchable from UI
 - **Global Search** — Unified server-side search across customers, vendors, items, invoices, estimates, and payments
+- **Attachments** — Upload files (PDF, images) to invoices, bills, and other entities with MIME type and extension validation
+- **Bank Rules** — Auto-categorize imported bank transactions with pattern-matching rules
+- **Budgets** — Create and track budgets by account and period with actual-vs-budget comparison
+- **Email Templates** — Customizable email templates for invoices, estimates, and statements
 
 ### UI
 - Authentic QB2003 "Default Blue" skin with navy/gold color palette (+ dark mode)
@@ -122,7 +339,7 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 - Windows XP-era toolbar, sidebar navigator with icons, status bar
 - Keyboard shortcuts: `Alt+N` (new invoice), `Alt+P` (payment), `Alt+Q` (quick entry), `Alt+H` (home), `Alt+D` (dark mode), `Ctrl+S` (save modal form), `Ctrl+K` (search), `Escape` (close modal)
 - No frameworks — vanilla HTML/CSS/JS single-page app
-- 29 SPA routes, 28 sidebar nav links
+- 35+ SPA routes, 34 sidebar nav links
 
 ### QuickBooks 2003 Pro Interoperability
 - **IIF Export** — Export all Slowbooks data (accounts, customers, vendors, items, invoices, payments, estimates) as .iif files importable into QB2003 via File > Utilities > Import > IIF Files
@@ -142,10 +359,10 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (35 routers, 160+ routes) |
-| Database | PostgreSQL 16 + SQLAlchemy 2.0 |
+| Backend | Python 3.12 + FastAPI (44 routers, 213+ routes) |
+| Database | PostgreSQL 16 / SQLite + SQLAlchemy 2.0 |
 | Migrations | Alembic |
-| Frontend | Vanilla HTML/CSS/JS (no framework) |
+| Frontend | Vanilla HTML/CSS/JS (no framework) + self-hosted Chart.js 4.4.6 for analytics |
 | PDF | WeasyPrint 60.2 + Jinja2 |
 | Bank Import | ofxparse (OFX/QFX) |
 | Payments | Stripe Checkout (hosted) |
@@ -207,10 +424,10 @@ SlowBooks-Pro-2026/
 ├── alembic.ini               # Alembic config
 ├── alembic/                  # Database migrations
 ├── app/
-│   ├── main.py               # FastAPI app + 35 routers (160+ routes)
-│   ├── config.py             # Environment-based settings
+│   ├── main.py               # FastAPI app + 43 routers (200+ routes)
+│   ├── config.py             # Environment-based settings (CORS, origins)
 │   ├── database.py           # SQLAlchemy engine + session
-│   ├── models/               # 30+ SQLAlchemy models
+│   ├── models/               # 25 model modules (40 tables)
 │   │   ├── accounts.py       # Chart of Accounts (self-referencing)
 │   │   ├── contacts.py       # Customers + Vendors
 │   │   ├── items.py          # Products, services, materials, labor
@@ -230,11 +447,16 @@ SlowBooks-Pro-2026/
 │   │   ├── backups.py        # Backup records
 │   │   ├── companies.py      # Multi-company records
 │   │   ├── payroll.py        # Employees, pay runs, pay stubs
-│   │   └── qbo_mapping.py    # QBO ↔ Slowbooks ID mappings
+│   │   ├── qbo_mapping.py    # QBO ↔ Slowbooks ID mappings
+│   │   ├── attachments.py    # File attachments (Phase 10)
+│   │   ├── bank_rules.py     # Bank transaction categorization rules
+│   │   ├── budgets.py        # Budget tracking by account/period
+│   │   └── email_templates.py # Customizable email templates
 │   ├── schemas/              # Pydantic request/response models
-│   ├── routes/               # FastAPI routers (35 routers)
+│   ├── routes/               # FastAPI routers (43 routers)
 │   ├── services/
 │   │   ├── accounting.py     # Double-entry journal entry engine
+│   │   ├── analytics.py      # Phase 9: business intelligence aggregates (8 methods)
 │   │   ├── audit.py          # SQLAlchemy after_flush audit hooks
 │   │   ├── closing_date.py   # Closing date enforcement guard
 │   │   ├── payroll_service.py # Withholding calculations
@@ -252,28 +474,37 @@ SlowBooks-Pro-2026/
 │   │   ├── stripe_service.py # Stripe Checkout + webhook verification
 │   │   ├── qbo_service.py    # QBO OAuth + token management + client factory
 │   │   ├── qbo_import.py     # Import 6 entity types from QBO
-│   │   └── qbo_export.py     # Export 6 entity types to QBO
-│   ├── templates/            # Jinja2 templates (PDF, email)
+│   │   ├── qbo_export.py     # Export 6 entity types to QBO
+│   │   ├── auth.py           # Phase 9.7: single-user password auth + session management
+│   │   ├── rate_limit.py     # Phase 9.7: slowapi rate limiting
+│   │   ├── settings_service.py # Settings CRUD with sensitive key filtering
+│   │   └── crypto.py         # Fernet encryption for API keys + master key management
+│   ├── templates/            # Jinja2 templates (PDF, email, checks, collection letters)
 │   ├── seed/                 # Chart of Accounts seed data
 │   └── static/
 │       ├── css/
 │       │   ├── style.css     # QB2003 "Default Blue" skin
 │       │   └── dark.css      # Dark mode CSS overrides
-│       └── js/               # SPA router, API wrapper, 27 page modules
+│       └── js/               # SPA router, API wrapper, 35+ page modules
 ├── scripts/
 │   ├── seed_database.py      # Seed the Chart of Accounts
 │   ├── seed_irs_mock_data.py # IRS Pub 583 mock data
 │   ├── run_recurring.py      # Cron script for recurring invoices
 │   └── backup.sh             # PostgreSQL backup with rotation
 ├── screenshots/              # README images
-└── index.html                # SPA shell (27 script tags)
+├── cloudflare/               # Self-hosted Cloudflare Worker AI gateway
+│   ├── worker.js             # Hardened proxy (model allowlist, rate limiting, security headers)
+│   ├── wrangler.toml         # Deployment config
+│   └── README.md             # Setup guide
+├── tests/                    # 92 pytest tests (auth, security, posting, reporting, import)
+└── index.html                # SPA shell (35+ script tags)
 ```
 
 ---
 
 ## Database Schema
 
-36 tables with a double-entry accounting foundation:
+42 tables with a double-entry accounting foundation:
 
 | Table | Purpose |
 |-------|---------|
@@ -313,12 +544,26 @@ SlowBooks-Pro-2026/
 | `pay_runs` | Pay run headers with totals |
 | `pay_stubs` | Individual pay stubs with withholding breakdowns |
 | `qbo_mappings` | QBO ID ↔ Slowbooks ID mapping for sync deduplication |
+| `attachments` | File attachments linked to invoices, bills, etc. |
+| `bank_rules` | Pattern-matching rules for auto-categorizing bank imports |
+| `budgets` | Budget amounts by account and period |
+| `email_templates` | Customizable email templates |
+| `inventory_movements` | Per-item qty/cost ledger (purchases, sales, adjustments) |
+| `saved_reports` | Named (report_type + parameters) tuples |
 
 ---
 
 ## API
 
-All endpoints under `/api/`. Swagger docs at `/docs`. 160+ routes across 35 routers.
+All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 routers. All routes (except `/api/auth/*`, `/health`, `/pay/*`, and `/api/stripe/webhook`) require an authenticated session.
+
+### Authentication (Phase 9.7)
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/auth/status` | GET | Auth state: `{setup_needed, authenticated}` |
+| `/api/auth/setup` | POST | First-run password setup (min 8 chars) |
+| `/api/auth/login` | POST | Login with password |
+| `/api/auth/logout` | POST | Clear session |
 
 ### Core (Original)
 | Endpoint | Methods | Description |
@@ -441,6 +686,46 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 160+ routes across 35 rout
 | `/api/backups/{id}/download` | GET | Download backup file |
 | `/api/companies` | GET, POST | Multi-company management |
 | `/api/uploads/logo` | POST | Upload company logo |
+| `/api/attachments/{type}/{id}` | GET, POST, DELETE | File attachments CRUD |
+| `/api/bank-rules` | GET, POST, PUT, DELETE | Bank transaction categorization rules |
+| `/api/budgets` | GET, POST, PUT, DELETE | Budget management |
+| `/api/email-templates` | GET, POST, PUT, DELETE | Custom email template management |
+| `/health` | GET | Liveness probe (no auth required) |
+
+### Inventory (Phase 11)
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/items/{id}/movements` | GET | Per-item inventory ledger (newest first) |
+| `/api/items/{id}/adjust` | POST | Manual quantity adjustment with offsetting JE |
+| `/api/items/low-stock` | GET | Items at or below their reorder point |
+| `/api/items/valuation` | GET | Sum of `qty × avg_cost` across tracked items |
+
+### Drill-Down & Saved Reports (Phase 11)
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/reports/account-transactions` | GET | Every journal line hitting an account, with source-doc links |
+| `/api/customers/check-duplicate` | GET | Pre-submit duplicate-name check (fuzzy) |
+| `/api/vendors/check-duplicate` | GET | Pre-submit duplicate-name check (fuzzy) |
+| `/api/saved-reports` | GET, POST | List/create named report parameter sets |
+| `/api/saved-reports/{id}` | GET, PUT, DELETE | Saved report CRUD |
+
+### Analytics
+All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or explicit `?start_date=YYYY-MM-DD&end_date=YYYY-MM-DD`.
+
+| Endpoint | Methods | Description |
+|----------|---------|-------------|
+| `/api/analytics/dashboard` | GET | Complete analytics snapshot (all 8 metrics, includes `period` echo) |
+| `/api/analytics/revenue` | GET | Windowed revenue by customer + 12-month trend |
+| `/api/analytics/expenses` | GET | Windowed expense breakdown by account number |
+| `/api/analytics/cash-flow` | GET | Cash forecast + DSO + A/R and A/P aging (`?days=90`) |
+| `/api/analytics/profitability` | GET | Lifetime paid revenue per customer |
+| `/api/analytics/export.csv` | GET | Flat CSV of the full snapshot (`section,key,subkey,value`) — honors period params |
+| `/api/analytics/export.pdf` | GET | Print-ready PDF via WeasyPrint — honors period params |
+| `/api/analytics/ai-config` | GET, PUT | Display config (no raw key) / update provider/model/key/worker_url (key Fernet-encrypted at rest; worker_url validated against SSRF/MITM) |
+| `/api/analytics/ai-config/test` | POST | Smoke-test the configured provider with a one-word prompt |
+| `/api/analytics/ai-insights` | POST | Run the dashboard through the configured LLM; `?force=true` bypasses 10-min cache |
+| `/api/analytics/ai-query` | POST | Tool-calling Q&A — LLM autonomously calls 16 read-only tools to answer `?question=...` |
+| `/analytics` | GET | Backwards-compat 307 redirect to the SPA hash route `/#/analytics` |
 
 ---
 
@@ -548,7 +833,23 @@ You can use, modify, and run Slowbooks Pro for any personal, educational, or int
 ## Contributors
 
 - [VonHoltenCodes](https://github.com/VonHoltenCodes) — Creator
+- [PNWImport](https://github.com/PNWImport) — Security hardening (auth, CORS, path traversal, atomic writes, non-root Docker, rate limiting), analytics engine, AI insights with 7-provider support, Cloudflare Worker gateway, Phase 11 inventory ledger, drill-down reports, fuzzy duplicate detection, saved reports
 - [jake-378](https://github.com/jake-378) — Backup UI fixes, report period selectors, invoice terms autofill, date validation fixes
 - [WC3D](https://github.com/WC3D) — Jinja2 XSS security fix
+
+### v2.0.0 walkthrough patches
+
+The v2.0.0 release pass surfaced several UI gaps where Phase 11 backend was complete but the frontend wasn't wired up. Closed during a live walkthrough with [Claude Code](https://claude.ai/code):
+- Setup wizard collects operator name + email + company info (was password-only)
+- AI provider config moved from a modal to a Settings sub-page with curated model dropdown + Custom escape hatch
+- Free-form chat panel replaced with 11 predefined AI analyses (more reliable across providers, especially Groq)
+- Items form gained the full Phase 11 inventory toolset (track checkbox, qty, reorder point, asset account, Adjust modal)
+- Customers/Vendors gained the duplicate-warning confirm dialog
+- Reports gained the Saved Reports list + Save button
+- P&L and Balance Sheet rows are now click-through to source transactions
+- PDF/CSV exports gained branded headers (SlowBooks Pro 2026 wordmark + company logo)
+- Several dark-mode CSS fixes (`--text-main` typo, missing `--gray-50` definition)
+
+**Looking for help validating the other 6 AI providers** — only Groq has been confirmed end-to-end against a live key. PRs welcome that confirm or fix xAI Grok, Cloudflare Workers AI, Anthropic Claude, OpenAI, or Google Gemini configs.
 
 *Built by [VonHoltenCodes](https://github.com/VonHoltenCodes) with [Claude Code](https://claude.ai/code) as co-author.*

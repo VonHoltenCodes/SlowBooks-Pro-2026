@@ -125,6 +125,14 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         )
         cm.transaction_id = txn.id
 
+    # Phase 11 (audit fix): a credit memo for returned inventory goods must
+    # put the qty back on the shelf. This only adds quantity (no cost basis
+    # JE) since the income-side reversal already covered the P&L impact.
+    db.flush()
+    db.refresh(cm)
+    from app.services.inventory_hooks import post_return_for_credit_memo
+    post_return_for_credit_memo(db, cm, txn_date=data.date)
+
     db.commit()
     db.refresh(cm)
     resp = CreditMemoResponse.model_validate(cm)
