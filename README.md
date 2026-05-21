@@ -346,6 +346,7 @@ Detailed references live under `docs/`:
 |-----|--------|
 | [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Payroll / HR module — models, routes, UI pages, pending items |
 | [docs/security-hardening.md](docs/security-hardening.md) | Production-readiness security pass — what changed, why, and how it's tested |
+| [docs/hipaa-compliance.md](docs/hipaa-compliance.md) | HIPAA Security Rule mapping — what aligns, what doesn't, honest gap list |
 | [docs/wiring-audit.md](docs/wiring-audit.md) | Frontend ↔ backend disconnect audit methodology and findings |
 | [docs/setup-qbo.md](docs/setup-qbo.md) | QuickBooks Online OAuth + sync setup |
 | [docs/setup-stripe.md](docs/setup-stripe.md) | Stripe payment processing setup |
