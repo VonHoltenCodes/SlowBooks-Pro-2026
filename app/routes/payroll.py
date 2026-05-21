@@ -34,6 +34,10 @@ from app.schemas.payroll import PayRunCreate, PayRunResponse, YTDResponse
 from app.schemas.deductions import GrossUpRequest, GrossUpResponse
 from app.services.payroll_service import calculate_withholdings
 from app.services.accounting import create_journal_entry
+from app.services.settings_service import get_all_settings
+from app.services.tax_forms.form_940 import generate_940_pdf
+from app.services.tax_forms.form_941 import generate_941_pdf
+from app.services.tax_forms.w2_w3 import generate_w2_pdf, generate_w3_pdf
 from app.services.garnishment import (
     GarnishmentSpec,
     apply_garnishments,
@@ -843,3 +847,72 @@ def generate_form_941(
     }
 
     return JSONResponse(content=form_941_data, status_code=200)
+
+
+# --- Tier 3: Tax Form PDFs --------------------------------------------------
+#
+# The /forms/* endpoints above return JSON — useful for future e-file
+# integration and machine-readable consumers. These /pdf variants render
+# the same data through WeasyPrint templates so the admin UI's "Generate"
+# buttons produce printable forms instead of raw JSON.
+#
+# The PDFs are not pixel-exact replicas of the IRS-published forms — they
+# show all the right data in a readable layout with a clear disclaimer.
+# Match against the official form before filing.
+
+
+def _company_for_pdf(db: Session) -> dict:
+    """Shape the settings dict the tax-form templates expect."""
+    settings = get_all_settings(db)
+    return {
+        "name": settings.get("company_name") or config.COMPANY_NAME,
+        "address": settings.get("company_address1") or "",
+        "city": settings.get("company_city") or "",
+        "state": settings.get("company_state") or config.EMPLOYER_STATE,
+        "zip": settings.get("company_zip") or "",
+        "ein": settings.get("company_tax_id") or config.EMPLOYER_EIN,
+    }
+
+
+def _pdf_response(pdf_bytes: bytes, filename: str) -> Response:
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"inline; filename={filename}"},
+    )
+
+
+@router.post("/forms/w2/{emp_id}/pdf", response_class=Response)
+def generate_w2_form_pdf(
+    emp_id: int,
+    year: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """W-2 PDF for one employee for the given calendar year."""
+    if not db.query(Employee).filter(Employee.id == emp_id).first():
+        raise HTTPException(status_code=404, detail="Employee not found")
+    pdf = generate_w2_pdf(db, year, emp_id, _company_for_pdf(db))
+    return _pdf_response(pdf, f"w2_{emp_id}_{year}.pdf")
+
+
+@router.post("/forms/w3/{year}/pdf", response_class=Response)
+def generate_w3_form_pdf(year: int, db: Session = Depends(get_db)):
+    """W-3 transmittal PDF — aggregate across every W-2 for the year."""
+    pdf = generate_w3_pdf(db, year, _company_for_pdf(db))
+    return _pdf_response(pdf, f"w3_{year}.pdf")
+
+
+@router.post("/forms/940/{year}/pdf", response_class=Response)
+def generate_form_940_pdf(year: int, db: Session = Depends(get_db)):
+    """Form 940 (FUTA) PDF for the given calendar year."""
+    pdf = generate_940_pdf(db, year, _company_for_pdf(db))
+    return _pdf_response(pdf, f"form_940_{year}.pdf")
+
+
+@router.post("/forms/941/{year}/{quarter}/pdf", response_class=Response)
+def generate_form_941_pdf(year: int, quarter: int, db: Session = Depends(get_db)):
+    """Form 941 (quarterly FICA) PDF for year + quarter."""
+    if quarter not in (1, 2, 3, 4):
+        raise HTTPException(status_code=400, detail="quarter must be 1-4")
+    pdf = generate_941_pdf(db, year, quarter, _company_for_pdf(db))
+    return _pdf_response(pdf, f"form_941_{year}_q{quarter}.pdf")

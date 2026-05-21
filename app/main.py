@@ -14,6 +14,7 @@
 # that had our licensed copy died in 2024. We just want to print invoices.
 # ============================================================================
 
+import time as _time
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -254,9 +255,6 @@ _AUTH_EXEMPT_EXACT = {
     "/favicon.ico",
     "/api/stripe/webhook",  # Stripe auth via signature, not session
 }
-
-
-import time as _time
 
 
 @app.middleware("http")

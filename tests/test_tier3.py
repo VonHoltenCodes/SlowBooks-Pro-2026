@@ -163,6 +163,84 @@ def test_form_941_invalid_quarter(client: any):
     assert r.status_code == 400
 
 
+# --- Tier 3: Tax form PDF variants ------------------------------------------
+
+
+def _is_pdf(body: bytes) -> bool:
+    """PDF files start with the magic '%PDF-' header byte sequence."""
+    return body[:5] == b"%PDF-"
+
+
+def test_w2_pdf_endpoint_returns_pdf(client: any, db_session: Session):
+    """POST /api/payroll/forms/w2/{emp_id}/pdf renders a real PDF."""
+    emp = Employee(
+        first_name="Alice",
+        last_name="Tester",
+        ssn_last_four="1234",
+        pay_type="hourly",
+        pay_rate=Decimal("25"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(emp)
+    db_session.commit()
+
+    r = client.post(f"/api/payroll/forms/w2/{emp.id}/pdf?year=2026")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert _is_pdf(r.content)
+    # PDFs over 1KB are non-trivially rendered (vs. a stub response). The
+    # text content is compressed inside the PDF and not byte-greppable.
+    assert len(r.content) > 1024
+
+
+def test_w2_pdf_404_for_nonexistent_employee(client: any):
+    r = client.post("/api/payroll/forms/w2/9999/pdf?year=2026")
+    assert r.status_code == 404
+
+
+def test_w3_pdf_endpoint_returns_pdf(client: any, db_session: Session):
+    """POST /api/payroll/forms/w3/{year}/pdf renders the W-3 summary."""
+    emp = Employee(
+        first_name="Bob",
+        last_name="Aggregator",
+        pay_type="hourly",
+        pay_rate=Decimal("30"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(emp)
+    db_session.commit()
+
+    r = client.post("/api/payroll/forms/w3/2026/pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert _is_pdf(r.content)
+
+
+def test_form_940_pdf_endpoint_returns_pdf(client: any, db_session: Session):
+    """POST /api/payroll/forms/940/{year}/pdf renders the FUTA form."""
+    r = client.post("/api/payroll/forms/940/2026/pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert _is_pdf(r.content)
+
+
+def test_form_941_pdf_endpoint_returns_pdf(client: any, db_session: Session):
+    """POST /api/payroll/forms/941/{year}/{quarter}/pdf renders quarterly FICA."""
+    r = client.post("/api/payroll/forms/941/2026/2/pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert _is_pdf(r.content)
+
+
+def test_form_941_pdf_rejects_invalid_quarter(client: any):
+    r = client.post("/api/payroll/forms/941/2026/5/pdf")
+    assert r.status_code == 400
+
+
 # --- Tier 3: Employee Self-Service Portal -----------------------------------
 
 

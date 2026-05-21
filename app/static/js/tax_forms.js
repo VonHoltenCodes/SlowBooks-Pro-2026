@@ -97,21 +97,21 @@ const TaxFormsPage = {
         const empId = empEl ? empEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
         if (!empId) { toast('Please select an employee', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/w2/${empId}?year=${year}`, 'POST');
+        await _openPDF(`/api/payroll/forms/w2/${empId}/pdf?year=${year}`, 'POST');
     },
 
     async generateW3() {
         const yearEl = document.getElementById('w2-year');
         const year = yearEl ? yearEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/w3/${year}`, 'POST');
+        await _openPDF(`/api/payroll/forms/w3/${year}/pdf`, 'POST');
     },
 
     async generate940() {
         const yearEl = document.getElementById('f940-year');
         const year = yearEl ? yearEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/940/${year}`, 'POST');
+        await _openPDF(`/api/payroll/forms/940/${year}/pdf`, 'POST');
     },
 
     async generate941() {
@@ -121,6 +121,6 @@ const TaxFormsPage = {
         const quarter = quarterEl ? quarterEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
         if (!quarter) { toast('Please select a quarter', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/941/${year}/${quarter}`, 'POST');
+        await _openPDF(`/api/payroll/forms/941/${year}/${quarter}/pdf`, 'POST');
     },
 };

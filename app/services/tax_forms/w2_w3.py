@@ -152,3 +152,11 @@ def generate_w2_pdf(db, year: int, employee_id: int, company: dict) -> bytes:
     template = _jinja_env.get_template("w2.html")
     html_str = template.render(data=data, company=company or {})
     return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+
+
+def generate_w3_pdf(db, year: int, company: dict) -> bytes:
+    """Render the W-3 transmittal (aggregate across all W-2s) to a PDF."""
+    data = compute_w3(db, year)
+    template = _jinja_env.get_template("w3.html")
+    html_str = template.render(data=data, company=company or {})
+    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
