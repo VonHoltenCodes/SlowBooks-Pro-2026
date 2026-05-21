@@ -169,11 +169,11 @@
             {% endif %}
         </div>
         <nav class="portal-nav">
-            <a href="/portal/{{ token }}"{% if active == 'dashboard' %} class="active"{% endif %}>Dashboard</a>
-            <a href="/portal/{{ token }}/paystubs"{% if active == 'paystubs' %} class="active"{% endif %}>Pay Stubs</a>
-            <a href="/portal/{{ token }}/profile"{% if active == 'profile' %} class="active"{% endif %}>Profile</a>
-            <a href="/portal/{{ token }}/bank"{% if active == 'bank' %} class="active"{% endif %}>Bank</a>
-            <a href="/portal/{{ token }}/pto"{% if active == 'pto' %} class="active"{% endif %}>Time Off</a>
+            <a href="/portal/"{% if active == 'dashboard' %} class="active"{% endif %}>Dashboard</a>
+            <a href="/portal/paystubs"{% if active == 'paystubs' %} class="active"{% endif %}>Pay Stubs</a>
+            <a href="/portal/profile"{% if active == 'profile' %} class="active"{% endif %}>Profile</a>
+            <a href="/portal/bank"{% if active == 'bank' %} class="active"{% endif %}>Bank</a>
+            <a href="/portal/pto"{% if active == 'pto' %} class="active"{% endif %}>Time Off</a>
         </nav>
         <div class="portal-body">
             {% block content %}{% endblock %}

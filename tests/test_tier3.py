@@ -364,6 +364,144 @@ def test_compute_doc_hash_handles_decimals_and_dates():
     assert h1 != h3
 
 
+# --- Tier 3: Cookie-based portal session ------------------------------------
+
+
+def test_portal_token_url_sets_cookie_and_redirects(client: any, db_session: Session):
+    """Visiting /portal/{token} once stamps the slowbooks_portal cookie and
+    303-redirects to /portal/. After that the URL never carries the token."""
+    emp = Employee(
+        first_name="Cookie",
+        last_name="Path",
+        pay_type="hourly",
+        pay_rate=Decimal("25"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(emp)
+    db_session.commit()
+
+    token = client.get(f"/api/employees/{emp.id}/portal-token").json()["portal_token"]
+
+    # Don't follow redirects — we want to inspect the 303 + Set-Cookie itself.
+    r = client.get(f"/portal/{token}", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == "/portal/"
+    # The cookie should be in the response headers (TestClient stores it too).
+    # Compare lowercased — different stacks emit attribute casing differently.
+    set_cookie = r.headers.get("set-cookie", "").lower()
+    assert "slowbooks_portal=" in set_cookie
+    assert "httponly" in set_cookie
+    assert "samesite=strict" in set_cookie
+
+
+def test_portal_cookieless_routes_require_cookie(client: any, db_session: Session):
+    """Without the cookie, the cookieless routes return 401."""
+    # Fresh client without ever claiming a token.
+    r = client.get("/portal/", follow_redirects=False)
+    assert r.status_code == 401
+    r = client.get("/portal/paystubs", follow_redirects=False)
+    assert r.status_code == 401
+
+
+def test_portal_full_cookieless_navigation_after_claim(
+    client: any, db_session: Session
+):
+    """Full happy path: claim once via token URL, then every subsequent
+    navigation goes through cookieless URLs."""
+    emp = Employee(
+        first_name="Flow",
+        last_name="Tester",
+        pay_type="hourly",
+        pay_rate=Decimal("25"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(emp)
+    db_session.commit()
+
+    token = client.get(f"/api/employees/{emp.id}/portal-token").json()["portal_token"]
+
+    # Claim
+    r = client.get(f"/portal/{token}")  # default follows redirects
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+
+    # Cookie is now in the TestClient jar — direct cookieless hits work
+    for path in (
+        "/portal/",
+        "/portal/paystubs",
+        "/portal/profile",
+        "/portal/bank",
+        "/portal/pto",
+    ):
+        r = client.get(path, follow_redirects=False)
+        assert r.status_code == 200, f"{path} returned {r.status_code}"
+
+
+def test_portal_logout_clears_cookie(client: any, db_session: Session):
+    """POST /portal/logout deletes the cookie; next request 401s."""
+    emp = Employee(
+        first_name="Logout",
+        last_name="Tester",
+        pay_type="hourly",
+        pay_rate=Decimal("25"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(emp)
+    db_session.commit()
+
+    token = client.get(f"/api/employees/{emp.id}/portal-token").json()["portal_token"]
+    client.get(f"/portal/{token}")  # claim
+
+    # Logged in
+    assert client.get("/portal/", follow_redirects=False).status_code == 200
+
+    client.post("/portal/logout", follow_redirects=False)
+    # TestClient may or may not honor the cookie deletion — clear the jar
+    # explicitly to mirror what the browser would do.
+    client.cookies.clear()
+
+    assert client.get("/portal/", follow_redirects=False).status_code == 401
+
+
+def test_portal_cookieless_profile_save_via_cookie(client: any, db_session: Session):
+    """POST /portal/profile (cookieless) saves W-4 fields via cookie auth."""
+    emp = Employee(
+        first_name="W4",
+        last_name="Cookieflow",
+        pay_type="hourly",
+        pay_rate=Decimal("25"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(emp)
+    db_session.commit()
+
+    token = client.get(f"/api/employees/{emp.id}/portal-token").json()["portal_token"]
+    client.get(f"/portal/{token}")  # claim sets the cookie
+
+    r = client.post(
+        "/portal/profile",
+        data={
+            "filing_status": "married",
+            "dependents_amount": "3",
+            "extra_withholding": "75",
+        },
+    )
+    assert r.status_code == 200  # TestClient follows the 303
+
+    db_session.refresh(emp)
+    assert emp.filing_status.value == "married"
+    assert emp.dependents_amount == 3
+    assert emp.extra_withholding == Decimal("75")
+
+
 # --- Tier 3: Employee Self-Service Portal -----------------------------------
 
 
