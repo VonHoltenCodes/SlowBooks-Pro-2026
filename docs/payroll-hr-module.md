@@ -10,12 +10,16 @@ what's in each tier, where each piece lives, and what's still pending.
 |-------|----------------|---------|----------|-------|
 | **Tier 1** | Onboarding checklist, time entries, PTO policies/requests | ✅ | ✅ | ✅ |
 | **Tier 2** | Deductions (401k, HSA, etc.), garnishments | ✅ | ✅ | ✅ |
-| **Tier 3 — Tax forms** | W-2, W-3, Form 940, Form 941 endpoints | ✅ JSON | ✅ | ✅ |
+| **Tier 3 — Tax forms (JSON)** | W-2, W-3, Form 940, Form 941 endpoints — machine-readable | ✅ | ✅ | ✅ |
+| **Tier 3 — Tax forms (PDF)** | WeasyPrint-rendered, employer-branded, audit-hashed | ✅ | ✅ | ✅ |
+| **Tier 3 — Document audit hashes** | SHA-256 chain in PDF footer + `document_audits` table | ✅ | n/a | ✅ |
 | **Tier 3 — Portal** | Token-accessed self-service for pay stubs, W-4, bank, PTO | ✅ | n/a | ✅ |
-| **Tier 3 — Portal hardening** | Expiration, no-referrer, rate limiting | ✅ | ✅ | ✅ |
+| **Tier 3 — Portal cookie session** | URL token only at first claim; subsequent navigation is cookieless | ✅ | n/a | ✅ |
+| **Tier 3 — Portal hardening** | Expiration, no-referrer, rate limiting, employer branding | ✅ | ✅ | ✅ |
+| **PTO year-end carryover** | Batch endpoint applies policy carryover caps + resets YTD | ✅ | n/a | ✅ |
+| **Time-entry → pay-run auto-population** | Pay-run form checkbox pulls approved unpaid hours | ✅ | ✅ | ✅ |
 
-249 tests pass across the full suite, including 13 dedicated to Tier 3
-endpoints and security.
+276 tests pass across the full suite.
 
 ---
 
@@ -176,24 +180,22 @@ All return `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
 
 ## Pending items
 
-### Tax form PDF generation
-- **What works:** Endpoints return correct JSON with all box-data fields
-- **What's missing:** WeasyPrint templates that match the IRS form layout
-- **Tracking:** UI already calls the endpoints; flipping JSON to PDF is a
-  drop-in on the backend (the JSON contract is the design source of truth)
+The major Tier 3 work has shipped — tax PDFs with audit hashes, the
+cookie-based portal session, PTO year-end carryover, and time-entry →
+pay-run auto-population are all live. What's left is in `docs/todo.md`:
 
-### Portal cookie-based session (replaces URL token after first visit)
-- **Current state:** URL carries the token; `Referrer-Policy: no-referrer`
-  + token expiration cover most of the leak surface
-- **Future:** First visit sets an `HttpOnly Secure SameSite=Strict` cookie
-  and redirects to a token-less URL. Bookmarks would point at
-  `/portal/claim/{token}` to seed the cookie
-
-### Performance and security work that's nice-to-have
-- Tighten CSP off `'unsafe-inline'` once the SPA bootstrap moves out of
-  inline `<script>` (currently `index.html`)
-- Penetration test against a staging deploy
-- Load test with 100+ employees, 1000+ time entries
+- **State SUI filings** — `app/services/tax_forms/state_sui.py` has
+  scaffolding; needs per-state form rendering + an endpoint
+- **E-Verify submission flow** — schema has `everify_case_number` but
+  no integration with the federal system
+- **Portal-token UI on admin side** — show expiry and last-used
+  inline (the API already returns `expires_at`)
+- **CSP nonce mode** — drop `'unsafe-inline'` once the inline bootstrap
+  script in `index.html` moves to an external file
+- **Penetration test against a staging deploy** — never done
+- **Encryption rewrap CLI** — `python -m app.services.encryption rewrap`
+  for offline key rotation; in-flight rotation via
+  `PAYROLL_ENCRYPTION_SECRET_PREV` already works
 
 ---
 

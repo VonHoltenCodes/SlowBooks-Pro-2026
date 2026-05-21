@@ -7,55 +7,122 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
-### Payroll / HR module
-- Self-service portal now branded with the employer's company name and logo
-  (was generic "Employee Portal — Slowbooks Pro 2026"). Same for the
-  state new-hire report PDF.
-- Frontend ↔ backend wiring audit: fixed three `API.delete` typos
-  (employees, deductions), added missing `GET/PUT /api/pto/policies/{id}`,
-  added `/approve` and `/reject` aliases for `/decision`.
-- Onboarding (`#/hr/onboarding`) — 8-task checklist per employee with
-  completion %, e-signature, downloadable new-hire PDF.
-- Time tracking (`#/hr/time-entries`) — manager approve/reject workflow.
-- PTO (`#/hr/pto`) — vacation/sick/personal policies, accrual rates,
-  carryover caps, request/approve workflow with balance auto-deduction.
-- Deductions (`#/hr/deductions`) — 401k, health, HSA, union dues
-  per-employee with pre/post-tax classification and effective dates.
-- Garnishments — court-ordered orders with priority rules and
-  25%-of-disposable-earnings cap.
-- Tax forms (`#/hr/tax-forms`) — W-2, W-3, Form 940 (FUTA), Form 941
-  (FICA) endpoints returning JSON (WeasyPrint PDF rendering is pending).
-- Employee self-service portal (`/portal/{token}`) — pay stub view, W-4
-  updates, direct-deposit setup, PTO requests via per-employee token URL.
+### Tax forms — PDFs, audit hashes, the works
+- **WeasyPrint PDF endpoints** — `POST /api/payroll/forms/{w2,w3,940,941}/.../pdf`
+  render real printable forms (Acme Co. branded, masked SSN, full box
+  data). The existing JSON endpoints stay for future e-file integration.
+- **Document audit hashes** — every tax-form PDF carries a SHA-256
+  content hash and an audit ID in the footer. Backed by a new
+  `document_audits` table with three lookup endpoints
+  (`/api/document-audits`, `.../verify/{hash}`, etc.). An auditor with
+  the PDF can recompute the hash and confirm authenticity against
+  the trust-anchor row.
 
-### Security hardening
-- App-level `HTTPSRedirectMiddleware` + HSTS (2-year, includeSubDomains,
+### Payroll / HR
+- **Time-entry → pay-run auto-population** — the pay-run form now has
+  a "Use approved time entries" checkbox + live-preview column showing
+  unpaid approved hours per employee. Backend was already wired; only
+  the frontend opt-in was missing.
+- **PTO year-end carryover automation** — new
+  `POST /api/pto/accruals/year-end-carryover?target_year=YYYY` endpoint
+  caps every accrual at its policy `max_carryover` and resets YTD
+  counters, returning a per-row before/after summary.
+- **Portal cookie session** — after the first `/portal/{token}` claim,
+  the token moves into a `HttpOnly Secure SameSite=Strict` cookie and
+  every subsequent URL is cookieless. No more Referer leak, browser
+  history, or shared-bookmark exposure. Backward-compat: emailed
+  `/portal/{token}` links still work — they just redirect through the
+  claim flow once.
+- **Portal branding** — every page renders the employer's company name
+  and logo in the header (was generic "Employee Portal").
+- **State new-hire report PDF branding** — same treatment.
+
+### Authentication / session hardening
+- **Login attempt audit log** — new `login_attempts` table records
+  every success and failure (IP, UA, timestamp). Catches the slow
+  brute-force attacker who paces under the 5/min rate limit.
+- **Session rotation on login** — `request.session.clear()` before
+  issuing the auth flag, defense-in-depth against session fixation.
+- **Idle session timeout** — sliding window via
+  `SESSION_IDLE_TIMEOUT_SECONDS` (default 14400s = 4 hours). Sessions
+  past the threshold get 401'd and cleared.
+
+### Security
+- **App-level `HTTPSRedirectMiddleware`** + HSTS (2-year, includeSubDomains,
   preload) when `FORCE_HTTPS=true`. Session cookie carries `Secure` flag
   in the same conditional.
-- `Content-Security-Policy` header — `frame-ancestors none`, `object-src
+- **Content-Security-Policy** — `frame-ancestors none`, `object-src
   none`, `form-action self`, Stripe origins allowlisted.
-- Startup fail-hard checks (production only): refuses to start if
+- **Startup fail-hard checks** (production only): refuses to start if
   `PAYROLL_ENCRYPTION_SECRET` is the dev default, `DATABASE_URL` lacks
   `sslmode`, or `FORCE_HTTPS=false`.
-- Portal tokens now have a 1-year hard expiry and a 90-day sliding idle
-  window (rolled forward on every authenticated request). Expired tokens
-  return `410 Gone`.
-- Portal pages emit `Referrer-Policy: no-referrer` and
-  `Cache-Control: no-store` so the URL token doesn't leak via the
-  `Referer` header or shared caches.
-- Field-level encryption (bank routing/account numbers) now stores
-  ciphertext with a `v1:` version prefix. `PAYROLL_ENCRYPTION_SECRET_PREV`
-  env var supports zero-downtime key rotation.
-- Per-IP rate limiting on every portal endpoint (30/min GET, 10/min POST),
+- **Portal token expiry** — 1-year hard + 90-day sliding idle. Expired
+  tokens return `410 Gone`.
+- **Portal headers** — `Referrer-Policy: no-referrer` and
+  `Cache-Control: no-store` on every portal response.
+- **Encryption key versioning** — bank PII ciphertext now prefixed with
+  `v1:`. `PAYROLL_ENCRYPTION_SECRET_PREV` env var supports
+  zero-downtime key rotation; decrypt tries current key first, then
+  previous.
+- **Per-endpoint rate limiting** — portal at 30/min GET / 10/min POST,
   joining the existing 5/min on login.
 
-### Docs
-- Reorganized docs under `docs/`. Root keeps only `README.md`,
-  `INSTALL.md`, `SECURITY.md`, `CHANGELOG.md` (the conventional set).
-- New: `docs/security-hardening.md`, `docs/wiring-audit.md`,
-  `docs/payroll-hr-module.md`.
-- Stripped Phase N / Tier N scaffolding from the README — that history
-  now lives here in the changelog instead.
+### Dependency CVE pass
+Bumped requirements.txt to close known CVEs surfaced by `pip-audit`:
+- `cryptography` — cap raised from `<44.0` to `<47.0`, floor `46.0.5`
+  (closes PYSEC-2026-35, CVE-2024-12797, CVE-2026-26007, etc.)
+- `fastapi` — bumped from `0.115.0` to `>=0.121.0,<0.122` to allow
+  starlette `0.47+`
+- New explicit `starlette>=0.47.2,<0.50` pin (closes CVE-2024-47874,
+  CVE-2025-54121)
+- New explicit `pyjwt>=2.10.0,<3.0` pin (override intuit-oauth's
+  transitive 2.7.0 with known CVE)
+
+`pip-audit -r requirements.txt` now reports **zero known
+vulnerabilities**.
+
+### Wiring fixes
+Spider-web audit of every `API.*` call against every `@router.*`
+handler caught four real breakages:
+- 3× `API.delete()` typos (`API.del` is the actual export) — `employees.js`,
+  `deductions.js`
+- Missing `GET /api/pto/policies/{id}` and `PUT /api/pto/policies/{id}` —
+  the policy-edit form was 404'ing
+- `/approve` and `/reject` alias routes for the PTO `/decision` endpoint —
+  the buttons were hitting non-existent paths
+
+### Docs + repo conventions
+- **`CONTRIBUTING.md`**, **`.github/PULL_REQUEST_TEMPLATE.md`**,
+  **`.github/ISSUE_TEMPLATE/{bug_report,feature_request,config}.{md,yml}`** — the
+  standard set this size of repo should have had.
+- **`docs/hipaa-compliance.md`** — Security Rule mapping, 8-gap honest
+  assessment, deployment recommendations.
+- **`docs/security-hardening.md`** + **`docs/wiring-audit.md`** + **`docs/todo.md`** — engineering
+  logs for the hardening pass, the wiring audit methodology, and the
+  internal TODO scratchpad.
+- README de-Phased / de-Tiered — that history now lives in this
+  CHANGELOG file instead of cluttering the user-facing readme.
+
+### Cleanup
+- **Alembic revision collision fixed** — tier1 was sharing
+  `f6a7b8c9d0e1` with the Phase 11 inventory migration. Renamed to
+  `f7a8b9c0d1e2`; chain is now linear.
+- `test_frontend_pages.py` moved from repo root to
+  `scripts/integration_test_frontend.py` (it's a live-HTTP integration
+  script, not a unit test).
+- `app/templates/invoice_pdf_v2.html` deleted — added 5 weeks ago but
+  never wired into `pdf_service.py`.
+- `backups/` directory kept tracked (via `.gitkeep`) but contents
+  gitignored so dumps don't accidentally land in commits.
+
+### Test coverage
+276 tests passing. Up from 119 at the start of this branch's work.
+All previously-passing tests still pass.
+
+### Docs reorganization
+Root now keeps only `README.md`, `INSTALL.md`, `SECURITY.md`,
+`CHANGELOG.md`, `CONTRIBUTING.md` (the conventional set). Everything
+else moved into `docs/`.
 
 ## [2.0.0] — May 2026
 
