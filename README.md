@@ -22,64 +22,19 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 
 ---
 
-## What's New in v2.0.0+ *(May 2026+)*
+## What's New
 
-A major release rolling up Phase 9–11 plus a community walkthrough that closed several UI gaps. **Tier 1-3 HR module** (onboarding, time entries, PTO, deductions, garnishments) now fully integrated with admin UI and self-service portal.
+**Full payroll & HR module** — Onboarding checklists, time tracking, PTO policies and requests, deductions (401k, health, HSA), court-ordered garnishments, W-2/W-3/940/941 generation, and a token-accessed employee self-service portal for pay stubs, W-4 updates, direct-deposit setup, and time-off requests.
 
-**Tier 1-3 HR Module** (new in v2.0.0+)
-- **Employee Onboarding** (#/hr/onboarding) — 8-task checklist per employee with completion %, task details, e-signature support, and downloadable new-hire PDF reports
-- **Time Tracking** (#/hr/time-entries) — Log employee hours by date/state with manager approve/reject workflow. Filters by employee, integrates with pay run calculation
-- **PTO Management** (#/hr/pto) — Define company PTO policies (vacation/sick/personal) with accrual rates and carryover caps. Employees request time off; managers approve. Auto-deducts from balance
-- **Deductions & Garnishments** (#/hr/deductions) — Define deduction types (401k, health, union) and assign per-employee. Court-ordered garnishments with priority rules and disposable earnings calculation
-- **Tax Form UI** (#/hr/tax-forms) — W-2, W-3, Form 940, Form 941 generation UI (backend implementation pending). Frontend ready to call `/api/payroll/forms/*` endpoints
-- **Employee Self-Service Portal** (/portal/{token}) — Token-based dashboard for employees to view pay stubs, check PTO balance, and request time off without knowing the company password. Replaces costly HR self-service portals
-- **Portal Tokens** — Regenerable per-employee URLs scoped to that employee's data only. Uses same session-based auth as company, but token-based for shared-URL access without login
+**Analytics dashboard** — KPI cards plus four charts (12-month revenue line, expenses doughnut, A/R+A/P stacked bar, 90-day cash forecast), MTD/QTD/YTD period selector, CSV/PDF export with branded headers.
 
-**Analytics & AI**
-- New analytics dashboard at `#/analytics` — KPI cards, 4 charts (12-month revenue line, expenses doughnut, A/R+A/P stacked bar, 90-day cash forecast), period selector (MTD/QTD/YTD), CSV/PDF export with branded headers (SlowBooks Pro 2026 wordmark + your company logo)
-- **AI Insights** one-shot brief (3 observations / 3 risks / 3 recommendations) on demand
-- **AI Predefined Analyses** — 11-action curated dropdown across 5 categories, replacing the earlier free-form chat (more reliable across providers)
-- **7 AI providers** supported: xAI Grok, Groq, Cloudflare Workers AI, Cloudflare Worker Gateway (self-hosted), Anthropic Claude, OpenAI, Google Gemini — bring-your-own-key, encrypted at rest with Fernet
-- **Settings → AI Insights** centralizes provider/model/key config with a curated model dropdown + Custom escape hatch
+**AI Insights** — Optional one-shot executive brief (3 observations / 3 risks / 3 recommendations) and 11 curated predefined analyses across 5 categories. Bring-your-own-key for any of seven providers (xAI Grok, Groq, Cloudflare Workers AI, Cloudflare self-hosted gateway, Anthropic Claude, OpenAI, Google Gemini); keys encrypted at rest.
 
-**Phase 11 — Inventory, Drill-Down, Duplicate Detection, Saved Reports**
-- Real perpetual-inventory ledger with weighted-average cost, COGS journal entries, manual adjustments, reorder points
-- Items form exposes the full inventory toolset; Adjust modal handles add/remove/set-to-count with cost re-weighting
-- P&L and Balance Sheet rows are now click-through — drill into source transactions with running balance and source-doc links
-- Fuzzy duplicate detection on customer/vendor names with confirm-and-create-anyway
-- Saved Reports — name and one-click rerun favorite report configs
+**Inventory & reporting** — Perpetual-inventory ledger with weighted-average cost, automatic COGS journal entries, click-through drill-down on P&L and Balance Sheet rows, fuzzy duplicate detection on customer/vendor names, and Saved Reports for one-click reruns.
 
-**Auth, security, ops**
-- Single-user setup wizard collects operator name + email + company name + email + password (Phase 9.7)
-- argon2id password hashing, slowapi rate limiting (5 logins/minute), session cookie auth
-- External security audit pass: SSRF guards on Cloudflare account ID + Worker URL, CSV formula injection protection, schema-validated AI config payloads, constant-time secret compare in the Worker
-- Dark mode now actually works on every report subtotal row (missing `--gray-50` definition fixed)
+**Hardened for production** — App-level HTTPS redirect + HSTS, Content-Security-Policy, Fernet at-rest encryption with versioned ciphertext (clean key rotation), portal token expiration (90-day idle + 1-year hard), Argon2id passwords, rate limiting on login and portal, and startup checks that fail hard on critical misconfig. See [docs/security-hardening.md](docs/security-hardening.md).
 
-**Performance**
-- Analytics dashboard: 10 SQL queries, ~26 ms engine on 3000 invoices + 1500 bills
-- 119 pytest tests, runs in under 10 seconds, zero network deps
-
-See the [v2.0.0 release notes on GitHub](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/tag/v2.0.0) for the full changelog.
-
----
-
-## Development Roadmap: Phases vs Tiers
-
-The project uses two organizational systems:
-
-**Phases (1-11):** Major feature rollouts covering the full application surface — invoicing, accounting, payments, banking, reports, etc. All phases are production-ready.
-
-- **Phases 1-8** — Core accounting: invoicing, A/P, payments, banking, reports, analytics, online payments, QuickBooks integration
-- **Phase 9–9.7** — Security & analytics: auth, rate limiting, AI insights, analytics dashboard
-- **Phase 10-11** — Polish: inventory, drill-down, duplicate detection, saved reports, budgets, bank rules, email templates
-
-**Tiers (1-3):** Deep modules for advanced payroll/HR — onboarding, time tracking, PTO, deductions, garnishments, tax forms. Each tier layers more complexity.
-
-- **Tier 1** — Employee onboarding, time entries, PTO management
-- **Tier 2** — Advanced deductions, garnishments, gross-up calculations
-- **Tier 3** — Tax form generation (W-2, W-3, Form 940/941)
-
-All Tier endpoints and admin UI pages are **production-ready**. Tax form endpoints (Tier 3) require backend implementation but UI is complete.
+See the [release notes on GitHub](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases) for the full changelog.
 
 ---
 
@@ -112,36 +67,37 @@ All Tier endpoints and admin UI pages are **production-ready**. Tax form endpoin
 
 ### Payroll & HR
 
-**Core Payroll**
-- **Employees** — Full employee records with 2020 Form W-4 fields (filing status, dependents, other income, deductions, extra withholding), address, work state, hire date, manager, role, contact info
-- **Pay Runs** — Create pay runs with automatic withholding calculations: Federal (progressive brackets per W-4), State (varies by state), Social Security (6.2%), Medicare (1.45%), plus garnishments and pre/post-tax deductions
-- **Process Payroll** — Creates balanced journal entries: DR Wage Expense, CR Federal/State Withholding, CR SS/Medicare Payable, CR Deductions, CR Bank, with one-click processing
-- **Pay Stubs** — Detailed pay stub generation with gross, deductions, taxes, and net pay breakdowns
-- **Year-to-Date Totals** — Track YTD gross, federal, state, SS, Medicare, and net per employee per calendar year
-- **Bank Accounts** — Store encrypted employee bank routing/account numbers for ACH direct deposit
-- Tax calculations are approximate — disclaimer included. Verify with a tax professional
+**Core payroll**
+- **Employees** — Full records with 2020 Form W-4 fields (filing status, dependents, other income, deductions, extra withholding), address, work state, hire date, manager, role, contact info
+- **Pay runs** — Automatic withholding: Federal (progressive brackets per W-4), state (per-state), Social Security (6.2%), Medicare (1.45%), plus garnishments and pre/post-tax deductions
+- **Processing** — One-click runs create balanced journal entries (DR Wage Expense, CR Withholding/Payable/Deductions/Bank)
+- **Pay stubs** — Gross, deductions, taxes, and net-pay breakdowns
+- **YTD totals** — Per-employee year-to-date gross, federal, state, SS, Medicare, and net
+- **Direct deposit** — Encrypted bank routing/account numbers for ACH
+- **Gross-up calculator** — Solve for target net when withholdings vary
+- **Supplemental wages** — Off-cycle bonuses (flat 22% or aggregate method)
+- **Multi-state withholding** — Per-stub work-state override for employees working across states
+- Tax calculations are approximate — verify with a tax professional
 
-**Tier 1: Onboarding & Time Tracking**
-- **Onboarding Checklists** — 8-task employee onboarding workflow (I-9 verification, tax forms, direct deposit, benefits enrollment, handbook sign-off, training completion, equipment allocation, system access) with completion tracking and e-signature support
-- **Time Entries** — Track employee hours by date and work state with approve/reject workflow. Supports regular, overtime, and double-time hours
-- **PTO Management** — Configurable PTO policies (vacation, sick, personal) with accrual rates and carryover caps. Employees request time off; managers approve or reject with automatic deduction from accrual balances
-- **Self-Service Portal** — Token-based employee access (no company password required) to view pay stubs, PTO balance, and request time off. Public `/pay/{token}` URL for secure employee self-service
+**HR module**
+- **Onboarding** — 8-task employee checklist (I-9, tax forms, direct deposit, benefits, handbook, training, equipment, system access) with e-signature and downloadable new-hire PDFs
+- **Time tracking** — Hours by date and work state with manager approve/reject workflow; supports regular, overtime, and double-time
+- **PTO management** — Configurable policies (vacation, sick, personal) with accrual rates and carryover caps; employees request, managers decide, balances auto-deducted
+- **Deductions** — 401k, health insurance, HSA, Roth, union dues — pre-tax or post-tax, per-employee with effective dates
+- **Garnishments** — Court-ordered orders with priority rules (child support > creditor) and 25%-of-disposable-earnings cap
+- **Non-taxable reimbursements** — Accountable-plan expense reimbursements
 
-**Tier 2: Advanced Deductions & Garnishments**
-- **Deduction Types** — Seed common pre-tax (401k, health insurance, HSA) and post-tax (401k Roth, union dues) deduction types with user-defined additions
-- **Employee Deductions** — Assign deductions per employee with amounts, effective dates, and automatic application to all pay runs
-- **Garnishments** — Court-ordered wage garnishments with priority rules (child support > creditor). Withholds up to 25% of disposable earnings, properly accounting for mandatory deductions
-- **Gross-Up Calculator** — Solve for target net pay when withholdings vary (e.g., "pay employee $2,000 net after all taxes")
-- **Supplemental Wages** — Off-cycle bonuses with flat 22% withholding or aggregate method, separate from regular payroll
-- **Non-Taxable Reimbursements** — Accountable-plan expense reimbursements (not subject to tax or FICA)
-- **Multi-State Withholding** — Per-stub work-state override for employees working across multiple states
+**Tax forms**
+- **W-2 / W-3** — Individual and summary forms from YTD payroll
+- **Form 940 (FUTA)** — Federal unemployment tax, auto-calculated from payroll
+- **Form 941 (FICA)** — Quarterly employment tax with monthly/quarterly aggregation
+- **I-9 storage** — Per-employee I-9 verification document vault
+- Endpoints return JSON ready for e-file or PDF rendering; WeasyPrint templates are the pending piece
 
-**Tier 3: Tax Form Generation** *(Backend ready; UI implemented)*
-- **W-2/W-3 Generation** — Generate W-2 (individual) and W-3 (summary) forms from year-to-date payroll data. Ready for export to IRS e-file system
-- **Form 940 (FUTA)** — Federal unemployment tax form with quarterly liability tracking. Auto-calculates from payroll
-- **Form 941 (FICA)** — Quarterly employment tax form with monthly/quarterly aggregation. Includes reconciliation with payments made
-- **Form I-9** — Support for storing and retrieving I-9 verification documents per employee
-- Tax form endpoints available at `/api/payroll/forms/{type}` (implementation pending)
+**Self-service portal**
+- Token-accessed dashboard at `/portal/{token}` — no company password required
+- View pay stubs, check PTO balance, submit PTO requests, update W-4, add direct-deposit accounts
+- Tokens are 192-bit, expire after 90 days idle or 1 year hard, rate-limited per IP, and emit `Referrer-Policy: no-referrer` so URLs don't leak via the `Referer` header
 
 ### Banking
 - **Bank Accounts** — Register view with deposits and withdrawals
@@ -175,7 +131,7 @@ All Tier endpoints and admin UI pages are **production-ready**. Tax form endpoin
 
 ![Dashboard — Dark Mode](screenshots/dashboard-dark.png)
 
-### Analytics (Phase 9)
+### Analytics
 Real-time business intelligence layer that sits on top of the accounting engine. Powered by `AnalyticsEngine` (`app/services/analytics.py`) with 8 aggregation methods and 7 REST endpoints at `/api/analytics/*`. **Fully integrated inline** into the main SPA as a hash-routed page — no separate shell, no full page reload. Click **Analytics** in the sidebar (under Accounting → Reports → Analytics → Tax Reports) to land on `#/analytics`.
 
 **Metrics computed:**
@@ -216,7 +172,7 @@ curl 'http://localhost:3001/api/analytics/export.csv?period=year' -o analytics.c
 ```
 Flat CSV with columns `(section, key, subkey, value)` covering 9 sections: period, revenue_by_customer, revenue_trend, expenses_by_category, ar_aging, ap_aging, dso, cash_forecast, customer_profit. Drops straight into Excel / Google Sheets / any BI tool.
 
-#### AI Insights (Phase 9.5)
+#### AI Insights
 An optional LLM layer sits on top of the analytics snapshot and produces a compact **3 observations / 3 risks / 3 recommendations** executive brief. Nothing is sent until you click the **AI Insights** button — the feature is zero-cost by default.
 
 **Seven providers supported out of the box** (verified April 2026):
@@ -351,7 +307,7 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 - **Print-Optimized PDF** — Enhanced invoice PDF template with company logo support
 - **IIF Import/Export** — Full QuickBooks 2003 Pro interoperability (see below)
 
-### Inventory, Drill-Down & Duplicate Detection (Phase 11)
+### Inventory, Drill-Down & Duplicate Detection
 
 ![Inventory tracking on the item form](screenshots/inventory-tracking.png)
 
@@ -367,7 +323,7 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 ![Duplicate detection warning](screenshots/duplicate-detection.png)
 - **Saved reports** — Full CRUD on named `(report_type, parameters)` tuples at `/api/saved-reports`. Lets users one-click rerun their favorite P&L, Balance Sheet, or account drill-down without re-entering dates
 
-### Security & Authentication (Phase 9.7 + hardening pass)
+### Security & Authentication
 - **Single-user authentication** — Argon2id-hashed password, session cookie (`same_site=strict`, 30-day TTL, `Secure` when `FORCE_HTTPS=true`)
 - **App-level HTTPS** — `HTTPSRedirectMiddleware` + HSTS (2-year, includeSubDomains, preload) when `FORCE_HTTPS=true` (default in production)
 - **Startup fail-hard checks** — process exits in production if `PAYROLL_ENCRYPTION_SECRET` is the dev default, `DATABASE_URL` lacks `sslmode`, or `FORCE_HTTPS=false`
@@ -422,7 +378,7 @@ Detailed references live under `docs/`:
 
 | Doc | Covers |
 |-----|--------|
-| [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Tier 1-3 payroll/HR module — models, routes, UI pages, pending items |
+| [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Payroll / HR module — models, routes, UI pages, pending items |
 | [docs/security-hardening.md](docs/security-hardening.md) | Production-readiness security pass — what changed, why, and how it's tested |
 | [docs/wiring-audit.md](docs/wiring-audit.md) | Frontend ↔ backend disconnect audit methodology and findings |
 | [docs/setup-qbo.md](docs/setup-qbo.md) | QuickBooks Online OAuth + sync setup |
@@ -524,12 +480,12 @@ SlowBooks-Pro-2026/
 │   │   ├── backups.py        # Backup records
 │   │   ├── companies.py      # Multi-company records
 │   │   ├── payroll.py        # Employees, pay runs, pay stubs, bank accounts
-│   │   ├── hr.py             # HR Tier 1-3: onboarding, time entries, PTO, deductions (Tiers 1-3)
+│   │   ├── hr.py             # HR module: onboarding, time entries, PTO, deductions
 │   │   ├── pto.py            # PTO policies, requests, accruals
 │   │   ├── time_entries.py   # Time entry tracking with approval workflow
 │   │   ├── deductions.py     # Deduction types, employee deductions, garnishments
 │   │   ├── qbo_mapping.py    # QBO ↔ Slowbooks ID mappings
-│   │   ├── attachments.py    # File attachments (Phase 10)
+│   │   ├── attachments.py    # File attachments
 │   │   ├── bank_rules.py     # Bank transaction categorization rules
 │   │   ├── budgets.py        # Budget tracking by account/period
 │   │   └── email_templates.py # Customizable email templates
@@ -537,7 +493,7 @@ SlowBooks-Pro-2026/
 │   ├── routes/               # FastAPI routers (43 routers)
 │   ├── services/
 │   │   ├── accounting.py     # Double-entry journal entry engine
-│   │   ├── analytics.py      # Phase 9: business intelligence aggregates (8 methods)
+│   │   ├── analytics.py      # business intelligence aggregates (8 methods)
 │   │   ├── audit.py          # SQLAlchemy after_flush audit hooks
 │   │   ├── closing_date.py   # Closing date enforcement guard
 │   │   ├── payroll_service.py # Withholding calculations
@@ -556,8 +512,8 @@ SlowBooks-Pro-2026/
 │   │   ├── qbo_service.py    # QBO OAuth + token management + client factory
 │   │   ├── qbo_import.py     # Import 6 entity types from QBO
 │   │   ├── qbo_export.py     # Export 6 entity types to QBO
-│   │   ├── auth.py           # Phase 9.7: single-user password auth + session management
-│   │   ├── rate_limit.py     # Phase 9.7: slowapi rate limiting
+│   │   ├── auth.py           # single-user password auth + session management
+│   │   ├── rate_limit.py     # slowapi rate limiting
 │   │   ├── settings_service.py # Settings CRUD with sensitive key filtering
 │   │   └── crypto.py         # Fernet encryption for API keys + master key management
 │   ├── templates/            # Jinja2 templates (PDF, email, checks, collection letters)
@@ -570,11 +526,11 @@ SlowBooks-Pro-2026/
 │           ├── app.js              # Main SPA router with 40 routes
 │           ├── employees.js        # Employee CRUD + Details modal with 5 tabs (portal, YTD, bank, docs)
 │           ├── api.js              # HTTP wrapper (API.get/post/put/delete)
-│           ├── onboarding.js       # HR Tier 1: onboarding checklists + e-signature
-│           ├── time_entries.js     # HR Tier 1: time tracking + approve/reject workflow
-│           ├── pto.js              # HR Tier 1: PTO policies + request workflow
-│           ├── deductions.js       # HR Tier 2: deduction types, employee deductions, garnishments
-│           ├── tax_forms.js        # HR Tier 3: W-2, W3, 940, 941 form generation UI
+│           ├── onboarding.js       # onboarding checklists + e-signature
+│           ├── time_entries.js     # time tracking + approve/reject workflow
+│           ├── pto.js              # PTO policies + request workflow
+│           ├── deductions.js       # deduction types, employee deductions, garnishments
+│           ├── tax_forms.js        # W-2, W-3, 940, 941 form generation UI
 │           └── [30+ more pages]    # Invoices, customers, reports, analytics, etc.
 ├── scripts/
 │   ├── seed_database.py      # Seed the Chart of Accounts
@@ -647,7 +603,7 @@ SlowBooks-Pro-2026/
 
 All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 routers. All routes (except `/api/auth/*`, `/health`, `/pay/*`, and `/api/stripe/webhook`) require an authenticated session.
 
-### Authentication (Phase 9.7)
+### Authentication
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/auth/status` | GET | Auth state: `{setup_needed, authenticated}` |
@@ -712,7 +668,7 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 rout
 | `/api/payroll/{id}/process` | POST | Process pay run (creates balanced journal entries) |
 | `/api/payroll/{id}/nacha` | POST | Generate NACHA ACH file for direct deposit |
 
-### HR Tier 1: Onboarding & Time Tracking
+### HR: Onboarding & Time Tracking
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/onboarding/{emp_id}` | GET, POST | Onboarding checklist with 8 tasks |
@@ -728,7 +684,7 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 rout
 | `/api/pto/requests/{id}/approve` | POST | Manager PTO approval |
 | `/api/pto/requests/{id}/reject` | POST | Manager PTO rejection |
 
-### HR Tier 2: Deductions & Garnishments
+### HR: Deductions & Garnishments
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/deductions/types` | GET, POST | Seed deduction types (401k, health, union, etc.) |
@@ -736,7 +692,7 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 rout
 | `/api/deductions/garnishments` | GET, POST, DELETE | Court-ordered garnishments with priority |
 | `/api/payroll/gross-up` | POST | Solve for target net after all withholdings |
 
-### HR Tier 3: Tax Form Generation
+### HR: Tax Form Generation
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/payroll/forms/w2/{emp_id}` | POST | Generate W-2 form JSON (year param required) |
@@ -826,7 +782,7 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 rout
 | `/api/email-templates` | GET, POST, PUT, DELETE | Custom email template management |
 | `/health` | GET | Liveness probe (no auth required) |
 
-### Inventory (Phase 11)
+### Inventory
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/items/{id}/movements` | GET | Per-item inventory ledger (newest first) |
@@ -834,7 +790,7 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 213+ routes across 44 rout
 | `/api/items/low-stock` | GET | Items at or below their reorder point |
 | `/api/items/valuation` | GET | Sum of `qty × avg_cost` across tracked items |
 
-### Drill-Down & Saved Reports (Phase 11)
+### Drill-Down & Saved Reports
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/reports/account-transactions` | GET | Every journal line hitting an account, with source-doc links |
@@ -967,17 +923,17 @@ You can use, modify, and run Slowbooks Pro for any personal, educational, or int
 ## Contributors
 
 - [VonHoltenCodes](https://github.com/VonHoltenCodes) — Creator
-- [PNWImport](https://github.com/PNWImport) — Security hardening (auth, CORS, path traversal, atomic writes, non-root Docker, rate limiting), analytics engine, AI insights with 7-provider support, Cloudflare Worker gateway, Phase 11 inventory ledger, drill-down reports, fuzzy duplicate detection, saved reports
+- [PNWImport](https://github.com/PNWImport) — Security hardening (auth, CORS, path traversal, atomic writes, non-root Docker, rate limiting), analytics engine, AI insights with 7-provider support, Cloudflare Worker gateway, inventory ledger, drill-down reports, fuzzy duplicate detection, saved reports
 - [jake-378](https://github.com/jake-378) — Backup UI fixes, report period selectors, invoice terms autofill, date validation fixes
 - [WC3D](https://github.com/WC3D) — Jinja2 XSS security fix
 
 ### v2.0.0 walkthrough patches
 
-The v2.0.0 release pass surfaced several UI gaps where Phase 11 backend was complete but the frontend wasn't wired up. Closed during a live walkthrough with [Claude Code](https://claude.ai/code):
+The v2.0.0 release pass surfaced several UI gaps where the backend was complete but the frontend wasn't wired up. Closed during a live walkthrough with [Claude Code](https://claude.ai/code):
 - Setup wizard collects operator name + email + company info (was password-only)
 - AI provider config moved from a modal to a Settings sub-page with curated model dropdown + Custom escape hatch
 - Free-form chat panel replaced with 11 predefined AI analyses (more reliable across providers, especially Groq)
-- Items form gained the full Phase 11 inventory toolset (track checkbox, qty, reorder point, asset account, Adjust modal)
+- Items form gained the full inventory toolset (track checkbox, qty, reorder point, asset account, Adjust modal)
 - Customers/Vendors gained the duplicate-warning confirm dialog
 - Reports gained the Saved Reports list + Save button
 - P&L and Balance Sheet rows are now click-through to source transactions
