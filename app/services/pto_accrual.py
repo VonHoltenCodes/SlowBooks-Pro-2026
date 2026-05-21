@@ -102,6 +102,55 @@ def wa_sick_accrual(hours_worked: Decimal) -> Decimal:
     return _q(_non_negative(hours_worked) * WA_SICK_ACCRUAL_RATE)
 
 
+def run_year_end_carryover(db, target_year: int) -> list[dict]:
+    """Roll every PTOAccrual into the new year.
+
+    For each accrual:
+      - cap `balance` at the policy's `max_carryover` (None = unlimited)
+      - reset `accrued_ytd` and `used_ytd` to 0
+
+    Returns a per-row summary so the operator (or an audit log) can see
+    exactly what changed. The target_year parameter doesn't filter rows;
+    it's required so the caller has to be explicit about which year they're
+    closing out.
+    """
+    from sqlalchemy.orm import joinedload
+
+    from app.models.pto import PTOAccrual
+
+    accruals = db.query(PTOAccrual).options(joinedload(PTOAccrual.policy)).all()
+    changes = []
+    for acc in accruals:
+        old_balance = _non_negative(acc.balance)
+        old_accrued = _non_negative(acc.accrued_ytd)
+        old_used = _non_negative(acc.used_ytd)
+        cap = acc.policy.max_carryover if acc.policy else None
+        new_balance = apply_carryover(old_balance, cap)
+
+        acc.balance = new_balance
+        acc.accrued_ytd = Decimal("0")
+        acc.used_ytd = Decimal("0")
+
+        changes.append(
+            {
+                "accrual_id": acc.id,
+                "employee_id": acc.employee_id,
+                "policy_id": acc.policy_id,
+                "policy_name": acc.policy.name if acc.policy else None,
+                "year_closed": target_year,
+                "balance_before": float(old_balance),
+                "balance_after": float(new_balance),
+                "carryover_cap": (float(cap) if cap is not None else None),
+                "capped": old_balance > new_balance,
+                "accrued_ytd_reset_from": float(old_accrued),
+                "used_ytd_reset_from": float(old_used),
+            }
+        )
+
+    db.commit()
+    return changes
+
+
 def compute_period_accrual(policy, hours_worked: Decimal = Decimal("0")) -> Decimal:
     """Period accrual for a PTOPolicy ORM object.
 

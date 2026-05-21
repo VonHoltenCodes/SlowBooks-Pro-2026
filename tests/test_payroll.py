@@ -520,6 +520,105 @@ def test_time_entry_summary_rejects_inverted_range(client):
 
 
 # ---------------------------------------------------------------------------
+# Integration — PTO year-end carryover
+# ---------------------------------------------------------------------------
+
+
+def _seed_pto_policy(client, name, max_carryover=None):
+    return client.post(
+        "/api/pto/policies",
+        json={
+            "name": name,
+            "pto_type": "vacation",
+            "accrual_method": "per_pay_period",
+            "accrual_rate": 4.0,
+            "max_carryover": max_carryover,
+        },
+    ).json()
+
+
+def _seed_pto_accrual(db_session, emp_id, policy_id, balance, accrued, used):
+    from app.models.pto import PTOAccrual
+
+    acc = PTOAccrual(
+        employee_id=emp_id,
+        policy_id=policy_id,
+        balance=Decimal(str(balance)),
+        accrued_ytd=Decimal(str(accrued)),
+        used_ytd=Decimal(str(used)),
+    )
+    db_session.add(acc)
+    db_session.commit()
+    return acc
+
+
+def test_year_end_carryover_caps_balance_and_resets_ytd(
+    client, db_session, seed_accounts
+):
+    """Balance above max_carryover gets capped; YTD counters reset to zero."""
+    emp = _create_employee(client)
+    policy = _seed_pto_policy(client, "Vacation cap-40", max_carryover=40)
+    acc = _seed_pto_accrual(
+        db_session, emp["id"], policy["id"], balance=60, accrued=120, used=60
+    )
+
+    r = client.post("/api/pto/accruals/year-end-carryover?target_year=2026")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["year_closed"] == 2026
+    rolled = payload["rolled"]
+    assert len(rolled) == 1
+    change = rolled[0]
+    assert change["balance_before"] == 60.0
+    assert change["balance_after"] == 40.0
+    assert change["capped"] is True
+    assert change["accrued_ytd_reset_from"] == 120.0
+    assert change["used_ytd_reset_from"] == 60.0
+
+    db_session.refresh(acc)
+    assert float(acc.balance) == 40.0
+    assert float(acc.accrued_ytd) == 0.0
+    assert float(acc.used_ytd) == 0.0
+
+
+def test_year_end_carryover_no_cap_keeps_balance(client, db_session, seed_accounts):
+    """Policy with max_carryover=None keeps the full balance."""
+    emp = _create_employee(client)
+    policy = _seed_pto_policy(client, "Unlimited carryover", max_carryover=None)
+    acc = _seed_pto_accrual(
+        db_session, emp["id"], policy["id"], balance=200, accrued=200, used=0
+    )
+
+    client.post("/api/pto/accruals/year-end-carryover?target_year=2026")
+
+    db_session.refresh(acc)
+    assert float(acc.balance) == 200.0
+    assert float(acc.accrued_ytd) == 0.0
+
+
+def test_year_end_carryover_balance_below_cap_unchanged(
+    client, db_session, seed_accounts
+):
+    """Balance already below the cap stays as-is (but YTD counters still reset)."""
+    emp = _create_employee(client)
+    policy = _seed_pto_policy(client, "Vacation cap-40", max_carryover=40)
+    acc = _seed_pto_accrual(
+        db_session, emp["id"], policy["id"], balance=18, accrued=80, used=62
+    )
+
+    r = client.post("/api/pto/accruals/year-end-carryover?target_year=2026").json()
+    change = r["rolled"][0]
+    assert change["balance_before"] == 18.0
+    assert change["balance_after"] == 18.0
+    assert change["capped"] is False
+
+    db_session.refresh(acc)
+    assert float(acc.balance) == 18.0
+    assert float(acc.accrued_ytd) == 0.0
+    assert float(acc.used_ytd) == 0.0
+
+
+# ---------------------------------------------------------------------------
 # Integration — PTO
 # ---------------------------------------------------------------------------
 def test_pto_policy_accrual_and_request(client):

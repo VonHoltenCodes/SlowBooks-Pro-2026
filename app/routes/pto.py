@@ -27,7 +27,11 @@ from app.schemas.pto import (
     PTORequestDecision,
     PTORequestResponse,
 )
-from app.services.pto_accrual import compute_period_accrual, apply_accrual
+from app.services.pto_accrual import (
+    apply_accrual,
+    compute_period_accrual,
+    run_year_end_carryover,
+)
 
 router = APIRouter(prefix="/api/pto", tags=["pto"])
 
@@ -253,3 +257,27 @@ def approve_request(request_id: int, db: Session = Depends(get_db)):
 @router.post("/requests/{request_id}/reject", response_model=PTORequestResponse)
 def reject_request(request_id: int, db: Session = Depends(get_db)):
     return decide_request(request_id, PTORequestDecision(status="denied"), db)
+
+
+# --- Year-end carryover -----------------------------------------------------
+
+
+@router.post("/accruals/year-end-carryover")
+def year_end_carryover(
+    target_year: int = Query(
+        ..., description="Calendar year being closed out (e.g. 2026)"
+    ),
+    db: Session = Depends(get_db),
+):
+    """Apply each policy's max_carryover cap to every accrual balance and
+    reset accrued_ytd / used_ytd to zero. Returns a per-row summary so the
+    operator can see what changed and which balances were capped.
+
+    Typical usage: invoke once per year on or just after Jan 1, with the
+    PRIOR year's number — e.g. POST .../year-end-carryover?target_year=2026
+    when rolling from 2026 into 2027.
+    """
+    return {
+        "year_closed": target_year,
+        "rolled": run_year_end_carryover(db, target_year),
+    }
