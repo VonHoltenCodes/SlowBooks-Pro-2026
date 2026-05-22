@@ -57,12 +57,14 @@ SUTA_RATE=0.012                         # your state's experience rate
 ## 4. TLS termination
 
 The app emits HSTS and uses `Secure` cookies whenever `FORCE_HTTPS=true`,
-but it doesn't terminate TLS itself. Put a real proxy in front:
+but it doesn't terminate TLS itself. Pick one of:
 
-- **nginx** with a Let's Encrypt cert (renewed by `certbot`)
-- **Traefik** with automatic ACME
-- **Caddy** with built-in ACME
-- Cloud LB / ALB with an ACM cert
+- **Caddy** — easiest, two-line Caddyfile, automatic Let's Encrypt
+- **nginx + certbot** — most common, ops teams already know it
+- **Traefik** — Docker-native, sits in the same compose file
+- Cloud LB / ALB with an ACM cert (AWS / GCP / Azure)
+
+Copy-paste configs for each in [tls-proxy-setup.md](tls-proxy-setup.md).
 
 Verify:
 - `https://your-domain/health` returns 200

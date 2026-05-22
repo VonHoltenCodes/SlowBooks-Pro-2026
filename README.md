@@ -346,6 +346,7 @@ Detailed references live under `docs/`:
 |-----|--------|
 | [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Payroll / HR module — models, routes, UI pages, pending items |
 | [docs/release-checklist.md](docs/release-checklist.md) | Production deployment checklist — secrets, TLS, backups, monitoring, pre-flight tests |
+| [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md) | How to put a real cert in front of SlowBooks (Caddy, nginx, Traefik) |
 | [docs/security-hardening.md](docs/security-hardening.md) | Production-readiness security pass — what changed, why, and how it's tested |
 | [docs/hipaa-compliance.md](docs/hipaa-compliance.md) | HIPAA Security Rule mapping — what aligns, what doesn't, honest gap list |
 | [docs/wiring-audit.md](docs/wiring-audit.md) | Frontend ↔ backend disconnect audit methodology and findings |
