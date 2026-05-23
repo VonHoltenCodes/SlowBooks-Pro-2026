@@ -1,6 +1,6 @@
 # Web framework + ASGI server
 fastapi>=0.135.0,<0.137  # bumped to allow starlette 1.x for PYSEC-2026-161
-uvicorn[standard]==0.30.6
+uvicorn[standard]>=0.32.0,<1.0
 # Explicit starlette pin overrides fastapi's looser upper bound. Fixes:
 #   CVE-2024-47874  (DoS via multipart; fixed in 0.40.0)
 #   CVE-2025-54121  (path traversal via static; fixed in 0.47.2)
@@ -8,13 +8,13 @@ uvicorn[standard]==0.30.6
 starlette>=1.0.1,<2.0
 
 # Database
-sqlalchemy==2.0.35
-alembic==1.13.3
+sqlalchemy>=2.0.40,<3.0
+alembic>=1.16.0,<2.0
 psycopg2-binary==2.9.10  # 2.9.10+ ships Python 3.13 wheels; 2.9.9 forces source build on slim images
 
 # Validation + settings
-pydantic==2.9.2
-pydantic-settings==2.5.2
+pydantic>=2.11.0,<3.0
+pydantic-settings>=2.10.0,<3.0
 python-dotenv==1.2.2  # CVE-2026-28684 — set_key()/unset_key() symlink following; we only use load_dotenv() but bumping anyway
 
 # Templating + PDF

@@ -12,7 +12,7 @@ internal hardening notes see
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.12 + FastAPI (44 routers, 213+ routes) |
+| Backend | Python 3.13 + FastAPI (44 routers, 213+ routes) |
 | Database | PostgreSQL 16 / SQLite + SQLAlchemy 2.0 |
 | Migrations | Alembic |
 | Frontend | Vanilla HTML/CSS/JS (no framework) + self-hosted Chart.js 4.4.6 for analytics |

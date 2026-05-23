@@ -111,7 +111,7 @@ For backups, restore, key rotation, and monitoring see **[docs/operations.md](do
 
 ## Tech Stack
 
-Python 3.12 + FastAPI on PostgreSQL 16 (SQLite for tests) with SQLAlchemy 2.0 and Alembic migrations. Vanilla HTML/CSS/JS single-page app — no framework, no build step. WeasyPrint + Jinja2 for PDFs. Self-hosted Chart.js for analytics (no CDN; LAN-deployable). Stripe Checkout for online payments. python-quickbooks + intuit-oauth for QBO sync. Runs on port 3001 by default.
+Python 3.13 + FastAPI on PostgreSQL 16 (SQLite for tests) with SQLAlchemy 2.0 and Alembic migrations. Vanilla HTML/CSS/JS single-page app — no framework, no build step. WeasyPrint + Jinja2 for PDFs. Self-hosted Chart.js for analytics (no CDN; LAN-deployable). Stripe Checkout for online payments. python-quickbooks + intuit-oauth for QBO sync. Runs on port 3001 by default.
 
 Full project layout in [docs/development.md](docs/development.md).
 

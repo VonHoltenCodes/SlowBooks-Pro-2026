@@ -7,6 +7,30 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Dependency upgrade pass
+Five hard-pinned (`==`) deps in `requirements.txt` were months behind.
+Pins relaxed to floor-and-cap ranges so future patch/minor bumps land
+without needing a release. All upgrades are stable 2.x → 2.x or
+patch-only; no API churn expected. pip-audit on the new requirements
+remains clean (zero known CVEs).
+
+| Dep | Was | Now | Installed (verified) |
+|---|---|---|---|
+| `alembic` | `==1.13.3` | `>=1.16.0,<2.0` | 1.18.4 |
+| `sqlalchemy` | `==2.0.35` | `>=2.0.40,<3.0` | 2.0.49 |
+| `pydantic` | `==2.9.2` | `>=2.11.0,<3.0` | 2.13.4 |
+| `pydantic-settings` | `==2.5.2` | `>=2.10.0,<3.0` | 2.14.1 |
+| `uvicorn[standard]` | `==0.30.6` | `>=0.32.0,<1.0` | 0.47.0 |
+
+Tests: 295 passing on the upgraded set (no source changes needed).
+
+### Python version doc alignment
+`README.md`, `INSTALL.md`, and `docs/development.md` all said "Python
+3.12" or "3.12+", but the Dockerfile, every CI job, and the CVE
+comments in `requirements.txt` reference Python 3.13. Docs now say
+3.13 (the actual tested version); INSTALL.md notes that 3.12 may work
+but isn't gated by CI.
+
 ### CRM-side UX additions
 - **Customer Details modal** — clicking a customer row now opens a
   single-screen popout (no sub-tabs) with billing/shipping addresses,

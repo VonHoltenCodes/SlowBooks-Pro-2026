@@ -81,7 +81,7 @@ docker compose cp slowbooks:/app/backups ./my-backups
 
 ### Prerequisites
 
-- Python 3.12+
+- Python 3.13 (CI gates against 3.13; older 3.12 may work but isn't tested)
 - PostgreSQL 16+
 - System libraries for WeasyPrint
 
