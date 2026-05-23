@@ -293,6 +293,8 @@ Canonical list of security measures lives in [SECURITY.md](../SECURITY.md); engi
 - No frameworks — vanilla HTML/CSS/JS single-page app
 - 35+ SPA routes, 34 sidebar nav links
 
+![Splash screen with build info](../screenshots/splash.png)
+
 ## QuickBooks 2003 Pro Interoperability
 - **IIF Export** — Export all Slowbooks data (accounts, customers, vendors, items, invoices, payments, estimates) as .iif files importable into QB2003 via File > Utilities > Import > IIF Files
 - **IIF Import** — Parse and import .iif files exported from QB2003 with duplicate detection and per-row error handling

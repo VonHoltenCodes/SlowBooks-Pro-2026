@@ -146,6 +146,19 @@ Production images (built off `requirements.txt` only) skip the
 boot check silently — CI already gates the same condition before the
 image is built.
 
+### Manual end-to-end smoke test
+
+`scripts/integration_test_frontend.py` is a live-HTTP integration
+script (deliberately not under `tests/` so the pytest collector
+skips it). Hits every SPA page + API endpoint over real HTTP and
+confirms JS bundles load without errors. Run it against a running
+server when you've touched routing or the SPA shell:
+
+```bash
+uvicorn app.main:app --port 8000 &
+python scripts/integration_test_frontend.py
+```
+
 ---
 
 ## Lint + format
