@@ -151,7 +151,7 @@ User-facing changes need:
 SQLAlchemy's `Base.metadata.create_all()` runs at startup so a fresh
 install always gets the latest schema. For changes to *existing* tables
 that need to ship to a deployed instance, add an Alembic migration
-under `alembic/versions/`. Run the migration locally against a snapshot
+under `migrations/versions/`. Run the migration locally against a snapshot
 of a real DB before shipping.
 
 ## Reporting security issues

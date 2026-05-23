@@ -43,7 +43,7 @@ something for each that does. Bullet points are fine; this isn't an essay.
 
 - [ ] No schema changes
 - [ ] New table / new columns only (handled by `Base.metadata.create_all`)
-- [ ] Existing-table change — Alembic migration added under `alembic/versions/`
+- [ ] Existing-table change — Alembic migration added under `migrations/versions/`
 
 ## Documentation
 

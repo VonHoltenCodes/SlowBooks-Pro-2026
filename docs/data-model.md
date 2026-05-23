@@ -2,7 +2,7 @@
 
 Schema reference for the Slowbooks PostgreSQL database. 42+ tables on
 a double-entry accounting foundation. For migration history, see the
-files under `alembic/versions/`; for model code, see `app/models/`.
+files under `migrations/versions/`; for model code, see `app/models/`.
 
 | Table | Purpose |
 |-------|---------|

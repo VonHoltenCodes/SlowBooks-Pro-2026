@@ -33,7 +33,7 @@ SlowBooks-Pro-2026/
 ├── requirements-dev.txt      # Test + lint deps
 ├── run.py                    # Uvicorn entry point (port 3001)
 ├── alembic.ini               # Alembic config
-├── alembic/                  # Database migrations
+├── migrations/               # Alembic database migrations (script_location in alembic.ini)
 ├── app/
 │   ├── main.py               # FastAPI app + 48 routers (250+ routes)
 │   ├── config.py             # Environment-based settings (CORS, origins)

@@ -7,6 +7,15 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Layout: `alembic/` → `migrations/`
+Database migration scripts moved from `alembic/` to the more
+conventional `migrations/` at the top level. `script_location` in
+`alembic.ini` updated; references in CONTRIBUTING, PR template, and
+docs all retargeted. The `alembic` CLI command itself is unchanged
+(reads alembic.ini for its script_location), so `alembic upgrade
+head` in `docker-entrypoint.sh` keeps working. Git tracked the moves
+as renames, so blame history is preserved.
+
 ### Schema-wide date-collision fix (the rest of jake-378's pattern)
 jake-378 previously fixed the `date: date` field-name-shadows-type
 collision in `app/schemas/invoices.py` and `estimates.py` (commits
