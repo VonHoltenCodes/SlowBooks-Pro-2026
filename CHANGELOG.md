@@ -7,6 +7,36 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Payroll / HR UI additions
+- **Portal-token admin view** — Employee Details > Portal Access now
+  shows expires-at (red when <30 days), last-used-at, and a
+  collapsible recent-access log pulled from `portal_accesses`.
+- **PTO accrual editor** — `#/hr/pto` gained an Employee Accruals
+  section with enroll-employee-in-policy form and per-row "Run Accrual"
+  prompt. Closes the gap where admins had to enroll employees via curl.
+- **E-Verify case tracking** — schema additions (`everify_status`,
+  `everify_submitted_at`, `everify_closed_at`, `everify_notes`),
+  GET/PUT `/api/employees/{id}/everify` endpoints, and a new section
+  in the Employee Details modal with color-coded status. Pure
+  record-keeping — the federal E-Verify submission still happens via
+  the official portal or a vendor; this stores the case so DHS
+  inspections find it in one place.
+
+### Partial CSP tightening
+- index.html's 11 inline `onclick=`/`oninput=` handlers moved to a new
+  `app/static/js/bootstrap.js` that wires them via `addEventListener`
+  after DOMContentLoaded. The static shell page now has zero inline
+  handlers — would work under a stricter CSP today.
+- `'unsafe-inline'` stays in `script-src` and `style-src` because the
+  JS-rendered modal templates across the rest of the app still emit
+  inline handlers + styles. Removing those is a multi-file refactor
+  documented in `docs/todo.md`. Honest accounting added to
+  `docs/security-hardening.md`.
+
+### Polish
+- `docs/release-checklist.md` section 4 (TLS) now mentions optionally
+  submitting the domain to the HSTS preload list once TLS is locked in.
+
 ### Audit + ops automation
 - **Portal access audit log** — new `portal_accesses` table records
   every authenticated and unauthenticated portal hit (employee_id, IP,

@@ -46,53 +46,31 @@ item, asserting (a) construction with required fields, (b) defaults,
 ## Payroll / HR — still open
 
 - **State unemployment filings (SUI)** — `app/services/tax_forms/state_sui.py`
-  has scaffolding; needs per-state form rendering + an endpoint.
-- **E-Verify submission flow** — schema already has
-  `everify_case_number` but there's no submit / status-check integration.
-- **Portal-token admin UI** — admin Employee Details modal should show
-  "Last used N days ago" + "Expires DATE" alongside the token (the
-  `expires_at` is already in the API response).
-- **PTO accrual editor UI** — no SPA form for `POST /api/pto/accruals`.
-  Admins currently use curl. Either build the form or add a "Enroll all
-  active employees in policy X" button on the policies page.
+  has scaffolding; needs per-state form rendering + an endpoint. Only
+  remaining payroll feature on the wishlist.
 
 ---
 
 ## Security / ops — still open
 
-- **CSP nonce migration** — drop `'unsafe-inline'` from `script-src`
-  once index.html's 10 inline `onclick=` handlers and the hundreds of
-  inline-event-handler templates in `app/static/js/*.js` are rewritten
-  to `addEventListener` style. Real refactor (touches every JS file),
-  not a quick fix.
+- **CSP `script-src` `'unsafe-inline'` removal** — index.html is clean
+  as of the bootstrap.js refactor. What's left: the inline `onclick=`
+  + inline `style=` attributes in JS-rendered modal HTML across roughly
+  two dozen files. Two viable paths:
+    1. Per-file rewrite — every `innerHTML = '<button onclick=...>'`
+       becomes addEventListener after the assignment. Touches every JS
+       file but each change is local.
+    2. Delegated dispatcher — one document-level click handler reads
+       `data-action` attributes and resolves them via a small registry.
+       Less code total, but every modal template still needs updating
+       from `onclick=` to `data-action=`.
+  Same scope either way. Defense-in-depth, not an active vuln; tracked
+  honestly in docs/security-hardening.md.
 - **Penetration test against a staging deploy** — external scope,
   can't be done in-repo.
-- **`docker-compose.prod-nginx.yml` variant** — `docs/tls-proxy-setup.md`
-  documents three TLS-proxy options (Caddy / nginx / Traefik). Bundling
-  one into compose is an opinionated choice; current state is that
-  ops picks their proxy and follows the doc. Acceptable as is unless
-  feedback says otherwise.
-
----
-
-## Frontend polish — still open
-
-- **HSTS preload submission** — once the customer's TLS is locked in,
-  optionally submit `books.example.com` to https://hstspreload.org/
-  for browser pre-load. Manual step per customer.
-
----
-
-## Polish
-
-- **HSTS-preload helper doc** — short note in the release checklist
-  about submitting the domain to the HSTS preload list (linked above).
-- **README "What's New" trim** — every release, the top of the README
-  drifts. Maybe move "What's New" into CHANGELOG entirely.
 
 ---
 
 ## Known small bugs
 
-(none known as of this revision — pay-stub reimbursement display bug
-fixed; portal token-in-URL leak closed by cookie-based session.)
+(none.)

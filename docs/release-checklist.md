@@ -71,6 +71,13 @@ Verify:
 - `http://your-domain/health` 308-redirects to https
 - The cert chain is complete (e.g. `ssllabs.com/ssltest` rates it A+)
 
+**Optional: submit to the HSTS preload list.** After your domain has
+been serving HTTPS-only with a valid HSTS header for a week or so,
+submit it at https://hstspreload.org/. Once accepted, every modern
+browser will refuse plain HTTP to your domain even on first visit.
+The HSTS header is already preload-compatible (`max-age=63072000;
+includeSubDomains; preload`) — you just need to register.
+
 ## 5. Backups
 
 `scripts/backup.sh` shells out to `pg_dump`. Schedule it:
