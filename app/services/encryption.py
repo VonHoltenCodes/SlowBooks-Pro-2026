@@ -87,3 +87,109 @@ def decrypt(token: str | None) -> str | None:
 
     logger.error("Failed to decrypt a stored secret with any configured key")
     return None
+
+
+def _is_encrypted_with_current(token: str) -> bool:
+    """True if the value decrypts under the CURRENT key. False if it
+    decrypts only under the previous key, or doesn't decrypt at all."""
+    if not token:
+        return True  # nothing to rewrap
+    raw = token[len(_VERSION_PREFIX) :] if token.startswith(_VERSION_PREFIX) else token
+    try:
+        _fernets[0].decrypt(raw.encode("ascii"))
+        return True
+    except (InvalidToken, ValueError):
+        return False
+
+
+def rewrap_all(db, dry_run: bool = False) -> dict:
+    """Re-encrypt every stored ciphertext under the CURRENT key.
+
+    Iterates every row in every model that stores a Fernet ciphertext —
+    today that's EmployeeBankAccount.{routing_number_enc, account_number_enc}.
+    For each value:
+      - if it decrypts under the current key, skip (already rewrapped)
+      - if it decrypts under PREV, re-encrypt with current and update
+      - if it doesn't decrypt at all, log + count as a failure (don't wipe)
+
+    Use this after rotating the secret. Returns a summary dict:
+      {"checked": N, "rewrapped": N, "already_current": N, "failed": N}
+
+    `dry_run=True` runs the same scan and reports what WOULD change
+    without committing.
+    """
+    from app.models.bank_accounts import EmployeeBankAccount
+
+    summary = {"checked": 0, "rewrapped": 0, "already_current": 0, "failed": 0}
+    accounts = db.query(EmployeeBankAccount).all()
+
+    for acct in accounts:
+        for field in ("routing_number_enc", "account_number_enc"):
+            blob = getattr(acct, field)
+            if not blob:
+                continue
+            summary["checked"] += 1
+            if _is_encrypted_with_current(blob):
+                summary["already_current"] += 1
+                continue
+            plaintext = decrypt(blob)
+            if plaintext is None:
+                summary["failed"] += 1
+                logger.error(
+                    "rewrap: account #%s field %s did not decrypt under any key",
+                    acct.id,
+                    field,
+                )
+                continue
+            if not dry_run:
+                setattr(acct, field, encrypt(plaintext))
+            summary["rewrapped"] += 1
+
+    if not dry_run:
+        db.commit()
+    return summary
+
+
+def _cli():
+    """`python -m app.services.encryption rewrap` — offline key rotation helper.
+
+    Requires the database to be reachable and PAYROLL_ENCRYPTION_SECRET_PREV
+    to be set if any rows are currently encrypted under the old key. Exits
+    non-zero if any row fails to decrypt under either key.
+    """
+    import argparse
+    import sys
+
+    parser = argparse.ArgumentParser(prog="python -m app.services.encryption")
+    sub = parser.add_subparsers(dest="cmd")
+    rewrap = sub.add_parser(
+        "rewrap", help="Re-encrypt all stored ciphertext under the current key"
+    )
+    rewrap.add_argument(
+        "--dry-run", action="store_true", help="Show what would change without writing"
+    )
+    args = parser.parse_args()
+
+    if args.cmd != "rewrap":
+        parser.print_help()
+        sys.exit(2)
+
+    from app.database import SessionLocal
+
+    db = SessionLocal()
+    try:
+        result = rewrap_all(db, dry_run=args.dry_run)
+    finally:
+        db.close()
+
+    print(f"  checked         : {result['checked']}")
+    print(f"  already current : {result['already_current']}")
+    print(
+        f"  rewrapped       : {result['rewrapped']}{' (dry-run, not committed)' if args.dry_run else ''}"
+    )
+    print(f"  failed          : {result['failed']}")
+    sys.exit(1 if result["failed"] > 0 else 0)
+
+
+if __name__ == "__main__":
+    _cli()

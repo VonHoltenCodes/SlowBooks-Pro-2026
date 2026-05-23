@@ -1115,6 +1115,109 @@ def test_encryption_returns_none_for_garbage():
     assert decrypt(None) is None
 
 
+def test_rewrap_all_re_encrypts_old_key_ciphertext(db_session: Session):
+    """rewrap_all() finds ciphertext encrypted with the previous key and
+    re-encrypts it with the current key. Already-current rows are skipped."""
+    import os as _os
+
+    import app.services.encryption as enc
+
+    # Snapshot the current key chain.
+    old_fernets = enc._fernets
+
+    # Pretend the current key was different by swapping the chain temporarily:
+    # _fernets[0] becomes a "new" key; _fernets[-1] is the "old" key that we
+    # encrypt the seed data with.
+    new_secret = "test-new-secret-different-from-default"
+    old_secret = "test-old-secret-different-from-new"
+    new_fernet = enc._derive_fernet(new_secret)
+    old_fernet = enc._derive_fernet(old_secret)
+
+    # Seed an account with ciphertext encrypted under the OLD key directly.
+    enc._fernets = [old_fernet]  # so encrypt() uses the old key
+    routing_blob = enc.encrypt("123456789")
+    account_blob = enc.encrypt("9876543210")
+
+    rewrap_emp = Employee(
+        first_name="Rew",
+        last_name="Rap",
+        pay_type="hourly",
+        pay_rate=Decimal("20"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(rewrap_emp)
+    db_session.commit()
+    acct = EmployeeBankAccount(
+        employee_id=rewrap_emp.id,
+        nickname="Rewrap Test",
+        account_kind=BankAccountKind.CHECKING,
+        routing_number_enc=routing_blob,
+        account_number_enc=account_blob,
+        account_last_four="3210",
+    )
+    db_session.add(acct)
+    db_session.commit()
+
+    # Now rotate: current key is new, old key fall-through is old.
+    enc._fernets = [new_fernet, old_fernet]
+    try:
+        summary = enc.rewrap_all(db_session, dry_run=False)
+    finally:
+        enc._fernets = old_fernets
+
+    assert summary["checked"] == 2  # both fields
+    assert summary["rewrapped"] == 2
+    assert summary["already_current"] == 0
+    assert summary["failed"] == 0
+
+    # After rewrap, both blobs should decrypt under the new key alone.
+    enc._fernets = [new_fernet]
+    try:
+        db_session.refresh(acct)
+        assert enc.decrypt(acct.routing_number_enc) == "123456789"
+        assert enc.decrypt(acct.account_number_enc) == "9876543210"
+    finally:
+        enc._fernets = old_fernets
+
+
+def test_rewrap_all_skips_already_current(db_session: Session):
+    """Rows already encrypted with the current key get counted but not touched."""
+    import app.services.encryption as enc
+
+    same_emp = Employee(
+        first_name="Same",
+        last_name="Key",
+        pay_type="hourly",
+        pay_rate=Decimal("20"),
+        pay_frequency="biweekly",
+        filing_status="single",
+        is_active=True,
+    )
+    db_session.add(same_emp)
+    db_session.commit()
+    acct = EmployeeBankAccount(
+        employee_id=same_emp.id,
+        nickname="Already Current",
+        account_kind=BankAccountKind.CHECKING,
+        routing_number_enc=enc.encrypt("111222333"),
+        account_number_enc=enc.encrypt("4444444444"),
+        account_last_four="4444",
+    )
+    db_session.add(acct)
+    db_session.commit()
+
+    orig_routing = acct.routing_number_enc
+    summary = enc.rewrap_all(db_session, dry_run=False)
+    db_session.refresh(acct)
+
+    assert summary["already_current"] == 2
+    assert summary["rewrapped"] == 0
+    # Blob unchanged
+    assert acct.routing_number_enc == orig_routing
+
+
 # --- Tier 3: Frontend → Backend wiring -----------------------------------
 
 
