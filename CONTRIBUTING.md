@@ -58,6 +58,43 @@ A normal feature touches all five layers; please cover them:
 6. **Tests** in `tests/test_<area>.py` covering at least the happy path
    and one failure mode
 
+## Schema conventions
+
+### ⚠ The `date: date` field-name-shadows-the-type collision
+
+This one has bitten us **eleven times** across the codebase. Pydantic
+v2 still has it as of 2.13. If a model has a field named `date` AND
+imports `date` from `datetime` without an alias, **`Optional[date]`
+on the corresponding Update model silently breaks** — every value
+validates as "Input should be None":
+
+```python
+# ❌ DON'T — the field name `date` shadows the type `date`,
+#          so Optional[date] becomes Optional[<the field itself>]
+from datetime import date
+from pydantic import BaseModel
+
+class InvoiceUpdate(BaseModel):
+    date: Optional[date] = None    # Pydantic reads this as
+                                    # Optional[FieldInfo] → must be None
+```
+
+```python
+# ✅ DO — alias the import so the type name and field name
+#         can never collide
+from datetime import date as dt_date
+from pydantic import BaseModel
+
+class InvoiceUpdate(BaseModel):
+    date: Optional[dt_date] = None
+```
+
+`tests/test_schemas_audit.py` enforces this — CI fails if any schema
+imports `date` without `as dt_date` AND has a field literally named
+`date`. Same rule applies for any other type whose name might collide
+with a sensible field name (`time`, `datetime`, `id` — though only
+`date` has bitten us in practice).
+
 ## Frontend ↔ backend wiring
 
 Every `API.get/post/put/del` call must hit a real handler with a
