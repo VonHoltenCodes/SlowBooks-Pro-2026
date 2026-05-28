@@ -114,20 +114,22 @@ item, asserting (a) construction with required fields, (b) defaults,
   config (Entra app registration walkthrough in setup-mail.md) + a Mail
   queue UI page. Depends on the Email integration item above (shared SMTP
   + IMAP wiring).
-- **Inventory item movement history UI** — `GET /api/items/{id}/movements`
-  endpoint is live; needs a "Movements" tab on the item details modal.
-- **AP aging report** in the Reports menu — endpoint
-  `GET /api/reports/ap-aging` exists; only AR aging is in the menu today.
 - **DocumentAudit (hash-chain) viewer UI** — endpoints ready
   (`/api/document-audits`, `/api/document-audits/verify/{hash}`); need an
   admin "Compliance" tab.
-- **Audit log viewer** — endpoint `GET /api/audit` returns records; UI
-  to browse + filter by table/record/action/date.
 - **Portal time-entry submit flow** — server endpoint
   `POST /api/time-entries/{id}/submit` exists for employee self-service;
   portal UI page does not.
 - **Stripe upgrade / checkout** — `POST /api/stripe/create-checkout-session`
   ready; surfacing requires a pricing-page + plan model. Single-tier today.
+
+### Recently wired (was dark-endpoint backlog)
+- ~~Inventory item movement history UI~~ — DONE: "History" button on each
+  tracked item opens the movement ledger (ItemsPage.showMovements).
+- ~~AP aging report in the Reports menu~~ — DONE: A/P Aging card alongside
+  A/R Aging (ReportsPage.apAging).
+- ~~Audit log viewer~~ — DONE: already built + nav-linked; fixed so the
+  table loads on open instead of staying empty until a filter is touched.
 
 ---
 

@@ -14,6 +14,7 @@ const ReportsPage = {
         profit_loss:        (params) => ReportsPage.profitLoss(params),
         balance_sheet:      (params) => ReportsPage.balanceSheet(params),
         ar_aging:           (params) => ReportsPage.arAging(params),
+        ap_aging:           (params) => ReportsPage.apAging(params),
         sales_tax:          (params) => ReportsPage.salesTax(params),
         general_ledger:     (params) => ReportsPage.generalLedger(params),
         income_by_customer: (params) => ReportsPage.incomeByCustomer(params),
@@ -63,6 +64,10 @@ const ReportsPage = {
                 <div class="card" style="cursor:pointer" onclick="ReportsPage.arAging()">
                     <div class="card-header">A/R Aging</div>
                     <p style="font-size:13px; color:var(--gray-500);">Outstanding receivables by age</p>
+                </div>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.apAging()">
+                    <div class="card-header">A/P Aging</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Outstanding payables by age</p>
                 </div>
                 <div class="card" style="cursor:pointer" onclick="ReportsPage.salesTax()">
                     <div class="card-header">Sales Tax</div>
@@ -608,6 +613,40 @@ const ReportsPage = {
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
                 </table></div>`;
         }, "As Of", true, { reportType: 'ar_aging', prefill });
+    },
+
+    async apAging(prefill) {
+        await ReportsPage.openPeriodModal("Accounts Payable Aging", "this_year_to_date", async (_period, params) => {
+            const data = await API.get(`/reports/ap-aging?as_of_date=${params.as_of_date}`);
+            let rows = data.items.map(i =>
+                `<tr>
+                    <td>${escapeHtml(i.vendor_name)}</td>
+                    <td class="amount">${formatCurrency(i.current)}</td>
+                    <td class="amount">${formatCurrency(i.over_30)}</td>
+                    <td class="amount">${formatCurrency(i.over_60)}</td>
+                    <td class="amount">${formatCurrency(i.over_90)}</td>
+                    <td class="amount" style="font-weight:600;">${formatCurrency(i.total)}</td>
+                </tr>`
+            ).join("");
+            const t = data.totals;
+            rows += `<tr style="font-weight:700; background:var(--gray-50);">
+                <td>TOTAL</td>
+                <td class="amount">${formatCurrency(t.current)}</td>
+                <td class="amount">${formatCurrency(t.over_30)}</td>
+                <td class="amount">${formatCurrency(t.over_60)}</td>
+                <td class="amount">${formatCurrency(t.over_90)}</td>
+                <td class="amount">${formatCurrency(t.total)}</td>
+            </tr>`;
+            return `
+                <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
+                <div class="table-container"><table>
+                    <thead><tr>
+                        <th>Vendor</th><th class="amount">Current</th><th class="amount">1-30</th>
+                        <th class="amount">31-60</th><th class="amount">61-90+</th><th class="amount">Total</th>
+                    </tr></thead>
+                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding payables</td></tr>'}</tbody>
+                </table></div>`;
+        }, "As Of", true, { reportType: 'ap_aging', prefill });
     },
 
     async trialBalance() {

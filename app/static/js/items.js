@@ -32,7 +32,8 @@ const ItemsPage = {
                     ? `<strong>${Number(item.quantity_on_hand || 0).toLocaleString()}</strong>`
                     : `<span style="color:var(--text-muted)">—</span>`;
                 const adjustBtn = item.track_inventory
-                    ? `<button class="btn btn-sm btn-secondary" onclick="ItemsPage.showAdjust(${item.id})" title="Adjust quantity on hand">Adjust</button>`
+                    ? `<button class="btn btn-sm btn-secondary" onclick="ItemsPage.showAdjust(${item.id})" title="Adjust quantity on hand">Adjust</button>
+                       <button class="btn btn-sm btn-secondary" onclick="ItemsPage.showMovements(${item.id})" title="Inventory movement history">History</button>`
                     : '';
                 html += `<tr>
                     <td><strong>${escapeHtml(item.name)}</strong></td>
@@ -213,6 +214,54 @@ const ItemsPage = {
     // The form lets the user think in three modes (Add / Remove / Set to)
     // and computes the delta for them. unit_cost is only relevant on Add
     // (i.e., a receipt that changes the weighted-average cost).
+
+    async showMovements(id) {
+        const [item, movements] = await Promise.all([
+            API.get(`/items/${id}`),
+            API.get(`/items/${id}/movements`),
+        ]);
+        // Movement type → human label + color. Receipts add stock, sales +
+        // negative adjustments remove it.
+        const typeLabel = {
+            purchase: ['Purchase', 'badge-paid'],
+            sale: ['Sale', 'badge-sent'],
+            adjustment: ['Adjustment', 'badge-draft'],
+            return: ['Return', 'badge-paid'],
+        };
+        let rows = movements.map(m => {
+            const [label, cls] = typeLabel[m.movement_type] || [m.movement_type, 'badge-draft'];
+            const qty = Number(m.quantity);
+            const qtyStr = (qty > 0 ? '+' : '') + qty.toLocaleString();
+            const src = m.source_type
+                ? `${escapeHtml(m.source_type)}${m.source_id ? ' #' + m.source_id : ''}`
+                : '';
+            return `<tr>
+                <td style="white-space:nowrap;font-size:11px;">${formatDate(m.date)}</td>
+                <td><span class="badge ${cls}">${label}</span></td>
+                <td class="amount" style="${qty < 0 ? 'color:var(--qb-red);' : ''}">${qtyStr}</td>
+                <td class="amount">${formatCurrency(m.unit_cost)}</td>
+                <td class="amount"><strong>${Number(m.balance_qty).toLocaleString()}</strong></td>
+                <td class="amount">${formatCurrency(m.balance_avg_cost)}</td>
+                <td style="font-size:11px;">${src}${m.memo ? '<br><span style="color:var(--text-muted);">' + escapeHtml(m.memo) + '</span>' : ''}</td>
+            </tr>`;
+        }).join('');
+        if (!rows) {
+            rows = '<tr><td colspan="7" style="text-align:center;color:var(--gray-400);">No movements recorded yet</td></tr>';
+        }
+        openModal(`Inventory History — ${escapeHtml(item.name)}`, `
+            <div style="margin-bottom:10px;font-size:12px;color:var(--text-muted);">
+                On hand: <strong>${Number(item.quantity_on_hand || 0).toLocaleString()}</strong>
+                &nbsp;·&nbsp; Weighted avg cost: <strong>${formatCurrency(item.avg_cost || 0)}</strong>
+            </div>
+            <div class="table-container" style="max-height:60vh;overflow:auto;"><table>
+                <thead><tr>
+                    <th>Date</th><th>Type</th><th class="amount">Qty</th><th class="amount">Unit Cost</th>
+                    <th class="amount">Bal Qty</th><th class="amount">Bal Avg</th><th>Source</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table></div>
+            <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+    },
 
     async showAdjust(id) {
         const item = await API.get(`/items/${id}`);

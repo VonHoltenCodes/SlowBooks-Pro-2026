@@ -43,3 +43,6 @@ Thumbs.db
 # Build artifacts from pip installs done in this directory
 *.egg
 
+
+# Coverage XML artifact from pytest --cov (CI writes its own)
+coverage.xml

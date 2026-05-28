@@ -290,13 +290,6 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     # Singular paystub fetch — SPA renders paystubs via the bulk list +
     # PDF endpoints. This route exists for direct linking / API consumers.
     ("GET", "/api/payroll/{run_id}/paystub/{stub_id}"),
-    # AP aging — Reports menu currently surfaces AR aging only. AP aging
-    # appears on the analytics dashboard as a chart; standalone report
-    # endpoint stays for future Reports-menu addition.
-    ("GET", "/api/reports/ap-aging"),
-    # Inventory item movement history — endpoint ready, "Movements" tab
-    # on the item details modal is on the future-work list (docs/todo.md).
-    ("GET", "/api/items/{item_id}/movements"),
     # Backup restore — dangerous; deliberately not exposed in the SPA.
     # Run via CLI: `python -m app.services.backup restore <file>`.
     ("POST", "/api/backups/restore"),
