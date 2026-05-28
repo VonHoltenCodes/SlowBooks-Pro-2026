@@ -4,6 +4,7 @@
 # ============================================================================
 
 from datetime import datetime
+from decimal import Decimal
 from sqlalchemy import event, inspect
 from sqlalchemy.orm import Session
 
@@ -29,8 +30,13 @@ def _serialize_value(val):
     """Convert a value to JSON-serializable form."""
     if val is None:
         return None
-    if isinstance(val, (int, float, bool, str)):
+    if isinstance(val, (int, bool, str, float)):
         return val
+    # Decimal (money) BEFORE the float fallback — float() would round-trip
+    # money through binary float and silently lose precision in the audit
+    # record (the ledger's record of record). Keep it exact as a string.
+    if isinstance(val, Decimal):
+        return str(val)
     if isinstance(val, datetime):
         return val.isoformat()
     if hasattr(val, "isoformat"):

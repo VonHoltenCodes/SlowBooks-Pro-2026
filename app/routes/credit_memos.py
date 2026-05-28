@@ -30,6 +30,7 @@ from app.services.accounting import (
     get_default_income_account_id,
     get_sales_tax_account_id,
     compute_line_totals,
+    _q,
 )
 from app.services.closing_date import check_closing_date
 
@@ -107,7 +108,10 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     journal_lines = []
 
     for i, line_data in enumerate(data.lines):
-        amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
+        # Round per line to match the rounded `total` used for the A/R credit
+        # below — otherwise sub-cent rates make the JE unbalanced and 500
+        # (same class as the invoice JE rounding bug).
+        amt = _q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate)))
         db.add(
             CreditMemoLine(
                 credit_memo_id=cm.id,
@@ -187,13 +191,22 @@ def apply_credit(
     cm_id: int, data: CreditApplicationCreate, db: Session = Depends(get_db)
 ):
     """Apply credit memo to an invoice."""
-    cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
+    # Lock both rows for the read-check-write. Two concurrent applies of the
+    # same credit memo would otherwise both read the same balance_remaining
+    # and both pass the check, double-spending the credit. No-op on SQLite;
+    # real row lock on Postgres.
+    cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).with_for_update().first()
     if not cm:
         raise HTTPException(status_code=404, detail="Credit memo not found")
     if cm.status == CreditMemoStatus.VOID:
         raise HTTPException(status_code=400, detail="Credit memo is voided")
 
-    invoice = db.query(Invoice).filter(Invoice.id == data.invoice_id).first()
+    invoice = (
+        db.query(Invoice)
+        .filter(Invoice.id == data.invoice_id)
+        .with_for_update()
+        .first()
+    )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
@@ -213,15 +226,18 @@ def apply_credit(
     amount = Decimal(str(data.amount))
     cm.amount_applied += amount
     cm.balance_remaining -= amount
-    if cm.balance_remaining <= 0:
+    if cm.balance_remaining < 0:
+        raise HTTPException(status_code=400, detail="Amount exceeds credit balance")
+    if cm.balance_remaining == 0:
         cm.status = CreditMemoStatus.APPLIED
 
     invoice.amount_paid += amount
     invoice.balance_due -= amount
-    if invoice.balance_due <= 0:
-        invoice.status = InvoiceStatus.PAID
-    else:
-        invoice.status = InvoiceStatus.PARTIAL
+    if invoice.balance_due < 0:
+        raise HTTPException(status_code=400, detail="Amount exceeds invoice balance")
+    invoice.status = (
+        InvoiceStatus.PAID if invoice.balance_due == 0 else InvoiceStatus.PARTIAL
+    )
 
     db.commit()
     return {"message": f"Applied {data.amount} to invoice {invoice.invoice_number}"}

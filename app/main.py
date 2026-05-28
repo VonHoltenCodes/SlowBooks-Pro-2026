@@ -116,8 +116,25 @@ def _run_startup_security_checks():
     """
     from app.config import APP_DEBUG, DATABASE_URL, PAYROLL_ENCRYPTION_SECRET
 
+    _DEV_KEY = "slowbooks-dev-payroll-key-change-me"
+    _is_real_db = not DATABASE_URL.startswith("sqlite")
+
+    # UNCONDITIONAL guard (fires even under APP_DEBUG): the public dev
+    # encryption key must never protect data in a real database. Without
+    # this, setting APP_DEBUG=true in production "to debug an issue" would
+    # silently leave every employee's bank PII decryptable with the key
+    # that ships in the source tree. SQLite (dev/test) is exempt, so this
+    # never trips local development or the test suite.
+    if _is_real_db and PAYROLL_ENCRYPTION_SECRET == _DEV_KEY:
+        raise RuntimeError(
+            "FATAL: PAYROLL_ENCRYPTION_SECRET is the public dev default while "
+            "connected to a non-SQLite database. All employee bank PII would be "
+            "decryptable by anyone with the source code — even with APP_DEBUG=true. "
+            "Set a unique, strong PAYROLL_ENCRYPTION_SECRET before deploying."
+        )
+
     if not APP_DEBUG:
-        if PAYROLL_ENCRYPTION_SECRET == "slowbooks-dev-payroll-key-change-me":
+        if PAYROLL_ENCRYPTION_SECRET == _DEV_KEY:
             raise RuntimeError(
                 "FATAL: PAYROLL_ENCRYPTION_SECRET has not been set in production. "
                 "All employee bank account data would be decryptable by anyone with the source code. "

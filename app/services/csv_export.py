@@ -14,10 +14,32 @@ from app.models.invoices import Invoice
 from app.models.accounts import Account
 
 
+def _csv_safe(value: str) -> str:
+    """Neutralize spreadsheet formula injection. A cell beginning with
+    =, +, -, @, TAB, or CR is treated as a formula by Excel/Sheets; prefixing
+    with an apostrophe forces plain text without changing the displayed value.
+    A customer named `=HYPERLINK(...)` otherwise executes on open."""
+    if value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
+class _SafeWriter:
+    """csv.writer wrapper that runs every STRING cell through _csv_safe.
+    Numbers / None / dates pass through untouched so output formatting and
+    types are preserved (only text cells can carry an injection payload)."""
+
+    def __init__(self, fileobj):
+        self._w = csv.writer(fileobj)
+
+    def writerow(self, row):
+        self._w.writerow([_csv_safe(c) if isinstance(c, str) else c for c in row])
+
+
 def export_customers(db: Session) -> str:
     customers = db.query(Customer).filter(Customer.is_active).all()
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = _SafeWriter(output)
     writer.writerow(
         [
             "ID",
@@ -55,7 +77,7 @@ def export_customers(db: Session) -> str:
 def export_vendors(db: Session) -> str:
     vendors = db.query(Vendor).filter(Vendor.is_active).all()
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = _SafeWriter(output)
     writer.writerow(
         [
             "ID",
@@ -93,7 +115,7 @@ def export_vendors(db: Session) -> str:
 def export_items(db: Session) -> str:
     items = db.query(Item).filter(Item.is_active).all()
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = _SafeWriter(output)
     writer.writerow(["ID", "Name", "Type", "Description", "Rate", "Cost", "Taxable"])
     for i in items:
         writer.writerow(
@@ -119,7 +141,7 @@ def export_invoices(db: Session, date_from=None, date_to=None) -> str:
     invoices = q.order_by(Invoice.date).all()
 
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = _SafeWriter(output)
     writer.writerow(
         [
             "Invoice #",
@@ -155,7 +177,7 @@ def export_invoices(db: Session, date_from=None, date_to=None) -> str:
 def export_accounts(db: Session) -> str:
     accounts = db.query(Account).order_by(Account.account_number).all()
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = _SafeWriter(output)
     writer.writerow(["Number", "Name", "Type", "Balance", "Active", "System"])
     for a in accounts:
         writer.writerow(

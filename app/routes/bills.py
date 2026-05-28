@@ -236,6 +236,10 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Bill not found")
     if bill.status == BillStatus.VOID:
         raise HTTPException(status_code=400, detail="Bill already voided")
+    # Voids post a reversing entry dated to the bill — must respect the
+    # closing date like invoice/payment/journal voids already do, or a bill
+    # can be reversed into a locked period.
+    check_closing_date(db, bill.date)
 
     if bill.transaction_id:
         from app.models.transactions import TransactionLine

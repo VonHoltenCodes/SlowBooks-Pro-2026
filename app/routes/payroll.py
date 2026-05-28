@@ -685,10 +685,17 @@ def generate_w2_form(
     w2_data = {
         "box_1": str(ytd["gross"]),  # Wages, tips, other compensation
         "box_2": str(ytd["federal"]),  # Federal income tax withheld
-        "box_3": str(ytd["ss"]),  # Social security wages
-        "box_4": str(ytd["ss"] * Decimal("0.062")),  # SS tax withheld
+        # ytd["ss"]/["medicare"] are the actual taxes WITHHELD (sum of stub
+        # ss_tax/medicare_tax), not wages. box_3/box_5 are wages (≈ gross,
+        # simplified — SS wage cap not applied here); box_4/box_6 are the
+        # withheld taxes verbatim. (Previously box_4 was ss_tax*0.062 and
+        # box_6 was medicare_tax*1.45 — both nonsensical; box_6 filed 145×
+        # the real Medicare tax.) The PDF path in tax_forms/w2_w3.py was
+        # already correct; this fixes the legacy JSON endpoint to match.
+        "box_3": str(ytd["gross"]),  # Social security wages (simplified)
+        "box_4": str(ytd["ss"]),  # SS tax withheld (actual)
         "box_5": str(ytd["gross"]),  # Medicare wages and tips
-        "box_6": str(ytd["medicare"] * Decimal("1.45")),  # Medicare tax withheld
+        "box_6": str(ytd["medicare"]),  # Medicare tax withheld (actual)
         "box_12a_code": "D",
         "box_12a_amount": "0",  # Would be 401k, HSA, etc.
         "employee_ssn": (
@@ -733,12 +740,14 @@ def generate_w3_form(
 
     # Build W-3 box data
     w3_data = {
+        # total_ss/total_medicare are sums of actual withheld taxes (see W-2
+        # note above). Wages ≈ gross (simplified); taxes are verbatim.
         "box_1": str(total_gross),  # Wages, tips, other compensation
         "box_2": str(total_federal),  # Federal income tax withheld
-        "box_3": str(total_ss),  # Social security wages
-        "box_4": str(total_ss * Decimal("0.062")),  # SS tax withheld
+        "box_3": str(total_gross),  # Social security wages (simplified)
+        "box_4": str(total_ss),  # SS tax withheld (actual)
         "box_5": str(total_gross),  # Medicare wages and tips
-        "box_6": str(total_medicare * Decimal("1.45")),  # Medicare tax withheld
+        "box_6": str(total_medicare),  # Medicare tax withheld (actual)
         "number_of_w2s": str(w2_count),
         "employer_ein": config.EMPLOYER_EIN or "XX-XXXXXXX",
         "employer_name": config.COMPANY_NAME,

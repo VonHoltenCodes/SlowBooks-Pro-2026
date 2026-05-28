@@ -531,6 +531,18 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.status == InvoiceStatus.VOID:
         raise HTTPException(status_code=400, detail="Invoice already voided")
+    # Voiding an invoice with payments applied would reverse the full A/R
+    # while the payment's cash-receipt JE + allocations stay on the books —
+    # double-counting cash and reversing A/R twice. Require the payment(s)
+    # to be voided first so the ledger stays consistent.
+    if (invoice.amount_paid or Decimal("0")) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot void an invoice with payments applied. Void the "
+                "payment(s) first, then void the invoice."
+            ),
+        )
     check_closing_date(db, invoice.date)
 
     # Create reversing journal entry if original had one

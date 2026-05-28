@@ -79,7 +79,16 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
 
     # Apply allocations to invoices
     for alloc_data in data.allocations:
-        invoice = db.query(Invoice).filter(Invoice.id == alloc_data.invoice_id).first()
+        # Lock the invoice row for the read-check-write so two concurrent
+        # payments to the same invoice can't both pass the balance check and
+        # over-apply (driving balance_due negative). No-op on SQLite; real
+        # row lock on Postgres.
+        invoice = (
+            db.query(Invoice)
+            .filter(Invoice.id == alloc_data.invoice_id)
+            .with_for_update()
+            .first()
+        )
         if not invoice:
             raise HTTPException(
                 status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
@@ -99,10 +108,16 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
 
         invoice.amount_paid += alloc_data.amount
         invoice.balance_due -= alloc_data.amount
-        if invoice.balance_due <= 0:
-            invoice.status = InvoiceStatus.PAID
-        else:
-            invoice.status = InvoiceStatus.PARTIAL
+        # Only an exact zero is PAID; a negative balance means something
+        # over-applied — surface it rather than masking corruption as PAID.
+        if invoice.balance_due < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Allocation drives invoice {invoice.invoice_number} balance negative",
+            )
+        invoice.status = (
+            InvoiceStatus.PAID if invoice.balance_due == 0 else InvoiceStatus.PARTIAL
+        )
 
     # ================================================================
     # Journal Entry — CReceivePayment::PostToJournal() @ 0x001A3A00
