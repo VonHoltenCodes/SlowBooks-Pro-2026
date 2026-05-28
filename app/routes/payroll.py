@@ -116,11 +116,14 @@ def _with_employee_names(run: PayRun) -> PayRunResponse:
 
 
 @router.get("", response_model=list[PayRunResponse])
-def list_pay_runs(db: Session = Depends(get_db)):
+def list_pay_runs(skip: int = 0, limit: int = 200, db: Session = Depends(get_db)):
+    limit = min(limit, 500)
     runs = (
         db.query(PayRun)
         .options(joinedload(PayRun.stubs).joinedload(PayStub.employee))
         .order_by(PayRun.pay_date.desc())
+        .offset(skip)
+        .limit(limit)
         .all()
     )
     return [_with_employee_names(run) for run in runs]

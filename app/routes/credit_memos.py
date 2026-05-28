@@ -47,14 +47,19 @@ def _next_cm_number(db: Session) -> str:
 
 @router.get("", response_model=list[CreditMemoResponse])
 def list_credit_memos(
-    customer_id: int = None, status: str = None, db: Session = Depends(get_db)
+    customer_id: int = None,
+    status: str = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
 ):
+    limit = min(limit, 1000)
     q = db.query(CreditMemo)
     if customer_id:
         q = q.filter(CreditMemo.customer_id == customer_id)
     if status:
         q = q.filter(CreditMemo.status == status)
-    memos = q.order_by(CreditMemo.date.desc()).all()
+    memos = q.order_by(CreditMemo.date.desc()).offset(skip).limit(limit).all()
     results = []
     for m in memos:
         resp = CreditMemoResponse.model_validate(m)

@@ -27,13 +27,20 @@ def _next_po_number(db: Session) -> str:
 
 
 @router.get("", response_model=list[POResponse])
-def list_pos(vendor_id: int = None, status: str = None, db: Session = Depends(get_db)):
+def list_pos(
+    vendor_id: int = None,
+    status: str = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    limit = min(limit, 1000)
     q = db.query(PurchaseOrder)
     if vendor_id:
         q = q.filter(PurchaseOrder.vendor_id == vendor_id)
     if status:
         q = q.filter(PurchaseOrder.status == status)
-    pos = q.order_by(PurchaseOrder.date.desc()).all()
+    pos = q.order_by(PurchaseOrder.date.desc()).offset(skip).limit(limit).all()
     results = []
     for po in pos:
         resp = POResponse.model_validate(po)

@@ -76,11 +76,17 @@ def update_bank_account(
 
 # Bank Transactions
 @router.get("/transactions", response_model=list[BankTransactionResponse])
-def list_bank_transactions(bank_account_id: int = None, db: Session = Depends(get_db)):
+def list_bank_transactions(
+    bank_account_id: int = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    limit = min(limit, 1000)
     q = db.query(BankTransaction)
     if bank_account_id:
         q = q.filter(BankTransaction.bank_account_id == bank_account_id)
-    return q.order_by(BankTransaction.date.desc()).all()
+    return q.order_by(BankTransaction.date.desc()).offset(skip).limit(limit).all()
 
 
 @router.post("/transactions", response_model=BankTransactionResponse, status_code=201)

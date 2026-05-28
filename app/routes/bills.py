@@ -28,14 +28,19 @@ def _get_ap_account_id(db):
 
 @router.get("", response_model=list[BillResponse])
 def list_bills(
-    vendor_id: int = None, status: str = None, db: Session = Depends(get_db)
+    vendor_id: int = None,
+    status: str = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
 ):
+    limit = min(limit, 1000)
     q = db.query(Bill)
     if vendor_id:
         q = q.filter(Bill.vendor_id == vendor_id)
     if status:
         q = q.filter(Bill.status == status)
-    bills = q.order_by(Bill.date.desc()).all()
+    bills = q.order_by(Bill.date.desc()).offset(skip).limit(limit).all()
     results = []
     for b in bills:
         resp = BillResponse.model_validate(b)

@@ -161,14 +161,19 @@ def _reverse_and_delete_journal(db: Session, transaction_id: int):
 
 @router.get("", response_model=list[InvoiceResponse])
 def list_invoices(
-    status: str = None, customer_id: int = None, db: Session = Depends(get_db)
+    status: str = None,
+    customer_id: int = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
 ):
+    limit = min(limit, 1000)
     q = db.query(Invoice)
     if status:
         q = q.filter(Invoice.status == status)
     if customer_id:
         q = q.filter(Invoice.customer_id == customer_id)
-    invoices = q.order_by(Invoice.date.desc()).all()
+    invoices = q.order_by(Invoice.date.desc()).offset(skip).limit(limit).all()
     results = []
     for inv in invoices:
         resp = InvoiceResponse.model_validate(inv)

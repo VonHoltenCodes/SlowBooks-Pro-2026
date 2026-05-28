@@ -27,11 +27,17 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 
 @router.get("", response_model=list[PaymentResponse])
-def list_payments(customer_id: int = None, db: Session = Depends(get_db)):
+def list_payments(
+    customer_id: int = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    limit = min(limit, 1000)
     q = db.query(Payment)
     if customer_id:
         q = q.filter(Payment.customer_id == customer_id)
-    payments = q.order_by(Payment.date.desc()).all()
+    payments = q.order_by(Payment.date.desc()).offset(skip).limit(limit).all()
     results = []
     for p in payments:
         resp = PaymentResponse.model_validate(p)
