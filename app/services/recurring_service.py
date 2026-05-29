@@ -14,6 +14,8 @@ from app.models.recurring import RecurringInvoice
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.items import Item
 from app.services.accounting import (
+    _q,
+    compute_line_totals,
     create_journal_entry,
     get_ar_account_id,
     get_default_income_account_id,
@@ -68,13 +70,12 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
 
         invoice_number = _next_invoice_number(db)
 
-        # Compute totals
-        subtotal = sum(
-            Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in rec.lines
-        )
+        # Compute totals via the shared helper: each line is rounded to 2dp
+        # before summing so the stored subtotal matches the sum of stored
+        # line amounts, and journal credits land on the same cents as the
+        # A/R debit once SQL rounds.
         tax_rate = rec.tax_rate or Decimal("0")
-        tax_amount = subtotal * tax_rate
-        total = subtotal + tax_amount
+        subtotal, tax_amount, total = compute_line_totals(rec.lines, tax_rate)
 
         # Parse terms for due date
         due_date = rec.next_due + timedelta(days=30)
@@ -109,7 +110,9 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
                     description=rline.description,
                     quantity=rline.quantity,
                     rate=rline.rate,
-                    amount=Decimal(str(rline.quantity)) * Decimal(str(rline.rate)),
+                    amount=_q(
+                        Decimal(str(rline.quantity)) * Decimal(str(rline.rate))
+                    ),
                     line_order=rline.line_order,
                 )
             )
@@ -125,7 +128,11 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
                 }
             ]
             for rline in rec.lines:
-                line_amt = Decimal(str(rline.quantity)) * Decimal(str(rline.rate))
+                # Must round per-line BEFORE summing to match compute_line_totals;
+                # otherwise stored credits drift from the rounded A/R debit.
+                line_amt = _q(
+                    Decimal(str(rline.quantity)) * Decimal(str(rline.rate))
+                )
                 if line_amt == 0:
                     continue
                 income_id = default_income_id
