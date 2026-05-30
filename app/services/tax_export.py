@@ -3,7 +3,6 @@
 # Feature 19: Generate from P&L data, output PDF and CSV
 # ============================================================================
 
-import csv
 import io
 from datetime import date
 
@@ -124,9 +123,17 @@ def get_schedule_c_data(db: Session, start_date: date, end_date: date) -> dict:
 
 
 def export_schedule_c_csv(data: dict) -> str:
-    """Export Schedule C data as CSV."""
+    """Export Schedule C data as CSV.
+
+    Uses the shared formula-injection-safe writer because line["accounts"]
+    contains user-supplied account names; a chart-of-accounts entry named
+    `=HYPERLINK("https://evil.example/")` would otherwise execute on open
+    in Excel / Sheets / Numbers.
+    """
+    from app.services.csv_export import _SafeWriter
+
     output = io.StringIO()
-    writer = csv.writer(output)
+    writer = _SafeWriter(output)
     writer.writerow(["Schedule C - Profit or Loss from Business"])
     writer.writerow([f"Period: {data['start_date']} to {data['end_date']}"])
     writer.writerow([])

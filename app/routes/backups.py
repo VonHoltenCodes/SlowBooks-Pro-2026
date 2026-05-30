@@ -95,7 +95,15 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
 
     result = restore_backup(db, filepath.name)
     if not result.get("success"):
-        raise HTTPException(
-            status_code=500, detail=result.get("error", "Restore failed")
-        )
+        # Map the service's error string to the right HTTP code so a missing
+        # backup file is a 404 (operator can fix it) and a bad name is a 400,
+        # rather than every failure looking like an unhelpful 500.
+        err = result.get("error", "Restore failed")
+        if "Invalid filename" in err:
+            status_code = 400
+        elif "not found" in err.lower():
+            status_code = 404
+        else:
+            status_code = 500
+        raise HTTPException(status_code=status_code, detail=err)
     return result

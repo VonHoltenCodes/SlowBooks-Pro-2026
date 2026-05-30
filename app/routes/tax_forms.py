@@ -123,7 +123,13 @@ def get_1099(year: int = Query(...), db: Session = Depends(get_db)):
 
 @router.get("/1099/{vendor_id}/pdf")
 def get_1099_pdf(vendor_id: int, year: int = Query(...), db: Session = Depends(get_db)):
-    pdf = form_1099.generate_1099_nec_pdf(db, year, vendor_id, _company())
+    try:
+        pdf = form_1099.generate_1099_nec_pdf(db, year, vendor_id, _company())
+    except ValueError as e:
+        # form_1099 raises ValueError for missing or non-1099 vendors; surface
+        # as 404 instead of leaking a 500 stack trace to the operator running
+        # year-end forms.
+        raise HTTPException(status_code=404, detail=str(e))
     return _pdf(pdf, f"1099nec_{year}_vendor{vendor_id}.pdf")
 
 
