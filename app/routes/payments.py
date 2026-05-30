@@ -65,6 +65,20 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
+    # Reject non-positive amounts at the boundary; otherwise create_journal_entry
+    # raises ValueError on the AR/bank line, which the framework surfaces as a
+    # 500. Refunds belong in a credit memo, not a negative-amount payment.
+    if data.amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Payment amount must be positive; use a credit memo for refunds",
+        )
+    if any(a.amount <= 0 for a in data.allocations):
+        raise HTTPException(
+            status_code=400,
+            detail="Allocation amounts must be positive",
+        )
+
     # Validate allocations don't exceed payment
     alloc_total = sum(a.amount for a in data.allocations)
     if alloc_total > data.amount:

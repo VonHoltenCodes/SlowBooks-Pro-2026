@@ -69,6 +69,21 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
+    # Reject duplicate vendor + bill_number combos. Vendors typically use a
+    # monotonically-increasing invoice number; receiving the same one twice is
+    # almost always a re-entry mistake, and accepting it silently produces
+    # duplicate payables and double-counted expenses.
+    dup = (
+        db.query(Bill)
+        .filter(Bill.vendor_id == data.vendor_id, Bill.bill_number == data.bill_number)
+        .first()
+    )
+    if dup:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Bill number {data.bill_number!r} already exists for this vendor (bill #{dup.id})",
+        )
+
     due_date = data.due_date
     if not due_date and data.terms:
         try:

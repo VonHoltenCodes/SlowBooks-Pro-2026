@@ -1,7 +1,9 @@
 from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
+
+from app.schemas.common import validate_non_negative_line
 
 
 class BillLineCreate(BaseModel):
@@ -11,6 +13,11 @@ class BillLineCreate(BaseModel):
     quantity: float = 1
     rate: float = 0
     line_order: int = 0
+
+    @model_validator(mode="after")
+    def _check_non_negative(self):
+        validate_non_negative_line(self.quantity, self.rate)
+        return self
 
 
 class BillLineResponse(BaseModel):
@@ -36,6 +43,13 @@ class BillCreate(BaseModel):
     tax_rate: float = 0
     notes: Optional[str] = None
     lines: list[BillLineCreate] = []
+
+    @field_validator("lines")
+    @classmethod
+    def _require_lines(cls, v):
+        if not v:
+            raise ValueError("bill must have at least one line")
+        return v
 
 
 class BillUpdate(BaseModel):
