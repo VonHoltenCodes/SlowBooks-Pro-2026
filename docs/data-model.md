@@ -1,6 +1,6 @@
 # Data Model
 
-Schema reference for the Slowbooks PostgreSQL database. 42+ tables on
+Schema reference for the Slowbooks PostgreSQL database. 55 tables on
 a double-entry accounting foundation. For migration history, see the
 files under `migrations/versions/`; for model code, see `app/models/`.
 

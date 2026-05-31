@@ -63,7 +63,7 @@ Full feature catalog (250+ bullets across every module) lives in **[docs/feature
 
 - **Accounts receivable** — Invoices, estimates, payments with multi-invoice allocation, credit memos, recurring schedules, batch payments, Quick Entry for paper backlogs.
 - **Accounts payable** — Purchase orders, bills (with vendor default expense accounts), bill payments, AP aging.
-- **Double-entry accounting** — Manual + auto journal entries, 39-account Chart of Accounts (Contractor template), closing-date enforcement, real-time balance updates, automatic audit log via SQLAlchemy event hooks.
+- **Double-entry accounting** — Manual + auto journal entries, 50-account Chart of Accounts (Contractor template), closing-date enforcement, real-time balance updates, automatic audit log via SQLAlchemy event hooks.
 
 ![Invoice editor seeded with IRS Pub 583 mock data](screenshots/invoices.png)
 
@@ -110,7 +110,7 @@ For backups, restore, key rotation, and monitoring see **[docs/operations.md](do
 | [INSTALL.md](INSTALL.md) | Install / first-run / upgrade guide (Docker + native Linux/macOS) |
 | [docs/features.md](docs/features.md) | Full feature catalog + API endpoint reference + IIF interoperability |
 | [docs/development.md](docs/development.md) | Tech stack, project structure, contributor flow |
-| [docs/data-model.md](docs/data-model.md) | Database schema — 45+ tables |
+| [docs/data-model.md](docs/data-model.md) | Database schema — 55 tables |
 | [docs/operations.md](docs/operations.md) | Backups, restore, key rotation, monitoring runbook |
 | [docs/payroll-hr-module.md](docs/payroll-hr-module.md) | Payroll / HR — models, routes, UI pages, pending items |
 | [docs/release-checklist.md](docs/release-checklist.md) | Production deployment checklist — secrets, TLS, backups, monitoring, pre-flight |

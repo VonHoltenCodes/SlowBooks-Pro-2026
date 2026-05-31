@@ -38,7 +38,7 @@ SlowBooks-Pro-2026/
 │   ├── main.py               # FastAPI app + 50 routers (300+ routes)
 │   ├── config.py             # Environment-based settings (CORS, origins)
 │   ├── database.py           # SQLAlchemy engine + session + table auto-creation
-│   ├── models/               # 34 model modules (45+ tables)
+│   ├── models/               # 35 model modules (55 tables)
 │   │   ├── accounts.py       # Chart of Accounts (self-referencing)
 │   │   ├── contacts.py       # Customers + Vendors
 │   │   ├── items.py          # Products, services, materials, labor
