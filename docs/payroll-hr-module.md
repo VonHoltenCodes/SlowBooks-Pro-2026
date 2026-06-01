@@ -19,7 +19,7 @@ what's in each tier, where each piece lives, and what's still pending.
 | **PTO year-end carryover** | Batch endpoint applies policy carryover caps + resets YTD | ✅ | n/a | ✅ |
 | **Time-entry → pay-run auto-population** | Pay-run form checkbox pulls approved unpaid hours | ✅ | ✅ | ✅ |
 
-422 tests pass across the full suite.
+452 tests pass across the full suite.
 
 ---
 

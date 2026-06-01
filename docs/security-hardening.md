@@ -27,7 +27,7 @@ For the public security policy and responsible-disclosure address, see
 | 12 | Encryption | Ciphertext now prefixed with `v1:` to enable clean key rotation | `app/services/encryption.py` |
 | 13 | Encryption | Support `PAYROLL_ENCRYPTION_SECRET_PREV` for in-flight rotation | `app/services/encryption.py` |
 
-All 422 tests pass after every change.
+All 452 tests pass after every change.
 
 ---
 
@@ -158,7 +158,7 @@ configured previous key.
 |------|-----------|
 | A01 — Broken Access Control | Single-user session auth, portal token expiry, rate limiting |
 | A02 — Cryptographic Failures | TLS enforced (transport) + Fernet at rest + key rotation path |
-| A03 — Injection | SQLAlchemy ORM throughout; one raw `CREATE DATABASE` guarded by allowlist regex |
+| A03 — Injection | SQLAlchemy ORM throughout; one raw `CREATE DATABASE` guarded by allowlist regex; AST-audited subprocess callsites (zero `shell=True`) |
 | A04 — Insecure Design | Startup checks fail hard on critical misconfig |
 | A05 — Security Misconfiguration | CSP, HSTS, security headers, secure cookie, locked-down CORS |
 | A06 — Vulnerable Components | Pinned versions, upper-bound caps in `requirements.txt` |
@@ -226,5 +226,22 @@ Run the full suite:
 
 ```bash
 python -m pytest tests/ -q
-# 249 passed
+# 452 passed
 ```
+
+### Shell-injection surface audit
+
+`tests/test_subprocess_safety_audit.py` is a CI-gated AST-based regression
+test that verifies:
+
+1. Zero `subprocess.*` calls use `shell=True` anywhere under `app/` or
+   `scripts/`.
+2. Zero `os.system` / `os.popen` / `commands.getoutput` calls anywhere in
+   production code.
+3. Every bash script in `scripts/` double-quotes all `$VAR` expansions
+   (regex audit).
+
+The test walks the AST of every `.py` file using `ast.NodeVisitor`; the
+shell-script scan uses a regex that flags bare `$` outside
+double-quotes. Both run in `< 1 s`. Adding any `shell=True` or
+`os.system` call will break CI immediately.

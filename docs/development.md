@@ -124,7 +124,7 @@ SlowBooks-Pro-2026/
 │   ├── worker.js             # Hardened proxy (model allowlist, rate limiting, security headers)
 │   ├── wrangler.toml         # Deployment config
 │   └── README.md             # Setup guide
-├── tests/                    # 422 pytest tests (auth, security, posting, reporting, import, payroll Tiers 1-3, HR, wiring audit, schema audit, jinja autoescape audit, rounding consistency, race-condition / N+1 / closing-date / secret-redaction audits)
+├── tests/                    # 452 pytest tests (auth, security, posting, reporting, import, payroll Tiers 1-3, HR, wiring audit, schema audit, jinja autoescape audit, rounding consistency, race-condition / N+1 / closing-date / secret-redaction / void-symmetry / IIF round-trip / shell-injection audits)
 └── index.html                # SPA shell
 ```
 

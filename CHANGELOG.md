@@ -7,10 +7,139 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### AP void — `POST /api/bill-payments/{id}/void`
+
+The customer-payment void (`POST /api/payments/{id}/void`) had no AP mirror.
+Any voided customer receipt restored A/R cleanly; vendor bill payments could
+not be undone at all. This gap is now closed.
+
+**What was added:**
+
+- `app/routes/bill_payments.py` — `void_bill_payment()` endpoint. Acquires a
+  `with_for_update()` row-lock on the payment before checking `is_voided`,
+  so two concurrent void requests cannot both pass the guard and post
+  duplicate reversing JEs. Posts a reversing JE (swaps debit/credit on every
+  original JE line). Walks each `BillPaymentAllocation` with a second
+  `with_for_update()` lock and restores `amount_paid` / `balance_due` /
+  `status` on each bill. Respects the closing-date guard — cannot post a
+  reversing JE into a locked period.
+
+- `app/models/bills.py` — `is_voided = Column(Boolean, …)` on `BillPayment`.
+
+- `app/schemas/bills.py` — `is_voided: bool = False` on `BillPaymentResponse`.
+
+- `migrations/versions/c9d0e1f2a3b4_add_is_voided_to_bill_payments.py` —
+  Alembic migration adds the column with `server_default=false()`.
+
+- `app/static/js/bills.js` — `BillsPage.voidBillPayment()` wires the new
+  endpoint to the UI so the wiring audit passes.
+
+**Test coverage:**
+
+- `tests/test_void_reversal_symmetry.py::test_bill_payment_void_restores_bill_balance`
+  — full void cycle: bill paid → void → balance restored, ledger balanced,
+  double-void rejects 400.
+- `tests/test_closing_date_enforcement.py::test_bill_payment_void_respects_closing_date`
+  — reversing JE cannot land in a closed period.
+
+---
+
+### Whole-repo lint & format sweep
+
+`black 24.8` and `ruff 0.6` run against `app/ tests/ scripts/` without an
+allowlist — every file is now clean. CI replaced a 30-line per-file allowlist
+with a two-line whole-tree gate.
+
+Fixes applied to reach a clean tree:
+
+- **E402** (imports not at top of file) in `app/routes/invoices.py`,
+  `app/routes/stripe_payments.py`, `app/routes/reports.py`,
+  `app/routes/saved_reports.py`, `app/services/iif_import.py`.
+- **E741** (ambiguous `l` variable name) in `app/services/accounting.py`,
+  `app/routes/journal.py`, `app/routes/reports.py`,
+  `app/services/iif_import.py`, `app/services/tax_export.py`,
+  `scripts/repair_rounding_drift.py`.
+- **black reformatting** of ~40 files with over-long lines.
+
+---
+
+### Books-balance invariant tests (`test_books_balance_invariants.py`)
+
+Seven cross-feature invariant tests that exercise the entire accounting layer
+end-to-end through the API:
+
+1. Every posted JE has `Σ debit == Σ credit`.
+2. Full ledger `Σ debit == Σ credit` across all transactions.
+3. Balance sheet balances: `A == L + E` (with synthetic Net Income line).
+4. A/R aging total matches open invoice balances.
+5. A/P aging total matches open bill balances.
+6. Analytics A/R widget matches `/api/reports/ar-aging`.
+7. P&L net income matches the balance-sheet synthetic equity line.
+
+`_build_scenario()` creates a realistic dataset (3 invoices, 2 bills,
+payments at various states) before each invariant check.
+
+---
+
+### Shell-injection AST audit (`test_subprocess_safety_audit.py`)
+
+Four CI-gated static-analysis tests that verify the subprocess/shell call
+surface is safe:
+
+1. Zero `subprocess.*` calls in `app/` or `scripts/` use `shell=True`.
+2. Zero `os.system` / `os.popen` / `commands.getoutput` in production code.
+3. All three subprocess callsites use list-form args (not string
+   interpolation).
+4. Every bash script in `scripts/` double-quotes all `$VAR` expansions.
+
+Uses `ast.NodeVisitor` for Python files; regex for shell scripts. Runs in
+< 1 s. Result: zero vulnerabilities found in the codebase.
+
+---
+
+### Void-reversal symmetry tests (`test_void_reversal_symmetry.py`)
+
+Six property-based invariant tests for void semantics:
+
+1. Full payment void restores invoice balance and keeps ledger balanced.
+2. Partial payment void restores only the voided portion.
+3. Bill-payment void restores bill balance, keeps ledger balanced, double-void
+   rejects 400.
+4. Invoice void (no payments applied) → status VOID, balance\_due 0, ledger
+   balanced.
+5. Invoice void with payments applied rejects 400/409 (would double-reverse
+   A/R).
+6. Double-void of same payment rejects or is a no-op — never posts a second
+   reversing JE.
+
+---
+
+### Closing-date exhaustive sweep (extended `test_closing_date_enforcement.py`)
+
+Expanded from 3 to 13 tests. Added `test_bill_payment_void_respects_closing_date`
+(the AP void guard), plus nine exhaustive sweep tests covering every
+direct-create route that accepts a user-supplied date and posts a JE:
+invoices, bills, payments, bill-payments, credit memos, journal entries,
+CC charges, deposits, batch payments.
+
+---
+
+### IIF round-trip tests (`test_iif_round_trip.py`)
+
+Three tests verifying the Intuit Interchange Format export/import pipeline:
+
+1. Chart-of-accounts export → reimport preserves all accounts by number.
+2. Customer names with metacharacters (`\t`, `\n`) are sanitized on export;
+   the sanitized record can be reimported cleanly.
+3. Invoice TRNS + SPL rows sum to zero (double-entry identity): the A/R debit
+   plus income credits plus tax credit == 0.
+
+---
+
 ### Production-readiness sweep (rounding / races / N+1 / closing-date / secrets)
 
 A 19-commit program-wide audit of every JE-posting path and money
-boundary in the codebase. All 422 tests pass; live walkthrough
+boundary in the codebase. All 452 tests pass; live walkthrough
 exercised every flow listed below.
 
 **Money math — rounding drift fixed at the source.**

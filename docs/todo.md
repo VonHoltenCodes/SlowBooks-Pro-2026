@@ -130,6 +130,10 @@ item, asserting (a) construction with required fields, (b) defaults,
   A/R Aging (ReportsPage.apAging).
 - ~~Audit log viewer~~ — DONE: already built + nav-linked; fixed so the
   table loads on open instead of staying empty until a filter is touched.
+- ~~Bill-payment void~~ — DONE: `POST /api/bill-payments/{id}/void`
+  implemented with row-lock, closing-date guard, reversing JE, and
+  `is_voided` idempotency. Mirrors the customer-payment void on the AP side.
+  6 void-symmetry tests + closing-date guard test cover the new endpoint.
 
 ---
 
