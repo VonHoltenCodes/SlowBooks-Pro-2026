@@ -162,13 +162,9 @@ def test_partial_payment_void_restores_partial_balance(
     assert dr == cr
 
 
-def test_bill_payment_has_no_void_endpoint_yet(client, db_session, seed_accounts):
-    """Customer payments have a void endpoint; bill (vendor) payments do not.
-
-    This is asymmetric — likely an oversight rather than a deliberate
-    design choice. Documented here so the gap is visible. If the route
-    is later added, flip this assertion to mirror
-    test_payment_void_restores_invoice_balance.
+def test_bill_payment_void_restores_bill_balance(client, db_session, seed_accounts):
+    """Voiding a bill payment posts a reversing JE and restores the bill's
+    open balance — AP-side mirror of test_payment_void_restores_invoice_balance.
     """
     v = _mk_vendor(db_session)
 
@@ -183,6 +179,7 @@ def test_bill_payment_has_no_void_endpoint_yet(client, db_session, seed_accounts
             ],
         },
     )
+    assert r.status_code == 201, r.text
     bill = r.json()
 
     r = client.post(
@@ -195,13 +192,32 @@ def test_bill_payment_has_no_void_endpoint_yet(client, db_session, seed_accounts
             "allocations": [{"bill_id": bill["id"], "amount": 175.0}],
         },
     )
+    assert r.status_code == 201, r.text
     bp = r.json()
 
+    # Pre-void: bill is paid, ledger balanced
+    r = client.get(f"/api/bills/{bill['id']}")
+    assert r.json()["status"] == "paid"
+    dr, cr = _ledger_balanced(db_session)
+    assert dr == cr
+
+    # Void the bill payment
     r = client.post(f"/api/bill-payments/{bp['id']}/void")
-    assert r.status_code == 404, (
-        "If a void endpoint has been added, update this test to assert "
-        "ledger-restoring void behavior like the customer-payment case."
-    )
+    assert r.status_code == 200, r.text
+    assert r.json()["is_voided"] is True
+
+    # Bill balance restored, ledger still balanced
+    r = client.get(f"/api/bills/{bill['id']}")
+    restored = r.json()
+    assert Decimal(str(restored["balance_due"])) == Decimal("175.00")
+    assert restored["status"] != "paid"
+
+    dr, cr = _ledger_balanced(db_session)
+    assert dr == cr, f"ledger imbalanced after bill-payment void: dr={dr} cr={cr}"
+
+    # Double-void idempotency
+    r = client.post(f"/api/bill-payments/{bp['id']}/void")
+    assert r.status_code == 400, "second void of same bill payment must reject"
 
 
 def test_invoice_void_without_payments_zeros_balance_and_keeps_ledger_balanced(

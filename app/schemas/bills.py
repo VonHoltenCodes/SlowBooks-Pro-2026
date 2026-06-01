@@ -111,5 +111,6 @@ class BillPaymentResponse(BaseModel):
     method: Optional[str] = None
     check_number: Optional[str] = None
     notes: Optional[str] = None
+    is_voided: bool = False
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}

@@ -8,6 +8,7 @@
 import enum
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     String,
@@ -108,6 +109,7 @@ class BillPayment(Base):
     pay_from_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     notes = Column(Text, nullable=True)
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    is_voided = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

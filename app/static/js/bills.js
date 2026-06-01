@@ -304,6 +304,16 @@ const BillsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    async voidBillPayment(id) {
+        if (!confirm('Void this bill payment? Bill balances will be restored.')) return;
+        try {
+            await API.post(`/bill-payments/${id}/void`);
+            toast('Bill payment voided');
+            closeModal();
+            App.navigate(location.hash);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     async loadAttachments(billId) {
         const el = $('#bill-attachments-list');
         if (!el) return;

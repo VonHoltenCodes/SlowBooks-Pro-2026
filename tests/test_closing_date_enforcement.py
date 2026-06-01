@@ -121,6 +121,38 @@ def test_payroll_process_respects_closing_date(client, db_session):
     assert r.status_code == 403, r.text
 
 
+def test_bill_payment_void_respects_closing_date(client, db_session, seed_accounts):
+    """Voiding a bill payment posts a dated reversing JE — must also
+    respect the closing date, matching the customer-payment void guard."""
+    v = _mk_vendor(db_session)
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": v.id,
+            "date": "2025-06-15",
+            "bill_number": "B-VOID-CLOSING",
+            "lines": [{"description": "x", "quantity": 1, "rate": 75, "line_order": 0}],
+        },
+    )
+    bill = r.json()
+    r = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": v.id,
+            "date": "2025-06-15",
+            "amount": 75.0,
+            "method": "check",
+            "allocations": [{"bill_id": bill["id"], "amount": 75.0}],
+        },
+    )
+    bp = r.json()
+
+    _set_closing_date(client, "2025-12-31")
+
+    r = client.post(f"/api/bill-payments/{bp['id']}/void")
+    assert r.status_code == 403, r.text
+
+
 # ---------------------------------------------------------------------------
 # Exhaustive sweep — every direct create that takes a user-supplied date
 # and posts a JE must reject when the date falls in a closed period.

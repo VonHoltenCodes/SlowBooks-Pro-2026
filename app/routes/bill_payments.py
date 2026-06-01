@@ -127,3 +127,79 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
     resp = BillPaymentResponse.model_validate(payment)
     resp.vendor_name = vendor.name
     return resp
+
+
+@router.post("/{bill_payment_id}/void", response_model=BillPaymentResponse)
+def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
+    """Void a bill payment — reverses JE and restores bill balances.
+
+    Mirror of /api/payments/{id}/void for the AP side. Posts a reversing
+    journal entry dated to the original payment, walks each allocation,
+    and restores the bill's amount_paid / balance_due / status to its
+    pre-payment values.
+    """
+    # Row-lock the payment so two concurrent voids can't both pass the
+    # is_voided guard and post duplicate reversing JEs.
+    payment = (
+        db.query(BillPayment)
+        .filter(BillPayment.id == bill_payment_id)
+        .with_for_update()
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Bill payment not found")
+    if payment.is_voided:
+        raise HTTPException(status_code=400, detail="Bill payment already voided")
+    check_closing_date(db, payment.date)
+
+    if payment.transaction_id:
+        from app.models.transactions import TransactionLine
+
+        original_lines = (
+            db.query(TransactionLine)
+            .filter(TransactionLine.transaction_id == payment.transaction_id)
+            .all()
+        )
+        reverse_lines = [
+            {
+                "account_id": ol.account_id,
+                "debit": ol.credit,
+                "credit": ol.debit,
+                "description": f"VOID: {ol.description or ''}",
+            }
+            for ol in original_lines
+        ]
+        if reverse_lines:
+            vendor = db.query(Vendor).filter(Vendor.id == payment.vendor_id).first()
+            vname = vendor.name if vendor else "Unknown"
+            create_journal_entry(
+                db,
+                payment.date,
+                f"VOID Bill payment to {vname}",
+                reverse_lines,
+                source_type="bill_payment_void",
+                source_id=payment.id,
+            )
+
+    # Reverse allocations. Lock each bill row so a concurrent create or
+    # second void can't race the read-modify-write of amount_paid /
+    # balance_due / status.
+    for alloc in payment.allocations:
+        bill = db.query(Bill).filter(Bill.id == alloc.bill_id).with_for_update().first()
+        if bill:
+            bill.amount_paid -= alloc.amount
+            bill.balance_due += alloc.amount
+            if bill.balance_due >= bill.total:
+                bill.status = BillStatus.UNPAID
+            elif bill.amount_paid > 0:
+                bill.status = BillStatus.PARTIAL
+            else:
+                bill.status = BillStatus.UNPAID
+
+    payment.is_voided = True
+    db.commit()
+    db.refresh(payment)
+    resp = BillPaymentResponse.model_validate(payment)
+    if payment.vendor:
+        resp.vendor_name = payment.vendor.name
+    return resp
