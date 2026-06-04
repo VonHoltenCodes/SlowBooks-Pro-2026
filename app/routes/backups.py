@@ -58,8 +58,16 @@ def make_backup(data: BackupCreate = BackupCreate(), db: Session = Depends(get_d
 
 
 @router.get("/download/{filename}")
-def download_backup(filename: str):
-    filepath = (BACKUP_DIR / filename).resolve()
+def download_backup(filename: str, db: Session = Depends(get_db)):
+    # Resolve the filename through the backups table first. The DB row is
+    # the system-of-record for what's a legitimate backup; a path derived
+    # from a DB read is also a clear sanitizer for static analyzers
+    # (CodeQL: py/path-injection) that don't recognize is_relative_to() as
+    # one. is_relative_to() below remains as defense-in-depth.
+    backup_row = db.query(Backup).filter(Backup.filename == filename).first()
+    if not backup_row:
+        raise HTTPException(status_code=404, detail="Backup file not found")
+    filepath = (BACKUP_DIR / backup_row.filename).resolve()
     if not filepath.is_relative_to(BACKUP_DIR.resolve()):
         raise HTTPException(status_code=400, detail="Invalid filename")
     if not filepath.exists():

@@ -141,7 +141,11 @@ def _claim(
     if request is not None:
         _record_portal_access(db, request, employee_id=emp.id, success=True)
     response = _portal_redirect(redirect_to)
-    _set_portal_cookie(response, token)
+    # Use the DB-resident token value rather than the URL param. Same
+    # string by construction (we just matched on it), but sourcing from
+    # the validated Employee row gives static analyzers a clear sanitizer
+    # boundary for the cookie write (CodeQL: py/cookie-injection).
+    _set_portal_cookie(response, emp.portal_token)
     return response
 
 
@@ -515,8 +519,12 @@ def portal_claim_pto(request: Request, token: str, db: Session = Depends(get_db)
 # POST routes with token in the URL — process inline, stamp the cookie, then
 # redirect to the cookieless URL. Browsers can't redirect a POST across paths
 # cleanly, so we do the work first and 303 to the GET equivalent.
-def _set_cookie_on(response, token: str):
-    _set_portal_cookie(response, token)
+def _set_cookie_on(response, emp: Employee):
+    # Cookie value is read from the validated Employee row, not the URL
+    # param. Same string by construction, but DB-sourced gives static
+    # analyzers a clear sanitizer for the cookie write
+    # (CodeQL: py/cookie-injection).
+    _set_portal_cookie(response, emp.portal_token)
     return response
 
 
@@ -554,7 +562,7 @@ def portal_claim_profile_save(
     emp.state = state or None
     emp.zip = zip or None
     db.commit()
-    return _set_cookie_on(_portal_redirect("/portal/profile?saved=1"), token)
+    return _set_cookie_on(_portal_redirect("/portal/profile?saved=1"), emp)
 
 
 @router.post("/portal/{token}/bank")
@@ -575,19 +583,19 @@ def portal_claim_bank_add(
     if not (routing.isdigit() and len(routing) == 9):
         return _set_cookie_on(
             _portal_redirect("/portal/bank?error=Routing+number+must+be+9+digits"),
-            token,
+            emp,
         )
     if not account.isdigit():
         return _set_cookie_on(
             _portal_redirect("/portal/bank?error=Account+number+must+be+numeric"),
-            token,
+            emp,
         )
     try:
         kind = BankAccountKind(account_kind)
         dtype = DepositType(deposit_type)
     except ValueError:
         return _set_cookie_on(
-            _portal_redirect("/portal/bank?error=Invalid+selection"), token
+            _portal_redirect("/portal/bank?error=Invalid+selection"), emp
         )
 
     db.add(
@@ -603,7 +611,7 @@ def portal_claim_bank_add(
         )
     )
     db.commit()
-    return _set_cookie_on(_portal_redirect("/portal/bank?saved=1"), token)
+    return _set_cookie_on(_portal_redirect("/portal/bank?saved=1"), emp)
 
 
 @router.post("/portal/{token}/pto")
@@ -640,4 +648,4 @@ def portal_claim_pto_request(
         )
     )
     db.commit()
-    return _set_cookie_on(_portal_redirect("/portal/pto?saved=1"), token)
+    return _set_cookie_on(_portal_redirect("/portal/pto?saved=1"), emp)
