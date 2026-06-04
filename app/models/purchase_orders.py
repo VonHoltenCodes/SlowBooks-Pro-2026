@@ -6,8 +6,16 @@
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text, Enum,
-    ForeignKey, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+    DateTime,
+    Text,
+    Enum,
+    ForeignKey,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -41,18 +49,26 @@ class PurchaseOrder(Base):
 
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     vendor = relationship("Vendor", backref="purchase_orders")
-    lines = relationship("PurchaseOrderLine", back_populates="purchase_order",
-                         cascade="all, delete-orphan", order_by="PurchaseOrderLine.line_order")
+    lines = relationship(
+        "PurchaseOrderLine",
+        back_populates="purchase_order",
+        cascade="all, delete-orphan",
+        order_by="PurchaseOrderLine.line_order",
+    )
 
 
 class PurchaseOrderLine(Base):
     __tablename__ = "purchase_order_lines"
 
     id = Column(Integer, primary_key=True, index=True)
-    purchase_order_id = Column(Integer, ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False)
+    purchase_order_id = Column(
+        Integer, ForeignKey("purchase_orders.id", ondelete="CASCADE"), nullable=False
+    )
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)

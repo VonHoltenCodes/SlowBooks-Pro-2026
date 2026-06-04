@@ -11,8 +11,16 @@
 import enum
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text, Enum,
-    ForeignKey, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+    DateTime,
+    Text,
+    Enum,
+    ForeignKey,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -20,10 +28,10 @@ from app.database import Base
 
 
 class EstimateStatus(str, enum.Enum):
-    PENDING = "pending"        # 0x00
-    ACCEPTED = "accepted"      # 0x01
-    REJECTED = "rejected"      # 0x02
-    CONVERTED = "converted"    # 0x04 — sets ConvertedTxnRef in ESTIMATE.DAT
+    PENDING = "pending"  # 0x00
+    ACCEPTED = "accepted"  # 0x01
+    REJECTED = "rejected"  # 0x02
+    CONVERTED = "converted"  # 0x04 — sets ConvertedTxnRef in ESTIMATE.DAT
 
 
 class Estimate(Base):
@@ -31,7 +39,9 @@ class Estimate(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     estimate_number = Column(String(50), unique=True, nullable=False)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    customer_id = Column(
+        Integer, ForeignKey("customers.id"), nullable=False, index=True
+    )
     status = Column(Enum(EstimateStatus), default=EstimateStatus.PENDING)
 
     date = Column(Date, nullable=False)
@@ -49,14 +59,22 @@ class Estimate(Base):
     total = Column(Numeric(12, 2), default=0)
 
     notes = Column(Text, nullable=True)
-    converted_invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True)
+    converted_invoice_id = Column(
+        Integer, ForeignKey("invoices.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     customer = relationship("Customer", backref="estimates")
-    lines = relationship("EstimateLine", back_populates="estimate", cascade="all, delete-orphan",
-                           order_by="EstimateLine.line_order")
+    lines = relationship(
+        "EstimateLine",
+        back_populates="estimate",
+        cascade="all, delete-orphan",
+        order_by="EstimateLine.line_order",
+    )
     converted_invoice = relationship("Invoice", foreign_keys=[converted_invoice_id])
 
 
@@ -64,7 +82,9 @@ class EstimateLine(Base):
     __tablename__ = "estimate_lines"
 
     id = Column(Integer, primary_key=True, index=True)
-    estimate_id = Column(Integer, ForeignKey("estimates.id", ondelete="CASCADE"), nullable=False)
+    estimate_id = Column(
+        Integer, ForeignKey("estimates.id", ondelete="CASCADE"), nullable=False
+    )
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)

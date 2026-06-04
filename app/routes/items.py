@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_ as sqla_and_, or_ as sqla_or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -20,10 +21,15 @@ router = APIRouter(prefix="/api/items", tags=["items"])
 
 
 @router.get("", response_model=list[ItemResponse])
-def list_items(active_only: bool = False, item_type: str = None, search: str = None, db: Session = Depends(get_db)):
+def list_items(
+    active_only: bool = False,
+    item_type: str = None,
+    search: str = None,
+    db: Session = Depends(get_db),
+):
     q = db.query(Item)
     if active_only:
-        q = q.filter(Item.is_active == True)
+        q = q.filter(Item.is_active)
     if item_type:
         q = q.filter(Item.item_type == item_type)
     if search:
@@ -33,7 +39,13 @@ def list_items(active_only: bool = False, item_type: str = None, search: str = N
 
 @router.get("/low-stock", response_model=list[LowStockResponse])
 def low_stock_items(db: Session = Depends(get_db)):
-    """Items where quantity_on_hand <= reorder_point (and reorder_point > 0).
+    """Items where quantity_on_hand <= reorder_point (and reorder_point > 0),
+    plus any item whose on-hand has gone negative.
+
+    Negative on-hand happens when a sale is invoiced before the receiving
+    bill is entered (the inventory service allows it). Without surfacing
+    these here, an operator who never sets a reorder_point can sell a
+    widget into the red and never see a warning.
 
     Returned sorted worst-shortage-first so the most urgent re-orders come first.
     """
@@ -41,23 +53,33 @@ def low_stock_items(db: Session = Depends(get_db)):
         db.query(Item)
         .filter(Item.track_inventory == True)  # noqa
         .filter(Item.is_active == True)  # noqa
-        .filter(Item.reorder_point > 0)
-        .filter(Item.quantity_on_hand <= Item.reorder_point)
+        .filter(
+            sqla_or_(
+                sqla_and_(
+                    Item.reorder_point > 0, Item.quantity_on_hand <= Item.reorder_point
+                ),
+                Item.quantity_on_hand < 0,
+            )
+        )
         .all()
     )
     out = []
     for it in rows:
-        shortage = Decimal(str(it.reorder_point or 0)) - Decimal(str(it.quantity_on_hand or 0))
+        shortage = Decimal(str(it.reorder_point or 0)) - Decimal(
+            str(it.quantity_on_hand or 0)
+        )
         if shortage < 0:
             shortage = Decimal("0")
-        out.append(LowStockResponse(
-            id=it.id,
-            name=it.name,
-            quantity_on_hand=it.quantity_on_hand,
-            reorder_point=it.reorder_point,
-            avg_cost=it.avg_cost,
-            shortage=shortage,
-        ))
+        out.append(
+            LowStockResponse(
+                id=it.id,
+                name=it.name,
+                quantity_on_hand=it.quantity_on_hand,
+                reorder_point=it.reorder_point,
+                avg_cost=it.avg_cost,
+                shortage=shortage,
+            )
+        )
     out.sort(key=lambda r: r.shortage, reverse=True)
     return out
 
@@ -106,13 +128,16 @@ def adjust_inventory(
         raise HTTPException(status_code=400, detail="Item is not inventory-tracked")
 
     mv = record_adjustment(
-        db, item,
+        db,
+        item,
         quantity_delta=data.quantity_delta,
         unit_cost=data.unit_cost,
         memo=data.memo,
     )
     if mv is None:
-        raise HTTPException(status_code=400, detail="No adjustment recorded (zero delta?)")
+        raise HTTPException(
+            status_code=400, detail="No adjustment recorded (zero delta?)"
+        )
     db.commit()
     db.refresh(mv)
     return mv

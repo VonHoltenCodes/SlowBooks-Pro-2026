@@ -12,6 +12,7 @@ and uses the cash method of accounting.
 All dollar amounts, vendor names, expense categories, and daily sales
 figures are taken directly from the IRS publication.
 """
+
 import sys
 from pathlib import Path
 from datetime import date, timedelta
@@ -28,7 +29,6 @@ from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.services.accounting import create_journal_entry, get_ar_account_id
 
-
 # ============================================================================
 # IRS Pub 583 — Henry Brown's Auto Body Shop
 # Monthly Summary of Cash Receipts, January (page 18)
@@ -36,18 +36,18 @@ from app.services.accounting import create_journal_entry, get_ar_account_id
 
 JANUARY_DAILY_SALES = [
     # (day, net_sales, sales_tax)
-    (3,  263.60, 4.20),
-    (4,  212.00, 3.39),
-    (5,  194.40, 3.10),
-    (6,  222.40, 3.54),
-    (7,  231.15, 3.68),
-    (8,  137.50, 2.13),
+    (3, 263.60, 4.20),
+    (4, 212.00, 3.39),
+    (5, 194.40, 3.10),
+    (6, 222.40, 3.54),
+    (7, 231.15, 3.68),
+    (8, 137.50, 2.13),
     (10, 187.90, 2.99),
     (11, 207.56, 3.31),
     (12, 128.95, 2.05),
     (13, 231.40, 3.77),
     (14, 201.28, 3.21),
-    (15, 88.01,  1.40),
+    (15, 88.01, 1.40),
     (17, 210.95, 3.36),
     (18, 221.80, 3.53),
     (19, 225.15, 3.59),
@@ -70,19 +70,84 @@ JANUARY_DAILY_SALES = [
 # ============================================================================
 
 VENDORS = [
-    {"name": "Dale Advertising",      "company": "Dale Advertising",      "phone": "555-0101", "terms": "Net 30"},
-    {"name": "Auto Parts, Inc.",      "company": "Auto Parts, Inc.",      "phone": "555-0102", "terms": "Net 30"},
-    {"name": "ABC Auto Paint",        "company": "ABC Auto Paint",        "phone": "555-0103", "terms": "Net 15"},
-    {"name": "Joe's Service Station", "company": "Joe's Service Station", "phone": "555-0104", "terms": "Net 15"},
-    {"name": "M.B. Ignition",         "company": "M.B. Ignition",         "phone": "555-0105", "terms": "Net 30"},
-    {"name": "Baker's Fender Co.",    "company": "Baker's Fender Co.",    "phone": "555-0106", "terms": "Net 30"},
-    {"name": "Enterprise Rentals",    "company": "Enterprise Rentals",    "phone": "555-0107", "terms": "Due on Receipt"},
-    {"name": "Mike's Deli",           "company": "Mike's Deli",           "phone": "555-0108", "terms": "Due on Receipt"},
-    {"name": "Telephone Co.",         "company": "Telephone Co.",         "phone": "555-0109", "terms": "Net 15"},
-    {"name": "National Bank",         "company": "National Bank",         "phone": "555-0110", "terms": "Due on Receipt"},
-    {"name": "Electric Co.",          "company": "Electric Co.",          "phone": "555-0111", "terms": "Net 30"},
-    {"name": "City Treasurer",        "company": "City Treasurer",        "phone": "555-0112", "terms": "Due on Receipt"},
-    {"name": "State Treasurer",       "company": "State Treasurer",       "phone": "555-0113", "terms": "Due on Receipt"},
+    {
+        "name": "Dale Advertising",
+        "company": "Dale Advertising",
+        "phone": "555-0101",
+        "terms": "Net 30",
+    },
+    {
+        "name": "Auto Parts, Inc.",
+        "company": "Auto Parts, Inc.",
+        "phone": "555-0102",
+        "terms": "Net 30",
+    },
+    {
+        "name": "ABC Auto Paint",
+        "company": "ABC Auto Paint",
+        "phone": "555-0103",
+        "terms": "Net 15",
+    },
+    {
+        "name": "Joe's Service Station",
+        "company": "Joe's Service Station",
+        "phone": "555-0104",
+        "terms": "Net 15",
+    },
+    {
+        "name": "M.B. Ignition",
+        "company": "M.B. Ignition",
+        "phone": "555-0105",
+        "terms": "Net 30",
+    },
+    {
+        "name": "Baker's Fender Co.",
+        "company": "Baker's Fender Co.",
+        "phone": "555-0106",
+        "terms": "Net 30",
+    },
+    {
+        "name": "Enterprise Rentals",
+        "company": "Enterprise Rentals",
+        "phone": "555-0107",
+        "terms": "Due on Receipt",
+    },
+    {
+        "name": "Mike's Deli",
+        "company": "Mike's Deli",
+        "phone": "555-0108",
+        "terms": "Due on Receipt",
+    },
+    {
+        "name": "Telephone Co.",
+        "company": "Telephone Co.",
+        "phone": "555-0109",
+        "terms": "Net 15",
+    },
+    {
+        "name": "National Bank",
+        "company": "National Bank",
+        "phone": "555-0110",
+        "terms": "Due on Receipt",
+    },
+    {
+        "name": "Electric Co.",
+        "company": "Electric Co.",
+        "phone": "555-0111",
+        "terms": "Net 30",
+    },
+    {
+        "name": "City Treasurer",
+        "company": "City Treasurer",
+        "phone": "555-0112",
+        "terms": "Due on Receipt",
+    },
+    {
+        "name": "State Treasurer",
+        "company": "State Treasurer",
+        "phone": "555-0113",
+        "terms": "Due on Receipt",
+    },
 ]
 
 # ============================================================================
@@ -91,14 +156,62 @@ VENDORS = [
 # ============================================================================
 
 CUSTOMERS = [
-    {"name": "John E. Marks",       "company": None,              "phone": "555-0201", "email": "jmarks@example.com",    "terms": "Net 30"},
-    {"name": "Patricia Davis",      "company": None,              "phone": "555-0202", "email": "pdavis@example.com",    "terms": "Net 30"},
-    {"name": "Robert Garcia",       "company": "Garcia Trucking", "phone": "555-0203", "email": "rgarcia@example.com",   "terms": "Net 15"},
-    {"name": "Thompson & Sons",     "company": "Thompson & Sons", "phone": "555-0204", "email": "info@thompson.example", "terms": "Net 30"},
-    {"name": "Linda S. Chen",       "company": None,              "phone": "555-0205", "email": "lchen@example.com",     "terms": "Net 15"},
-    {"name": "Metro Cab Co.",       "company": "Metro Cab Co.",   "phone": "555-0206", "email": "fleet@metrocab.example", "terms": "Net 30"},
-    {"name": "Wilson Insurance",    "company": "Wilson Insurance","phone": "555-0207", "email": "claims@wilson.example",  "terms": "Net 30"},
-    {"name": "David R. Ortega",     "company": None,              "phone": "555-0208", "email": "dortega@example.com",   "terms": "Due on Receipt"},
+    {
+        "name": "John E. Marks",
+        "company": None,
+        "phone": "555-0201",
+        "email": "jmarks@example.com",
+        "terms": "Net 30",
+    },
+    {
+        "name": "Patricia Davis",
+        "company": None,
+        "phone": "555-0202",
+        "email": "pdavis@example.com",
+        "terms": "Net 30",
+    },
+    {
+        "name": "Robert Garcia",
+        "company": "Garcia Trucking",
+        "phone": "555-0203",
+        "email": "rgarcia@example.com",
+        "terms": "Net 15",
+    },
+    {
+        "name": "Thompson & Sons",
+        "company": "Thompson & Sons",
+        "phone": "555-0204",
+        "email": "info@thompson.example",
+        "terms": "Net 30",
+    },
+    {
+        "name": "Linda S. Chen",
+        "company": None,
+        "phone": "555-0205",
+        "email": "lchen@example.com",
+        "terms": "Net 15",
+    },
+    {
+        "name": "Metro Cab Co.",
+        "company": "Metro Cab Co.",
+        "phone": "555-0206",
+        "email": "fleet@metrocab.example",
+        "terms": "Net 30",
+    },
+    {
+        "name": "Wilson Insurance",
+        "company": "Wilson Insurance",
+        "phone": "555-0207",
+        "email": "claims@wilson.example",
+        "terms": "Net 30",
+    },
+    {
+        "name": "David R. Ortega",
+        "company": None,
+        "phone": "555-0208",
+        "email": "dortega@example.com",
+        "terms": "Due on Receipt",
+    },
 ]
 
 # ============================================================================
@@ -107,14 +220,62 @@ CUSTOMERS = [
 # ============================================================================
 
 ITEMS = [
-    {"name": "Body Repair",        "item_type": "service",  "rate": 85.00,  "description": "Auto body repair labor",         "income_acct": "4000"},
-    {"name": "Paint & Finish",     "item_type": "service",  "rate": 65.00,  "description": "Paint and finish work",           "income_acct": "4000"},
-    {"name": "Dent Removal",       "item_type": "service",  "rate": 45.00,  "description": "Dent removal and straightening",  "income_acct": "4000"},
-    {"name": "Frame Alignment",    "item_type": "service",  "rate": 125.00, "description": "Frame alignment and correction",  "income_acct": "4000"},
-    {"name": "Auto Parts",         "item_type": "material", "rate": 0.00,   "description": "Parts and materials (at cost)",   "income_acct": "4100"},
-    {"name": "Paint Supplies",     "item_type": "material", "rate": 0.00,   "description": "Paint, primer, clear coat",       "income_acct": "4100"},
-    {"name": "Towing Service",     "item_type": "service",  "rate": 75.00,  "description": "Tow truck service",               "income_acct": "4000"},
-    {"name": "Insurance Estimate", "item_type": "service",  "rate": 0.00,   "description": "Insurance damage assessment",     "income_acct": "4000"},
+    {
+        "name": "Body Repair",
+        "item_type": "service",
+        "rate": 85.00,
+        "description": "Auto body repair labor",
+        "income_acct": "4000",
+    },
+    {
+        "name": "Paint & Finish",
+        "item_type": "service",
+        "rate": 65.00,
+        "description": "Paint and finish work",
+        "income_acct": "4000",
+    },
+    {
+        "name": "Dent Removal",
+        "item_type": "service",
+        "rate": 45.00,
+        "description": "Dent removal and straightening",
+        "income_acct": "4000",
+    },
+    {
+        "name": "Frame Alignment",
+        "item_type": "service",
+        "rate": 125.00,
+        "description": "Frame alignment and correction",
+        "income_acct": "4000",
+    },
+    {
+        "name": "Auto Parts",
+        "item_type": "material",
+        "rate": 0.00,
+        "description": "Parts and materials (at cost)",
+        "income_acct": "4100",
+    },
+    {
+        "name": "Paint Supplies",
+        "item_type": "material",
+        "rate": 0.00,
+        "description": "Paint, primer, clear coat",
+        "income_acct": "4100",
+    },
+    {
+        "name": "Towing Service",
+        "item_type": "service",
+        "rate": 75.00,
+        "description": "Tow truck service",
+        "income_acct": "4000",
+    },
+    {
+        "name": "Insurance Estimate",
+        "item_type": "service",
+        "rate": 0.00,
+        "description": "Insurance damage assessment",
+        "income_acct": "4000",
+    },
 ]
 
 # ============================================================================
@@ -124,16 +285,94 @@ ITEMS = [
 
 INVOICES = [
     # (customer_name, invoice_date_offset, lines: [(item_name, qty, rate)], terms)
-    ("John E. Marks",   3,  [("Body Repair", 2, 85.00), ("Auto Parts", 1, 203.00), ("Paint & Finish", 1, 65.00)], "Net 30"),
-    ("Patricia Davis",  5,  [("Dent Removal", 3, 45.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
-    ("Robert Garcia",   7,  [("Body Repair", 3, 85.00), ("Frame Alignment", 1, 125.00), ("Auto Parts", 1, 150.00)], "Net 15"),
-    ("Thompson & Sons", 10, [("Body Repair", 4, 85.00), ("Paint & Finish", 3, 65.00), ("Paint Supplies", 1, 137.50)], "Net 30"),
-    ("Linda S. Chen",   12, [("Dent Removal", 2, 45.00), ("Paint & Finish", 1, 65.00)], "Net 15"),
-    ("Metro Cab Co.",   14, [("Body Repair", 2, 85.00), ("Dent Removal", 1, 45.00), ("Auto Parts", 1, 66.70)], "Net 30"),
-    ("Wilson Insurance", 17, [("Insurance Estimate", 1, 0.00), ("Body Repair", 3, 85.00), ("Paint & Finish", 2, 65.00)], "Net 30"),
-    ("David R. Ortega", 20, [("Dent Removal", 1, 45.00), ("Paint & Finish", 1, 65.00)], "Due on Receipt"),
-    ("John E. Marks",   24, [("Body Repair", 1, 85.00), ("Towing Service", 1, 75.00), ("Auto Parts", 1, 9.80)], "Net 30"),
-    ("Robert Garcia",   27, [("Frame Alignment", 1, 125.00), ("Body Repair", 2, 85.00), ("Auto Parts", 1, 272.49)], "Net 15"),
+    (
+        "John E. Marks",
+        3,
+        [
+            ("Body Repair", 2, 85.00),
+            ("Auto Parts", 1, 203.00),
+            ("Paint & Finish", 1, 65.00),
+        ],
+        "Net 30",
+    ),
+    (
+        "Patricia Davis",
+        5,
+        [("Dent Removal", 3, 45.00), ("Paint & Finish", 2, 65.00)],
+        "Net 30",
+    ),
+    (
+        "Robert Garcia",
+        7,
+        [
+            ("Body Repair", 3, 85.00),
+            ("Frame Alignment", 1, 125.00),
+            ("Auto Parts", 1, 150.00),
+        ],
+        "Net 15",
+    ),
+    (
+        "Thompson & Sons",
+        10,
+        [
+            ("Body Repair", 4, 85.00),
+            ("Paint & Finish", 3, 65.00),
+            ("Paint Supplies", 1, 137.50),
+        ],
+        "Net 30",
+    ),
+    (
+        "Linda S. Chen",
+        12,
+        [("Dent Removal", 2, 45.00), ("Paint & Finish", 1, 65.00)],
+        "Net 15",
+    ),
+    (
+        "Metro Cab Co.",
+        14,
+        [
+            ("Body Repair", 2, 85.00),
+            ("Dent Removal", 1, 45.00),
+            ("Auto Parts", 1, 66.70),
+        ],
+        "Net 30",
+    ),
+    (
+        "Wilson Insurance",
+        17,
+        [
+            ("Insurance Estimate", 1, 0.00),
+            ("Body Repair", 3, 85.00),
+            ("Paint & Finish", 2, 65.00),
+        ],
+        "Net 30",
+    ),
+    (
+        "David R. Ortega",
+        20,
+        [("Dent Removal", 1, 45.00), ("Paint & Finish", 1, 65.00)],
+        "Due on Receipt",
+    ),
+    (
+        "John E. Marks",
+        24,
+        [
+            ("Body Repair", 1, 85.00),
+            ("Towing Service", 1, 75.00),
+            ("Auto Parts", 1, 9.80),
+        ],
+        "Net 30",
+    ),
+    (
+        "Robert Garcia",
+        27,
+        [
+            ("Frame Alignment", 1, 125.00),
+            ("Body Repair", 2, 85.00),
+            ("Auto Parts", 1, 272.49),
+        ],
+        "Net 15",
+    ),
 ]
 
 # ============================================================================
@@ -141,9 +380,34 @@ INVOICES = [
 # ============================================================================
 
 ESTIMATES = [
-    ("Thompson & Sons", 5,  [("Body Repair", 6, 85.00), ("Frame Alignment", 2, 125.00), ("Paint & Finish", 4, 65.00), ("Auto Parts", 1, 450.00)]),
-    ("Metro Cab Co.",   8,  [("Body Repair", 3, 85.00), ("Paint & Finish", 3, 65.00), ("Dent Removal", 4, 45.00)]),
-    ("Wilson Insurance", 15, [("Body Repair", 2, 85.00), ("Paint & Finish", 1, 65.00), ("Auto Parts", 1, 320.00)]),
+    (
+        "Thompson & Sons",
+        5,
+        [
+            ("Body Repair", 6, 85.00),
+            ("Frame Alignment", 2, 125.00),
+            ("Paint & Finish", 4, 65.00),
+            ("Auto Parts", 1, 450.00),
+        ],
+    ),
+    (
+        "Metro Cab Co.",
+        8,
+        [
+            ("Body Repair", 3, 85.00),
+            ("Paint & Finish", 3, 65.00),
+            ("Dent Removal", 4, 45.00),
+        ],
+    ),
+    (
+        "Wilson Insurance",
+        15,
+        [
+            ("Body Repair", 2, 85.00),
+            ("Paint & Finish", 1, 65.00),
+            ("Auto Parts", 1, 320.00),
+        ],
+    ),
 ]
 
 # ============================================================================
@@ -153,11 +417,11 @@ ESTIMATES = [
 
 PAYMENTS = [
     # (customer_name, date_offset, amount, method, reference, invoice_index)
-    ("John E. Marks",   10, 438.00, "check", "4501", 0),
-    ("Patricia Davis",  15, 265.00, "check", "4502", 1),
-    ("David R. Ortega", 21, 110.00, "cash",  "4503", 7),
-    ("Linda S. Chen",   20, 155.00, "check", "4504", 4),
-    ("Robert Garcia",   22, 530.00, "check", "4505", 2),
+    ("John E. Marks", 10, 438.00, "check", "4501", 0),
+    ("Patricia Davis", 15, 265.00, "check", "4502", 1),
+    ("David R. Ortega", 21, 110.00, "cash", "4503", 7),
+    ("Linda S. Chen", 20, 155.00, "check", "4504", 4),
+    ("Robert Garcia", 22, 530.00, "check", "4505", 2),
 ]
 
 
@@ -172,13 +436,16 @@ def seed():
 
     try:
         # Check if mock data already exists
-        existing_customers = db.query(Customer).filter(Customer.name == "John E. Marks").first()
+        existing_customers = (
+            db.query(Customer).filter(Customer.name == "John E. Marks").first()
+        )
         if existing_customers:
             print("IRS mock data already seeded. Skipping.")
             return
 
         # Find next available invoice/estimate numbers
         from sqlalchemy import func
+
         max_inv = db.query(func.max(Invoice.invoice_number)).scalar() or "0"
         try:
             inv_start = max(int(max_inv) + 1, 2001)
@@ -196,10 +463,15 @@ def seed():
                 vendor_map[v["name"]] = existing
                 continue
             vendor = Vendor(
-                name=v["name"], company=v["company"],
-                phone=v["phone"], terms=v["terms"],
-                address1="123 Commerce St", city="Anytown",
-                state="TX", zip="75001", is_active=True,
+                name=v["name"],
+                company=v["company"],
+                phone=v["phone"],
+                terms=v["terms"],
+                address1="123 Commerce St",
+                city="Anytown",
+                state="TX",
+                zip="75001",
+                is_active=True,
             )
             db.add(vendor)
             db.flush()
@@ -216,18 +488,25 @@ def seed():
                 customer_map[c["name"]] = existing
                 continue
             customer = Customer(
-                name=c["name"], company=c.get("company"),
-                phone=c["phone"], email=c["email"],
+                name=c["name"],
+                company=c.get("company"),
+                phone=c["phone"],
+                email=c["email"],
                 terms=c["terms"],
-                bill_address1="456 Main St", bill_city="Anytown",
-                bill_state="TX", bill_zip="75001",
-                is_active=True, is_taxable=True,
+                bill_address1="456 Main St",
+                bill_city="Anytown",
+                bill_state="TX",
+                bill_zip="75001",
+                is_active=True,
+                is_taxable=True,
             )
             db.add(customer)
             db.flush()
             customer_map[c["name"]] = customer
             created_c += 1
-        print(f"  {created_c} customers created ({len(CUSTOMERS) - created_c} existing)")
+        print(
+            f"  {created_c} customers created ({len(CUSTOMERS) - created_c} existing)"
+        )
 
         # --- Items (skip existing) ---
         item_map = {}
@@ -238,14 +517,20 @@ def seed():
                 item_map[it["name"]] = existing
                 continue
             income_acct = get_account_by_number(db, it["income_acct"])
-            item_type_val = {"service": ItemType.SERVICE, "material": ItemType.MATERIAL,
-                             "labor": ItemType.LABOR, "product": ItemType.PRODUCT}[it["item_type"]]
+            item_type_val = {
+                "service": ItemType.SERVICE,
+                "material": ItemType.MATERIAL,
+                "labor": ItemType.LABOR,
+                "product": ItemType.PRODUCT,
+            }[it["item_type"]]
             item = Item(
-                name=it["name"], item_type=item_type_val,
+                name=it["name"],
+                item_type=item_type_val,
                 rate=Decimal(str(it["rate"])),
                 description=it["description"],
                 income_account_id=income_acct.id if income_acct else None,
-                is_taxable=True, is_active=True,
+                is_taxable=True,
+                is_active=True,
             )
             db.add(item)
             db.flush()
@@ -263,8 +548,12 @@ def seed():
             inv_date = base_date + timedelta(days=day_offset - 1)
 
             # Calculate terms days for due date
-            terms_days = {"Net 15": 15, "Net 30": 30, "Net 45": 45,
-                          "Due on Receipt": 0}.get(terms, 30)
+            terms_days = {
+                "Net 15": 15,
+                "Net 30": 30,
+                "Net 45": 45,
+                "Due on Receipt": 0,
+            }.get(terms, 30)
             due_date = inv_date + timedelta(days=terms_days)
 
             subtotal = Decimal("0")
@@ -273,11 +562,16 @@ def seed():
                 item = item_map[item_name]
                 amt = Decimal(str(qty)) * Decimal(str(rate))
                 subtotal += amt
-                inv_lines.append({
-                    "item_id": item.id, "description": item.description,
-                    "quantity": Decimal(str(qty)), "rate": Decimal(str(rate)),
-                    "amount": amt, "line_order": i,
-                })
+                inv_lines.append(
+                    {
+                        "item_id": item.id,
+                        "description": item.description,
+                        "quantity": Decimal(str(qty)),
+                        "rate": Decimal(str(rate)),
+                        "amount": amt,
+                        "line_order": i,
+                    }
+                )
 
             # 1.59% sales tax (from Pub 583: $77.51 tax / $4,865.05 sales)
             tax_rate = Decimal("0.0159")
@@ -287,11 +581,16 @@ def seed():
             invoice = Invoice(
                 invoice_number=str(inv_counter),
                 customer_id=customer.id,
-                date=inv_date, due_date=due_date,
-                terms=terms, status=InvoiceStatus.SENT,
-                subtotal=subtotal, tax_rate=tax_rate,
-                tax_amount=tax_amount, total=total,
-                amount_paid=Decimal("0"), balance_due=total,
+                date=inv_date,
+                due_date=due_date,
+                terms=terms,
+                status=InvoiceStatus.SENT,
+                subtotal=subtotal,
+                tax_rate=tax_rate,
+                tax_amount=tax_amount,
+                total=total,
+                amount_paid=Decimal("0"),
+                balance_due=total,
             )
             db.add(invoice)
             db.flush()
@@ -317,21 +616,49 @@ def seed():
                         service_total += ld["amount"]
 
                 journal_lines = [
-                    {"account_id": ar_id, "debit": total, "credit": Decimal("0"),
-                     "description": f"Invoice {inv_counter}"},
+                    {
+                        "account_id": ar_id,
+                        "debit": total,
+                        "credit": Decimal("0"),
+                        "description": f"Invoice {inv_counter}",
+                    },
                 ]
                 if service_total > 0 and income_acct:
-                    journal_lines.append({"account_id": income_acct.id, "debit": Decimal("0"),
-                                          "credit": service_total, "description": f"Invoice {inv_counter}"})
+                    journal_lines.append(
+                        {
+                            "account_id": income_acct.id,
+                            "debit": Decimal("0"),
+                            "credit": service_total,
+                            "description": f"Invoice {inv_counter}",
+                        }
+                    )
                 if product_total > 0 and product_acct:
-                    journal_lines.append({"account_id": product_acct.id, "debit": Decimal("0"),
-                                          "credit": product_total, "description": f"Invoice {inv_counter}"})
+                    journal_lines.append(
+                        {
+                            "account_id": product_acct.id,
+                            "debit": Decimal("0"),
+                            "credit": product_total,
+                            "description": f"Invoice {inv_counter}",
+                        }
+                    )
                 if tax_amount > 0 and tax_acct:
-                    journal_lines.append({"account_id": tax_acct.id, "debit": Decimal("0"),
-                                          "credit": tax_amount, "description": f"Invoice {inv_counter} tax"})
+                    journal_lines.append(
+                        {
+                            "account_id": tax_acct.id,
+                            "debit": Decimal("0"),
+                            "credit": tax_amount,
+                            "description": f"Invoice {inv_counter} tax",
+                        }
+                    )
 
-                txn = create_journal_entry(db, inv_date, f"Invoice {inv_counter}",
-                                           journal_lines, source_type="invoice", source_id=invoice.id)
+                txn = create_journal_entry(
+                    db,
+                    inv_date,
+                    f"Invoice {inv_counter}",
+                    journal_lines,
+                    source_type="invoice",
+                    source_id=invoice.id,
+                )
                 invoice.transaction_id = txn.id
 
             invoice_list.append(invoice)
@@ -352,21 +679,29 @@ def seed():
                 item = item_map[item_name]
                 amt = Decimal(str(qty)) * Decimal(str(rate))
                 subtotal += amt
-                est_lines.append({
-                    "item_id": item.id, "description": item.description,
-                    "quantity": Decimal(str(qty)), "rate": Decimal(str(rate)),
-                    "amount": amt, "line_order": i,
-                })
+                est_lines.append(
+                    {
+                        "item_id": item.id,
+                        "description": item.description,
+                        "quantity": Decimal(str(qty)),
+                        "rate": Decimal(str(rate)),
+                        "amount": amt,
+                        "line_order": i,
+                    }
+                )
 
             tax_amount = (subtotal * Decimal("0.0159")).quantize(Decimal("0.01"))
 
             estimate = Estimate(
                 estimate_number=f"E-{est_counter}",
                 customer_id=customer.id,
-                date=est_date, expiration_date=est_date + timedelta(days=30),
+                date=est_date,
+                expiration_date=est_date + timedelta(days=30),
                 status=EstimateStatus.PENDING,
-                subtotal=subtotal, tax_rate=Decimal("0.0159"),
-                tax_amount=tax_amount, total=subtotal + tax_amount,
+                subtotal=subtotal,
+                tax_rate=Decimal("0.0159"),
+                tax_amount=tax_amount,
+                total=subtotal + tax_amount,
             )
             db.add(estimate)
             db.flush()
@@ -388,8 +723,10 @@ def seed():
 
             payment = Payment(
                 customer_id=customer.id,
-                date=pmt_date, amount=pmt_amount,
-                method=method, reference=ref,
+                date=pmt_date,
+                amount=pmt_amount,
+                method=method,
+                reference=ref,
                 deposit_to_account_id=checking_acct.id if checking_acct else None,
             )
             db.add(payment)
@@ -415,13 +752,27 @@ def seed():
             # Journal entry: DR Checking, CR A/R
             if ar_id and checking_acct:
                 journal_lines = [
-                    {"account_id": checking_acct.id, "debit": pmt_amount, "credit": Decimal("0"),
-                     "description": f"Payment from {cust_name}"},
-                    {"account_id": ar_id, "debit": Decimal("0"), "credit": pmt_amount,
-                     "description": f"Payment from {cust_name}"},
+                    {
+                        "account_id": checking_acct.id,
+                        "debit": pmt_amount,
+                        "credit": Decimal("0"),
+                        "description": f"Payment from {cust_name}",
+                    },
+                    {
+                        "account_id": ar_id,
+                        "debit": Decimal("0"),
+                        "credit": pmt_amount,
+                        "description": f"Payment from {cust_name}",
+                    },
                 ]
-                txn = create_journal_entry(db, pmt_date, f"Payment from {cust_name}",
-                                           journal_lines, source_type="payment", source_id=payment.id)
+                txn = create_journal_entry(
+                    db,
+                    pmt_date,
+                    f"Payment from {cust_name}",
+                    journal_lines,
+                    source_type="payment",
+                    source_id=payment.id,
+                )
                 payment.transaction_id = txn.id
 
         db.flush()
@@ -432,7 +783,7 @@ def seed():
         # Summary
         total_invoiced = sum(inv.total for inv in invoice_list)
         total_paid = sum(Decimal(str(p[2])) for p in PAYMENTS)
-        print(f"\nIRS Pub 583 mock data seeded successfully.")
+        print("\nIRS Pub 583 mock data seeded successfully.")
         print(f"  Total invoiced: ${total_invoiced:,.2f}")
         print(f"  Total paid:     ${total_paid:,.2f}")
         print(f"  Outstanding:    ${total_invoiced - total_paid:,.2f}")

@@ -49,8 +49,19 @@ ALLOWED_MIME_TYPES = {
     "application/zip",
 }
 ALLOWED_EXTENSIONS = {
-    ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp",
-    ".txt", ".csv", ".doc", ".docx", ".xls", ".xlsx", ".zip",
+    ".pdf",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".txt",
+    ".csv",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+    ".zip",
 }
 
 # Only plain word chars, spaces, hyphens, dots, and parens in filenames.
@@ -86,7 +97,9 @@ def _resolve_within(base: Path, *parts: str) -> Path:
     return candidate
 
 
-@router.post("/{entity_type}/{entity_id}", response_model=AttachmentResponse, status_code=201)
+@router.post(
+    "/{entity_type}/{entity_id}", response_model=AttachmentResponse, status_code=201
+)
 async def upload_attachment(
     entity_type: str,
     entity_id: int,
@@ -145,7 +158,9 @@ async def upload_attachment(
 def list_attachments(entity_type: str, entity_id: int, db: Session = Depends(get_db)):
     return (
         db.query(Attachment)
-        .filter(Attachment.entity_type == entity_type, Attachment.entity_id == entity_id)
+        .filter(
+            Attachment.entity_type == entity_type, Attachment.entity_id == entity_id
+        )
         .order_by(Attachment.uploaded_at.desc())
         .all()
     )

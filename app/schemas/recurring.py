@@ -1,6 +1,8 @@
-from datetime import date, datetime
+from datetime import date
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator, model_validator
+
+from app.schemas.common import validate_non_negative_line
 
 
 class RecurringLineCreate(BaseModel):
@@ -9,6 +11,11 @@ class RecurringLineCreate(BaseModel):
     quantity: float = 1
     rate: float = 0
     line_order: int = 0
+
+    @model_validator(mode="after")
+    def _check_non_negative(self):
+        validate_non_negative_line(self.quantity, self.rate)
+        return self
 
 
 class RecurringLineResponse(BaseModel):
@@ -30,6 +37,13 @@ class RecurringCreate(BaseModel):
     tax_rate: float = 0
     notes: Optional[str] = None
     lines: list[RecurringLineCreate] = []
+
+    @field_validator("lines")
+    @classmethod
+    def _require_lines(cls, v):
+        if not v:
+            raise ValueError("recurring invoice must have at least one line")
+        return v
 
 
 class RecurringUpdate(BaseModel):

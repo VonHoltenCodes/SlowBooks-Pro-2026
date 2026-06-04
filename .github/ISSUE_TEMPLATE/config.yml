@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/security/advisories/new
+    about: Report security issues privately via GitHub Security Advisories
+  - name: Question or discussion
+    url: https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/discussions
+    about: Ask a question or start a discussion (not a bug or feature request)

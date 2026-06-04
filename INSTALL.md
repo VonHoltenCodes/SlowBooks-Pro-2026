@@ -25,9 +25,9 @@ Open **http://localhost:3001** in your browser.
 
 ### What happens on first run
 
-1. PostgreSQL 16 starts and creates the `bookkeeper` database
-2. Alembic runs all migrations (creates 40 tables)
-3. Chart of Accounts is seeded (39 accounts)
+1. PostgreSQL 17 starts and creates the `bookkeeper` database
+2. Alembic runs all migrations (creates 55 tables)
+3. Chart of Accounts is seeded (50 accounts — Contractor template, includes the payroll-liability accounts needed for pay-run processing)
 4. Uvicorn starts serving the app on port 3001
 5. On first visit, you'll be prompted to set an operator password (min 8 characters)
 
@@ -81,8 +81,8 @@ docker compose cp slowbooks:/app/backups ./my-backups
 
 ### Prerequisites
 
-- Python 3.12+
-- PostgreSQL 16+
+- Python 3.13 (CI gates against 3.13; older 3.12 may work but isn't tested)
+- PostgreSQL 17 (Docker image ships 17-alpine; older 16 still works for native installs)
 - System libraries for WeasyPrint
 
 ### Steps
@@ -131,10 +131,10 @@ Same as Linux but using Homebrew for system dependencies.
 
 ```bash
 # Install dependencies
-brew install postgresql@16 cairo pango gdk-pixbuf libffi
+brew install postgresql@17 cairo pango gdk-pixbuf libffi
 
 # Start PostgreSQL
-brew services start postgresql@16
+brew services start postgresql@17
 
 # Create database
 createuser bookkeeper -P    # password: bookkeeper
@@ -186,4 +186,4 @@ APP_PORT=3002
 
 - **Docker:** This is included in the container automatically.
 - **Native Linux:** `sudo apt install postgresql-client`
-- **Native macOS:** `brew install postgresql@16`
+- **Native macOS:** `brew install postgresql@17`

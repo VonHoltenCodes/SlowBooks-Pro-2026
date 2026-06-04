@@ -96,13 +96,21 @@
     function field(id, label, opts) {
         opts = opts || {};
         const type = opts.type || "text";
-        const required = opts.required ? " required" : "";
+        // `required` triggers HTML5 validation; `aria-required` is the
+        // semantic flag screen readers consume. Both belong on every
+        // required input — keep them in lockstep.
+        const required = opts.required ? ' required aria-required="true"' : "";
         const minlength = opts.minlength ? ' minlength="' + opts.minlength + '"' : "";
         const placeholder = opts.placeholder
             ? ' placeholder="' + opts.placeholder + '"'
             : "";
         const autocomplete = opts.autocomplete
             ? ' autocomplete="' + opts.autocomplete + '"'
+            : "";
+        // Asterisk: bold + larger so a quick scan catches it. aria-hidden
+        // because the same info is conveyed by aria-required on the input.
+        const asterisk = opts.required
+            ? ' <span aria-hidden="true" style="color:#a4242b;font-weight:700;font-size:15px;">*</span>'
             : "";
         return (
             '<label for="' +
@@ -111,7 +119,7 @@
             labelStyle() +
             '">' +
             label +
-            (opts.required ? ' <span style="color:#c00">*</span>' : "") +
+            asterisk +
             "</label>" +
             '<input id="' +
             id +

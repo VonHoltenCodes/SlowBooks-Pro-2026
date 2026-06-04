@@ -40,8 +40,9 @@ async def preview_ofx(file: UploadFile = File(...)):
 
 
 @router.post("/import/{bank_account_id}")
-async def import_ofx(bank_account_id: int, file: UploadFile = File(...),
-                     db: Session = Depends(get_db)):
+async def import_ofx(
+    bank_account_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)
+):
     """Import OFX/QFX transactions into a bank account."""
     ba = db.query(BankAccount).filter(BankAccount.id == bank_account_id).first()
     if not ba:

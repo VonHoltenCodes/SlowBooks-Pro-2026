@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page { size: letter; margin: 0.6in 0.75in; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .form-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
+    .form-title .sub { font-size: 9pt; color: #666; margin-top: 4px; }
+    .year-tag { text-align: right; }
+    .year-tag .yr { font-size: 24pt; font-weight: 700; color: #003366; }
+    .year-tag .lbl { font-size: 8pt; color: #666; text-transform: uppercase; letter-spacing: 0.05em; }
+    .parties { display: flex; gap: 24px; margin-bottom: 20px; }
+    .party { flex: 1; border: 1px solid #003366; padding: 8px 12px; }
+    .party-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; }
+    .party-text { font-size: 9pt; color: #333; }
+    table.boxes { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    table.boxes td { border: 1px solid #888; padding: 6px 10px; vertical-align: top; width: 50%; }
+    .box-num { font-size: 7pt; font-weight: 700; color: #003366; text-transform: uppercase; letter-spacing: 0.03em; }
+    .box-val { font-size: 12pt; font-variant-numeric: tabular-nums; margin-top: 2px; }
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; line-height: 1.5; }
+    .footer .audit { font-family: 'Courier New', monospace; color: #777; }
+    .footer .audit strong { color: #555; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <div class="form-title">
+            <h1>FORM W-2</h1>
+            <div class="sub">Wage and Tax Statement</div>
+        </div>
+        <div class="year-tag">
+            <div class="lbl">Tax Year</div>
+            <div class="yr">{{ data.year }}</div>
+        </div>
+    </div>
+
+    <div class="parties">
+        <div class="party">
+            <div class="party-label">Employer</div>
+            <div class="party-text">
+                <strong>{{ company.get('name') or 'Company' }}</strong><br>
+                {% if company.get('address') %}{{ company.get('address') }}<br>{% endif %}
+                {% if company.get('city') %}{{ company.get('city') }}, {{ company.get('state', '') }} {{ company.get('zip', '') }}<br>{% endif %}
+                {% if company.get('ein') %}EIN: {{ company.get('ein') }}{% endif %}
+            </div>
+        </div>
+        <div class="party">
+            <div class="party-label">Employee</div>
+            <div class="party-text">
+                {% if data.employee %}
+                <strong>{{ data.employee.name }}</strong><br>
+                SSN: XXX-XX-{{ data.employee.ssn_last_four or 'XXXX' }}<br>
+                {% if data.employee.address1 %}{{ data.employee.address1 }}<br>{% endif %}
+                {% if data.employee.address2 %}{{ data.employee.address2 }}<br>{% endif %}
+                {% if data.employee.city %}{{ data.employee.city }}, {{ data.employee.state or '' }} {{ data.employee.zip or '' }}{% endif %}
+                {% else %}
+                <strong>Employee #{{ data.employee_id }}</strong>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <table class="boxes">
+        <tr>
+            <td>
+                <div class="box-num">Box 1 &mdash; Wages, tips, other compensation</div>
+                <div class="box-val">{{ data.box1_federal_wages | currency }}</div>
+            </td>
+            <td>
+                <div class="box-num">Box 2 &mdash; Federal income tax withheld</div>
+                <div class="box-val">{{ data.box2_federal_tax_withheld | currency }}</div>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div class="box-num">Box 3 &mdash; Social Security wages</div>
+                <div class="box-val">{{ data.box3_ss_wages | currency }}</div>
+            </td>
+            <td>
+                <div class="box-num">Box 4 &mdash; Social Security tax withheld</div>
+                <div class="box-val">{{ data.box4_ss_tax_withheld | currency }}</div>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div class="box-num">Box 5 &mdash; Medicare wages and tips</div>
+                <div class="box-val">{{ data.box5_medicare_wages | currency }}</div>
+            </td>
+            <td>
+                <div class="box-num">Box 6 &mdash; Medicare tax withheld</div>
+                <div class="box-val">{{ data.box6_medicare_tax_withheld | currency }}</div>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div class="box-num">Box 15 &mdash; State</div>
+                <div class="box-val">{{ data.employee.work_state if data.employee else '' }}</div>
+            </td>
+            <td>
+                <div class="box-num">Box 16 &mdash; State wages, tips, etc.</div>
+                <div class="box-val">{{ data.box16_state_wages | currency }}</div>
+            </td>
+        </tr>
+        <tr>
+            <td>
+                <div class="box-num">Box 17 &mdash; State income tax</div>
+                <div class="box-val">{{ data.box17_state_income_tax | currency }}</div>
+            </td>
+            <td>
+                <div class="box-num">&nbsp;</div>
+                <div class="box-val">&nbsp;</div>
+            </td>
+        </tr>
+    </table>
+
+    <div class="footer">
+        Generated by Slowbooks Pro 2026 &middot; This is not an official IRS form &middot; Verify with a tax professional before filing.
+        {% if audit and audit.id %}
+        <br><span class="audit">Generated <strong>{{ audit.timestamp }}</strong> &middot; Audit ID <strong>#{{ audit.id }}</strong> &middot; Hash <strong>{{ audit.hash_short }}</strong></span>
+        {% endif %}
+    </div>
+</body>
+</html>

@@ -7,6 +7,10 @@ const AuditPage = {
         const tables = await API.get('/audit/tables');
         const tableOpts = tables.map(t => `<option value="${t}">${t}</option>`).join('');
 
+        // Populate the results table immediately after the shell is in the
+        // DOM — otherwise the page sits empty until the user pokes a filter.
+        setTimeout(() => AuditPage.load(), 0);
+
         return `
             <div class="page-header">
                 <h2>Audit Log</h2>

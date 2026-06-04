@@ -32,11 +32,18 @@ def check_closing_date(db: Session, txn_date: date, password: str = None):
 
     if txn_date <= closing:
         # Check if password override is available
-        pw_row = db.query(Settings).filter(Settings.key == "closing_date_password").first()
-        if pw_row and pw_row.value and password and hmac.compare_digest(password, pw_row.value):
+        pw_row = (
+            db.query(Settings).filter(Settings.key == "closing_date_password").first()
+        )
+        if (
+            pw_row
+            and pw_row.value
+            and password
+            and hmac.compare_digest(password, pw_row.value)
+        ):
             return  # Password override accepted
         raise HTTPException(
             status_code=403,
             detail=f"Transaction date {txn_date} is on or before the closing date ({closing}). "
-                   f"Modifications to closed periods are not allowed."
+            f"Modifications to closed periods are not allowed.",
         )

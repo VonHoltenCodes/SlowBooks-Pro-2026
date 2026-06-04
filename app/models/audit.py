@@ -3,7 +3,7 @@
 # Infrastructure A: SQLAlchemy after_flush event listener → audit_log table
 # ============================================================================
 
-from sqlalchemy import Column, Integer, String, DateTime, Text, func
+from sqlalchemy import Column, Integer, String, DateTime, func
 from sqlalchemy.dialects.postgresql import JSON
 
 from app.database import Base

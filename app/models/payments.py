@@ -8,8 +8,16 @@
 # ============================================================================
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text, Boolean,
-    ForeignKey, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+    DateTime,
+    Text,
+    Boolean,
+    ForeignKey,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -20,7 +28,9 @@ class Payment(Base):
     __tablename__ = "payments"
 
     id = Column(Integer, primary_key=True, index=True)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    customer_id = Column(
+        Integer, ForeignKey("customers.id"), nullable=False, index=True
+    )
     date = Column(Date, nullable=False, index=True)
     amount = Column(Numeric(12, 2), nullable=False)
     method = Column(String(50), nullable=True)  # check, cash, credit_card, etc.
@@ -36,15 +46,21 @@ class Payment(Base):
     customer = relationship("Customer", backref="payments")
     deposit_to_account = relationship("Account", foreign_keys=[deposit_to_account_id])
     transaction = relationship("Transaction", foreign_keys=[transaction_id])
-    allocations = relationship("PaymentAllocation", back_populates="payment", cascade="all, delete-orphan")
+    allocations = relationship(
+        "PaymentAllocation", back_populates="payment", cascade="all, delete-orphan"
+    )
 
 
 class PaymentAllocation(Base):
     __tablename__ = "payment_allocations"
 
     id = Column(Integer, primary_key=True, index=True)
-    payment_id = Column(Integer, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False)
-    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False)
+    payment_id = Column(
+        Integer, ForeignKey("payments.id", ondelete="CASCADE"), nullable=False
+    )
+    invoice_id = Column(
+        Integer, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False
+    )
     amount = Column(Numeric(12, 2), nullable=False)
 
     payment = relationship("Payment", back_populates="allocations")

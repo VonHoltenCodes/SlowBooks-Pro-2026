@@ -25,10 +25,10 @@ UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 # externally-exposed deployment this is an XSS vector. Followups: sanitize
 # uploaded SVGs (bleach / svg-hush) or serve /static/ with a strict CSP.
 _LOGO_EXT_BY_TYPE = {
-    "image/png":     "png",
-    "image/jpeg":    "jpg",
-    "image/gif":     "gif",
-    "image/webp":    "webp",
+    "image/png": "png",
+    "image/jpeg": "jpg",
+    "image/gif": "gif",
+    "image/webp": "webp",
     "image/svg+xml": "svg",
 }
 
@@ -42,7 +42,7 @@ async def upload_logo(file: UploadFile = File(...), db: Session = Depends(get_db
         raise HTTPException(
             status_code=400,
             detail="Logo must be a PNG, JPEG, GIF, WebP, or SVG image "
-                   f"(got '{file.content_type or 'unknown'}').",
+            f"(got '{file.content_type or 'unknown'}').",
         )
 
     content = await file.read()
@@ -52,7 +52,7 @@ async def upload_logo(file: UploadFile = File(...), db: Session = Depends(get_db
         raise HTTPException(
             status_code=400,
             detail=f"Logo is too large ({len(content) // 1024} KB). "
-                   f"Maximum {_LOGO_MAX_BYTES // (1024 * 1024)} MB.",
+            f"Maximum {_LOGO_MAX_BYTES // (1024 * 1024)} MB.",
         )
 
     filename = f"company_logo.{ext}"

@@ -7,15 +7,15 @@ from datetime import timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models.bills import Bill, BillLine, BillStatus
 from app.models.contacts import Vendor
 from app.models.items import Item
 from app.models.accounts import Account
-from app.schemas.bills import BillCreate, BillUpdate, BillResponse
-from app.services.accounting import create_journal_entry, compute_line_totals
+from app.schemas.bills import BillCreate, BillResponse
+from app.services.accounting import _q, create_journal_entry, compute_line_totals
 from app.services.closing_date import check_closing_date
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
@@ -27,13 +27,26 @@ def _get_ap_account_id(db):
 
 
 @router.get("", response_model=list[BillResponse])
-def list_bills(vendor_id: int = None, status: str = None, db: Session = Depends(get_db)):
-    q = db.query(Bill)
+def list_bills(
+    vendor_id: int = None,
+    status: str = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 1000))
+    skip = max(0, skip)
+    # Eager-load vendor + lines so a 500-row list doesn't fire 1001
+    # follow-up SELECTs through BillResponse.model_validate.
+    q = db.query(Bill).options(
+        joinedload(Bill.vendor),
+        selectinload(Bill.lines),
+    )
     if vendor_id:
         q = q.filter(Bill.vendor_id == vendor_id)
     if status:
         q = q.filter(Bill.status == status)
-    bills = q.order_by(Bill.date.desc()).all()
+    bills = q.order_by(Bill.date.desc()).offset(skip).limit(limit).all()
     results = []
     for b in bills:
         resp = BillResponse.model_validate(b)
@@ -62,6 +75,21 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
+    # Reject duplicate vendor + bill_number combos. Vendors typically use a
+    # monotonically-increasing invoice number; receiving the same one twice is
+    # almost always a re-entry mistake, and accepting it silently produces
+    # duplicate payables and double-counted expenses.
+    dup = (
+        db.query(Bill)
+        .filter(Bill.vendor_id == data.vendor_id, Bill.bill_number == data.bill_number)
+        .first()
+    )
+    if dup:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Bill number {data.bill_number!r} already exists for this vendor (bill #{dup.id})",
+        )
+
     due_date = data.due_date
     if not due_date and data.terms:
         try:
@@ -73,16 +101,27 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     bill = Bill(
-        bill_number=data.bill_number, vendor_id=data.vendor_id, date=data.date,
-        due_date=due_date, terms=data.terms, ref_number=data.ref_number, po_id=data.po_id,
-        subtotal=subtotal, tax_rate=data.tax_rate, tax_amount=tax_amount,
-        total=total, balance_due=total, notes=data.notes,
+        bill_number=data.bill_number,
+        vendor_id=data.vendor_id,
+        date=data.date,
+        due_date=due_date,
+        terms=data.terms,
+        ref_number=data.ref_number,
+        po_id=data.po_id,
+        subtotal=subtotal,
+        tax_rate=data.tax_rate,
+        tax_amount=tax_amount,
+        total=total,
+        balance_due=total,
+        notes=data.notes,
     )
     db.add(bill)
     db.flush()
 
     # Default expense account for lines without explicit account
-    default_expense_id = db.query(Account).filter(Account.account_number == "6000").first()
+    default_expense_id = (
+        db.query(Account).filter(Account.account_number == "6000").first()
+    )
     default_expense_id = default_expense_id.id if default_expense_id else None
 
     # Phase 11: track which lines are inventory receipts so we can write
@@ -91,11 +130,14 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         get_inventory_asset_account_id,
         record_purchase,
     )
+
     inv_receipts = []  # [(item, quantity, unit_cost), ...]
 
     journal_lines = []
     for i, line_data in enumerate(data.lines):
-        amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
+        # Round per line so stored BillLine.amount matches compute_line_totals
+        # and the JE debit lands on the same cents as the rounded AP credit.
+        amt = _q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate)))
         item = None
         if line_data.item_id:
             item = db.query(Item).filter(Item.id == line_data.item_id).first()
@@ -120,11 +162,13 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                     ),
                 )
             if line_data.quantity > 0:
-                inv_receipts.append((
-                    item,
-                    Decimal(str(line_data.quantity)),
-                    Decimal(str(line_data.rate)),  # unit cost from the bill
-                ))
+                inv_receipts.append(
+                    (
+                        item,
+                        Decimal(str(line_data.quantity)),
+                        Decimal(str(line_data.rate)),  # unit cost from the bill
+                    )
+                )
         else:
             posting_acct = line_data.account_id
             if not posting_acct and item and item.expense_account_id:
@@ -134,40 +178,60 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
             if not posting_acct:
                 posting_acct = default_expense_id
 
-        db.add(BillLine(
-            bill_id=bill.id, item_id=line_data.item_id, account_id=posting_acct,
-            description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
-        ))
+        db.add(
+            BillLine(
+                bill_id=bill.id,
+                item_id=line_data.item_id,
+                account_id=posting_acct,
+                description=line_data.description,
+                quantity=line_data.quantity,
+                rate=line_data.rate,
+                amount=amt,
+                line_order=line_data.line_order or i,
+            )
+        )
 
         if amt > 0 and posting_acct:
-            journal_lines.append({
-                "account_id": posting_acct,
-                "debit": amt, "credit": Decimal("0"),
-                "description": line_data.description or "",
-            })
+            journal_lines.append(
+                {
+                    "account_id": posting_acct,
+                    "debit": amt,
+                    "credit": Decimal("0"),
+                    "description": line_data.description or "",
+                }
+            )
 
     # Tax line
     if tax_amount > 0:
         tax_acct = db.query(Account).filter(Account.account_number == "2200").first()
         if tax_acct:
-            journal_lines.append({
-                "account_id": tax_acct.id,
-                "debit": tax_amount, "credit": Decimal("0"),
-                "description": "Sales tax on bill",
-            })
+            journal_lines.append(
+                {
+                    "account_id": tax_acct.id,
+                    "debit": tax_amount,
+                    "credit": Decimal("0"),
+                    "description": "Sales tax on bill",
+                }
+            )
 
     # Credit AP
     ap_id = _get_ap_account_id(db)
     if ap_id and journal_lines:
-        journal_lines.append({
-            "account_id": ap_id,
-            "debit": Decimal("0"), "credit": total,
-            "description": f"Bill {data.bill_number} - {vendor.name}",
-        })
+        journal_lines.append(
+            {
+                "account_id": ap_id,
+                "debit": Decimal("0"),
+                "credit": total,
+                "description": f"Bill {data.bill_number} - {vendor.name}",
+            }
+        )
         txn = create_journal_entry(
-            db, data.date, f"Bill {data.bill_number} - {vendor.name}",
-            journal_lines, source_type="bill", source_id=bill.id,
+            db,
+            data.date,
+            f"Bill {data.bill_number} - {vendor.name}",
+            journal_lines,
+            source_type="bill",
+            source_id=bill.id,
         )
         bill.transaction_id = txn.id
 
@@ -175,8 +239,12 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     # existing JE already debits the Inventory Asset account for these lines)
     for item, qty, unit_cost in inv_receipts:
         record_purchase(
-            db, item, quantity=qty, unit_cost=unit_cost,
-            source_type="bill", source_id=bill.id,
+            db,
+            item,
+            quantity=qty,
+            unit_cost=unit_cost,
+            source_type="bill",
+            source_id=bill.id,
             memo=f"Bill {data.bill_number}",
             post_journal=False,
             txn_date=data.date,
@@ -196,35 +264,56 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Bill not found")
     if bill.status == BillStatus.VOID:
         raise HTTPException(status_code=400, detail="Bill already voided")
+    # Voids post a reversing entry dated to the bill — must respect the
+    # closing date like invoice/payment/journal voids already do, or a bill
+    # can be reversed into a locked period.
+    check_closing_date(db, bill.date)
 
     if bill.transaction_id:
         from app.models.transactions import TransactionLine
-        original_lines = db.query(TransactionLine).filter(
-            TransactionLine.transaction_id == bill.transaction_id
-        ).all()
+
+        original_lines = (
+            db.query(TransactionLine)
+            .filter(TransactionLine.transaction_id == bill.transaction_id)
+            .all()
+        )
         reverse_lines = [
-            {"account_id": ol.account_id, "debit": ol.credit, "credit": ol.debit,
-             "description": f"VOID: {ol.description or ''}"}
+            {
+                "account_id": ol.account_id,
+                "debit": ol.credit,
+                "credit": ol.debit,
+                "description": f"VOID: {ol.description or ''}",
+            }
             for ol in original_lines
         ]
         if reverse_lines:
-            create_journal_entry(db, bill.date, f"VOID Bill {bill.bill_number}",
-                                 reverse_lines, source_type="bill_void", source_id=bill.id)
+            create_journal_entry(
+                db,
+                bill.date,
+                f"VOID Bill {bill.bill_number}",
+                reverse_lines,
+                source_type="bill_void",
+                source_id=bill.id,
+            )
 
     # Phase 11: reverse inventory receipts (the reversing JE already undoes
     # the Inventory Asset side; we just need the movement rows)
     from app.services.inventory_service import _append_movement
     from app.models.items import MovementType as _MovementType
+
     for line in bill.lines:
         if not line.item_id:
             continue
         item = db.query(Item).filter(Item.id == line.item_id).first()
         if item and item.track_inventory and line.quantity > 0:
             _append_movement(
-                db, item, _MovementType.VOID,
+                db,
+                item,
+                _MovementType.VOID,
                 quantity=-Decimal(str(line.quantity)),
                 unit_cost=Decimal(str(line.rate)),
-                source_type="bill_void", source_id=bill.id,
+                source_type="bill_void",
+                source_id=bill.id,
                 memo=f"VOID Bill {bill.bill_number}",
             )
 

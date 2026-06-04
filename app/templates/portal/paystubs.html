@@ -1,0 +1,35 @@
+{% extends "portal/base.html" %}
+{% set active = 'paystubs' %}
+{% block title %}Pay Stubs{% endblock %}
+
+{% block content %}
+<h2>Pay Stubs</h2>
+<p class="muted">Your processed pay stubs, most recent first.</p>
+
+{% if stubs %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Pay Date</th>
+            <th>Pay Period</th>
+            <th class="num">Gross</th>
+            <th class="num">Net</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for stub in stubs %}
+        <tr>
+            <td>{{ stub.pay_run.pay_date }}</td>
+            <td>{{ stub.pay_run.period_start }} &ndash; {{ stub.pay_run.period_end }}</td>
+            <td class="num">${{ "%.2f"|format(stub.gross_pay|float) }}</td>
+            <td class="num">${{ "%.2f"|format(stub.net_pay|float) }}</td>
+            <td><a class="link" href="/api/payroll/{{ stub.pay_run_id }}/paystub/{{ stub.id }}">Download PDF</a></td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">You do not have any processed pay stubs yet.</p>
+{% endif %}
+{% endblock %}

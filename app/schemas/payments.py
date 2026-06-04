@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -20,7 +20,7 @@ class PaymentAllocationResponse(BaseModel):
 
 class PaymentCreate(BaseModel):
     customer_id: int
-    date: date
+    date: dt_date
     amount: Decimal
     method: Optional[str] = None
     check_number: Optional[str] = None
@@ -33,7 +33,7 @@ class PaymentCreate(BaseModel):
 class PaymentResponse(BaseModel):
     id: int
     customer_id: int
-    date: date
+    date: dt_date
     amount: Decimal
     method: Optional[str]
     check_number: Optional[str]

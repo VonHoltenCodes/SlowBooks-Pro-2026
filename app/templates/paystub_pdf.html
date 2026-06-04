@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page { size: letter; margin: 0.6in 0.75in; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .company-name { font-size: 16pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
+    .company-info { font-size: 9pt; color: #4a4a6a; }
+    .stub-title { text-align: right; }
+    .stub-title h1 { font-size: 20pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
+    .stub-title .sub { font-size: 9pt; color: #666; margin-top: 4px; }
+    .meta-table { width: 100%; margin-bottom: 16px; }
+    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; }
+    .meta-label { font-weight: 700; color: #4a4a6a; width: 110px; }
+    .addresses { display: flex; gap: 40px; margin-bottom: 20px; }
+    .address-block { flex: 1; }
+    .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
+    .address-text { font-size: 9pt; color: #333; }
+    table.grid { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    table.grid th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.grid th.r { text-align: right; }
+    table.grid td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.grid td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.grid tr:nth-child(even) td { background: #f7f9fb; }
+    table.grid tr.total td { font-weight: 700; color: #003366; border-top: 2px solid #003366; background: #fff; }
+    .section-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; }
+    .two-col { display: flex; gap: 24px; }
+    .two-col > div { flex: 1; }
+    .net-box { margin-top: 8px; border: 2px solid #003366; padding: 8px 12px; display: flex; justify-content: space-between; }
+    .net-box .label { font-weight: 700; color: #003366; font-size: 11pt; }
+    .net-box .amt { font-weight: 700; color: #003366; font-size: 14pt; font-variant-numeric: tabular-nums; }
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <div class="company-name">{{ company.get('name') or company.get('company_name') or 'Company' }}</div>
+            <div class="company-info">
+                {% set addr = company.get('address') or company.get('company_address1') %}
+                {% if addr %}{{ addr }}<br>{% endif %}
+                {% if company.get('city') %}{{ company.get('city') }}, {{ company.get('state', '') }} {{ company.get('zip', '') }}<br>{% endif %}
+                {% if company.get('phone') %}{{ company.get('phone') }}{% endif %}
+            </div>
+        </div>
+        <div class="stub-title">
+            <h1>PAY STATEMENT</h1>
+            <div class="sub">Pay Date: {{ pay_run.pay_date | fdate }}</div>
+        </div>
+    </div>
+
+    <table class="meta-table"><tr>
+        <td class="meta-label">Pay Period:</td><td>{{ pay_run.period_start | fdate }} &mdash; {{ pay_run.period_end | fdate }}</td>
+        <td class="meta-label">Pay Date:</td><td>{{ pay_run.pay_date | fdate }}</td>
+    </tr></table>
+
+    <div class="addresses">
+        <div class="address-block">
+            <div class="address-label">Employee</div>
+            <div class="address-text">
+                <strong>{{ employee.full_name }}</strong><br>
+                SSN: XXX-XX-{{ employee.ssn_last_four or 'XXXX' }}<br>
+                {% if employee.address1 %}{{ employee.address1 }}<br>{% endif %}
+                {% if employee.address2 %}{{ employee.address2 }}<br>{% endif %}
+                {% if employee.city %}{{ employee.city }}, {{ employee.state or '' }} {{ employee.zip or '' }}{% endif %}
+            </div>
+        </div>
+        <div class="address-block">
+            <div class="address-label">Employer</div>
+            <div class="address-text">
+                <strong>{{ company.get('name') or company.get('company_name') or 'Company' }}</strong><br>
+                {% set addr = company.get('address') or company.get('company_address1') %}
+                {% if addr %}{{ addr }}<br>{% endif %}
+                {% if company.get('city') %}{{ company.get('city') }}, {{ company.get('state', '') }} {{ company.get('zip', '') }}<br>{% endif %}
+                {% if company.get('ein') %}EIN: {{ company.get('ein') }}{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="section-label">Hours Worked</div>
+    <table class="grid">
+        <thead><tr>
+            <th>Type</th><th class="r" style="width:120px;">Hours</th>
+        </tr></thead>
+        <tbody>
+            <tr><td>Regular</td><td class="r">{{ "%.2f" | format(regular_hours) }}</td></tr>
+            <tr><td>Overtime</td><td class="r">{{ "%.2f" | format(overtime_hours) }}</td></tr>
+            <tr><td>Double Time</td><td class="r">{{ "%.2f" | format(doubletime_hours) }}</td></tr>
+            <tr class="total"><td>Total Hours Worked</td><td class="r">{{ "%.2f" | format(total_hours) }}</td></tr>
+        </tbody>
+    </table>
+
+    <div class="two-col">
+        <div>
+            <div class="section-label">Earnings</div>
+            <table class="grid">
+                <thead><tr>
+                    <th>Description</th><th class="r">Current</th><th class="r">YTD</th>
+                </tr></thead>
+                <tbody>
+                    <tr>
+                        <td>Gross Wages</td>
+                        <td class="r">{{ gross_pay | currency }}</td>
+                        <td class="r">{{ ytd.get('gross', 0) | currency }}</td>
+                    </tr>
+                    <tr class="total">
+                        <td>Total Gross</td>
+                        <td class="r">{{ gross_pay | currency }}</td>
+                        <td class="r">{{ ytd.get('gross', 0) | currency }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div>
+            <div class="section-label">Deductions</div>
+            <table class="grid">
+                <thead><tr>
+                    <th>Description</th><th class="r">Current</th><th class="r">YTD</th>
+                </tr></thead>
+                <tbody>
+                {% for d in deductions %}
+                    <tr>
+                        <td>{{ d.label }}</td>
+                        <td class="r">{{ d.amount | currency }}</td>
+                        <td class="r">
+                            {%- set k = d.label | lower -%}
+                            {%- if 'federal' in k %}{{ ytd.get('federal', 0) | currency }}
+                            {%- elif 'social' in k %}{{ ytd.get('ss', 0) | currency }}
+                            {%- elif 'medicare' in k %}{{ ytd.get('medicare', 0) | currency }}
+                            {%- elif 'state other' in k %}{{ ytd.get('state_other', 0) | currency }}
+                            {%- elif 'state' in k %}{{ ytd.get('state', 0) | currency }}
+                            {%- elif 'pre-tax' in k %}{{ ytd.get('pretax', 0) | currency }}
+                            {%- elif 'post-tax' in k %}{{ ytd.get('posttax', 0) | currency }}
+                            {%- else %}&mdash;{%- endif -%}
+                        </td>
+                    </tr>
+                {% endfor %}
+                {% if not deductions %}
+                    <tr><td colspan="3">No deductions this period.</td></tr>
+                {% endif %}
+                    <tr class="total">
+                        <td>Total Deductions</td>
+                        <td class="r">{{ total_deductions | currency }}</td>
+                        <td class="r">{{ ytd.get('deductions', 0) | currency }}</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    {% if additions %}
+    <div style="margin-top:14px">
+        <div class="section-label">Additions to Net (non-taxable)</div>
+        <table class="grid">
+            <thead><tr>
+                <th>Description</th><th class="r">Current</th>
+            </tr></thead>
+            <tbody>
+            {% for a in additions %}
+                <tr><td>{{ a.label }}</td><td class="r">{{ a.amount | currency }}</td></tr>
+            {% endfor %}
+                <tr class="total">
+                    <td>Total Additions</td>
+                    <td class="r">{{ total_additions | currency }}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    {% endif %}
+
+    <div class="net-box">
+        <div>
+            <span class="label">Net Wages (Current)</span>
+        </div>
+        <div class="amt">{{ net_pay | currency }}</div>
+    </div>
+    <table class="meta-table"><tr>
+        <td class="meta-label">Net Wages YTD:</td>
+        <td>{{ ytd.get('net', 0) | currency }}</td>
+    </tr></table>
+
+    <div class="footer">Generated by Slowbooks Pro 2026 &mdash; Build 12.0.3190-R</div>
+</body>
+</html>

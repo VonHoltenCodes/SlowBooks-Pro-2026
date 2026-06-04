@@ -13,14 +13,13 @@
 # ============================================================================
 
 from decimal import Decimal
-from typing import Any, Iterable, Optional
+from typing import Any, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.items import Item, InventoryMovement, MovementType
+from app.models.items import Item, MovementType
 from app.services.inventory_service import (
     record_sale,
-    record_purchase,
     reverse_sale,
     _append_movement,
 )
@@ -45,16 +44,21 @@ def post_sale_for_invoice(db: Session, invoice, txn_date=None) -> None:
         item = _get_item(db, line.item_id)
         if item and item.track_inventory:
             record_sale(
-                db, item,
+                db,
+                item,
                 quantity=Decimal(str(line.quantity)),
-                source_type="invoice", source_id=invoice.id,
+                source_type="invoice",
+                source_id=invoice.id,
                 memo=f"Invoice {ref}",
                 txn_date=date_to_use,
             )
 
 
 def reverse_sale_for_invoice(
-    db: Session, invoice, txn_date=None, memo: str = "Sale reversal",
+    db: Session,
+    invoice,
+    txn_date=None,
+    memo: str = "Sale reversal",
 ) -> None:
     """Reverse every SALE movement originally booked against this invoice.
 
@@ -68,10 +72,13 @@ def reverse_sale_for_invoice(
         item = _get_item(db, line.item_id)
         if item and item.track_inventory:
             reverse_sale(
-                db, item,
+                db,
+                item,
                 quantity=Decimal(str(line.quantity)),
-                source_type="invoice_void", source_id=invoice.id,
-                original_source_type="invoice", original_source_id=invoice.id,
+                source_type="invoice_void",
+                source_id=invoice.id,
+                original_source_type="invoice",
+                original_source_id=invoice.id,
                 txn_date=date_to_use,
             )
 
@@ -87,10 +94,13 @@ def post_return_for_credit_memo(db: Session, credit_memo, txn_date=None) -> None
         if item and item.track_inventory:
             unit_cost = Decimal(str(item.avg_cost or 0))
             _append_movement(
-                db, item, MovementType.RETURN_IN,
+                db,
+                item,
+                MovementType.RETURN_IN,
                 quantity=Decimal(str(line.quantity)),
                 unit_cost=unit_cost,
-                source_type="credit_memo", source_id=credit_memo.id,
+                source_type="credit_memo",
+                source_id=credit_memo.id,
                 memo=f"Return: {ref}",
             )
 
@@ -126,14 +136,18 @@ def reconcile_invoice_inventory_delta(
         item_id = row.get("item_id")
         if not item_id:
             continue
-        old_qty[item_id] = old_qty.get(item_id, Decimal("0")) + Decimal(str(row["quantity"]))
+        old_qty[item_id] = old_qty.get(item_id, Decimal("0")) + Decimal(
+            str(row["quantity"])
+        )
 
     # Aggregate new qty per item_id
     new_qty: dict[int, Decimal] = {}
     for line in invoice.lines:
         if not line.item_id:
             continue
-        new_qty[line.item_id] = new_qty.get(line.item_id, Decimal("0")) + Decimal(str(line.quantity))
+        new_qty[line.item_id] = new_qty.get(line.item_id, Decimal("0")) + Decimal(
+            str(line.quantity)
+        )
 
     all_items = set(old_qty) | set(new_qty)
     for item_id in all_items:
@@ -146,19 +160,24 @@ def reconcile_invoice_inventory_delta(
         if delta > 0:
             # Additional qty sold
             record_sale(
-                db, item,
+                db,
+                item,
                 quantity=delta,
-                source_type="invoice", source_id=invoice.id,
+                source_type="invoice",
+                source_id=invoice.id,
                 memo=f"Edit +{delta}",
                 txn_date=date_to_use,
             )
         elif delta < 0:
             # Qty reduced — reverse the difference
             reverse_sale(
-                db, item,
+                db,
+                item,
                 quantity=-delta,
-                source_type="invoice_edit", source_id=invoice.id,
-                original_source_type="invoice", original_source_id=invoice.id,
+                source_type="invoice_edit",
+                source_id=invoice.id,
+                original_source_type="invoice",
+                original_source_id=invoice.id,
                 txn_date=date_to_use,
             )
 

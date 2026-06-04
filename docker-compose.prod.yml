@@ -1,0 +1,103 @@
+# ============================================================================
+# Slowbooks Pro 2026 — PRODUCTION Docker Compose
+# Usage:  docker compose -f docker-compose.prod.yml up -d
+#
+# Pulls every secret + tunable from the environment. There are no defaults
+# baked into this file on purpose — running it without a real .env will
+# fail loudly. See .env.example for the full list.
+#
+# What this differs from docker-compose.yml on:
+#   - Postgres uses SSL (sslmode=require). You must mount a cert/key pair.
+#   - The app's APP_DEBUG is forced false and the strict startup checks fire.
+#   - PAYROLL_ENCRYPTION_SECRET, SESSION_SECRET_KEY, FORCE_HTTPS are required.
+#   - Postgres port is NOT published to the host.
+#   - The app sits behind your own TLS-terminating reverse proxy. This file
+#     does not include nginx/Traefik — wire it in front yourself.
+# ============================================================================
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - effective_cache_size=1GB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=64MB
+      - -c
+      - max_connections=100
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/var/lib/postgresql/certs/server.crt
+      - -c
+      - ssl_key_file=/var/lib/postgresql/certs/server.key
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?missing POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?missing POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?missing POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Mount your TLS cert/key pair here. Generate self-signed for dev only;
+      # use a real CA for production.
+      - ./certs/postgres:/var/lib/postgresql/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    # NOT published to the host — only the app container should reach it.
+
+  slowbooks:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database — sslmode=require is enforced by the app's startup checks.
+      DATABASE_URL: "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=require"
+
+      # Production gates. Startup will refuse to boot if these are wrong.
+      APP_DEBUG: "false"
+      FORCE_HTTPS: "${FORCE_HTTPS:-true}"
+      HSTS_MAX_AGE: "${HSTS_MAX_AGE:-63072000}"
+      SESSION_IDLE_TIMEOUT_SECONDS: "${SESSION_IDLE_TIMEOUT_SECONDS:-14400}"
+      RATE_LIMIT_ENABLED: "1"
+
+      # Required secrets. ?:err makes compose refuse to start with them empty.
+      PAYROLL_ENCRYPTION_SECRET: ${PAYROLL_ENCRYPTION_SECRET:?missing PAYROLL_ENCRYPTION_SECRET — run: openssl rand -base64 32}
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:?missing SESSION_SECRET_KEY — run: openssl rand -hex 32}
+
+      # Optional during key rotation
+      PAYROLL_ENCRYPTION_SECRET_PREV: ${PAYROLL_ENCRYPTION_SECRET_PREV:-}
+
+      # Browser origin allowlist for the SPA. Comma-separated, no wildcards.
+      CORS_ALLOW_ORIGINS: ${CORS_ALLOW_ORIGINS:?set this to your real origin, e.g. https://books.example.com}
+
+      # Workers / serving
+      APP_HOST: "0.0.0.0"
+      APP_PORT: "3001"
+      APP_WORKERS: "${APP_WORKERS:-4}"
+
+      # Employer identifiers (used by W-2 / W-3 / 940 / 941 endpoints)
+      EMPLOYER_EIN: ${EMPLOYER_EIN:-}
+      EMPLOYER_STATE: ${EMPLOYER_STATE:-WA}
+      SUTA_RATE: ${SUTA_RATE:-0.012}
+    expose:
+      - "3001"
+    # Not published to host — your TLS proxy (nginx, Traefik, AWS ALB, etc.)
+    # is the only thing that should reach this container directly.
+    volumes:
+      - slowbooks_uploads:/app/app/static/uploads
+      - slowbooks_backups:/app/backups
+
+volumes:
+  postgres_data:
+  slowbooks_uploads:
+  slowbooks_backups:

@@ -6,14 +6,15 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy import func as sqlfunc
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.models.purchase_orders import PurchaseOrder, PurchaseOrderLine, POStatus
 from app.models.contacts import Vendor
 from app.schemas.purchase_orders import POCreate, POUpdate, POResponse
-from app.services.accounting import compute_line_totals
+from app.services.accounting import _q, compute_line_totals
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
 
@@ -27,13 +28,25 @@ def _next_po_number(db: Session) -> str:
 
 
 @router.get("", response_model=list[POResponse])
-def list_pos(vendor_id: int = None, status: str = None, db: Session = Depends(get_db)):
-    q = db.query(PurchaseOrder)
+def list_pos(
+    vendor_id: int = None,
+    status: str = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 1000))
+    skip = max(0, skip)
+    # Eager-load to avoid N+1 on .vendor and .lines during model_validate.
+    q = db.query(PurchaseOrder).options(
+        joinedload(PurchaseOrder.vendor),
+        selectinload(PurchaseOrder.lines),
+    )
     if vendor_id:
         q = q.filter(PurchaseOrder.vendor_id == vendor_id)
     if status:
         q = q.filter(PurchaseOrder.status == status)
-    pos = q.order_by(PurchaseOrder.date.desc()).all()
+    pos = q.order_by(PurchaseOrder.date.desc()).offset(skip).limit(limit).all()
     results = []
     for po in pos:
         resp = POResponse.model_validate(po)
@@ -60,23 +73,54 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
-    po_number = _next_po_number(db)
+    vendor_id = vendor.id
+    vendor_name = vendor.name
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
-    po = PurchaseOrder(
-        po_number=po_number, vendor_id=data.vendor_id, date=data.date,
-        expected_date=data.expected_date, ship_to=data.ship_to,
-        subtotal=subtotal, tax_rate=data.tax_rate, tax_amount=tax_amount,
-        total=total, notes=data.notes,
-    )
-    db.add(po)
-    db.flush()
+    po = None
+    po_number = None
+    last_err = None
+    # Same race as create_invoice / create_estimate: _next_po_number is MAX+1
+    # without a row-level lock, so two concurrent creates can collide on the
+    # po_number UNIQUE constraint. Retry on IntegrityError.
+    for _ in range(10):
+        po_number = _next_po_number(db)
+        po = PurchaseOrder(
+            po_number=po_number,
+            vendor_id=vendor_id,
+            date=data.date,
+            expected_date=data.expected_date,
+            ship_to=data.ship_to,
+            subtotal=subtotal,
+            tax_rate=data.tax_rate,
+            tax_amount=tax_amount,
+            total=total,
+            notes=data.notes,
+        )
+        db.add(po)
+        try:
+            db.flush()
+            break
+        except IntegrityError as e:
+            if "po_number" not in str(e.orig).lower():
+                raise
+            last_err = e
+            db.rollback()
+            po = None
+    if po is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not assign a unique PO number; please retry.",
+        ) from last_err
 
     for i, line_data in enumerate(data.lines):
         line = PurchaseOrderLine(
-            purchase_order_id=po.id, item_id=line_data.item_id,
-            description=line_data.description, quantity=line_data.quantity,
-            rate=line_data.rate, amount=Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate)),
+            purchase_order_id=po.id,
+            item_id=line_data.item_id,
+            description=line_data.description,
+            quantity=line_data.quantity,
+            rate=line_data.rate,
+            amount=_q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))),
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -84,7 +128,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(po)
     resp = POResponse.model_validate(po)
-    resp.vendor_name = vendor.name
+    resp.vendor_name = vendor_name
     return resp
 
 
@@ -101,14 +145,22 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
             setattr(po, key, val)
 
     if data.lines is not None:
-        db.query(PurchaseOrderLine).filter(PurchaseOrderLine.purchase_order_id == po_id).delete()
+        db.query(PurchaseOrderLine).filter(
+            PurchaseOrderLine.purchase_order_id == po_id
+        ).delete()
         for i, line_data in enumerate(data.lines):
-            amt = Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
-            db.add(PurchaseOrderLine(
-                purchase_order_id=po_id, item_id=line_data.item_id,
-                description=line_data.description, quantity=line_data.quantity,
-                rate=line_data.rate, amount=amt, line_order=line_data.line_order or i,
-            ))
+            amt = _q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate)))
+            db.add(
+                PurchaseOrderLine(
+                    purchase_order_id=po_id,
+                    item_id=line_data.item_id,
+                    description=line_data.description,
+                    quantity=line_data.quantity,
+                    rate=line_data.rate,
+                    amount=amt,
+                    line_order=line_data.line_order or i,
+                )
+            )
         tax_rate = data.tax_rate if data.tax_rate is not None else po.tax_rate
         subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
         po.subtotal = subtotal
@@ -135,22 +187,36 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
     from app.models.accounts import Account
     from app.models.items import Item as ItemModel
     from app.services.accounting import create_journal_entry
+    from app.services.closing_date import check_closing_date
     from app.services.inventory_service import (
-        get_inventory_asset_account_id, record_purchase,
+        get_inventory_asset_account_id,
+        record_purchase,
     )
 
     po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
     if not po:
         raise HTTPException(status_code=404, detail="Purchase order not found")
+    # Posts a JE dated to po.date; closing-date enforcement must cover this
+    # path too, otherwise an operator can reach into a closed period by
+    # converting an old PO without ever creating a bill directly.
+    check_closing_date(db, po.date)
     if po.status == POStatus.CLOSED:
         raise HTTPException(status_code=400, detail="PO already closed")
 
     vendor = po.vendor
     bill = Bill(
-        bill_number=f"BILL-{po.po_number}", vendor_id=po.vendor_id, status=BillStatus.UNPAID,
-        po_id=po.id, date=po.date, terms="Net 30",
-        subtotal=po.subtotal, tax_rate=po.tax_rate, tax_amount=po.tax_amount,
-        total=po.total, balance_due=po.total, notes=f"From {po.po_number}",
+        bill_number=f"BILL-{po.po_number}",
+        vendor_id=po.vendor_id,
+        status=BillStatus.UNPAID,
+        po_id=po.id,
+        date=po.date,
+        terms="Net 30",
+        subtotal=po.subtotal,
+        tax_rate=po.tax_rate,
+        tax_amount=po.tax_amount,
+        total=po.total,
+        balance_due=po.total,
+        notes=f"From {po.po_number}",
     )
     db.add(bill)
     db.flush()
@@ -164,8 +230,14 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
     journal_lines: list[dict] = []
     inv_receipts: list[tuple] = []
     for poline in po.lines:
-        amt = Decimal(str(poline.quantity)) * Decimal(str(poline.rate))
-        item = db.query(ItemModel).filter(ItemModel.id == poline.item_id).first() if poline.item_id else None
+        # Round per line so the bill's JE debit matches the rounded AP credit
+        # rebuilt from po.total below.
+        amt = _q(Decimal(str(poline.quantity)) * Decimal(str(poline.rate)))
+        item = (
+            db.query(ItemModel).filter(ItemModel.id == poline.item_id).first()
+            if poline.item_id
+            else None
+        )
 
         if item and item.track_inventory:
             posting_acct = get_inventory_asset_account_id(db, item)
@@ -178,11 +250,13 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
                     ),
                 )
             if poline.quantity and poline.quantity > 0:
-                inv_receipts.append((
-                    item,
-                    Decimal(str(poline.quantity)),
-                    Decimal(str(poline.rate)),
-                ))
+                inv_receipts.append(
+                    (
+                        item,
+                        Decimal(str(poline.quantity)),
+                        Decimal(str(poline.rate)),
+                    )
+                )
         else:
             posting_acct = None
             if item and item.expense_account_id:
@@ -192,47 +266,68 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
             else:
                 posting_acct = default_expense_id
 
-        db.add(BillLine(
-            bill_id=bill.id, item_id=poline.item_id, account_id=posting_acct,
-            description=poline.description,
-            quantity=poline.quantity, rate=poline.rate, amount=poline.amount,
-            line_order=poline.line_order,
-        ))
+        db.add(
+            BillLine(
+                bill_id=bill.id,
+                item_id=poline.item_id,
+                account_id=posting_acct,
+                description=poline.description,
+                quantity=poline.quantity,
+                rate=poline.rate,
+                amount=poline.amount,
+                line_order=poline.line_order,
+            )
+        )
         if amt > 0 and posting_acct:
-            journal_lines.append({
-                "account_id": posting_acct,
-                "debit": amt, "credit": Decimal("0"),
-                "description": poline.description or "",
-            })
+            journal_lines.append(
+                {
+                    "account_id": posting_acct,
+                    "debit": amt,
+                    "credit": Decimal("0"),
+                    "description": poline.description or "",
+                }
+            )
 
     if bill.tax_amount and bill.tax_amount > 0:
         tax_acct = db.query(Account).filter(Account.account_number == "2200").first()
         if tax_acct:
-            journal_lines.append({
-                "account_id": tax_acct.id,
-                "debit": Decimal(str(bill.tax_amount)),
-                "credit": Decimal("0"),
-                "description": "Sales tax on bill",
-            })
+            journal_lines.append(
+                {
+                    "account_id": tax_acct.id,
+                    "debit": Decimal(str(bill.tax_amount)),
+                    "credit": Decimal("0"),
+                    "description": "Sales tax on bill",
+                }
+            )
 
     if ap_acct and journal_lines:
-        journal_lines.append({
-            "account_id": ap_acct.id,
-            "debit": Decimal("0"),
-            "credit": Decimal(str(bill.total)),
-            "description": f"From PO {po.po_number}",
-        })
+        journal_lines.append(
+            {
+                "account_id": ap_acct.id,
+                "debit": Decimal("0"),
+                "credit": Decimal(str(bill.total)),
+                "description": f"From PO {po.po_number}",
+            }
+        )
         txn = create_journal_entry(
-            db, po.date, f"Bill {bill.bill_number} - {vendor.name if vendor else ''}",
-            journal_lines, source_type="bill", source_id=bill.id,
+            db,
+            po.date,
+            f"Bill {bill.bill_number} - {vendor.name if vendor else ''}",
+            journal_lines,
+            source_type="bill",
+            source_id=bill.id,
         )
         bill.transaction_id = txn.id
 
     # Write inventory movement rows for tracked receipts
     for item, qty, unit_cost in inv_receipts:
         record_purchase(
-            db, item, quantity=qty, unit_cost=unit_cost,
-            source_type="bill", source_id=bill.id,
+            db,
+            item,
+            quantity=qty,
+            unit_cost=unit_cost,
+            source_type="bill",
+            source_id=bill.id,
             memo=f"PO {po.po_number}",
             post_journal=False,
             txn_date=po.date,

@@ -16,7 +16,10 @@ const PaymentsPage = {
             </div>`;
 
         if (payments.length === 0) {
-            html += `<div class="empty-state"><p>No payments recorded yet</p></div>`;
+            html += `<div class="empty-state">
+                <p>No payments recorded yet.</p>
+                <button class="btn btn-primary" onclick="PaymentsPage.showForm()" style="margin-top:10px;">+ Record your first payment</button>
+            </div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
@@ -84,14 +87,14 @@ const PaymentsPage = {
 
     _invoices: [],
 
-    async showForm() {
+    async showForm(_ignoredId = null, prefillCustomerId = null) {
         const [customers, accounts] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/accounts'),
         ]);
         const bankAccts = accounts.filter(a => a.account_type === 'asset');
 
-        const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+        const custOpts = customers.map(c => `<option value="${c.id}"${prefillCustomerId === c.id ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
         const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
 
         openModal('Record Payment', `
@@ -126,6 +129,10 @@ const PaymentsPage = {
                     <button type="submit" class="btn btn-primary">Record Payment</button>
                 </div>
             </form>`);
+        // If we opened from the customer details flow, the customer is
+        // already selected but the change event didn't fire — trigger the
+        // invoice list manually so the operator sees the unpaid invoices.
+        if (prefillCustomerId) PaymentsPage.loadInvoices(prefillCustomerId);
     },
 
     async loadInvoices(customerId) {
@@ -150,11 +157,68 @@ const PaymentsPage = {
                 <td class="amount">${formatCurrency(inv.balance_due)}</td>
                 <td><input class="alloc-amount" data-invoice="${inv.id}" data-max="${inv.balance_due}"
                     type="number" step="0.01" min="0" max="${inv.balance_due}"
+                    oninput="PaymentsPage._updateAllocStatus()"
                     style="width:100px; padding:4px 8px; border:1px solid var(--gray-300); border-radius:4px;"></td>
             </tr>`;
         }
-        html += `</tbody></table></div>`;
+        // Running total — updated live as the user types into any allocation
+        // field. Catches over-allocation BEFORE the submit fires.
+        html += `</tbody></table></div>
+            <div id="alloc-status" style="margin-top:8px; padding:8px 10px; border-radius:4px;
+                background:var(--gray-100); font-size:13px;"></div>`;
         $('#payment-invoices').innerHTML = html;
+        // Also recompute when the payment Amount field changes — the total
+        // we're comparing against is that amount.
+        const amountInput = $('[name="amount"]');
+        if (amountInput && !amountInput._allocWired) {
+            amountInput.addEventListener('input', () => PaymentsPage._updateAllocStatus());
+            amountInput._allocWired = true;
+        }
+        PaymentsPage._updateAllocStatus();
+    },
+
+    _updateAllocStatus() {
+        const status = $('#alloc-status');
+        if (!status) return;
+        const total = parseFloat($('[name="amount"]')?.value) || 0;
+        let allocated = 0;
+        // Scope to the invoice table so we never pick up a stray .alloc-amount
+        // from another view that happens to be in the DOM.
+        const host = $('#payment-invoices');
+        (host ? host.querySelectorAll('.alloc-amount') : []).forEach(input => {
+            allocated += parseFloat(input.value) || 0;
+        });
+        const remaining = total - allocated;
+        const eps = 0.005;  // Decimal noise tolerance
+        if (total === 0 && allocated > eps) {
+            // Amount cleared (or never entered) but money is allocated — this
+            // would submit a NaN/zero payment with real allocations. Warn.
+            status.style.background = '#fde2e2';
+            status.style.color = '#a4242b';
+            status.textContent =
+                `${formatCurrency(allocated)} allocated but the Payment amount is empty. ` +
+                `Enter the amount you received above.`;
+        } else if (total === 0) {
+            status.style.background = 'var(--gray-100)';
+            status.style.color = 'var(--gray-600)';
+            status.textContent = 'Enter a payment amount above to begin allocating.';
+        } else if (remaining > eps) {
+            status.style.background = '#fff4d6';
+            status.style.color = '#7a5500';
+            status.textContent =
+                `${formatCurrency(remaining)} unallocated of ${formatCurrency(total)}. ` +
+                `Fine — the remainder will be tracked as a customer credit.`;
+        } else if (remaining < -eps) {
+            status.style.background = '#fde2e2';
+            status.style.color = '#a4242b';
+            status.textContent =
+                `Over-allocated by ${formatCurrency(Math.abs(remaining))}. ` +
+                `Reduce one of the Apply amounts or increase the Payment amount.`;
+        } else {
+            status.style.background = '#d6f4e0';
+            status.style.color = '#1f6f3a';
+            status.textContent = `Fully allocated (${formatCurrency(total)}).`;
+        }
     },
 
     async save(e) {

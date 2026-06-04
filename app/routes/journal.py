@@ -3,14 +3,13 @@
 # Feature: Allow users to create/view/void manual journal entries
 # ============================================================================
 
-from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.transactions import Transaction, TransactionLine
+from app.models.transactions import Transaction
 from app.models.accounts import Account
 from app.schemas.journal import JournalEntryCreate, JournalEntryResponse
 from app.services.accounting import create_journal_entry
@@ -33,25 +32,29 @@ def list_journal_entries(source_type: str = None, db: Session = Depends(get_db))
         lines_data = []
         for line in txn.lines:
             acct = accounts.get(line.account_id)
-            lines_data.append({
-                "id": line.id,
-                "account_id": line.account_id,
-                "account_name": acct.name if acct else "",
-                "account_number": acct.account_number if acct else "",
-                "debit": float(line.debit),
-                "credit": float(line.credit),
-                "description": line.description or "",
-            })
-        results.append(JournalEntryResponse(
-            id=txn.id,
-            date=txn.date,
-            description=txn.description or "",
-            reference=txn.reference or "",
-            source_type=txn.source_type or "",
-            lines=lines_data,
-            total_debit=sum(l["debit"] for l in lines_data),
-            total_credit=sum(l["credit"] for l in lines_data),
-        ))
+            lines_data.append(
+                {
+                    "id": line.id,
+                    "account_id": line.account_id,
+                    "account_name": acct.name if acct else "",
+                    "account_number": acct.account_number if acct else "",
+                    "debit": float(line.debit),
+                    "credit": float(line.credit),
+                    "description": line.description or "",
+                }
+            )
+        results.append(
+            JournalEntryResponse(
+                id=txn.id,
+                date=txn.date,
+                description=txn.description or "",
+                reference=txn.reference or "",
+                source_type=txn.source_type or "",
+                lines=lines_data,
+                total_debit=sum(line["debit"] for line in lines_data),
+                total_credit=sum(line["credit"] for line in lines_data),
+            )
+        )
     return results
 
 
@@ -64,15 +67,17 @@ def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
     lines_data = []
     for line in txn.lines:
         acct = accounts.get(line.account_id)
-        lines_data.append({
-            "id": line.id,
-            "account_id": line.account_id,
-            "account_name": acct.name if acct else "",
-            "account_number": acct.account_number if acct else "",
-            "debit": float(line.debit),
-            "credit": float(line.credit),
-            "description": line.description or "",
-        })
+        lines_data.append(
+            {
+                "id": line.id,
+                "account_id": line.account_id,
+                "account_name": acct.name if acct else "",
+                "account_number": acct.account_number if acct else "",
+                "debit": float(line.debit),
+                "credit": float(line.credit),
+                "description": line.description or "",
+            }
+        )
     return JournalEntryResponse(
         id=txn.id,
         date=txn.date,
@@ -80,13 +85,15 @@ def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
         reference=txn.reference or "",
         source_type=txn.source_type or "",
         lines=lines_data,
-        total_debit=sum(l["debit"] for l in lines_data),
-        total_credit=sum(l["credit"] for l in lines_data),
+        total_debit=sum(line["debit"] for line in lines_data),
+        total_credit=sum(line["credit"] for line in lines_data),
     )
 
 
 @router.post("", response_model=JournalEntryResponse, status_code=201)
-def create_manual_journal_entry(data: JournalEntryCreate, db: Session = Depends(get_db)):
+def create_manual_journal_entry(
+    data: JournalEntryCreate, db: Session = Depends(get_db)
+):
     check_closing_date(db, data.date)
     lines = []
     for line in data.lines:
@@ -94,21 +101,28 @@ def create_manual_journal_entry(data: JournalEntryCreate, db: Session = Depends(
             continue
         acct = db.query(Account).filter(Account.id == line.account_id).first()
         if not acct:
-            raise HTTPException(status_code=404, detail=f"Account {line.account_id} not found")
-        lines.append({
-            "account_id": line.account_id,
-            "debit": Decimal(str(line.debit)),
-            "credit": Decimal(str(line.credit)),
-            "description": line.description or "",
-        })
+            raise HTTPException(
+                status_code=404, detail=f"Account {line.account_id} not found"
+            )
+        lines.append(
+            {
+                "account_id": line.account_id,
+                "debit": Decimal(str(line.debit)),
+                "credit": Decimal(str(line.credit)),
+                "description": line.description or "",
+            }
+        )
 
     if not lines:
         raise HTTPException(status_code=400, detail="No valid lines")
 
     try:
         txn = create_journal_entry(
-            db, data.date, data.description,
-            lines, source_type="manual",
+            db,
+            data.date,
+            data.description,
+            lines,
+            source_type="manual",
             reference=data.reference or "",
         )
     except ValueError as e:
@@ -130,14 +144,22 @@ def void_journal_entry(entry_id: int, db: Session = Depends(get_db)):
     check_closing_date(db, txn.date)
 
     reverse_lines = [
-        {"account_id": ol.account_id, "debit": ol.credit, "credit": ol.debit,
-         "description": f"VOID: {ol.description or ''}"}
+        {
+            "account_id": ol.account_id,
+            "debit": ol.credit,
+            "credit": ol.debit,
+            "description": f"VOID: {ol.description or ''}",
+        }
         for ol in txn.lines
     ]
     if reverse_lines:
         void_txn = create_journal_entry(
-            db, txn.date, f"VOID: {txn.description or ''}",
-            reverse_lines, source_type="manual_void", source_id=txn.id,
+            db,
+            txn.date,
+            f"VOID: {txn.description or ''}",
+            reverse_lines,
+            source_type="manual_void",
+            source_id=txn.id,
             reference=txn.reference,
         )
         db.commit()

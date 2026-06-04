@@ -15,7 +15,10 @@ const VendorsPage = {
             </div>`;
 
         if (vendors.length === 0) {
-            html += `<div class="empty-state"><p>No vendors yet</p></div>`;
+            html += `<div class="empty-state">
+                <p>No vendors yet.</p>
+                <button class="btn btn-primary" onclick="VendorsPage.showForm()" style="margin-top:10px;">+ Create your first vendor</button>
+            </div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>

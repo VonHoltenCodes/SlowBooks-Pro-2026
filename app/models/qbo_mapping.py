@@ -15,7 +15,9 @@ class QBOMapping(Base):
     __tablename__ = "qbo_mappings"
 
     id = Column(Integer, primary_key=True, index=True)
-    entity_type = Column(String(50), nullable=False)  # account, customer, vendor, item, invoice, payment
+    entity_type = Column(
+        String(50), nullable=False
+    )  # account, customer, vendor, item, invoice, payment
     slowbooks_id = Column(Integer, nullable=False)
     qbo_id = Column(String(100), nullable=False)
     qbo_sync_token = Column(String(50), nullable=True)

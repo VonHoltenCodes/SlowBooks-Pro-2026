@@ -63,7 +63,7 @@ def apply_rules(db: Session = Depends(get_db)):
     """Apply all active rules to unmatched bank transactions."""
     rules = (
         db.query(BankRule)
-        .filter(BankRule.is_active == True)
+        .filter(BankRule.is_active)
         .order_by(BankRule.priority.desc())
         .all()
     )

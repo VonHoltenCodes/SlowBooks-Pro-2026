@@ -60,6 +60,12 @@ Connect Slowbooks to QuickBooks Online to import or export accounts, customers, 
    - **Redirect URI**: `http://localhost:3001/api/qbo/callback` (should already be set)
 4. Click **Save Settings**
 
+After saving, the **Client Secret**, **Access Token**, and **Refresh
+Token** fields will display as `********` on subsequent page loads —
+that's the redaction guard, not a save failure. Typing a new value
+over the `********` replaces the stored secret; leaving it untouched
+keeps the existing value.
+
 ---
 
 ## Step 5: Connect to QuickBooks

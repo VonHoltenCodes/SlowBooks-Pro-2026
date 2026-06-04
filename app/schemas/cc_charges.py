@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date as dt_date
 from decimal import Decimal
 from typing import Optional
 
@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 
 class CCChargeCreate(BaseModel):
-    date: date
+    date: dt_date
     payee: Optional[str] = None
     account_id: int
     amount: Decimal
@@ -16,7 +16,7 @@ class CCChargeCreate(BaseModel):
 
 class CCChargeResponse(BaseModel):
     id: int
-    date: date
+    date: dt_date
     payee: str = ""
     account_name: str = ""
     amount: float

@@ -23,30 +23,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install "black>=24.8.0" "ruff>=0.6.0"
-      - name: black --check (phase 4/5/6 code)
-        run: |
-          black --check \
-            app/services/settings_service.py \
-            app/services/ai_service.py \
-            app/services/ai_tools.py \
-            app/services/analytics.py \
-            app/services/auth.py \
-            app/routes/analytics.py \
-            app/routes/auth.py \
-            app/main.py \
-            tests/
+      # Whole-tree gate. The earlier allowlist existed because legacy
+      # phases (1-3 routes, legacy services) carried pre-black-era style
+      # and would have churned on a wholesale widening. The production-
+      # readiness sweep formatted everything to black 24.8 / ruff 0.6,
+      # so the gate now protects every file from regression — no risk
+      # of a new file slipping through unformatted.
+      - name: black --check
+        run: black --check app/ tests/ scripts/
       - name: ruff check
-        run: |
-          ruff check \
-            app/services/settings_service.py \
-            app/services/ai_service.py \
-            app/services/ai_tools.py \
-            app/services/analytics.py \
-            app/services/auth.py \
-            app/routes/analytics.py \
-            app/routes/auth.py \
-            app/main.py \
-            tests/
+        run: ruff check app/ tests/ scripts/
 
   test:
     name: Test (pytest + coverage)
@@ -89,6 +75,27 @@ jobs:
           name: coverage-report
           path: coverage.xml
           retention-days: 7
+
+  pip-audit:
+    name: Dependency vulnerability scan
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install pip-audit
+        run: |
+          python -m pip install --upgrade pip
+          pip install pip-audit
+      # PR gate. The weekly cron in pip-audit.yml is for catching CVEs
+      # disclosed AFTER a release shipped; this step prevents introducing
+      # a known-vulnerable dep via PR. Strict mode (no --ignore-vuln) —
+      # if a CVE pops up that has no fix yet, add an ignore here with a
+      # comment explaining why + tracking ticket.
+      - name: Audit requirements.txt
+        run: pip-audit --requirement requirements.txt --strict
 
   docker-build:
     name: Docker build

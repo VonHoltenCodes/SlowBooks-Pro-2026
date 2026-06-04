@@ -29,3 +29,20 @@ htmlcov/
 
 # User-uploaded attachments / logos — runtime data, not source
 app/static/uploads/
+
+# pg_dump output — the backups/ dir itself stays tracked (via .gitkeep)
+# so the backup feature has somewhere to drop files on a fresh install,
+# but the dumps themselves are runtime data.
+backups/*
+!backups/.gitkeep
+
+# OS-level cruft
+.DS_Store
+Thumbs.db
+
+# Build artifacts from pip installs done in this directory
+*.egg
+
+
+# Coverage XML artifact from pytest --cov (CI writes its own)
+coverage.xml

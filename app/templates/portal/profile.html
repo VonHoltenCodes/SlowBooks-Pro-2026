@@ -1,0 +1,88 @@
+{% extends "portal/base.html" %}
+{% set active = 'profile' %}
+{% block title %}Profile{% endblock %}
+
+{% block content %}
+<h2>Profile</h2>
+
+{% if saved %}
+<div class="banner banner-success">Your changes have been saved.</div>
+{% endif %}
+
+<p class="muted">Update your Form W-4 election and mailing address.</p>
+
+<form class="portal-form" method="post" action="/portal/profile">
+    <h3>Form W-4 Election</h3>
+
+    <div class="field">
+        <label for="filing_status">Filing Status</label>
+        <select id="filing_status" name="filing_status">
+            {% for fs in filing_statuses %}
+            <option value="{{ fs.value }}"{% if emp.filing_status == fs %} selected{% endif %}>
+                {{ fs.value.replace('_', ' ')|title }}
+            </option>
+            {% endfor %}
+        </select>
+    </div>
+
+    <div class="field checkbox">
+        <label>
+            <input type="checkbox" name="multiple_jobs" value="true"{% if emp.multiple_jobs %} checked{% endif %}>
+            Multiple jobs or spouse works (Step 2c)
+        </label>
+    </div>
+
+    <div class="field-row">
+        <div class="field">
+            <label for="dependents_amount">Dependents Amount (Step 3)</label>
+            <input type="number" step="0.01" id="dependents_amount" name="dependents_amount"
+                   value="{{ '%.2f'|format(emp.dependents_amount|float) }}">
+        </div>
+        <div class="field">
+            <label for="extra_withholding">Extra Withholding per Period (Step 4c)</label>
+            <input type="number" step="0.01" id="extra_withholding" name="extra_withholding"
+                   value="{{ '%.2f'|format(emp.extra_withholding|float) }}">
+        </div>
+    </div>
+
+    <div class="field-row">
+        <div class="field">
+            <label for="other_income_annual">Other Income, Annual (Step 4a)</label>
+            <input type="number" step="0.01" id="other_income_annual" name="other_income_annual"
+                   value="{{ '%.2f'|format(emp.other_income_annual|float) }}">
+        </div>
+        <div class="field">
+            <label for="deductions_annual">Deductions, Annual (Step 4b)</label>
+            <input type="number" step="0.01" id="deductions_annual" name="deductions_annual"
+                   value="{{ '%.2f'|format(emp.deductions_annual|float) }}">
+        </div>
+    </div>
+
+    <h3>Mailing Address</h3>
+
+    <div class="field">
+        <label for="address1">Address Line 1</label>
+        <input type="text" id="address1" name="address1" value="{{ emp.address1 or '' }}">
+    </div>
+    <div class="field">
+        <label for="address2">Address Line 2</label>
+        <input type="text" id="address2" name="address2" value="{{ emp.address2 or '' }}">
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label for="city">City</label>
+            <input type="text" id="city" name="city" value="{{ emp.city or '' }}">
+        </div>
+        <div class="field">
+            <label for="state">State</label>
+            <input type="text" id="state" name="state" value="{{ emp.state or '' }}">
+        </div>
+        <div class="field">
+            <label for="zip">ZIP</label>
+            <input type="text" id="zip" name="zip" value="{{ emp.zip or '' }}">
+        </div>
+    </div>
+
+    <button type="submit" class="btn">Save Changes</button>
+</form>
+{% endblock %}

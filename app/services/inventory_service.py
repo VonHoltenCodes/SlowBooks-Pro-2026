@@ -151,11 +151,20 @@ def record_purchase(
         ap_acc = db.query(Account).filter(Account.account_number == "2000").first()
         if asset_id and ap_acc:
             from datetime import date as _date
+
             lines = [
-                {"account_id": asset_id, "debit": _q(quantity * unit_cost), "credit": Decimal("0"),
-                 "description": f"Inventory: {item.name}"},
-                {"account_id": ap_acc.id, "debit": Decimal("0"), "credit": _q(quantity * unit_cost),
-                 "description": f"A/P: {item.name}"},
+                {
+                    "account_id": asset_id,
+                    "debit": _q(quantity * unit_cost),
+                    "credit": Decimal("0"),
+                    "description": f"Inventory: {item.name}",
+                },
+                {
+                    "account_id": ap_acc.id,
+                    "debit": Decimal("0"),
+                    "credit": _q(quantity * unit_cost),
+                    "description": f"A/P: {item.name}",
+                },
             ]
             txn = create_journal_entry(
                 db,
@@ -168,9 +177,14 @@ def record_purchase(
             txn_id = txn.id
 
     return _append_movement(
-        db, item, MovementType.PURCHASE,
-        quantity=quantity, unit_cost=unit_cost,
-        source_type=source_type, source_id=source_id, transaction_id=txn_id,
+        db,
+        item,
+        MovementType.PURCHASE,
+        quantity=quantity,
+        unit_cost=unit_cost,
+        source_type=source_type,
+        source_id=source_id,
+        transaction_id=txn_id,
         memo=memo,
     )
 
@@ -207,11 +221,20 @@ def record_sale(
         cogs_id = get_cogs_account_id(db)
         if asset_id and cogs_id:
             from datetime import date as _date
+
             lines = [
-                {"account_id": cogs_id, "debit": cogs_amount, "credit": Decimal("0"),
-                 "description": f"COGS: {item.name}"},
-                {"account_id": asset_id, "debit": Decimal("0"), "credit": cogs_amount,
-                 "description": f"Inventory: {item.name}"},
+                {
+                    "account_id": cogs_id,
+                    "debit": cogs_amount,
+                    "credit": Decimal("0"),
+                    "description": f"COGS: {item.name}",
+                },
+                {
+                    "account_id": asset_id,
+                    "debit": Decimal("0"),
+                    "credit": cogs_amount,
+                    "description": f"Inventory: {item.name}",
+                },
             ]
             txn = create_journal_entry(
                 db,
@@ -224,10 +247,14 @@ def record_sale(
             txn_id = txn.id
 
     return _append_movement(
-        db, item, MovementType.SALE,
+        db,
+        item,
+        MovementType.SALE,
         quantity=-quantity,  # store as negative
         unit_cost=unit_cost,
-        source_type=source_type, source_id=source_id, transaction_id=txn_id,
+        source_type=source_type,
+        source_id=source_id,
+        transaction_id=txn_id,
         memo=memo,
     )
 
@@ -268,24 +295,42 @@ def record_adjustment(
         offset_id = adj_acc.id if adj_acc else get_cogs_account_id(db)
         if asset_id and offset_id:
             from datetime import date as _date
+
             if quantity_delta > 0:
                 # stock up: DR Inventory / CR Adjustment
                 lines = [
-                    {"account_id": asset_id, "debit": amount, "credit": Decimal("0"),
-                     "description": f"Inventory adj: {item.name}"},
-                    {"account_id": offset_id, "debit": Decimal("0"), "credit": amount,
-                     "description": f"Inventory adjustment gain"},
+                    {
+                        "account_id": asset_id,
+                        "debit": amount,
+                        "credit": Decimal("0"),
+                        "description": f"Inventory adj: {item.name}",
+                    },
+                    {
+                        "account_id": offset_id,
+                        "debit": Decimal("0"),
+                        "credit": amount,
+                        "description": "Inventory adjustment gain",
+                    },
                 ]
             else:
                 # stock down: DR Adjustment / CR Inventory
                 lines = [
-                    {"account_id": offset_id, "debit": amount, "credit": Decimal("0"),
-                     "description": f"Inventory adjustment loss"},
-                    {"account_id": asset_id, "debit": Decimal("0"), "credit": amount,
-                     "description": f"Inventory adj: {item.name}"},
+                    {
+                        "account_id": offset_id,
+                        "debit": amount,
+                        "credit": Decimal("0"),
+                        "description": "Inventory adjustment loss",
+                    },
+                    {
+                        "account_id": asset_id,
+                        "debit": Decimal("0"),
+                        "credit": amount,
+                        "description": f"Inventory adj: {item.name}",
+                    },
                 ]
             txn = create_journal_entry(
-                db, txn_date or _date.today(),
+                db,
+                txn_date or _date.today(),
                 f"Inventory adjustment — {item.name}",
                 lines,
                 source_type="adjustment",
@@ -294,9 +339,14 @@ def record_adjustment(
             txn_id = txn.id
 
     return _append_movement(
-        db, item, MovementType.ADJUSTMENT,
-        quantity=quantity_delta, unit_cost=unit_cost,
-        source_type="adjustment", source_id=item.id, transaction_id=txn_id,
+        db,
+        item,
+        MovementType.ADJUSTMENT,
+        quantity=quantity_delta,
+        unit_cost=unit_cost,
+        source_type="adjustment",
+        source_id=item.id,
+        transaction_id=txn_id,
         memo=memo,
     )
 
@@ -360,31 +410,47 @@ def reverse_sale(
         cogs_id = get_cogs_account_id(db)
         if asset_id and cogs_id:
             from datetime import date as _date
+
             lines = [
-                {"account_id": asset_id, "debit": amount, "credit": Decimal("0"),
-                 "description": f"Inventory reversal: {item.name}"},
-                {"account_id": cogs_id, "debit": Decimal("0"), "credit": amount,
-                 "description": f"COGS reversal: {item.name}"},
+                {
+                    "account_id": asset_id,
+                    "debit": amount,
+                    "credit": Decimal("0"),
+                    "description": f"Inventory reversal: {item.name}",
+                },
+                {
+                    "account_id": cogs_id,
+                    "debit": Decimal("0"),
+                    "credit": amount,
+                    "description": f"COGS reversal: {item.name}",
+                },
             ]
             txn = create_journal_entry(
-                db, txn_date or _date.today(),
+                db,
+                txn_date or _date.today(),
                 f"COGS reversal — {item.name}",
                 lines,
-                source_type=source_type, source_id=source_id,
+                source_type=source_type,
+                source_id=source_id,
             )
             txn_id = txn.id
 
     return _append_movement(
-        db, item, MovementType.VOID,
-        quantity=quantity, unit_cost=unit_cost,
-        source_type=source_type, source_id=source_id, transaction_id=txn_id,
+        db,
+        item,
+        MovementType.VOID,
+        quantity=quantity,
+        unit_cost=unit_cost,
+        source_type=source_type,
+        source_id=source_id,
+        transaction_id=txn_id,
         memo="Sale reversal",
     )
 
 
 def current_valuation(db: Session) -> dict:
     """Return aggregate inventory valuation: total_value, item_count, low_stock_count."""
-    items = db.query(Item).filter(Item.track_inventory == True, Item.is_active == True).all()  # noqa
+    items = db.query(Item).filter(Item.track_inventory, Item.is_active).all()  # noqa
     total_value = Decimal("0")
     item_count = 0
     low_stock = 0
@@ -393,7 +459,9 @@ def current_valuation(db: Session) -> dict:
         avg = Decimal(str(it.avg_cost or 0))
         total_value += qty * avg
         item_count += 1
-        if Decimal(str(it.reorder_point or 0)) > 0 and qty <= Decimal(str(it.reorder_point)):
+        if Decimal(str(it.reorder_point or 0)) > 0 and qty <= Decimal(
+            str(it.reorder_point)
+        ):
             low_stock += 1
     return {
         "total_value": float(_q(total_value)),

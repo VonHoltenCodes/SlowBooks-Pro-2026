@@ -9,7 +9,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models.payments import Payment, PaymentAllocation
@@ -17,7 +17,9 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Customer
 from app.schemas.payments import PaymentCreate, PaymentResponse
 from app.services.accounting import (
-    create_journal_entry, get_ar_account_id, get_undeposited_funds_id,
+    create_journal_entry,
+    get_ar_account_id,
+    get_undeposited_funds_id,
 )
 from app.services.closing_date import check_closing_date
 
@@ -25,11 +27,22 @@ router = APIRouter(prefix="/api/payments", tags=["payments"])
 
 
 @router.get("", response_model=list[PaymentResponse])
-def list_payments(customer_id: int = None, db: Session = Depends(get_db)):
-    q = db.query(Payment)
+def list_payments(
+    customer_id: int = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 1000))
+    skip = max(0, skip)
+    # Eager-load to avoid N+1 on .customer and .allocations during model_validate.
+    q = db.query(Payment).options(
+        joinedload(Payment.customer),
+        selectinload(Payment.allocations),
+    )
     if customer_id:
         q = q.filter(Payment.customer_id == customer_id)
-    payments = q.order_by(Payment.date.desc()).all()
+    payments = q.order_by(Payment.date.desc()).offset(skip).limit(limit).all()
     results = []
     for p in payments:
         resp = PaymentResponse.model_validate(p)
@@ -57,6 +70,20 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
+    # Reject non-positive amounts at the boundary; otherwise create_journal_entry
+    # raises ValueError on the AR/bank line, which the framework surfaces as a
+    # 500. Refunds belong in a credit memo, not a negative-amount payment.
+    if data.amount <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Payment amount must be positive; use a credit memo for refunds",
+        )
+    if any(a.amount <= 0 for a in data.allocations):
+        raise HTTPException(
+            status_code=400,
+            detail="Allocation amounts must be positive",
+        )
+
     # Validate allocations don't exceed payment
     alloc_total = sum(a.amount for a in data.allocations)
     if alloc_total > data.amount:
@@ -77,13 +104,24 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
 
     # Apply allocations to invoices
     for alloc_data in data.allocations:
-        invoice = db.query(Invoice).filter(Invoice.id == alloc_data.invoice_id).first()
+        # Lock the invoice row for the read-check-write so two concurrent
+        # payments to the same invoice can't both pass the balance check and
+        # over-apply (driving balance_due negative). No-op on SQLite; real
+        # row lock on Postgres.
+        invoice = (
+            db.query(Invoice)
+            .filter(Invoice.id == alloc_data.invoice_id)
+            .with_for_update()
+            .first()
+        )
         if not invoice:
-            raise HTTPException(status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+            )
         if alloc_data.amount > invoice.balance_due:
             raise HTTPException(
                 status_code=400,
-                detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}"
+                detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}",
             )
 
         alloc = PaymentAllocation(
@@ -95,10 +133,16 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
 
         invoice.amount_paid += alloc_data.amount
         invoice.balance_due -= alloc_data.amount
-        if invoice.balance_due <= 0:
-            invoice.status = InvoiceStatus.PAID
-        else:
-            invoice.status = InvoiceStatus.PARTIAL
+        # Only an exact zero is PAID; a negative balance means something
+        # over-applied — surface it rather than masking corruption as PAID.
+        if invoice.balance_due < 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Allocation drives invoice {invoice.invoice_number} balance negative",
+            )
+        invoice.status = (
+            InvoiceStatus.PAID if invoice.balance_due == 0 else InvoiceStatus.PARTIAL
+        )
 
     # ================================================================
     # Journal Entry — CReceivePayment::PostToJournal() @ 0x001A3A00
@@ -124,8 +168,12 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
             },
         ]
         txn = create_journal_entry(
-            db, data.date, f"Payment from {customer.name}",
-            journal_lines, source_type="payment", source_id=payment.id,
+            db,
+            data.date,
+            f"Payment from {customer.name}",
+            journal_lines,
+            source_type="payment",
+            source_id=payment.id,
             reference=data.reference or data.check_number or "",
         )
         payment.transaction_id = txn.id
@@ -140,7 +188,11 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
 @router.post("/{payment_id}/void", response_model=PaymentResponse)
 def void_payment(payment_id: int, db: Session = Depends(get_db)):
     """Void a payment — reverses journal entry and restores invoice balances"""
-    payment = db.query(Payment).filter(Payment.id == payment_id).first()
+    # Row-lock the payment so two concurrent voids can't both pass the
+    # is_voided guard and post duplicate reversing JEs.
+    payment = (
+        db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
+    )
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
     if payment.is_voided:
@@ -150,26 +202,45 @@ def void_payment(payment_id: int, db: Session = Depends(get_db)):
     # Reverse journal entry
     if payment.transaction_id:
         from app.models.transactions import TransactionLine
-        original_lines = db.query(TransactionLine).filter(
-            TransactionLine.transaction_id == payment.transaction_id
-        ).all()
+
+        original_lines = (
+            db.query(TransactionLine)
+            .filter(TransactionLine.transaction_id == payment.transaction_id)
+            .all()
+        )
         reverse_lines = [
-            {"account_id": ol.account_id, "debit": ol.credit, "credit": ol.debit,
-             "description": f"VOID: {ol.description or ''}"}
+            {
+                "account_id": ol.account_id,
+                "debit": ol.credit,
+                "credit": ol.debit,
+                "description": f"VOID: {ol.description or ''}",
+            }
             for ol in original_lines
         ]
         if reverse_lines:
-            customer = db.query(Customer).filter(Customer.id == payment.customer_id).first()
+            customer = (
+                db.query(Customer).filter(Customer.id == payment.customer_id).first()
+            )
             cname = customer.name if customer else "Unknown"
             create_journal_entry(
-                db, payment.date,
+                db,
+                payment.date,
                 f"VOID Payment from {cname}",
-                reverse_lines, source_type="payment_void", source_id=payment.id,
+                reverse_lines,
+                source_type="payment_void",
+                source_id=payment.id,
             )
 
-    # Reverse invoice allocations
+    # Reverse invoice allocations. Lock each invoice row so a concurrent
+    # create_payment / second void can't race the read-modify-write of
+    # amount_paid and balance_due.
     for alloc in payment.allocations:
-        invoice = db.query(Invoice).filter(Invoice.id == alloc.invoice_id).first()
+        invoice = (
+            db.query(Invoice)
+            .filter(Invoice.id == alloc.invoice_id)
+            .with_for_update()
+            .first()
+        )
         if invoice:
             invoice.amount_paid -= alloc.amount
             invoice.balance_due += alloc.amount

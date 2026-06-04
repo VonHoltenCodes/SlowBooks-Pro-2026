@@ -13,8 +13,16 @@ import enum
 import uuid
 
 from sqlalchemy import (
-    Column, Integer, String, Date, Numeric, DateTime, Text, Enum,
-    ForeignKey, func,
+    Column,
+    Integer,
+    String,
+    Date,
+    Numeric,
+    DateTime,
+    Text,
+    Enum,
+    ForeignKey,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -23,11 +31,11 @@ from app.database import Base
 
 class InvoiceStatus(str, enum.Enum):
     # enum InvStatus @ 0x0015CA30 — originally a DWORD bitfield
-    DRAFT = "draft"        # 0x00 — "Pending" in original UI
-    SENT = "sent"          # 0x01
-    PARTIAL = "partial"    # 0x02 — "PartialPmt" internally
-    PAID = "paid"          # 0x04
-    VOID = "void"          # 0x08 — sets TxnVoidFlag in JRNL.DAT
+    DRAFT = "draft"  # 0x00 — "Pending" in original UI
+    SENT = "sent"  # 0x01
+    PARTIAL = "partial"  # 0x02 — "PartialPmt" internally
+    PAID = "paid"  # 0x04
+    VOID = "void"  # 0x08 — sets TxnVoidFlag in JRNL.DAT
 
 
 class Invoice(Base):
@@ -35,7 +43,9 @@ class Invoice(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     invoice_number = Column(String(50), unique=True, nullable=False)
-    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False, index=True)
+    customer_id = Column(
+        Integer, ForeignKey("customers.id"), nullable=False, index=True
+    )
     status = Column(Enum(InvoiceStatus), default=InvoiceStatus.DRAFT, index=True)
 
     date = Column(Date, nullable=False, index=True)
@@ -66,16 +76,27 @@ class Invoice(Base):
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
 
     # Stripe online payments
-    payment_token = Column(String(36), unique=True, nullable=True, index=True,
-                           default=lambda: str(uuid.uuid4()))
+    payment_token = Column(
+        String(36),
+        unique=True,
+        nullable=True,
+        index=True,
+        default=lambda: str(uuid.uuid4()),
+    )
     stripe_checkout_session_id = Column(String(255), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     customer = relationship("Customer", backref="invoices")
-    lines = relationship("InvoiceLine", back_populates="invoice", cascade="all, delete-orphan",
-                          order_by="InvoiceLine.line_order")
+    lines = relationship(
+        "InvoiceLine",
+        back_populates="invoice",
+        cascade="all, delete-orphan",
+        order_by="InvoiceLine.line_order",
+    )
     transaction = relationship("Transaction", foreign_keys=[transaction_id])
 
 
@@ -83,7 +104,9 @@ class InvoiceLine(Base):
     __tablename__ = "invoice_lines"
 
     id = Column(Integer, primary_key=True, index=True)
-    invoice_id = Column(Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False)
+    invoice_id = Column(
+        Integer, ForeignKey("invoices.id", ondelete="CASCADE"), nullable=False
+    )
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)

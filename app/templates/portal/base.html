@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Employee Portal{% endblock %} — {{ company_name }}</title>
+    <link rel="icon" type="image/png" href="/portal/favicon.ico">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Tahoma, sans-serif;
+            background: #eef1f5;
+            color: #1a1a2e;
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 40px 16px;
+        }
+        .portal-card {
+            background: #ffffff;
+            border: 1px solid #c0c8d0;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 720px;
+            height: fit-content;
+        }
+        .portal-header {
+            background: linear-gradient(180deg, #336699 0%, #003366 100%);
+            color: white;
+            padding: 24px;
+        }
+        .portal-header { display: flex; align-items: center; gap: 16px; }
+        .portal-header .portal-brand { flex: 1; }
+        .portal-header h1 { font-size: 20px; margin-bottom: 4px; }
+        .portal-header .subtitle { font-size: 13px; opacity: 0.85; }
+        .portal-header .company-logo {
+            max-height: 56px; max-width: 140px; background: rgba(255,255,255,0.92);
+            padding: 6px 10px; border-radius: 4px;
+        }
+        .portal-nav {
+            display: flex;
+            flex-wrap: wrap;
+            background: #f4f6f9;
+            border-bottom: 1px solid #d8dee6;
+        }
+        .portal-nav a {
+            padding: 12px 16px;
+            font-size: 13px;
+            font-weight: 600;
+            color: #336699;
+            text-decoration: none;
+            border-bottom: 3px solid transparent;
+        }
+        .portal-nav a:hover { background: #e8edf3; }
+        .portal-nav a.active {
+            color: #003366;
+            border-bottom-color: #003366;
+            background: #ffffff;
+        }
+        .portal-body { padding: 24px; }
+        h2 { font-size: 17px; color: #003366; margin-bottom: 14px; }
+        h3 { font-size: 14px; color: #003366; margin: 20px 0 10px; }
+        p { font-size: 14px; line-height: 1.5; }
+        .data-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        .data-table th, .data-table td {
+            padding: 9px 10px;
+            font-size: 13px;
+            text-align: left;
+            border-bottom: 1px solid #e4e8ee;
+        }
+        .data-table th {
+            color: #4a4a6a;
+            font-weight: 700;
+            background: #f4f6f9;
+        }
+        .data-table td.num, .data-table th.num { text-align: right; }
+        .summary-table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+        .summary-table td {
+            padding: 8px 0;
+            font-size: 14px;
+            border-bottom: 1px solid #eee;
+        }
+        .summary-table td:first-child {
+            color: #4a4a6a;
+            font-weight: 600;
+            width: 42%;
+        }
+        .banner {
+            padding: 12px 14px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 16px;
+        }
+        .banner-success { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+        .banner-error { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+        form.portal-form { margin-top: 8px; }
+        .field { margin-bottom: 14px; }
+        .field label {
+            display: block;
+            font-size: 13px;
+            font-weight: 600;
+            color: #4a4a6a;
+            margin-bottom: 4px;
+        }
+        .field input[type=text],
+        .field input[type=number],
+        .field input[type=date],
+        .field select,
+        .field textarea {
+            width: 100%;
+            padding: 8px 10px;
+            font-size: 14px;
+            border: 1px solid #c0c8d0;
+            border-radius: 4px;
+            background: #ffffff;
+            color: #1a1a2e;
+        }
+        .field textarea { min-height: 70px; resize: vertical; }
+        .field.checkbox label { display: flex; align-items: center; gap: 8px; }
+        .field.checkbox input { width: auto; }
+        .field-row { display: flex; gap: 12px; }
+        .field-row .field { flex: 1; }
+        .btn {
+            display: inline-block;
+            padding: 11px 20px;
+            background: linear-gradient(180deg, #336699 0%, #003366 100%);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .btn:hover { background: linear-gradient(180deg, #4a7fb5 0%, #336699 100%); }
+        .pill {
+            display: inline-block;
+            padding: 2px 9px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: capitalize;
+        }
+        .pill-pending { background: #fef3c7; color: #92400e; }
+        .pill-approved { background: #d1fae5; color: #065f46; }
+        .pill-denied { background: #fee2e2; color: #991b1b; }
+        .pill-active { background: #dbeafe; color: #1e40af; }
+        .pill-inactive { background: #e4e8ee; color: #4a4a6a; }
+        .muted { color: #7a7a9a; font-size: 13px; }
+        .portal-footer {
+            padding: 12px 24px;
+            text-align: center;
+            font-size: 11px;
+            color: #7a7a9a;
+            border-top: 1px solid #eee;
+        }
+        a.link { color: #336699; font-weight: 600; }
+    </style>
+</head>
+<body>
+    <div class="portal-card">
+        <div class="portal-header">
+            <div class="portal-brand">
+                <h1>{{ company_name }}</h1>
+                <div class="subtitle">Employee Portal &middot; {{ emp.full_name }}</div>
+            </div>
+            {% if company_logo_url %}
+            <img class="company-logo" src="{{ company_logo_url }}" alt="{{ company_name }} logo">
+            {% endif %}
+        </div>
+        <nav class="portal-nav">
+            <a href="/portal/"{% if active == 'dashboard' %} class="active"{% endif %}>Dashboard</a>
+            <a href="/portal/paystubs"{% if active == 'paystubs' %} class="active"{% endif %}>Pay Stubs</a>
+            <a href="/portal/profile"{% if active == 'profile' %} class="active"{% endif %}>Profile</a>
+            <a href="/portal/bank"{% if active == 'bank' %} class="active"{% endif %}>Bank</a>
+            <a href="/portal/pto"{% if active == 'pto' %} class="active"{% endif %}>Time Off</a>
+            <form method="post" action="/portal/logout" style="margin-left:auto;display:inline">
+                <button type="submit" style="background:none;border:none;padding:12px 16px;font-size:13px;font-weight:600;color:#336699;cursor:pointer">Log out</button>
+            </form>
+        </nav>
+        <div class="portal-body">
+            {% block content %}{% endblock %}
+        </div>
+        <div class="portal-footer">Powered by Slowbooks Pro 2026</div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,100 @@
+{% extends "portal/base.html" %}
+{% set active = 'pto' %}
+{% block title %}Time Off{% endblock %}
+
+{% block content %}
+<h2>Time Off</h2>
+
+{% if saved %}
+<div class="banner banner-success">Your time-off request has been submitted.</div>
+{% endif %}
+
+<h3>Balances</h3>
+{% if accruals %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Policy</th>
+            <th>Type</th>
+            <th class="num">Balance</th>
+            <th class="num">Accrued YTD</th>
+            <th class="num">Used YTD</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for accrual, policy in accruals %}
+        <tr>
+            <td>{{ policy.name }}</td>
+            <td style="text-transform: capitalize;">{{ policy.pto_type.value }}</td>
+            <td class="num">{{ "%.2f"|format(accrual.balance|float) }}</td>
+            <td class="num">{{ "%.2f"|format(accrual.accrued_ytd|float) }}</td>
+            <td class="num">{{ "%.2f"|format(accrual.used_ytd|float) }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">You have no PTO accrual balances.</p>
+{% endif %}
+
+<h3>My Requests</h3>
+{% if requests %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Dates</th>
+            <th>Type</th>
+            <th class="num">Hours</th>
+            <th>Status</th>
+            <th>Notes</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for req in requests %}
+        <tr>
+            <td>{{ req.start_date }} &ndash; {{ req.end_date }}</td>
+            <td style="text-transform: capitalize;">{{ req.pto_type.value }}</td>
+            <td class="num">{{ "%.2f"|format(req.hours|float) }}</td>
+            <td><span class="pill pill-{{ req.status.value }}">{{ req.status.value }}</span></td>
+            <td>{{ req.notes or '—' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">You have no time-off requests.</p>
+{% endif %}
+
+<h3>Request Time Off</h3>
+<form class="portal-form" method="post" action="/portal/pto">
+    <div class="field-row">
+        <div class="field">
+            <label for="start_date">Start Date</label>
+            <input type="date" id="start_date" name="start_date" required>
+        </div>
+        <div class="field">
+            <label for="end_date">End Date</label>
+            <input type="date" id="end_date" name="end_date" required>
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label for="hours">Hours</label>
+            <input type="number" step="0.25" min="0" id="hours" name="hours" value="0" required>
+        </div>
+        <div class="field">
+            <label for="pto_type">Type</label>
+            <select id="pto_type" name="pto_type">
+                {% for pt in pto_types %}
+                <option value="{{ pt.value }}">{{ pt.value|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <div class="field">
+        <label for="notes">Notes</label>
+        <textarea id="notes" name="notes" placeholder="Optional"></textarea>
+    </div>
+    <button type="submit" class="btn">Submit Request</button>
+</form>
+{% endblock %}

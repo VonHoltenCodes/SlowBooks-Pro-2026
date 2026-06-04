@@ -19,7 +19,10 @@ const CustomersPage = {
             </div>`;
 
         if (customers.length === 0) {
-            html += `<div class="empty-state"><p>No customers yet</p></div>`;
+            html += `<div class="empty-state">
+                <p>No customers yet.</p>
+                <button class="btn btn-primary" onclick="CustomersPage.showForm()" style="margin-top:10px;">+ Create your first customer</button>
+            </div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
@@ -28,7 +31,7 @@ const CustomersPage = {
                 </tr></thead>
                 <tbody id="customer-tbody">`;
             for (const c of customers) {
-                html += `<tr class="clickable customer-row" data-name="${escapeHtml(c.name).toLowerCase()}">
+                html += `<tr class="clickable customer-row" data-name="${escapeHtml(c.name).toLowerCase()}" onclick="CustomersPage.showDetails(${c.id})">
                     <td><strong>${escapeHtml(c.name)}</strong></td>
                     <td>${escapeHtml(c.company) || ''}</td>
                     <td>${escapeHtml(c.phone) || ''}</td>
@@ -49,6 +52,165 @@ const CustomersPage = {
         $$('.customer-row').forEach(row => {
             row.style.display = row.dataset.name.includes(q) ? '' : 'none';
         });
+    },
+
+    // -- Customer details modal --------------------------------------------
+    // Row-click destination. Shows everything we know about the customer
+    // on one screen: contact, addresses, terms, NOTES (editable inline),
+    // any reseller permits attached, the last 10 invoices, the last 10
+    // payments. Avoid the "click here to see notes, click here to see
+    // invoices" gated-screen pattern.
+    async showDetails(id) {
+        let customer, invoices, payments, permits;
+        try {
+            [customer, invoices, payments, permits] = await Promise.all([
+                API.get(`/customers/${id}`),
+                API.get(`/invoices?customer_id=${id}`).catch(() => []),
+                API.get(`/payments?customer_id=${id}`).catch(() => []),
+                API.get(`/reseller-permits?entity_type=customer&entity_id=${id}`).catch(() => []),
+            ]);
+        } catch (err) {
+            toast(err.message, 'error');
+            return;
+        }
+
+        const fullAddr = (a1, a2, city, state, zip) => {
+            const parts = [a1, a2].filter(Boolean).join(', ');
+            const line2 = [city, state, zip].filter(Boolean).join(' ');
+            return [parts, line2].filter(Boolean).join('\n');
+        };
+        const bill = fullAddr(customer.bill_address1, customer.bill_address2, customer.bill_city, customer.bill_state, customer.bill_zip);
+        const ship = fullAddr(customer.ship_address1, customer.ship_address2, customer.ship_city, customer.ship_state, customer.ship_zip);
+
+        // -- Permits sub-section: status badge + state + verify link --
+        const permitsBody = permits.length === 0
+            ? '<p style="color:#888;font-size:13px;margin:0">None on file. <a href="#/reseller-permits" onclick="closeModal()">Add one</a>.</p>'
+            : '<ul style="margin:0;padding-left:18px;font-size:13px">' + permits.map(p => {
+                let badge = '<span style="color:#1f7a36">Active</span>';
+                if (p.is_expired) badge = '<span style="color:#a4242b;font-weight:600">EXPIRED</span>';
+                else if (p.days_to_expire !== null && p.days_to_expire <= 30) badge = `<span style="color:#a8761f;font-weight:600">Expires in ${p.days_to_expire}d</span>`;
+                else if (!p.is_active) badge = '<span style="color:#888">Inactive</span>';
+                const link = p.verification_url ? ` · <a href="${escapeHtml(p.verification_url)}" target="_blank" rel="noopener">Open ${escapeHtml(p.jurisdiction)} lookup</a>` : '';
+                return `<li>${escapeHtml(p.jurisdiction)} · <code>${escapeHtml(p.permit_number)}</code> · ${badge}${p.expires_at ? ` · exp ${escapeHtml(p.expires_at)}` : ''}${link}</li>`;
+            }).join('') + '</ul>';
+
+        // -- Invoices + payments — last 10 each, click-through to detail --
+        const invRows = invoices.slice(0, 10).map(i =>
+            `<tr style="cursor:pointer" onclick="closeModal();App.navigate('#/invoices')">
+                <td>${escapeHtml(i.invoice_number || '')}</td>
+                <td>${escapeHtml(i.date || '')}</td>
+                <td class="amount">${formatCurrency(i.total)}</td>
+                <td>${escapeHtml(i.status || '')}</td>
+            </tr>`).join('');
+        const payRows = payments.slice(0, 10).map(p =>
+            `<tr>
+                <td>${escapeHtml(p.date || '')}</td>
+                <td>${escapeHtml(p.payment_method || '')}</td>
+                <td>${escapeHtml(p.reference || '')}</td>
+                <td class="amount">${formatCurrency(p.amount)}</td>
+            </tr>`).join('');
+
+        const html = `
+            <!-- header: name + balance + quick actions -->
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:12px">
+                <div>
+                    <h3 style="margin:0;font-size:18px">${escapeHtml(customer.name)}</h3>
+                    ${customer.company ? `<div style="color:#666;font-size:13px">${escapeHtml(customer.company)}</div>` : ''}
+                    <div style="margin-top:6px;font-size:12px;color:#888">
+                        ${customer.is_active === false ? '<span style="color:#a4242b">Inactive</span>' : '<span style="color:#1f7a36">Active</span>'}
+                        &nbsp;·&nbsp; Terms: ${escapeHtml(customer.terms || 'Net 30')}
+                        ${customer.credit_limit ? ` · Credit limit: ${formatCurrency(customer.credit_limit)}` : ''}
+                        ${customer.tax_id ? ` · Tax ID: <code>${escapeHtml(customer.tax_id)}</code>` : ''}
+                    </div>
+                </div>
+                <div style="text-align:right">
+                    <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em">Balance</div>
+                    <div style="font-size:22px;font-weight:700;color:${parseFloat(customer.balance) > 0 ? '#a4242b' : '#1a1a2e'}">
+                        ${formatCurrency(customer.balance)}
+                    </div>
+                    <div style="margin-top:8px">
+                        <button class="btn btn-sm btn-primary" onclick="closeModal();InvoicesPage.showForm(null,${id})">New Invoice</button>
+                        <button class="btn btn-sm btn-secondary" onclick="closeModal();PaymentsPage.showForm(null,${id})">Receive Payment</button>
+                        <button class="btn btn-sm btn-secondary" onclick="CustomersPage.showForm(${id})">Edit</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- contact + addresses + permits in 3 columns -->
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:14px">
+                <div>
+                    <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Contact</h4>
+                    <div style="font-size:13px">
+                        ${customer.email ? `<div>📧 ${escapeHtml(customer.email)}</div>` : ''}
+                        ${customer.phone ? `<div>☎ ${escapeHtml(customer.phone)}</div>` : ''}
+                        ${customer.mobile ? `<div>📱 ${escapeHtml(customer.mobile)}</div>` : ''}
+                        ${customer.website ? `<div>🌐 ${escapeHtml(customer.website)}</div>` : ''}
+                        ${!customer.email && !customer.phone && !customer.mobile ? '<span style="color:#888">No contact info</span>' : ''}
+                    </div>
+                </div>
+                <div>
+                    <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Billing</h4>
+                    <pre style="font-size:13px;font-family:inherit;white-space:pre-wrap;margin:0">${escapeHtml(bill || '—')}</pre>
+                </div>
+                <div>
+                    <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Shipping</h4>
+                    <pre style="font-size:13px;font-family:inherit;white-space:pre-wrap;margin:0">${escapeHtml(ship || (bill ? '(same as billing)' : '—'))}</pre>
+                </div>
+            </div>
+
+            <!-- notes (inline editable) -->
+            <div style="margin-bottom:14px">
+                <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0;display:flex;justify-content:space-between">
+                    <span>Notes</span>
+                    <span id="cust-note-status-${id}" style="font-size:10px;color:#888;text-transform:none;letter-spacing:0;font-weight:normal"></span>
+                </h4>
+                <textarea id="cust-notes-${id}" rows="3" style="width:100%;font-size:13px;font-family:inherit"
+                    placeholder="Internal notes about this customer — visible to everyone with admin access."
+                    onblur="CustomersPage._saveNotes(${id}, this.value)">${escapeHtml(customer.notes || '')}</textarea>
+            </div>
+
+            <!-- reseller permits -->
+            <div style="margin-bottom:14px">
+                <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Reseller permits</h4>
+                ${permitsBody}
+            </div>
+
+            <!-- recent invoices + payments side by side -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                <div>
+                    <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Recent invoices (${invoices.length})</h4>
+                    ${invoices.length === 0 ? '<p style="color:#888;font-size:13px;margin:0">No invoices yet</p>' :
+                        `<table class="data-table" style="font-size:12px">
+                            <thead><tr><th>#</th><th>Date</th><th class="amount">Total</th><th>Status</th></tr></thead>
+                            <tbody>${invRows}</tbody>
+                        </table>`}
+                </div>
+                <div>
+                    <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Recent payments (${payments.length})</h4>
+                    ${payments.length === 0 ? '<p style="color:#888;font-size:13px;margin:0">No payments yet</p>' :
+                        `<table class="data-table" style="font-size:12px">
+                            <thead><tr><th>Date</th><th>Method</th><th>Ref</th><th class="amount">Amount</th></tr></thead>
+                            <tbody>${payRows}</tbody>
+                        </table>`}
+                </div>
+            </div>`;
+
+        openModal(`Customer — ${customer.name}`, html);
+    },
+
+    async _saveNotes(id, value) {
+        const status = document.getElementById(`cust-note-status-${id}`);
+        if (status) status.textContent = 'saving…';
+        try {
+            await API.put(`/customers/${id}`, { notes: value });
+            if (status) {
+                status.textContent = '✓ saved';
+                setTimeout(() => { if (status) status.textContent = ''; }, 1500);
+            }
+        } catch (err) {
+            if (status) status.textContent = '⚠ save failed';
+            toast(err.message, 'error');
+        }
     },
 
     async showForm(id = null) {

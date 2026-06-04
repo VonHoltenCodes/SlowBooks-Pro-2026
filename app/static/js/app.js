@@ -40,6 +40,13 @@ const App = {
         '/companies':     { page: 'companies',       label: 'Companies',          render: () => CompaniesPage.render() },
         '/employees':     { page: 'employees',       label: 'Employees',          render: () => EmployeesPage.render() },
         '/payroll':       { page: 'payroll',         label: 'Payroll',            render: () => PayrollPage.render() },
+        // Tier 1/2/3: Payroll & HR
+        '/hr/onboarding':   { page: 'hr-onboarding',   label: 'Onboarding',       render: () => OnboardingPage.render() },
+        '/hr/time-entries': { page: 'hr-time-entries', label: 'Time Entries',      render: () => TimeEntriesPage.render() },
+        '/hr/pto':          { page: 'hr-pto',           label: 'Time Off',         render: () => PTOPage.render() },
+        '/hr/deductions':   { page: 'hr-deductions',   label: 'Deductions',        render: () => DeductionsPage.render() },
+        '/hr/tax-forms':    { page: 'hr-tax-forms',    label: 'Tax Forms',         render: () => TaxFormsPage.render() },
+        '/reseller-permits':{ page: 'reseller-permits',label: 'Reseller Permits', render: () => ResellerPermitsPage.render() },
         // Phase 9: Analytics (real-time business intelligence)
         '/analytics':     { page: 'analytics',       label: 'Analytics & AI',     render: () => AnalyticsPage.render() },
         // Phase 9: Forum Bug Fixes & Missing Features

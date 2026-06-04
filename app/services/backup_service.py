@@ -54,6 +54,7 @@ def _parse_db_url(url: str) -> dict:
     """Parse PostgreSQL connection URL into components."""
     # postgresql://user:pass@host:port/dbname
     from urllib.parse import urlparse
+
     parsed = urlparse(url)
     return {
         "host": parsed.hostname or "localhost",
@@ -75,10 +76,24 @@ def create_backup(db: Session, notes: str = None, backup_type: str = "manual") -
 
     try:
         result = subprocess.run(
-            ["pg_dump", "-h", params["host"], "-p", params["port"],
-             "-U", params["user"], "-F", "c", "-f", str(filepath), params["dbname"]],
+            [
+                "pg_dump",
+                "-h",
+                params["host"],
+                "-p",
+                params["port"],
+                "-U",
+                params["user"],
+                "-F",
+                "c",
+                "-f",
+                str(filepath),
+                params["dbname"],
+            ],
             env={**dict(__import__("os").environ), **env},
-            capture_output=True, text=True, timeout=300,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         if result.returncode != 0:
             return {"success": False, "error": result.stderr}
@@ -86,8 +101,10 @@ def create_backup(db: Session, notes: str = None, backup_type: str = "manual") -
         file_size = filepath.stat().st_size
 
         backup = Backup(
-            filename=filename, file_size=file_size,
-            backup_type=backup_type, notes=notes,
+            filename=filename,
+            file_size=file_size,
+            backup_type=backup_type,
+            notes=notes,
         )
         db.add(backup)
         db.commit()
@@ -97,7 +114,10 @@ def create_backup(db: Session, notes: str = None, backup_type: str = "manual") -
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Backup timed out"}
     except FileNotFoundError:
-        return {"success": False, "error": "pg_dump not found. Is PostgreSQL client installed?"}
+        return {
+            "success": False,
+            "error": "pg_dump not found. Is PostgreSQL client installed?",
+        }
 
 
 def restore_backup(db: Session, filename: str) -> dict:
@@ -121,11 +141,24 @@ def restore_backup(db: Session, filename: str) -> dict:
 
     try:
         result = subprocess.run(
-            ["pg_restore", "-h", params["host"], "-p", params["port"],
-             "-U", params["user"], "-d", params["dbname"], "--clean", "--if-exists",
-             str(filepath)],
+            [
+                "pg_restore",
+                "-h",
+                params["host"],
+                "-p",
+                params["port"],
+                "-U",
+                params["user"],
+                "-d",
+                params["dbname"],
+                "--clean",
+                "--if-exists",
+                str(filepath),
+            ],
             env={**dict(__import__("os").environ), **env},
-            capture_output=True, text=True, timeout=300,
+            capture_output=True,
+            text=True,
+            timeout=300,
         )
         # pg_restore may return non-zero even on partial success
         if result.returncode != 0 and "error" in result.stderr.lower():
@@ -143,9 +176,11 @@ def list_backup_files() -> list[dict]:
     """List all backup files in the backup directory."""
     files = []
     for f in sorted(BACKUP_DIR.glob("slowbooks_*.sql"), reverse=True):
-        files.append({
-            "filename": f.name,
-            "file_size": f.stat().st_size,
-            "created": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
-        })
+        files.append(
+            {
+                "filename": f.name,
+                "file_size": f.stat().st_size,
+                "created": datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
+            }
+        )
     return files

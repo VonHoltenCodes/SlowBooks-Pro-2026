@@ -117,7 +117,7 @@ const AnalyticsPage = {
             <div class="analytics-kpi-grid">
                 <div class="analytics-kpi"><div class="analytics-kpi-label">Revenue</div><div class="analytics-kpi-value kpi-green">${formatCurrency(totalRevenue)}</div></div>
                 <div class="analytics-kpi"><div class="analytics-kpi-label">Expenses</div><div class="analytics-kpi-value kpi-red">${formatCurrency(totalExpenses)}</div></div>
-                <div class="analytics-kpi"><div class="analytics-kpi-label">DSO (Days)</div><div class="analytics-kpi-value kpi-blue">${dso.toFixed(1)}</div></div>
+                <div class="analytics-kpi" title="Days Sales Outstanding — average number of days between invoicing a customer and collecting the payment. Lower is better. Computed as (open A/R balance ÷ last-30-day paid revenue) × 30."><div class="analytics-kpi-label">DSO (Days)</div><div class="analytics-kpi-value kpi-blue">${dso.toFixed(1)}</div></div>
                 <div class="analytics-kpi"><div class="analytics-kpi-label">Margin %</div><div class="analytics-kpi-value kpi-purple">${margin.toFixed(1)}%</div></div>
             </div>
 

@@ -30,30 +30,33 @@
                 documentation (QBFC 5.0), and 14 years as a paying customer.<br>
                 Intuit's activation servers died ~2017. The hard drive died in 2024.
             </div>
-            <button class="splash-btn" onclick="document.getElementById('splash').classList.add('hidden')">OK</button>
+            <button class="splash-btn" id="splash-dismiss">OK</button>
         </div>
     </div>
 
     <div id="app">
+        <!-- Skip link for keyboard users — first tab stop, lets them jump
+             past the topbar + sidebar straight into page content. -->
+        <a href="#page-content" class="skip-link">Skip to main content</a>
         <!-- Toolbar (CQBMenuBar + CQBToolBar) -->
         <div id="topbar">
             <div class="topbar-brand">Slowbooks Pro <span>2026</span></div>
             <div class="tb-sep"></div>
-            <button class="tb-btn" onclick="App.navigate('#/')">Home</button>
-            <button class="tb-btn" onclick="CustomersPage.showForm()">New Customer</button>
-            <button class="tb-btn" onclick="InvoicesPage.showForm()">Create Invoice</button>
-            <button class="tb-btn" onclick="PaymentsPage.showForm()">Receive Payment</button>
-            <button class="tb-btn" onclick="App.navigate('#/quick-entry')">Quick Entry</button>
+            <button class="tb-btn" data-nav="#/">Home</button>
+            <button class="tb-btn" data-action="CustomersPage.showForm">New Customer</button>
+            <button class="tb-btn" data-action="InvoicesPage.showForm">Create Invoice</button>
+            <button class="tb-btn" data-action="PaymentsPage.showForm">Receive Payment</button>
+            <button class="tb-btn" data-nav="#/quick-entry">Quick Entry</button>
             <div class="tb-sep"></div>
-            <button class="tb-btn" onclick="App.navigate('#/reports')">Reports</button>
+            <button class="tb-btn" data-nav="#/reports">Reports</button>
             <div class="tb-sep"></div>
-            <input type="text" id="global-search" class="tb-search" placeholder="Search customers, invoices..."
-                   oninput="App.globalSearch(this.value)" onkeydown="if(event.key==='Escape'){this.value='';App.globalSearch('');}">
+            <input type="text" id="global-search" class="tb-search" placeholder="Search customers, invoices...">
             <div id="search-results" class="search-dropdown hidden"></div>
             <div class="topbar-right">
-                <button class="tb-btn" id="theme-toggle" onclick="App.toggleTheme()" title="Toggle Dark Mode">&#9788;</button>
+                <button class="tb-btn" id="theme-toggle" title="Toggle Dark Mode">&#9788;</button>
                 <div class="topbar-clock" id="topbar-clock"></div>
-                <button class="tb-btn" onclick="App.showAbout()">About</button>
+                <button class="tb-btn" id="about-btn">About</button>
+                <button class="tb-btn" id="logout-btn" title="Sign out">Sign Out</button>
             </div>
         </div>
 
@@ -99,6 +102,20 @@
                         <span class="nav-icon">&#9786;</span> Employees</a></li>
                     <li><a href="#/payroll" class="nav-link" data-page="payroll">
                         <span class="nav-icon">&#9733;</span> Payroll</a></li>
+
+                    <li class="nav-section">Payroll &amp; HR</li>
+                    <li><a href="#/hr/onboarding" class="nav-link" data-page="hr-onboarding">
+                        <span class="nav-icon">&#9654;</span> Onboarding</a></li>
+                    <li><a href="#/hr/time-entries" class="nav-link" data-page="hr-time-entries">
+                        <span class="nav-icon">&#9201;</span> Time Entries</a></li>
+                    <li><a href="#/hr/pto" class="nav-link" data-page="hr-pto">
+                        <span class="nav-icon">&#9788;</span> Time Off</a></li>
+                    <li><a href="#/hr/deductions" class="nav-link" data-page="hr-deductions">
+                        <span class="nav-icon">&#8722;</span> Deductions</a></li>
+                    <li><a href="#/hr/tax-forms" class="nav-link" data-page="hr-tax-forms">
+                        <span class="nav-icon">&#9783;</span> Tax Forms</a></li>
+                    <li><a href="#/reseller-permits" class="nav-link" data-page="reseller-permits">
+                        <span class="nav-icon">&#9982;</span> Reseller Permits</a></li>
 
                     <li class="nav-section">Banking</li>
                     <li><a href="#/banking" class="nav-link" data-page="banking">
@@ -167,7 +184,7 @@
         <div id="modal" class="modal">
             <div class="modal-header">
                 <h2 id="modal-title"></h2>
-                <button class="modal-close" onclick="closeModal()">&times;</button>
+                <button class="modal-close" id="modal-close-btn" aria-label="Close dialog" type="button">&times;</button>
             </div>
             <div id="modal-body"></div>
         </div>
@@ -204,6 +221,12 @@
     <script src="/static/js/companies.js"></script>
     <script src="/static/js/employees.js"></script>
     <script src="/static/js/payroll.js"></script>
+    <script src="/static/js/onboarding.js"></script>
+    <script src="/static/js/time_entries.js"></script>
+    <script src="/static/js/pto.js"></script>
+    <script src="/static/js/deductions.js"></script>
+    <script src="/static/js/tax_forms.js"></script>
+    <script src="/static/js/reseller_permits.js"></script>
     <!-- Phase 9: Analytics (Chart.js is self-hosted, no CDN) -->
     <script src="/static/js/chart.umd.js"></script>
     <script src="/static/js/analytics.js"></script>
@@ -219,5 +242,7 @@
     <script src="/static/js/budgets.js"></script>
     <!-- App must be last -->
     <script src="/static/js/app.js"></script>
+    <!-- Static-page event wiring (replaces what used to be inline onclick=) -->
+    <script src="/static/js/bootstrap.js"></script>
 </body>
 </html>

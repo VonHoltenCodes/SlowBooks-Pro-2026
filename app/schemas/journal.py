@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date as dt_date
 from decimal import Decimal
 from typing import Optional
 
@@ -23,7 +23,7 @@ class JournalLineResponse(BaseModel):
 
 
 class JournalEntryCreate(BaseModel):
-    date: date
+    date: dt_date
     description: str
     reference: Optional[str] = None
     lines: list[JournalLineCreate]
@@ -31,7 +31,7 @@ class JournalEntryCreate(BaseModel):
 
 class JournalEntryResponse(BaseModel):
     id: int
-    date: date
+    date: dt_date
     description: str
     reference: str = ""
     source_type: str = ""

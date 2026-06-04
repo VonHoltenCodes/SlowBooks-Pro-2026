@@ -13,10 +13,12 @@ from decimal import Decimal
 from pathlib import Path
 
 # ---- Environment overrides (must run BEFORE any app imports) ----
+os.environ["APP_DEBUG"] = "true"  # Disable production security checks in test
 os.environ["SESSION_SECRET_KEY"] = "test-secret-key-not-for-production"
 os.environ["ALLOWED_ORIGINS"] = "http://testserver,http://localhost:3001"
 os.environ["CORS_ALLOW_ORIGINS"] = "http://testserver,http://localhost:3001"
 os.environ["RATE_LIMIT_ENABLED"] = "0"
+os.environ["SESSION_IDLE_TIMEOUT_SECONDS"] = "0"  # Disable idle expiry in tests
 # Point the app at an in-memory DB by default; fixtures override per-test.
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
@@ -28,36 +30,46 @@ from sqlalchemy import create_engine  # noqa: E402
 from sqlalchemy.orm import sessionmaker  # noqa: E402
 from sqlalchemy.pool import StaticPool  # noqa: E402
 
+# Import all model modules so Base.metadata sees every table before create_all.
+# Without these imports, tables defined in unimported modules wouldn't be created.
+from app.models import (  # noqa: F401
+    accounts,
+    attachments,
+    audit,
+    auth as auth_model,
+    backups,
+    banking,
+    bank_accounts,
+    bank_rules,
+    bills,
+    budgets,
+    companies,
+    contacts,
+    credit_memos,
+    deductions,
+    document_audit as document_audit_model,
+    email_log,
+    email_templates,
+    portal_access as portal_access_model,
+    reseller_permit as reseller_permit_model,
+    estimates,
+    hr,
+    invoices,
+    items,
+    payments,
+    payroll,
+    pto,
+    purchase_orders,
+    qbo_mapping,
+    recurring,
+    settings as settings_model,
+    tax,
+    time_entries,
+    transactions,
+)
 import app.database as db_module  # noqa: E402
 from app.database import Base, get_db  # noqa: E402
 from app.seed.chart_of_accounts import CHART_OF_ACCOUNTS  # noqa: E402
-
-# Import all model modules so Base.metadata knows about every table
-from app.models import accounts as _m_accounts  # noqa: F401,E402
-from app.models import attachments as _m_attachments  # noqa: F401,E402
-from app.models import audit as _m_audit  # noqa: F401,E402
-from app.models import backups as _m_backups  # noqa: F401,E402
-from app.models import bank_rules as _m_bank_rules  # noqa: F401,E402
-from app.models import banking as _m_banking  # noqa: F401,E402
-from app.models import bills as _m_bills  # noqa: F401,E402
-from app.models import budgets as _m_budgets  # noqa: F401,E402
-from app.models import companies as _m_companies  # noqa: F401,E402
-from app.models import contacts as _m_contacts  # noqa: F401,E402
-from app.models import credit_memos as _m_credit_memos  # noqa: F401,E402
-from app.models import email_log as _m_email_log  # noqa: F401,E402
-from app.models import email_templates as _m_email_templates  # noqa: F401,E402
-from app.models import estimates as _m_estimates  # noqa: F401,E402
-from app.models import invoices as _m_invoices  # noqa: F401,E402
-from app.models import items as _m_items  # noqa: F401,E402
-from app.models import payments as _m_payments  # noqa: F401,E402
-from app.models import payroll as _m_payroll  # noqa: F401,E402
-from app.models import purchase_orders as _m_purchase_orders  # noqa: F401,E402
-from app.models import qbo_mapping as _m_qbo_mapping  # noqa: F401,E402
-from app.models import recurring as _m_recurring  # noqa: F401,E402
-from app.models import settings as _m_settings  # noqa: F401,E402
-from app.models import tax as _m_tax  # noqa: F401,E402
-from app.models import transactions as _m_transactions  # noqa: F401,E402
-from app.models import saved_reports as _m_saved_reports  # noqa: F401,E402
 
 from app.main import app  # noqa: E402
 
@@ -69,6 +81,8 @@ from app.main import app  # noqa: E402
 @pytest.fixture
 def db_engine():
     """Per-test in-memory SQLite engine with full schema."""
+    from app.services.audit import register_audit_hooks
+
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -76,18 +90,30 @@ def db_engine():
     )
     Base.metadata.create_all(bind=engine)
     # Point the app module at this engine so SessionLocal-based code (audit
-    # hooks, etc.) also land in the same DB.
+    # hooks, etc.) also land in the same DB. The audit `after_flush` hook
+    # is registered against the session factory, so we must re-register it
+    # on the new factory — otherwise the audit_log mechanism is silently
+    # bypassed in tests.
     db_module.engine = engine
     db_module.SessionLocal = sessionmaker(
         autocommit=False, autoflush=False, bind=engine
     )
+    register_audit_hooks(db_module.SessionLocal)
     yield engine
     engine.dispose()
 
 
 @pytest.fixture
 def TestSession(db_engine):
-    return sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    """Per-test session factory. The `client` fixture wires get_db to this,
+    so any audit hook the production app expects must be re-attached here
+    (the registration in main.py only fires for the original SessionLocal,
+    which conftest replaces above)."""
+    from app.services.audit import register_audit_hooks
+
+    factory = sessionmaker(autocommit=False, autoflush=False, bind=db_engine)
+    register_audit_hooks(factory)
+    return factory
 
 
 @pytest.fixture

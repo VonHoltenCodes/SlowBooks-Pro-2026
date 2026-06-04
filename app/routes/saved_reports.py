@@ -14,14 +14,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.database import get_db
+from app.models.saved_reports import SavedReport
+from app.routes._helpers import get_or_404
+
 # Cap serialized parameters at 64 KB. A saved report is just dates + a
 # handful of IDs — 64K is already a thousand times what it needs.
 # Prevents bloat/DoS via giant JSON payloads.
 _MAX_PARAMS_BYTES = 64 * 1024
-
-from app.database import get_db
-from app.models.saved_reports import SavedReport
-from app.routes._helpers import get_or_404
 
 router = APIRouter(prefix="/api/saved-reports", tags=["saved-reports"])
 
@@ -78,7 +78,9 @@ def _validate_params_size(params: dict) -> None:
     try:
         size = len(json.dumps(params or {}))
     except (TypeError, ValueError):
-        raise HTTPException(status_code=400, detail="parameters must be JSON-serializable")
+        raise HTTPException(
+            status_code=400, detail="parameters must be JSON-serializable"
+        )
     if size > _MAX_PARAMS_BYTES:
         raise HTTPException(
             status_code=400,

@@ -1,4 +1,5 @@
 """Seed the database with Chart of Accounts."""
+
 import sys
 from pathlib import Path
 

@@ -15,7 +15,11 @@ class EmailTemplate(Base):
     name = Column(String(100), unique=True, nullable=False)
     subject_template = Column(String(500), nullable=False)
     body_template = Column(Text, nullable=False)
-    template_type = Column(String(50), nullable=False)  # invoice, payment_receipt, past_due, collection
+    template_type = Column(
+        String(50), nullable=False
+    )  # invoice, payment_receipt, past_due, collection
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

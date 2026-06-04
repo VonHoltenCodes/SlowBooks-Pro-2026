@@ -12,6 +12,12 @@ jobs:
   analyze:
     name: Analyze
     runs-on: ubuntu-latest
+    # CodeQL's analyze step uploads to GitHub code scanning, which requires
+    # Advanced Security — NOT enabled on forks. Running it there fails every
+    # time ("Code scanning is not enabled for this repository"), which is the
+    # red X you see on the fork. Skip on forks; it still runs on the upstream
+    # repo where code scanning is configured.
+    if: ${{ !github.event.repository.fork }}
     permissions:
       actions: read
       contents: read

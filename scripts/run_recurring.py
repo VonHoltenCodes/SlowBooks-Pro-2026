@@ -3,8 +3,10 @@
 Standalone cron script to generate due recurring invoices.
 Add to crontab: 0 6 * * * cd /path/to/bookkeeper && python3 scripts/run_recurring.py
 """
+
 import sys
 from pathlib import Path
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.database import SessionLocal

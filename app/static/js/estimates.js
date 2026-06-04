@@ -16,7 +16,10 @@ const EstimatesPage = {
             </div>`;
 
         if (estimates.length === 0) {
-            html += `<div class="empty-state"><p>No estimates yet</p></div>`;
+            html += `<div class="empty-state">
+                <p>No estimates yet.</p>
+                <button class="btn btn-primary" onclick="EstimatesPage.showForm()" style="margin-top:10px;">+ Create your first estimate</button>
+            </div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>

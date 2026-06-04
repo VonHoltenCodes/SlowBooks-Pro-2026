@@ -24,7 +24,10 @@ const BillsPage = {
             </div>`;
 
         if (bills.length === 0) {
-            html += '<div class="empty-state"><p>No bills entered yet</p></div>';
+            html += `<div class="empty-state">
+                <p>No bills entered yet.</p>
+                <button class="btn btn-primary" onclick="BillsPage.showForm()" style="margin-top:10px;">+ Enter your first bill</button>
+            </div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr><th>Bill #</th><th>Vendor</th><th>Date</th><th>Due</th><th>Status</th>
@@ -298,6 +301,16 @@ const BillsPage = {
             toast('Bills paid');
             closeModal();
             App.navigate('#/bills');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async voidBillPayment(id) {
+        if (!confirm('Void this bill payment? Bill balances will be restored.')) return;
+        try {
+            await API.post(`/bill-payments/${id}/void`);
+            toast('Bill payment voided');
+            closeModal();
+            App.navigate(location.hash);
         } catch (err) { toast(err.message, 'error'); }
     },
 

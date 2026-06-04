@@ -144,3 +144,189 @@ def test_editing_only_tax_rate_keeps_journal_balanced(
     assert (
         dr == cr == Decimal("110.00")
     ), f"journal not updated to match new tax: dr={dr}, cr={cr}, invoice.total={invoice.total}"
+
+
+# ---------------------------------------------------------------------------
+# Due-date computation regression tests.
+#
+# A "Due Date" field + JS auto-calc was added in the UX pass. The SPA now
+# always sends due_date (a value or explicit null). These tests pin the
+# server-side behavior so the two known bugs can't come back:
+#   1. Clearing the field on edit must RECOMPUTE from terms, not persist NULL.
+#   2. "Due on Receipt" must mean same-day, not the old +30 ValueError fallback.
+# ---------------------------------------------------------------------------
+
+from datetime import date as _date  # noqa: E402
+
+
+def test_due_date_helper_terms_math():
+    """The shared _due_date_from_terms helper covers Net N, Due on Receipt,
+    and unknown terms (fallback Net 30)."""
+    from app.routes.invoices import _due_date_from_terms
+
+    base = _date(2026, 4, 1)
+    assert _due_date_from_terms(base, "Net 30") == _date(2026, 5, 1)
+    assert _due_date_from_terms(base, "Net 15") == _date(2026, 4, 16)
+    assert _due_date_from_terms(base, "Due on Receipt") == base  # NOT +30
+    assert _due_date_from_terms(base, "due upon receipt") == base
+    assert _due_date_from_terms(base, "Net 0") == base
+    assert _due_date_from_terms(base, "gibberish") == _date(2026, 5, 1)  # fallback
+    assert _due_date_from_terms(base, None) == _date(2026, 5, 1)
+
+
+def test_create_invoice_due_on_receipt_is_same_day(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Regression: 'Due on Receipt' used to fall through int() ValueError to
+    a 30-day due date. It must be the invoice date."""
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "terms": "Due on Receipt",
+            "tax_rate": "0",
+            "lines": [
+                {"description": "X", "quantity": "1", "rate": "10", "line_order": 0}
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["due_date"] == "2026-04-01"
+
+
+def test_create_invoice_explicit_due_date_wins(
+    client, db_session, seed_accounts, seed_customer
+):
+    """An explicit due_date overrides the terms-derived one."""
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "terms": "Net 30",
+            "due_date": "2026-04-10",
+            "tax_rate": "0",
+            "lines": [
+                {"description": "X", "quantity": "1", "rate": "10", "line_order": 0}
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["due_date"] == "2026-04-10"
+
+
+def test_editing_invoice_with_cleared_due_date_recomputes_not_null(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Regression: the SPA sends due_date=null when the field is cleared.
+    exclude_unset lets the explicit null through; without the fix it would
+    persist as NULL. It must recompute from terms instead."""
+    inv = _create_invoice(client, seed_customer.id, amount="100.00")  # Net 30
+    assert inv["due_date"] == "2026-05-01"
+
+    r = client.put(
+        f"/api/invoices/{inv['id']}",
+        json={"due_date": None, "terms": "Net 30"},
+    )
+    assert r.status_code == 200, r.text
+    # Recomputed from date(2026-04-01) + Net 30, NOT wiped to null.
+    assert r.json()["due_date"] == "2026-05-01"
+
+
+def test_editing_invoice_preserves_explicit_due_date(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Sending a concrete due_date on edit stores that exact date."""
+    inv = _create_invoice(client, seed_customer.id, amount="100.00")
+    r = client.put(
+        f"/api/invoices/{inv['id']}",
+        json={"due_date": "2026-06-15"},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["due_date"] == "2026-06-15"
+
+
+# ---------------------------------------------------------------------------
+# JE rounding regression (enterprise eval CRITICAL):
+# sub-cent unit rates produced an unbalanced journal entry → 500 on create.
+# AR debit used the rounded total while income credits used unrounded qty*rate.
+# ---------------------------------------------------------------------------
+
+
+def test_subcent_rate_invoice_posts_balanced_je(
+    client, db_session, seed_accounts, seed_customer
+):
+    """qty=3 @ rate=1.005 (fuel-style sub-cent price) must create a balanced
+    JE, not 500. Regression for the rounded-debit / unrounded-credit bug."""
+    from app.models.transactions import TransactionLine
+
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "tax_rate": "0",
+            "lines": [
+                {
+                    "description": "fuel",
+                    "quantity": "3",
+                    "rate": "1.005",
+                    "line_order": 0,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text  # was 500 before the fix
+    txn_id = (
+        db_session.query(
+            __import__("app.models.invoices", fromlist=["Invoice"]).Invoice
+        )
+        .filter_by(id=r.json()["id"])
+        .first()
+        .transaction_id
+    )
+    lines = db_session.query(TransactionLine).filter_by(transaction_id=txn_id).all()
+    dr = sum((Decimal(str(l.debit)) for l in lines), Decimal("0"))
+    cr = sum((Decimal(str(l.credit)) for l in lines), Decimal("0"))
+    assert dr == cr, f"journal unbalanced after sub-cent rate: dr={dr} cr={cr}"
+
+
+def test_subcent_rate_invoice_edit_stays_balanced(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The edit path rebuilds the JE via the shared helper — same rounding
+    rule must hold."""
+    from app.models.transactions import TransactionLine
+    from app.models.invoices import Invoice
+
+    inv = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "tax_rate": "0",
+            "lines": [
+                {"description": "x", "quantity": "1", "rate": "10", "line_order": 0}
+            ],
+        },
+    ).json()
+    r = client.put(
+        f"/api/invoices/{inv['id']}",
+        json={
+            "lines": [
+                {
+                    "description": "fuel",
+                    "quantity": "7",
+                    "rate": "2.005",
+                    "line_order": 0,
+                }
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    txn_id = db_session.query(Invoice).filter_by(id=inv["id"]).first().transaction_id
+    lines = db_session.query(TransactionLine).filter_by(transaction_id=txn_id).all()
+    dr = sum((Decimal(str(l.debit)) for l in lines), Decimal("0"))
+    cr = sum((Decimal(str(l.credit)) for l in lines), Decimal("0"))
+    assert dr == cr, f"edit JE unbalanced: dr={dr} cr={cr}"

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page { size: letter; margin: 0.7in 0.8in; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.5; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 24px; }
+    .company-name { font-size: 15pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
+    .company-info { font-size: 9pt; color: #4a4a6a; }
+    .form-title { text-align: right; }
+    .form-title h1 { font-size: 18pt; font-weight: 700; color: #003366; margin: 0; }
+    .form-title .sub { font-size: 8.5pt; color: #666; margin-top: 4px; }
+    h2 { font-size: 10pt; color: #003366; text-transform: uppercase; letter-spacing: 0.04em;
+         border-bottom: 2px solid #003366; padding-bottom: 3px; margin: 20px 0 8px; }
+    table.fields { width: 100%; border-collapse: collapse; }
+    table.fields td { padding: 5px 8px; font-size: 9.5pt; border-bottom: 1px solid #e0e0e0; }
+    table.fields td.label { width: 38%; color: #4a4a6a; font-weight: 600; }
+    .alert { background: #fdecea; color: #a4242b; padding: 8px 12px; border-radius: 4px;
+             font-size: 9pt; font-weight: 700; margin-top: 14px; }
+    .ok { background: #eaf5ec; color: #1f7a36; padding: 8px 12px; border-radius: 4px;
+          font-size: 9pt; margin-top: 14px; }
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center;
+              font-size: 7pt; color: #999; padding: 8px 0; }
+</style>
+</head>
+<body>
+    <div class="header">
+        <div>
+            {% if company_logo_data_uri %}
+            <img src="{{ company_logo_data_uri }}" alt="" style="max-height:54px;max-width:170px;margin-bottom:8px"><br>
+            {% endif %}
+            <div class="company-name">{{ report.employer.name or 'Employer' }}</div>
+            <div class="company-info">
+                {% if report.employer.address %}{{ report.employer.address }}<br>{% endif %}
+                {% if report.employer.ein %}EIN: {{ report.employer.ein }}<br>{% endif %}
+                {% if report.employer.state %}State: {{ report.employer.state }}{% endif %}
+            </div>
+        </div>
+        <div class="form-title">
+            <h1>NEW HIRE REPORT</h1>
+            <div class="sub">State New-Hire Reporting &mdash; required within 20 days of hire</div>
+        </div>
+    </div>
+
+    <h2>Employee</h2>
+    <table class="fields">
+        <tr><td class="label">Name</td><td>{{ report.employee_name }}</td></tr>
+        <tr><td class="label">SSN (last 4)</td><td>***-**-{{ report.ssn_last_four or '____' }}</td></tr>
+        <tr><td class="label">Address</td><td>
+            {{ report.address.address1 or '' }}{% if report.address.address2 %}, {{ report.address.address2 }}{% endif %}<br>
+            {{ report.address.city or '' }}, {{ report.address.state or '' }} {{ report.address.zip or '' }}
+        </td></tr>
+        <tr><td class="label">Work State</td><td>{{ report.work_state or '' }}</td></tr>
+        <tr><td class="label">Date of Hire</td><td>{{ report.hire_date or 'Not set' }}</td></tr>
+        <tr><td class="label">Reporting Deadline</td><td>{{ report.report_deadline or 'N/A' }}</td></tr>
+    </table>
+
+    {% if report.overdue %}
+    <div class="alert">OVERDUE &mdash; this new hire should already have been reported to the state directory.</div>
+    {% else %}
+    <div class="ok">Within the reporting window. File this report with the state new-hire directory.</div>
+    {% endif %}
+
+    <div class="footer">Generated {{ today }} &middot; SlowBooks Pro 2026 &middot; File with your state new-hire reporting agency.</div>
+</body>
+</html>

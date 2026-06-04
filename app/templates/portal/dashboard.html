@@ -1,0 +1,29 @@
+{% extends "portal/base.html" %}
+{% set active = 'dashboard' %}
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<h2>Welcome, {{ emp.first_name }}</h2>
+<p class="muted">Here is a summary of your employment record.</p>
+
+<table class="summary-table">
+    <tr><td>Name</td><td>{{ emp.full_name }}</td></tr>
+    {% if emp.email %}<tr><td>Email</td><td>{{ emp.email }}</td></tr>{% endif %}
+    <tr><td>Pay Type</td><td style="text-transform: capitalize;">{{ emp.pay_type.value }}</td></tr>
+    <tr><td>Pay Frequency</td><td style="text-transform: capitalize;">{{ emp.pay_frequency.value.replace('_', '-') }}</td></tr>
+    {% if emp.hire_date %}<tr><td>Hire Date</td><td>{{ emp.hire_date }}</td></tr>{% endif %}
+    <tr><td>Pay Stubs Available</td><td>{{ stub_count }}</td></tr>
+</table>
+
+<h3>Quick Links</h3>
+<table class="data-table">
+    <tr><td><a class="link" href="/portal/paystubs">View pay stubs</a></td>
+        <td class="muted">Download your processed pay stub PDFs</td></tr>
+    <tr><td><a class="link" href="/portal/profile">Update profile</a></td>
+        <td class="muted">Form W-4 election and mailing address</td></tr>
+    <tr><td><a class="link" href="/portal/bank">Bank accounts</a></td>
+        <td class="muted">Manage direct-deposit accounts</td></tr>
+    <tr><td><a class="link" href="/portal/pto">Time off</a></td>
+        <td class="muted">Check balances and request time off</td></tr>
+</table>
+{% endblock %}

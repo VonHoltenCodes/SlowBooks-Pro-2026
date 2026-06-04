@@ -3,7 +3,6 @@
 # Classic QB "Make Deposits" workflow
 # ============================================================================
 
-from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -37,7 +36,6 @@ def list_pending_deposits(db: Session = Depends(get_db)):
     )
 
     # Also find credits (deposits already made) to exclude net-zero items
-    credit_by_txn = {}
     credit_lines = (
         db.query(TransactionLine)
         .filter(TransactionLine.account_id == uf_id)
@@ -57,15 +55,17 @@ def list_pending_deposits(db: Session = Depends(get_db)):
         if running_credit >= tl.debit:
             running_credit -= tl.debit
             continue
-        results.append(PendingDepositResponse(
-            transaction_line_id=tl.id,
-            transaction_id=txn.id,
-            date=txn.date,
-            description=txn.description or "",
-            reference=txn.reference or "",
-            source_type=txn.source_type or "",
-            amount=float(tl.debit),
-        ))
+        results.append(
+            PendingDepositResponse(
+                transaction_line_id=tl.id,
+                transaction_id=txn.id,
+                date=txn.date,
+                description=txn.description or "",
+                reference=txn.reference or "",
+                source_type=txn.source_type or "",
+                amount=float(tl.debit),
+            )
+        )
 
     return results
 
@@ -74,13 +74,17 @@ def list_pending_deposits(db: Session = Depends(get_db)):
 def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
 
-    bank_account = db.query(Account).filter(Account.id == data.deposit_to_account_id).first()
+    bank_account = (
+        db.query(Account).filter(Account.id == data.deposit_to_account_id).first()
+    )
     if not bank_account:
         raise HTTPException(status_code=404, detail="Bank account not found")
 
     uf_id = get_undeposited_funds_id(db)
     if not uf_id:
-        raise HTTPException(status_code=400, detail="Undeposited Funds account not found")
+        raise HTTPException(
+            status_code=400, detail="Undeposited Funds account not found"
+        )
 
     total = Decimal(str(data.total))
     if total <= 0:
@@ -102,8 +106,11 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
     ]
 
     txn = create_journal_entry(
-        db, data.date, f"Deposit to {bank_account.name}",
-        journal_lines, source_type="deposit",
+        db,
+        data.date,
+        f"Deposit to {bank_account.name}",
+        journal_lines,
+        source_type="deposit",
         reference=data.reference or "",
     )
 

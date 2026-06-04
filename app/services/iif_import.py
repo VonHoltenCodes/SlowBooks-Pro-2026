@@ -18,20 +18,25 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy.orm import Session
 
-logger = logging.getLogger(__name__)
-
 from app.models.accounts import Account, AccountType
 from app.models.contacts import Customer, Vendor
 from app.models.items import Item, ItemType
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
-from app.services.accounting import create_journal_entry, get_ar_account_id, get_sales_tax_account_id, get_default_income_account_id
+from app.services.accounting import (
+    _q,
+    create_journal_entry,
+    get_ar_account_id,
+    get_default_income_account_id,
+)
 
+logger = logging.getLogger(__name__)
 
 # ============================================================================
 # IIF Parser
 # ============================================================================
+
 
 def parse_iif(content: str) -> dict:
     """Parse IIF file content into structured sections.
@@ -190,9 +195,7 @@ def _find_account(db: Session, name: str) -> Account:
         return acct
 
     # 2. Case-insensitive match
-    acct = db.query(Account).filter(
-        Account.name.ilike(name)
-    ).first()
+    acct = db.query(Account).filter(Account.name.ilike(name)).first()
     if acct:
         return acct
 
@@ -241,6 +244,7 @@ _IIF_TO_ITEM_TYPE = {
 # ============================================================================
 # Import Functions
 # ============================================================================
+
 
 def import_accounts(db: Session, rows: list) -> dict:
     """Import account rows from IIF into Slowbooks.
@@ -379,48 +383,60 @@ def _create_opening_balance_entry(db: Session, balances: list) -> dict:
     total = Decimal("0")
     for acct_id, amount in balances:
         if amount > 0:
-            lines.append({
-                "account_id": acct_id,
-                "debit": amount,
-                "credit": Decimal("0"),
-                "description": "Opening balance (IIF import)",
-            })
+            lines.append(
+                {
+                    "account_id": acct_id,
+                    "debit": amount,
+                    "credit": Decimal("0"),
+                    "description": "Opening balance (IIF import)",
+                }
+            )
         else:
-            lines.append({
-                "account_id": acct_id,
-                "debit": Decimal("0"),
-                "credit": -amount,
-                "description": "Opening balance (IIF import)",
-            })
+            lines.append(
+                {
+                    "account_id": acct_id,
+                    "debit": Decimal("0"),
+                    "credit": -amount,
+                    "description": "Opening balance (IIF import)",
+                }
+            )
         total += amount
 
     # Plug any residual to Retained Earnings so the JE balances
     if total != 0:
         plug = (
             db.query(Account).filter(Account.account_number == "3200").first()
-            or db.query(Account).filter(Account.name.ilike("Opening%Balance%Equity%")).first()
-            or db.query(Account).filter(Account.name.ilike("Retained%Earnings%")).first()
+            or db.query(Account)
+            .filter(Account.name.ilike("Opening%Balance%Equity%"))
+            .first()
+            or db.query(Account)
+            .filter(Account.name.ilike("Retained%Earnings%"))
+            .first()
         )
         if not plug:
             return {
                 "created": False,
                 "warning": "Could not find Retained Earnings / Opening Balance Equity "
-                           "account to balance opening entry; opening balances skipped.",
+                "account to balance opening entry; opening balances skipped.",
             }
         if total > 0:
-            lines.append({
-                "account_id": plug.id,
-                "debit": Decimal("0"),
-                "credit": total,
-                "description": "Opening balance plug",
-            })
+            lines.append(
+                {
+                    "account_id": plug.id,
+                    "debit": Decimal("0"),
+                    "credit": total,
+                    "description": "Opening balance plug",
+                }
+            )
         else:
-            lines.append({
-                "account_id": plug.id,
-                "debit": -total,
-                "credit": Decimal("0"),
-                "description": "Opening balance plug",
-            })
+            lines.append(
+                {
+                    "account_id": plug.id,
+                    "debit": -total,
+                    "credit": Decimal("0"),
+                    "description": "Opening balance plug",
+                }
+            )
 
     try:
         txn = create_journal_entry(
@@ -623,13 +639,17 @@ def import_transactions(db: Session, blocks: list) -> dict:
                     counts["invoices"] += 1
                     if not result.transaction_id:
                         doc = result.invoice_number or f"block {i+1}"
-                        warnings.append(f"Invoice {doc}: imported but journal entry could not be created (account mismatch)")
+                        warnings.append(
+                            f"Invoice {doc}: imported but journal entry could not be created (account mismatch)"
+                        )
             elif trns_type == "PAYMENT":
                 result = _import_payment(db, trns, spls)
                 if result:
                     counts["payments"] += 1
                     if not result.transaction_id:
-                        warnings.append(f"Payment block {i+1}: imported but journal entry could not be created (account mismatch)")
+                        warnings.append(
+                            f"Payment block {i+1}: imported but journal entry could not be created (account mismatch)"
+                        )
             elif trns_type == "ESTIMATE":
                 result = _import_estimate(db, trns, spls)
                 if result:
@@ -639,7 +659,9 @@ def import_transactions(db: Session, blocks: list) -> dict:
 
         except Exception as e:
             sp.rollback()
-            errors.append({"row": i + 1, "message": f"Transaction block {i + 1}: {str(e)}"})
+            errors.append(
+                {"row": i + 1, "message": f"Transaction block {i + 1}: {str(e)}"}
+            )
 
     return {"imported": counts, "errors": errors, "warnings": warnings}
 
@@ -700,7 +722,10 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
 
     for spl in spls:
         acct_name = spl.get("ACCNT", "").strip()
-        spl_amount = abs(_parse_decimal(spl.get("AMOUNT", "")))
+        # Quantize each SPL amount to 2dp before accumulating so the stored
+        # subtotal matches sum(line.amount). QB Pro fuel-surcharge / per-unit
+        # exports sometimes emit sub-cent AMOUNT values that drift otherwise.
+        spl_amount = _q(abs(_parse_decimal(spl.get("AMOUNT", ""))))
         memo = spl.get("MEMO", "").strip()
 
         # Tax split
@@ -719,7 +744,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
         qty = abs(_parse_decimal(spl.get("QNTY", ""))) or Decimal("1")
         rate = abs(_parse_decimal(spl.get("PRICE", "")))
         if rate == 0 and qty > 0:
-            rate = spl_amount / qty
+            rate = _q(spl_amount / qty)
 
         line = InvoiceLine(
             invoice_id=invoice.id,
@@ -744,33 +769,42 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
     unmatched_accounts = []
     if ar_id and subtotal > 0:
         journal_lines = [
-            {"account_id": ar_id, "debit": invoice.total, "credit": Decimal("0"),
-             "description": f"Invoice {doc_num}"},
+            {
+                "account_id": ar_id,
+                "debit": invoice.total,
+                "credit": Decimal("0"),
+                "description": f"Invoice {doc_num}",
+            },
         ]
 
         # Find income account for credit side
         for spl in spls:
             acct_name = spl.get("ACCNT", "").strip()
-            spl_amount = abs(_parse_decimal(spl.get("AMOUNT", "")))
+            # Quantize to match the per-line amount written above; otherwise
+            # the JE credits could land a cent off the AR debit when stored.
+            spl_amount = _q(abs(_parse_decimal(spl.get("AMOUNT", ""))))
             if spl_amount == 0:
                 continue
             acct = _find_account(db, acct_name)
             if acct:
-                journal_lines.append({
-                    "account_id": acct.id,
-                    "debit": Decimal("0"),
-                    "credit": spl_amount,
-                    "description": f"Invoice {doc_num}",
-                })
+                journal_lines.append(
+                    {
+                        "account_id": acct.id,
+                        "debit": Decimal("0"),
+                        "credit": spl_amount,
+                        "description": f"Invoice {doc_num}",
+                    }
+                )
             else:
                 unmatched_accounts.append(acct_name)
 
         # Only post if balanced
-        total_dr = sum(Decimal(str(l["debit"])) for l in journal_lines)
-        total_cr = sum(Decimal(str(l["credit"])) for l in journal_lines)
+        total_dr = sum(Decimal(str(line["debit"])) for line in journal_lines)
+        total_cr = sum(Decimal(str(line["credit"])) for line in journal_lines)
         if total_dr == total_cr and total_dr > 0:
             txn = create_journal_entry(
-                db, invoice.date,
+                db,
+                invoice.date,
                 f"IIF Import — Invoice {doc_num}",
                 journal_lines,
                 source_type="invoice",
@@ -782,14 +816,17 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
             default_income_id = get_default_income_account_id(db)
             if default_income_id:
                 shortfall = total_dr - total_cr
-                journal_lines.append({
-                    "account_id": default_income_id,
-                    "debit": Decimal("0"),
-                    "credit": shortfall,
-                    "description": f"Invoice {doc_num} (unmatched: {', '.join(unmatched_accounts)})",
-                })
+                journal_lines.append(
+                    {
+                        "account_id": default_income_id,
+                        "debit": Decimal("0"),
+                        "credit": shortfall,
+                        "description": f"Invoice {doc_num} (unmatched: {', '.join(unmatched_accounts)})",
+                    }
+                )
                 txn = create_journal_entry(
-                    db, invoice.date,
+                    db,
+                    invoice.date,
                     f"IIF Import — Invoice {doc_num}",
                     journal_lines,
                     source_type="invoice",
@@ -803,6 +840,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
     # import leaves a phantom COGS gap.
     db.refresh(invoice)
     from app.services.inventory_hooks import post_sale_for_invoice
+
     post_sale_for_invoice(db, invoice, txn_date=invoice.date)
     return invoice
 
@@ -815,10 +853,14 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     cust_name = trns.get("NAME", "").strip()
     pmt_date = _parse_iif_date(trns.get("DATE", ""))
     pmt_amount = abs(_parse_decimal(trns.get("AMOUNT", "")))
-    existing_q = db.query(Payment).join(Customer).filter(
-        Customer.name == cust_name,
-        Payment.date == (pmt_date or date.today()),
-        Payment.amount == pmt_amount,
+    existing_q = (
+        db.query(Payment)
+        .join(Customer)
+        .filter(
+            Customer.name == cust_name,
+            Payment.date == (pmt_date or date.today()),
+            Payment.amount == pmt_amount,
+        )
     )
     if ref:
         existing_q = existing_q.filter(Payment.reference == ref)
@@ -839,6 +881,7 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     if not deposit_acct:
         # Last resort: use Undeposited Funds
         from app.services.accounting import get_undeposited_funds_id
+
         uf_id = get_undeposited_funds_id(db)
         if uf_id:
             deposit_acct = db.query(Account).filter(Account.id == uf_id).first()
@@ -857,7 +900,9 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     for spl in spls:
         doc_num = spl.get("DOCNUM", "").strip()
         if doc_num:
-            invoice = db.query(Invoice).filter(Invoice.invoice_number == doc_num).first()
+            invoice = (
+                db.query(Invoice).filter(Invoice.invoice_number == doc_num).first()
+            )
             if invoice:
                 alloc_amount = abs(_parse_decimal(spl.get("AMOUNT", "")))
                 alloc = PaymentAllocation(
@@ -868,7 +913,9 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
                 db.add(alloc)
 
                 # Update invoice status
-                invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + (alloc_amount or amount)
+                invoice.amount_paid = (invoice.amount_paid or Decimal("0")) + (
+                    alloc_amount or amount
+                )
                 invoice.balance_due = invoice.total - invoice.amount_paid
                 if invoice.balance_due <= 0:
                     invoice.status = InvoiceStatus.PAID
@@ -879,13 +926,22 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     ar_id = get_ar_account_id(db)
     if ar_id and deposit_acct and amount > 0:
         journal_lines = [
-            {"account_id": deposit_acct.id, "debit": amount, "credit": Decimal("0"),
-             "description": f"Payment from {cust_name}"},
-            {"account_id": ar_id, "debit": Decimal("0"), "credit": amount,
-             "description": f"Payment from {cust_name}"},
+            {
+                "account_id": deposit_acct.id,
+                "debit": amount,
+                "credit": Decimal("0"),
+                "description": f"Payment from {cust_name}",
+            },
+            {
+                "account_id": ar_id,
+                "debit": Decimal("0"),
+                "credit": amount,
+                "description": f"Payment from {cust_name}",
+            },
         ]
         txn = create_journal_entry(
-            db, payment.date,
+            db,
+            payment.date,
             f"IIF Import — Payment from {cust_name}",
             journal_lines,
             source_type="payment",
@@ -902,7 +958,9 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
     doc_num = trns.get("DOCNUM", "").strip()
 
     if doc_num:
-        existing = db.query(Estimate).filter(Estimate.estimate_number == doc_num).first()
+        existing = (
+            db.query(Estimate).filter(Estimate.estimate_number == doc_num).first()
+        )
         if existing:
             return None
 
@@ -935,7 +993,10 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
 
     for spl in spls:
         acct_name = spl.get("ACCNT", "").strip()
-        spl_amount = abs(_parse_decimal(spl.get("AMOUNT", "")))
+        # Same per-line quantization the invoice import uses; keeps stored
+        # subtotal aligned with sum(line.amount) when the source IIF has
+        # sub-cent AMOUNT values.
+        spl_amount = _q(abs(_parse_decimal(spl.get("AMOUNT", ""))))
         memo = spl.get("MEMO", "").strip()
 
         if "tax" in acct_name.lower():
@@ -952,7 +1013,7 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
         qty = abs(_parse_decimal(spl.get("QNTY", ""))) or Decimal("1")
         rate = abs(_parse_decimal(spl.get("PRICE", "")))
         if rate == 0 and qty > 0:
-            rate = spl_amount / qty
+            rate = _q(spl_amount / qty)
 
         line = EstimateLine(
             estimate_id=estimate.id,
@@ -1003,6 +1064,7 @@ def _parse_city_state_zip(s: str) -> tuple:
 # Validation (pre-flight check without importing)
 # ============================================================================
 
+
 def validate_iif(content: str) -> dict:
     """Validate an IIF file and return a report without modifying the database.
 
@@ -1052,7 +1114,9 @@ def validate_iif(content: str) -> dict:
             report["valid"] = False
         atype = row.get("ACCNTTYPE", "").strip().upper()
         if atype and atype not in _IIF_TO_ACCOUNT_TYPE:
-            report["warnings"].append(f"Account '{name}': unrecognized type '{atype}' (will default to Expense)")
+            report["warnings"].append(
+                f"Account '{name}': unrecognized type '{atype}' (will default to Expense)"
+            )
 
     # Validate customers
     for i, row in enumerate(parsed.get("CUST", [])):
@@ -1074,7 +1138,9 @@ def validate_iif(content: str) -> dict:
             report["valid"] = False
         itype = row.get("INVITEMTYPE", "").strip().upper()
         if itype and itype not in _IIF_TO_ITEM_TYPE:
-            report["warnings"].append(f"Item '{name}': unrecognized type '{itype}' (will default to Service)")
+            report["warnings"].append(
+                f"Item '{name}': unrecognized type '{itype}' (will default to Service)"
+            )
 
     # Validate transaction blocks
     for i, block in enumerate(parsed.get("TRNS", [])):
@@ -1087,11 +1153,15 @@ def validate_iif(content: str) -> dict:
 
         trns_date = trns.get("DATE", "").strip()
         if not trns_date:
-            report["warnings"].append(f"Transaction block {i + 1} ({trns_type}): missing DATE")
+            report["warnings"].append(
+                f"Transaction block {i + 1} ({trns_type}): missing DATE"
+            )
 
         # Check balance: TRNS amount should equal -sum(SPL amounts)
         trns_amt = _parse_decimal(trns.get("AMOUNT", ""))
-        spl_total = sum(_parse_decimal(s.get("AMOUNT", "")) for s in block.get("spl", []))
+        spl_total = sum(
+            _parse_decimal(s.get("AMOUNT", "")) for s in block.get("spl", [])
+        )
         balance = trns_amt + spl_total
         if abs(balance) > Decimal("0.01"):
             report["warnings"].append(
@@ -1105,6 +1175,7 @@ def validate_iif(content: str) -> dict:
 # ============================================================================
 # Master import orchestrator
 # ============================================================================
+
 
 def import_all(db: Session, content: str) -> dict:
     """Import an entire IIF file into Slowbooks.

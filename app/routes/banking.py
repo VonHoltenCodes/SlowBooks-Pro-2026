@@ -10,14 +10,22 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
-from app.models.banking import BankAccount, BankTransaction, Reconciliation, ReconciliationStatus
+from app.models.banking import (
+    BankAccount,
+    BankTransaction,
+    Reconciliation,
+    ReconciliationStatus,
+)
 from app.schemas.banking import (
-    BankAccountCreate, BankAccountUpdate, BankAccountResponse,
-    BankTransactionCreate, BankTransactionResponse,
-    ReconciliationCreate, ReconciliationResponse,
+    BankAccountCreate,
+    BankAccountUpdate,
+    BankAccountResponse,
+    BankTransactionCreate,
+    BankTransactionResponse,
+    ReconciliationCreate,
+    ReconciliationResponse,
 )
 from app.services.closing_date import check_closing_date
 
@@ -27,7 +35,12 @@ router = APIRouter(prefix="/api/banking", tags=["banking"])
 # Bank Accounts
 @router.get("/accounts", response_model=list[BankAccountResponse])
 def list_bank_accounts(db: Session = Depends(get_db)):
-    return db.query(BankAccount).filter(BankAccount.is_active == True).order_by(BankAccount.name).all()
+    return (
+        db.query(BankAccount)
+        .filter(BankAccount.is_active)
+        .order_by(BankAccount.name)
+        .all()
+    )
 
 
 @router.get("/accounts/{account_id}", response_model=BankAccountResponse)
@@ -48,7 +61,9 @@ def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/accounts/{account_id}", response_model=BankAccountResponse)
-def update_bank_account(account_id: int, data: BankAccountUpdate, db: Session = Depends(get_db)):
+def update_bank_account(
+    account_id: int, data: BankAccountUpdate, db: Session = Depends(get_db)
+):
     ba = db.query(BankAccount).filter(BankAccount.id == account_id).first()
     if not ba:
         raise HTTPException(status_code=404, detail="Bank account not found")
@@ -61,11 +76,18 @@ def update_bank_account(account_id: int, data: BankAccountUpdate, db: Session = 
 
 # Bank Transactions
 @router.get("/transactions", response_model=list[BankTransactionResponse])
-def list_bank_transactions(bank_account_id: int = None, db: Session = Depends(get_db)):
+def list_bank_transactions(
+    bank_account_id: int = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    limit = max(1, min(limit, 1000))
+    skip = max(0, skip)
     q = db.query(BankTransaction)
     if bank_account_id:
         q = q.filter(BankTransaction.bank_account_id == bank_account_id)
-    return q.order_by(BankTransaction.date.desc()).all()
+    return q.order_by(BankTransaction.date.desc()).offset(skip).limit(limit).all()
 
 
 @router.post("/transactions", response_model=BankTransactionResponse, status_code=201)
@@ -120,17 +142,24 @@ def get_reconciliation_transactions(recon_id: int, db: Session = Depends(get_db)
         .all()
     )
 
-    cleared_total = sum(float(t.amount) for t in txns if t.reconciled)
-    uncleared_total = sum(float(t.amount) for t in txns if not t.reconciled)
-    statement_bal = float(recon.statement_balance)
+    # Sum and subtract in Decimal so a reconciliation that's actually zero
+    # doesn't show $0.00000001 of "difference" from float drift over hundreds
+    # of cleared transactions. Convert to float only at the JSON boundary.
+    cleared_total = sum(
+        (Decimal(str(t.amount)) for t in txns if t.reconciled), Decimal("0")
+    )
+    uncleared_total = sum(
+        (Decimal(str(t.amount)) for t in txns if not t.reconciled), Decimal("0")
+    )
+    statement_bal = Decimal(str(recon.statement_balance or 0))
     difference = statement_bal - cleared_total
 
     return {
         "reconciliation_id": recon.id,
-        "statement_balance": statement_bal,
-        "cleared_total": cleared_total,
-        "uncleared_total": uncleared_total,
-        "difference": difference,
+        "statement_balance": float(statement_bal),
+        "cleared_total": float(cleared_total),
+        "uncleared_total": float(uncleared_total),
+        "difference": float(difference),
         "transactions": [
             {
                 "id": t.id,
@@ -199,15 +228,17 @@ def check_register(account_id: int = None, db: Session = Depends(get_db)):
         else:
             running_balance += tl.credit - tl.debit
 
-        entries.append({
-            "date": txn.date.isoformat(),
-            "description": txn.description or tl.description or "",
-            "reference": txn.reference or "",
-            "source_type": txn.source_type or "",
-            "payment": float(tl.credit) if tl.credit > 0 else 0,
-            "deposit": float(tl.debit) if tl.debit > 0 else 0,
-            "balance": float(running_balance),
-        })
+        entries.append(
+            {
+                "date": txn.date.isoformat(),
+                "description": txn.description or tl.description or "",
+                "reference": txn.reference or "",
+                "source_type": txn.source_type or "",
+                "payment": float(tl.credit) if tl.credit > 0 else 0,
+                "deposit": float(tl.debit) if tl.debit > 0 else 0,
+                "balance": float(running_balance),
+            }
+        )
 
     return {
         "account_id": account_id,
@@ -230,7 +261,7 @@ def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
         db.query(BankTransaction)
         .filter(BankTransaction.bank_account_id == recon.bank_account_id)
         .filter(BankTransaction.date <= recon.statement_date)
-        .filter(BankTransaction.reconciled == True)
+        .filter(BankTransaction.reconciled)
         .all()
     )
     cleared_total = sum(t.amount for t in txns)
@@ -238,7 +269,7 @@ def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
     if abs(cleared_total - recon.statement_balance) > Decimal("0.01"):
         raise HTTPException(
             status_code=400,
-            detail=f"Difference is ${float(recon.statement_balance - cleared_total):.2f} — must be $0.00 to complete"
+            detail=f"Difference is ${float(recon.statement_balance - cleared_total):.2f} — must be $0.00 to complete",
         )
 
     recon.status = ReconciliationStatus.COMPLETED

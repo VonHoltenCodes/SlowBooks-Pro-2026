@@ -3,7 +3,29 @@
  * Reconstructed from QBW32.EXE resource table (RT_RCDATA "QBSKIN")
  * Original skin engine: CQBSkinManager at offset 0x00260000
  * Color palette extracted from QB2003 "Default Blue" theme (SKIN_BLUE.DAT)
- * ============================================================================
+ * ============================================================================ */
+
+/* Skip-to-content link — first tab stop on every page, hidden until focused.
+   Lets keyboard / screen-reader users jump past the topbar + sidebar straight
+   into the main content area. */
+.skip-link {
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: var(--qb-blue, #1e3a8a);
+    color: #fff;
+    padding: 8px 16px;
+    z-index: 10000;
+    text-decoration: none;
+    font-weight: 600;
+}
+.skip-link:focus {
+    top: 0;
+    outline: 2px solid var(--qb-gold, #f7c948);
+    outline-offset: 2px;
+}
+
+/* ============================================================================
  * BUILD NOTE: The yellow invoice texture (RT_BITMAP 0x012C) was a 4x4 px
  * tiled BMP in the original. We recreated it as a CSS gradient. Close enough.
  * ============================================================================ */

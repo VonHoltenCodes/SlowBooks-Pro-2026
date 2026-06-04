@@ -14,16 +14,21 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
+from app.services.accounting import (
+    create_journal_entry,
+    get_ar_account_id,
+    get_undeposited_funds_id,
+)
+from app.services.stripe_service import (
+    get_stripe_settings,
+    create_checkout_session,
+    verify_webhook_event,
+)
 
 
 class CheckoutSessionRequest(BaseModel):
     payment_token: str
-from app.services.accounting import (
-    create_journal_entry, get_ar_account_id, get_undeposited_funds_id,
-)
-from app.services.stripe_service import (
-    get_stripe_settings, create_checkout_session, verify_webhook_event,
-)
+
 
 router = APIRouter(prefix="/api/stripe", tags=["stripe"])
 
@@ -39,11 +44,15 @@ def _require_stripe(db: Session) -> dict:
 
 
 @router.post("/create-checkout-session")
-def create_checkout(data: CheckoutSessionRequest, request: Request, db: Session = Depends(get_db)):
+def create_checkout(
+    data: CheckoutSessionRequest, request: Request, db: Session = Depends(get_db)
+):
     """Create a Stripe Checkout Session for an invoice."""
     settings = _require_stripe(db)
 
-    invoice = db.query(Invoice).filter(Invoice.payment_token == data.payment_token).first()
+    invoice = (
+        db.query(Invoice).filter(Invoice.payment_token == data.payment_token).first()
+    )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     if invoice.status in (InvoiceStatus.PAID, InvoiceStatus.VOID):
@@ -83,14 +92,22 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
     invoice_id = int(session["metadata"]["invoice_id"])
     session_id = session["id"]
 
-    # Idempotency: check if payment already recorded for this session
+    # Idempotency under contention: Stripe will retry with a backoff on any
+    # non-2xx; in practice two webhook deliveries can land milliseconds apart.
+    # A plain check-then-insert against Payment.reference would let both pass
+    # the existence guard and create two payments. Row-lock the invoice so
+    # the second arrival serializes behind the first and sees the already-
+    # recorded payment on its idempotency re-check.
+    invoice = (
+        db.query(Invoice).filter(Invoice.id == invoice_id).with_for_update().first()
+    )
+    if not invoice:
+        return {"status": "invoice_not_found"}
+
     existing = db.query(Payment).filter(Payment.reference == session_id).first()
     if existing:
         return {"status": "already_processed"}
 
-    invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
-    if not invoice:
-        return {"status": "invoice_not_found"}
     if invoice.status in (InvoiceStatus.PAID, InvoiceStatus.VOID):
         return {"status": "invoice_already_settled"}
 
@@ -109,7 +126,7 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
         amount=amount,
         method="stripe",
         reference=session_id,
-        notes=f"Online payment via Stripe Checkout",
+        notes="Online payment via Stripe Checkout",
     )
     db.add(payment)
     db.flush()
@@ -151,9 +168,12 @@ async def stripe_webhook(request: Request, db: Session = Depends(get_db)):
             },
         ]
         txn = create_journal_entry(
-            db, date.today(),
+            db,
+            date.today(),
             f"Stripe payment — Invoice #{invoice.invoice_number}",
-            journal_lines, source_type="payment", source_id=payment.id,
+            journal_lines,
+            source_type="payment",
+            source_id=payment.id,
             reference=session_id,
         )
         payment.transaction_id = txn.id

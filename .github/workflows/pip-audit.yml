@@ -1,0 +1,79 @@
+name: Weekly pip-audit
+
+# Quarterly was the original goal but weekly is essentially free on
+# GitHub Actions and catches new advisories almost as soon as they land
+# in the OSV / PyPI databases.
+
+on:
+  schedule:
+    # Sundays at 14:00 UTC — quiet time, before the Monday work week.
+    - cron: "0 14 * * 0"
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: pip-audit
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write   # to file an issue when something is found
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install pip-audit
+        run: pip install pip-audit
+
+      - name: Audit requirements.txt
+        id: audit
+        run: |
+          # --strict makes the step fail when vulnerabilities are found, which
+          # is what triggers the issue-filing step below via continue-on-error.
+          pip-audit -r requirements.txt --strict
+        continue-on-error: true
+
+      - name: File an issue if vulnerabilities found
+        if: steps.audit.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Weekly pip-audit found CVEs (${new Date().toISOString().slice(0,10)})`;
+            const body = [
+              "The scheduled `pip-audit` run flagged at least one known",
+              "vulnerability in `requirements.txt`. Open the workflow run for",
+              "the full report:",
+              "",
+              `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              "",
+              "Triage:",
+              "1. Check if the affected package can be bumped within its current",
+              "   version cap. If yes, bump the floor in `requirements.txt`.",
+              "2. If not, expand the cap — but read the upstream changelog for",
+              "   any breaking changes first.",
+              "3. If no fix is published yet, leave a note in `docs/todo.md`",
+              "   and re-evaluate next week.",
+              "",
+              "See `docs/security-hardening.md` for the recurring-audit recipe.",
+            ].join("\n");
+            // De-dupe — don't pile up identical issues week after week.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: "security,pip-audit",
+              state: "open",
+            });
+            if (existing.data.length === 0) {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: ["security", "pip-audit"],
+              });
+            }
+
+      - name: Fail the job if vulnerabilities found
+        if: steps.audit.outcome == 'failure'
+        run: exit 1

@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page { size: letter; margin: 0.5in; }
+    body { font-family: 'Courier New', Courier, monospace; font-size: 10pt; color: #000; }
+    .form-title { font-size: 16pt; font-weight: bold; margin-bottom: 2px; }
+    .form-sub { font-size: 9pt; color: #444; margin-bottom: 16px; }
+    .box { border: 1px solid #000; padding: 6px 8px; margin-bottom: 8px; }
+    .box-label { font-size: 7pt; color: #666; text-transform: uppercase; }
+    .box-value { font-size: 11pt; }
+    .columns { display: flex; gap: 12px; }
+    .col { flex: 1; }
+    .totals { display: flex; gap: 12px; margin-top: 8px; }
+    .total-box { flex: 1; border: 2px solid #000; padding: 10px 12px; }
+    .total-box .box-value { font-size: 16pt; font-weight: bold; }
+    table { width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 9pt; }
+    th { text-align: left; padding: 3px 6px; border-bottom: 1px solid #333; font-size: 8pt; }
+    td { padding: 3px 6px; border-bottom: 1px solid #ddd; }
+    td.r { text-align: right; }
+    .footer { margin-top: 18px; font-size: 8pt; color: #666; }
+</style>
+</head>
+<body>
+    <div class="form-title">Form 1096</div>
+    <div class="form-sub">
+        Annual Summary and Transmittal of U.S. Information Returns
+        &bull; Tax Year {{ year }}
+    </div>
+
+    <div class="columns">
+        <div class="col">
+            <div class="box">
+                <div class="box-label">Filer</div>
+                <div class="box-value">{{ payer.get('name', '') }}</div>
+                <div class="box-value" style="font-size:9pt;">
+                    {{ payer.get('address', '') }}
+                </div>
+            </div>
+        </div>
+        <div class="col">
+            <div class="box">
+                <div class="box-label">Filer's TIN / EIN</div>
+                <div class="box-value">{{ payer.get('ein', '') }}</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="totals">
+        <div class="total-box">
+            <div class="box-label">Box 3 &mdash; Number of Forms (1099-NEC)</div>
+            <div class="box-value">{{ summary.form_count }}</div>
+        </div>
+        <div class="total-box">
+            <div class="box-label">Box 5 &mdash; Total Amount Reported</div>
+            <div class="box-value">{{ summary.total_amount | currency }}</div>
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Recipient</th>
+                <th>TIN</th>
+                <th style="text-align:right;">Box 1 Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for v in vendors %}
+            <tr>
+                <td>{{ v.name }}</td>
+                <td>{{ v.tax_id or 'MISSING' }}</td>
+                <td class="r">{{ v.total_paid | currency }}</td>
+            </tr>
+        {% endfor %}
+        {% if not vendors %}
+            <tr><td colspan="3">No reportable 1099-NEC forms for {{ year }}.</td></tr>
+        {% endif %}
+        </tbody>
+    </table>
+
+    <div class="footer">
+        Transmittal covers 1099-NEC forms only. Vendors below the $600
+        threshold are excluded from this summary.
+    </div>
+</body>
+</html>

@@ -157,14 +157,25 @@ class AnalyticsEngine:
 
         Uses Invoice.balance_due (the canonical open-balance column) so we
         don't double-count partial payments. Single joined query returning
-        only `(customer_name, date, balance_due)` tuples — avoids the N+1
+        only `(customer_name, due_date, balance_due)` tuples — avoids the N+1
         relationship load that `inv.customer.name` would have triggered.
+
+        Bucketed by days-past-DUE (today - due_date), matching the regular
+        /api/reports/ar-aging endpoint. Previously this version bucketed by
+        days-since-INVOICED, so the dashboard widget and the report disagreed
+        on the same data set.
         """
         today = date.today()
         rows = (
-            self.db.query(Customer.name, Invoice.date, Invoice.balance_due)
+            self.db.query(
+                Customer.name, Invoice.due_date, Invoice.date, Invoice.balance_due
+            )
             .join(Customer, Invoice.customer_id == Customer.id)
-            .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
+            .filter(
+                Invoice.status.in_(
+                    [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
+                )
+            )
             .filter(Invoice.balance_due > 0)
             .all()
         )
@@ -176,13 +187,17 @@ class AnalyticsEngine:
             "90": defaultdict(float),
         }
 
-        for customer_name, inv_date, balance in rows:
-            days = (today - inv_date).days
-            if days <= 30:
+        for customer_name, due_date, inv_date, balance in rows:
+            # Days past due. If the invoice has no due_date fall back to the
+            # invoice date so we don't crash; treat that case the same way
+            # the reports.ar_aging endpoint does.
+            ref = due_date or inv_date
+            days = (today - ref).days
+            if days <= 0:
                 bucket = "current"
-            elif days <= 60:
+            elif days <= 30:
                 bucket = "30"
-            elif days <= 90:
+            elif days <= 60:
                 bucket = "60"
             else:
                 bucket = "90"
@@ -238,7 +253,11 @@ class AnalyticsEngine:
 
         ar_balance = (
             self.db.query(func.coalesce(func.sum(Invoice.balance_due), 0))
-            .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
+            .filter(
+                Invoice.status.in_(
+                    [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
+                )
+            )
             .scalar()
         ) or Decimal(0)
 
@@ -266,7 +285,11 @@ class AnalyticsEngine:
 
         ar_rows = (
             self.db.query(Invoice.due_date, Invoice.balance_due)
-            .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
+            .filter(
+                Invoice.status.in_(
+                    [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
+                )
+            )
             .filter(Invoice.due_date.isnot(None))
             .all()
         )

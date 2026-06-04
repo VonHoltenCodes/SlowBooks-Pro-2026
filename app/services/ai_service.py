@@ -146,6 +146,37 @@ def validate_worker_url(url: str) -> str:
             raise ValueError(f"worker_url host '{host}' contains invalid characters")
         if ".." in host or host.startswith(".") or host.endswith("."):
             raise ValueError(f"worker_url host '{host}' is malformed")
+        # Resolve and re-check every answer against the private/reserved ranges.
+        # Without this a name like rebind.attacker.com pointing at
+        # 169.254.169.254 (cloud metadata) or 127.0.0.1 would sail past the
+        # IP-literal block above. (Residual TOCTOU: the outbound request
+        # re-resolves later; this raises the bar at config-save time. Resolution
+        # failure is left non-fatal — the hardened client + provider allowlist
+        # still gate the actual call.)
+        import socket
+
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except OSError:
+            infos = []
+        for info in infos:
+            resolved = info[4][0]
+            try:
+                rip = ipaddress.ip_address(resolved)
+            except ValueError:
+                continue
+            if (
+                rip.is_private
+                or rip.is_loopback
+                or rip.is_link_local
+                or rip.is_multicast
+                or rip.is_unspecified
+                or rip.is_reserved
+            ):
+                raise ValueError(
+                    f"worker_url host '{host}' resolves to a private/reserved "
+                    f"address ({resolved}) — refusing (SSRF guard)"
+                )
 
     # --- Port sanity ------------------------------------------------------
     port = parsed.port  # urlparse already validates this returns int or None

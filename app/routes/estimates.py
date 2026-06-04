@@ -7,10 +7,12 @@
 # ============================================================================
 
 from datetime import timedelta
+from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
 from fastapi.responses import Response
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
@@ -21,6 +23,7 @@ from app.schemas.invoices import InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.settings_service import get_all_settings as get_settings, set_setting
 from app.services.accounting import (
+    _q,
     compute_line_totals,
     create_journal_entry,
     get_ar_account_id,
@@ -42,15 +45,25 @@ def _next_estimate_number(db: Session) -> str:
 
     while True:
         estimate_number = f"{prefix}{current_number}"
-        exists = db.query(Estimate.id).filter(Estimate.estimate_number == estimate_number).first()
+        exists = (
+            db.query(Estimate.id)
+            .filter(Estimate.estimate_number == estimate_number)
+            .first()
+        )
         if not exists:
             return estimate_number
         current_number += 1
 
 
 @router.get("", response_model=list[EstimateResponse])
-def list_estimates(status: str = None, customer_id: int = None, db: Session = Depends(get_db)):
-    q = db.query(Estimate)
+def list_estimates(
+    status: str = None, customer_id: int = None, db: Session = Depends(get_db)
+):
+    # Eager-load .customer and .lines to avoid N+1 during model_validate.
+    q = db.query(Estimate).options(
+        joinedload(Estimate.customer),
+        selectinload(Estimate.lines),
+    )
     if status:
         q = q.filter(Estimate.status == status)
     if customer_id:
@@ -82,22 +95,44 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    estimate_number = _next_estimate_number(db)
+    cust_id = customer.id
+    cust_name = customer.name
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
-    estimate = Estimate(
-        estimate_number=estimate_number,
-        customer_id=data.customer_id,
-        date=data.date,
-        expiration_date=data.expiration_date,
-        subtotal=subtotal,
-        tax_rate=data.tax_rate,
-        tax_amount=tax_amount,
-        total=total,
-        notes=data.notes,
-    )
-    db.add(estimate)
-    db.flush()
+    estimate = None
+    estimate_number = None
+    last_err = None
+    # Same race as create_invoice: _next_estimate_number's check-then-insert
+    # window lets two concurrent creates pick the same number. Retry on
+    # IntegrityError; the UNIQUE constraint is the safety net.
+    for _ in range(10):
+        estimate_number = _next_estimate_number(db)
+        estimate = Estimate(
+            estimate_number=estimate_number,
+            customer_id=cust_id,
+            date=data.date,
+            expiration_date=data.expiration_date,
+            subtotal=subtotal,
+            tax_rate=data.tax_rate,
+            tax_amount=tax_amount,
+            total=total,
+            notes=data.notes,
+        )
+        db.add(estimate)
+        try:
+            db.flush()
+            break
+        except IntegrityError as e:
+            if "estimate_number" not in str(e.orig).lower():
+                raise
+            last_err = e
+            db.rollback()
+            estimate = None
+    if estimate is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Could not assign a unique estimate number; please retry.",
+        ) from last_err
 
     for i, line_data in enumerate(data.lines):
         line = EstimateLine(
@@ -106,25 +141,29 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             description=line_data.description,
             quantity=line_data.quantity,
             rate=line_data.rate,
-            amount=line_data.quantity * line_data.rate,
+            amount=_q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))),
             class_name=line_data.class_name,
             line_order=line_data.line_order or i,
         )
         db.add(line)
 
-    numeric_part = estimate_number.removeprefix(get_settings(db).get("estimate_prefix", "E-"))
+    numeric_part = estimate_number.removeprefix(
+        get_settings(db).get("estimate_prefix", "E-")
+    )
     if numeric_part.isdigit():
         set_setting(db, "estimate_next_number", str(int(numeric_part) + 1))
 
     db.commit()
     db.refresh(estimate)
     resp = EstimateResponse.model_validate(estimate)
-    resp.customer_name = customer.name
+    resp.customer_name = cust_name
     return resp
 
 
 @router.put("/{estimate_id}", response_model=EstimateResponse)
-def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depends(get_db)):
+def update_estimate(
+    estimate_id: int, data: EstimateUpdate, db: Session = Depends(get_db)
+):
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
@@ -141,7 +180,9 @@ def update_estimate(estimate_id: int, data: EstimateUpdate, db: Session = Depend
                 description=line_data.description,
                 quantity=line_data.quantity,
                 rate=line_data.rate,
-                amount=line_data.quantity * line_data.rate,
+                amount=_q(
+                    Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
+                ),
                 class_name=line_data.class_name,
                 line_order=line_data.line_order or i,
             )
@@ -172,7 +213,9 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
-        headers={"Content-Disposition": f"inline; filename=Estimate_{est.estimate_number}.pdf"},
+        headers={
+            "Content-Disposition": f"inline; filename=Estimate_{est.estimate_number}.pdf"
+        },
     )
 
 
@@ -185,31 +228,42 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
     company = get_settings(db)
     from jinja2 import Environment, FileSystemLoader
     from pathlib import Path
+
     template_dir = Path(__file__).parent.parent / "templates"
     env = Environment(loader=FileSystemLoader(str(template_dir)), autoescape=True)
     from app.services.pdf_service import _format_currency, _format_date
+
     env.filters["currency"] = _format_currency
     env.filters["fdate"] = _format_date
     template = env.get_template("estimate_pdf.html")
-    if est.customer and not hasattr(est, 'customer_name'):
+    if est.customer and not hasattr(est, "customer_name"):
         est.customer_name = est.customer.name
     html_str = template.render(est=est, company=company)
-    html_str = html_str.replace("</body>", "<script>window.onload=function(){window.print();}</script></body>")
+    html_str = html_str.replace(
+        "</body>", "<script>window.onload=function(){window.print();}</script></body>"
+    )
     from fastapi.responses import HTMLResponse
+
     return HTMLResponse(content=html_str)
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)
 def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
     """CEstimate::ConvertToInvoice() @ 0x001944A0 — deep-copies all fields/lines"""
+    from app.services.closing_date import check_closing_date
+
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
     if estimate.status == EstimateStatus.CONVERTED:
         raise HTTPException(status_code=400, detail="Estimate already converted")
+    # Posts a JE dated to estimate.date; enforce closing date here too so an
+    # operator can't sidestep a closed period by converting an old estimate.
+    check_closing_date(db, estimate.date)
 
     # Get next invoice number
     from app.routes.invoices import _next_invoice_number
+
     invoice_number = _next_invoice_number(db)
 
     # Parse terms for due date
@@ -265,16 +319,18 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
     tax_account_id = get_sales_tax_account_id(db)
 
     if ar_id and default_income_id:
-        from decimal import Decimal
         from app.models.items import Item
+
         journal_lines = []
         # Debit A/R for total
-        journal_lines.append({
-            "account_id": ar_id,
-            "debit": Decimal(str(invoice.total)),
-            "credit": Decimal("0"),
-            "description": f"Invoice #{invoice_number}",
-        })
+        journal_lines.append(
+            {
+                "account_id": ar_id,
+                "debit": Decimal(str(invoice.total)),
+                "credit": Decimal("0"),
+                "description": f"Invoice #{invoice_number}",
+            }
+        )
         # Credit income for each line item
         for eline in estimate.lines:
             line_amount = Decimal(str(eline.amount))
@@ -285,26 +341,33 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
                 item = db.query(Item).filter(Item.id == eline.item_id).first()
                 if item and item.income_account_id:
                     income_id = item.income_account_id
-            journal_lines.append({
-                "account_id": income_id,
-                "debit": Decimal("0"),
-                "credit": line_amount,
-                "description": eline.description or "",
-            })
+            journal_lines.append(
+                {
+                    "account_id": income_id,
+                    "debit": Decimal("0"),
+                    "credit": line_amount,
+                    "description": eline.description or "",
+                }
+            )
         # Credit sales tax if any
         if invoice.tax_amount and invoice.tax_amount > 0 and tax_account_id:
-            journal_lines.append({
-                "account_id": tax_account_id,
-                "debit": Decimal("0"),
-                "credit": Decimal(str(invoice.tax_amount)),
-                "description": "Sales tax",
-            })
+            journal_lines.append(
+                {
+                    "account_id": tax_account_id,
+                    "debit": Decimal("0"),
+                    "credit": Decimal(str(invoice.tax_amount)),
+                    "description": "Sales tax",
+                }
+            )
 
         customer = estimate.customer
         txn = create_journal_entry(
-            db, estimate.date,
+            db,
+            estimate.date,
             f"Invoice #{invoice_number} - {customer.name if customer else ''}",
-            journal_lines, source_type="invoice", source_id=invoice.id,
+            journal_lines,
+            source_type="invoice",
+            source_id=invoice.id,
             reference=invoice_number,
         )
         invoice.transaction_id = txn.id
@@ -315,6 +378,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
     db.flush()
     db.refresh(invoice)
     from app.services.inventory_hooks import post_sale_for_invoice
+
     post_sale_for_invoice(db, invoice, txn_date=estimate.date)
 
     db.commit()

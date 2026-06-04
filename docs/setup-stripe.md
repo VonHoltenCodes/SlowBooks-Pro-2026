@@ -58,6 +58,12 @@ Stripe uses webhooks to notify Slowbooks when a payment is completed.
    - **Webhook Secret**: paste your `whsec_...` secret
 4. Click **Save Settings**
 
+After saving, the **Secret Key** and **Webhook Secret** fields will
+display as `********` on every subsequent page load — that's the
+redaction guard, not a save failure. Re-opening the page to edit
+other settings will not overwrite the stored secrets; only typing a
+new value over the `********` actually replaces them.
+
 ---
 
 ## Step 5: Test It

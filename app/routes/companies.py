@@ -29,5 +29,7 @@ def get_companies(db: Session = Depends(get_db)):
 def new_company(data: CompanyCreate, db: Session = Depends(get_db)):
     result = create_company(db, data.name, data.database_name, data.description)
     if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("error", "Failed to create company"))
+        raise HTTPException(
+            status_code=400, detail=result.get("error", "Failed to create company")
+        )
     return result

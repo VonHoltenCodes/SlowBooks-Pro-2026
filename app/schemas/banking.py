@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
@@ -39,7 +39,7 @@ class BankAccountResponse(BaseModel):
 
 class BankTransactionCreate(BaseModel):
     bank_account_id: int
-    date: date
+    date: dt_date
     amount: Decimal
     payee: Optional[str] = None
     description: Optional[str] = None
@@ -50,7 +50,7 @@ class BankTransactionCreate(BaseModel):
 class BankTransactionResponse(BaseModel):
     id: int
     bank_account_id: int
-    date: date
+    date: dt_date
     amount: Decimal
     payee: Optional[str]
     description: Optional[str]
@@ -64,14 +64,14 @@ class BankTransactionResponse(BaseModel):
 
 class ReconciliationCreate(BaseModel):
     bank_account_id: int
-    statement_date: date
+    statement_date: dt_date
     statement_balance: Decimal
 
 
 class ReconciliationResponse(BaseModel):
     id: int
     bank_account_id: int
-    statement_date: date
+    statement_date: dt_date
     statement_balance: Decimal
     status: ReconciliationStatus
     created_at: datetime

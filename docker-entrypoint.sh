@@ -24,6 +24,25 @@ alembic upgrade head
 echo "Seeding database..."
 python scripts/seed_database.py
 
+# Boot-time wiring self-check. Catches the rare case where the deployed
+# Python image and JS bundle drifted (someone manually swapped files in
+# a running container, or a local-dev container is running against a
+# checked-out branch that's stale) BEFORE traffic hits.
+#
+# Only runs when pytest is installed — the production image ships with
+# requirements.txt only (no pytest), so this is a no-op there; CI already
+# gated the same check before the image was built. The check matters
+# most for local dev / debug containers built off requirements-dev.txt.
+#
+# Set SKIP_BOOT_SELFCHECK=1 to bypass even when pytest is available.
+if [ -z "${SKIP_BOOT_SELFCHECK:-}" ] && python -c "import pytest" 2>/dev/null; then
+    echo "Boot self-check: SPA <-> backend wiring..."
+    if ! python -m pytest tests/test_wiring.py -q --no-header 2>&1 | tail -5; then
+        echo "ERROR: wiring self-check failed. Set SKIP_BOOT_SELFCHECK=1 to override." >&2
+        exit 1
+    fi
+fi
+
 echo "Starting Slowbooks Pro 2026 on port ${APP_PORT:-3001}..."
 # Multi-worker production mode.
 # uvloop + httptools come from uvicorn[standard], explicit for clarity.

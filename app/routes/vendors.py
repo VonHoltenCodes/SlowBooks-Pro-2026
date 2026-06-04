@@ -11,17 +11,21 @@ router = APIRouter(prefix="/api/vendors", tags=["vendors"])
 
 
 @router.get("", response_model=list[VendorResponse])
-def list_vendors(active_only: bool = False, search: str = None, db: Session = Depends(get_db)):
+def list_vendors(
+    active_only: bool = False, search: str = None, db: Session = Depends(get_db)
+):
     q = db.query(Vendor)
     if active_only:
-        q = q.filter(Vendor.is_active == True)
+        q = q.filter(Vendor.is_active)
     if search:
         q = q.filter(Vendor.name.ilike(f"%{search}%"))
     return q.order_by(Vendor.name).all()
 
 
 @router.get("/check-duplicate")
-def check_duplicate(name: str = Query(..., min_length=1), db: Session = Depends(get_db)):
+def check_duplicate(
+    name: str = Query(..., min_length=1), db: Session = Depends(get_db)
+):
     """Phase 11: standalone duplicate-check endpoint for pre-submit UI warnings."""
     existing = db.query(Vendor).filter(Vendor.is_active == True).all()  # noqa
     return {"duplicates": find_duplicates(name, existing)}

@@ -1,0 +1,89 @@
+{% extends "portal/base.html" %}
+{% set active = 'bank' %}
+{% block title %}Bank Accounts{% endblock %}
+
+{% block content %}
+<h2>Bank Accounts</h2>
+
+{% if saved %}
+<div class="banner banner-success">Bank account added.</div>
+{% endif %}
+{% if error %}
+<div class="banner banner-error">{{ error }}</div>
+{% endif %}
+
+<p class="muted">Direct-deposit accounts. Account and routing numbers are stored
+encrypted and never displayed.</p>
+
+{% if accounts %}
+<table class="data-table">
+    <thead>
+        <tr>
+            <th>Nickname</th>
+            <th>Type</th>
+            <th>Account</th>
+            <th>Deposit</th>
+            <th>Status</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for acct in accounts %}
+        <tr>
+            <td>{{ acct.nickname or '—' }}</td>
+            <td style="text-transform: capitalize;">{{ acct.account_kind.value }}</td>
+            <td>&bull;&bull;&bull;&bull;{{ acct.account_last_four or '????' }}</td>
+            <td style="text-transform: capitalize;">{{ acct.deposit_type.value }}</td>
+            <td>
+                {% if acct.is_active %}
+                <span class="pill pill-active">Active</span>
+                {% else %}
+                <span class="pill pill-inactive">Inactive</span>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">You have no bank accounts on file.</p>
+{% endif %}
+
+<h3>Add a Bank Account</h3>
+<form class="portal-form" method="post" action="/portal/bank">
+    <div class="field">
+        <label for="nickname">Nickname</label>
+        <input type="text" id="nickname" name="nickname" placeholder="e.g. Primary Checking">
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label for="account_kind">Account Type</label>
+            <select id="account_kind" name="account_kind">
+                {% for kind in account_kinds %}
+                <option value="{{ kind.value }}">{{ kind.value|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="field">
+            <label for="deposit_type">Deposit Type</label>
+            <select id="deposit_type" name="deposit_type">
+                {% for dt in deposit_types %}
+                <option value="{{ dt.value }}">{{ dt.value|capitalize }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+    <div class="field-row">
+        <div class="field">
+            <label for="routing_number">Routing Number (9 digits)</label>
+            <input type="text" id="routing_number" name="routing_number"
+                   inputmode="numeric" maxlength="9" required>
+        </div>
+        <div class="field">
+            <label for="account_number">Account Number</label>
+            <input type="text" id="account_number" name="account_number"
+                   inputmode="numeric" required>
+        </div>
+    </div>
+    <button type="submit" class="btn">Add Account</button>
+</form>
+{% endblock %}

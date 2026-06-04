@@ -52,9 +52,13 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Allocations exceed payment amount")
 
     payment = BillPayment(
-        vendor_id=data.vendor_id, date=data.date, amount=data.amount,
-        method=data.method, check_number=data.check_number,
-        pay_from_account_id=data.pay_from_account_id, notes=data.notes,
+        vendor_id=data.vendor_id,
+        date=data.date,
+        amount=data.amount,
+        method=data.method,
+        check_number=data.check_number,
+        pay_from_account_id=data.pay_from_account_id,
+        notes=data.notes,
     )
     db.add(payment)
     db.flush()
@@ -62,14 +66,21 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
     for alloc_data in data.allocations:
         bill = db.query(Bill).filter(Bill.id == alloc_data.bill_id).first()
         if not bill:
-            raise HTTPException(status_code=404, detail=f"Bill {alloc_data.bill_id} not found")
+            raise HTTPException(
+                status_code=404, detail=f"Bill {alloc_data.bill_id} not found"
+            )
         if alloc_data.amount > float(bill.balance_due):
-            raise HTTPException(status_code=400, detail=f"Allocation exceeds bill balance")
+            raise HTTPException(
+                status_code=400, detail="Allocation exceeds bill balance"
+            )
 
-        db.add(BillPaymentAllocation(
-            bill_payment_id=payment.id, bill_id=alloc_data.bill_id,
-            amount=alloc_data.amount,
-        ))
+        db.add(
+            BillPaymentAllocation(
+                bill_payment_id=payment.id,
+                bill_id=alloc_data.bill_id,
+                amount=alloc_data.amount,
+            )
+        )
 
         bill.amount_paid += Decimal(str(alloc_data.amount))
         bill.balance_due -= Decimal(str(alloc_data.amount))
@@ -88,14 +99,26 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
 
     if ap_id and bank_id:
         journal_lines = [
-            {"account_id": ap_id, "debit": Decimal(str(data.amount)),
-             "credit": Decimal("0"), "description": f"Bill payment to {vendor.name}"},
-            {"account_id": bank_id, "debit": Decimal("0"),
-             "credit": Decimal(str(data.amount)), "description": f"Bill payment to {vendor.name}"},
+            {
+                "account_id": ap_id,
+                "debit": Decimal(str(data.amount)),
+                "credit": Decimal("0"),
+                "description": f"Bill payment to {vendor.name}",
+            },
+            {
+                "account_id": bank_id,
+                "debit": Decimal("0"),
+                "credit": Decimal(str(data.amount)),
+                "description": f"Bill payment to {vendor.name}",
+            },
         ]
         txn = create_journal_entry(
-            db, data.date, f"Bill payment to {vendor.name}",
-            journal_lines, source_type="bill_payment", source_id=payment.id,
+            db,
+            data.date,
+            f"Bill payment to {vendor.name}",
+            journal_lines,
+            source_type="bill_payment",
+            source_id=payment.id,
         )
         payment.transaction_id = txn.id
 
@@ -103,4 +126,80 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
     db.refresh(payment)
     resp = BillPaymentResponse.model_validate(payment)
     resp.vendor_name = vendor.name
+    return resp
+
+
+@router.post("/{bill_payment_id}/void", response_model=BillPaymentResponse)
+def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
+    """Void a bill payment — reverses JE and restores bill balances.
+
+    Mirror of /api/payments/{id}/void for the AP side. Posts a reversing
+    journal entry dated to the original payment, walks each allocation,
+    and restores the bill's amount_paid / balance_due / status to its
+    pre-payment values.
+    """
+    # Row-lock the payment so two concurrent voids can't both pass the
+    # is_voided guard and post duplicate reversing JEs.
+    payment = (
+        db.query(BillPayment)
+        .filter(BillPayment.id == bill_payment_id)
+        .with_for_update()
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Bill payment not found")
+    if payment.is_voided:
+        raise HTTPException(status_code=400, detail="Bill payment already voided")
+    check_closing_date(db, payment.date)
+
+    if payment.transaction_id:
+        from app.models.transactions import TransactionLine
+
+        original_lines = (
+            db.query(TransactionLine)
+            .filter(TransactionLine.transaction_id == payment.transaction_id)
+            .all()
+        )
+        reverse_lines = [
+            {
+                "account_id": ol.account_id,
+                "debit": ol.credit,
+                "credit": ol.debit,
+                "description": f"VOID: {ol.description or ''}",
+            }
+            for ol in original_lines
+        ]
+        if reverse_lines:
+            vendor = db.query(Vendor).filter(Vendor.id == payment.vendor_id).first()
+            vname = vendor.name if vendor else "Unknown"
+            create_journal_entry(
+                db,
+                payment.date,
+                f"VOID Bill payment to {vname}",
+                reverse_lines,
+                source_type="bill_payment_void",
+                source_id=payment.id,
+            )
+
+    # Reverse allocations. Lock each bill row so a concurrent create or
+    # second void can't race the read-modify-write of amount_paid /
+    # balance_due / status.
+    for alloc in payment.allocations:
+        bill = db.query(Bill).filter(Bill.id == alloc.bill_id).with_for_update().first()
+        if bill:
+            bill.amount_paid -= alloc.amount
+            bill.balance_due += alloc.amount
+            if bill.balance_due >= bill.total:
+                bill.status = BillStatus.UNPAID
+            elif bill.amount_paid > 0:
+                bill.status = BillStatus.PARTIAL
+            else:
+                bill.status = BillStatus.UNPAID
+
+    payment.is_voided = True
+    db.commit()
+    db.refresh(payment)
+    resp = BillPaymentResponse.model_validate(payment)
+    if payment.vendor:
+        resp.vendor_name = payment.vendor.name
     return resp

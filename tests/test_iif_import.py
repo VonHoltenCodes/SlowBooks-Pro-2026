@@ -18,6 +18,18 @@ INVOICE_IIF = (
     "ENDTRNS\n"
 )
 
+# Sub-cent SPL amounts (e.g. fuel surcharge exports from QB Pro) drift the
+# stored subtotal / total away from sum(line.amount) when accumulated raw.
+SUBCENT_INVOICE_IIF = (
+    "!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tTERMS\n"
+    "!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tINVITEM\tQNTY\tPRICE\n"
+    "!ENDTRNS\n"
+    "TRNS\t1\tINVOICE\t2026-04-01\tAccounts Receivable\tAcme Co\t99.99\tINV-DRIFT\tNet 30\n"
+    "SPL\t2\tINVOICE\t2026-04-01\tService Income\tAcme Co\t-49.995\t\t1.5\t33.33\n"
+    "SPL\t3\tINVOICE\t2026-04-01\tService Income\tAcme Co\t-49.995\t\t1.5\t33.33\n"
+    "ENDTRNS\n"
+)
+
 
 def test_iif_import_invoice_common_case(db_session, seed_accounts):
     from app.services.iif_import import parse_iif, import_transactions
@@ -54,6 +66,46 @@ def test_iif_import_invoice_common_case(db_session, seed_accounts):
     total_dr = sum((Decimal(str(l.debit)) for l in lines), Decimal("0"))
     total_cr = sum((Decimal(str(l.credit)) for l in lines), Decimal("0"))
     assert total_dr == total_cr == Decimal("108.75")
+
+
+def test_iif_import_subcent_amounts_quantize_to_match_subtotal(
+    db_session, seed_accounts
+):
+    """Sub-cent SPL AMOUNT values (e.g. -49.995) must round to 2dp on import
+    so the stored InvoiceLine.amount sum matches the stored subtotal and the
+    journal entry remains balanced after persistence."""
+    from app.services.iif_import import parse_iif, import_transactions
+    from app.models.invoices import Invoice, InvoiceLine
+    from app.models.contacts import Customer
+    from app.models.transactions import TransactionLine
+
+    db_session.add(Customer(name="Acme Co", is_active=True))
+    db_session.commit()
+
+    parsed = parse_iif(SUBCENT_INVOICE_IIF)
+    import_transactions(db_session, parsed["TRNS"])
+    db_session.commit()
+    db_session.expire_all()
+
+    invoice = db_session.query(Invoice).filter_by(invoice_number="INV-DRIFT").first()
+    assert invoice is not None
+
+    lines = db_session.query(InvoiceLine).filter_by(invoice_id=invoice.id).all()
+    sum_lines = sum((Decimal(str(l.amount)) for l in lines), Decimal("0"))
+    assert (
+        invoice.subtotal == sum_lines
+    ), f"subtotal {invoice.subtotal} != sum(line.amount) {sum_lines}"
+
+    # JE balanced after persistence (stored cents on both sides match)
+    if invoice.transaction_id:
+        txn_lines = (
+            db_session.query(TransactionLine)
+            .filter_by(transaction_id=invoice.transaction_id)
+            .all()
+        )
+        dr = sum((Decimal(str(l.debit)) for l in txn_lines), Decimal("0"))
+        cr = sum((Decimal(str(l.credit)) for l in txn_lines), Decimal("0"))
+        assert dr == cr, f"JE unbalanced: debits={dr} credits={cr}"
 
 
 def test_iif_import_dedupes_on_doc_number(db_session, seed_accounts):

@@ -14,8 +14,12 @@ from app.models.recurring import RecurringInvoice
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.items import Item
 from app.services.accounting import (
-    create_journal_entry, get_ar_account_id,
-    get_default_income_account_id, get_sales_tax_account_id,
+    _q,
+    compute_line_totals,
+    create_journal_entry,
+    get_ar_account_id,
+    get_default_income_account_id,
+    get_sales_tax_account_id,
 )
 
 
@@ -44,10 +48,14 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
     if as_of is None:
         as_of = date.today()
 
-    recurrings = db.query(RecurringInvoice).filter(
-        RecurringInvoice.is_active == True,
-        RecurringInvoice.next_due <= as_of,
-    ).all()
+    recurrings = (
+        db.query(RecurringInvoice)
+        .filter(
+            RecurringInvoice.is_active,
+            RecurringInvoice.next_due <= as_of,
+        )
+        .all()
+    )
 
     created_ids = []
     ar_id = get_ar_account_id(db)
@@ -62,11 +70,12 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
 
         invoice_number = _next_invoice_number(db)
 
-        # Compute totals
-        subtotal = sum(Decimal(str(l.quantity)) * Decimal(str(l.rate)) for l in rec.lines)
+        # Compute totals via the shared helper: each line is rounded to 2dp
+        # before summing so the stored subtotal matches the sum of stored
+        # line amounts, and journal credits land on the same cents as the
+        # A/R debit once SQL rounds.
         tax_rate = rec.tax_rate or Decimal("0")
-        tax_amount = subtotal * tax_rate
-        total = subtotal + tax_amount
+        subtotal, tax_amount, total = compute_line_totals(rec.lines, tax_rate)
 
         # Parse terms for due date
         due_date = rec.next_due + timedelta(days=30)
@@ -78,30 +87,48 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
                 pass
 
         invoice = Invoice(
-            invoice_number=invoice_number, customer_id=rec.customer_id,
-            date=rec.next_due, due_date=due_date, terms=rec.terms,
-            subtotal=subtotal, tax_rate=tax_rate, tax_amount=tax_amount,
-            total=total, balance_due=total, notes=rec.notes,
+            invoice_number=invoice_number,
+            customer_id=rec.customer_id,
+            date=rec.next_due,
+            due_date=due_date,
+            terms=rec.terms,
+            subtotal=subtotal,
+            tax_rate=tax_rate,
+            tax_amount=tax_amount,
+            total=total,
+            balance_due=total,
+            notes=rec.notes,
         )
         db.add(invoice)
         db.flush()
 
         for rline in rec.lines:
-            db.add(InvoiceLine(
-                invoice_id=invoice.id, item_id=rline.item_id,
-                description=rline.description, quantity=rline.quantity,
-                rate=rline.rate, amount=Decimal(str(rline.quantity)) * Decimal(str(rline.rate)),
-                line_order=rline.line_order,
-            ))
+            db.add(
+                InvoiceLine(
+                    invoice_id=invoice.id,
+                    item_id=rline.item_id,
+                    description=rline.description,
+                    quantity=rline.quantity,
+                    rate=rline.rate,
+                    amount=_q(Decimal(str(rline.quantity)) * Decimal(str(rline.rate))),
+                    line_order=rline.line_order,
+                )
+            )
 
         # Journal entry
         if ar_id and default_income_id:
-            journal_lines = [{
-                "account_id": ar_id, "debit": total, "credit": Decimal("0"),
-                "description": f"Recurring Invoice #{invoice_number}",
-            }]
+            journal_lines = [
+                {
+                    "account_id": ar_id,
+                    "debit": total,
+                    "credit": Decimal("0"),
+                    "description": f"Recurring Invoice #{invoice_number}",
+                }
+            ]
             for rline in rec.lines:
-                line_amt = Decimal(str(rline.quantity)) * Decimal(str(rline.rate))
+                # Must round per-line BEFORE summing to match compute_line_totals;
+                # otherwise stored credits drift from the rounded A/R debit.
+                line_amt = _q(Decimal(str(rline.quantity)) * Decimal(str(rline.rate)))
                 if line_amt == 0:
                     continue
                 income_id = default_income_id
@@ -109,18 +136,30 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
                     item = db.query(Item).filter(Item.id == rline.item_id).first()
                     if item and item.income_account_id:
                         income_id = item.income_account_id
-                journal_lines.append({
-                    "account_id": income_id, "debit": Decimal("0"), "credit": line_amt,
-                    "description": rline.description or "",
-                })
+                journal_lines.append(
+                    {
+                        "account_id": income_id,
+                        "debit": Decimal("0"),
+                        "credit": line_amt,
+                        "description": rline.description or "",
+                    }
+                )
             if tax_amount > 0 and tax_account_id:
-                journal_lines.append({
-                    "account_id": tax_account_id, "debit": Decimal("0"), "credit": tax_amount,
-                    "description": "Sales tax",
-                })
+                journal_lines.append(
+                    {
+                        "account_id": tax_account_id,
+                        "debit": Decimal("0"),
+                        "credit": tax_amount,
+                        "description": "Sales tax",
+                    }
+                )
             txn = create_journal_entry(
-                db, rec.next_due, f"Recurring Invoice #{invoice_number}",
-                journal_lines, source_type="invoice", source_id=invoice.id,
+                db,
+                rec.next_due,
+                f"Recurring Invoice #{invoice_number}",
+                journal_lines,
+                source_type="invoice",
+                source_id=invoice.id,
                 reference=invoice_number,
             )
             invoice.transaction_id = txn.id
@@ -130,6 +169,7 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
         db.flush()
         db.refresh(invoice)
         from app.services.inventory_hooks import post_sale_for_invoice
+
         post_sale_for_invoice(db, invoice, txn_date=rec.next_due)
 
         # Advance next due date
