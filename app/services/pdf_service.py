@@ -1,6 +1,6 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CPrintManager + CInvoicePrintLayout
-# Offset: 0x00220000
+# A nod to qbw32.exe!CPrintManager + CInvoicePrintLayout
+# Imagined offset: 0x00220000
 # Original used Crystal Reports 8.5 OCX embedded in an OLE container for
 # print preview. The .RPT template files were stored as RT_RCDATA resources.
 # We're using WeasyPrint + Jinja2 because Crystal Reports can go to hell.

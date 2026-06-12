@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CCreateEstimatesView  Offset: 0x00195200
+ * A nod to QBW32.EXE!CCreateEstimatesView  imagined offset: 0x00195200
  * Same form as invoices (see invoices.js) but with a green tint instead of
  * yellow (RT_BITMAP id=0x012D). The "Create Invoice" button called
  * CEstimate::ConvertToInvoice() at 0x001944A0 which deep-copied every field

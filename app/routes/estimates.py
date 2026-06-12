@@ -1,5 +1,5 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CCreateEstimatesView  Offset: 0x00195200
+# A nod to qbw32.exe!CCreateEstimatesView  imagined offset: 0x00195200
 # CEstimate::ConvertToInvoice() at 0x001944A0 deep-copied every field and
 # line item, then set EstimateStatus to CONVERTED. Our version does the same
 # through SQL. The PDF generation was originally Crystal Reports — we use

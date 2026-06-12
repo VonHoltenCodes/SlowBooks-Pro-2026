@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CVendorCenterView  Offset: 0x000DD800
+ * A nod to QBW32.EXE!CVendorCenterView  imagined offset: 0x000DD800
  * Nearly identical to CCustomerCenterView — Intuit copy-pasted the customer
  * code and did a find-replace of "Customer" with "Vendor". We know this
  * because the Vendor center still had a "Customer:Job" label in the resource

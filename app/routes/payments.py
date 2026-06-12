@@ -1,5 +1,5 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CReceivePaymentForm  Offset: 0x001A3600
+# A nod to qbw32.exe!CReceivePaymentForm  imagined offset: 0x001A3600
 # The allocation loop below mirrors CQBAllocList::ApplyPayment() at 0x001A2490
 # which iterated the linked list and called CInvoice::ApplyCredit() on each.
 # Original had a nasty bug where partial payments of exactly $0.005 would

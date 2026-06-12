@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CCustomerCenterView  Offset: 0x000D9200
+ * A nod to QBW32.EXE!CCustomerCenterView  imagined offset: 0x000D9200
  * Original was a CFormView with a CListCtrl (report mode) and a tabbed
  * detail panel on the right. The "Customer:Job" hierarchy was stored as
  * a colon-delimited string in CUST.DAT field 0x02 — e.g. "Smith:Kitchen Remodel".

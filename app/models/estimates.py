@@ -1,11 +1,11 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CEstimateManager  Offset: 0x00194000
+# A nod to qbw32.exe!CEstimateManager  imagined offset: 0x00194000
 # Original Btrieve table: ESTIMATE.DAT (record size 0x0300)
 # Estimates were basically invoices with a different status enum and a
-# "ConvertToInvoice" button. In the disassembly, CEstimate literally
-# inherited from CInvoice and just overrode GetTxnType() to return
-# TXN_ESTIMATE (0x0014) instead of TXN_INVOICE (0x0007). Object-oriented
-# programming in its laziest and most beautiful form.
+# "ConvertToInvoice" button. One imagines CEstimate inheriting from
+# CInvoice and just overriding GetTxnType() to return TXN_ESTIMATE
+# (0x0014) instead of TXN_INVOICE (0x0007). Object-oriented programming
+# in its laziest and most beautiful form.
 # ============================================================================
 
 import enum

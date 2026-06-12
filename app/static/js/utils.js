@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CQBFormatUtils  Offset: 0x0008C200
+ * A nod to QBW32.EXE!CQBFormatUtils  imagined offset: 0x0008C200
  * Original formatting used Win32 GetCurrencyFormat() / GetDateFormat()
  * with the system locale. The BCD-to-string conversion in the original
  * had a special case for negative values that printed parentheses instead

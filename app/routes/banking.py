@@ -1,6 +1,6 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CBankManager + CReconcileEngine
-# Offset: 0x001E7200 (BankAcct) / 0x001F0400 (Reconcile)
+# A nod to qbw32.exe!CBankManager + CReconcileEngine
+# Imagined offset: 0x001E7200 (BankAcct) / 0x001F0400 (Reconcile)
 # The reconciliation engine was CReconcileEngine::ComputeDifference() at
 # 0x001F0890. Toggle cleared items, then validate sum matches statement.
 # ============================================================================

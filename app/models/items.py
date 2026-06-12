@@ -1,5 +1,5 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CItemManager  Offset: 0x000F4E00
+# A nod to qbw32.exe!CItemManager  imagined offset: 0x000F4E00
 # Original Btrieve table: ITEM.DAT (record size 0x01C0, 4 key segments)
 # Intuit called these "ItemRef" entries — the SDK exposed them through the
 # IItemQuery interface. Type field was a WORD that mapped to the

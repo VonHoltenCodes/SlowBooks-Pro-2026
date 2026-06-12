@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CReceivePaymentsView  Offset: 0x001A4200
+ * A nod to QBW32.EXE!CReceivePaymentsView  imagined offset: 0x001A4200
  * The payment allocation grid in the original was a custom MFC control
  * called CQBPaymentGrid that would auto-fill oldest invoices first when
  * you typed a payment amount (FIFO allocation via CQBAllocList::AutoApply

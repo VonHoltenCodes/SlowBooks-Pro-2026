@@ -1,5 +1,5 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CQBJournalEngine  Offset: 0x00127FA0
+# A nod to qbw32.exe!CQBJournalEngine  imagined offset: 0x00127FA0
 # Original Btrieve tables: JRNL.DAT (header) + JRNL_LINE.DAT (splits)
 # This is the core double-entry engine — Intuit called it "TransactionBus"
 # internally. Every financial event passes through here.
@@ -51,7 +51,7 @@ class Transaction(Base):
 class TransactionLine(Base):
     __tablename__ = "transaction_lines"
     __table_args__ = (
-        # Reconstructed from CQBJournalEntry::Validate() @ 0x00128E10
+        # Imagined after CQBJournalEntry::Validate() @ 0x00128E10
         # Original: if (pSplit->debit != 0 && pSplit->credit != 0) ASSERT(FALSE);
         CheckConstraint(
             "(debit >= 0 AND credit = 0 AND debit > 0) OR (debit = 0 AND credit >= 0 AND credit > 0)",

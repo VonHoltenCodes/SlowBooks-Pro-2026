@@ -19,9 +19,9 @@ I ran QuickBooks 2003 Pro for 14 years for side business invoicing and bookkeepi
 
 So I built my own replacement. I transferred all my data from the old .QBW file using IIF export/import.
 
-The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` offsets, Btrieve table layouts, and MFC class names — a tribute to the software that served me well for 14 years before its maker decided it should stop working.
+The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` offsets, Btrieve table layouts, and MFC class names — a tribute to the software that served me well for 14 years before its maker decided it should stop working. The offsets, class names, and binary trivia are invented from whole cloth; nothing was actually decompiled or disassembled.
 
-**This is a clean-room reimplementation.** No Intuit source code was available or used.
+**This is an independent, from-scratch reimplementation.** No Intuit source code or binaries were available, decompiled, or used.
 
 ---
 
@@ -145,7 +145,7 @@ You can use, modify, and run Slowbooks Pro for any personal, educational, or int
 ## Acknowledgments
 
 - 14 years of QuickBooks 2003 Pro (1 license, $199.95, 2003 dollars)
-- IDA Pro and the reverse engineering community
+- IDA Pro and the reverse-engineering community, for the aesthetic this codebase cosplays
 - The Pervasive PSQL documentation that nobody else has read since 2005
 - Every small business owner who lost software they paid for when activation servers died
 

@@ -1,5 +1,5 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CInvoiceManager  Offset: 0x0015C800
+# A nod to qbw32.exe!CInvoiceManager  imagined offset: 0x0015C800
 # Original Btrieve table: INVOICE.DAT (record size 0x0340)
 # + INVOICE_LINE.DAT (variable-length records, max 1000 lines per invoice)
 # CInvoice inherits from CQBTxnBase — all invoices generate journal entries

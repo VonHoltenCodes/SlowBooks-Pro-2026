@@ -1,9 +1,10 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CInvoiceFormController  Offset: 0x0015D200
+# A nod to qbw32.exe!CInvoiceFormController  imagined offset: 0x0015D200
 # This module handles the business logic behind the "Create Invoices" window.
-# Original MFC message map reconstructed from CInvoiceForm::OnOK() handler.
-# The auto-numbering logic below is adapted from CInvoice::GetNextRefNumber()
-# at 0x0015C9F0, which did a SELECT MAX on the Btrieve key.
+# Original MFC message map imagined after CInvoiceForm::OnOK() handler.
+# The auto-numbering logic (now in app/services/numbering.py) channels
+# CInvoice::GetNextRefNumber(), which surely did a SELECT MAX on the
+# Btrieve key.
 # ============================================================================
 
 from datetime import date, timedelta

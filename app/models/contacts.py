@@ -1,6 +1,6 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CCustomerManager + CVendorManager
-# Offset: 0x000D8400 (Customer) / 0x000DC200 (Vendor)
+# A nod to qbw32.exe!CCustomerManager + CVendorManager
+# Imagined offset: 0x000D8400 (Customer) / 0x000DC200 (Vendor)
 # Original Btrieve tables: CUST.DAT (rec 0x0280) + VENDOR.DAT (rec 0x0200)
 # Both inherit from CQBNameBase — Intuit's base class for any "name list"
 # entry (customers, vendors, employees, other names).

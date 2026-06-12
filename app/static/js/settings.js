@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CPreferencesDialog  Offset: 0x0023F800
+ * A nod to QBW32.EXE!CPreferencesDialog  imagined offset: 0x0023F800
  * Original: tabbed dialog (IDD_PREFERENCES) with 12 tabs. We condensed
  * everything into a single page because nobody needs 12 tabs for
  * company name and tax rate. The registry writes at 0x00240200 are now

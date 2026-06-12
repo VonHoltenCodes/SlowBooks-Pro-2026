@@ -1,6 +1,6 @@
 /**
- * Decompiled from QBW32.EXE!CBankRegisterView + CReconcileWizard
- * Offset: 0x001E8400 (Register) / 0x001F1200 (Reconcile)
+ * A nod to QBW32.EXE!CBankRegisterView + CReconcileWizard
+ * Imagined offset: 0x001E8400 (Register) / 0x001F1200 (Reconcile)
  * The bank register was one of the oldest views in QuickBooks, dating back
  * to the original Quicken codebase (circa 1993). You could tell because it
  * used CEditView instead of CFormView and had hardcoded column widths in

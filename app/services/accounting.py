@@ -1,6 +1,6 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CQBJournalEngine::PostTransaction()
-# Offset: 0x00128400
+# A nod to qbw32.exe!CQBJournalEngine::PostTransaction()
+# Imagined offset: 0x00128400
 # This is the heart of the double-entry system. Every financial event
 # (invoice, payment, bank transaction) creates a balanced journal entry
 # through this service. The original validated sum(debits) == sum(credits)

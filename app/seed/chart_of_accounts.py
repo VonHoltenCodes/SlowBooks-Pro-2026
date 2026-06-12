@@ -1,6 +1,6 @@
 # ============================================================================
-# Extracted from qbw32.exe!CNewCompanyWizard::CreateDefaultAccounts()
-# Offset: 0x00231A00  |  Resource table: RT_RCDATA id=0x0067 "DEFACCTS"
+# A nod to qbw32.exe!CNewCompanyWizard::CreateDefaultAccounts()
+# Imagined offset: 0x00231A00  |  Resource table: RT_RCDATA id=0x0067 "DEFACCTS"
 # These are the default Chart of Accounts entries that QB2003 Pro created
 # when you ran the "EasyStep Interview" for a new company file.
 # Account numbers match the "Contractor" industry template (CONTRACTOR.QBT)

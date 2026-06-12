@@ -1,7 +1,7 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CChartOfAccounts  Offset: 0x000B12A0
+# A nod to qbw32.exe!CChartOfAccounts  imagined offset: 0x000B12A0
 # Original Btrieve table: ACCT.DAT (record size 0x0180, key 0 = AcctNum)
-# Field mappings reconstructed from CQBAccount::Serialize() vtable
+# Field mappings imagined after CQBAccount::Serialize() vtable
 # ============================================================================
 
 import enum

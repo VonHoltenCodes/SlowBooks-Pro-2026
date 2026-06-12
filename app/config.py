@@ -1,6 +1,6 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CQBPreferences + CCompanyInfo
-# Offset: 0x0023F000 (Prefs) / 0x00241200 (CompanyInfo)
+# A nod to qbw32.exe!CQBPreferences + CCompanyInfo
+# Imagined offset: 0x0023F000 (Prefs) / 0x00241200 (CompanyInfo)
 # Original stored in Windows Registry: HKCU\Software\Intuit\QuickBooks\12.0
 # and in the .QBW file header (first 512 bytes, encrypted with XOR 0x1F).
 # We moved everything to .env because it's 2026 and registry is not a config.

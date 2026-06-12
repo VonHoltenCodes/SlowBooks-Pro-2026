@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CReportEngine + CReportViewer  Offset: 0x00210000
+ * A nod to QBW32.EXE!CReportEngine + CReportViewer  imagined offset: 0x00210000
  * The original report engine was actually impressive - it had its own query
  * language ("QBReportQuery") that got compiled to Btrieve API calls. The
  * P&L report alone generated 14 separate Btrieve operations. We just use SQL.

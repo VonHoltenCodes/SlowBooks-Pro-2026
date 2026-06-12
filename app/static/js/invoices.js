@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CCreateInvoicesView  Offset: 0x0015E400
+ * A nod to QBW32.EXE!CCreateInvoicesView  imagined offset: 0x0015E400
  * This was the crown jewel of QB2003 — the "Create Invoices" form with
  * the yellow-tinted paper background texture (resource RT_BITMAP id=0x012C).
  * Line items were rendered in a custom owner-draw CListCtrl subclass called

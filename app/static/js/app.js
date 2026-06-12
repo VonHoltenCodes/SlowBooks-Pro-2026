@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CMainFrame + CQBNavigator  Offset: 0x00042000
+ * A nod to QBW32.EXE!CMainFrame + CQBNavigator  imagined offset: 0x00042000
  * Original was an MFC CFrameWnd with a custom left-panel "Navigator" control
  * (the icon sidebar everyone remembers). CMainFrame::OnNavigate() dispatched
  * to individual CFormView subclasses via a 31-entry function pointer table.

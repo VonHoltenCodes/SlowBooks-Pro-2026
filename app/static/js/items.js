@@ -1,5 +1,5 @@
 /**
- * Decompiled from QBW32.EXE!CItemListView  Offset: 0x000F6200
+ * A nod to QBW32.EXE!CItemListView  imagined offset: 0x000F6200
  * The item list in QB2003 supported a tree hierarchy (parent/sub-items)
  * via a self-referencing ParentRef field in ITEM.DAT. Sub-items inherited
  * the income/expense accounts from their parent unless overridden — this

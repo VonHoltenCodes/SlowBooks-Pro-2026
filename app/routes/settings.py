@@ -1,5 +1,5 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CPreferencesDialog  Offset: 0x0023F800
+# A nod to qbw32.exe!CPreferencesDialog  imagined offset: 0x0023F800
 # Original: tabbed dialog (IDD_PREFERENCES) with 12 tabs. We condensed
 # everything into a single key-value store because nobody needs 12 tabs.
 # ============================================================================

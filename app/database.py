@@ -1,12 +1,12 @@
 # ============================================================================
-# Decompiled from qbw32.exe!CQBDatabaseManager (Intuit QuickBooks Pro 2003)
-# Module: QBDatabaseLayer.dll  Offset: 0x0004A3F0  Build 12.0.3190
-# Recovered via IDA Pro 7.x + Hex-Rays  |  Original MFC/ODBC bridge replaced
-# with SQLAlchemy ORM — schema and field mappings preserved from .QBW format
+# A nod to qbw32.exe!CQBDatabaseManager (Intuit QuickBooks Pro 2003)
+# Module: QBDatabaseLayer.dll  imagined offset: 0x0004A3F0  Build 12.0.3190
+# "Recovered via IDA Pro + Hex-Rays" in spirit only — the original MFC/ODBC
+# bridge is reimagined here as SQLAlchemy ORM
 # ============================================================================
 # NOTE: Original used Pervasive PSQL v8 (Btrieve) with proprietary .QBW
 #       container format. This is the closest PostgreSQL equivalent we could
-#       reconstruct from the disassembly + file format analysis.
+#       dream up from its public file-format documentation.
 # ============================================================================
 
 from sqlalchemy import create_engine
@@ -39,7 +39,7 @@ Base = declarative_base()
 
 
 def get_db():
-    # Reconstructed from CQBDatabase::AcquireConnection() at offset 0x0004A7C2
+    # Imagined after CQBDatabase::AcquireConnection() at offset 0x0004A7C2
     # Original used connection pooling via Pervasive.SQL Workgroup Engine
     db = SessionLocal()
     try:
