@@ -9,25 +9,15 @@
 const EstimatesPage = {
     async render() {
         const estimates = await API.get('/estimates');
-        let html = `
-            <div class="page-header">
-                <h2>Estimates</h2>
-                <button class="btn btn-primary" onclick="EstimatesPage.showForm()">+ New Estimate</button>
-            </div>`;
-
-        if (estimates.length === 0) {
-            html += `<div class="empty-state">
-                <p>No estimates yet.</p>
-                <button class="btn btn-primary" onclick="EstimatesPage.showForm()" style="margin-top:10px;">+ Create your first estimate</button>
-            </div>`;
-        } else {
-            html += `<div class="table-container"><table>
-                <thead><tr>
-                    <th>#</th><th>Customer</th><th>Date</th><th>Expires</th>
-                    <th>Status</th><th class="amount">Total</th><th>Actions</th>
-                </tr></thead><tbody>`;
-            for (const est of estimates) {
-                html += `<tr>
+        return renderListPage({
+            title: 'Estimates',
+            headerHtml: `<button class="btn btn-primary" onclick="EstimatesPage.showForm()">+ New Estimate</button>`,
+            empty: `<p>No estimates yet.</p>
+                <button class="btn btn-primary" onclick="EstimatesPage.showForm()" style="margin-top:10px;">+ Create your first estimate</button>`,
+            columns: ['#', 'Customer', 'Date', 'Expires', 'Status',
+                { label: 'Total', cls: 'amount' }, 'Actions'],
+            items: estimates,
+            row: est => `<tr>
                     <td><strong>${escapeHtml(est.estimate_number)}</strong></td>
                     <td>${escapeHtml(est.customer_name || '')}</td>
                     <td>${formatDate(est.date)}</td>
@@ -39,11 +29,8 @@ const EstimatesPage = {
                         <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>
                         ${est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : ''}
                     </td>
-                </tr>`;
-            }
-            html += `</tbody></table></div>`;
-        }
-        return html;
+                </tr>`,
+        });
     },
 
     async view(id) {

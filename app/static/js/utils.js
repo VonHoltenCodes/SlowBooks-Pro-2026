@@ -68,3 +68,54 @@ function closeSearchDropdown() {
     const input = $('#global-search');
     if (input) input.value = '';
 }
+
+/**
+ * Shared scaffolding for the document list pages (invoices, bills,
+ * estimates, purchase orders, credit memos). Each page previously built
+ * the same page-header / status-filter toolbar / empty-state / table
+ * skeleton by hand; only the title, buttons, columns, and row markup
+ * actually differ, so those stay page-owned.
+ *
+ *   title:      page heading text
+ *   headerHtml: raw HTML rendered next to the heading (action buttons)
+ *   filter:     optional {id, rowSelector, options: [[value, label], ...]}
+ *               status dropdown; filtering is client-side via filterRows()
+ *   empty:      raw HTML rendered inside .empty-state when items is empty
+ *   columns:    array of header labels; use {label, cls} for styled columns
+ *   items:      the fetched rows
+ *   row:        item => '<tr ...>...</tr>' (page keeps escaping/actions)
+ */
+function renderListPage({ title, headerHtml = '', filter = null, empty, columns, items, row }) {
+    let html = `
+        <div class="page-header">
+            <h2>${title}</h2>
+            ${headerHtml}
+        </div>`;
+    if (filter) {
+        const opts = filter.options
+            .map(([value, label]) => `<option value="${value}">${label}</option>`)
+            .join('');
+        html += `
+            <div class="toolbar">
+                <select id="${filter.id}" onchange="filterRows('${filter.id}', '${filter.rowSelector}')">
+                    <option value="">All Statuses</option>
+                    ${opts}
+                </select>
+            </div>`;
+    }
+    if (items.length === 0) {
+        return html + `<div class="empty-state">${empty}</div>`;
+    }
+    const ths = columns
+        .map(c => (typeof c === 'string' ? `<th>${c}</th>` : `<th class="${c.cls}">${c.label}</th>`))
+        .join('');
+    return html + `<div class="table-container"><table>
+        <thead><tr>${ths}</tr></thead><tbody>${items.map(row).join('')}</tbody></table></div>`;
+}
+
+function filterRows(selectId, rowSelector) {
+    const status = $(`#${selectId}`)?.value;
+    $$(rowSelector).forEach(row => {
+        row.style.display = (!status || row.dataset.status === status) ? '' : 'none';
+    });
+}

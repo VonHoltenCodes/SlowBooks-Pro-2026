@@ -5,35 +5,23 @@
 const BillsPage = {
     async render() {
         const bills = await API.get('/bills');
-        let html = `
-            <div class="page-header">
-                <h2>Bills (Accounts Payable)</h2>
-                <div class="btn-group">
+        return renderListPage({
+            title: 'Bills (Accounts Payable)',
+            headerHtml: `<div class="btn-group">
                     <button class="btn btn-primary" onclick="BillsPage.showForm()">+ Enter Bill</button>
                     <button class="btn btn-secondary" onclick="BillsPage.showPayForm()">Pay Bills</button>
-                </div>
-            </div>
-            <div class="toolbar">
-                <select id="bill-status-filter" onchange="BillsPage.applyFilter()">
-                    <option value="">All Statuses</option>
-                    <option value="unpaid">Unpaid</option>
-                    <option value="partial">Partial</option>
-                    <option value="paid">Paid</option>
-                    <option value="void">Void</option>
-                </select>
-            </div>`;
-
-        if (bills.length === 0) {
-            html += `<div class="empty-state">
-                <p>No bills entered yet.</p>
-                <button class="btn btn-primary" onclick="BillsPage.showForm()" style="margin-top:10px;">+ Enter your first bill</button>
-            </div>`;
-        } else {
-            html += `<div class="table-container"><table>
-                <thead><tr><th>Bill #</th><th>Vendor</th><th>Date</th><th>Due</th><th>Status</th>
-                <th class="amount">Total</th><th class="amount">Balance</th><th>Actions</th></tr></thead><tbody id="bill-tbody">`;
-            for (const b of bills) {
-                html += `<tr class="bill-row" data-status="${b.status}">
+                </div>`,
+            filter: {
+                id: 'bill-status-filter',
+                rowSelector: '.bill-row',
+                options: [['unpaid', 'Unpaid'], ['partial', 'Partial'], ['paid', 'Paid'], ['void', 'Void']],
+            },
+            empty: `<p>No bills entered yet.</p>
+                <button class="btn btn-primary" onclick="BillsPage.showForm()" style="margin-top:10px;">+ Enter your first bill</button>`,
+            columns: ['Bill #', 'Vendor', 'Date', 'Due', 'Status',
+                { label: 'Total', cls: 'amount' }, { label: 'Balance', cls: 'amount' }, 'Actions'],
+            items: bills,
+            row: b => `<tr class="bill-row" data-status="${b.status}">
                     <td><strong>${escapeHtml(b.bill_number)}</strong></td>
                     <td>${escapeHtml(b.vendor_name || '')}</td>
                     <td>${formatDate(b.date)}</td>
@@ -45,17 +33,7 @@ const BillsPage = {
                         <button class="btn btn-sm btn-secondary" onclick="BillsPage.view(${b.id})">View</button>
                         ${b.status !== 'void' && b.status !== 'paid' ? `<button class="btn btn-sm btn-danger" onclick="BillsPage.void(${b.id})">Void</button>` : ''}
                     </td>
-                </tr>`;
-            }
-            html += '</tbody></table></div>';
-        }
-        return html;
-    },
-
-    applyFilter() {
-        const status = $('#bill-status-filter')?.value;
-        $$('.bill-row').forEach(row => {
-            row.style.display = (!status || row.dataset.status === status) ? '' : 'none';
+                </tr>`,
         });
     },
 

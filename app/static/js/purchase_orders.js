@@ -5,19 +5,13 @@
 const PurchaseOrdersPage = {
     async render() {
         const pos = await API.get('/purchase-orders');
-        let html = `
-            <div class="page-header">
-                <h2>Purchase Orders</h2>
-                <button class="btn btn-primary" onclick="PurchaseOrdersPage.showForm()">+ New PO</button>
-            </div>`;
-
-        if (pos.length === 0) {
-            html += '<div class="empty-state"><p>No purchase orders yet</p></div>';
-        } else {
-            html += `<div class="table-container"><table>
-                <thead><tr><th>#</th><th>Vendor</th><th>Date</th><th>Status</th><th class="amount">Total</th><th>Actions</th></tr></thead><tbody>`;
-            for (const po of pos) {
-                html += `<tr>
+        return renderListPage({
+            title: 'Purchase Orders',
+            headerHtml: `<button class="btn btn-primary" onclick="PurchaseOrdersPage.showForm()">+ New PO</button>`,
+            empty: '<p>No purchase orders yet</p>',
+            columns: ['#', 'Vendor', 'Date', 'Status', { label: 'Total', cls: 'amount' }, 'Actions'],
+            items: pos,
+            row: po => `<tr>
                     <td><strong>${escapeHtml(po.po_number)}</strong></td>
                     <td>${escapeHtml(po.vendor_name || '')}</td>
                     <td>${formatDate(po.date)}</td>
@@ -27,11 +21,8 @@ const PurchaseOrdersPage = {
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.showForm(${po.id})">Edit</button>
                         ${po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : ''}
                     </td>
-                </tr>`;
-            }
-            html += '</tbody></table></div>';
-        }
-        return html;
+                </tr>`,
+        });
     },
 
     _items: [],

@@ -5,20 +5,14 @@
 const CreditMemosPage = {
     async render() {
         const memos = await API.get('/credit-memos');
-        let html = `
-            <div class="page-header">
-                <h2>Credit Memos</h2>
-                <button class="btn btn-primary" onclick="CreditMemosPage.showForm()">+ New Credit Memo</button>
-            </div>`;
-
-        if (memos.length === 0) {
-            html += '<div class="empty-state"><p>No credit memos yet</p></div>';
-        } else {
-            html += `<div class="table-container"><table>
-                <thead><tr><th>#</th><th>Customer</th><th>Date</th><th>Status</th>
-                <th class="amount">Total</th><th class="amount">Remaining</th><th>Actions</th></tr></thead><tbody>`;
-            for (const m of memos) {
-                html += `<tr>
+        return renderListPage({
+            title: 'Credit Memos',
+            headerHtml: `<button class="btn btn-primary" onclick="CreditMemosPage.showForm()">+ New Credit Memo</button>`,
+            empty: '<p>No credit memos yet</p>',
+            columns: ['#', 'Customer', 'Date', 'Status',
+                { label: 'Total', cls: 'amount' }, { label: 'Remaining', cls: 'amount' }, 'Actions'],
+            items: memos,
+            row: m => `<tr>
                     <td><strong>${escapeHtml(m.memo_number)}</strong></td>
                     <td>${escapeHtml(m.customer_name || '')}</td>
                     <td>${formatDate(m.date)}</td>
@@ -28,11 +22,8 @@ const CreditMemosPage = {
                     <td class="actions">
                         ${m.status === 'issued' ? `<button class="btn btn-sm btn-primary" onclick="CreditMemosPage.showApply(${m.id})">Apply</button>` : ''}
                     </td>
-                </tr>`;
-            }
-            html += '</tbody></table></div>';
-        }
-        return html;
+                </tr>`,
+        });
     },
 
     _items: [],

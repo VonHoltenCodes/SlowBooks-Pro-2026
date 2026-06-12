@@ -10,35 +10,20 @@
 const InvoicesPage = {
     async render() {
         const invoices = await API.get('/invoices');
-        let html = `
-            <div class="page-header">
-                <h2>Invoices</h2>
-                <button class="btn btn-primary" onclick="InvoicesPage.showForm()">+ New Invoice</button>
-            </div>
-            <div class="toolbar">
-                <select id="inv-status-filter" onchange="InvoicesPage.applyFilter()">
-                    <option value="">All Statuses</option>
-                    <option value="draft">Draft</option>
-                    <option value="sent">Sent</option>
-                    <option value="partial">Partial</option>
-                    <option value="paid">Paid</option>
-                    <option value="void">Void</option>
-                </select>
-            </div>`;
-
-        if (invoices.length === 0) {
-            html += `<div class="empty-state">
-                <p>No invoices yet.</p>
-                <button class="btn btn-primary" onclick="InvoicesPage.showForm()" style="margin-top:10px;">+ Create your first invoice</button>
-            </div>`;
-        } else {
-            html += `<div class="table-container"><table>
-                <thead><tr>
-                    <th>#</th><th>Customer</th><th>Date</th><th>Due Date</th>
-                    <th>Status</th><th class="amount">Total</th><th class="amount">Balance</th><th>Actions</th>
-                </tr></thead><tbody id="inv-tbody">`;
-            for (const inv of invoices) {
-                html += `<tr class="inv-row" data-status="${inv.status}">
+        return renderListPage({
+            title: 'Invoices',
+            headerHtml: `<button class="btn btn-primary" onclick="InvoicesPage.showForm()">+ New Invoice</button>`,
+            filter: {
+                id: 'inv-status-filter',
+                rowSelector: '.inv-row',
+                options: [['draft', 'Draft'], ['sent', 'Sent'], ['partial', 'Partial'], ['paid', 'Paid'], ['void', 'Void']],
+            },
+            empty: `<p>No invoices yet.</p>
+                <button class="btn btn-primary" onclick="InvoicesPage.showForm()" style="margin-top:10px;">+ Create your first invoice</button>`,
+            columns: ['#', 'Customer', 'Date', 'Due Date', 'Status',
+                { label: 'Total', cls: 'amount' }, { label: 'Balance', cls: 'amount' }, 'Actions'],
+            items: invoices,
+            row: inv => `<tr class="inv-row" data-status="${inv.status}">
                     <td><strong>${escapeHtml(inv.invoice_number)}</strong></td>
                     <td>${escapeHtml(inv.customer_name || '')}</td>
                     <td>${formatDate(inv.date)}</td>
@@ -51,17 +36,7 @@ const InvoicesPage = {
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showForm(${inv.id})">Edit</button>
                         ${inv.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="InvoicesPage.markSent(${inv.id})">Mark Sent</button>` : ''}
                     </td>
-                </tr>`;
-            }
-            html += `</tbody></table></div>`;
-        }
-        return html;
-    },
-
-    applyFilter() {
-        const status = $('#inv-status-filter').value;
-        $$('.inv-row').forEach(row => {
-            row.style.display = (!status || row.dataset.status === status) ? '' : 'none';
+                </tr>`,
         });
     },
 
