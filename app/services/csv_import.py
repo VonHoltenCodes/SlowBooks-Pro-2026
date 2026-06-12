@@ -1,6 +1,12 @@
 # ============================================================================
 # CSV Import Service — import entities from CSV files
 # Feature 14: Resilient import with error collection (like iif_import.py)
+#
+# Imported text is stored verbatim — deliberately. Spreadsheet formula
+# injection (a name like "=HYPERLINK(...)") is neutralized at EXPORT time
+# by csv_export._csv_safe; mangling values on the way in would corrupt
+# legitimate data (e.g. a vendor named "-Dash Co"). XSS is handled by
+# escapeHtml() in the frontend.
 # ============================================================================
 
 import csv

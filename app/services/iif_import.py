@@ -24,6 +24,7 @@ from app.models.items import Item, ItemType
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
+from app.services.iif_common import IIF_TO_ACCOUNT_TYPE, IIF_TO_ITEM_TYPE
 from app.services.accounting import (
     _q,
     create_journal_entry,
@@ -210,38 +211,6 @@ def _find_account(db: Session, name: str) -> Account:
 
 
 # ============================================================================
-# Reverse type mappings (IIF -> Slowbooks)
-# ============================================================================
-
-_IIF_TO_ACCOUNT_TYPE = {
-    "BANK": AccountType.ASSET,
-    "AR": AccountType.ASSET,
-    "OCASSET": AccountType.ASSET,
-    "OASSET": AccountType.ASSET,
-    "FIXASSET": AccountType.ASSET,
-    "AP": AccountType.LIABILITY,
-    "OCLIAB": AccountType.LIABILITY,
-    "LTLIAB": AccountType.LIABILITY,
-    "EQUITY": AccountType.EQUITY,
-    "INC": AccountType.INCOME,
-    "EXP": AccountType.EXPENSE,
-    "COGS": AccountType.COGS,
-    # Additional QB types mapped to closest Slowbooks equivalent
-    "EXINC": AccountType.INCOME,
-    "EXEXP": AccountType.EXPENSE,
-    "NONPOSTING": AccountType.ASSET,
-}
-
-_IIF_TO_ITEM_TYPE = {
-    "SERV": ItemType.SERVICE,
-    "PART": ItemType.PRODUCT,
-    "OTHC": ItemType.LABOR,
-    "INVENTORY": ItemType.PRODUCT,
-    "NON-INVENTORY": ItemType.MATERIAL,
-}
-
-
-# ============================================================================
 # Import Functions
 # ============================================================================
 
@@ -282,7 +251,7 @@ def import_accounts(db: Session, rows: list) -> dict:
                 continue
 
             iif_type = row.get("ACCNTTYPE", "").strip().upper()
-            acct_type = _IIF_TO_ACCOUNT_TYPE.get(iif_type, AccountType.EXPENSE)
+            acct_type = IIF_TO_ACCOUNT_TYPE.get(iif_type, AccountType.EXPENSE)
             acct_num = row.get("ACCNUM", "").strip() or None
 
             # Handle parent:child names
@@ -584,7 +553,7 @@ def import_items(db: Session, rows: list) -> dict:
                 continue
 
             iif_type = row.get("INVITEMTYPE", "").strip().upper()
-            item_type = _IIF_TO_ITEM_TYPE.get(iif_type, ItemType.SERVICE)
+            item_type = IIF_TO_ITEM_TYPE.get(iif_type, ItemType.SERVICE)
 
             # Resolve income account by name (with fallback)
             income_account_id = None
@@ -1113,7 +1082,7 @@ def validate_iif(content: str) -> dict:
             report["errors"].append(f"Account row {i + 1}: missing NAME")
             report["valid"] = False
         atype = row.get("ACCNTTYPE", "").strip().upper()
-        if atype and atype not in _IIF_TO_ACCOUNT_TYPE:
+        if atype and atype not in IIF_TO_ACCOUNT_TYPE:
             report["warnings"].append(
                 f"Account '{name}': unrecognized type '{atype}' (will default to Expense)"
             )
@@ -1137,7 +1106,7 @@ def validate_iif(content: str) -> dict:
             report["errors"].append(f"Item row {i + 1}: missing NAME")
             report["valid"] = False
         itype = row.get("INVITEMTYPE", "").strip().upper()
-        if itype and itype not in _IIF_TO_ITEM_TYPE:
+        if itype and itype not in IIF_TO_ITEM_TYPE:
             report["warnings"].append(
                 f"Item '{name}': unrecognized type '{itype}' (will default to Service)"
             )

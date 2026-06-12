@@ -21,71 +21,13 @@ from app.models.contacts import Customer, Vendor
 from app.models.items import Item, ItemType
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
-from app.models.qbo_mapping import QBOMapping
+from app.services.qbo_common import (
+    QBO_TO_ACCOUNT_TYPE,
+    QBO_TO_ITEM_TYPE,
+    create_mapping,
+    get_mapping_by_qbo_id,
+)
 from app.services.qbo_service import get_qbo_client
-
-# ============================================================================
-# QBO -> Slowbooks type mappings
-# ============================================================================
-
-_QBO_ACCOUNT_TYPE_MAP = {
-    "Bank": AccountType.ASSET,
-    "Accounts Receivable": AccountType.ASSET,
-    "Other Current Asset": AccountType.ASSET,
-    "Fixed Asset": AccountType.ASSET,
-    "Other Asset": AccountType.ASSET,
-    "Accounts Payable": AccountType.LIABILITY,
-    "Credit Card": AccountType.LIABILITY,
-    "Other Current Liability": AccountType.LIABILITY,
-    "Long Term Liability": AccountType.LIABILITY,
-    "Equity": AccountType.EQUITY,
-    "Income": AccountType.INCOME,
-    "Other Income": AccountType.INCOME,
-    "Expense": AccountType.EXPENSE,
-    "Other Expense": AccountType.EXPENSE,
-    "Cost of Goods Sold": AccountType.COGS,
-}
-
-_QBO_ITEM_TYPE_MAP = {
-    "Service": ItemType.SERVICE,
-    "Inventory": ItemType.PRODUCT,
-    "Group": ItemType.PRODUCT,
-    "NonInventory": ItemType.MATERIAL,
-}
-
-
-# ============================================================================
-# Mapping helpers
-# ============================================================================
-
-
-def _get_mapping(db: Session, entity_type: str, qbo_id: str) -> QBOMapping:
-    """Look up existing mapping by QBO ID."""
-    return (
-        db.query(QBOMapping)
-        .filter(
-            QBOMapping.entity_type == entity_type,
-            QBOMapping.qbo_id == str(qbo_id),
-        )
-        .first()
-    )
-
-
-def _create_mapping(
-    db: Session,
-    entity_type: str,
-    slowbooks_id: int,
-    qbo_id: str,
-    sync_token: str = None,
-):
-    """Create a new QBO <-> Slowbooks mapping."""
-    m = QBOMapping(
-        entity_type=entity_type,
-        slowbooks_id=slowbooks_id,
-        qbo_id=str(qbo_id),
-        qbo_sync_token=sync_token,
-    )
-    db.add(m)
 
 
 def _safe(obj, attr, default=None):
@@ -149,7 +91,7 @@ def import_accounts(db: Session) -> dict:
                 continue
 
             # Skip if already mapped
-            if _get_mapping(db, "account", qbo_id):
+            if get_mapping_by_qbo_id(db, "account", qbo_id):
                 continue
 
             name = _safe(qbo_acct, "Name", "")
@@ -159,7 +101,7 @@ def import_accounts(db: Session) -> dict:
             # Check if name already exists in Slowbooks
             existing = db.query(Account).filter(Account.name == name).first()
             if existing:
-                _create_mapping(
+                create_mapping(
                     db, "account", existing.id, qbo_id, _safe(qbo_acct, "SyncToken")
                 )
                 db.flush()
@@ -167,14 +109,14 @@ def import_accounts(db: Session) -> dict:
 
             # Map QBO account type to Slowbooks
             qbo_type = _safe(qbo_acct, "AccountType", "Expense")
-            acct_type = _QBO_ACCOUNT_TYPE_MAP.get(qbo_type, AccountType.EXPENSE)
+            acct_type = QBO_TO_ACCOUNT_TYPE.get(qbo_type, AccountType.EXPENSE)
 
             # Resolve parent account
             parent_id = None
             parent_ref = _safe(qbo_acct, "ParentRef")
             if parent_ref:
                 parent_qbo_id = _safe(parent_ref, "value", "")
-                parent_map = _get_mapping(db, "account", parent_qbo_id)
+                parent_map = get_mapping_by_qbo_id(db, "account", parent_qbo_id)
                 if parent_map:
                     parent_id = parent_map.slowbooks_id
 
@@ -190,9 +132,7 @@ def import_accounts(db: Session) -> dict:
             db.add(acct)
             db.flush()
 
-            _create_mapping(
-                db, "account", acct.id, qbo_id, _safe(qbo_acct, "SyncToken")
-            )
+            create_mapping(db, "account", acct.id, qbo_id, _safe(qbo_acct, "SyncToken"))
             imported += 1
 
         except Exception as e:
@@ -225,7 +165,7 @@ def import_customers(db: Session) -> dict:
             if not qbo_id:
                 continue
 
-            if _get_mapping(db, "customer", qbo_id):
+            if get_mapping_by_qbo_id(db, "customer", qbo_id):
                 continue
 
             display_name = _safe(qbo_cust, "DisplayName", "")
@@ -235,7 +175,7 @@ def import_customers(db: Session) -> dict:
             # Check by name
             existing = db.query(Customer).filter(Customer.name == display_name).first()
             if existing:
-                _create_mapping(
+                create_mapping(
                     db, "customer", existing.id, qbo_id, _safe(qbo_cust, "SyncToken")
                 )
                 db.flush()
@@ -312,7 +252,7 @@ def import_customers(db: Session) -> dict:
             db.add(cust)
             db.flush()
 
-            _create_mapping(
+            create_mapping(
                 db, "customer", cust.id, qbo_id, _safe(qbo_cust, "SyncToken")
             )
             imported += 1
@@ -347,7 +287,7 @@ def import_vendors(db: Session) -> dict:
             if not qbo_id:
                 continue
 
-            if _get_mapping(db, "vendor", qbo_id):
+            if get_mapping_by_qbo_id(db, "vendor", qbo_id):
                 continue
 
             display_name = _safe(qbo_vend, "DisplayName", "")
@@ -356,7 +296,7 @@ def import_vendors(db: Session) -> dict:
 
             existing = db.query(Vendor).filter(Vendor.name == display_name).first()
             if existing:
-                _create_mapping(
+                create_mapping(
                     db, "vendor", existing.id, qbo_id, _safe(qbo_vend, "SyncToken")
                 )
                 db.flush()
@@ -405,7 +345,7 @@ def import_vendors(db: Session) -> dict:
             db.add(vend)
             db.flush()
 
-            _create_mapping(db, "vendor", vend.id, qbo_id, _safe(qbo_vend, "SyncToken"))
+            create_mapping(db, "vendor", vend.id, qbo_id, _safe(qbo_vend, "SyncToken"))
             imported += 1
 
         except Exception as e:
@@ -436,7 +376,7 @@ def import_items(db: Session) -> dict:
             if not qbo_id:
                 continue
 
-            if _get_mapping(db, "item", qbo_id):
+            if get_mapping_by_qbo_id(db, "item", qbo_id):
                 continue
 
             name = _safe(qbo_item, "Name", "")
@@ -445,21 +385,21 @@ def import_items(db: Session) -> dict:
 
             existing = db.query(Item).filter(Item.name == name).first()
             if existing:
-                _create_mapping(
+                create_mapping(
                     db, "item", existing.id, qbo_id, _safe(qbo_item, "SyncToken")
                 )
                 db.flush()
                 continue
 
             qbo_type = _safe(qbo_item, "Type", "Service")
-            item_type = _QBO_ITEM_TYPE_MAP.get(qbo_type, ItemType.SERVICE)
+            item_type = QBO_TO_ITEM_TYPE.get(qbo_type, ItemType.SERVICE)
 
             # Resolve income account
             income_account_id = None
             income_ref = _safe(qbo_item, "IncomeAccountRef")
             if income_ref:
                 income_qbo_id = _safe(income_ref, "value", "")
-                income_map = _get_mapping(db, "account", income_qbo_id)
+                income_map = get_mapping_by_qbo_id(db, "account", income_qbo_id)
                 if income_map:
                     income_account_id = income_map.slowbooks_id
 
@@ -468,7 +408,7 @@ def import_items(db: Session) -> dict:
             expense_ref = _safe(qbo_item, "ExpenseAccountRef")
             if expense_ref:
                 expense_qbo_id = _safe(expense_ref, "value", "")
-                expense_map = _get_mapping(db, "account", expense_qbo_id)
+                expense_map = get_mapping_by_qbo_id(db, "account", expense_qbo_id)
                 if expense_map:
                     expense_account_id = expense_map.slowbooks_id
 
@@ -486,7 +426,7 @@ def import_items(db: Session) -> dict:
             db.add(item)
             db.flush()
 
-            _create_mapping(db, "item", item.id, qbo_id, _safe(qbo_item, "SyncToken"))
+            create_mapping(db, "item", item.id, qbo_id, _safe(qbo_item, "SyncToken"))
             imported += 1
 
         except Exception as e:
@@ -517,7 +457,7 @@ def import_invoices(db: Session) -> dict:
             if not qbo_id:
                 continue
 
-            if _get_mapping(db, "invoice", qbo_id):
+            if get_mapping_by_qbo_id(db, "invoice", qbo_id):
                 continue
 
             doc_num = _safe(qbo_inv, "DocNumber", "")
@@ -528,7 +468,7 @@ def import_invoices(db: Session) -> dict:
                     db.query(Invoice).filter(Invoice.invoice_number == doc_num).first()
                 )
                 if existing:
-                    _create_mapping(
+                    create_mapping(
                         db, "invoice", existing.id, qbo_id, _safe(qbo_inv, "SyncToken")
                     )
                     db.flush()
@@ -539,7 +479,7 @@ def import_invoices(db: Session) -> dict:
             customer_id = None
             if cust_ref:
                 cust_qbo_id = _safe(cust_ref, "value", "")
-                cust_map = _get_mapping(db, "customer", cust_qbo_id)
+                cust_map = get_mapping_by_qbo_id(db, "customer", cust_qbo_id)
                 if cust_map:
                     customer_id = cust_map.slowbooks_id
 
@@ -627,7 +567,7 @@ def import_invoices(db: Session) -> dict:
                 item_ref = _safe(detail, "ItemRef")
                 if item_ref:
                     item_qbo_id = _safe(item_ref, "value", "")
-                    item_map = _get_mapping(db, "item", item_qbo_id)
+                    item_map = get_mapping_by_qbo_id(db, "item", item_qbo_id)
                     if item_map:
                         item_id = item_map.slowbooks_id
 
@@ -647,7 +587,7 @@ def import_invoices(db: Session) -> dict:
                 db.add(inv_line)
                 line_order += 1
 
-            _create_mapping(
+            create_mapping(
                 db, "invoice", invoice.id, qbo_id, _safe(qbo_inv, "SyncToken")
             )
 
@@ -692,7 +632,7 @@ def import_payments(db: Session) -> dict:
             if not qbo_id:
                 continue
 
-            if _get_mapping(db, "payment", qbo_id):
+            if get_mapping_by_qbo_id(db, "payment", qbo_id):
                 continue
 
             # Resolve customer
@@ -700,7 +640,7 @@ def import_payments(db: Session) -> dict:
             customer_id = None
             if cust_ref:
                 cust_qbo_id = _safe(cust_ref, "value", "")
-                cust_map = _get_mapping(db, "customer", cust_qbo_id)
+                cust_map = get_mapping_by_qbo_id(db, "customer", cust_qbo_id)
                 if cust_map:
                     customer_id = cust_map.slowbooks_id
 
@@ -728,7 +668,7 @@ def import_payments(db: Session) -> dict:
             deposit_ref = _safe(qbo_pmt, "DepositToAccountRef")
             if deposit_ref:
                 deposit_qbo_id = _safe(deposit_ref, "value", "")
-                deposit_map = _get_mapping(db, "account", deposit_qbo_id)
+                deposit_map = get_mapping_by_qbo_id(db, "account", deposit_qbo_id)
                 if deposit_map:
                     deposit_account_id = deposit_map.slowbooks_id
 
@@ -756,7 +696,7 @@ def import_payments(db: Session) -> dict:
                     txn_type = _safe(linked, "TxnType", "")
                     txn_id = _safe(linked, "TxnId", "")
                     if txn_type == "Invoice" and txn_id:
-                        inv_map = _get_mapping(db, "invoice", txn_id)
+                        inv_map = get_mapping_by_qbo_id(db, "invoice", txn_id)
                         if inv_map:
                             inv = (
                                 db.query(Invoice)
@@ -781,7 +721,7 @@ def import_payments(db: Session) -> dict:
                                 elif inv.amount_paid > 0:
                                     inv.status = InvoiceStatus.PARTIAL
 
-            _create_mapping(
+            create_mapping(
                 db, "payment", payment.id, qbo_id, _safe(qbo_pmt, "SyncToken")
             )
             imported += 1

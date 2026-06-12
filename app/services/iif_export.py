@@ -27,6 +27,7 @@ from app.models.items import Item
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine
+from app.services.iif_common import account_to_iif_type, item_to_iif_type
 
 
 def _iif_date(d: date) -> str:
@@ -56,52 +57,6 @@ def _tab_join(fields: list) -> str:
 def _iif_line(fields: list) -> str:
     """Build a single IIF line: tab-joined fields + \\r\\n."""
     return _tab_join(fields) + "\r\n"
-
-
-def _map_account_type(acct: Account) -> str:
-    """Map Slowbooks AccountType + account_number to IIF ACCNTTYPE.
-
-    QB2003 has finer-grained account types than our 6 enums.
-    We use account_number ranges to distinguish sub-types within
-    each Slowbooks category.
-    """
-    num = int(acct.account_number or "0")
-    atype = acct.account_type.value
-
-    if atype == "asset":
-        if 1000 <= num <= 1099:
-            return "BANK"
-        if num == 1100:
-            return "AR"
-        if num < 1500:
-            return "OCASSET"
-        if num < 2000:
-            return "FIXASSET"
-        return "OASSET"
-
-    if atype == "liability":
-        if num == 2000:
-            return "AP"
-        if num < 2500:
-            return "OCLIAB"
-        return "LTLIAB"
-
-    return {
-        "equity": "EQUITY",
-        "income": "INC",
-        "expense": "EXP",
-        "cogs": "COGS",
-    }[atype]
-
-
-def _map_item_type(item: Item) -> str:
-    """Map Slowbooks ItemType to IIF INVITEMTYPE."""
-    return {
-        "service": "SERV",
-        "product": "PART",
-        "material": "PART",
-        "labor": "OTHC",
-    }[item.item_type.value]
 
 
 def _resolve_account_name(db: Session, account_id: int) -> str:
@@ -146,7 +101,7 @@ def export_accounts(db: Session) -> str:
             [
                 "ACCNT",
                 name,
-                _map_account_type(acct),
+                account_to_iif_type(acct),
                 acct.description or "",
                 acct.account_number or "",
                 "",  # EXTRA field (unused, but QB expects the column)
@@ -311,7 +266,7 @@ def export_items(db: Session) -> str:
             [
                 "INVITEM",
                 item.name or "",
-                _map_item_type(item),
+                item_to_iif_type(item),
                 item.description or "",
                 acct_name,
                 str(item.rate) if item.rate else "0",

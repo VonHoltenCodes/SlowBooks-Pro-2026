@@ -14,78 +14,16 @@ from sqlalchemy.orm import Session
 
 from app.models.accounts import Account, AccountType
 from app.models.contacts import Customer, Vendor
-from app.models.items import Item, ItemType
+from app.models.items import Item
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.payments import Payment, PaymentAllocation
-from app.models.qbo_mapping import QBOMapping
+from app.services.qbo_common import (
+    ACCOUNT_TYPE_TO_QBO,
+    ITEM_TYPE_TO_QBO,
+    create_mapping,
+    get_mapping_by_slowbooks_id,
+)
 from app.services.qbo_service import get_qbo_client
-
-# ============================================================================
-# Slowbooks -> QBO type mappings (reverse of import)
-# ============================================================================
-
-_SLOWBOOKS_TO_QBO_ACCOUNT_TYPE = {
-    AccountType.ASSET: ("Other Current Asset", "Other Current Asset"),
-    AccountType.LIABILITY: ("Other Current Liability", "Other Current Liability"),
-    AccountType.EQUITY: ("Equity", "Opening Balance Equity"),
-    AccountType.INCOME: ("Income", "Sales of Product Income"),
-    AccountType.EXPENSE: ("Expense", "Other Miscellaneous Service Cost"),
-    AccountType.COGS: ("Cost of Goods Sold", "Supplies and Materials - COGS"),
-}
-
-_SLOWBOOKS_TO_QBO_ITEM_TYPE = {
-    ItemType.SERVICE: "Service",
-    ItemType.PRODUCT: "Inventory",
-    ItemType.MATERIAL: "NonInventory",
-    ItemType.LABOR: "Service",
-}
-
-
-# ============================================================================
-# Mapping helpers
-# ============================================================================
-
-
-def _get_mapping(db: Session, entity_type: str, slowbooks_id: int) -> QBOMapping:
-    """Look up existing mapping by Slowbooks ID."""
-    return (
-        db.query(QBOMapping)
-        .filter(
-            QBOMapping.entity_type == entity_type,
-            QBOMapping.slowbooks_id == slowbooks_id,
-        )
-        .first()
-    )
-
-
-def _get_mapping_by_qbo_id(db: Session, entity_type: str, qbo_id: str) -> QBOMapping:
-    """Look up existing mapping by QBO ID."""
-    return (
-        db.query(QBOMapping)
-        .filter(
-            QBOMapping.entity_type == entity_type,
-            QBOMapping.qbo_id == str(qbo_id),
-        )
-        .first()
-    )
-
-
-def _create_mapping(
-    db: Session,
-    entity_type: str,
-    slowbooks_id: int,
-    qbo_id: str,
-    sync_token: str = None,
-):
-    """Create a new QBO <-> Slowbooks mapping."""
-    m = QBOMapping(
-        entity_type=entity_type,
-        slowbooks_id=slowbooks_id,
-        qbo_id=str(qbo_id),
-        qbo_sync_token=sync_token,
-    )
-    db.add(m)
-
 
 # ============================================================================
 # Export functions
@@ -107,10 +45,10 @@ def export_accounts(db: Session) -> dict:
 
     for acct in accounts:
         try:
-            if _get_mapping(db, "account", acct.id):
+            if get_mapping_by_slowbooks_id(db, "account", acct.id):
                 continue  # Already exported
 
-            type_info = _SLOWBOOKS_TO_QBO_ACCOUNT_TYPE.get(
+            type_info = ACCOUNT_TYPE_TO_QBO.get(
                 acct.account_type, ("Expense", "Other Miscellaneous Service Cost")
             )
 
@@ -125,13 +63,13 @@ def export_accounts(db: Session) -> dict:
 
             # Set parent if mapped
             if acct.parent_id:
-                parent_map = _get_mapping(db, "account", acct.parent_id)
+                parent_map = get_mapping_by_slowbooks_id(db, "account", acct.parent_id)
                 if parent_map:
                     qbo_acct.ParentRef = {"value": parent_map.qbo_id}
                     qbo_acct.SubAccount = True
 
             saved = qbo_acct.save(qb=client)
-            _create_mapping(
+            create_mapping(
                 db, "account", acct.id, saved.Id, getattr(saved, "SyncToken", None)
             )
             exported += 1
@@ -161,7 +99,7 @@ def export_customers(db: Session) -> dict:
 
     for cust in customers:
         try:
-            if _get_mapping(db, "customer", cust.id):
+            if get_mapping_by_slowbooks_id(db, "customer", cust.id):
                 continue
 
             qbo_cust = QBOCustomer()
@@ -201,7 +139,7 @@ def export_customers(db: Session) -> dict:
                 qbo_cust.Notes = cust.notes
 
             saved = qbo_cust.save(qb=client)
-            _create_mapping(
+            create_mapping(
                 db, "customer", cust.id, saved.Id, getattr(saved, "SyncToken", None)
             )
             exported += 1
@@ -231,7 +169,7 @@ def export_vendors(db: Session) -> dict:
 
     for vend in vendors:
         try:
-            if _get_mapping(db, "vendor", vend.id):
+            if get_mapping_by_slowbooks_id(db, "vendor", vend.id):
                 continue
 
             qbo_vend = QBOVendor()
@@ -260,7 +198,7 @@ def export_vendors(db: Session) -> dict:
                 qbo_vend.AcctNum = vend.account_number
 
             saved = qbo_vend.save(qb=client)
-            _create_mapping(
+            create_mapping(
                 db, "vendor", vend.id, saved.Id, getattr(saved, "SyncToken", None)
             )
             exported += 1
@@ -290,12 +228,12 @@ def export_items(db: Session) -> dict:
 
     for item in items:
         try:
-            if _get_mapping(db, "item", item.id):
+            if get_mapping_by_slowbooks_id(db, "item", item.id):
                 continue
 
             qbo_item = QBOItem()
             qbo_item.Name = item.name
-            qbo_item.Type = _SLOWBOOKS_TO_QBO_ITEM_TYPE.get(item.item_type, "Service")
+            qbo_item.Type = ITEM_TYPE_TO_QBO.get(item.item_type, "Service")
 
             if item.description:
                 qbo_item.Description = item.description
@@ -306,18 +244,22 @@ def export_items(db: Session) -> dict:
 
             # Link income account if mapped
             if item.income_account_id:
-                acct_map = _get_mapping(db, "account", item.income_account_id)
+                acct_map = get_mapping_by_slowbooks_id(
+                    db, "account", item.income_account_id
+                )
                 if acct_map:
                     qbo_item.IncomeAccountRef = {"value": acct_map.qbo_id}
 
             # Link expense account if mapped
             if item.expense_account_id:
-                acct_map = _get_mapping(db, "account", item.expense_account_id)
+                acct_map = get_mapping_by_slowbooks_id(
+                    db, "account", item.expense_account_id
+                )
                 if acct_map:
                     qbo_item.ExpenseAccountRef = {"value": acct_map.qbo_id}
 
             # QBO requires IncomeAccountRef for Service/NonInventory items
-            if not item.income_account_id or not _get_mapping(
+            if not item.income_account_id or not get_mapping_by_slowbooks_id(
                 db, "account", item.income_account_id
             ):
                 # Find a default income account in QBO mappings
@@ -330,12 +272,14 @@ def export_items(db: Session) -> dict:
                     .first()
                 )
                 if default_income:
-                    acct_map = _get_mapping(db, "account", default_income.id)
+                    acct_map = get_mapping_by_slowbooks_id(
+                        db, "account", default_income.id
+                    )
                     if acct_map:
                         qbo_item.IncomeAccountRef = {"value": acct_map.qbo_id}
 
             saved = qbo_item.save(qb=client)
-            _create_mapping(
+            create_mapping(
                 db, "item", item.id, saved.Id, getattr(saved, "SyncToken", None)
             )
             exported += 1
@@ -360,11 +304,11 @@ def export_invoices(db: Session) -> dict:
 
     for inv in invoices:
         try:
-            if _get_mapping(db, "invoice", inv.id):
+            if get_mapping_by_slowbooks_id(db, "invoice", inv.id):
                 continue
 
             # Customer must be mapped
-            cust_map = _get_mapping(db, "customer", inv.customer_id)
+            cust_map = get_mapping_by_slowbooks_id(db, "customer", inv.customer_id)
             if not cust_map:
                 errors.append(
                     {
@@ -402,7 +346,7 @@ def export_invoices(db: Session) -> dict:
 
                 # Link item if mapped
                 if inv_line.item_id:
-                    item_map = _get_mapping(db, "item", inv_line.item_id)
+                    item_map = get_mapping_by_slowbooks_id(db, "item", inv_line.item_id)
                     if item_map:
                         detail["ItemRef"] = {"value": item_map.qbo_id}
 
@@ -420,7 +364,7 @@ def export_invoices(db: Session) -> dict:
                 qbo_inv.CustomerMemo = {"value": inv.notes}
 
             saved = qbo_inv.save(qb=client)
-            _create_mapping(
+            create_mapping(
                 db, "invoice", inv.id, saved.Id, getattr(saved, "SyncToken", None)
             )
             exported += 1
@@ -443,11 +387,11 @@ def export_payments(db: Session) -> dict:
 
     for pmt in payments:
         try:
-            if _get_mapping(db, "payment", pmt.id):
+            if get_mapping_by_slowbooks_id(db, "payment", pmt.id):
                 continue
 
             # Customer must be mapped
-            cust_map = _get_mapping(db, "customer", pmt.customer_id)
+            cust_map = get_mapping_by_slowbooks_id(db, "customer", pmt.customer_id)
             if not cust_map:
                 errors.append(
                     {
@@ -468,7 +412,9 @@ def export_payments(db: Session) -> dict:
 
             # Link deposit account
             if pmt.deposit_to_account_id:
-                acct_map = _get_mapping(db, "account", pmt.deposit_to_account_id)
+                acct_map = get_mapping_by_slowbooks_id(
+                    db, "account", pmt.deposit_to_account_id
+                )
                 if acct_map:
                     qbo_pmt.DepositToAccountRef = {"value": acct_map.qbo_id}
 
@@ -481,7 +427,7 @@ def export_payments(db: Session) -> dict:
 
             lines = []
             for alloc in allocations:
-                inv_map = _get_mapping(db, "invoice", alloc.invoice_id)
+                inv_map = get_mapping_by_slowbooks_id(db, "invoice", alloc.invoice_id)
                 if inv_map:
                     lines.append(
                         {
@@ -499,7 +445,7 @@ def export_payments(db: Session) -> dict:
                 qbo_pmt.Line = lines
 
             saved = qbo_pmt.save(qb=client)
-            _create_mapping(
+            create_mapping(
                 db, "payment", pmt.id, saved.Id, getattr(saved, "SyncToken", None)
             )
             exported += 1
