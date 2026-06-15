@@ -267,7 +267,7 @@ const App = {
         const grouped = {};
         for (const a of accounts) {
             if (!grouped[a.account_type]) grouped[a.account_type] = [];
-            grouped[a.account_type].push(a);
+            if (a.is_active !== false) grouped[a.account_type].push(a);
         }
 
         const typeOrder = ['asset', 'liability', 'equity', 'income', 'cogs', 'expense'];
