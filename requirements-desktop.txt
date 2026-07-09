@@ -1,0 +1,6 @@
+# Extra dependencies for the one-click desktop launcher (desktop_launcher.py).
+# Kept separate from requirements.txt so the server image and CI are unaffected.
+#
+# pywebview opens the app in a native window backed by the OS webview
+# (WebView2 on Windows 10/11, which ships with the OS).
+pywebview>=5.0

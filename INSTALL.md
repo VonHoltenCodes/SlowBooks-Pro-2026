@@ -1,6 +1,40 @@
 # Installation Guide
 
-Three ways to run Slowbooks Pro 2026.
+Ways to run Slowbooks Pro 2026.
+
+---
+
+## Option 0: One-click desktop app (Windows)
+
+**Easiest for a single user on Windows** who already has **Docker Desktop** and
+**Python** installed. Runs Slowbooks in its own window — no browser tab, no
+`.env` editing, no command line.
+
+### Prerequisites
+
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) installed and **running** (its WSL2 backend is the default on Windows 10/11)
+- Python 3 installed and on your `PATH` (`python --version` should work)
+
+### Steps
+
+1. Download / clone this repository.
+2. Double-click **`Launch SlowBooks Pro.bat`**.
+
+That's it. On first launch it will:
+
+- create your `.env` and generate a strong `PAYROLL_ENCRYPTION_SECRET` for you
+  (this is the value that causes the *"PAYROLL_ENCRYPTION_SECRET is the public
+  dev default"* error when it's left unset — the launcher sets it correctly so
+  you never see that error),
+- install the small window component the first time,
+- start the app in Docker, and
+- open Slowbooks in a desktop window once it's ready.
+
+To stop the app, double-click **`Stop SlowBooks Pro.bat`** (your data is kept
+safe in Docker volumes for next time).
+
+> First launch downloads and builds the container images, so it can take a few
+> minutes. Later launches are quick.
 
 ---
 
@@ -17,11 +51,22 @@ Three ways to run Slowbooks Pro 2026.
 ```bash
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git
 cd SlowBooks-Pro-2026
-cp .env.example .env        # optional — defaults work out of the box
+cp .env.example .env
+
+# Set a strong encryption secret for employee bank PII. The app refuses to
+# start against Postgres with the shipped dev default, so this is required:
+#   Linux/macOS:  openssl rand -base64 32
+#   any OS:       python -c "import secrets; print(secrets.token_urlsafe(32))"
+# Put the result on the PAYROLL_ENCRYPTION_SECRET= line in .env.
+
 docker compose up
 ```
 
 Open **http://localhost:3001** in your browser.
+
+> On Windows, **Option 0** does all of this for you (generates the secret,
+> starts Docker, opens a desktop window) — prefer it unless you specifically
+> want the manual Docker flow.
 
 ### What happens on first run
 

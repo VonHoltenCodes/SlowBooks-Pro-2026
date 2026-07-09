@@ -49,6 +49,28 @@ services:
       APP_PORT: "3001"
       APP_DEBUG: "${APP_DEBUG:-false}"
       APP_WORKERS: "${APP_WORKERS:-2}"
+      # ---- At-rest encryption (REQUIRED) ----
+      # Encrypts employee bank routing/account numbers. Must be forwarded from
+      # .env or the app boots with the public dev default and refuses to start
+      # against Postgres (app/main.py startup guard). The :? form fails the
+      # `docker compose up` loudly if it's empty — never default to an empty
+      # string, which would silently encrypt PII under a blank key.
+      PAYROLL_ENCRYPTION_SECRET: "${PAYROLL_ENCRYPTION_SECRET:?set PAYROLL_ENCRYPTION_SECRET in .env — generate one with openssl rand -base64 32}"
+      # Optional previous key, only used during rotation (decrypt fallback).
+      PAYROLL_ENCRYPTION_SECRET_PREV: ${PAYROLL_ENCRYPTION_SECRET_PREV:-}
+      # Optional cookie-signing key. If empty the app auto-generates and
+      # persists one to .slowbooks-session.key (see app/services/auth.py).
+      SESSION_SECRET_KEY: ${SESSION_SECRET_KEY:-}
+      # ---- Company + employer identity (optional, also editable in the UI) ----
+      COMPANY_NAME: ${COMPANY_NAME:-My Company}
+      COMPANY_ADDRESS: ${COMPANY_ADDRESS:-}
+      COMPANY_PHONE: ${COMPANY_PHONE:-}
+      COMPANY_EMAIL: ${COMPANY_EMAIL:-}
+      DEFAULT_TERMS: ${DEFAULT_TERMS:-Net 30}
+      DEFAULT_TAX_RATE: ${DEFAULT_TAX_RATE:-0.0}
+      EMPLOYER_EIN: ${EMPLOYER_EIN:-}
+      EMPLOYER_STATE: ${EMPLOYER_STATE:-WA}
+      SUTA_RATE: ${SUTA_RATE:-0.012}
       # Python 3.13 experimental JIT - uncomment for ~5-10% extra on hot loops
       # PYTHON_JIT: "1"
     ports:
