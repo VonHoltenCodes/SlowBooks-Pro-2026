@@ -1,340 +1,234 @@
 # ============================================================================
-# Slowbooks Pro 2026 -- Windows Setup
+# SlowBooks Pro 2026 — native Windows desktop setup.
 #
-# Installs everything Slowbooks Pro needs on a bare Windows machine and
-# launches it. Fetched and re-run each time by "Setup SlowBooks Pro.bat" --
-# keep this file as the one place that changes; the .bat stays stable.
+# Fetched and run by "Setup SlowBooks Pro.bat" (which self-elevates first).
+# Installs, with NO Docker and NO WSL2:
+#   - the SlowBooks Pro app source (plain HTTPS zip download, no git)
+#   - Python 3.13 (winget, falling back to the python.org installer)
+#   - the GTK3 runtime (Cairo/Pango/gdk-pixbuf DLLs WeasyPrint needs
+#     to render PDFs on native Windows)
+#   - the app's Python dependencies + pywebview (native window)
+# then creates a Desktop shortcut and launches the app.
 #
-# Every step below checks "is this already done?" before doing anything, so
-# this script is always safe to run again (after a required restart, after
-# fixing something manually, or just to relaunch).
-#
-# Docker choice: Docker Engine is installed *inside* a WSL2 Linux distro,
-# not Docker Desktop. This avoids Docker Desktop's background GUI/tray
-# process, its Windows<->WSL2 networking shim, and its slow first-launch
-# time -- container performance itself is identical either way since both
-# ultimately run on the same WSL2 Linux kernel.
-#
-# All WSL-side commands run as root (-u root). This is deliberate: a fresh
-# WSL distro normally prompts interactively for a default Unix username on
-# first launch, which would stall unattended setup. Root always exists
-# without that prompt, and nothing here needs a non-root user.
+# Every step is idempotent: it checks "is this already done?" before doing
+# anything, so the script is safe to re-run after an interruption or a
+# manual fix. No step requires (or ever performs) a Windows restart.
 # ============================================================================
 
 $ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$RepoOwner    = 'moshgrossman'
-$RepoName     = 'SlowBooks-Pro-2026'
-$RepoBranch   = 'main'
-$InstallRoot  = Join-Path $env:LOCALAPPDATA 'SlowBooksPro'
-$AppDir       = Join-Path $InstallRoot 'app'
-$WslDistro    = 'Ubuntu'
-$WslAppDirPosix = '/root/slowbooks-pro'
-$WslAppDirUnc   = "\\wsl.localhost\$WslDistro\root\slowbooks-pro"
+$RepoZipUrl  = 'https://github.com/moshgrossman/SlowBooks-Pro-2026/archive/refs/heads/main.zip'
+$InstallRoot = Join-Path $env:LOCALAPPDATA 'SlowBooksPro'
+$AppDir      = Join-Path $InstallRoot 'app'
+$GtkBinDir   = Join-Path $env:ProgramFiles 'GTK3-Runtime Win64\bin'
 
-function Write-Step { param([string]$Message) Write-Host "`n==> $Message" -ForegroundColor Cyan }
-function Write-Info { param([string]$Message) Write-Host "    $Message" }
+# Fallback used only if winget is unavailable or fails. Kept pinned because
+# python.org has no "latest installer" URL; bump occasionally.
+$PythonFallbackUrl = 'https://www.python.org/ftp/python/3.13.5/python-3.13.5-amd64.exe'
 
-function Write-ErrExit {
-    param([string]$Message)
-    Write-Host "`n$Message" -ForegroundColor Red
-    Write-Host "`nPress Enter to close this window..."
-    Read-Host | Out-Null
+function Banner([string]$msg) {
+    Write-Host ''
+    Write-Host "==== $msg ====" -ForegroundColor Cyan
+}
+
+function Fail([string]$msg) {
+    Write-Host ''
+    Write-Host "SETUP STOPPED: $msg" -ForegroundColor Red
+    Write-Host 'Fix the issue above, then run this setup again — completed steps are skipped automatically.'
     exit 1
 }
 
-function Test-CommandExists {
-    param([string]$Name)
-    return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
+# Pick up PATH changes made by installers without needing a new console
+# (or a restart).
+function Update-SessionPath {
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                [Environment]::GetEnvironmentVariable('Path', 'User')
 }
 
-function Invoke-WslRoot {
-    # Runs a command as root inside the target WSL distro. Returns the
-    # process exit code via $LASTEXITCODE (standard for external commands).
-    param([string]$Command)
-    wsl.exe -d $WslDistro -u root -- bash -lc $Command
-}
-
-# ---------------------------------------------------------------------------
-# Step 0: fetch the app source itself (plain HTTPS ZIP -- no git required)
-# ---------------------------------------------------------------------------
-function Get-AppSource {
-    Write-Step 'Checking Slowbooks Pro application files...'
-    $marker = Join-Path $AppDir 'desktop_launcher.py'
-    if (Test-Path $marker) {
-        Write-Info "Already present at $AppDir"
-        return
-    }
-
-    New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
-    $zipUrl  = "https://github.com/$RepoOwner/$RepoName/archive/refs/heads/$RepoBranch.zip"
-    $zipPath = Join-Path $InstallRoot 'source.zip'
-
-    Write-Info 'Downloading application files...'
-    try {
-        Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing
-    } catch {
-        Write-ErrExit "Could not download Slowbooks Pro from:`n  $zipUrl`n`nCheck your internet connection and run 'Setup SlowBooks Pro.bat' again.`nIf this keeps happening, download it manually from:`n  https://github.com/$RepoOwner/$RepoName"
-    }
-
-    Write-Info 'Extracting...'
-    $extractTmp = Join-Path $InstallRoot 'source-extract'
-    if (Test-Path $extractTmp) { Remove-Item -Recurse -Force $extractTmp }
-    Expand-Archive -Path $zipPath -DestinationPath $extractTmp -Force
-
-    $extractedFolder = Get-ChildItem -Path $extractTmp -Directory | Select-Object -First 1
-    if (-not $extractedFolder) {
-        Write-ErrExit "The downloaded application archive looked empty. Please run 'Setup SlowBooks Pro.bat' again."
-    }
-    Move-Item -Path $extractedFolder.FullName -Destination $AppDir -Force
-
-    Remove-Item -Force $zipPath -ErrorAction SilentlyContinue
-    Remove-Item -Recurse -Force $extractTmp -ErrorAction SilentlyContinue
-    Write-Info 'Done.'
-}
-
-# ---------------------------------------------------------------------------
-# Step 1: Python (runs desktop_launcher.py and its native window on Windows)
-# ---------------------------------------------------------------------------
+# Resolve a REAL Python 3 interpreter path. "python" on a fresh Windows
+# install is often the Microsoft Store alias stub, which is not Python —
+# so verify by actually running it and resolving sys.executable.
 function Get-Python {
-    Write-Step 'Checking Python...'
-    if (Test-CommandExists 'python') {
-        Write-Info "Found: $(& python --version 2>&1)"
-        return
-    }
-
-    Write-Info 'Python not found. Installing...'
-    $installed = $false
-
-    if (Test-CommandExists 'winget') {
-        Write-Info 'Trying winget (Option 1 of 2)...'
+    $launcher = Get-Command py -ErrorAction SilentlyContinue
+    if ($launcher) {
         try {
-            winget install --id Python.Python.3.13 -e --silent --accept-package-agreements --accept-source-agreements
-            if ($LASTEXITCODE -eq 0) { $installed = $true }
-        } catch {
-            Write-Info "winget install failed: $($_.Exception.Message)"
-        }
+            [string]$exe = (& $launcher.Source -3 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1)
+            if ($LASTEXITCODE -eq 0 -and $exe) { return $exe.Trim() }
+        } catch { }
     }
-
-    if (-not $installed) {
-        Write-Info 'Trying a direct download from python.org (Option 2 of 2)...'
+    $direct = Get-Command python -ErrorAction SilentlyContinue
+    if ($direct) {
         try {
-            $pyUrl = 'https://www.python.org/ftp/python/3.13.1/python-3.13.1-amd64.exe'
-            $pyInstaller = Join-Path $env:TEMP 'slowbooks-python-installer.exe'
-            Invoke-WebRequest -Uri $pyUrl -OutFile $pyInstaller -UseBasicParsing
-            Start-Process -FilePath $pyInstaller -ArgumentList '/quiet InstallAllUsers=1 PrependPath=1' -Wait
-            Remove-Item -Force $pyInstaller -ErrorAction SilentlyContinue
-            $installed = $true
-        } catch {
-            Write-Info "Direct download failed: $($_.Exception.Message)"
-        }
+            [string]$exe = (& $direct.Source -c 'import sys; print(sys.executable)' 2>$null | Select-Object -First 1)
+            if ($LASTEXITCODE -eq 0 -and $exe) { return $exe.Trim() }
+        } catch { }
     }
-
-    # Refresh PATH in this session so a just-installed python.exe is found
-    # without needing to close and reopen the window.
-    $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
-                [System.Environment]::GetEnvironmentVariable('Path', 'User')
-
-    if (-not (Test-CommandExists 'python')) {
-        Write-ErrExit "Python could not be installed automatically.`n`nPlease download and install it yourself from:`n  https://www.python.org/downloads/`n(Be sure to check 'Add python.exe to PATH' during install.)`n`nThen run 'Setup SlowBooks Pro.bat' again."
-    }
-    Write-Info 'Python installed.'
+    return $null
 }
 
 # ---------------------------------------------------------------------------
-# Step 2: WSL2 + a Linux distro
+# Step 0 — fetch the app source (plain zip download, no git needed)
 # ---------------------------------------------------------------------------
-function Test-RebootPending {
-    $paths = @(
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
-        'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-    )
-    foreach ($p in $paths) {
-        if (Test-Path $p) { return $true }
-    }
-    return $false
-}
-
-function Get-Wsl2 {
-    Write-Step 'Checking WSL2...'
-
-    $build = [System.Environment]::OSVersion.Version.Build
-    if ($build -lt 19041) {
-        Write-ErrExit "Your Windows version (build $build) is too old for automatic WSL2 setup (build 19041+ needed).`n`nPlease follow Microsoft's manual WSL install guide:`n  https://learn.microsoft.com/windows/wsl/install-manual`n`nThen run 'Setup SlowBooks Pro.bat' again."
-    }
-
-    $wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux
-    $vmFeature  = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform
-
-    if ($wslFeature.State -ne 'Enabled' -or $vmFeature.State -ne 'Enabled') {
-        Write-Info 'Enabling required Windows features (this can take a minute)...'
-        if ($wslFeature.State -ne 'Enabled') {
-            Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -All -NoRestart | Out-Null
-        }
-        if ($vmFeature.State -ne 'Enabled') {
-            Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -All -NoRestart | Out-Null
-        }
-
-        # Never restart automatically -- always ask first.
-        if (Test-RebootPending) {
-            Write-ErrExit "A restart is required to finish enabling WSL2.`n`nPlease restart your computer, then double-click 'Setup SlowBooks Pro.bat' again -- it will continue automatically from here."
-        }
-    }
-
-    wsl.exe --set-default-version 2 | Out-Null
-
-    $existingDistros = (wsl.exe -l -q 2>$null) -replace "`0", '' -split "`r?`n" | ForEach-Object { $_.Trim() }
-    if ($existingDistros -notcontains $WslDistro) {
-        Write-Info "Installing the $WslDistro Linux environment (this can take a few minutes)..."
-        try {
-            wsl.exe --install -d $WslDistro --no-launch
-        } catch {
-            Write-ErrExit "Could not install the Linux environment automatically.`n`nPlease follow Microsoft's manual WSL install guide:`n  https://learn.microsoft.com/windows/wsl/install-manual`n`nThen run 'Setup SlowBooks Pro.bat' again."
-        }
-        if (Test-RebootPending) {
-            Write-ErrExit "A restart is required to finish setting up WSL2.`n`nPlease restart your computer, then double-click 'Setup SlowBooks Pro.bat' again."
-        }
-    }
-
-    # Give a freshly-installed distro a moment to finish initializing.
-    $ready = $false
-    for ($i = 0; $i -lt 10; $i++) {
-        Invoke-WslRoot 'echo ready' | Out-Null
-        if ($LASTEXITCODE -eq 0) { $ready = $true; break }
-        Start-Sleep -Seconds 3
-    }
-    if (-not $ready) {
-        Write-ErrExit "The $WslDistro Linux environment did not come up in time.`n`nPlease run 'Setup SlowBooks Pro.bat' again. If this keeps happening, restart your computer first."
-    }
-
-    Write-Info "WSL2 with $WslDistro is ready."
-}
-
-# ---------------------------------------------------------------------------
-# Step 3: Docker Engine inside WSL2 (no Docker Desktop)
-# ---------------------------------------------------------------------------
-function Get-DockerEngine {
-    Write-Step "Checking Docker Engine inside $WslDistro..."
-
-    Invoke-WslRoot 'docker --version' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Info 'Docker not found. Installing (this can take a few minutes)...'
-
-        Write-Info "Trying Docker's official install script (Option 1 of 2)..."
-        Invoke-WslRoot 'curl -fsSL https://get.docker.com | sh' | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Info 'Retrying once...'
-            Start-Sleep -Seconds 5
-            Invoke-WslRoot 'curl -fsSL https://get.docker.com | sh' | Out-Null
-        }
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Info 'Trying the distro package instead (Option 2 of 2)...'
-            Invoke-WslRoot 'apt-get update && apt-get install -y docker.io' | Out-Null
-        }
-
-        Invoke-WslRoot 'docker --version' | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-            Write-ErrExit "Docker Engine could not be installed automatically inside WSL2.`n`nPlease follow the manual install guide:`n  https://docs.docker.com/engine/install/ubuntu/`n`nThen run 'Setup SlowBooks Pro.bat' again."
-        }
-    }
-
-    Write-Info 'Making Docker start automatically...'
-    Invoke-WslRoot "grep -q '^\[boot\]' /etc/wsl.conf 2>/dev/null || printf '\n[boot]\nsystemd=true\n' >> /etc/wsl.conf" | Out-Null
-
-    Invoke-WslRoot 'test -d /run/systemd/system' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        # systemd isn't active in the current session yet -- restarting the
-        # WSL *distro* (not Windows) applies the wsl.conf change. This is
-        # fast and harmless, unlike a Windows reboot, so no confirmation
-        # prompt is needed here the way Step 2's Windows-feature changes get.
-        Write-Info 'Restarting the Linux environment to apply settings...'
-        wsl.exe --terminate $WslDistro | Out-Null
-        Start-Sleep -Seconds 3
-        Invoke-WslRoot 'true' | Out-Null
-        Start-Sleep -Seconds 3
-    }
-
-    Invoke-WslRoot 'systemctl enable --now docker' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Invoke-WslRoot 'service docker start' | Out-Null
-    }
-
-    Start-Sleep -Seconds 2
-    Invoke-WslRoot 'docker info' | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrExit "Docker Engine installed but the background service isn't responding.`n`nPlease run 'Setup SlowBooks Pro.bat' again. If this keeps happening, see:`n  https://docs.docker.com/engine/install/ubuntu/#post-installation-steps"
-    }
-
-    Write-Info 'Docker Engine is running.'
-}
-
-# ---------------------------------------------------------------------------
-# Step 4: copy the app into the WSL filesystem
-#
-# Docker builds/bind-mounts are slow across the Windows<->WSL2 boundary
-# (the /mnt/c passthrough uses a network filesystem protocol under the
-# hood). Keeping the app's own copy inside the Linux distro's native
-# filesystem avoids that penalty entirely.
-# ---------------------------------------------------------------------------
-function Sync-AppToWsl {
-    Write-Step 'Copying application files into the Linux environment...'
-
-    $drive = $AppDir.Substring(0, 1).ToLower()
-    $rest  = $AppDir.Substring(2) -replace '\\', '/'
-    $wslSourcePosix = "/mnt/$drive$rest"
-
-    Invoke-WslRoot 'command -v rsync >/dev/null || (apt-get update && apt-get install -y rsync)' | Out-Null
-
-    $syncCmd = "mkdir -p $WslAppDirPosix && rsync -a --delete '$wslSourcePosix/' '$WslAppDirPosix/' 2>/dev/null || (rm -rf '$WslAppDirPosix' && mkdir -p '$WslAppDirPosix' && cp -r '$wslSourcePosix'/. '$WslAppDirPosix/')"
-    Invoke-WslRoot $syncCmd | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        Write-ErrExit "Could not copy application files into the Linux environment.`n`nPlease run 'Setup SlowBooks Pro.bat' again."
-    }
-    Write-Info 'Application files ready.'
-}
-
-# ---------------------------------------------------------------------------
-# Step 5: finish -- shortcut for next time, then launch now
-# ---------------------------------------------------------------------------
-function New-DesktopShortcut {
-    Write-Step 'Creating a shortcut for next time...'
+Banner 'Step 0/5: SlowBooks Pro application files'
+if (Test-Path (Join-Path $AppDir 'desktop_launcher.py')) {
+    Write-Host "Already present at $AppDir — skipping download."
+    # Never re-fetch over an existing install; company data lives in the
+    # sibling 'data' folder and is never touched here either way.
+} else {
+    New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+    $zip = Join-Path $env:TEMP 'SlowBooksPro-main.zip'
+    $extract = Join-Path $env:TEMP 'SlowBooksPro-extract'
+    Write-Host "Downloading $RepoZipUrl ..."
     try {
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcutPath = Join-Path ([System.Environment]::GetFolderPath('Desktop')) 'Slowbooks Pro 2026.lnk'
-        $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = Join-Path $AppDir 'Launch SlowBooks Pro.bat'
-        $shortcut.WorkingDirectory = $AppDir
-        $shortcut.IconLocation = 'shell32.dll,13'
-        $shortcut.Save()
-        Write-Info "Created: $shortcutPath"
+        Invoke-WebRequest -UseBasicParsing -Uri $RepoZipUrl -OutFile $zip
     } catch {
-        Write-Info "Could not create a desktop shortcut (not critical): $($_.Exception.Message)"
+        Fail "Could not download the application ($($_.Exception.Message)). Check your internet connection."
     }
+    if (Test-Path $extract) { Remove-Item -Recurse -Force $extract }
+    Expand-Archive -Path $zip -DestinationPath $extract
+    # The zip contains a single "<repo>-main" root folder — that becomes $AppDir.
+    $inner = Get-ChildItem -Directory $extract | Select-Object -First 1
+    Move-Item $inner.FullName $AppDir
+    Remove-Item -Force $zip
+    Remove-Item -Recurse -Force $extract
+    Write-Host "Installed application files to $AppDir"
 }
 
-function Start-App {
-    Write-Step 'Launching Slowbooks Pro...'
-    Push-Location $AppDir
+# ---------------------------------------------------------------------------
+# Step 1 — Python
+# ---------------------------------------------------------------------------
+Banner 'Step 1/5: Python'
+$python = Get-Python
+if ($python) {
+    Write-Host "Found Python: $python — skipping install."
+} else {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) {
+        Write-Host 'Installing Python 3.13 via winget...'
+        try {
+            & winget install --id Python.Python.3.13 -e --silent `
+                --accept-package-agreements --accept-source-agreements
+        } catch {
+            Write-Host "winget install failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        Update-SessionPath
+        $python = Get-Python
+    }
+    if (-not $python) {
+        Write-Host 'Falling back to the official python.org installer...'
+        $pyInstaller = Join-Path $env:TEMP 'python-installer.exe'
+        try {
+            Invoke-WebRequest -UseBasicParsing -Uri $PythonFallbackUrl -OutFile $pyInstaller
+            # Silent, all users, on PATH. Does not require a restart.
+            Start-Process -FilePath $pyInstaller -Wait -ArgumentList '/quiet', 'InstallAllUsers=1', 'PrependPath=1'
+            Remove-Item -Force $pyInstaller -ErrorAction SilentlyContinue
+        } catch {
+            Write-Host "python.org installer failed: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+        Update-SessionPath
+        $python = Get-Python
+    }
+    if (-not $python) {
+        Fail ("Python could not be installed automatically. Install it manually from " +
+              "https://www.python.org/downloads/ (check 'Add python.exe to PATH'), then run this file again.")
+    }
+    Write-Host "Installed Python: $python"
+}
+
+# ---------------------------------------------------------------------------
+# Step 2 — GTK3 runtime (WeasyPrint's PDF-rendering libraries)
+#
+# !! HIGHEST-UNCERTAINTY STEP — verify on a real Windows machine !!
+# WeasyPrint needs Cairo/Pango/gdk-pixbuf, which have no pip wheels on
+# Windows. WeasyPrint's own docs point to this prebuilt GTK3 runtime
+# installer. Two things MUST be confirmed by an actual test (not assumed):
+#   (a) the silent install (/S) completes and puts DLLs in $GtkBinDir,
+#   (b) WeasyPrint can actually render a PDF afterward.
+# The bin dir is force-added to the machine PATH below because the NSIS
+# silent mode may not tick the installer's own "set PATH" option.
+# ---------------------------------------------------------------------------
+Banner 'Step 2/5: PDF rendering component (GTK3 runtime)'
+if (Test-Path (Join-Path $GtkBinDir 'libgobject-2.0-0.dll')) {
+    Write-Host "GTK3 runtime already installed at $GtkBinDir — skipping."
+} else {
+    Write-Host 'Looking up the latest GTK3 runtime release...'
     try {
-        & python -m pip install --quiet -r requirements-desktop.txt
-        & python desktop_launcher.py
-    } finally {
-        Pop-Location
+        # Always resolve the latest release rather than hardcoding a version.
+        $release = Invoke-RestMethod -UseBasicParsing `
+            -Uri 'https://api.github.com/repos/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases/latest'
+        $asset = $release.assets | Where-Object { $_.name -match '\.exe$' } | Select-Object -First 1
+        if (-not $asset) { throw 'No installer asset found in the latest release.' }
+        $gtkInstaller = Join-Path $env:TEMP $asset.name
+        Write-Host "Downloading $($asset.name)..."
+        Invoke-WebRequest -UseBasicParsing -Uri $asset.browser_download_url -OutFile $gtkInstaller
+        # NSIS silent install. No restart needed or performed.
+        Start-Process -FilePath $gtkInstaller -Wait -ArgumentList '/S'
+        Remove-Item -Force $gtkInstaller -ErrorAction SilentlyContinue
+    } catch {
+        Fail ("Could not install the GTK3 runtime ($($_.Exception.Message)). Install it manually from " +
+              'https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases ' +
+              'then run this file again.')
     }
+    if (-not (Test-Path (Join-Path $GtkBinDir 'libgobject-2.0-0.dll'))) {
+        Fail "GTK3 runtime installer finished but $GtkBinDir is missing its DLLs."
+    }
+    Write-Host 'GTK3 runtime installed.'
+}
+# Ensure the DLLs are findable by WeasyPrint regardless of installer options.
+$machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
+if ($machinePath -notlike "*$GtkBinDir*") {
+    [Environment]::SetEnvironmentVariable('Path', "$machinePath;$GtkBinDir", 'Machine')
+    Write-Host "Added $GtkBinDir to the system PATH."
+}
+Update-SessionPath
+
+# ---------------------------------------------------------------------------
+# Step 3 — Python dependencies
+# ---------------------------------------------------------------------------
+Banner 'Step 3/5: Python packages'
+Push-Location $AppDir
+try {
+    & $python -m pip install --upgrade pip --quiet
+    & $python -m pip install -r requirements.txt
+    if ($LASTEXITCODE -ne 0) { Fail 'pip install -r requirements.txt failed (see output above).' }
+    & $python -m pip install -r requirements-desktop.txt
+    if ($LASTEXITCODE -ne 0) { Fail 'pip install -r requirements-desktop.txt failed (see output above).' }
+} finally {
+    Pop-Location
+}
+Write-Host 'Python packages installed.'
+
+# ---------------------------------------------------------------------------
+# Step 4 — first-run configuration (.env)
+# ---------------------------------------------------------------------------
+Banner 'Step 4/5: First-run configuration'
+Push-Location $AppDir
+try {
+    & $python desktop_launcher.py --setup-only
+    if ($LASTEXITCODE -ne 0) { Fail 'First-run configuration failed (see output above).' }
+} finally {
+    Pop-Location
 }
 
 # ---------------------------------------------------------------------------
-# Main
+# Step 5 — Desktop shortcut + first launch
 # ---------------------------------------------------------------------------
-Write-Host 'Slowbooks Pro 2026 -- Setup' -ForegroundColor Green
-Write-Host 'This installs everything needed and then opens the app. It is safe to' -ForegroundColor Green
-Write-Host 'run again if it stops partway through.' -ForegroundColor Green
+Banner 'Step 5/5: Desktop shortcut'
+$desktop = [Environment]::GetFolderPath('Desktop')
+$shortcutPath = Join-Path $desktop 'SlowBooks Pro.lnk'
+$launchBat = Join-Path $AppDir 'Launch SlowBooks Pro.bat'
+$shell = New-Object -ComObject WScript.Shell
+$shortcut = $shell.CreateShortcut($shortcutPath)
+$shortcut.TargetPath = $launchBat
+$shortcut.WorkingDirectory = $AppDir
+$shortcut.Description = 'SlowBooks Pro 2026'
+$shortcut.Save()
+Write-Host "Created shortcut: $shortcutPath"
 
-Get-AppSource
-Get-Python
-Get-Wsl2
-Get-DockerEngine
-Sync-AppToWsl
-New-DesktopShortcut
-Start-App
+Write-Host ''
+Write-Host 'Setup complete! Opening SlowBooks Pro now...' -ForegroundColor Green
+Write-Host 'Next time, use the "SlowBooks Pro" shortcut on your Desktop.'
+# Launch through explorer.exe so the app runs as the normal (non-elevated)
+# user rather than inheriting this script's Administrator token.
+Start-Process explorer.exe -ArgumentList "`"$launchBat`""

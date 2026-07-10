@@ -1,54 +1,45 @@
 @echo off
+rem ============================================================================
+rem SlowBooks Pro 2026 — one-click Windows setup bootstrapper.
+rem
+rem This is the ONLY file you need to download. It:
+rem   1. Asks Windows for Administrator rights (a UAC prompt) — needed to
+rem      install Python and the PDF-rendering component system-wide.
+rem   2. Downloads the current setup script from the SlowBooks Pro GitHub
+rem      repository (so fixes and improvements apply without you ever
+rem      needing a new copy of this file).
+rem   3. Runs it.
+rem
+rem Note: the first time you run a downloaded script, Windows SmartScreen
+rem may show "Windows protected your PC" — click "More info" then
+rem "Run anyway". That warning is expected for any unsigned script.
+rem ============================================================================
 setlocal
 
-REM ==========================================================================
-REM  Slowbooks Pro 2026 - Setup (Windows)
-REM
-REM  This is the ONE file to download and double-click. It installs
-REM  everything Slowbooks Pro needs (Python, WSL2, Docker Engine), downloads
-REM  the app itself, and opens it. Safe to run again if it stops partway
-REM  through (e.g. after a restart).
-REM
-REM  Windows will likely show a "Windows protected your PC" SmartScreen
-REM  warning the first time you run a downloaded script like this one --
-REM  that's expected for an unsigned script. Click "More info" then
-REM  "Run anyway" to continue.
-REM
-REM  This file stays small on purpose: it always fetches the latest setup
-REM  logic from GitHub, so it keeps working even if that logic improves
-REM  later.
-REM ==========================================================================
-
-REM --- Self-elevate to Administrator (needed to install Python system-wide
-REM     and enable the WSL2 Windows feature) ---
+rem ---- Self-elevate to Administrator (triggers one UAC prompt) ----
 net session >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Requesting administrator privileges...
-    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -WorkingDirectory '%~dp0' -Verb RunAs"
+    echo Requesting Administrator rights...
+    powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
     exit /b
 )
 
-set "SETUP_URL=https://raw.githubusercontent.com/moshgrossman/SlowBooks-Pro-2026/main/Setup-SlowBooksPro.ps1"
-set "SETUP_PS1=%TEMP%\Setup-SlowBooksPro.ps1"
+set "PS1_URL=https://raw.githubusercontent.com/moshgrossman/SlowBooks-Pro-2026/main/Setup-SlowBooksPro.ps1"
+set "PS1_FILE=%TEMP%\Setup-SlowBooksPro.ps1"
 
-echo Downloading the latest setup script...
-powershell -NoProfile -Command "try { Invoke-WebRequest -Uri '%SETUP_URL%' -OutFile '%SETUP_PS1%' -UseBasicParsing } catch { exit 1 }"
-if errorlevel 1 (
+echo Downloading the SlowBooks Pro setup script...
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '%PS1_URL%' -OutFile '%PS1_FILE%'"
+
+if not exist "%PS1_FILE%" (
     echo.
-    echo Could not download the setup script. Check your internet connection
-    echo and try again, or set up manually using the instructions at:
-    echo   https://github.com/moshgrossman/SlowBooks-Pro-2026/blob/main/INSTALL.md
+    echo ERROR: Could not download the setup script. Check your internet
+    echo connection and run this file again.
     pause
     exit /b 1
 )
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%SETUP_PS1%"
-set "EXITCODE=%errorlevel%"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1_FILE%"
 
-if not "%EXITCODE%"=="0" (
-    echo.
-    echo Setup did not finish. See the messages above for what to do next.
-    pause
-)
-
-exit /b %EXITCODE%
+echo.
+pause

@@ -22,16 +22,23 @@ def upgrade() -> None:
     # Payment void indicator
     op.add_column('payments', sa.Column('is_voided', sa.Boolean(), server_default='false', nullable=True))
 
-    # Vendor default expense account
-    op.add_column('vendors', sa.Column('default_expense_account_id', sa.Integer(), nullable=True))
-    op.create_foreign_key(
-        'fk_vendor_default_expense_account',
-        'vendors', 'accounts',
-        ['default_expense_account_id'], ['id'],
-    )
+    # Vendor default expense account.
+    # Batch mode so this also runs on SQLite (native desktop installs):
+    # SQLite cannot ALTER-add a constraint, so batch rebuilds the table
+    # there via copy-and-move. On PostgreSQL batch emits the exact same
+    # plain ALTER TABLE statements as before — no behavior change for
+    # existing server installs.
+    with op.batch_alter_table('vendors') as batch_op:
+        batch_op.add_column(sa.Column('default_expense_account_id', sa.Integer(), nullable=True))
+        batch_op.create_foreign_key(
+            'fk_vendor_default_expense_account',
+            'accounts',
+            ['default_expense_account_id'], ['id'],
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint('fk_vendor_default_expense_account', 'vendors', type_='foreignkey')
-    op.drop_column('vendors', 'default_expense_account_id')
+    with op.batch_alter_table('vendors') as batch_op:
+        batch_op.drop_constraint('fk_vendor_default_expense_account', type_='foreignkey')
+        batch_op.drop_column('default_expense_account_id')
     op.drop_column('payments', 'is_voided')

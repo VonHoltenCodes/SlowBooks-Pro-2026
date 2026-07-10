@@ -1,25 +1,17 @@
 @echo off
-REM ==========================================================================
-REM  Slowbooks Pro 2026 - one-click desktop launcher (Windows)
-REM
-REM  Double-click this file to start Slowbooks Pro in its own window.
-REM  Requires Python, WSL2, and Docker Engine to already be set up — run
-REM  "Setup SlowBooks Pro.bat" first if you haven't. desktop_launcher.py
-REM  itself talks to Docker inside WSL2, so nothing else is needed here.
-REM ==========================================================================
-
+rem ============================================================================
+rem SlowBooks Pro 2026 — daily launcher (the Desktop shortcut points here).
+rem No Administrator rights needed: nothing is installed, this only runs
+rem what setup already installed. Closing the app window stops the server.
+rem ============================================================================
 cd /d "%~dp0"
 
-REM Make sure the native-window dependency is present (fast if already there).
-python -c "import webview" 2>nul
-if errorlevel 1 (
-    echo Installing the desktop window component ^(one-time^)...
+rem Fast no-op when pywebview is already installed; repairs it if missing.
+python -c "import webview" >nul 2>&1
+if %errorlevel% neq 0 (
+    echo Installing the desktop window component...
     python -m pip install -r requirements-desktop.txt
 )
 
-python "desktop_launcher.py"
-if errorlevel 1 (
-    echo.
-    echo Something went wrong. See the messages above.
-    pause
-)
+python desktop_launcher.py
+if %errorlevel% neq 0 pause

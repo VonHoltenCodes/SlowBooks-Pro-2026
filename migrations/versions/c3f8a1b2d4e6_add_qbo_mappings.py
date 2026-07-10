@@ -27,7 +27,7 @@ def upgrade() -> None:
         sa.Column('qbo_id', sa.String(length=100), nullable=False),
         sa.Column('qbo_sync_token', sa.String(length=50), nullable=True),
         sa.Column('last_synced_at', sa.DateTime(timezone=True),
-                  server_default=sa.text('now()'), nullable=True),
+                  server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
         sa.PrimaryKeyConstraint('id'),
     )
     op.create_index(op.f('ix_qbo_mappings_id'), 'qbo_mappings', ['id'], unique=False)

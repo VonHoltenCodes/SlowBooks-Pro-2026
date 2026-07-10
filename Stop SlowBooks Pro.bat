@@ -1,18 +1,24 @@
 @echo off
-REM ==========================================================================
-REM  Slowbooks Pro 2026 - stop the app (Windows)
-REM
-REM  Stops the Docker containers running inside WSL2. Your data is kept safe
-REM  in Docker volumes and will be there next time you launch.
-REM ==========================================================================
+rem ============================================================================
+rem SlowBooks Pro 2026 — emergency stop (safety net only).
+rem
+rem Normally you stop SlowBooks Pro simply by closing its window. Use this
+rem only if the app didn't exit cleanly and something is still holding the
+rem port. It kills whatever is listening on the configured port (APP_PORT
+rem in .env, default 3001).
+rem ============================================================================
+cd /d "%~dp0"
 
-echo Stopping Slowbooks Pro...
-wsl.exe -d Ubuntu -u root -- bash -lc "cd /root/slowbooks-pro && docker compose down"
-if errorlevel 1 (
-    echo.
-    echo Could not stop the app. If you haven't run "Setup SlowBooks Pro.bat"
-    echo yet, there is nothing running to stop.
+set "PORT=3001"
+if exist ".env" (
+    for /f "usebackq tokens=1,* delims==" %%a in (".env") do (
+        if /i "%%a"=="APP_PORT" set "PORT=%%b"
+    )
 )
 
-echo Done. Your data is preserved.
+echo Stopping anything listening on port %PORT%...
+powershell -NoProfile -Command ^
+    "Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Stopping process ' + $_); Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }"
+
+echo Done.
 pause

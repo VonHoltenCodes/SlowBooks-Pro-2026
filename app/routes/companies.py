@@ -16,7 +16,9 @@ router = APIRouter(prefix="/api/companies", tags=["companies"])
 
 class CompanyCreate(BaseModel):
     name: str
-    database_name: str
+    # Postgres (server) installs only — desktop/SQLite installs derive the
+    # company's .db filename from the name.
+    database_name: Optional[str] = None
     description: Optional[str] = None
 
 

@@ -10,8 +10,14 @@ from alembic import context
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url from DATABASE_URL env var if set (used by Docker)
-if os.getenv("DATABASE_URL"):
+# Programmatic callers (company_service creating a NEW company database)
+# pass an explicit URL via config.attributes — that wins, so a per-company
+# migration never gets clobbered by the process-wide DATABASE_URL.
+# Otherwise, override sqlalchemy.url from DATABASE_URL env var (Docker).
+_url_override = config.attributes.get("database_url")
+if _url_override:
+    config.set_main_option("sqlalchemy.url", _url_override)
+elif os.getenv("DATABASE_URL"):
     config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
 
 # Interpret the config file for Python logging.

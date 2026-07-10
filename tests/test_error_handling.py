@@ -32,10 +32,12 @@ def test_restore_invalid_filename_returns_400(client, db_session):
     assert r.status_code == 400, r.text
 
 
-def test_restore_missing_extension_returns_400(client, db_session):
+def test_restore_bad_extension_returns_400(client, db_session):
     """The service rejects filenames that don't match the safe regex —
-    that's an input validation failure (400), not a server error (500)."""
-    r = client.post("/api/backups/restore", json={"filename": "nonexistent.db"})
+    that's an input validation failure (400), not a server error (500).
+    (.db is a legitimate backup extension now — SQLite desktop backups —
+    so an unknown extension is used here instead.)"""
+    r = client.post("/api/backups/restore", json={"filename": "nonexistent.txt"})
     assert r.status_code == 400, r.text
     assert "invalid" in r.text.lower() or "filename" in r.text.lower()
 

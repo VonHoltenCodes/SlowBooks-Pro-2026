@@ -28,7 +28,7 @@ def upgrade() -> None:
     sa.Column('old_values', postgresql.JSON(astext_type=sa.Text()), nullable=True),
     sa.Column('new_values', postgresql.JSON(astext_type=sa.Text()), nullable=True),
     sa.Column('changed_fields', postgresql.JSON(astext_type=sa.Text()), nullable=True),
-    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('timestamp', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('source', sa.String(length=100), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
@@ -43,7 +43,7 @@ def upgrade() -> None:
     sa.Column('file_size', sa.Integer(), nullable=True),
     sa.Column('backup_type', sa.String(length=20), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_backups_id'), 'backups', ['id'], unique=False)
@@ -52,9 +52,9 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=200), nullable=False),
     sa.Column('database_name', sa.String(length=100), nullable=False),
     sa.Column('description', sa.String(length=500), nullable=True),
-    sa.Column('last_accessed', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('last_accessed', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('database_name')
     )
@@ -67,7 +67,7 @@ def upgrade() -> None:
     sa.Column('subject', sa.String(length=500), nullable=True),
     sa.Column('status', sa.String(length=20), nullable=False),
     sa.Column('error_message', sa.Text(), nullable=True),
-    sa.Column('sent_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('sent_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_email_log_id'), 'email_log', ['id'], unique=False)
@@ -88,8 +88,8 @@ def upgrade() -> None:
     sa.Column('hire_date', sa.Date(), nullable=True),
     sa.Column('is_active', sa.Boolean(), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_index(op.f('ix_employees_id'), 'employees', ['id'], unique=False)
@@ -103,7 +103,7 @@ def upgrade() -> None:
     sa.Column('pay_from_account_id', sa.Integer(), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('transaction_id', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['pay_from_account_id'], ['accounts.id'], ),
     sa.ForeignKeyConstraint(['transaction_id'], ['transactions.id'], ),
     sa.ForeignKeyConstraint(['vendor_id'], ['vendors.id'], ),
@@ -120,7 +120,7 @@ def upgrade() -> None:
     sa.Column('total_net', sa.Numeric(precision=12, scale=2), nullable=True),
     sa.Column('total_taxes', sa.Numeric(precision=12, scale=2), nullable=True),
     sa.Column('transaction_id', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['transaction_id'], ['transactions.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -138,8 +138,8 @@ def upgrade() -> None:
     sa.Column('tax_amount', sa.Numeric(precision=12, scale=2), nullable=True),
     sa.Column('total', sa.Numeric(precision=12, scale=2), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['vendor_id'], ['vendors.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('po_number')
@@ -157,8 +157,8 @@ def upgrade() -> None:
     sa.Column('tax_rate', sa.Numeric(precision=5, scale=4), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('invoices_created', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['customer_id'], ['customers.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -190,8 +190,8 @@ def upgrade() -> None:
     sa.Column('balance_due', sa.Numeric(precision=12, scale=2), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('transaction_id', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['po_id'], ['purchase_orders.id'], ),
     sa.ForeignKeyConstraint(['transaction_id'], ['transactions.id'], ),
     sa.ForeignKeyConstraint(['vendor_id'], ['vendors.id'], ),
@@ -213,8 +213,8 @@ def upgrade() -> None:
     sa.Column('balance_remaining', sa.Numeric(precision=12, scale=2), nullable=True),
     sa.Column('notes', sa.Text(), nullable=True),
     sa.Column('transaction_id', sa.Integer(), nullable=True),
-    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
-    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('now()'), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
+    sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True),
     sa.ForeignKeyConstraint(['customer_id'], ['customers.id'], ),
     sa.ForeignKeyConstraint(['original_invoice_id'], ['invoices.id'], ),
     sa.ForeignKeyConstraint(['transaction_id'], ['transactions.id'], ),

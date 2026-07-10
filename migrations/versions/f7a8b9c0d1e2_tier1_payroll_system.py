@@ -82,8 +82,14 @@ def upgrade() -> None:
     # -- Vendors: 1099-NEC workflow --
     op.add_column('vendors', sa.Column('is_1099_eligible', sa.Boolean(), server_default='false', nullable=True))
     op.add_column('vendors', sa.Column('w9_on_file', sa.Boolean(), server_default='false', nullable=True))
-    op.add_column('vendors', sa.Column('w9_document_id', sa.Integer(),
-                                       sa.ForeignKey('attachments.id'), nullable=True))
+    # Batch mode: an ALTER-added FK constraint isn't possible on SQLite
+    # (native desktop installs) — batch rebuilds the table there; on
+    # PostgreSQL this emits the same ALTER TABLE as a plain add_column.
+    with op.batch_alter_table('vendors') as batch_op:
+        batch_op.add_column(sa.Column(
+            'w9_document_id', sa.Integer(),
+            sa.ForeignKey('attachments.id', name='fk_vendors_w9_document'),
+            nullable=True))
 
     # -- Time entries --
     op.create_table(

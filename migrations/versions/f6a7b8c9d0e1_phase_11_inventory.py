@@ -23,7 +23,16 @@ def upgrade() -> None:
     op.add_column('items', sa.Column('quantity_on_hand', sa.Numeric(14, 4), server_default='0', nullable=False))
     op.add_column('items', sa.Column('reorder_point', sa.Numeric(14, 4), server_default='0', nullable=False))
     op.add_column('items', sa.Column('avg_cost', sa.Numeric(14, 4), server_default='0', nullable=False))
-    op.add_column('items', sa.Column('asset_account_id', sa.Integer(), sa.ForeignKey('accounts.id'), nullable=True))
+    # Batch mode: the inline ForeignKey means an ALTER-added constraint,
+    # which SQLite (native desktop installs) can't do — batch rebuilds the
+    # table there. On PostgreSQL this emits the same ALTER TABLE as before.
+    # (batch mode requires the constraint to carry an explicit name)
+    with op.batch_alter_table('items') as batch_op:
+        batch_op.add_column(sa.Column(
+            'asset_account_id', sa.Integer(),
+            sa.ForeignKey('accounts.id', name='fk_items_asset_account'),
+            nullable=True,
+        ))
 
     # -- Inventory Movements ledger --
     op.create_table(

@@ -6,46 +6,59 @@ Ways to run Slowbooks Pro 2026.
 
 ## Option 0: One-click desktop app (Windows)
 
-**Easiest for a single user on Windows.** Nothing needs to be installed
-beforehand — no Python, no Docker, no WSL2, no git. One file sets all of that
-up automatically and opens Slowbooks in its own window (no browser tab).
+**Recommended for non-technical Windows users.** No Docker, no WSL2, no command
+line — Slowbooks Pro runs as a normal desktop app in its own window (no
+browser tab). Nothing needs to be installed beforehand; one file sets
+everything up automatically.
 
 ### Steps
 
 1. Download **[`Setup SlowBooks Pro.bat`](https://raw.githubusercontent.com/moshgrossman/SlowBooks-Pro-2026/main/Setup%20SlowBooks%20Pro.bat)**
-   (right-click → Save link as...).
+   (right-click → Save As if your browser shows it as text).
 2. Double-click it.
-3. Windows will likely show a **"Windows protected your PC"** warning — this
-   is expected for a downloaded, unsigned script. Click **More info**, then
-   **Run anyway**.
-4. Approve the administrator prompt (needed to install Python and enable
-   WSL2).
+3. Approve the two prompts you'll see:
+   - **Windows SmartScreen** ("Windows protected your PC") — click
+     **More info → Run anyway**. This is expected for any unsigned downloaded
+     script; it appears only the first time.
+   - **User Account Control** (Administrator permission) — needed to install
+     Python and a small PDF-rendering component system-wide.
+4. Wait for setup to finish. The app opens by itself, and a **SlowBooks Pro**
+   shortcut appears on your Desktop for next time.
 
-That's it — walk away. It will:
+### What it installs
 
-- download the Slowbooks Pro application files,
-- install Python if it isn't already present,
-- enable WSL2 and install a small Linux environment if needed,
-- install Docker Engine *inside* that Linux environment (not Docker
-  Desktop — lighter, and starts faster),
-- generate a strong `PAYROLL_ENCRYPTION_SECRET` for you (this is the value
-  that causes the *"PAYROLL_ENCRYPTION_SECRET is the public dev default"*
-  error when it's left unset — Setup sets it correctly so you never see that
-  error),
-- build and start the app, and
-- open Slowbooks in a desktop window once it's ready, plus leave a shortcut
-  on your Desktop for next time.
+- The Slowbooks Pro application itself (into `%LOCALAPPDATA%\SlowBooksPro`)
+- Python 3.13 (the language runtime the app is written in)
+- The GTK3 runtime (a small component used to generate PDF invoices and tax forms)
 
-**If it stops partway through** (most commonly: Windows needs to restart to
-finish enabling WSL2), it will tell you exactly what to do — usually just
-"restart your computer, then double-click this file again." It always picks
-up where it left off rather than starting over.
+That's it — **no Docker, no WSL2, no database server**. Your books are stored
+in ordinary files on your own machine.
 
-First run downloads and builds everything, so it can take several minutes.
-Later opens (via the Desktop shortcut, which runs `Launch SlowBooks Pro.bat`
-directly) are quick. To stop the app, use `Stop SlowBooks Pro.bat` inside the
-installed folder (`%LOCALAPPDATA%\SlowBooksPro\app`) — your data is kept safe
-in Docker volumes for next time.
+### Working with multiple companies
+
+This install manages companies the way QuickBooks Desktop does: each company
+is its own file, stored under `%LOCALAPPDATA%\SlowBooksPro\data\companies\`.
+Every time you open SlowBooks Pro you're asked which company to open (or to
+create a new one). To switch companies, close the app and open it again.
+
+### Stopping the app
+
+Just close the window — the server shuts down with it. If something ever gets
+stuck, run `Stop SlowBooks Pro.bat` in the app folder as a safety net.
+
+### Backups
+
+Backups created from the Settings UI are simply snapshots of the open
+company's `.db` file (stored in the app's `backups` folder). You can also copy
+the company files in `%LOCALAPPDATA%\SlowBooksPro\data\companies\` anywhere
+you like while the app is closed — each file is a complete, self-contained
+company.
+
+### Tradeoffs versus Option 1 (Docker + PostgreSQL)
+
+This path is **single-user, single-machine**: no multi-user client portal
+serving other people, no concurrent access. In exchange, there's nothing to
+administer — no `pg_dump`, no containers, no background services.
 
 ---
 
@@ -75,9 +88,9 @@ docker compose up
 
 Open **http://localhost:3001** in your browser.
 
-> On Windows, **Option 0** does all of this for you (generates the secret,
-> starts Docker, opens a desktop window) — prefer it unless you specifically
-> want the manual Docker flow.
+> On Windows, **Option 0** avoids all of this (no Docker at all, secret
+> generated for you, opens a desktop window) — prefer it unless you
+> specifically want a multi-user Docker + PostgreSQL server.
 
 ### What happens on first run
 
