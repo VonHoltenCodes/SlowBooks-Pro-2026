@@ -48,6 +48,15 @@ create a new one). To switch companies, close the app and open it again.
 Just close the window — the server shuts down with it. If something ever gets
 stuck, run `Stop SlowBooks Pro.bat` in the app folder as a safety net.
 
+### Troubleshooting
+
+Day-to-day, the Desktop shortcut opens the app with no console window — it
+runs quietly in the background like any other desktop app. If something goes
+wrong before the app window can open, a small popup explains it, and full
+details are written to `%LOCALAPPDATA%\SlowBooksPro\data\launcher.log`. For
+live console output while troubleshooting something trickier, double-click
+`Launch SlowBooks Pro.bat` inside the app folder instead of the shortcut.
+
 ### Backups
 
 Backups created from the Settings UI are simply snapshots of the open

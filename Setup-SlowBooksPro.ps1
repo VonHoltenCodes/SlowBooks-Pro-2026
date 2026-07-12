@@ -113,7 +113,7 @@ function Get-Python {
 # depends on.
 # ---------------------------------------------------------------------------
 Banner 'Step 0/6: SlowBooks Pro application files'
-$RequiredAppVersion = '7'
+$RequiredAppVersion = '8'
 $markerPath = Join-Path $AppDir 'DESKTOP_INSTALL_VERSION'
 $installedVersion = ''
 if (Test-Path $markerPath) {
@@ -325,10 +325,13 @@ $desktop = [Environment]::GetFolderPath('Desktop')
 $oldShortcut = Join-Path $desktop 'Slowbooks Pro 2026.lnk'
 if (Test-Path $oldShortcut) { Remove-Item -Force $oldShortcut }
 $shortcutPath = Join-Path $desktop 'SlowBooks Pro.lnk'
-$launchBat = Join-Path $AppDir 'Launch SlowBooks Pro.bat'
+# The shortcut targets the hidden .vbs launcher (no console window) --
+# "Launch SlowBooks Pro.bat" still exists in the app folder for anyone
+# who wants to see live console output while troubleshooting.
+$launchVbs = Join-Path $AppDir 'Launch SlowBooks Pro.vbs'
 $shell = New-Object -ComObject WScript.Shell
 $shortcut = $shell.CreateShortcut($shortcutPath)
-$shortcut.TargetPath = $launchBat
+$shortcut.TargetPath = $launchVbs
 $shortcut.WorkingDirectory = $AppDir
 $shortcut.Description = 'SlowBooks Pro 2026'
 $shortcut.Save()
@@ -339,4 +342,4 @@ Write-Host 'Setup complete! Opening SlowBooks Pro now...' -ForegroundColor Green
 Write-Host 'Next time, use the "SlowBooks Pro" shortcut on your Desktop.'
 # Launch through explorer.exe so the app runs as the normal (non-elevated)
 # user rather than inheriting this script's Administrator token.
-Start-Process explorer.exe -ArgumentList "`"$launchBat`""
+Start-Process explorer.exe -ArgumentList "`"$launchVbs`""
