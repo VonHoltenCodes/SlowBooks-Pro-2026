@@ -20,8 +20,9 @@ from sqlalchemy.orm import Session
 
 from app.config import DATABASE_URL
 from app.models.backups import Backup
+from app.services import storage
 
-BACKUP_DIR = Path(__file__).parent.parent.parent / "backups"
+BACKUP_DIR = storage.backups_root()
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Strict filename allow-list. Backup files we create are named

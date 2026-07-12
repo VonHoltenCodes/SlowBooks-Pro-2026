@@ -12,7 +12,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(BASE_DIR / ".env")
+# Desktop installs keep .env in the per-user data area (the install dir is
+# read-only); the launcher passes its location via SLOWBOOKS_ENV_FILE.
+load_dotenv(os.getenv("SLOWBOOKS_ENV_FILE") or BASE_DIR / ".env")
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql://bookkeeper:bookkeeper@localhost:5432/bookkeeper"

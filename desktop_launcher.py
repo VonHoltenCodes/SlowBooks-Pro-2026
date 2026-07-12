@@ -19,10 +19,17 @@ To switch companies: close the window and relaunch — the picker appears
 again. Flags:
   --no-window   start the server and print the URL (no native window)
   --setup-only  prepare .env and data directories, then exit
+  --smoke-test  CI self-test: create a company, boot the server, render a
+                PDF, exit 0/1
   --hidden      windowless mode -- redirects output to launcher.log and
                 shows a popup instead of a console on fatal startup
-                errors. Not meant to be passed by hand.
+                errors. Automatic in the installed (frozen) build.
   --port N      override the port (default: APP_PORT from .env, else 3001)
+
+The installed Windows build is this same file frozen by PyInstaller: the
+read-only app files live in the install dir, everything writable lives
+under %LOCALAPPDATA%\\SlowBooksPro, and the server child is this exe
+re-executed with the internal --_serve flag (no separate Python needed).
 """
 
 import argparse
@@ -35,9 +42,73 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-ENV_FILE = ROOT / ".env"
+# PyInstaller: the read-only application files (app/, migrations/,
+# alembic.ini, .env.example) live in the bundle; everything writable
+# (.env, companies, uploads, backups, logs) lives in the per-user data
+# area. From source, both are the repo checkout — unchanged behavior.
+FROZEN = bool(getattr(sys, "frozen", False))
+ROOT = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+
+
+def get_data_dir() -> Path:
+    """Same resolution as app.services.company_service.data_dir(), duplicated
+    here so --setup-only works before the app's dependencies are installed."""
+    override = os.environ.get("SLOWBOOKS_DATA_DIR")
+    if override:
+        return Path(override)
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
+        return Path(base) / "SlowBooksPro" / "data"
+    return Path.home() / ".slowbookspro" / "data"
+
+
+def _config_dir() -> Path:
+    """Writable per-user config root (parent of the data dir when frozen)."""
+    return get_data_dir().parent if FROZEN else Path(__file__).resolve().parent
+
+
+ENV_FILE = _config_dir() / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
+
+
+def _bootstrap_frozen_runtime() -> None:
+    """Make the bundled Pango/GObject DLLs and the system fonts visible to
+    WeasyPrint — must run before anything imports weasyprint (both in this
+    process and, because it's module-level, in the --_serve child)."""
+    gtk_dir = ROOT / "gtk"
+    if gtk_dir.is_dir():
+        os.environ.setdefault("WEASYPRINT_DLL_DIRECTORIES", str(gtk_dir))
+        try:
+            os.add_dll_directory(str(gtk_dir))
+        except OSError:
+            pass
+
+    # MSYS2-built Pango finds fonts through fontconfig, not Windows GDI —
+    # point it at C:\Windows\Fonts via a generated fonts.conf.
+    try:
+        conf_dir = _config_dir()
+        conf_dir.mkdir(parents=True, exist_ok=True)
+        win_fonts = os.path.join(
+            os.environ.get("WINDIR", r"C:\Windows"), "Fonts"
+        ).replace("\\", "/")
+        cache_dir = str(conf_dir / "fc-cache").replace("\\", "/")
+        conf_path = conf_dir / "fonts.conf"
+        conf_path.write_text(
+            '<?xml version="1.0"?>\n'
+            '<!DOCTYPE fontconfig SYSTEM "fonts.dtd">\n'
+            "<fontconfig>\n"
+            f"  <dir>{win_fonts}</dir>\n"
+            f"  <cachedir>{cache_dir}</cachedir>\n"
+            "</fontconfig>\n",
+            encoding="utf-8",
+        )
+        os.environ["FONTCONFIG_FILE"] = str(conf_path)
+    except OSError:
+        pass  # PDF rendering may still work; don't block app startup
+
+
+if FROZEN and sys.platform == "win32":
+    _bootstrap_frozen_runtime()
 
 # Must match app/config.py's shipped placeholder — a real secret is
 # generated to replace it (or an empty value) on first run.
@@ -77,20 +148,9 @@ def set_env_value(key: str, value: str) -> None:
     ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def get_data_dir() -> Path:
-    """Same resolution as app.services.company_service.data_dir(), duplicated
-    here so --setup-only works before the app's dependencies are installed."""
-    override = os.environ.get("SLOWBOOKS_DATA_DIR")
-    if override:
-        return Path(override)
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or str(Path.home() / "AppData" / "Local")
-        return Path(base) / "SlowBooksPro" / "data"
-    return Path.home() / ".slowbookspro" / "data"
-
-
 def prepare_env() -> None:
     """Idempotent first-run .env preparation."""
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
     if not ENV_FILE.exists():
         if ENV_EXAMPLE.exists():
             ENV_FILE.write_text(
@@ -116,6 +176,14 @@ def prepare_env() -> None:
         set_env_value("PAYROLL_ENCRYPTION_SECRET", secrets.token_urlsafe(32))
         print("Generated PAYROLL_ENCRYPTION_SECRET")
 
+    # Session-cookie signing key. Persisting it here (instead of letting
+    # the app fall back to its .slowbooks-session.key file next to the
+    # code) keeps the install dir read-only and sessions valid across
+    # restarts.
+    if not get_env_value("SESSION_SECRET_KEY"):
+        set_env_value("SESSION_SECRET_KEY", secrets.token_urlsafe(48))
+        print("Generated SESSION_SECRET_KEY")
+
     data_dir = get_data_dir()
     (data_dir / "companies").mkdir(parents=True, exist_ok=True)
 
@@ -135,6 +203,11 @@ def _server_env(db_url: str, port: int) -> dict:
             "APP_HOST": "127.0.0.1",
             "APP_PORT": str(port),
             "SLOWBOOKS_DATA_DIR": str(get_data_dir()),
+            # Where app/config.py loads .env from (the install dir is
+            # read-only when frozen), and the flag the frontend uses to
+            # enable desktop-only behavior like the update check.
+            "SLOWBOOKS_ENV_FILE": str(ENV_FILE),
+            "SLOWBOOKS_DESKTOP": "1",
         }
     )
     return env
@@ -151,6 +224,20 @@ def migrate(db_url: str, output=None) -> None:
     to inherit and print to -- see launcher.log). None (the default)
     inherits the parent's console, unchanged from before.
     """
+    if FROZEN:
+        # No child interpreter to run `-m alembic` in — run it in-process.
+        # migrations/env.py gives config.attributes["database_url"]
+        # precedence, so the process-wide DATABASE_URL doesn't matter.
+        from alembic import command
+        from alembic.config import Config
+
+        cfg = Config(str(ROOT / "alembic.ini"))
+        cfg.set_main_option("script_location", str(ROOT / "migrations"))
+        cfg.attributes["database_url"] = db_url
+        os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
+        command.upgrade(cfg, "head")
+        return
+
     subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
         cwd=ROOT,
@@ -162,8 +249,15 @@ def migrate(db_url: str, output=None) -> None:
 
 
 def start_server(db_url: str, port: int, output=None) -> subprocess.Popen:
-    return subprocess.Popen(
-        [
+    if FROZEN:
+        # Re-exec this same bundled exe; --_serve (handled at the top of
+        # main()) turns the child into the uvicorn server. cwd must be
+        # writable — the install dir is not.
+        cmd = [sys.executable, "--_serve"]
+        cwd = get_data_dir()
+        cwd.mkdir(parents=True, exist_ok=True)
+    else:
+        cmd = [
             sys.executable,
             "-m",
             "uvicorn",
@@ -175,8 +269,11 @@ def start_server(db_url: str, port: int, output=None) -> subprocess.Popen:
             # cmd.exe consoles don't render ANSI colors by default; without
             # this the logs are full of "<-[32m" escape-code garbage.
             "--no-use-colors",
-        ],
-        cwd=ROOT,
+        ]
+        cwd = ROOT
+    return subprocess.Popen(
+        cmd,
+        cwd=cwd,
         env=_server_env(db_url, port),
         stdout=output,
         stderr=subprocess.STDOUT if output else None,
@@ -611,12 +708,81 @@ def run_headless(port: int) -> int:
     return 0
 
 
+def _serve() -> int:
+    """Internal: run the uvicorn server in this process. The frozen build
+    has no child interpreter for `-m uvicorn`, so start_server() re-execs
+    the bundled exe with --_serve instead; all configuration (DATABASE_URL,
+    APP_PORT, SLOWBOOKS_*) arrives via the environment from _server_env()."""
+    import uvicorn
+
+    port = int(os.environ.get("APP_PORT", "3001"))
+    uvicorn.run("app.main:app", host="127.0.0.1", port=port, use_colors=False)
+    return 0
+
+
+def run_smoke_test(port: int = 3999) -> int:
+    """Headless self-test for CI: prove the frozen bundle can prepare an
+    environment, create + migrate a company database, serve the app, and —
+    the riskiest part on Windows — render a PDF through WeasyPrint's
+    bundled Pango/GObject DLLs. Exit code is the verdict."""
+    prepare_env()
+    os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
+    from app.services import company_service
+
+    print("smoke: creating company...")
+    result = company_service.manifest_create_company("Smoke Test Co")
+    if result["success"]:
+        filename = result["file"]
+    else:
+        existing = company_service.manifest_list_companies()
+        if not existing:
+            print(f"smoke: FAIL create_company: {result.get('error')}")
+            return 1
+        filename = existing[0]["file"]
+
+    print("smoke: launching server...")
+    proc = launch_company(filename, port)
+    try:
+        with urllib.request.urlopen(
+            f"http://127.0.0.1:{port}/health", timeout=5
+        ) as resp:
+            if resp.status != 200:
+                print(f"smoke: FAIL /health returned {resp.status}")
+                return 1
+    finally:
+        stop_server(proc)
+
+    print("smoke: rendering a PDF via WeasyPrint...")
+    import weasyprint
+
+    pdf = weasyprint.HTML(
+        string="<h1>SlowBooks Pro</h1><p>PDF rendering works.</p>"
+    ).write_pdf()
+    if not pdf or not pdf.startswith(b"%PDF"):
+        print("smoke: FAIL WeasyPrint did not produce a PDF")
+        return 1
+
+    print("smoke: PASS")
+    return 0
+
+
 def main() -> int:
+    # Not a user flag — the frozen server child (see start_server) and
+    # argparse must never meet, so handle it before parsing.
+    if "--_serve" in sys.argv:
+        return _serve()
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--setup-only",
         action="store_true",
         help="prepare .env and data directories, then exit",
+    )
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="CI self-test: create a company, boot the server, render a "
+        "PDF, exit 0/1. Uses SLOWBOOKS_DATA_DIR for isolation.",
     )
     parser.add_argument(
         "--no-window",
@@ -637,9 +803,13 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=None)
     args = parser.parse_args()
 
+    # A frozen console=False exe has no console at all — always behave as
+    # --hidden there so output lands in launcher.log instead of vanishing.
+    hidden = args.hidden or FROZEN
+
     log_fh = None
     log_path = None
-    if args.hidden:
+    if hidden:
         data_dir = get_data_dir()
         data_dir.mkdir(parents=True, exist_ok=True)
         log_path = data_dir / "launcher.log"
@@ -664,13 +834,16 @@ def main() -> int:
             print("Setup complete.")
             return 0
 
+        if args.smoke_test:
+            return run_smoke_test()
+
         port = args.port or int(get_env_value("APP_PORT") or "3001")
 
         if args.no_window:
             return run_headless(port)
         return run_window(port, log_fh)
     except Exception:
-        if not args.hidden:
+        if not hidden:
             raise  # unchanged behavior: let the traceback print normally
         import traceback
 

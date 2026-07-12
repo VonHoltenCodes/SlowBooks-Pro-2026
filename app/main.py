@@ -30,6 +30,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
+from app.services import storage
 from app.services.rate_limit import limiter
 
 from app.routes import (
@@ -415,13 +416,19 @@ app.include_router(reseller_permits_routes.router)
 # Register audit log hooks
 register_audit_hooks(SessionLocal)
 
-# Static files
+# Static files. Uploads live outside the bundle on desktop installs
+# (SLOWBOOKS_DATA_DIR) but keep their /static/uploads URLs — the more
+# specific mount must be registered first so it wins over /static.
 static_dir = Path(__file__).parent / "static"
+uploads_dir = storage.uploads_root()
+uploads_dir.mkdir(parents=True, exist_ok=True)
+if uploads_dir != static_dir / "uploads":
+    app.mount(
+        "/static/uploads",
+        StaticFiles(directory=str(uploads_dir)),
+        name="static-uploads",
+    )
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
-
-# Ensure uploads directory exists
-uploads_dir = static_dir / "uploads"
-uploads_dir.mkdir(exist_ok=True)
 
 # SPA entry point
 index_path = Path(__file__).parent.parent / "index.html"

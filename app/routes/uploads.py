@@ -3,17 +3,16 @@
 # Feature 15: Infrastructure D (UploadFile pattern, static/uploads/)
 # ============================================================================
 
-from pathlib import Path
-
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.settings import Settings
+from app.services import storage
 
 router = APIRouter(prefix="/api/uploads", tags=["uploads"])
 
-UPLOAD_DIR = Path(__file__).parent.parent / "static" / "uploads"
+UPLOAD_DIR = storage.uploads_root()
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 # Map of allowed content-type -> filename extension. Deriving the extension

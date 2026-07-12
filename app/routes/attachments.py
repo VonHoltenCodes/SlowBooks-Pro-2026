@@ -13,10 +13,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.attachments import Attachment
 from app.schemas.attachments import AttachmentResponse
+from app.services import storage
 
 router = APIRouter(prefix="/api/attachments", tags=["attachments"])
 
-STATIC_BASE = (Path(__file__).parent.parent / "static").resolve()
+# Attachment file_path values in the DB are stored relative to this root
+# ("uploads/attachments/...") — app/static on server installs, the per-user
+# data dir on desktop installs (see app/services/storage.py).
+STATIC_BASE = storage.files_root().resolve()
 UPLOAD_BASE = (STATIC_BASE / "uploads" / "attachments").resolve()
 
 # Map validated entity type -> directory name. Routing the user-provided
