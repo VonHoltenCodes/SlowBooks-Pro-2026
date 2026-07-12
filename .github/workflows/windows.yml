@@ -125,7 +125,7 @@ jobs:
         with:
           endpoint: https://cus.codesigning.azure.net/
           trusted-signing-account-name: easyamp-signing
-          certificate-profile-name: slowbookspro-public-trust
+          certificate-profile-name: easyamp-public-trust
           files-folder: ${{ github.workspace }}/packaging/windows/dist/SlowBooksPro
           files-folder-filter: exe
           file-digest: SHA256
@@ -150,7 +150,7 @@ jobs:
         with:
           endpoint: https://cus.codesigning.azure.net/
           trusted-signing-account-name: easyamp-signing
-          certificate-profile-name: slowbookspro-public-trust
+          certificate-profile-name: easyamp-public-trust
           files-folder: ${{ github.workspace }}
           files-folder-filter: exe
           file-digest: SHA256
