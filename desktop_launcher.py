@@ -353,7 +353,9 @@ window.addEventListener('pywebviewready', refresh);
 
 
 class PickerApi:
-    """js_api bridge for the company-picker page (window.pywebview.api).
+    """js_api bridge, available as window.pywebview.api on both the company
+    picker AND the main app window (the same Window object is reused --
+    load_url() navigates it from the picker HTML to the running app).
 
     IMPORTANT: all state on this object MUST be underscore-private.
     pywebview recursively serializes every PUBLIC attribute of the js_api
@@ -362,13 +364,55 @@ class PickerApi:
     producing endless console spam ('AccessibilityObject.Bounds.Empty...
     maximum recursion depth exceeded', 'CoreWebView2 can only be accessed
     from the UI thread') on every page load. Underscore names are skipped
-    by pywebview's get_functions(), so only the three methods are exposed.
+    by pywebview's get_functions(), so only the four methods are exposed.
     """
 
     def __init__(self, port: int):
         self._port = port
         self._window = None
         self._server: subprocess.Popen | None = None
+
+    def open_document(self, url: str) -> dict:
+        """Open a same-origin document (invoice/estimate PDF, print
+        preview, CSV export, ...) in a new native window.
+
+        The app sends Content-Security-Policy: frame-ancestors 'none' --
+        deliberate anti-clickjacking -- which forbids framing the app
+        even from itself, so an <iframe> overlay renders "This content
+        is blocked." A second top-level window sidesteps that (a
+        navigation, not a frame) and stays authenticated: every window
+        pywebview creates in this process shares one WebView2
+        UserDataFolder (see webview.platforms.winforms' module-level
+        cache_dir), so it carries the same session cookie as the main
+        window. Chromium's built-in viewer renders PDFs inline with its
+        own print/save controls; print-preview HTML pages call
+        window.print() themselves, which opens WebView2's native print
+        dialog in that window.
+
+        The URL is resolved and validated against this app's own origin
+        server-side (not just by the caller in JS) before opening it.
+        """
+        from urllib.parse import urljoin, urlparse
+
+        origin = f"http://127.0.0.1:{self._port}"
+        full_url = urljoin(origin + "/", url)
+        parsed = urlparse(full_url)
+        if (
+            parsed.scheme != "http"
+            or parsed.hostname != "127.0.0.1"
+            or parsed.port != self._port
+        ):
+            return {"success": False, "error": "Refusing to open a non-local URL"}
+
+        try:
+            import webview
+
+            webview.create_window(
+                "SlowBooks Pro 2026", full_url, width=900, height=1100
+            )
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True}
 
     def list_companies(self) -> dict:
         from app.services import company_service
