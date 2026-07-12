@@ -725,6 +725,12 @@ def run_smoke_test(port: int = 3999) -> int:
     environment, create + migrate a company database, serve the app, and —
     the riskiest part on Windows — render a PDF through WeasyPrint's
     bundled Pango/GObject DLLs. Exit code is the verdict."""
+    import logging
+
+    # Service-layer failures are logger.exception'd and swallowed into
+    # generic user-facing errors; in a smoke test we want the traceback.
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout, force=True)
+
     prepare_env()
     os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
     from app.services import company_service
