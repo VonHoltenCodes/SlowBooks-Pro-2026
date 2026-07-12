@@ -303,6 +303,22 @@ body {
     user-select: none;
 }
 
+/* Desktop-install update notice (fed by /api/system/update-check) */
+.update-badge {
+    display: block;
+    margin-bottom: 4px;
+    padding: 3px 6px;
+    border-radius: 3px;
+    background: rgba(224, 158, 36, 0.18);
+    border: 1px solid rgba(224, 158, 36, 0.55);
+    color: #e8b64c;
+    font-size: 10px;
+    font-weight: 600;
+    text-decoration: none;
+    user-select: auto;
+}
+.update-badge:hover { background: rgba(224, 158, 36, 0.32); }
+
 /* ========================================================================
  * CONTENT AREA
  * ======================================================================== */

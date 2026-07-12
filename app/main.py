@@ -85,6 +85,9 @@ from app.routes import analytics
 # Phase 9.7: Single-user authentication
 from app.routes import auth as auth_routes
 
+# System info + update check (desktop installs)
+from app.routes import system as system_routes
+
 # Phase 11: Inventory tracking + drill-down reports + saved reports
 from app.routes import saved_reports
 
@@ -100,6 +103,7 @@ from app.routes import document_audit as document_audit_routes
 from app.routes import reseller_permits as reseller_permits_routes
 from app.services.auth import get_session_secret
 
+from app import __version__
 from app.config import (
     CORS_ALLOW_ORIGINS,
     FORCE_HTTPS,
@@ -181,7 +185,7 @@ async def lifespan(app: FastAPI):
 # its default response class rather than pinning the now-deprecated ORJSON one.
 app = FastAPI(
     title="Slowbooks Pro 2026",
-    version="2.0.0",
+    version=__version__,
     lifespan=lifespan,
 )
 
@@ -375,6 +379,7 @@ app.include_router(uploads.router)
 app.include_router(bank_import.router)
 app.include_router(tax.router)
 app.include_router(backups.router)
+app.include_router(system_routes.router)
 # Phase 6: Ambitious
 app.include_router(companies.router)
 app.include_router(employees.router)

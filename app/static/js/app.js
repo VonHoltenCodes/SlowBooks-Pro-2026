@@ -647,8 +647,47 @@ const App = {
         // Load company name into status bar
         App.loadCompanyName();
 
+        // Real version in the footer + update badge on desktop installs
+        App.initSystemInfo();
+
         // Navigate after splash closes
         App.navigate(location.hash || '#/');
+    },
+
+    /**
+     * Footer version + update check. Raw fetch (not the API wrapper) on
+     * purpose: before first login these return 401, and the wrapper's 401
+     * handler would pop the auth prompt — auth.js already owns that, and
+     * it reloads the page after login so this runs again authenticated.
+     * The whole thing is best-effort; failures leave the footer as-is.
+     */
+    async initSystemInfo() {
+        try {
+            let res = await fetch('/api/system', { credentials: 'same-origin' });
+            if (!res.ok) return;
+            const info = await res.json();
+            const versionEl = $('#app-version');
+            if (versionEl && info.version) {
+                versionEl.textContent = `v${info.version} · Build 12.0.3190-R`;
+            }
+            if (!info.desktop) return;
+
+            res = await fetch('/api/system/update-check', { credentials: 'same-origin' });
+            if (!res.ok) return;
+            const check = await res.json();
+            if (!check.update_available || !check.download_url) return;
+            const footer = $('#sidebar-footer');
+            if (!footer || footer.querySelector('.update-badge')) return;
+            const link = document.createElement('a');
+            // External URL: pywebview hands target="_blank" links that leave
+            // 127.0.0.1 to the system browser (see desktop_shim.js).
+            link.href = check.download_url;
+            link.target = '_blank';
+            link.rel = 'noopener';
+            link.className = 'update-badge';
+            link.textContent = `⬆ Update available — v${check.latest_version}`;
+            footer.prepend(link);
+        } catch (e) { /* offline or pre-auth — footer stays as shipped */ }
     },
 };
 
