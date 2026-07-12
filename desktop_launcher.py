@@ -455,6 +455,11 @@ def run_window(port: int) -> int:
         )
         return 1
 
+    # pywebview CANCELS downloads by default -- without this, saving a PDF,
+    # a CSV export, or a backup from inside the app silently does nothing.
+    # With it, WebView2 shows a normal "Save As" dialog.
+    webview.settings["ALLOW_DOWNLOADS"] = True
+
     api = PickerApi(port)
     window = webview.create_window(
         "SlowBooks Pro 2026",
