@@ -235,6 +235,9 @@ def migrate(db_url: str, output=None) -> None:
         cfg.set_main_option("script_location", str(ROOT / "migrations"))
         cfg.attributes["database_url"] = db_url
         os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
+        # env.py imports app.database (import-time engine): make sure that
+        # binds to SQLite — the bundle ships no Postgres driver.
+        os.environ["DATABASE_URL"] = db_url
         command.upgrade(cfg, "head")
         return
 

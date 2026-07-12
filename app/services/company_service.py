@@ -182,6 +182,14 @@ def _init_company_db(url: str) -> None:
     from alembic import command
     from alembic.config import Config
 
+    # migrations/env.py imports app.database, which creates its engine at
+    # import time from DATABASE_URL. In the launcher process that var may
+    # be unset, and the Postgres fallback would try to import psycopg2 —
+    # which the frozen desktop bundle deliberately doesn't ship. Make sure
+    # a first import binds to this SQLite URL instead. (Migrations
+    # themselves use cfg.attributes below, which takes precedence.)
+    os.environ.setdefault("DATABASE_URL", url)
+
     root = Path(__file__).resolve().parent.parent.parent
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "migrations"))
