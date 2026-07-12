@@ -113,7 +113,7 @@ function Get-Python {
 # depends on.
 # ---------------------------------------------------------------------------
 Banner 'Step 0/6: SlowBooks Pro application files'
-$RequiredAppVersion = '2'
+$RequiredAppVersion = '3'
 $markerPath = Join-Path $AppDir 'DESKTOP_INSTALL_VERSION'
 $installedVersion = ''
 if (Test-Path $markerPath) {
