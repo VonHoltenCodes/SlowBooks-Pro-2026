@@ -438,11 +438,17 @@ async function openCompany(file) {
   setBusy(true);
   setStatus('Opening company… first open can take a minute.');
   const result = await window.pywebview.api.open_company(file);
-  if (result && !result.success) {
-    setStatus(result.error || 'Could not open company.', true);
+  if (result && result.success) {
+    // Navigate from JS, only AFTER the call above has resolved -- doing
+    // this from Python instead (mid-call) would navigate the window
+    // away before pywebview can deliver the return value to this very
+    // page, throwing 'window.pywebview._returnValuesCallbacks... is
+    // not a function' in a background thread.
+    window.location.href = result.url;
+  } else {
+    setStatus((result && result.error) || 'Could not open company.', true);
     setBusy(false);
   }
-  // On success the Python side navigates this window to the app.
 }
 async function createCompany() {
   const name = document.getElementById('newname').value.trim();
@@ -468,7 +474,7 @@ window.addEventListener('pywebviewready', refresh);
 class PickerApi:
     """js_api bridge, available as window.pywebview.api on both the company
     picker AND the main app window (the same Window object is reused --
-    load_url() navigates it from the picker HTML to the running app).
+    the picker's own JS navigates it to the running app on success).
 
     IMPORTANT: all state on this object MUST be underscore-private.
     pywebview recursively serializes every PUBLIC attribute of the js_api
@@ -482,7 +488,6 @@ class PickerApi:
 
     def __init__(self, port: int, log_fh=None):
         self._port = port
-        self._window = None
         self._server: subprocess.Popen | None = None
         self._log_fh = log_fh
 
@@ -545,13 +550,24 @@ class PickerApi:
             return {"success": False, "error": str(exc)}
 
     def open_company(self, filename: str) -> dict:
+        """Launch the company's server and hand the URL back to the picker
+        page's own JS to navigate to, once this call has resolved.
+
+        Previously this method navigated the window itself
+        (self._window.load_url(...)) before returning. That's a race:
+        pywebview delivers a JS promise's return value by finding the
+        call still pending on the (now-navigated-away) page, so on a
+        fast launch the picker page was already gone by the time
+        pywebview tried to resolve it -- 'window.pywebview.
+        _returnValuesCallbacks.open_company... is not a function' in a
+        background thread. Returning the url and letting the caller
+        navigate AFTER the call resolves avoids the race entirely.
+        """
         try:
             self._server = launch_company(filename, self._port, output=self._log_fh)
         except Exception as exc:
             return {"success": False, "error": str(exc)}
-        if self._window is not None:
-            self._window.load_url(f"http://127.0.0.1:{self._port}")
-        return {"success": True}
+        return {"success": True, "url": f"http://127.0.0.1:{self._port}"}
 
 
 def _webview2_installed() -> bool:
@@ -646,7 +662,7 @@ def run_window(port: int, log_fh=None) -> int:
     storage_dir.mkdir(parents=True, exist_ok=True)
 
     api = PickerApi(port, log_fh)
-    window = webview.create_window(
+    webview.create_window(
         "SlowBooks Pro 2026",
         html=PICKER_HTML,
         js_api=api,
@@ -654,7 +670,6 @@ def run_window(port: int, log_fh=None) -> int:
         height=860,
         min_size=(900, 600),
     )
-    api._window = window
     try:
         # Require the WebView2 (Chromium) renderer on Windows. Without this,
         # pywebview silently falls back to the legacy IE/MSHTML control on
