@@ -4,7 +4,14 @@
 
 Free and open source. Runs on Windows, macOS, and Linux. No Intuit activation servers required.
 
-**Get started:** `docker compose up` — see **[INSTALL.md](INSTALL.md)** for all install options.
+**Get started (Windows):** download the signed installer —
+**[SlowBooksPro-Setup-x64.exe](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/latest/download/SlowBooksPro-Setup-x64.exe)** —
+double-click, done. No Docker, no Python, no database server; Windows shows
+a verified publisher instead of a SmartScreen warning.
+
+**Get started (servers / macOS / Linux):** `docker compose up` — see
+**[INSTALL.md](INSTALL.md)** for all install options, or visit
+**[slowbookspro.com](https://www.slowbookspro.com)**.
 
 ![Slowbooks Pro 2026 — Company Snapshot (Light)](screenshots/dashboard-light.png)
 ![Slowbooks Pro 2026 — Company Snapshot (Dark)](screenshots/dashboard-dark.png)
@@ -26,6 +33,14 @@ The codebase is annotated with "decompilation" comments referencing `QBW32.EXE` 
 ---
 
 ## What's New
+
+**Native Windows desktop app (v2.1)** — A real installer, code-signed via
+Azure Trusted Signing, that runs SlowBooks as a normal desktop app in its
+own window: no Docker, no Python install, no database server. Each company
+is a single SQLite file (like a QuickBooks company file) under
+`%LOCALAPPDATA%\SlowBooksPro`, picked from a QuickBooks-style company
+picker at launch — upgrades and even uninstalls never touch your books.
+The footer shows an update notice when a new release ships.
 
 **Full payroll & HR module** — Onboarding checklists, time tracking, PTO policies and requests, deductions (401k, health, HSA), court-ordered garnishments, W-2/W-3/940/941 generation, and a token-accessed employee self-service portal for pay stubs, W-4 updates, direct-deposit setup, and time-off requests.
 
@@ -87,7 +102,14 @@ Full feature catalog (300+ entries across every module) lives in **[docs/feature
 
 ## Quick Start
 
-### Docker (Windows, macOS, Linux)
+### Windows — signed installer
+
+Download **[SlowBooksPro-Setup-x64.exe](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/latest/download/SlowBooksPro-Setup-x64.exe)**
+from the latest release and double-click it. Fully self-contained (64-bit
+Windows 10/11); also available as a portable .zip on the
+[releases page](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/latest).
+
+### Docker (servers, macOS, Linux)
 
 ```bash
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git
@@ -95,7 +117,7 @@ cd SlowBooks-Pro-2026
 docker compose up
 ```
 
-Open **http://localhost:3001**. PostgreSQL, migrations, and seed data are handled automatically.
+Open **http://localhost:3001**. PostgreSQL, migrations, and seed data are handled automatically. Docker is the path for multi-user setups (e.g. the employee portal).
 
 For native installs (Linux + macOS), demo data, troubleshooting, and CORS / port-change recipes, see **[INSTALL.md](INSTALL.md)**.
 
@@ -107,7 +129,7 @@ For backups, restore, key rotation, and monitoring see **[docs/operations.md](do
 
 | Doc | Covers |
 |-----|--------|
-| [INSTALL.md](INSTALL.md) | Install / first-run / upgrade guide (Docker + native Linux/macOS) |
+| [INSTALL.md](INSTALL.md) | Install / first-run / upgrade guide (Windows installer + Docker + native Linux/macOS) |
 | [docs/features.md](docs/features.md) | Full feature catalog + API endpoint reference + IIF interoperability |
 | [docs/development.md](docs/development.md) | Tech stack, project structure, contributor flow |
 | [docs/data-model.md](docs/data-model.md) | Database schema — 55 tables |
@@ -128,7 +150,9 @@ For backups, restore, key rotation, and monitoring see **[docs/operations.md](do
 
 ## Tech Stack
 
-Python 3.13 + FastAPI on PostgreSQL 17 (SQLite for tests) with SQLAlchemy 2.0 and Alembic migrations. Vanilla HTML/CSS/JS single-page app — no framework, no build step. WeasyPrint + Jinja2 for PDFs. Self-hosted Chart.js for analytics (no CDN; LAN-deployable). Stripe Checkout for online payments. python-quickbooks + intuit-oauth for QBO sync. Runs on port 3001 by default.
+Python 3.13 + FastAPI on PostgreSQL 17 (SQLite for tests and for the desktop app, one file per company) with SQLAlchemy 2.0 and Alembic migrations. Vanilla HTML/CSS/JS single-page app — no framework, no build step. WeasyPrint + Jinja2 for PDFs. Self-hosted Chart.js for analytics (no CDN; LAN-deployable). Stripe Checkout for online payments. python-quickbooks + intuit-oauth for QBO sync. Runs on port 3001 by default.
+
+The Windows desktop build is the same codebase frozen with PyInstaller (pywebview/WebView2 window, in-process Alembic, bundled Pango for PDFs), built and code-signed in CI via Azure Trusted Signing on every release tag.
 
 Full project layout in [docs/development.md](docs/development.md).
 
@@ -156,4 +180,5 @@ You can use, modify, and run Slowbooks Pro for any personal, educational, or int
 - [VonHoltenCodes](https://github.com/VonHoltenCodes) — Creator
 - [PNWImport](https://github.com/PNWImport) — Security hardening (auth, CORS, path traversal, atomic writes, non-root Docker, rate limiting), analytics engine, AI insights with 7-provider support, Cloudflare Worker gateway, inventory ledger, drill-down reports, fuzzy duplicate detection, saved reports, payroll/HR module, tax-form audit chain, reseller-permit module, customer details popout
 - [jake-378](https://github.com/jake-378) — Backup UI fixes, report period selectors, invoice terms autofill, date validation fixes
+- [moshgrossman](https://github.com/moshgrossman) — Native Windows desktop mode groundwork: SQLite file-per-company with manifest, company picker, desktop launcher, SQLite-compatible migrations, print/PDF window handling
 - [WC3D](https://github.com/WC3D) — Jinja2 XSS security fix
