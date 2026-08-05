@@ -139,7 +139,7 @@ Full feature catalog (300+ entries across every module) lives in **[docs/feature
 - **QuickBooks Online sync** — OAuth + bidirectional sync. See **[docs/setup-qbo.md](docs/setup-qbo.md)**.
 - **QB2003 interop** — IIF import/export with type-mapping, validation, round-trip safety, and INVOICE/PAYMENT/ESTIMATE/BILL/DEPOSIT transaction blocks (classes included).
 - **Fixed assets** — Register, depreciation runs, disposal with gain/loss, CSV import, reconciliation report.
-- **Migration onramps** — Xero CSV import with dry-run verification; Opening Balances wizard; QuickBooks IIF.
+- **Migration onramps** — one Migrate Data page for Xero, MYOB, Sage 50, Wave, Zoho Books, and GnuCash, all dry-run-verified; Opening Balances wizard; QuickBooks IIF.
 
 ---
 
@@ -187,6 +187,7 @@ For backups, restore, key rotation, and monitoring see **[docs/operations.md](do
 | [docs/setup-stripe.md](docs/setup-stripe.md) | Stripe payment processing setup |
 | [docs/setup-paypal.md](docs/setup-paypal.md) | PayPal payment processing setup |
 | [docs/setup-square.md](docs/setup-square.md) | Square payment processing setup |
+| [docs/migrate-from-myob.md](docs/migrate-from-myob.md) | Migrating from MYOB — export walkthrough + dry-run flow |
 | [SECURITY.md](SECURITY.md) | Public security policy and responsible disclosure |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Contributor flow |
 | [CHANGELOG.md](CHANGELOG.md) | Release history |

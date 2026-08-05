@@ -41,7 +41,7 @@ def _files(**named):
 def test_dry_run_passes_and_mutates_nothing(client, db_session, seed_accounts):
     before = db_session.query(Account).count()
     resp = client.post(
-        "/api/xero-import/dry-run",
+        "/api/migration/xero/dry-run",
         files=_files(
             **{
                 "ChartOfAccounts.csv": COA_CSV,
@@ -61,7 +61,7 @@ def test_dry_run_passes_and_mutates_nothing(client, db_session, seed_accounts):
 def test_dry_run_flags_unbalanced_journal(client, seed_accounts):
     bad_gl = GL_CSV.replace('"1,150.00"\n', '"1,100.00"\n', 1)
     resp = client.post(
-        "/api/xero-import/dry-run",
+        "/api/migration/xero/dry-run",
         files=_files(**{"chart.csv": COA_CSV, "ledger.csv": bad_gl}),
     )
     data = resp.json()
@@ -72,7 +72,7 @@ def test_dry_run_flags_unbalanced_journal(client, seed_accounts):
 def test_dry_run_flags_tb_mismatch(client, seed_accounts):
     bad_tb = TB_CSV.replace("950.00", "900.00")
     resp = client.post(
-        "/api/xero-import/dry-run",
+        "/api/migration/xero/dry-run",
         files=_files(
             **{"chart.csv": COA_CSV, "ledger.csv": GL_CSV, "trial.csv": bad_tb}
         ),
@@ -84,7 +84,7 @@ def test_dry_run_flags_tb_mismatch(client, seed_accounts):
 
 def test_dry_run_requires_gl_and_coa(client, seed_accounts):
     resp = client.post(
-        "/api/xero-import/dry-run", files=_files(**{"trial.csv": TB_CSV})
+        "/api/migration/xero/dry-run", files=_files(**{"trial.csv": TB_CSV})
     )
     data = resp.json()
     assert data["ok"] is False
@@ -93,7 +93,7 @@ def test_dry_run_requires_gl_and_coa(client, seed_accounts):
 
 def test_import_creates_accounts_and_journals(client, db_session, seed_accounts):
     resp = client.post(
-        "/api/xero-import/import",
+        "/api/migration/xero/import",
         files=_files(
             **{
                 "chart.csv": COA_CSV,
@@ -130,7 +130,7 @@ def test_import_refuses_when_dry_run_fails(client, db_session, seed_accounts):
     before = db_session.query(Transaction).count()
     bad_gl = GL_CSV.replace('"1,150.00"\n', '"1,100.00"\n', 1)
     resp = client.post(
-        "/api/xero-import/import",
+        "/api/migration/xero/import",
         files=_files(**{"chart.csv": COA_CSV, "ledger.csv": bad_gl}),
     )
     data = resp.json()

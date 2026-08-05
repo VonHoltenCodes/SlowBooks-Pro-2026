@@ -67,7 +67,7 @@ from app.routes import bank_import, tax, backups
 from app.routes import classes as classes_routes
 from app.routes import fx as fx_routes
 from app.routes import fixed_assets as fixed_assets_routes
-from app.routes import xero_import as xero_import_routes
+from app.routes import migration as migration_routes
 from app.routes import opening_balances as opening_balances_routes
 
 # Phase 6: Ambitious
@@ -371,7 +371,7 @@ app.include_router(accounts.router)
 app.include_router(classes_routes.router)
 app.include_router(fx_routes.router)
 app.include_router(fixed_assets_routes.router)
-app.include_router(xero_import_routes.router)
+app.include_router(migration_routes.router)
 app.include_router(opening_balances_routes.router)
 app.include_router(customers.router)
 app.include_router(vendors.router)

@@ -15,7 +15,7 @@ const OpeningBalancesPage = {
                     <p>Your chart of accounts isn't set up yet.</p>
                     <p style="font-size:12px; margin-top:8px;">
                         Load a chart in <a href="#/settings">Settings</a> or migrate one
-                        via <a href="#/xero-import">Xero Import</a>, then come back here.
+                        via <a href="#/migrate">Migrate Data</a>, then come back here.
                     </p>
                 </div>`;
         }
