@@ -20,7 +20,7 @@ class _EmailInvoiceRequest(BaseModel):
 
 @router.get("/{invoice_id}/pdf")
 def invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
-    """Generate PDF — CInvoicePrintLayout::RenderPage() @ 0x00220400"""
+    """Generate the invoice PDF."""
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")

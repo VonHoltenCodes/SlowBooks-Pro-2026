@@ -1,6 +1,5 @@
 # ============================================================================
-# A nod to qbw32.exe!CCompanyInfo + CQBPreferences
-# Imagined offset: 0x00241200 / 0x0023F000
+# Settings — one key-value table, merged over DEFAULT_SETTINGS on read.
 # Original stored company info in the .QBW file header (bytes 0x40-0x1FF)
 # encrypted with a simple XOR 0x1F cipher. Preferences lived in the registry
 # at HKCU\Software\Intuit\QuickBooks\12.0\Preferences.

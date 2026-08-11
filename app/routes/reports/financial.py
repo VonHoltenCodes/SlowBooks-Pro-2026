@@ -146,7 +146,7 @@ def general_ledger(
     account_id: int = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """CReportEngine::RunGLDetail() @ 0x00211400"""
+    """General Ledger detail report."""
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:

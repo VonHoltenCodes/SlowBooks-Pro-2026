@@ -1,10 +1,9 @@
 # ============================================================================
 # Slowbooks Pro 2026 — Secrets encryption helpers
 #
-# Not "decompiled" from QB2003 — QuickBooks 2003 "encrypted" its secrets
-# with a single-byte XOR 0x1F cipher (CFileHeader::Obfuscate @ 0x00241520).
-# That was a joke in 2003 and it's a felony in 2026. This is the modern
-# replacement: Fernet symmetric authenticated encryption.
+# 2003-era accounting software famously "encrypted" secrets with trivial
+# XOR obfuscation. This is the modern replacement: Fernet symmetric
+# authenticated encryption.
 #
 # Fernet (from the `cryptography` library) gives us:
 #   * AES-128 in CBC mode for confidentiality

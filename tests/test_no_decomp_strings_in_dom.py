@@ -1,10 +1,10 @@
 """S1 audit follow-up: pin that decompilation-heritage debug strings
 stay confined to comments and never reach the rendered DOM.
 
-The codebase deliberately carries QuickBooks-2003 decompilation flair in
-file-header /** ... */ blocks and inline // comments — that's a feature,
-not a bug. What's NOT okay is the same strings appearing inside template
-literals or other executable code, because they then ship to the browser
+The codebase historically carried QuickBooks-2003 "decompilation flair"
+in comments (removed in the 2026-08 tone-down sweep). These tests remain
+as a guard against REINTRODUCTION: such strings must never appear inside
+template literals or other executable code, because they then ship to the browser
 and give an attacker a free fingerprinting surface (and look unprofessional
 to legitimate users).
 
@@ -94,26 +94,3 @@ def test_no_decomp_strings_outside_comments(js_path):
             f"              if it's debug info actually leaking to the "
             f"DOM, strip it.\n"
         )
-
-
-def test_decomp_flair_in_comments_is_preserved():
-    """Sanity check on the OPPOSITE direction: the comment-level
-    decomp flair (e.g. `/** Decompiled from QBW32.EXE!CMainFrame */` at
-    the top of app.js) is intentional and must NOT be stripped by an
-    overzealous future cleanup. If this assertion fails, someone
-    probably went too aggressive removing the heritage banners — they
-    don't reach the DOM, so they're fine to keep.
-    """
-    app_js = (_JS_DIR / "app.js").read_text(encoding="utf-8")
-    # The file-header banner is the canonical example of intentional
-    # in-comment flair.
-    assert "QBW32.EXE" in app_js, (
-        "app.js file-header banner missing — the decomp flair in /** */ "
-        "comments is deliberate and shouldn't be stripped."
-    )
-    # And it must be inside a comment, not in code.
-    code_only = _strip_comments(app_js)
-    assert "QBW32.EXE" not in code_only, (
-        "QBW32.EXE appears in app.js OUTSIDE a comment — that would leak "
-        "to the DOM. Either move it into /* */ or // or remove it."
-    )

@@ -1,19 +1,12 @@
 # ============================================================================
 # Slowbooks Pro 2026 — "It's like QuickBooks, but we own the source code"
-# A from-scratch homage to Intuit QuickBooks Pro 2003 (Build 12.0.3190).
-# Spiritual ancestor: QBW32.EXE (14,823,424 bytes, PE32 MSVC++ 6.0 SP5)
-# Imagined decompilation target: CQBMainApp (WinMain @ 0x00401000)
-# ============================================================================
-# LEGAL: This is an independent reimplementation. No Intuit source code or
-# binaries were decompiled, disassembled, or used — the MFC class names and
-# hex "offsets" sprinkled through this codebase are invented retro flavor,
-# an affectionate fiction. All actual knowledge derived from:
-#   1. Published Intuit SDK documentation (QBFC 5.0, qbXML 4.0)
-#   2. 14 years of clicking every menu item as a paying customer
-#   3. IIF files exported by our own licensed copy
-#   4. Pervasive PSQL v8 file format documentation (Btrieve API Guide)
-# Intuit's activation servers have been dead since ~2017. The hard drive
-# that had our licensed copy died in 2024. We just want to print invoices.
+# An independent, from-scratch replacement for Intuit QuickBooks Pro 2003.
+# No Intuit source code or binaries were decompiled, disassembled, or used.
+# Everything derives from published SDK documentation (QBFC 5.0, qbXML 4.0),
+# IIF files exported by our own licensed copy, and 14 years of using the
+# product as a paying customer. Intuit's activation servers have been dead
+# since ~2017; the hard drive with our licensed copy died in 2024. We just
+# want to print invoices.
 # ============================================================================
 
 import re as _re

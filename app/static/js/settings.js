@@ -1,9 +1,7 @@
 /**
- * A nod to QBW32.EXE!CPreferencesDialog  imagined offset: 0x0023F800
- * Original: tabbed dialog (IDD_PREFERENCES) with 12 tabs. We condensed
- * everything into a single page because nobody needs 12 tabs for
- * company name and tax rate. The registry writes at 0x00240200 are now
- * PostgreSQL INSERTs. Progress.
+ * Settings — QuickBooks 2003 had a 12-tab preferences dialog; we
+ * condensed everything into a single page because nobody needs 12 tabs
+ * for company name and tax rate.
  */
 const SettingsPage = {
     async render() {

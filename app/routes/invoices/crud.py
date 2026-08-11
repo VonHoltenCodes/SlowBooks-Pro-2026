@@ -163,7 +163,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         db.add(line)
 
     # ================================================================
-    # Journal Entry — CInvoice::PostToJournal() @ 0x0015D800
+    # Journal Entry
     # DR  Accounts Receivable (1100)     total
     # CR  Income per line item           line amount
     # CR  Sales Tax Payable (2200)       tax amount (if any)

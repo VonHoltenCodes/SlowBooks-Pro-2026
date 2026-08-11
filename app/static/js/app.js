@@ -1,10 +1,6 @@
 /**
- * A nod to QBW32.EXE!CMainFrame + CQBNavigator  imagined offset: 0x00042000
- * Original was an MFC CFrameWnd with a custom left-panel "Navigator" control
- * (the icon sidebar everyone remembers). CMainFrame::OnNavigate() dispatched
- * to individual CFormView subclasses via a 31-entry function pointer table.
- * We replaced the Win32 message pump with hash-based routing because, again,
- * it is no longer 2003. WM_COMMAND 0x8001 through 0x801F, rest in peace.
+ * App shell — the left-panel Navigator (the icon sidebar everyone
+ * remembers from QuickBooks) plus hash-based routing to each page.
  */
 const App = {
     routes: {
@@ -84,8 +80,8 @@ const App = {
         } catch (err) {
             // Server-side detail (err.message and stack) goes to console
             // for devs; the DOM gets a clean user-facing error with a
-            // recovery action. Avoid leaking framework / decompilation
-            // internals into the rendered page (S1 audit finding).
+            // recovery action. Avoid leaking framework internals into
+            // the rendered page (S1 audit finding).
             console.error(err);
             $('#page-content').innerHTML = `<div class="empty-state">
                 <h3>Couldn't load this page</h3>
@@ -226,7 +222,7 @@ const App = {
             <div class="page-header">
                 <h2>Company Snapshot</h2>
                 <div style="font-size:10px; color:var(--text-muted);">
-                    Slowbooks Pro 2026 &mdash; Build 12.0.3190-R
+                    Slowbooks Pro 2026
                 </div>
             </div>
 
@@ -352,7 +348,7 @@ const App = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    // Feature 4: Unified Global Search — replaces CQBSearchEngine @ 0x00250000
+    // Feature 4: Unified Global Search
     _searchTimeout: null,
     async globalSearch(query) {
         const dropdown = $('#search-results');
@@ -613,7 +609,7 @@ const App = {
         // Load saved theme
         App.loadTheme();
 
-        // Keyboard shortcuts — CAcceleratorTable @ 0x00042800
+        // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {
             // Ctrl+Enter: submit quick entry form
             if (e.ctrlKey && e.key === 'Enter') {
@@ -680,7 +676,7 @@ const App = {
             const info = await res.json();
             const versionEl = $('#app-version');
             if (versionEl && info.version) {
-                versionEl.textContent = `v${info.version} · Build 12.0.3190-R`;
+                versionEl.textContent = `v${info.version}`;
             }
             if (!info.desktop) return;
 

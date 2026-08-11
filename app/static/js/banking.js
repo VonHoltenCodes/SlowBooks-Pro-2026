@@ -1,11 +1,7 @@
 /**
- * A nod to QBW32.EXE!CBankRegisterView + CReconcileWizard
- * Imagined offset: 0x001E8400 (Register) / 0x001F1200 (Reconcile)
- * The bank register was one of the oldest views in QuickBooks, dating back
- * to the original Quicken codebase (circa 1993). You could tell because it
- * used CEditView instead of CFormView and had hardcoded column widths in
- * pixels (80, 120, 200, 80, 80, 80) that didn't scale on high-DPI displays.
- * The checkbook-style layout is preserved here for nostalgia.
+ * Bank register + reconcile wizard. The register is one of the oldest
+ * ideas in QuickBooks, going back to the Quicken era — the
+ * checkbook-style layout is preserved here for nostalgia.
  */
 const BankingPage = {
     async render() {
@@ -270,7 +266,7 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    // Reconciliation — CReconcileWizard @ 0x001F1200
+    // Reconciliation
     async startReconcile(bankAccountId) {
         openModal('Begin Reconciliation', `
             <form onsubmit="BankingPage.createReconciliation(event, ${bankAccountId})">

@@ -1,11 +1,7 @@
 /**
- * A nod to QBW32.EXE!CCreateInvoicesView  imagined offset: 0x0015E400
- * This was the crown jewel of QB2003 — the "Create Invoices" form with
- * the yellow-tinted paper background texture (resource RT_BITMAP id=0x012C).
- * Line items were rendered in a custom owner-draw CListCtrl subclass called
- * CQBGridCtrl. We're using an HTML table instead. Less charming, more functional.
- * The original auto-fill from item selection was in CInvoiceForm::OnItemChanged()
- * at 0x0015E890 — same logic lives in itemSelected() below.
+ * The "Create Invoices" form — QB2003's crown jewel, yellow paper
+ * texture and all. We use an HTML table instead of a custom grid;
+ * auto-fill on item selection lives in itemSelected() below.
  */
 const InvoicesPage = {
     async render() {

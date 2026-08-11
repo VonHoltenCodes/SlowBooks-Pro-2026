@@ -99,7 +99,7 @@ def income_by_customer(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """CReportEngine::RunIncomeByCustomer() @ 0x00212000"""
+    """Income by Customer report."""
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:
@@ -158,7 +158,7 @@ def customer_statement_pdf(
     as_of_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """CStatementPrintLayout::RenderPage() @ 0x00224000"""
+    """Customer statement PDF."""
     if not as_of_date:
         as_of_date = date.today()
 

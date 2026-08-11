@@ -1,9 +1,6 @@
 /**
- * A nod to QBW32.EXE!CVendorCenterView  imagined offset: 0x000DD800
- * Nearly identical to CCustomerCenterView — Intuit copy-pasted the customer
- * code and did a find-replace of "Customer" with "Vendor". We know this
- * because the Vendor center still had a "Customer:Job" label in the resource
- * table (RT_DIALOG id=0x00A7) that they forgot to rename. Classic.
+ * Vendor Center — a near-mirror of the Customer Center; the two views
+ * share their layout on purpose.
  */
 const VendorsPage = {
     async render() {

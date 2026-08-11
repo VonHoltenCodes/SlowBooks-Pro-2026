@@ -1,10 +1,6 @@
 /**
- * A nod to QBW32.EXE!CReportEngine + CReportViewer  imagined offset: 0x00210000
- * The original report engine was actually impressive - it had its own query
- * language ("QBReportQuery") that got compiled to Btrieve API calls. The
- * P&L report alone generated 14 separate Btrieve operations. We just use SQL.
- * CReportViewer was an OLE container that hosted a Crystal Reports 8.5 OCX
- * for print preview. We do not miss Crystal Reports.
+ * Reports — every report is plain SQL on the backend; this viewer
+ * renders the tables, print/PDF is WeasyPrint server-side.
  */
 const ReportsPage = {
     // Map of report_type → opener method, for re-opening saved reports.

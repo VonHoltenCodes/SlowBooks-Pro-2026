@@ -1,11 +1,5 @@
 # ============================================================================
-# A nod to qbw32.exe!CReceivePayment  imagined offset: 0x001A2100
-# Original Btrieve table: RCVPMT.DAT + RCVPMT_ALLOC.DAT
-# The payment allocation system must have been one of the more tangled
-# parts of the original — picture a custom linked-list ("CQBAllocList")
-# tracking which invoices a single payment covered, with a hard limit of
-# 100 allocations per payment in CQBAllocList::AddAlloc. (Invented lore,
-# but you believe it, don't you.)
+# Payments and their allocations across invoices.
 # ============================================================================
 
 from sqlalchemy import (

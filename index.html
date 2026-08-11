@@ -9,7 +9,7 @@
 </head>
 <body>
     <!-- ================================================================
-         Splash screen — imagined after CAboutDlg (IDD_ABOUTBOX)
+         Splash / About dialog
          Original showed the QuickBooks logo, build number, and a
          "Licensed to:" field read from HKCU\Software\Intuit\Registration
          ================================================================ -->
@@ -19,16 +19,14 @@
             <div class="splash-subtitle">2026 Edition</div>
             <div class="splash-divider"></div>
             <div class="splash-info">
-                <strong>Build 12.0.3190-R</strong> &mdash; Reimagined<br>
-                A loving tribute to Intuit QuickBooks Pro 2003<br>
-                QBW32.EXE (14,823,424 bytes &bull; PE32 MSVC++ 6.0 SP5)<br>
-                Original Pervasive PSQL v8 &rarr; PostgreSQL 16
+                <strong>Free &amp; source-available</strong> &mdash; no caps, no subscriptions<br>
+                Born as a clean-room replacement for QuickBooks&nbsp;Pro&nbsp;2003<br>
+                after Intuit&rsquo;s activation servers died.
             </div>
             <div class="splash-legal">
-                Independent reimplementation. Nothing was decompiled &mdash; the<br>
-                "offsets" in the source are affectionate fiction. Built from published<br>
-                SDK documentation (QBFC 5.0) and 14 years as a paying customer.<br>
-                Intuit's activation servers died ~2017. The hard drive died in 2024.
+                Independent reimplementation built from published SDK<br>
+                documentation (QBFC 5.0) and 14 years as a paying customer.<br>
+                Not affiliated with Intuit Inc.
             </div>
             <button class="splash-btn" id="splash-dismiss">OK</button>
         </div>
@@ -38,7 +36,7 @@
         <!-- Skip link for keyboard users — first tab stop, lets them jump
              past the topbar + sidebar straight into page content. -->
         <a href="#page-content" class="skip-link">Skip to main content</a>
-        <!-- Toolbar (CQBMenuBar + CQBToolBar) -->
+        <!-- Toolbar -->
         <div id="topbar">
             <div class="topbar-brand">Slowbooks Pro <span>2026</span></div>
             <div class="tb-sep"></div>
@@ -171,7 +169,7 @@
                          system browser (same path as the update badge). -->
                     <a href="https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/discussions/39"
                        target="_blank" rel="noopener" class="footer-link">Using SlowBooks for real work? Tell us &rarr;</a>
-                    <span id="app-version">Build 12.0.3190-R</span><br>
+                    <span id="app-version">Slowbooks Pro 2026</span><br>
                     &copy; 2026 Slowbooks
                 </div>
             </nav>
@@ -181,7 +179,7 @@
             </main>
         </div>
 
-        <!-- Status bar (CQBStatusBar) -->
+        <!-- Status bar -->
         <div id="statusbar">
             <span class="status-section" id="status-text">Ready</span>
             <span class="status-sep"></span>

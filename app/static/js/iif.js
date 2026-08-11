@@ -1,9 +1,7 @@
 /**
  * IIF Import/Export — QuickBooks 2003 Pro Interoperability
- * A nod to QBW32.EXE!CQBIIFEngine  imagined offset: 0x001B8000
  *
- * Original IIF engine lived in QBIIF32.DLL (shipped separately).
- * Import: File > Utilities > Import > IIF Files
+ * In QB2003: Import: File > Utilities > Import > IIF Files
  * Export: File > Utilities > Export > Lists to IIF Files
  *
  * The original DLL was a 342KB mess of fscanf() calls with no error

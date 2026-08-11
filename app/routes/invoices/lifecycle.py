@@ -25,7 +25,7 @@ from app.routes.invoices._router import router
 
 @router.post("/{invoice_id}/void", response_model=InvoiceResponse)
 def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    """CInvoice::VoidTransaction() @ 0x0015DA00 — creates reversing entry"""
+    """Void — creates a reversing journal entry."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -110,7 +110,7 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{invoice_id}/send", response_model=InvoiceResponse)
 def mark_invoice_sent(invoice_id: int, db: Session = Depends(get_db)):
-    """Mark invoice as sent — CInvoice::SetSentFlag() @ 0x0015D400"""
+    """Mark the invoice as sent."""
     invoice = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
@@ -233,7 +233,7 @@ def apply_late_fees(db: Session = Depends(get_db)):
 
 @router.post("/{invoice_id}/duplicate", response_model=InvoiceResponse, status_code=201)
 def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db)):
-    """CInvoice::Duplicate() @ 0x0015DC00 — copy invoice with new number"""
+    """Duplicate — copy the invoice under a new number."""
     original = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not original:
         raise HTTPException(status_code=404, detail="Invoice not found")

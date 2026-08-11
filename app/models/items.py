@@ -1,9 +1,7 @@
 # ============================================================================
-# A nod to qbw32.exe!CItemManager  imagined offset: 0x000F4E00
-# Original Btrieve table: ITEM.DAT (record size 0x01C0, 4 key segments)
-# Intuit called these "ItemRef" entries — the SDK exposed them through the
-# IItemQuery interface. Type field was a WORD that mapped to the
-# qbXMLItemTypeEnum in the QBFC COM library.
+# Items — the products & services that appear on invoice lines.
+# The QuickBooks SDK exposed these as "ItemRef" entries; our ItemType
+# values map onto qbXMLItemTypeEnum from the QBFC library.
 #
 # Phase 11: Added inventory tracking (quantity_on_hand, reorder_point,
 # weighted-average cost via InventoryMovement ledger). QB2003 stored these
@@ -30,11 +28,10 @@ from app.database import Base
 
 
 class ItemType(str, enum.Enum):
-    # qbXMLItemTypeEnum @ 0x000F5090
-    PRODUCT = "product"  # itInventory (0x00)
-    SERVICE = "service"  # itService (0x01)
-    MATERIAL = "material"  # itNonInventory (0x02) — we renamed this for clarity
-    LABOR = "labor"  # itOtherCharge (0x03) — labor/hourly billing
+    PRODUCT = "product"  # itInventory in qbXML
+    SERVICE = "service"  # itService
+    MATERIAL = "material"  # itNonInventory — renamed for clarity
+    LABOR = "labor"  # itOtherCharge — labor/hourly billing
 
 
 class MovementType(str, enum.Enum):

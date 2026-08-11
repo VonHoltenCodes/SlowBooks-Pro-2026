@@ -1,9 +1,6 @@
 # ============================================================================
-# A nod to qbw32.exe!CCreateEstimatesView  imagined offset: 0x00195200
-# CEstimate::ConvertToInvoice() at 0x001944A0 deep-copied every field and
-# line item, then set EstimateStatus to CONVERTED. Our version does the same
-# through SQL. The PDF generation was originally Crystal Reports — we use
-# WeasyPrint now because Crystal Reports licenses cost more than this app.
+# Estimates — "Convert to Invoice" deep-copies every field and line item,
+# then marks the estimate CONVERTED. PDFs are rendered with WeasyPrint.
 # ============================================================================
 
 from datetime import timedelta
@@ -191,7 +188,7 @@ def update_estimate(
 
 @router.get("/{estimate_id}/pdf")
 def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
-    """Generate PDF — CEstimatePrintLayout::RenderPage() @ 0x00221800"""
+    """Generate the estimate PDF."""
     est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
@@ -236,7 +233,7 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)
 def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
-    """CEstimate::ConvertToInvoice() @ 0x001944A0 — deep-copies all fields/lines"""
+    """Convert to invoice — deep-copies all fields and lines."""
     from app.services.closing_date import check_closing_date
 
     estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()

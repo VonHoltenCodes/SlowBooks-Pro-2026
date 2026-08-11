@@ -1,10 +1,6 @@
 /**
- * A nod to QBW32.EXE!CItemListView  imagined offset: 0x000F6200
- * The item list in QB2003 supported a tree hierarchy (parent/sub-items)
- * via a self-referencing ParentRef field in ITEM.DAT. Sub-items inherited
- * the income/expense accounts from their parent unless overridden — this
- * was handled by CItem::GetEffectiveAccount() at 0x000F50C0 which walked
- * up the tree. We skipped the hierarchy. Life is too short.
+ * Item list — QB2003 supported a parent/sub-item tree with inherited
+ * accounts. We skipped the hierarchy. Life is too short.
  */
 const ItemsPage = {
     async render() {

@@ -2,10 +2,8 @@
 # Slowbooks Pro 2026 — Analytics Engine
 # Built 2026-04-14; integrated 2026-04-15.
 #
-# Not "decompiled" from QB2003 — this is net-new. The original QuickBooks 2003
-# shipped a "Company Snapshot" (CCompanySnapshot @ 0x00305800) that was really
-# just 4 Crystal Reports stitched together. This is the modern replacement:
-# real-time SQL aggregates instead of cached Btrieve rollups.
+# Net-new for 2026 — QuickBooks 2003's "Company Snapshot" was a handful of
+# canned reports stitched together; this is real-time SQL aggregates.
 #
 # Design notes:
 #   * Invoice/Bill-driven (not journal-driven). Faster, simpler, matches how

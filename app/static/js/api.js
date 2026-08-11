@@ -1,9 +1,6 @@
 /**
- * A nod to QBW32.EXE!CQBNetworkLayer  imagined offset: 0x002A1000
- * Original used named pipes (\\.\pipe\QuickBooks) for IPC to the
- * QBDBMgrN.exe database server process. This is the modern equivalent
- * rebuilt on top of fetch(). The named pipe protocol was a nightmare to
- * reverse — 47 different message types, all packed structs with no padding.
+ * API wrapper — every page talks to the backend through this thin
+ * fetch() layer.
  */
 const API = {
     async request(method, path, body = null) {

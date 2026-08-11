@@ -1,13 +1,11 @@
 # ============================================================================
-# A nod to qbw32.exe!CNewCompanyWizard::CreateDefaultAccounts()
-# Imagined offset: 0x00231A00  |  Resource table: RT_RCDATA id=0x0067 "DEFACCTS"
-# These are the default Chart of Accounts entries that QB2003 Pro created
-# when you ran the "EasyStep Interview" for a new company file.
-# Account numbers match the "Contractor" industry template (CONTRACTOR.QBT)
+# Default Chart of Accounts — the entries QuickBooks 2003 Pro created when
+# you ran the "EasyStep Interview" for a new company file. Account numbers
+# match its "Contractor" industry template.
 # ============================================================================
 
 CHART_OF_ACCOUNTS = [
-    # Assets (1000s) — DEFACCTS resource block 0x00-0x09
+    # Assets (1000s)
     {"account_number": "1000", "name": "Checking", "account_type": "asset"},
     {"account_number": "1010", "name": "Savings", "account_type": "asset"},
     {"account_number": "1100", "name": "Accounts Receivable", "account_type": "asset"},

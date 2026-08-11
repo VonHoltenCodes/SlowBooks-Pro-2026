@@ -28,7 +28,7 @@ def sales_tax_report(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """CReportEngine::RunSalesTax() @ 0x002108A0"""
+    """Sales Tax report."""
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:

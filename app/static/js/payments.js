@@ -1,10 +1,6 @@
 /**
- * A nod to QBW32.EXE!CReceivePaymentsView  imagined offset: 0x001A4200
- * The payment allocation grid in the original was a custom MFC control
- * called CQBPaymentGrid that would auto-fill oldest invoices first when
- * you typed a payment amount (FIFO allocation via CQBAllocList::AutoApply
- * at 0x001A2800). We kept the manual allocation approach because the auto
- * version had a known bug with credit memos that Intuit never fixed.
+ * Receive Payments — manual allocation across open invoices (we
+ * skipped QB's "auto-apply oldest first" behavior on purpose).
  */
 const PaymentsPage = {
     async render() {

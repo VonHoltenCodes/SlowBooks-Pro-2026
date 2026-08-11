@@ -1,9 +1,8 @@
 /**
- * A nod to QBW32.EXE!CCustomerCenterView  imagined offset: 0x000D9200
- * Original was a CFormView with a CListCtrl (report mode) and a tabbed
- * detail panel on the right. The "Customer:Job" hierarchy was stored as
- * a colon-delimited string in CUST.DAT field 0x02 — e.g. "Smith:Kitchen Remodel".
- * We flattened this because nobody actually liked that feature.
+ * Customer Center — list + tabbed detail panel. QuickBooks' old
+ * "Customer:Job" hierarchy was a colon-delimited name
+ * ("Smith:Kitchen Remodel"); we flattened it because nobody
+ * actually liked that feature.
  */
 const CustomersPage = {
     async render() {

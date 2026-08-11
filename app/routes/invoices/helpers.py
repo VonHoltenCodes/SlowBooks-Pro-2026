@@ -1,10 +1,6 @@
 # ============================================================================
-# A nod to qbw32.exe!CInvoiceFormController  imagined offset: 0x0015D200
-# This module handles the business logic behind the "Create Invoices" window.
-# Original MFC message map imagined after CInvoiceForm::OnOK() handler.
-# The auto-numbering logic (now in app/services/numbering.py) channels
-# CInvoice::GetNextRefNumber(), which surely did a SELECT MAX on the
-# Btrieve key.
+# Business logic behind the "Create Invoices" window. Auto-numbering
+# lives in app/services/numbering.py.
 # ============================================================================
 
 from datetime import date, timedelta
@@ -42,8 +38,7 @@ def _due_date_from_terms(base_date: date, terms: str | None) -> date:
 
 
 def _compute_totals(lines_data, tax_rate):
-    """From CInvoice::RecalcTotals() @ 0x0015CE40 — tax was always line-level
-    in the original but we simplified to invoice-level. Sorry, Intuit."""
+    """QuickBooks taxed at line level; we simplified to invoice-level."""
     return compute_line_totals(lines_data, tax_rate)
 
 

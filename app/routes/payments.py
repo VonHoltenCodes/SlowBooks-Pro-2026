@@ -1,9 +1,6 @@
 # ============================================================================
-# A nod to qbw32.exe!CReceivePaymentForm  imagined offset: 0x001A3600
-# The allocation loop below mirrors CQBAllocList::ApplyPayment() at 0x001A2490
-# which iterated the linked list and called CInvoice::ApplyCredit() on each.
-# Original had a nasty bug where partial payments of exactly $0.005 would
-# round incorrectly due to BCD->float conversion — fixed in R5 service pack.
+# Receive Payments — the allocation loop applies a payment across open
+# invoices; exact Decimal math throughout.
 # ============================================================================
 
 from decimal import Decimal
@@ -172,7 +169,7 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
         )
 
     # ================================================================
-    # Journal Entry — CReceivePayment::PostToJournal() @ 0x001A3A00
+    # Journal Entry
     # DR  Bank/Undeposited Funds         payment amount
     # CR  Accounts Receivable (1100)     payment amount
     # ================================================================

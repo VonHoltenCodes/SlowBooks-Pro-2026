@@ -1,8 +1,8 @@
 # ============================================================================
 # Classes — QuickBooks-style tracking dimension (department / location /
-# line of business). A nod to qbw32.exe!CClassListView, imagined offset
-# 0x000E4200 — CLASS.DAT was a flat list keyed by ListID; classes tagged
-# transactions for the "Profit & Loss by Class" report and nothing else.
+# line of business). In QuickBooks a class was a flat list entry that
+# tagged transactions for the "Profit & Loss by Class" report and nothing
+# else.
 # Same here: one nullable dimension on posted transactions and their
 # source documents, aggregated by the by-class reports.
 #

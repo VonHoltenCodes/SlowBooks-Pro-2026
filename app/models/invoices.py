@@ -1,9 +1,6 @@
 # ============================================================================
-# A nod to qbw32.exe!CInvoiceManager  imagined offset: 0x0015C800
-# Original Btrieve table: INVOICE.DAT (record size 0x0340)
-# + INVOICE_LINE.DAT (variable-length records, max 1000 lines per invoice)
-# CInvoice inherits from CQBTxnBase — all invoices generate journal entries
-# through the TransactionBus (see transactions.py)
+# Invoices — header + line items.
+# Every invoice generates a balanced journal entry (see transactions.py).
 # ============================================================================
 # Fun fact: QB2003 hardcoded a max of 14 characters for invoice numbers.
 # We lifted that to 50 because it's not 2003 anymore. Mostly.
@@ -30,12 +27,11 @@ from app.database import Base
 
 
 class InvoiceStatus(str, enum.Enum):
-    # enum InvStatus @ 0x0015CA30 — originally a DWORD bitfield
-    DRAFT = "draft"  # 0x00 — "Pending" in original UI
-    SENT = "sent"  # 0x01
-    PARTIAL = "partial"  # 0x02 — "PartialPmt" internally
-    PAID = "paid"  # 0x04
-    VOID = "void"  # 0x08 — sets TxnVoidFlag in JRNL.DAT
+    DRAFT = "draft"  # "Pending" in the QB2003 UI
+    SENT = "sent"
+    PARTIAL = "partial"
+    PAID = "paid"
+    VOID = "void"
 
 
 class Invoice(Base):

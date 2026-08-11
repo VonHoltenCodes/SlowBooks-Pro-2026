@@ -1,13 +1,6 @@
 # ============================================================================
-# A nod to qbw32.exe!CCustomerManager + CVendorManager
-# Imagined offset: 0x000D8400 (Customer) / 0x000DC200 (Vendor)
-# Original Btrieve tables: CUST.DAT (rec 0x0280) + VENDOR.DAT (rec 0x0200)
-# Both inherit from CQBNameBase — Intuit's base class for any "name list"
-# entry (customers, vendors, employees, other names).
-# ============================================================================
-# NOTE: Original had a 41-character limit on customer names inherited from
-# the QuickBooks 1.0 DOS version. We found this out the hard way during
-# decompilation when field 0x02 was a char[41] with null terminator.
+# Customers + Vendors — QuickBooks treated every contact as a "name list"
+# entry (customers, vendors, employees, other names); same idea here.
 # ============================================================================
 
 from sqlalchemy import (

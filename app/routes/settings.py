@@ -1,6 +1,5 @@
 # ============================================================================
-# A nod to qbw32.exe!CPreferencesDialog  imagined offset: 0x0023F800
-# Original: tabbed dialog (IDD_PREFERENCES) with 12 tabs. We condensed
+# Settings — QuickBooks 2003 had a 12-tab preferences dialog; we condensed
 # everything into a single key-value store because nobody needs 12 tabs.
 # ============================================================================
 
