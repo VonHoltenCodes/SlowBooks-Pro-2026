@@ -253,6 +253,12 @@ async def security_headers(request: Request, call_next):
         "Permissions-Policy",
         "camera=(), microphone=(), geolocation=()",
     )
+    # WebView2's persistent desktop profile heuristically caches responses
+    # that carry validators (ETag/Last-Modified) but no Cache-Control — after
+    # an app update it kept rendering the previous version's cached HTML/JS.
+    # no-cache still allows ETag/304 revalidation (free on localhost) but
+    # forbids serving from cache without asking.
+    _set_if_unset(response.headers, "Cache-Control", "no-cache")
     _set_if_unset(response.headers, "Content-Security-Policy", _CSP)
     # HSTS instructs browsers to refuse plain HTTP for HSTS_MAX_AGE seconds.
     # Only emit when HTTPS is actually enforced; sending it under plain HTTP

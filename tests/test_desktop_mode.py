@@ -259,3 +259,48 @@ def test_save_backup_file_avoids_overwrite(sqlite_live_db, db_session, picker_ap
     second = api.save_backup_file(created["filename"])
     assert first["success"] and second["success"]
     assert first["path"] != second["path"]
+
+
+# ---------------------------------------------------------------------------
+# Stale-UI-after-update guards: no-cache headers + webview cache purge
+# ---------------------------------------------------------------------------
+
+
+def test_html_and_static_send_no_cache(client):
+    """WebView2's persistent profile must never blind-serve cached UI:
+    every response carries Cache-Control: no-cache (ETag/304 still work)."""
+    for path in ("/", "/static/js/app.js"):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert resp.headers.get("cache-control") == "no-cache", path
+
+
+def test_webview_cache_purged_on_version_change(tmp_path):
+    import desktop_launcher
+
+    storage = tmp_path / "webview"
+    profile = storage / "EBWebView" / "Default"
+    cache = profile / "Cache" / "Cache_Data"
+    code_cache = profile / "Code Cache" / "js"
+    cache.mkdir(parents=True)
+    code_cache.mkdir(parents=True)
+    (cache / "f_000001").write_bytes(b"stale")
+    cookies = profile / "Cookies"
+    cookies.write_bytes(b"keep me")
+
+    desktop_launcher._purge_stale_webview_cache(storage, "9.9.9")
+    assert not cache.exists()
+    assert not code_cache.exists()
+    assert cookies.read_bytes() == b"keep me"  # logins survive
+    assert (storage / "app-version.txt").read_text().strip() == "9.9.9"
+
+    # Same version again: marker short-circuits, nothing recreated/deleted
+    probe = profile / "Cache"
+    probe.mkdir(parents=True)
+    desktop_launcher._purge_stale_webview_cache(storage, "9.9.9")
+    assert probe.exists()
+
+    # New version purges again
+    desktop_launcher._purge_stale_webview_cache(storage, "10.0.0")
+    assert not probe.exists()
+    assert (storage / "app-version.txt").read_text().strip() == "10.0.0"

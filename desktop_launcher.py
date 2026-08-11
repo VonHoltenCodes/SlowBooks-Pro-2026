@@ -68,6 +68,36 @@ def _config_dir() -> Path:
     return get_data_dir().parent if FROZEN else Path(__file__).resolve().parent
 
 
+def _purge_stale_webview_cache(storage_dir: Path, current_version: str) -> None:
+    """Drop WebView2's HTTP disk cache on the first launch of a new version.
+
+    The persistent profile (private_mode=False fix from v2.1.1) also
+    persists the renderer's disk cache across app updates — field report:
+    a 2.4.1 update kept rendering the previous version's cached
+    index.html/JS. Cookies are deliberately left alone so logins survive;
+    only the cache directories go.
+    """
+    import shutil
+
+    marker = storage_dir / "app-version.txt"
+    try:
+        if (
+            marker.exists()
+            and marker.read_text(encoding="utf-8").strip() == current_version
+        ):
+            return
+    except OSError:
+        pass
+    for pattern in ("**/Cache", "**/Code Cache", "**/GPUCache"):
+        for path in storage_dir.glob(pattern):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+    try:
+        marker.write_text(current_version, encoding="utf-8")
+    except OSError:
+        pass  # purge again next launch; never block startup on this
+
+
 ENV_FILE = _config_dir() / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
 
@@ -728,6 +758,9 @@ def run_window(port: int, log_fh=None) -> int:
     # restarts as a bonus.
     storage_dir = get_data_dir() / "webview"
     storage_dir.mkdir(parents=True, exist_ok=True)
+    from app import __version__ as app_version
+
+    _purge_stale_webview_cache(storage_dir, app_version)
 
     api = PickerApi(port, log_fh)
     webview.create_window(
