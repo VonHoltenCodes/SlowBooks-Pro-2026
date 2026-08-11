@@ -35,6 +35,7 @@ SECRET_KEYS = frozenset(
         "qbo_client_secret",
         "qbo_access_token",
         "qbo_refresh_token",
+        "simplefin_access_url",
     }
 )
 SECRET_PLACEHOLDER = "********"

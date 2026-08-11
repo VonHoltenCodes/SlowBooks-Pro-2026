@@ -136,6 +136,7 @@ Full feature catalog (300+ entries across every module) lives in **[docs/feature
 ![Duplicate detection warning on customer create](screenshots/duplicate-detection.png)
 
 - **Online payments** — Stripe, PayPal, and Square behind one provider abstraction, with desktop-mode payment recording. Setup guides: [Stripe](docs/setup-stripe.md), [PayPal](docs/setup-paypal.md), [Square](docs/setup-square.md).
+- **Bank feeds** — Automatic transaction sync via [SimpleFIN](https://www.simplefin.org/): you hold the bank credential (no middleman server, no developer API keys), transactions dedup against OFX/CSV imports, and bank rules auto-categorize on arrival. See **[docs/setup-bank-feeds.md](docs/setup-bank-feeds.md)**.
 - **QuickBooks Online sync** — OAuth + bidirectional sync. See **[docs/setup-qbo.md](docs/setup-qbo.md)**.
 - **QB2003 interop** — IIF import/export with type-mapping, validation, round-trip safety, and INVOICE/PAYMENT/ESTIMATE/BILL/DEPOSIT transaction blocks (classes included).
 - **Fixed assets** — Register, depreciation runs, disposal with gain/loss, CSV import, reconciliation report.

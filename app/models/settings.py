@@ -84,6 +84,12 @@ DEFAULT_SETTINGS = {
     # Square signs webhooks over the EXACT notification URL registered in
     # its dashboard; set this to that URL (required for webhook verification)
     "square_notification_url": "",
+    # SimpleFIN bank feeds (user-held bridge.simplefin.org credential).
+    # access_url embeds basic-auth creds — listed in SECRET_KEYS.
+    "simplefin_access_url": "",
+    "simplefin_account_map": "{}",  # JSON {simplefin id: bank_account_id}
+    "simplefin_accounts_cache": "[]",  # last-seen bridge accounts, for the UI
+    "simplefin_last_sync": "",
     # QuickBooks Online Integration
     "qbo_enabled": "false",
     "qbo_client_id": "",

@@ -79,9 +79,16 @@ def _extract_tag(block: str, tag: str) -> str:
 
 
 def import_transactions(
-    db: Session, bank_account_id: int, transactions: list[dict]
+    db: Session,
+    bank_account_id: int,
+    transactions: list[dict],
+    import_source: str = "ofx",
 ) -> dict:
-    """Import parsed transactions, deduplicating by FITID."""
+    """Import parsed transactions, deduplicating by FITID.
+
+    Shared by the OFX upload path and the SimpleFIN feed (which passes
+    import_source="simplefin" and SimpleFIN transaction ids as fitids).
+    """
     imported = 0
     skipped = 0
 
@@ -109,7 +116,7 @@ def import_transactions(
             payee=txn.get("payee", ""),
             description=txn.get("memo", ""),
             import_id=fitid,
-            import_source="ofx",
+            import_source=import_source,
             match_status="unmatched",
         )
         db.add(bt)

@@ -9,7 +9,10 @@
  */
 const BankingPage = {
     async render() {
-        const accounts = await API.get('/banking/accounts');
+        const [accounts, feed] = await Promise.all([
+            API.get('/banking/accounts'),
+            API.get('/simplefin/status'),
+        ]);
         let html = `
             <div class="page-header">
                 <h2>Bank Accounts</h2>
@@ -31,7 +34,102 @@ const BankingPage = {
             }
             html += `</div>`;
         }
+        html += BankingPage._renderFeedSection(feed, accounts);
         return html;
+    },
+
+    // ------------------------------------------------------------------
+    // SimpleFIN bank feeds — the user brings their own bridge credential
+    // (bridge.simplefin.org); we claim the token once, then sync on click.
+    // ------------------------------------------------------------------
+    _renderFeedSection(feed, accounts) {
+        let body;
+        if (!feed.connected) {
+            body = `
+                <p style="font-size:12px; margin-bottom:8px;">
+                    Pull transactions straight from your bank — no file exports.
+                    Sign up at <a href="https://bridge.simplefin.org" target="_blank" rel="noopener">bridge.simplefin.org</a>,
+                    connect your bank there, then paste your <strong>setup token</strong> below.
+                    Your credential stays on this machine; SlowBooks has no middleman server.
+                </p>
+                <form onsubmit="BankingPage.connectSimpleFIN(event)">
+                    <div class="form-group">
+                        <label>SimpleFIN setup token</label>
+                        <input type="password" id="simplefin-token" required autocomplete="off"
+                               placeholder="Paste the one-time setup token">
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Connect</button>
+                    </div>
+                </form>`;
+        } else {
+            const options = (sfId) => {
+                const mapped = feed.account_map[sfId] || '';
+                return ['<option value="">— not imported —</option>']
+                    .concat(accounts.map(ba =>
+                        `<option value="${ba.id}" ${ba.id === mapped ? 'selected' : ''}>${escapeHtml(ba.name)}</option>`))
+                    .join('');
+            };
+            const rows = feed.accounts.map(a => `<tr>
+                    <td>${escapeHtml(a.name)}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.org || '')}</div></td>
+                    <td class="amount">${escapeHtml(a.balance)} ${escapeHtml(a.currency)}</td>
+                    <td><select data-sfid="${escapeHtml(a.id)}" class="simplefin-map">${options(a.id)}</select></td>
+                </tr>`).join('');
+            body = `
+                <p style="font-size:12px; margin-bottom:8px;">
+                    Connected. Choose which SlowBooks bank account each feed lands in,
+                    then sync — duplicates are skipped automatically and bank rules apply.
+                    ${feed.last_sync ? `Last sync: ${escapeHtml(feed.last_sync.replace('T', ' '))}` : 'Not synced yet.'}
+                </p>
+                <div class="table-container"><table>
+                    <thead><tr><th>Bank feed</th><th class="amount">Balance</th><th>Imports into</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>
+                <div class="form-actions" style="margin-top:12px;">
+                    <button class="btn btn-primary" onclick="BankingPage.syncSimpleFIN()">Sync Now</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.disconnectSimpleFIN()">Disconnect</button>
+                </div>`;
+        }
+        return `<div class="card" style="margin-top:16px;">
+            <div class="card-header">Bank Feeds (SimpleFIN)</div>${body}</div>`;
+    },
+
+    async connectSimpleFIN(e) {
+        e.preventDefault();
+        const token = $('#simplefin-token').value.trim();
+        if (!token) return;
+        try {
+            const data = await API.post('/simplefin/claim', { setup_token: token });
+            toast(`Connected — found ${data.accounts.length} account(s). Now map them below.`);
+            App.navigate('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async saveSimpleFINMap() {
+        const mapping = {};
+        document.querySelectorAll('.simplefin-map').forEach(sel => {
+            mapping[sel.dataset.sfid] = sel.value ? parseInt(sel.value, 10) : 0;
+        });
+        await API.post('/simplefin/map', { mapping });
+    },
+
+    async syncSimpleFIN() {
+        try {
+            await BankingPage.saveSimpleFINMap();
+            const r = await API.post('/simplefin/sync');
+            toast(`Synced: ${r.imported} new, ${r.skipped} duplicates skipped`);
+            if (r.warnings.length) toast(r.warnings[0], 'error');
+            App.navigate('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async disconnectSimpleFIN() {
+        if (!confirm('Disconnect the SimpleFIN bank feed? Imported transactions are kept.')) return;
+        try {
+            await API.post('/simplefin/disconnect');
+            toast('Bank feed disconnected');
+            App.navigate('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async viewRegister(bankAccountId) {

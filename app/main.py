@@ -63,7 +63,7 @@ from app.routes import csv as csv_routes
 from app.routes import uploads
 
 # Phase 5: Advanced Integration
-from app.routes import bank_import, tax, backups
+from app.routes import bank_import, simplefin, tax, backups
 from app.routes import classes as classes_routes
 from app.routes import fx as fx_routes
 from app.routes import fixed_assets as fixed_assets_routes
@@ -400,6 +400,7 @@ app.include_router(csv_routes.router)
 app.include_router(uploads.router)
 # Phase 5: Advanced Integration
 app.include_router(bank_import.router)
+app.include_router(simplefin.router)
 app.include_router(tax.router)
 app.include_router(backups.router)
 app.include_router(system_routes.router)
