@@ -303,6 +303,19 @@ body {
     user-select: none;
 }
 
+.sidebar-footer .footer-link {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 10px;
+    color: rgba(255,255,255,0.35);
+    text-decoration: none;
+}
+
+.sidebar-footer .footer-link:hover {
+    color: rgba(255,255,255,0.75);
+    text-decoration: underline;
+}
+
 /* Desktop-install update notice (fed by /api/system/update-check) */
 .update-badge {
     display: block;
