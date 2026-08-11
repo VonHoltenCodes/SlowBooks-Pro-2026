@@ -298,3 +298,29 @@ def test_disconnect_route_clears_settings(authed_client, db_session):
     assert (get_setting_raw(db_session, "simplefin_access_url") or "") == ""
     status = authed_client.get("/api/simplefin/status").json()
     assert status["connected"] is False
+
+
+# ---------------------------------------------------------------------------
+# SSRF guard — user-supplied bridge URLs must never reach private space
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://127.0.0.1/simplefin/claim/X",
+        "https://10.0.0.5/simplefin/claim/X",
+        "https://192.168.68.1/simplefin/claim/X",
+        "https://169.254.169.254/latest/meta-data",
+        "https://[::1]/simplefin/claim/X",
+        "http://bridge.example.com/simplefin/claim/X",
+    ],
+)
+def test_ssrf_guard_rejects_non_public(url):
+    with pytest.raises(sf.SimpleFINError):
+        sf._assert_public_https(url)
+
+
+def test_ssrf_guard_allows_public_literal():
+    # Literal public IP: getaddrinfo resolves numerically, no DNS involved
+    sf._assert_public_https("https://1.1.1.1/simplefin")

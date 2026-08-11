@@ -18,8 +18,10 @@
 
 import base64
 import binascii
+import ipaddress
 import json
 import logging
+import socket
 from datetime import date, datetime, time, timezone
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit, urlunsplit
@@ -45,8 +47,36 @@ class SimpleFINError(Exception):
     """Raised with a user-safe message — never wraps raw exception text."""
 
 
+def _assert_public_https(url: str) -> None:
+    """SSRF guard: bridge URLs are user-supplied by design (self-hosted
+    bridges are a feature), so before any request we require https and
+    refuse hosts that resolve to non-public addresses — loopback, RFC1918,
+    link-local/metadata, and friends. A hostile setup token must not be
+    able to point SlowBooks at localhost services or the LAN."""
+    parts = urlsplit(url)
+    if parts.scheme != "https":
+        raise SimpleFINError("Bridge URLs must use https")
+    host = parts.hostname or ""
+    if not host:
+        raise SimpleFINError("Bridge URL has no hostname")
+    try:
+        infos = socket.getaddrinfo(host, parts.port or 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise SimpleFINError("Could not resolve the bridge hostname")
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if not ip.is_global:
+            raise SimpleFINError(
+                "Bridge host resolves to a private or local address — refusing"
+            )
+
+
 def send(request: dict, timeout: float = DEFAULT_TIMEOUT) -> httpx.Response:
-    """Execute a request dict from a build_* function (hardened defaults)."""
+    """Execute a request dict from a build_* function (hardened defaults).
+
+    Every outbound URL passes the SSRF guard first — this is the single
+    network chokepoint for the SimpleFIN feature."""
+    _assert_public_https(request["url"])
     with httpx.Client(
         verify=True,
         follow_redirects=False,
