@@ -61,7 +61,24 @@ fixed here. No schema migrations; drop-in upgrade from 2.5.x.
   `.env.example` no longer recommends a FORCE_HTTPS setting the app
   refuses to boot with; README operation count corrected.
 
-17 new regression tests (1159 total).
+**Report display fix**
+
+- Balance-sheet and P&L lines rendered in the app wrapped every amount in
+  an absolute value, so a contra-balance account displayed positive while
+  the totals summed real signed values — visibly "$100 + $400 + $600 =
+  $300" after an unapplied customer payment drove A/R negative (a
+  legitimate prepayment). Lines now render signed, matching the totals
+  and the PDF output, which were always correct. (#56)
+
+**macOS releases now sign themselves in CI**
+
+- Tag builds sign, notarize, and staple the macOS DMG on the runner using
+  the same release tooling the maintainer ran locally, and attach it to
+  the release alongside the Windows assets. Starting with this release the
+  macOS publisher identity is **Trenton Von Holten** (previously releases
+  were signed by the macOS maintainer's own Developer ID).
+
+20 new regression tests (1162 total).
 
 ### Native macOS desktop
 
