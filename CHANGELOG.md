@@ -7,6 +7,62 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.5.3 — API hardening, from a full-surface sweep
+
+Every one of the API's 357 operations was driven end-to-end on Windows
+(installer) and Linux (source, PostgreSQL 17); everything that surfaced is
+fixed here. No schema migrations; drop-in upgrade from 2.5.x.
+
+**Data-integrity fixes**
+
+- An invalid `pay_type` or `role` on an employee was written as-is and then
+  made the row permanently unreadable — one bad `PUT` returned 500 for the
+  record *and* for `GET /api/employees` company-wide, with no API-level
+  recovery. Both fields are now validated as enums (422 at the edge), the
+  same treatment `pay_frequency` and `filing_status` already had. For rows
+  corrupted before the fix, `scripts/repair_employee_enums.py` repairs in
+  raw SQL (dry-run by default; `--apply` to write).
+- The migration dry-run tolerated a one-cent journal imbalance the importer
+  then refused, so `ok=true` could precede a mid-import 500. The gate now
+  applies the importer's exact-balance rule, including to synthesized
+  opening-balance journals.
+- Customer and vendor names: blank/whitespace-only names rejected, lengths
+  capped to the column width (was: opaque 500 on PostgreSQL, silent
+  overflow on SQLite), obviously malformed emails rejected. The CSV and
+  IIF importers honor the same rules — an IIF transaction with a blank
+  NAME no longer auto-creates an unnamed customer.
+
+**Correctness / API behavior**
+
+- Emailing an invoice (and Settings → "send test email") called
+  `send_email()` with a stale signature and could never succeed; both now
+  work, report 502 with a pointer to the email log when SMTP fails, and no
+  longer double-log.
+- Account endpoints return 409 with a real message instead of leaking
+  database errors as 500s (delete-with-history, duplicate account number);
+  an account can no longer be made its own parent.
+- `/openapi.json` no longer requires auth, so the documented agent flow
+  ("discover from the spec") works; the spec now declares its bearer
+  security scheme, with genuinely public routes exempted.
+- API tokens can no longer clear or roll back the closing date, nor set
+  the closing-date override password; moving the date forward (tightening)
+  is still allowed, and signed-in users are unaffected.
+- Machine-originated audit rows (e.g. the token `last_used_at` stamp) are
+  attributed to an explicit `system` principal instead of NULL.
+- `SlowBooksPro.exe --help` with piped/redirected output hung the frozen
+  Windows build forever on an invisible error dialog (UnicodeEncodeError
+  under cp1252 inside argparse). Launcher stdio is now total; verified on
+  Windows before/after.
+
+**Docs**
+
+- INSTALL.md's native Linux path works as written on PEP 668 distros
+  (venv steps, `.env` honored by alembic, APP_DEBUG guidance);
+  `.env.example` no longer recommends a FORCE_HTTPS setting the app
+  refuses to boot with; README operation count corrected.
+
+17 new regression tests (1159 total).
+
 ### Native macOS desktop
 
 - Added a signed and Apple-notarized native app for Apple Silicon Macs running
