@@ -199,3 +199,52 @@ def test_invoice_email_does_not_raise_typeerror(client, seed_customer):
     # What must never come back is the old TypeError surfacing as a 500.
     assert r.status_code != 500, r.text
     assert "unexpected keyword argument" not in r.text
+
+
+# ---------------------------------------------------------------------------
+# Rows corrupted before the validation fix cannot be repaired through the API
+# (they cannot be read, updated or deleted), so scripts/repair_employee_enums.py
+# works in raw SQL. This proves the whole cycle: corrupt -> roster breaks ->
+# repair -> roster healthy.
+# ---------------------------------------------------------------------------
+
+
+def test_repair_script_recovers_a_bricked_roster(client, db_session):
+    from sqlalchemy import text
+
+    from scripts.repair_employee_enums import repair, scan
+
+    created = _make_employee(client, first_name="Ada", last_name="Lovelace")
+    assert created.status_code in (200, 201), created.text
+    emp_id = created.json()["id"]
+    assert client.get("/api/employees").status_code == 200
+
+    # Reproduce the pre-fix damage directly, since the API now refuses it.
+    db_session.execute(
+        text("UPDATE employees SET pay_type = :v WHERE id = :id"),
+        {"v": "sweep-pay_type", "id": emp_id},
+    )
+    db_session.commit()
+
+    found = scan(db_session)
+    assert any(f["id"] == emp_id for f in found), found
+    assert found[0]["invalid"]["pay_type"] == "sweep-pay_type"
+
+    repair(db_session, found)
+
+    assert scan(db_session) == []
+    row = db_session.execute(
+        text("SELECT pay_type FROM employees WHERE id = :id"), {"id": emp_id}
+    ).scalar()
+    assert row == "HOURLY"  # SQLAlchemy Enum persists the member NAME
+
+    # The roster reads again, which is the whole point.
+    assert client.get("/api/employees").status_code == 200
+    assert client.get(f"/api/employees/{emp_id}").status_code == 200
+
+
+def test_repair_script_is_a_noop_on_healthy_data(client, db_session):
+    from scripts.repair_employee_enums import scan
+
+    _make_employee(client, pay_type="salary", role="manager")
+    assert scan(db_session) == []
