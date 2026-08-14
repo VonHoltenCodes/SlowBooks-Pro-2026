@@ -3,7 +3,9 @@
 # everything into a single key-value store because nobody needs 12 tabs.
 # ============================================================================
 
-from fastapi import APIRouter, Depends, HTTPException
+from datetime import date
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -64,8 +66,62 @@ def get_settings(db: Session = Depends(get_db)):
     return _redact_secrets(get_all_settings(db))
 
 
+def _guard_closing_period(request: Request, db: Session, fields: dict):
+    """The closing-date lock is only a control if the principal it constrains
+    cannot switch it off. A token could previously clear closing_date, post
+    into the closed period, and set closing_date_password — while the agent
+    documentation states the override password is "off-limits to agents
+    entirely".
+
+    Scoped deliberately to token principals. A human with a session is the
+    person the lock exists to serve and can still move or clear it; requiring
+    the override password from them would lock out anyone who set one and
+    forgot it. Tokens may still move the date FORWARD (tightening the lock),
+    only loosening is refused.
+    """
+    principal = getattr(getattr(request, "state", None), "token_principal", None)
+    if principal is None:
+        return  # session user — unchanged behaviour
+
+    if "closing_date_password" in fields:
+        raise HTTPException(
+            status_code=403,
+            detail="API tokens cannot set the closing-date override password.",
+        )
+
+    if "closing_date" not in fields:
+        return
+
+    def _parse(v):
+        if not v:
+            return None
+        try:
+            return date.fromisoformat(str(v))
+        except ValueError:
+            return None
+
+    from app.services.closing_date import get_closing_date
+
+    current = get_closing_date(db)
+    if current is None:
+        return  # no lock set yet — nothing to loosen
+
+    incoming = _parse(fields.get("closing_date"))
+    if incoming is None or incoming < current:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"API tokens cannot clear or roll back the closing date "
+                f"(currently {current.isoformat()}). Moving it forward is "
+                f"allowed; loosening it requires a signed-in user."
+            ),
+        )
+
+
 @router.put("")
-def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
+def update_settings(
+    data: SettingsUpdate, request: Request, db: Session = Depends(get_db)
+):
     # model_dump returns extras plus any declared fields. Still whitelisted
     # against DEFAULT_SETTINGS so unknown keys are silently dropped.
     #
@@ -73,6 +129,11 @@ def update_settings(data: SettingsUpdate, db: Session = Depends(get_db)):
     # skip the update. Otherwise the UI would round-trip the placeholder
     # back into storage and silently overwrite the real secret when the
     # operator edits any other setting without re-typing the password.
+    _guard_closing_period(
+        request,
+        db,
+        {k: v for k, v in data.model_dump().items() if k in DEFAULT_SETTINGS},
+    )
     for key, value in data.model_dump().items():
         if key not in DEFAULT_SETTINGS:
             continue
