@@ -1,6 +1,24 @@
 from decimal import Decimal
+from typing import Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, StringConstraints
+
+
+# A required display name that cannot be blank.
+#
+# `min_length` alone is not enough: a name of "   " has length 3 and passes,
+# producing a record that is invisible in list views and unsearchable — there
+# is nothing to click and nothing to type to find it again. strip_whitespace
+# runs BEFORE the length check, so "   " collapses to "" and is rejected, and
+# a padded "  Acme  " is stored cleanly as "Acme".
+#
+# max_length mirrors the VARCHAR(200) width shared by Customer.name and
+# Vendor.name. Validating here keeps the two supported backends consistent:
+# PostgreSQL raises StringDataRightTruncation (an opaque HTTP 500) while
+# SQLite ignores VARCHAR(n) and stores the oversized value.
+NonBlankName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+]
 
 
 class MessageResponse(BaseModel):

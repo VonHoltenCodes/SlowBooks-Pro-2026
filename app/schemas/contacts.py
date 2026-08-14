@@ -4,6 +4,8 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
+from app.schemas.common import NonBlankName
+
 
 # Field lengths below mirror the VARCHAR(n) widths on the Customer model.
 # Without them nothing validates length at the edge and the database is the
@@ -13,7 +15,7 @@ from pydantic import BaseModel, Field
 # company file can hold data that cannot be imported into a Postgres/Server
 # Edition deployment. Validating here makes both backends return one 422.
 class CustomerCreate(BaseModel):
-    name: str = Field(..., max_length=200)
+    name: NonBlankName
     company: Optional[str] = Field(None, max_length=200)
     email: Optional[str] = Field(None, max_length=200)
     phone: Optional[str] = Field(None, max_length=50)
@@ -40,7 +42,7 @@ class CustomerCreate(BaseModel):
 
 
 class CustomerUpdate(BaseModel):
-    name: Optional[str] = Field(None, max_length=200)
+    name: Optional[NonBlankName] = None
     company: Optional[str] = Field(None, max_length=200)
     email: Optional[str] = Field(None, max_length=200)
     phone: Optional[str] = Field(None, max_length=50)
@@ -102,46 +104,46 @@ class CustomerResponse(BaseModel):
 
 
 class VendorCreate(BaseModel):
-    name: str
-    company: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    fax: Optional[str] = None
-    website: Optional[str] = None
-    address1: Optional[str] = None
-    address2: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    country: str = "US"
-    terms: str = "Net 30"
-    tax_id: Optional[str] = None
-    account_number: Optional[str] = None
+    name: NonBlankName
+    company: Optional[str] = Field(None, max_length=200)
+    email: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=50)
+    fax: Optional[str] = Field(None, max_length=50)
+    website: Optional[str] = Field(None, max_length=200)
+    address1: Optional[str] = Field(None, max_length=200)
+    address2: Optional[str] = Field(None, max_length=200)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=50)
+    zip: Optional[str] = Field(None, max_length=20)
+    country: str = Field("US", max_length=100)
+    terms: str = Field("Net 30", max_length=50)
+    tax_id: Optional[str] = Field(None, max_length=50)
+    account_number: Optional[str] = Field(None, max_length=50)
     default_expense_account_id: Optional[int] = None
     is_1099_vendor: bool = False
-    vendor_1099_type: Optional[str] = None
+    vendor_1099_type: Optional[str] = Field(None, max_length=10)
     notes: Optional[str] = None
 
 
 class VendorUpdate(BaseModel):
-    name: Optional[str] = None
-    company: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    fax: Optional[str] = None
-    website: Optional[str] = None
-    address1: Optional[str] = None
-    address2: Optional[str] = None
-    city: Optional[str] = None
-    state: Optional[str] = None
-    zip: Optional[str] = None
-    country: Optional[str] = None
-    terms: Optional[str] = None
-    tax_id: Optional[str] = None
-    account_number: Optional[str] = None
+    name: Optional[NonBlankName] = None
+    company: Optional[str] = Field(None, max_length=200)
+    email: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=50)
+    fax: Optional[str] = Field(None, max_length=50)
+    website: Optional[str] = Field(None, max_length=200)
+    address1: Optional[str] = Field(None, max_length=200)
+    address2: Optional[str] = Field(None, max_length=200)
+    city: Optional[str] = Field(None, max_length=100)
+    state: Optional[str] = Field(None, max_length=50)
+    zip: Optional[str] = Field(None, max_length=20)
+    country: Optional[str] = Field(None, max_length=100)
+    terms: Optional[str] = Field(None, max_length=50)
+    tax_id: Optional[str] = Field(None, max_length=50)
+    account_number: Optional[str] = Field(None, max_length=50)
     default_expense_account_id: Optional[int] = None
     is_1099_vendor: Optional[bool] = None
-    vendor_1099_type: Optional[str] = None
+    vendor_1099_type: Optional[str] = Field(None, max_length=10)
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
