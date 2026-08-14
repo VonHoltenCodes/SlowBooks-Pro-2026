@@ -3,7 +3,7 @@
 # everything into a single key-value store because nobody needs 12 tabs.
 # ============================================================================
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.orm import Session
 
@@ -88,20 +88,25 @@ def test_email(db: Session = Depends(get_db)):
     """Feature 8: Send a test email to verify SMTP settings."""
     settings = get_all_settings(db)
     if not settings.get("smtp_host"):
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=400, detail="SMTP not configured")
     try:
         from app.services.email_service import send_email
 
-        send_email(
+        sent = send_email(
+            db=db,
             to_email=settings.get("smtp_from_email") or settings.get("smtp_user", ""),
             subject="Slowbooks Pro 2026 — Test Email",
             html_body="<p>This is a test email from Slowbooks Pro 2026. SMTP is configured correctly.</p>",
-            settings=settings,
+            entity_type="settings_test",
         )
+        if not sent:
+            raise HTTPException(
+                status_code=502,
+                detail="Test email failed to send. See the email log for the reason.",
+            )
         return {"status": "sent"}
+    except HTTPException:
+        # Don't let the catch-all below rewrite our own 502 into a 500.
+        raise
     except Exception as e:
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=500, detail=f"Email failed: {str(e)}")
