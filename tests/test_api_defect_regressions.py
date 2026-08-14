@@ -248,3 +248,72 @@ def test_repair_script_is_a_noop_on_healthy_data(client, db_session):
 
     _make_employee(client, pay_type="salary", role="manager")
     assert scan(db_session) == []
+
+
+# ---------------------------------------------------------------------------
+# Importers could create records the API itself refuses: an IIF TRNS row with
+# a blank NAME auto-created Customer(name=""), and oversized names bypassed
+# the schema length caps entirely (ORM objects are built directly).
+# ---------------------------------------------------------------------------
+
+BLANK_NAME_INVOICE_IIF = (
+    "!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tTERMS\n"
+    "!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tINVITEM\tQNTY\tPRICE\n"
+    "!ENDTRNS\n"
+    "TRNS\t1\tINVOICE\t2026-04-01\tAccounts Receivable\t\t50.00\tINV-BLANK\tNet 30\n"
+    "SPL\t2\tINVOICE\t2026-04-01\tService Income\t\t-50.00\t\t1\t50.00\n"
+    "ENDTRNS\n"
+)
+
+
+def test_iif_blank_name_does_not_create_blank_customer(db_session, seed_accounts):
+    from app.models.contacts import Customer
+    from app.services.iif_import import import_transactions, parse_iif
+
+    parsed = parse_iif(BLANK_NAME_INVOICE_IIF)
+    import_transactions(db_session, parsed["TRNS"])  # must not raise
+    db_session.commit()
+
+    blanks = db_session.query(Customer).filter(Customer.name == "").count()
+    assert blanks == 0
+
+
+def test_csv_import_clamps_oversized_customer_name(db_session):
+    from app.models.contacts import Customer
+    from app.services.csv_import import import_customers
+
+    csv_text = "Name,Email\n" + ("X" * 300) + ",big@example.com\n"
+    result = import_customers(db_session, csv_text)
+    assert result["created"] == 1, result
+
+    row = db_session.query(Customer).filter(Customer.name.like("X%")).one()
+    assert len(row.name) == 200
+
+
+# ---------------------------------------------------------------------------
+# Audit rows written outside a request principal (e.g. the api_tokens
+# last_used_at stamp) carried username=NULL — ambiguous between "the system
+# did it" and "attribution failed". They are now attributed to `system`.
+# ---------------------------------------------------------------------------
+
+
+def test_machine_writes_are_attributed_to_system(client, db_session):
+    from app.models.audit import AuditLog
+
+    token = _mint(client, label="attrib-probe", role="readonly")
+    tc = _bearer(token)
+    assert tc.get("/api/customers").status_code == 200
+
+    rows = (
+        db_session.query(AuditLog)
+        .filter(AuditLog.table_name == "api_tokens")
+        .order_by(AuditLog.id.desc())
+        .all()
+    )
+    assert rows, "expected audit rows for the token lifecycle"
+    assert all(r.username for r in rows), [(r.action, r.username) for r in rows]
+    # the last_used_at stamp specifically — previously NULL
+    upd = [r for r in rows if (r.action or "").upper() == "UPDATE"]
+    assert upd and all(r.username == "system" for r in upd), [
+        (r.action, r.username) for r in upd
+    ]
