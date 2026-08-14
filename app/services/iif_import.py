@@ -439,7 +439,7 @@ def import_customers(db: Session, rows: list) -> dict:
     for i, row in enumerate(rows):
         sp = db.begin_nested()
         try:
-            name = row.get("NAME", "").strip()
+            name = row.get("NAME", "").strip()[:200]
             if not name:
                 errors.append({"row": i + 1, "message": "Missing customer NAME"})
                 sp.rollback()
@@ -492,7 +492,7 @@ def import_vendors(db: Session, rows: list) -> dict:
     for i, row in enumerate(rows):
         sp = db.begin_nested()
         try:
-            name = row.get("NAME", "").strip()
+            name = row.get("NAME", "").strip()[:200]
             if not name:
                 errors.append({"row": i + 1, "message": "Missing vendor NAME"})
                 sp.rollback()
@@ -977,7 +977,13 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
             return None
 
     # Resolve customer
-    cust_name = trns.get("NAME", "").strip()
+    cust_name = trns.get("NAME", "").strip()[:200]
+    if not cust_name:
+        # A TRNS row with no NAME cannot anchor an AR document, and auto-
+        # creating a Customer(name="") plants a record that is invisible in
+        # list views and unsearchable — the API refuses blank names since
+        # 6c82e9a, so the importer must not sneak them in the back door.
+        return None
     customer = db.query(Customer).filter(Customer.name == cust_name).first()
     if not customer:
         # Auto-create customer
@@ -1254,7 +1260,13 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
         if existing:
             return None
 
-    cust_name = trns.get("NAME", "").strip()
+    cust_name = trns.get("NAME", "").strip()[:200]
+    if not cust_name:
+        # A TRNS row with no NAME cannot anchor an AR document, and auto-
+        # creating a Customer(name="") plants a record that is invisible in
+        # list views and unsearchable — the API refuses blank names since
+        # 6c82e9a, so the importer must not sneak them in the back door.
+        return None
     customer = db.query(Customer).filter(Customer.name == cust_name).first()
     if not customer:
         customer = Customer(name=cust_name, is_active=True)
