@@ -1,8 +1,12 @@
 name: macOS
 
-# Option 1 release model: CI creates a short-lived, ad-hoc-signed transport
-# artifact. Developer ID signing, notarization, and release publication happen
-# locally after exact-commit verification.
+# Two-stage release model: the build job creates a short-lived, ad-hoc-signed
+# transport artifact with full provenance. The sign job then runs the same
+# packaging/macos/release.py used for local releases — Developer ID signing,
+# notarization, and stapling on the runner, with the identity imported from
+# repo secrets into a throwaway keychain. On tags the signed DMG is attached
+# to the GitHub release. release.py still works locally as a fallback; CI and
+# local releases share one code path.
 on:
   workflow_dispatch:
     inputs:
@@ -12,6 +16,7 @@ on:
         type: string
   push:
     branches: [macos-build]
+    tags: ["v*"]
 
 permissions:
   contents: read
@@ -190,3 +195,121 @@ jobs:
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
+
+  sign:
+    name: Sign, notarize, and staple
+    needs: build
+    # Signing secrets exist only in the canonical repo; forks build unsigned.
+    if: github.repository == 'VonHoltenCodes/SlowBooks-Pro-2026'
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download unsigned artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SlowBooksPro-macos-arm64-${{ github.sha }}-unsigned
+          path: ${{ runner.temp }}/macos-artifact
+
+      - name: Import Developer ID certificate into a throwaway keychain
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 24)"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN"
+          printf '%s' "$MACOS_CERT_P12" | base64 -d > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # Allow codesign to use the key without a UI prompt.
+          security set-key-partition-list -S apple-tool:,apple: \
+            -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN" > /dev/null
+          # Make the throwaway keychain the default so both codesign's
+          # identity search and notarytool's credential profile land in it.
+          security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+          security default-keychain -s "$KEYCHAIN"
+          security find-identity -v -p codesigning "$KEYCHAIN"
+
+      - name: Store notarization credentials
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool store-credentials slowbooks-notary \
+            --apple-id "$APPLE_ID" \
+            --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_APP_PASSWORD"
+
+      - name: Sign, notarize, and staple via release.py
+        run: |
+          set -euo pipefail
+          cd packaging/macos
+          python3 release.py "$RUNNER_TEMP/macos-artifact" \
+            --expected-sha "$GITHUB_SHA" \
+            --output-root "$RUNNER_TEMP/release-out"
+
+      - name: Stage signed DMG and release evidence
+        run: |
+          set -euo pipefail
+          report_dir="$(find "$RUNNER_TEMP/release-out" -mindepth 1 -maxdepth 1 -type d)"
+          dmg="$(find "$report_dir" -maxdepth 1 -name 'SlowBooksPro-*-macos-arm64.dmg')"
+          test -f "$dmg"
+          stage="$RUNNER_TEMP/signed-stage"
+          mkdir -p "$stage"
+          cp "$dmg" "$stage/"
+          # Stable asset name: the website's direct-download links depend on it.
+          cp "$dmg" "$stage/SlowBooksPro-macos-arm64.dmg"
+          cp "$report_dir/SHA256SUMS" "$stage/SHA256SUMS.macos"
+          tar -czf "$stage/release-evidence.tar.gz" --exclude='*.dmg' \
+            -C "$(dirname "$report_dir")" "$(basename "$report_dir")"
+          ls -la "$stage"
+
+      - name: Delete throwaway keychain
+        if: always()
+        run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
+
+      - name: Upload signed artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SlowBooksPro-macos-arm64-${{ github.sha }}-signed
+          path: ${{ runner.temp }}/signed-stage/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  release:
+    name: Attach signed DMG to release
+    needs: sign
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: SlowBooksPro-macos-arm64-${{ github.sha }}-signed
+          path: dist
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/SlowBooksPro-*-macos-arm64.dmg
+            dist/SlowBooksPro-macos-arm64.dmg
+            dist/SHA256SUMS.macos
+            dist/release-evidence.tar.gz
