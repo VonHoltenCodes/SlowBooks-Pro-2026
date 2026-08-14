@@ -219,9 +219,10 @@ PDFs; self-hosted Chart.js (no CDN, LAN-deployable). Hosted-checkout
 payments only — card data never touches the app. Port 3001.
 
 The Windows and Apple Silicon desktop builds freeze the same codebase
-with PyInstaller + pywebview. Windows signs in CI via Azure Trusted
-Signing; macOS transport artifacts build in CI, then are signed and
-notarized locally with the maintainer's Apple Developer ID.
+with PyInstaller + pywebview. Both sign in CI on every release tag:
+Windows via Azure Trusted Signing, macOS with the project's Apple
+Developer ID — signed, notarized, and stapled on the runner (signing
+credentials live only in repo secrets, never in the repo).
 
 Full layout in [docs/development.md](docs/development.md).
 
@@ -256,4 +257,4 @@ offer it as a paid service. Full terms in [LICENSE](LICENSE).
 - [Alex Jordan (@LayoverLogic)](https://github.com/LayoverLogic) — Security hardening, IIF BILL/DEPOSIT import, class tracking design, multi-currency design with the Bank of Canada FX service, sortable list columns, country dropdowns
 - [amazon1148](https://github.com/amazon1148) — CSV bank import with auto-detection for Chase and PayPal statement formats
 - [Joel Macklow (@joelmacklow)](https://github.com/joelmacklow) — Fixed assets, Xero import with dry-run, opening-balance wizard, report PDF pipeline, and security regression-suite concepts, specified in his NZ localization fork
-- [Keith (@ContractorKeith)](https://github.com/ContractorKeith) — macOS maintainer: native Apple Silicon `.app`/DMG pipeline with local Developer ID signing and notarization, per-user Application Support data layout, frozen-bundle fontconfig self-containment, `.env` permission hardening; long-time macOS field tester
+- [Keith (@ContractorKeith)](https://github.com/ContractorKeith) — macOS maintainer: built the native Apple Silicon `.app`/DMG pipeline and the sign/notarize/staple release tooling that now runs in CI, per-user Application Support data layout, frozen-bundle fontconfig self-containment, `.env` permission hardening; long-time macOS field tester
