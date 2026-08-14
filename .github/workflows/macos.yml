@@ -281,6 +281,19 @@ jobs:
         if: always()
         run: security delete-keychain "$RUNNER_TEMP/signing.keychain-db" || true
 
+      # The evidence reports are the only way to debug a policy/notary
+      # failure — the DMG-free report directory is small, upload it always.
+      - name: Upload evidence on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signing-evidence-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/release-out/
+            !${{ runner.temp }}/release-out/**/*.dmg
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Upload signed artifact
         uses: actions/upload-artifact@v4
         with:
