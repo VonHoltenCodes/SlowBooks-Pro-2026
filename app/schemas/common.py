@@ -3,7 +3,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
-
 # A required display name that cannot be blank.
 #
 # `min_length` alone is not enough: a name of "   " has length 3 and passes,
