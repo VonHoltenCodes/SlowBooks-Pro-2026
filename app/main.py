@@ -319,6 +319,13 @@ _AUTH_EXEMPT_PREFIXES = (
 _AUTH_EXEMPT_EXACT = {
     "/",
     "/health",
+    # The published AI docs (llms.txt, ai/agents-template.md) tell agents to
+    # fetch the spec FIRST and "discover endpoints from the spec; do not
+    # guess paths" — so gating it behind auth made the documented flow
+    # impossible: the first call an agent is told to make returned 401.
+    # The spec is a description of the interface, not business data; every
+    # operation behind it still enforces auth and role scoping.
+    "/openapi.json",
     "/analytics",  # redirect to SPA hash route
     "/favicon.ico",
     "/api/stripe/webhook",  # legacy alias — Stripe auth via signature

@@ -119,7 +119,12 @@ def dry_run_bundle(db: Session, bundle: dict, parsers: dict, source_label: str) 
     simulated: dict[str, Decimal] = {}
     for group in journals:
         total = sum(r["debit"] - r["credit"] for r in group)
-        if _q(abs(total)) > Decimal("0.01"):
+        # Must be EXACT: create_journal_entry() rejects any non-zero
+        # imbalance, so a tolerance here only defers the failure to the
+        # middle of the import. A one-cent rounding drift is the single
+        # most common real-world imbalance, and the old "> 0.01" test let
+        # exactly that case through the gate.
+        if _q(abs(total)) != 0:
             ref = (
                 group[0].get("journal") or group[0].get("reference") or group[0]["date"]
             )
@@ -154,7 +159,10 @@ def dry_run_bundle(db: Session, bundle: dict, parsers: dict, source_label: str) 
             # That case is resolvable: import synthesizes one balanced
             # opening journal. Residuals that DON'T net to zero mean data
             # is genuinely missing and stay hard errors.
-            if abs(sum(d for _, d in residuals)) <= Decimal("0.01"):
+            # Same exactness rule: the synthesized opening journal is
+            # posted through create_journal_entry(), so residuals must net
+            # to exactly zero or that post fails mid-import.
+            if _q(abs(sum(d for _, d in residuals))) == 0:
                 opening_balances = [
                     {"account": name, "amount": float(diff)} for name, diff in residuals
                 ]

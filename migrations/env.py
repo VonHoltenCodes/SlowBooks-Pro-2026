@@ -1,6 +1,20 @@
 import os
 from logging.config import fileConfig
 
+# INSTALL.md has the user write DATABASE_URL into .env and THEN run
+# `alembic upgrade head`. Alembic is its own entrypoint and never boots
+# app.config, so without this the .env is ignored, sqlalchemy.url falls back
+# to the placeholder in alembic.ini, and the user gets
+# `FATAL: password authentication failed for user "user"` — a user they
+# never created, with no hint that the .env they just edited was unread.
+# override=False so a real exported DATABASE_URL (Docker) still wins.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(override=False)
+except ImportError:  # pragma: no cover - dotenv is in requirements.txt
+    pass
+
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 

@@ -2,59 +2,66 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
+# Field lengths below mirror the VARCHAR(n) widths on the Customer model.
+# Without them nothing validates length at the edge and the database is the
+# only check — which the two supported backends answer differently: Postgres
+# raises StringDataRightTruncation (surfacing as an opaque HTTP 500) while
+# SQLite ignores VARCHAR(n) and stores the oversized value, so a desktop
+# company file can hold data that cannot be imported into a Postgres/Server
+# Edition deployment. Validating here makes both backends return one 422.
 class CustomerCreate(BaseModel):
-    name: str
-    company: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    mobile: Optional[str] = None
-    fax: Optional[str] = None
-    website: Optional[str] = None
-    bill_address1: Optional[str] = None
-    bill_address2: Optional[str] = None
-    bill_city: Optional[str] = None
-    bill_state: Optional[str] = None
-    bill_zip: Optional[str] = None
-    bill_country: str = "US"
-    ship_address1: Optional[str] = None
-    ship_address2: Optional[str] = None
-    ship_city: Optional[str] = None
-    ship_state: Optional[str] = None
-    ship_zip: Optional[str] = None
-    ship_country: str = "US"
-    terms: str = "Net 30"
+    name: str = Field(..., max_length=200)
+    company: Optional[str] = Field(None, max_length=200)
+    email: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=50)
+    mobile: Optional[str] = Field(None, max_length=50)
+    fax: Optional[str] = Field(None, max_length=50)
+    website: Optional[str] = Field(None, max_length=200)
+    bill_address1: Optional[str] = Field(None, max_length=200)
+    bill_address2: Optional[str] = Field(None, max_length=200)
+    bill_city: Optional[str] = Field(None, max_length=100)
+    bill_state: Optional[str] = Field(None, max_length=50)
+    bill_zip: Optional[str] = Field(None, max_length=20)
+    bill_country: str = Field("US", max_length=100)
+    ship_address1: Optional[str] = Field(None, max_length=200)
+    ship_address2: Optional[str] = Field(None, max_length=200)
+    ship_city: Optional[str] = Field(None, max_length=100)
+    ship_state: Optional[str] = Field(None, max_length=50)
+    ship_zip: Optional[str] = Field(None, max_length=20)
+    ship_country: str = Field("US", max_length=100)
+    terms: str = Field("Net 30", max_length=50)
     credit_limit: Optional[Decimal] = None
-    tax_id: Optional[str] = None
+    tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: bool = True
     notes: Optional[str] = None
 
 
 class CustomerUpdate(BaseModel):
-    name: Optional[str] = None
-    company: Optional[str] = None
-    email: Optional[str] = None
-    phone: Optional[str] = None
-    mobile: Optional[str] = None
-    fax: Optional[str] = None
-    website: Optional[str] = None
-    bill_address1: Optional[str] = None
-    bill_address2: Optional[str] = None
-    bill_city: Optional[str] = None
-    bill_state: Optional[str] = None
-    bill_zip: Optional[str] = None
-    bill_country: Optional[str] = None
-    ship_address1: Optional[str] = None
-    ship_address2: Optional[str] = None
-    ship_city: Optional[str] = None
-    ship_state: Optional[str] = None
-    ship_zip: Optional[str] = None
-    ship_country: Optional[str] = None
-    terms: Optional[str] = None
+    name: Optional[str] = Field(None, max_length=200)
+    company: Optional[str] = Field(None, max_length=200)
+    email: Optional[str] = Field(None, max_length=200)
+    phone: Optional[str] = Field(None, max_length=50)
+    mobile: Optional[str] = Field(None, max_length=50)
+    fax: Optional[str] = Field(None, max_length=50)
+    website: Optional[str] = Field(None, max_length=200)
+    bill_address1: Optional[str] = Field(None, max_length=200)
+    bill_address2: Optional[str] = Field(None, max_length=200)
+    bill_city: Optional[str] = Field(None, max_length=100)
+    bill_state: Optional[str] = Field(None, max_length=50)
+    bill_zip: Optional[str] = Field(None, max_length=20)
+    bill_country: Optional[str] = Field(None, max_length=100)
+    ship_address1: Optional[str] = Field(None, max_length=200)
+    ship_address2: Optional[str] = Field(None, max_length=200)
+    ship_city: Optional[str] = Field(None, max_length=100)
+    ship_state: Optional[str] = Field(None, max_length=50)
+    ship_zip: Optional[str] = Field(None, max_length=20)
+    ship_country: Optional[str] = Field(None, max_length=100)
+    terms: Optional[str] = Field(None, max_length=50)
     credit_limit: Optional[Decimal] = None
-    tax_id: Optional[str] = None
+    tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: Optional[bool] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
