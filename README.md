@@ -60,7 +60,7 @@ a native `.app` in a DMG, no Docker or Python required.
 [SimpleFIN](https://www.simplefin.org/) — you hold the bank credential,
 no middleman server, dedup + bank rules on arrival
 ([docs/setup-bank-feeds.md](docs/setup-bank-feeds.md)). Every install
-also serves a self-documenting 347-operation local REST API; point
+also serves a self-documenting 357-operation local REST API; point
 Claude Code or any agentic CLI at it —
 [slowbookspro.com/ai](https://www.slowbookspro.com/ai/) has the
 paste-prompt.

@@ -1,8 +1,8 @@
+import re
 from decimal import Decimal
 from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
-
 
 # A required display name that cannot be blank.
 #
@@ -16,6 +16,19 @@ from pydantic import BaseModel, StringConstraints
 # Vendor.name. Validating here keeps the two supported backends consistent:
 # PostgreSQL raises StringDataRightTruncation (an opaque HTTP 500) while
 # SQLite ignores VARCHAR(n) and stores the oversized value.
+# A stored email address. Deliberately a permissive shape check, not RFC 5322
+# validation: the goal is to reject "not-an-email", which was accepted and
+# stored verbatim, without pulling in the email-validator dependency that
+# pydantic.EmailStr requires — requirements.txt is tightly pinned with CVE
+# rationale per line and is not somewhere to add a dependency casually.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+OptionalEmail = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, max_length=200, pattern=_EMAIL_RE.pattern),
+]
+
+
 NonBlankName = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
 ]

@@ -621,3 +621,57 @@ async def serve_analytics_redirect():
     from fastapi.responses import RedirectResponse
 
     return RedirectResponse(url="/#/analytics", status_code=307)
+
+
+# ---------------------------------------------------------------------------
+# OpenAPI: declare the auth the API actually enforces.
+#
+# components.securitySchemes was empty and there was no top-level `security`,
+# so the spec described an API that needs no credentials — while every
+# operation behind it returns 401 without a bearer token. That matters
+# specifically because llms.txt and ai/agents-template.md tell agents to
+# "discover endpoints from the spec; do not guess paths": a client generated
+# from the spec emitted no Authorization header and 401'd on every call.
+#
+# Applied globally, with the genuinely public routes exempted so the document
+# stays truthful in both directions.
+# ---------------------------------------------------------------------------
+_PUBLIC_FOR_SPEC = {"/", "/health", "/openapi.json", "/analytics", "/favicon.ico"}
+_PUBLIC_PREFIXES_FOR_SPEC = ("/api/auth/", "/pay/", "/portal/", "/static/")
+
+
+def _custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+
+    from fastapi.openapi.utils import get_openapi
+
+    schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        routes=app.routes,
+    )
+    schema.setdefault("components", {})["securitySchemes"] = {
+        "BearerToken": {
+            "type": "http",
+            "scheme": "bearer",
+            "description": (
+                "Scoped API token from Settings -> API Tokens, sent as "
+                "`Authorization: Bearer sbp_...`. Session cookies from "
+                "POST /api/auth/login are accepted equivalently."
+            ),
+        }
+    }
+    schema["security"] = [{"BearerToken": []}]
+
+    for path, item in schema.get("paths", {}).items():
+        if path in _PUBLIC_FOR_SPEC or path.startswith(_PUBLIC_PREFIXES_FOR_SPEC):
+            for operation in item.values():
+                if isinstance(operation, dict):
+                    operation["security"] = []
+
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = _custom_openapi

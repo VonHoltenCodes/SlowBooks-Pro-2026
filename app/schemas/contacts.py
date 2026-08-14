@@ -4,7 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from app.schemas.common import NonBlankName
+from app.schemas.common import NonBlankName, OptionalEmail
 
 
 # Field lengths below mirror the VARCHAR(n) widths on the Customer model.
@@ -17,7 +17,7 @@ from app.schemas.common import NonBlankName
 class CustomerCreate(BaseModel):
     name: NonBlankName
     company: Optional[str] = Field(None, max_length=200)
-    email: Optional[str] = Field(None, max_length=200)
+    email: Optional[OptionalEmail] = None
     phone: Optional[str] = Field(None, max_length=50)
     mobile: Optional[str] = Field(None, max_length=50)
     fax: Optional[str] = Field(None, max_length=50)
@@ -44,7 +44,7 @@ class CustomerCreate(BaseModel):
 class CustomerUpdate(BaseModel):
     name: Optional[NonBlankName] = None
     company: Optional[str] = Field(None, max_length=200)
-    email: Optional[str] = Field(None, max_length=200)
+    email: Optional[OptionalEmail] = None
     phone: Optional[str] = Field(None, max_length=50)
     mobile: Optional[str] = Field(None, max_length=50)
     fax: Optional[str] = Field(None, max_length=50)
@@ -106,7 +106,7 @@ class CustomerResponse(BaseModel):
 class VendorCreate(BaseModel):
     name: NonBlankName
     company: Optional[str] = Field(None, max_length=200)
-    email: Optional[str] = Field(None, max_length=200)
+    email: Optional[OptionalEmail] = None
     phone: Optional[str] = Field(None, max_length=50)
     fax: Optional[str] = Field(None, max_length=50)
     website: Optional[str] = Field(None, max_length=200)
@@ -128,7 +128,7 @@ class VendorCreate(BaseModel):
 class VendorUpdate(BaseModel):
     name: Optional[NonBlankName] = None
     company: Optional[str] = Field(None, max_length=200)
-    email: Optional[str] = Field(None, max_length=200)
+    email: Optional[OptionalEmail] = None
     phone: Optional[str] = Field(None, max_length=50)
     fax: Optional[str] = Field(None, max_length=50)
     website: Optional[str] = Field(None, max_length=200)
