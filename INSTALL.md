@@ -90,8 +90,10 @@ separately tested Intel build is available.
 
 ## Option 1: Docker (Windows, macOS, Linux)
 
-**Recommended for servers, Intel Macs, and multi-user setups.** One command,
-no dependency headaches.
+**Recommended for Linux servers and Intel Macs.** One command, no
+dependency headaches. Note: multi-user over the LAN does **not** require
+Docker — Server Edition runs from the signed Windows installer (see
+[docs/server-edition.md](docs/server-edition.md)).
 
 ### Prerequisites
 

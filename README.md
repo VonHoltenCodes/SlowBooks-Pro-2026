@@ -169,7 +169,11 @@ Download **[SlowBooksPro-macos-arm64.dmg](https://github.com/VonHoltenCodes/Slow
 drag **SlowBooks Pro** to Applications, launch. Signed and notarized;
 macOS 14+. Intel Macs: use Docker until a tested Intel build ships.
 
-### Docker (servers, Linux, Intel Mac)
+### Docker (Linux servers, Intel Mac)
+
+Docker is optional — multi-user LAN serving on Windows is **Server
+Edition**, built into the signed installer above (no containers involved).
+Docker remains the path for Linux servers and Intel Macs:
 
 ```bash
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git
