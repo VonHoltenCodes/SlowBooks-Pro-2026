@@ -5,7 +5,9 @@
 Free, source-available, and complete: double-entry accounting, unlimited
 invoicing, US payroll with tamper-evident tax forms, perpetual inventory,
 bank feeds, analytics — with every record in local files you control. No
-cloud, no account, no telemetry, no caps, no paid tiers.
+cloud, no account, no telemetry, no caps, no paid tiers. **Multi-user
+Server Edition is built into the same signed installer — no Docker
+required** (Docker remains an optional path for Linux servers).
 
 **Get started:**
 [Windows installer](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/latest/download/SlowBooksPro-Setup-x64.exe) ·
