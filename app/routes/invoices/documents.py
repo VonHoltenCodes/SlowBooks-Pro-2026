@@ -26,11 +26,12 @@ def invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invoice not found")
     company = get_settings(db)
     pdf_bytes = generate_invoice_pdf(inv, company)
+    doc_kind = "SalesReceipt" if inv.is_sales_receipt else "Invoice"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=Invoice_{inv.invoice_number}.pdf"
+            "Content-Disposition": f"inline; filename={doc_kind}_{inv.invoice_number}.pdf"
         },
     )
 
@@ -103,7 +104,11 @@ def email_invoice(
             subject=subject,
             html_body=html_body,
             attachment_bytes=pdf_bytes,
-            attachment_name=f"Invoice_{inv.invoice_number}.pdf",
+            attachment_name=(
+                f"SalesReceipt_{inv.invoice_number}.pdf"
+                if inv.is_sales_receipt
+                else f"Invoice_{inv.invoice_number}.pdf"
+            ),
             entity_type="invoice",
             entity_id=inv.id,
         )

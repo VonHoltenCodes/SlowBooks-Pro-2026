@@ -7,6 +7,23 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.6.1 — The receipt now looks like a receipt
+
+- The printed/saved sales receipt was the unmodified invoice template —
+  titled INVOICE, with Due Date, Terms, and Balance Due rows, saved as
+  `Invoice_<n>.pdf`. It now renders as a SALES RECEIPT: date only, Sold
+  To, Total + Paid (no balance line — nothing is due), filename
+  `SalesReceipt_<n>.pdf`, and the same for the email attachment name.
+  Found on macOS hardware by the build maintainer during the v2.6.0
+  release pass. (#60)
+- The PDF's Bill To / Sold To block always prints the customer's name
+  now: the template fell back on a `customer_name` attribute only some
+  callers stamped onto the invoice, so the direct PDF route printed a
+  bare header whenever the customer had no address on file.
+- `SHA256SUMS.macos` now also lists the stable-named
+  `SlowBooksPro-macos-arm64.dmg`, so the README's direct download can be
+  checksum-verified, not just the versioned asset.
+
 ### v2.6.0 — Sales receipts: one-screen POS sales + QuickBooks import
 
 For businesses that ring up sales at a counter instead of invoicing:

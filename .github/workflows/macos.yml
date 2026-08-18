@@ -273,6 +273,9 @@ jobs:
           # Stable asset name: the website's direct-download links depend on it.
           cp "$dmg" "$stage/SlowBooksPro-macos-arm64.dmg"
           cp "$report_dir/SHA256SUMS" "$stage/SHA256SUMS.macos"
+          # The stable-named copy needs its own checksum line — same bytes,
+          # second name — so the README's direct download is verifiable too.
+          ( cd "$stage" && shasum -a 256 SlowBooksPro-macos-arm64.dmg >> SHA256SUMS.macos )
           tar -czf "$stage/release-evidence.tar.gz" --exclude='*.dmg' \
             -C "$(dirname "$report_dir")" "$(basename "$report_dir")"
           ls -la "$stage"

@@ -279,3 +279,78 @@ def test_qbo_import_sales_receipt_without_customer_reports_error(
     result = qbo_import.import_sales_receipts(db_session)
     assert result["imported"] == 0
     assert result["errors"] and "Customer not found" in result["errors"][0]["message"]
+
+
+# ---------------------------------------------------------------------------
+# PDF / print artifact (#60): a receipt must not render as an invoice
+# ---------------------------------------------------------------------------
+
+
+def test_sales_receipt_pdf_is_a_receipt_not_an_invoice(
+    client, seed_accounts, seed_customer
+):
+    sr = _post_receipt(client, seed_customer.id).json()
+    inv_id = sr["invoice"]["id"]
+
+    r = client.get(f"/api/invoices/{inv_id}/pdf")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert f"SalesReceipt_{sr['invoice']['invoice_number']}.pdf" in r.headers.get(
+        "content-disposition", ""
+    )
+
+    # The print preview renders the same template as HTML, so the document
+    # semantics can be asserted as text.
+    html = client.get(f"/api/invoices/{inv_id}/print-preview").text
+    assert "SALES RECEIPT" in html
+    assert "Balance Due" not in html
+    assert "Due Date" not in html
+    assert "Terms" not in html
+    assert "Sold To" in html
+    assert "Test Customer" in html
+
+
+def test_invoice_pdf_keeps_invoice_semantics(client, seed_accounts, seed_customer):
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "terms": "Net 30",
+            "tax_rate": "0",
+            "lines": [{"description": "Consulting", "quantity": "1", "rate": "50"}],
+        },
+    )
+    inv = r.json()
+
+    r = client.get(f"/api/invoices/{inv['id']}/pdf")
+    assert r.status_code == 200
+    assert f"Invoice_{inv['invoice_number']}.pdf" in r.headers.get(
+        "content-disposition", ""
+    )
+
+    html = client.get(f"/api/invoices/{inv['id']}/print-preview").text
+    assert "INVOICE" in html
+    assert "SALES RECEIPT" not in html
+    assert "Due Date" in html
+    assert "Bill To" in html
+    # Regression for the bare BILL TO block: the customer name must print
+    # even when the callers don't stamp customer_name onto the ORM object.
+    assert "Test Customer" in html
+
+
+def test_pdf_template_prints_name_via_customer_relationship(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The /pdf route renders the ORM object directly (no customer_name
+    attribute) — the template must fall back to inv.customer.name."""
+    sr = _post_receipt(client, seed_customer.id).json()
+
+    from app.models.invoices import Invoice
+    from app.services.pdf_service import _jinja_env
+
+    inv = db_session.query(Invoice).filter_by(id=sr["invoice"]["id"]).first()
+    assert not hasattr(inv, "customer_name")
+    html = _jinja_env.get_template("invoice_pdf.html").render(inv=inv, company={})
+    assert "Test Customer" in html
+    assert "SALES RECEIPT" in html
