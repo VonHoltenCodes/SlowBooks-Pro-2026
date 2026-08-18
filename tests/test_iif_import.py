@@ -426,3 +426,122 @@ def test_reimport_reports_duplicates_skipped(db_session, seed_accounts):
     assert second["bills"] == 0
     assert second["deposits"] == 0
     assert second["duplicates_skipped"] == 3
+
+
+# ---------------------------------------------------------------------------
+# CASH SALE (sales receipts)
+# ---------------------------------------------------------------------------
+
+CASH_SALE_IIF = (
+    "!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tPAYMETH\n"
+    "!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tINVITEM\tQNTY\tPRICE\n"
+    "!ENDTRNS\n"
+    "TRNS\t1\tCASH SALE\t2026-04-02\tChecking\tWalkup Wanda\t108.75\tSR-100\tCash\n"
+    "SPL\t2\tCASH SALE\t2026-04-02\tService Income\tWalkup Wanda\t-100.00\t\t1\t100.00\n"
+    "SPL\t3\tCASH SALE\t2026-04-02\tSales Tax Payable\tWalkup Wanda\t-8.75\t\t\t\n"
+    "ENDTRNS\n"
+)
+
+# Counter sale: no customer name, no document number.
+ANON_CASH_SALE_IIF = (
+    "!TRNS\tTRNSID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tDOCNUM\tPAYMETH\n"
+    "!SPL\tSPLID\tTRNSTYPE\tDATE\tACCNT\tNAME\tAMOUNT\tINVITEM\tQNTY\tPRICE\n"
+    "!ENDTRNS\n"
+    "TRNS\t1\tCASH SALE\t2026-04-03\tChecking\t\t25.00\t\tCash\n"
+    "SPL\t2\tCASH SALE\t2026-04-03\tService Income\t\t-25.00\t\t1\t25.00\n"
+    "ENDTRNS\n"
+)
+
+
+def test_iif_import_cash_sale_creates_paid_receipt(db_session, seed_accounts):
+    from app.services.iif_import import parse_iif, import_transactions
+    from app.models.invoices import Invoice, InvoiceStatus
+    from app.models.payments import Payment, PaymentAllocation
+    from app.models.contacts import Customer
+    from app.models.transactions import TransactionLine
+
+    db_session.add(Customer(name="Walkup Wanda", is_active=True))
+    db_session.commit()
+
+    parsed = parse_iif(CASH_SALE_IIF)
+    result = import_transactions(db_session, parsed["TRNS"])
+    db_session.commit()
+
+    assert result["imported"]["sales_receipts"] == 1, result
+    invoice = db_session.query(Invoice).filter_by(invoice_number="SR-100").first()
+    assert invoice is not None
+    assert invoice.is_sales_receipt is True
+    assert invoice.status == InvoiceStatus.PAID
+    assert invoice.subtotal == Decimal("100.00")
+    assert invoice.tax_amount == Decimal("8.75")
+    assert invoice.total == Decimal("108.75")
+    assert invoice.balance_due == Decimal("0")
+
+    payment = db_session.query(Payment).first()
+    assert payment.amount == Decimal("108.75")
+    assert payment.method == "Cash"
+    checking = seed_accounts["1000"]
+    assert payment.deposit_to_account_id == checking.id
+    alloc = db_session.query(PaymentAllocation).first()
+    assert alloc.invoice_id == invoice.id
+    assert alloc.amount == Decimal("108.75")
+
+    # Both journals balance; the payment journal debits Checking.
+    for txn_id in (invoice.transaction_id, payment.transaction_id):
+        assert txn_id is not None
+        lines = db_session.query(TransactionLine).filter_by(transaction_id=txn_id).all()
+        dr = sum((Decimal(str(line.debit)) for line in lines), Decimal("0"))
+        cr = sum((Decimal(str(line.credit)) for line in lines), Decimal("0"))
+        assert dr == cr == Decimal("108.75")
+    debit_line = (
+        db_session.query(TransactionLine)
+        .filter_by(transaction_id=payment.transaction_id, account_id=checking.id)
+        .first()
+    )
+    assert Decimal(str(debit_line.debit)) == Decimal("108.75")
+
+
+def test_iif_import_anonymous_cash_sale_uses_walk_in_customer(
+    db_session, seed_accounts
+):
+    from app.services.iif_import import (
+        WALK_IN_CUSTOMER_NAME,
+        import_transactions,
+        parse_iif,
+    )
+    from app.models.invoices import Invoice
+    from app.models.contacts import Customer
+
+    parsed = parse_iif(ANON_CASH_SALE_IIF)
+    result = import_transactions(db_session, parsed["TRNS"])
+    db_session.commit()
+
+    assert result["imported"]["sales_receipts"] == 1, result
+    assert any(WALK_IN_CUSTOMER_NAME in w for w in result["warnings"])
+
+    walk_in = db_session.query(Customer).filter_by(name=WALK_IN_CUSTOMER_NAME).first()
+    assert walk_in is not None
+    invoice = db_session.query(Invoice).first()
+    assert invoice.customer_id == walk_in.id
+    # Unnumbered receipt got the next invoice number from the numbering service
+    assert invoice.invoice_number
+
+
+def test_iif_reimport_cash_sale_skips_duplicates(db_session, seed_accounts):
+    from app.services.iif_import import parse_iif, import_transactions
+    from app.models.invoices import Invoice
+    from app.models.contacts import Customer
+
+    db_session.add(Customer(name="Walkup Wanda", is_active=True))
+    db_session.commit()
+
+    combined = parse_iif(CASH_SALE_IIF + ANON_CASH_SALE_IIF)
+    first = import_transactions(db_session, combined["TRNS"])
+    db_session.commit()
+    assert first["imported"]["sales_receipts"] == 2
+
+    second = import_transactions(db_session, combined["TRNS"])
+    db_session.commit()
+    assert second["imported"]["sales_receipts"] == 0
+    assert second["imported"]["duplicates_skipped"] == 2
+    assert db_session.query(Invoice).count() == 2

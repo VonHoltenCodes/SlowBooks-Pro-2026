@@ -135,7 +135,8 @@ Full catalog (300+ entries) in **[docs/features.md](docs/features.md)**. Highlig
 - **Online payments** — [Stripe](docs/setup-stripe.md),
   [PayPal](docs/setup-paypal.md), [Square](docs/setup-square.md) behind
   one abstraction, desktop-mode recording included
-- **Interop & migration** — QuickBooks IIF round-trip,
+- **Interop & migration** — QuickBooks IIF round-trip incl. sales
+  receipts ([docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md)),
   [QBO OAuth sync](docs/setup-qbo.md), Migrate Data for Xero / MYOB /
   Sage 50 / Wave / Zoho Books / GnuCash, Opening Balances wizard
 - **Fixed assets** — register, depreciation runs, disposal with

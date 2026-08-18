@@ -14,6 +14,7 @@ pass, and the per-integration setup guides ([Stripe](setup-stripe.md),
 
 ## Invoicing & Payments (Accounts Receivable)
 - **Invoices** — Create, edit, duplicate, void, mark as sent, email as PDF. Auto-numbering, auto due-date from terms, dynamic line items with running totals. Print/PDF generation via WeasyPrint. Inline customer creation from invoice form
+- **Sales Receipts** — One-screen invoice + payment for point-of-sale style sales where the customer pays on the spot. Payment method, deposit-to account, and line items on a single form; posts both documents and their journal entries atomically. Imports from QuickBooks Desktop (IIF `CASH SALE`) and QuickBooks Online (SalesReceipt API)
 - **Estimates** — Full estimate workflow with convert-to-invoice (deep-copies all fields and line items). Inline customer creation from estimate form
 - **Payments** — Record payments with allocation across multiple invoices. Auto-updates invoice balances and status (draft/sent/partial/paid). Void payments with reversing journal entries
 - **Recurring Invoices** — Schedule automatic invoice generation (weekly/monthly/quarterly/yearly) with manual "Generate Now" or cron script

@@ -8,6 +8,7 @@ class IIFImportResult(BaseModel):
     items: int = 0
     invoices: int = 0
     payments: int = 0
+    sales_receipts: int = 0
     estimates: int = 0
     bills: int = 0
     deposits: int = 0

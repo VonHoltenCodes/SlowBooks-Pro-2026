@@ -7,6 +7,45 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Sales receipts — one-screen POS sales + QuickBooks import
+
+For businesses that ring up sales at a counter instead of invoicing:
+a QuickBooks sales receipt is an invoice paid at the moment of sale,
+and SlowBooks now models it exactly that way — an Invoice flagged
+`is_sales_receipt` plus a Payment for the full total, so every
+existing report, PDF, export, and void path works unchanged. Schema
+migration `c7d8e9f0a1b2` adds the flag (drop-in; new databases need
+nothing).
+
+- **Enter Sales Receipts screen** — new sidebar page with a
+  one-screen form: customer (with quick-add), payment method,
+  check #/reference, deposit-to account (defaults to Undeposited
+  Funds), tax, class, currency, and line items. `POST
+  /api/sales-receipts` composes the existing invoice and payment
+  routes, so numbering, closing-date enforcement, FX, and
+  inventory/COGS behave identically to documents entered separately;
+  if the payment half fails the invoice half is voided rather than
+  left as a stray open balance. Receipts list on their own page and
+  no longer clutter the Invoices list (`GET
+  /api/invoices?is_sales_receipt=...` filters either way; omitting
+  the param returns everything, as before).
+- **IIF import: `CASH SALE` blocks** — QuickBooks Desktop's sales
+  receipts previously fell into the silently-skipped bucket. They now
+  import as paid invoice + payment with balanced journals (deposit
+  account from the TRNS header, Undeposited Funds fallback).
+  Counter sales with a blank Customer:Job land on an auto-created
+  "Walk-In Customer" (reported as a warning); unnumbered receipts get
+  the next invoice number, and re-imports dedup by document number or
+  customer + date + total.
+- **QBO import: SalesReceipt entity** — the QuickBooks Online
+  importer pulls sales receipts alongside invoices and payments, with
+  the same id-mapping dedup; the QBO page gets a Sales Receipts
+  import checkbox (import-only — there is no matching export entity).
+- **docs/migrate-from-quickbooks.md** — new guide covering both
+  paths, including the fact that Desktop's built-in IIF export is
+  lists-only and the clean Transaction Detail report recipe for
+  getting sales history out.
+
 ### v2.5.3 — API hardening, from a full-surface sweep
 
 Every one of the API's 357 operations was driven end-to-end on Windows

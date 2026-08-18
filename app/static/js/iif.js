@@ -313,6 +313,7 @@ const IIFPage = {
             const total = (result.accounts || 0) + (result.customers || 0) +
                           (result.vendors || 0) + (result.items || 0) +
                           (result.invoices || 0) + (result.payments || 0) +
+                          (result.sales_receipts || 0) +
                           (result.estimates || 0) + (result.bills || 0) +
                           (result.deposits || 0);
             toast(`Imported ${total} records`);
@@ -331,6 +332,7 @@ const IIFPage = {
             ['Items', result.items],
             ['Invoices', result.invoices],
             ['Payments', result.payments],
+            ['Sales Receipts', result.sales_receipts],
             ['Estimates', result.estimates],
             ['Bills', result.bills],
             ['Deposits', result.deposits],
