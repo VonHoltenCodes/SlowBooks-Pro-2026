@@ -5,7 +5,9 @@
  */
 const InvoicesPage = {
     async render() {
-        const invoices = await API.get('/invoices');
+        // Sales receipts are invoices under the hood; they get their own
+        // page, so keep them out of this list.
+        const invoices = await API.get('/invoices?is_sales_receipt=false');
         return renderListPage({
             title: 'Invoices',
             headerHtml: `<button class="btn btn-primary" onclick="InvoicesPage.showForm()">+ New Invoice</button>`,

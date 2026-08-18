@@ -8,6 +8,7 @@ class QBOImportResult(BaseModel):
     items: int = 0
     invoices: int = 0
     payments: int = 0
+    sales_receipts: int = 0
     errors: list[dict] = []
 
 

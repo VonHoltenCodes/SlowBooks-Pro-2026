@@ -22,13 +22,21 @@ const QBOPage = {
             ? `Connected to <strong>${escapeHtml(status.company_name || 'QuickBooks Online')}</strong> (Realm: ${escapeHtml(status.realm_id)})`
             : 'Not connected';
 
-        const entityTypes = ['accounts', 'customers', 'vendors', 'items', 'invoices', 'payments'];
+        const entityTypes = [
+            ['accounts', 'Accounts'], ['customers', 'Customers'], ['vendors', 'Vendors'],
+            ['items', 'Items'], ['invoices', 'Invoices'], ['payments', 'Payments'],
+        ];
+        // Sales receipts import as paid-invoice + payment pairs; there is
+        // no matching export entity, so only the import list offers them.
+        const importEntityTypes = [...entityTypes, ['sales_receipts', 'Sales Receipts']];
 
-        const checkboxes = entityTypes.map(e =>
+        const checkboxHtml = types => types.map(([value, label]) =>
             `<label style="display:inline-flex; align-items:center; gap:4px; margin-right:12px;">
-                <input type="checkbox" value="${e}" checked> ${e.charAt(0).toUpperCase() + e.slice(1)}
+                <input type="checkbox" value="${value}" checked> ${label}
             </label>`
         ).join('');
+        const importCheckboxes = checkboxHtml(importEntityTypes);
+        const checkboxes = checkboxHtml(entityTypes);
 
         return `
             <div class="page-header">
@@ -73,7 +81,7 @@ const QBOPage = {
                         Import Individual Entity Types
                     </div>
                     <div id="qbo-import-checkboxes" style="margin-bottom:8px; font-size:11px;">
-                        ${checkboxes}
+                        ${importCheckboxes}
                     </div>
                     <button class="btn btn-secondary" onclick="QBOPage.importSelected()"
                         ${!status.connected ? 'disabled' : ''}>
@@ -148,7 +156,8 @@ const QBOPage = {
             QBOPage._showResult('qbo-import-result', result, 'imported');
             const total = (result.accounts || 0) + (result.customers || 0) +
                           (result.vendors || 0) + (result.items || 0) +
-                          (result.invoices || 0) + (result.payments || 0);
+                          (result.invoices || 0) + (result.payments || 0) +
+                          (result.sales_receipts || 0);
             toast(`Imported ${total} records from QBO`);
             App.setStatus('QuickBooks Online — Import complete');
         } catch (err) {
@@ -161,7 +170,7 @@ const QBOPage = {
         const checked = QBOPage._getChecked('qbo-import-checkboxes');
         if (checked.length === 0) { toast('Select at least one entity type', 'error'); return; }
 
-        const result = { accounts: 0, customers: 0, vendors: 0, items: 0, invoices: 0, payments: 0, errors: [] };
+        const result = { accounts: 0, customers: 0, vendors: 0, items: 0, invoices: 0, payments: 0, sales_receipts: 0, errors: [] };
         App.setStatus('Importing from QuickBooks Online...');
 
         for (const entity of checked) {
@@ -238,6 +247,7 @@ const QBOPage = {
             ['Items', result.items],
             ['Invoices', result.invoices],
             ['Payments', result.payments],
+            ['Sales Receipts', result.sales_receipts],
         ];
 
         let html = '<div class="iif-results"><h4>Results</h4>';

@@ -36,6 +36,7 @@ from app.routes import (
     invoices,
     estimates,
     payments,
+    sales_receipts,
     banking,
     reports,
     settings,
@@ -506,6 +507,7 @@ app.include_router(items.router)
 app.include_router(invoices.router)
 app.include_router(estimates.router)
 app.include_router(payments.router)
+app.include_router(sales_receipts.router)
 app.include_router(banking.router)
 app.include_router(reports.router)
 app.include_router(settings.router)

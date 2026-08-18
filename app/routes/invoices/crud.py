@@ -34,6 +34,7 @@ from app.routes.invoices.helpers import (
 def list_invoices(
     status: str = None,
     customer_id: int = None,
+    is_sales_receipt: bool = None,
     skip: int = 0,
     limit: int = 500,
     db: Session = Depends(get_db),
@@ -51,6 +52,8 @@ def list_invoices(
         q = q.filter(Invoice.status == status)
     if customer_id:
         q = q.filter(Invoice.customer_id == customer_id)
+    if is_sales_receipt is not None:
+        q = q.filter(Invoice.is_sales_receipt == is_sales_receipt)
     invoices = q.order_by(Invoice.date.desc()).offset(skip).limit(limit).all()
     results = []
     for inv in invoices:
