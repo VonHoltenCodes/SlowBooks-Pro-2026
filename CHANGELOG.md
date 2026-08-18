@@ -7,7 +7,7 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
-### Sales receipts — one-screen POS sales + QuickBooks import
+### v2.6.0 — Sales receipts: one-screen POS sales + QuickBooks import
 
 For businesses that ring up sales at a counter instead of invoicing:
 a QuickBooks sales receipt is an invoice paid at the moment of sale,
