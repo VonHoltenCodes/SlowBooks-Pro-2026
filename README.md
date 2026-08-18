@@ -43,6 +43,15 @@ source code or binaries were available, decompiled, or used.
 
 ## What's New
 
+**v2.6 — Sales receipts.** Point-of-sale style sales on one screen: the
+sale and its payment recorded together, deposited where you say, posted
+atomically — and kept on their own page so they don't clutter your
+invoices. Your existing receipt history imports too: `CASH SALE` blocks
+from QuickBooks Desktop IIF files and the SalesReceipt entity over the
+QuickBooks Online connection, with a migration guide covering both paths
+([docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md)).
+Built because a user asked for it.
+
 **v2.5 — Server Edition.** The same signed installer can serve your whole
 office from one Windows PC: users with roles (admin / bookkeeper /
 read-only), username logins, per-user audit attribution, and a startup
@@ -71,11 +80,6 @@ paste-prompt.
 Sage 50, Wave, Zoho Books, and GnuCash — every import dry-run-verified
 against your trial balance before a single record is written, with
 opening balances posted automatically.
-
-**v2.2 — Payments, classes, currencies, assets.** Stripe + PayPal +
-Square behind one provider abstraction; class tracking with P&L by
-Class; multi-currency with automatic FX gain/loss; fixed assets with
-depreciation runs; financial-report PDF pack.
 
 Full history in **[CHANGELOG.md](CHANGELOG.md)**.
 
