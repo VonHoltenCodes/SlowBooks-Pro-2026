@@ -102,3 +102,16 @@ async def csv_import_items(file: UploadFile = File(...), db: Session = Depends(g
     content = (await read_limited(file, label="CSV file")).decode("utf-8-sig")
     result = import_items(db, content)
     return result
+
+
+@router.post("/import/sales-receipts")
+async def csv_import_sales_receipts(
+    file: UploadFile = File(...), db: Session = Depends(get_db)
+):
+    """Import sales receipts from a QuickBooks Desktop "Transaction Detail
+    by Date" report CSV (filtered to Sales Receipt) — the documented
+    fallback for Desktop, which can't export transactions to IIF."""
+    from app.services.qb_report_import import import_sales_receipt_report
+
+    content = (await read_limited(file, label="CSV file")).decode("utf-8-sig")
+    return import_sales_receipt_report(db, content)

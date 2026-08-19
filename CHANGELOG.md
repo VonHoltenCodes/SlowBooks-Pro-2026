@@ -7,6 +7,24 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Sales receipts from a QuickBooks report CSV
+
+QuickBooks Desktop can't export transactions to IIF, so the sales-
+receipt migration doc pointed Desktop users at a Transaction Detail
+report export — which previously had nowhere to land. It does now:
+**QuickBooks Interop → Sales Receipts from Report CSV** imports a
+"Transaction Detail by Date" export (filtered to Sales Receipt), each
+receipt becoming a paid sale + payment with balanced journals.
+
+Shaped by a real customer's export, so the parser handles what real
+files contain: applied-deposit contra lines that reduce the total
+(sign-aware — an absolute-value parse would inflate them), percentage
+tax rows carrying the tax agency's name, deposits-only receipts,
+thousands separators, and per-receipt balance checks with clear
+errors. Unmatched account names post to default income with a warning;
+re-uploads dedup by customer + date + total. Receipt numbers keep the
+report's Num where free (SR-prefixed on collision).
+
 ### v2.6.1 — The receipt now looks like a receipt
 
 - The printed/saved sales receipt was the unmodified invoice template —

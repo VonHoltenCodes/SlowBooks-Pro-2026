@@ -95,7 +95,60 @@ const IIFPage = {
                     <div id="iif-validation-result"></div>
                     <div id="iif-import-result"></div>
                 </div>
+
+                <!-- Sales Receipts from Report CSV -->
+                <div class="iif-section">
+                    <h3>&#9635; Sales Receipts from Report CSV</h3>
+                    <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
+                        QuickBooks Desktop can't export transactions to IIF. Instead, run
+                        <strong>Reports &gt; Custom Reports &gt; Transaction Detail</strong>, filter
+                        Transaction Type to <strong>Sales Receipt</strong>, export to CSV, and
+                        upload it here. Each receipt imports as a paid sale + payment.
+                        Safe to re-upload — duplicates are skipped.
+                    </p>
+                    <input type="file" id="qbcsv-file-input" accept=".csv" style="font-size:11px; margin-bottom:8px;">
+                    <div>
+                        <button class="btn btn-primary" onclick="IIFPage.importSalesReceiptCsv()">Import Sales Receipts</button>
+                    </div>
+                    <div id="qbcsv-import-result" style="margin-top:12px;"></div>
+                </div>
             </div>`;
+    },
+
+    async importSalesReceiptCsv() {
+        const input = $('#qbcsv-file-input');
+        if (!input?.files[0]) { toast('Choose a CSV file first', 'error'); return; }
+        const formData = new FormData();
+        formData.append('file', input.files[0]);
+        try {
+            App.setStatus('Importing sales receipts from report CSV...');
+            const res = await fetch('/api/csv/import/sales-receipts', { method: 'POST', body: formData });
+            const result = await res.json();
+            if (!res.ok) throw new Error(result.detail || 'Import failed');
+
+            let html = `<div class="iif-results"><h4>Results</h4>
+                <div class="result-row"><span>Sales Receipts</span><span class="result-count">${result.imported} imported</span></div>`;
+            if (result.duplicates_skipped > 0) {
+                html += `<div class="result-row"><span>Duplicates skipped</span><span class="result-count">${result.duplicates_skipped}</span></div>`;
+            }
+            html += '</div>';
+            if (result.warnings?.length) {
+                html += '<div class="iif-errors" style="border-color:var(--warning,#cc9933);">';
+                result.warnings.forEach(w => { html += `${escapeHtml(w)}<br>`; });
+                html += '</div>';
+            }
+            if (result.errors?.length) {
+                html += '<div class="iif-errors">';
+                result.errors.forEach(e => { html += `${escapeHtml(typeof e === 'string' ? e : JSON.stringify(e))}<br>`; });
+                html += '</div>';
+            }
+            $('#qbcsv-import-result').innerHTML = html;
+            toast(`Imported ${result.imported} sales receipt${result.imported === 1 ? '' : 's'}`);
+            App.setStatus('QuickBooks Interop — Import complete');
+        } catch (err) {
+            toast(err.message, 'error');
+            App.setStatus('Import failed');
+        }
     },
 
     // ==== Export Functions ====
