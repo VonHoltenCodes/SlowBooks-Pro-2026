@@ -1,0 +1,19 @@
+"Sunrise Trailer Sales, Inc.",,,,,,,,,,,,,,,,8:16 PM
+Transaction Detail by Date,,,,,,,,,,,,,,,,08/18/26
+"April 9 through August 18, 2026",,,,,,,,,,,,,,,,Accrual Basis
+,Date,Num,Name,Memo,Item,Item Description,Account,Class,Clr,Split,Qty,Sales Price,Debit,Credit,Amount,Balance
+"Apr 9 - Aug 18, '26",,,,,,,,,,,,,,,,
+,04/09/26,1,Alex Vega,,,,Undeposited Funds,,√,-SPLIT-,,,"24,265.00",,0.00,0.00
+,04/09/26,1,Alex Vega,out of state sale:  2026 camper,Trailer Sales:Campers,out of state sale,Vehicle Sales (Resale),,,Undeposited Funds,-1,"23,995.00",,"23,995.00","-23,995.00","-23,995.00"
+,04/09/26,1,Alex Vega,out of state sale: battery,Exempt Parts:Battery,out of state sale: battery,Batteries (Exempt),,,Undeposited Funds,-1,250.00,,250.00,-250.00,"-24,245.00"
+,04/09/26,1,Alex Vega,out of state,Exempt Parts,,Parts Taxable,,,Undeposited Funds,-1,595.00,,595.00,-595.00,"-24,840.00"
+,04/09/26,1,Alex Vega,out of state,Miscellaneous:Dealer Conv.,,Others Income,,,Undeposited Funds,-1,425.00,,425.00,-425.00,"-25,265.00"
+,04/09/26,1,Alex Vega,less deposit,Miscellaneous:Deposits,,Deposits,,,Undeposited Funds,-1,"-1,000.00","1,000.00",,"1,000.00","-24,265.00"
+,04/09/26,1,Dept of Revenue,Sales Tax,SCST,Sales Tax,Sales Tax Payable,,,Undeposited Funds,,6.4%,0.00,,0.00,"-24,265.00"
+,04/09/26,2,Bella Cruz,,,,Undeposited Funds,,√,-SPLIT-,,,"1,000.00",,0.00,"-24,265.00"
+,04/09/26,2,Bella Cruz,dep on 2013 unit,Miscellaneous:Deposits,,Deposits,,,Undeposited Funds,-1,"1,000.00",,"1,000.00","-1,000.00","-25,265.00"
+,04/09/26,2,Dept of Revenue,Sales Tax,SCST,Sales Tax,Sales Tax Payable,,,Undeposited Funds,,6.4%,0.00,,0.00,"-25,265.00"
+,04/10/26,3,Casey Reed,,,,Checking,,√,-SPLIT-,,,106.40,,0.00,"-25,265.00"
+,04/10/26,3,Casey Reed,hitch pin,Parts:Hitch Pin,hitch pin,Parts Taxable,,,Checking,-2,50.00,,100.00,-100.00,"-25,365.00"
+,04/10/26,3,Dept of Revenue,Sales Tax,SCST,Sales Tax,Sales Tax Payable,,,Checking,,6.4%,,6.40,-6.40,"-25,371.40"
+"Apr 9 - Aug 18, '26",,,,,,,,,,,,,,,,
