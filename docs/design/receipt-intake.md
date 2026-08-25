@@ -1,36 +1,59 @@
-# Receipt / Purchase Intake — design notes (brainstorm, 2026-08-13)
+# Receipt / Document Intake — design notes
 
-Status: DESIGN. Nothing here is committed product behavior yet.
+Status: DESIGN, revised 2026-08-25. Nothing here is committed product
+behavior yet. Revision: an outside contributor proposed a lightweight
+in-core Tesseract tier, and it fits — the "standalone repo" rule below
+existed to keep heavy vision dependencies out of the frozen installers,
+and Tesseract doesn't carry any.
 
-## Two-tier strategy (decided)
+## Three-tier strategy
 
-- **Tier 1 (this repo)**: vendor order-history importers — big-box vendors
-  (Amazon Business, Home Depot Pro, Lowe's Pro, Grainger, Uline) expose
-  structured CSV/order exports. Use those wherever they exist: 100%
-  reliable vs. OCR's confidence games, SKU-level line items. Reuses the
-  proven dialect pattern (migration engine / bank CSV importer): dedup on
-  order number, line items → bills/cc_charges, match against SimpleFIN
-  bank feed. Start every dialect from a REAL export file (MYOB lesson).
-- **Tier 2 (standalone repo, merged later)**: OCR for the long tail —
-  paper/thermal receipts. Standalone keeps torch/CUDA/vision deps out of
-  this repo's clean footprint and frozen installers. Also reusable for
-  sub/vendor invoice capture later.
+- **Tier 1 (this repo)**: vendor order-history importers — big-box
+  vendors (Amazon Business, Home Depot Pro, Lowe's Pro, Grainger,
+  Uline) expose structured CSV/order exports. Use those wherever they
+  exist: 100% reliable vs. OCR's confidence games, SKU-level line
+  items. Reuses the proven dialect pattern (migration engine / bank CSV
+  importer): dedup on order number, line items → bills/cc_charges,
+  match against SimpleFIN bank feed. Start every dialect from a REAL
+  export file (MYOB lesson).
+- **Tier 2 (this repo, NEW)**: lightweight local OCR via Tesseract +
+  pytesseract + Pillow (pdf pages via the poppler tools already used
+  for PDF work, or pypdfium2). Ground rules that make it mergeable:
+  - **Optional, graceful degrade**: pytesseract shells out to the
+    system `tesseract` binary. The feature detects the binary and,
+    when absent, the endpoint returns a clear "install Tesseract to
+    enable scanning" message — the app must run exactly as today
+    without it. No bundling into the signed Windows/macOS installers
+    in the first pass (signing/notarizing a nested binary is its own
+    project); Docker/native installs just add the system package.
+  - **Deterministic parsing first**: raw OCR text → regex/anchor
+    extraction for date, total, vendor. The existing BYOK AI layer
+    (`app/services/ai_service.py`, 7 providers incl. self-hosted) is
+    the OPTIONAL enhancement for messy documents — never a bundled
+    model, never required, off by default like all AI here.
+  - **One document type first**: receipts → pre-fill the Sales Receipt
+    / Bill form (UI: a "Scan" button that uploads and populates the
+    form; the operator always reviews before saving). Checks, bank
+    statements, and 1099s are follow-ons — statements especially
+    should push people to OFX/CSV/SimpleFIN first, OCR as last resort.
+  - Endpoint shape: `POST /api/ocr/receipt` (multipart), auth'd like
+    everything else; tests must skip cleanly when tesseract is absent
+    and CI installs it (ubuntu: `apt-get install tesseract-ocr`).
+- **Tier 3 (standalone repo, later)**: heavyweight OCR for the long
+  tail — thermal receipts, batch capture. PaddleOCR-class accuracy,
+  anchor-based template extraction (invoice2data-style: field positions
+  relative to anchor text, never absolute pixels), correction UI where
+  operator fixes update the template. Standalone keeps torch/CUDA
+  weight out of this repo's clean footprint. Cloud OCR strictly opt-in.
 
-## Tier 2 technical direction
+## Honest framing (unchanged)
 
-- **Anchor-based template extraction, NOT ML** (invoice2data-style):
-  store field positions relative to anchor text (e.g., the "TOTAL"
-  label), never absolute pixel coords — survives variable receipt length.
-- **PaddleOCR over Tesseract** for thermal receipts; cloud OCR
-  (Textract / Azure) strictly opt-in for higher accuracy — local-first
-  is the brand.
-- **Correction UI is the real "self-adapting" mechanism**: flag
-  low-confidence fields; operator corrections update the template.
-  Be honest in framing — this is template learning, not ML. No
-  "AI-powered" claims for what is anchor matching plus feedback.
+Template learning is anchor matching plus operator feedback — say
+that. No "AI-powered" claims for deterministic extraction; the AI
+label belongs only to the BYOK path when the operator turns it on.
 
-## Integration seam
+## Integration seam (unchanged)
 
 Structured JSON over the local API with a scoped bookkeeper token
-(shipped v2.5.1) — the receipt service is the first real token customer.
-Attachments module links the source image/CSV to the created document.
+(shipped v2.5.1). Attachments module links the source image/PDF to the
+created document, so every scanned entry keeps its evidence.
