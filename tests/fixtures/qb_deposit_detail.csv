@@ -1,0 +1,18 @@
+,,,,,,,,5:17 PM
+Deposit Detail,,,,,,,,08/25/26
+"April 1, 2026",,,,,,,,
+,Type,Date,Num,Name,Memo,Account,Pay Meth,Amount
+ ,,,,,,,,
+,Deposit,04/01/26,,,Deposit,Checking,,"17,918.67"
+ ,,,,,,,,
+,Sales Receipt,04/01/26,1,Gina Jefferson,,Undeposited Funds,Check,"-1,578.12"
+,Sales Receipt,04/01/26,2,Jim Franco,,Undeposited Funds,Check,"-16,340.55"
+TOTAL,,,,,,,,
+ ,,,,,,,,
+,Deposit,04/01/26,,,Deposit,Checking,,"3,087.17"
+ ,,,,,,,,
+,Sales Receipt,04/01/26,524,Frances Markham,,Undeposited Funds,VISA,-482.78
+,Sales Receipt,04/01/26,525,Pete Dickson,,Undeposited Funds,VISA,-32.53
+,Sales Receipt,04/01/26,523,Laurie Frederick,,Undeposited Funds,VISA,-423.50
+,Sales Receipt,04/01/26,521,Dana Cortes,,Undeposited Funds,VISA,"-2,148.36"
+TOTAL,,,,,,,,

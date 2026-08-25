@@ -7,6 +7,37 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Deposits and checks from QuickBooks report CSVs
+
+The report-CSV path now covers three exports, auto-detected by their
+columns on one upload: **Deposit Detail** (each deposit becomes the
+journal entry moving its payments from Undeposited Funds to the bank),
+**Check Detail** (bank credit + expense debits — including payroll
+checks, whose withholding lines credit their liability accounts and
+net to the check amount; sign-aware parsing again, proven against a
+real customer's export), and the Transaction Detail sales-receipt
+report below. Blocks that don't balance or reference missing accounts
+error individually with a pointer to import the chart of accounts
+first; re-uploads dedup.
+
+### Sales receipts from a QuickBooks report CSV
+
+QuickBooks Desktop can't export transactions to IIF, so the sales-
+receipt migration doc pointed Desktop users at a Transaction Detail
+report export — which previously had nowhere to land. It does now:
+**QuickBooks Interop → Sales Receipts from Report CSV** imports a
+"Transaction Detail by Date" export (filtered to Sales Receipt), each
+receipt becoming a paid sale + payment with balanced journals.
+
+Shaped by a real customer's export, so the parser handles what real
+files contain: applied-deposit contra lines that reduce the total
+(sign-aware — an absolute-value parse would inflate them), percentage
+tax rows carrying the tax agency's name, deposits-only receipts,
+thousands separators, and per-receipt balance checks with clear
+errors. Unmatched account names post to default income with a warning;
+re-uploads dedup by customer + date + total. Receipt numbers keep the
+report's Num where free (SR-prefixed on collision).
+
 ### v2.6.1 — The receipt now looks like a receipt
 
 - The printed/saved sales receipt was the unmodified invoice template —

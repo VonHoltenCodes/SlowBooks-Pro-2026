@@ -102,3 +102,17 @@ async def csv_import_items(file: UploadFile = File(...), db: Session = Depends(g
     content = (await read_limited(file, label="CSV file")).decode("utf-8-sig")
     result = import_items(db, content)
     return result
+
+
+@router.post("/import/qb-report")
+async def csv_import_qb_report(
+    file: UploadFile = File(...), db: Session = Depends(get_db)
+):
+    """Import a QuickBooks Desktop report CSV — the documented fallback
+    for Desktop, which can't export transactions to IIF. Auto-detects the
+    report by its columns: Transaction Detail filtered to Sales Receipt,
+    Deposit Detail, or Check Detail."""
+    from app.services.qb_report_import import import_qb_report
+
+    content = (await read_limited(file, label="CSV file")).decode("utf-8-sig")
+    return import_qb_report(db, content)

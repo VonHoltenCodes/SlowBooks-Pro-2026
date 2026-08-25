@@ -52,19 +52,48 @@ Desktop does not export transactions to IIF natively. Two options:
   `CASH SALE` (sales receipts), `ESTIMATE`, `BILL`, and `DEPOSIT`
   blocks. Import lists first, then transactions, so customer/item/
   account names resolve.
-- **A clean report export** to review your data or hand-build IIF from.
-  The messy-report trap is exporting a summary report; use a detail
-  report filtered to one transaction type instead:
+- **For sales receipts, deposits, and checks: a report CSV imports
+  directly.** Three Desktop report exports upload straight into
+  **QuickBooks Interop → Import from Report CSV** (the report type is
+  auto-detected):
+
+  - **Deposit Detail** (`Reports → Banking → Deposit Detail`) — each
+    deposit imports as a journal entry moving its payments from
+    Undeposited Funds into your bank account, so the check register and
+    reconciliation see them.
+  - **Check Detail** (`Reports → Banking → Check Detail`) — each check
+    imports as a journal entry (bank credit, expense debits). Payroll
+    checks work too: withholding lines credit their liability accounts
+    and the net matches the check.
+  - **Transaction Detail filtered to Sales Receipt** — each receipt
+    imports as a paid sale + payment (details below).
+
+  Import your **lists first** (chart of accounts, customers, items via
+  IIF) so account and item names resolve — deposit and check blocks
+  whose accounts are missing are reported with a pointer to do exactly
+  that. All three are safe to re-upload; duplicates are skipped.
+
+  The messy-report trap is exporting a summary report; the sales
+  receipt path uses a detail report filtered to one transaction type:
 
   1. **Reports → Custom Reports → Transaction Detail**
   2. Set the date range to **All**.
   3. **Filters** tab → *Transaction Type* → **Sales Receipt**.
-  4. **Display** tab → trim the columns to Date, Num, Name, Item, Qty,
-     Sales Price, Amount.
-  5. **Excel → Create New Worksheet** (or Print → Save as CSV).
+  4. Keep the report's **default columns** — the importer needs at
+     least Date, Num, Name, Account, Split, Debit, and Credit (Memo,
+     Item, Qty, and Sales Price are used when present).
+  5. **Excel → Create New Worksheet**, save as CSV (or Print → Save as
+     CSV).
+  6. Upload it under **QuickBooks Interop → Sales Receipts from Report
+     CSV**. Each receipt imports as a paid sale + its payment, with
+     balanced journals; applied-deposit and discount lines keep their
+     signs, tax rows are recognized by the percentage in Sales Price,
+     and re-uploads skip duplicates.
 
-  That yields one row per line item with no subtotal noise — the same
-  recipe works for invoices and payments by switching the filter.
+  Import your **lists first** (chart of accounts, customers, items via
+  IIF) so the report's account and item names resolve — unmatched
+  accounts post to your default income account, with a warning naming
+  them.
 
 ### How CASH SALE blocks import
 
