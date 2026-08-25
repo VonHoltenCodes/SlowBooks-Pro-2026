@@ -44,18 +44,25 @@ New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
 # Only runs when the server data dir has no company files yet, so it can
 # never clobber an active server's books.
 $DesktopDir = Join-Path $env:LOCALAPPDATA "SlowBooksPro"
-$serverHasBooks = @(Get-ChildItem -Path $DataDir -Filter *.db -ErrorAction SilentlyContinue).Count -gt 0
-$desktopHasBooks = (Test-Path $DesktopDir) -and
-    (@(Get-ChildItem -Path $DesktopDir -Filter *.db -ErrorAction SilentlyContinue).Count -gt 0)
+# Company files live in the data home's companies\ subfolder (root-level
+# .db checked too, for older layouts).
+function Test-HasBooks([string]$dir) {
+    if (-not (Test-Path $dir)) { return $false }
+    $roots = @(Get-ChildItem -Path $dir -Filter *.db -ErrorAction SilentlyContinue)
+    $comps = @(Get-ChildItem -Path (Join-Path $dir "companies") -Filter *.db -ErrorAction SilentlyContinue)
+    return ($roots.Count + $comps.Count) -gt 0
+}
+$serverHasBooks = Test-HasBooks $DataDir
+$desktopHasBooks = Test-HasBooks $DesktopDir
 if (-not $serverHasBooks -and $desktopHasBooks) {
     Write-Host ">> Copying your desktop books from $DesktopDir"
-    Get-ChildItem -Path $DesktopDir -File |
+    Get-ChildItem -Path $DesktopDir -File -Force |
         Where-Object { $_.Extension -in ".db", ".json" -or $_.Name -like ".env*" } |
         ForEach-Object {
             Copy-Item $_.FullName -Destination $DataDir -Force
             Write-Host ("   " + $_.Name)
         }
-    foreach ($sub in "uploads", "backups") {
+    foreach ($sub in "companies", "uploads", "backups") {
         $src = Join-Path $DesktopDir $sub
         if (Test-Path $src) {
             Copy-Item $src -Destination $DataDir -Recurse -Force
