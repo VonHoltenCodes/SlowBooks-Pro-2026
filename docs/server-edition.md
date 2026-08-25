@@ -36,9 +36,17 @@ powershell -ExecutionPolicy Bypass -File _internal\scripts\windows\serveredition
 ```
 
 This registers a startup task (runs as SYSTEM before anyone logs in),
-opens the firewall port, moves the data home to
+opens the firewall port, sets the data home to
 `C:\ProgramData\SlowBooksPro` (machine-wide, not one user's profile),
-starts the server, and prints your team's connect URLs.
+starts the server, and prints your team's connect URLs. If you already
+have desktop-mode books in `%LOCALAPPDATA%\SlowBooksPro`, the script
+copies them (company files, encryption key, uploads, backups) into the
+new data home the first time — your desktop copies are left untouched.
+
+Run it from an **elevated** PowerShell (right-click → Run as
+Administrator) and from the installed app's folder — a wrong location
+stops with a "SlowBooksPro.exe not found" message before anything is
+changed.
 
 Undo it any time:
 

@@ -1,8 +1,8 @@
 import re
 from decimal import Decimal
-from typing import Annotated
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, BeforeValidator, StringConstraints
 
 # A required display name that cannot be blank.
 #
@@ -27,6 +27,19 @@ OptionalEmail = Annotated[
     str,
     StringConstraints(strip_whitespace=True, max_length=200, pattern=_EMAIL_RE.pattern),
 ]
+
+
+def _blank_to_none(v):
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
+
+
+# An email field that treats blank as absent. HTML forms submit every empty
+# input as "" — Optional[OptionalEmail] alone rejects that with a pattern
+# 422 even though the user typed nothing (#64). Blank collapses to None
+# before the pattern runs; anything non-blank must still look like an email.
+BlankableEmail = Annotated[Optional[OptionalEmail], BeforeValidator(_blank_to_none)]
 
 
 NonBlankName = Annotated[

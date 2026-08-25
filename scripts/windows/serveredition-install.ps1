@@ -26,12 +26,46 @@ $RuleName = "SlowBooks Pro Server Edition"
 if (-not $ExePath) {
     $ExePath = Join-Path $PSScriptRoot "..\..\..\SlowBooksPro.exe"
 }
-$ExePath = (Resolve-Path $ExePath).Path
+# Existence check must come first: Resolve-Path throws its own opaque
+# error on a missing path under ErrorActionPreference=Stop, which aborted
+# the whole install before the firewall/task steps with no guidance (#65).
 if (-not (Test-Path $ExePath)) {
-    throw "SlowBooksPro.exe not found at $ExePath - pass -ExePath"
+    throw ("SlowBooksPro.exe not found at $ExePath - run this script from " +
+        "the installed app's _internal\scripts\windows\ folder, or pass -ExePath")
 }
+$ExePath = (Resolve-Path $ExePath).Path
 
 New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+
+# Bring existing desktop-mode books along (docs promised this; the script
+# previously only created an empty folder, #65). Copies company files, the
+# manifest, the .env encryption key (without it, stored credentials cannot
+# be decrypted), uploads, and backups - not the webview cache or logs.
+# Only runs when the server data dir has no company files yet, so it can
+# never clobber an active server's books.
+$DesktopDir = Join-Path $env:LOCALAPPDATA "SlowBooksPro"
+$serverHasBooks = @(Get-ChildItem -Path $DataDir -Filter *.db -ErrorAction SilentlyContinue).Count -gt 0
+$desktopHasBooks = (Test-Path $DesktopDir) -and
+    (@(Get-ChildItem -Path $DesktopDir -Filter *.db -ErrorAction SilentlyContinue).Count -gt 0)
+if (-not $serverHasBooks -and $desktopHasBooks) {
+    Write-Host ">> Copying your desktop books from $DesktopDir"
+    Get-ChildItem -Path $DesktopDir -File |
+        Where-Object { $_.Extension -in ".db", ".json" -or $_.Name -like ".env*" } |
+        ForEach-Object {
+            Copy-Item $_.FullName -Destination $DataDir -Force
+            Write-Host ("   " + $_.Name)
+        }
+    foreach ($sub in "uploads", "backups") {
+        $src = Join-Path $DesktopDir $sub
+        if (Test-Path $src) {
+            Copy-Item $src -Destination $DataDir -Recurse -Force
+            Write-Host ("   " + $sub + "\")
+        }
+    }
+    Write-Host ">> Desktop copies are untouched; the server now uses $DataDir"
+} elseif ($serverHasBooks) {
+    Write-Host ">> $DataDir already has company files - leaving them as-is"
+}
 
 Write-Host ">> Opening firewall port $Port (rule: $RuleName)"
 netsh advfirewall firewall delete rule name="$RuleName" | Out-Null
