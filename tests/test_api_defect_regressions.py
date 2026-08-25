@@ -317,3 +317,71 @@ def test_machine_writes_are_attributed_to_system(client, db_session):
     assert upd and all(r.username == "system" for r in upd), [
         (r.action, r.username) for r in upd
     ]
+
+
+# ---------------------------------------------------------------------------
+# #64 — HTML forms submit blank inputs as "", and a blank email must mean
+# "no email", not "invalid email". The Customer Center / Vendor forms send
+# exactly this shape, so every create with an empty Email box 422'd.
+# ---------------------------------------------------------------------------
+
+
+def _form_shaped(name):
+    """Payload as customers.js builds it: FormData -> empty strings."""
+    return {
+        "name": name,
+        "company": "",
+        "email": "",
+        "phone": "",
+        "mobile": "",
+        "fax": "",
+        "website": "",
+        "terms": "Net 30",
+        "bill_address1": "",
+        "bill_address2": "",
+        "bill_city": "",
+        "bill_state": "",
+        "bill_zip": "",
+        "bill_country": "US",
+        "ship_address1": "",
+        "ship_address2": "",
+        "ship_city": "",
+        "ship_state": "",
+        "ship_zip": "",
+        "ship_country": "US",
+        "tax_id": "",
+        "notes": "",
+    }
+
+
+def test_customer_create_accepts_blank_email_from_form_payload(client):
+    r = client.post("/api/customers", json=_form_shaped("Blank Email Customer"))
+    assert r.status_code == 201, r.text
+    assert r.json()["email"] is None
+
+
+def test_vendor_create_accepts_blank_email_from_form_payload(client):
+    payload = _form_shaped("Blank Email Vendor")
+    for key in list(payload):
+        if key.startswith(("bill_", "ship_")):
+            del payload[key]
+    r = client.post("/api/vendors", json=payload)
+    assert r.status_code == 201, r.text
+    assert r.json()["email"] is None
+
+
+def test_customer_update_accepts_blank_email(client):
+    created = client.post(
+        "/api/customers",
+        json={"name": "Update Blank Email", "email": "real@example.com"},
+    ).json()
+    r = client.put(f"/api/customers/{created['id']}", json={"email": ""})
+    assert r.status_code == 200, r.text
+    assert r.json()["email"] is None
+
+
+def test_actually_malformed_email_still_rejected(client):
+    r = client.post(
+        "/api/customers", json={"name": "Bad Email", "email": "not-an-email"}
+    )
+    assert r.status_code == 422

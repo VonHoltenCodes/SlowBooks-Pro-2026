@@ -25,13 +25,24 @@ const API = {
         }
         if (!res.ok) {
             const body = await res.json().catch(() => ({ detail: res.statusText }));
-            // FastAPI HTTPException(detail=str) → string; HTTPException(detail=dict) → object.
+            // FastAPI HTTPException(detail=str) → string; HTTPException(detail=dict) → object;
+            // pydantic validation (422) → array of {loc, msg} entries.
             // Carry both the human message and the structured body so callers can
             // introspect 409s, 422s, etc. without losing information.
             const detail = body && body.detail !== undefined ? body.detail : body;
-            const message = typeof detail === 'string'
-                ? detail
-                : (detail && detail.message) || res.statusText || 'Request failed';
+            let message;
+            if (typeof detail === 'string') {
+                message = detail;
+            } else if (Array.isArray(detail)) {
+                // Name the field(s): "email: String should match pattern ..."
+                // — a bare "Unprocessable Entity" left users guessing (#64).
+                message = detail.map(d => {
+                    const field = (d.loc || []).filter(p => p !== 'body').join('.');
+                    return field ? `${field}: ${d.msg}` : d.msg;
+                }).filter(Boolean).join('; ') || res.statusText || 'Request failed';
+            } else {
+                message = (detail && detail.message) || res.statusText || 'Request failed';
+            }
             const err = new Error(message);
             err.status = res.status;
             err.detail = detail;
