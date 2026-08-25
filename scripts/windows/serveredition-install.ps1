@@ -80,11 +80,23 @@ netsh advfirewall firewall add rule name="$RuleName" dir=in action=allow `
     protocol=TCP localport=$Port | Out-Null
 
 Write-Host ">> Registering startup task $TaskName (runs as SYSTEM, no login needed)"
-$TaskCmd = "`"$ExePath`" --serve-lan --port $Port --data-dir `"$DataDir`""
+# PowerShell 5.1 mangles embedded double quotes when handing arguments to
+# native commands: with the app in "C:\Program Files\SlowBooks Pro 2026",
+# schtasks saw /TR split at the first space and rejected it (Invalid
+# argument/option - 'Files\SlowBooks'), so the task was never created from
+# a normal installed location. Backslash-quote is the one form PS passes
+# through literally.
+$TaskCmd = "\`"$ExePath\`" --serve-lan --port $Port --data-dir \`"$DataDir\`""
 schtasks /Create /TN $TaskName /SC ONSTART /RU SYSTEM /RL HIGHEST /F /TR $TaskCmd | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "schtasks could not register the $TaskName task (exit $LASTEXITCODE)"
+}
 
 Write-Host ">> Starting the server now"
 schtasks /Run /TN $TaskName | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    throw "schtasks could not start the $TaskName task (exit $LASTEXITCODE)"
+}
 Start-Sleep -Seconds 8
 
 $ips = Get-NetIPAddress -AddressFamily IPv4 |
