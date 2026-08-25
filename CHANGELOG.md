@@ -7,6 +7,24 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.6.2 — Report-CSV imports & field fixes
+
+**Field fixes** (both from a Server Edition user's report, #64/#65):
+
+- Creating a customer or vendor with a blank Email box failed with an
+  unexplained "unprocessable entity" — blank email now means "no
+  email", and validation errors name the field they're about.
+  (Workaround before this release was entering any valid email.)
+- The Server Edition install script now copies existing desktop books
+  (company files, encryption key, uploads, backups) into the server's
+  data home, as the docs always claimed; a wrong run location stops
+  with a guided message; and — found reproducing the report on real
+  hardware — the startup task could never be registered from the
+  normal installed path at all (PowerShell 5.1 mangled the quoting on
+  the spaced "Program Files" path and the script printed success over
+  the failure). Task creation is fixed and failures now stop the
+  script loudly. Field-verified end-to-end on hardware.
+
 ### Deposits and checks from QuickBooks report CSVs
 
 The report-CSV path now covers three exports, auto-detected by their
