@@ -52,9 +52,29 @@ Desktop does not export transactions to IIF natively. Two options:
   `CASH SALE` (sales receipts), `ESTIMATE`, `BILL`, and `DEPOSIT`
   blocks. Import lists first, then transactions, so customer/item/
   account names resolve.
-- **For sales receipts: a report CSV imports directly.** The
-  messy-report trap is exporting a summary report; use a detail report
-  filtered to one transaction type instead:
+- **For sales receipts, deposits, and checks: a report CSV imports
+  directly.** Three Desktop report exports upload straight into
+  **QuickBooks Interop → Import from Report CSV** (the report type is
+  auto-detected):
+
+  - **Deposit Detail** (`Reports → Banking → Deposit Detail`) — each
+    deposit imports as a journal entry moving its payments from
+    Undeposited Funds into your bank account, so the check register and
+    reconciliation see them.
+  - **Check Detail** (`Reports → Banking → Check Detail`) — each check
+    imports as a journal entry (bank credit, expense debits). Payroll
+    checks work too: withholding lines credit their liability accounts
+    and the net matches the check.
+  - **Transaction Detail filtered to Sales Receipt** — each receipt
+    imports as a paid sale + payment (details below).
+
+  Import your **lists first** (chart of accounts, customers, items via
+  IIF) so account and item names resolve — deposit and check blocks
+  whose accounts are missing are reported with a pointer to do exactly
+  that. All three are safe to re-upload; duplicates are skipped.
+
+  The messy-report trap is exporting a summary report; the sales
+  receipt path uses a detail report filtered to one transaction type:
 
   1. **Reports → Custom Reports → Transaction Detail**
   2. Set the date range to **All**.

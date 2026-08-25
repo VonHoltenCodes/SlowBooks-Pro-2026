@@ -96,38 +96,48 @@ const IIFPage = {
                     <div id="iif-import-result"></div>
                 </div>
 
-                <!-- Sales Receipts from Report CSV -->
+                <!-- QuickBooks Report CSV import -->
                 <div class="iif-section">
-                    <h3>&#9635; Sales Receipts from Report CSV</h3>
+                    <h3>&#9635; Import from Report CSV</h3>
                     <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
-                        QuickBooks Desktop can't export transactions to IIF. Instead, run
-                        <strong>Reports &gt; Custom Reports &gt; Transaction Detail</strong>, filter
-                        Transaction Type to <strong>Sales Receipt</strong>, export to CSV, and
-                        upload it here. Each receipt imports as a paid sale + payment.
+                        QuickBooks Desktop can't export transactions to IIF — export a detail
+                        <strong>report</strong> to CSV instead and upload it here. The report type is
+                        detected automatically: <strong>Transaction Detail</strong> filtered to Sales
+                        Receipt (each imports as a paid sale + payment), <strong>Deposit
+                        Detail</strong>, or <strong>Check Detail</strong> (both import as journal
+                        entries on your bank account). Keep the report's default columns.
                         Safe to re-upload — duplicates are skipped.
                     </p>
                     <input type="file" id="qbcsv-file-input" accept=".csv" style="font-size:11px; margin-bottom:8px;">
                     <div>
-                        <button class="btn btn-primary" onclick="IIFPage.importSalesReceiptCsv()">Import Sales Receipts</button>
+                        <button class="btn btn-primary" onclick="IIFPage.importQbReportCsv()">Import Report CSV</button>
                     </div>
                     <div id="qbcsv-import-result" style="margin-top:12px;"></div>
                 </div>
             </div>`;
     },
 
-    async importSalesReceiptCsv() {
+    async importQbReportCsv() {
         const input = $('#qbcsv-file-input');
         if (!input?.files[0]) { toast('Choose a CSV file first', 'error'); return; }
         const formData = new FormData();
         formData.append('file', input.files[0]);
         try {
-            App.setStatus('Importing sales receipts from report CSV...');
-            const res = await fetch('/api/csv/import/sales-receipts', { method: 'POST', body: formData });
+            App.setStatus('Importing QuickBooks report CSV...');
+            const res = await fetch('/api/csv/import/qb-report', { method: 'POST', body: formData });
             const result = await res.json();
             if (!res.ok) throw new Error(result.detail || 'Import failed');
 
-            let html = `<div class="iif-results"><h4>Results</h4>
-                <div class="result-row"><span>Sales Receipts</span><span class="result-count">${result.imported} imported</span></div>`;
+            const kindLabel = { sales_receipts: 'Sales Receipts', deposits: 'Deposits', checks: 'Checks' };
+            let html = '<div class="iif-results"><h4>Results</h4>';
+            if (result.detected) {
+                html += `<div class="result-row"><span>Detected report</span><span class="result-count">${kindLabel[result.detected] || result.detected}</span></div>`;
+            }
+            for (const key of ['sales_receipts', 'deposits', 'checks']) {
+                if (result[key] > 0) {
+                    html += `<div class="result-row"><span>${kindLabel[key]}</span><span class="result-count">${result[key]} imported</span></div>`;
+                }
+            }
             if (result.duplicates_skipped > 0) {
                 html += `<div class="result-row"><span>Duplicates skipped</span><span class="result-count">${result.duplicates_skipped}</span></div>`;
             }
@@ -143,7 +153,8 @@ const IIFPage = {
                 html += '</div>';
             }
             $('#qbcsv-import-result').innerHTML = html;
-            toast(`Imported ${result.imported} sales receipt${result.imported === 1 ? '' : 's'}`);
+            const total = (result.sales_receipts || 0) + (result.deposits || 0) + (result.checks || 0);
+            toast(`Imported ${total} record${total === 1 ? '' : 's'}`);
             App.setStatus('QuickBooks Interop — Import complete');
         } catch (err) {
             toast(err.message, 'error');

@@ -7,6 +7,19 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Deposits and checks from QuickBooks report CSVs
+
+The report-CSV path now covers three exports, auto-detected by their
+columns on one upload: **Deposit Detail** (each deposit becomes the
+journal entry moving its payments from Undeposited Funds to the bank),
+**Check Detail** (bank credit + expense debits — including payroll
+checks, whose withholding lines credit their liability accounts and
+net to the check amount; sign-aware parsing again, proven against a
+real customer's export), and the Transaction Detail sales-receipt
+report below. Blocks that don't balance or reference missing accounts
+error individually with a pointer to import the chart of accounts
+first; re-uploads dedup.
+
 ### Sales receipts from a QuickBooks report CSV
 
 QuickBooks Desktop can't export transactions to IIF, so the sales-
