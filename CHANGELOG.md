@@ -7,6 +7,27 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Receipt intake — scan a receipt into the Sales Receipt / Bill form
+
+A new **Scan Receipt** button on both the Enter Sales Receipt and Enter
+Bill forms uploads a receipt image or PDF, runs it through local OCR
+(Tesseract), and pre-fills the form: date, merchant/vendor hint, and the
+grand total as a single line (Qty 1 × Rate = total), with detected tax
+split out on the Sales Receipt form (tax rate field) and noted in Bill
+Notes (bills have no tax field). The operator always reviews before
+saving, and the source image/PDF attaches to the saved document so every
+scanned entry keeps its evidence.
+
+Per the design notes, this is **zero new Python dependencies** —
+tesseract and poppler-utils are called directly via subprocess and stay
+the user's install (never bundled into the signed installers); the
+Docker image installs both system packages. When the binary is absent,
+the feature degrades gracefully: the button is disabled and the Settings
+page shows "install Tesseract to enable scanning." Parsing is
+deterministic (regex/anchor extraction for date, total, tax, merchant) —
+no AI, no bundled models. Design + API contract:
+[docs/design/receipt-intake-spec.md](docs/design/receipt-intake-spec.md).
+
 ### v2.6.3 — Classes cross over, and report CSVs read ANSI
 
 **Classes now come across from QuickBooks.** A class list export

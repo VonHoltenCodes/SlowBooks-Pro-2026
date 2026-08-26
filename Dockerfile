@@ -15,6 +15,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONMALLOC=pymalloc
 
 # System dependencies for WeasyPrint (PDF generation) and PostgreSQL client (backup/restore)
+# tesseract-ocr + poppler-utils: receipt intake (Tier 2 OCR) — per the design doc,
+# Docker/native installs add the system package; never bundled into the signed installers.
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libpango-1.0-0 \
@@ -26,6 +28,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxml2 \
     libxslt1.1 \
     postgresql-client \
+    tesseract-ocr \
+    poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
