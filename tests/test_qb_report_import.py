@@ -319,3 +319,61 @@ def test_payroll_check_with_withholding_contra_lines(db_session, seed_accounts):
     dr = sum(d for d, _ in by_acct.values())
     cr = sum(c for _, c in by_acct.values())
     assert dr == cr
+
+
+# ---------------------------------------------------------------------------
+# #62 post-merge review follow-ups (Keith)
+# ---------------------------------------------------------------------------
+
+BILL_PMT_BLOCK = (
+    " ,,,,,,,,,\n"
+    ",Bill Pmt -Check,03/07/26,2001,Parts Supplier Co,,,Checking,-250.00,\n"
+    " ,,,,,,,,,\n"
+    ",,,,,inv 4451,,Accounts Payable,250.00,-250.00\n"
+    "TOTAL,,,,,,,,250.00,-250.00\n"
+)
+
+
+def test_unrecognized_check_block_types_are_warned_not_silent(
+    db_session, seed_accounts
+):
+    """A Check Detail export can carry Bill Pmt -Check / Paycheck /
+    Transfer blocks; they aren't supported yet but must be COUNTED, not
+    silently dropped."""
+    from app.services.qb_report_import import import_check_report
+
+    text = CHECK_FIXTURE.read_text() + BILL_PMT_BLOCK
+    result = import_check_report(db_session, text)
+    assert result["checks"] == 4  # the real checks still import
+    assert result["errors"] == []
+    assert any(
+        "Bill Pmt -Check" in w and "skipped" in w for w in result["warnings"]
+    ), result["warnings"]
+
+
+def test_cp1252_export_decodes_instead_of_500(client, seed_accounts):
+    """QB Desktop's Save-as-CSV often writes Windows-1252; a payee like
+    'José' must import, not UnicodeDecodeError into a 500."""
+    text = CHECK_FIXTURE.read_text().replace("Freight Express", "José Hernández")
+    raw = text.encode("cp1252")
+    r = client.post(
+        "/api/csv/import/qb-report",
+        files={"file": ("checks.csv", raw, "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["detected"] == "checks"
+    assert body["checks"] == 4
+    receipts = client.get("/api/invoices?limit=10").json()  # sanity: api alive
+    assert isinstance(receipts, list)
+
+
+def test_undecodable_upload_gets_400_not_500(client, seed_accounts):
+    # 0x81 is undefined in cp1252 and invalid UTF-8 continuation
+    raw = b"\xff\xfe\x81\x81 not really text \x81"
+    r = client.post(
+        "/api/csv/import/qb-report",
+        files={"file": ("junk.csv", raw, "text/csv")},
+    )
+    assert r.status_code == 400
+    assert "UTF-8" in r.json()["detail"]
