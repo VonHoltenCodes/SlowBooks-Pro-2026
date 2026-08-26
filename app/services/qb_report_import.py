@@ -425,10 +425,16 @@ def import_sales_receipt_report(db: Session, csv_text: str) -> dict:
 # ============================================================================
 
 
-def _group_blocks(rows, cols, start, header_type):
+def _group_blocks(rows, cols, start, header_type, skipped=None):
     """Group report rows into blocks: a Type==header_type row starts a
     block, a TOTAL rail ends it, everything between with an Account is a
-    detail line."""
+    detail line.
+
+    A dated, typed row OUTSIDE any block is a block header of some other
+    transaction type (Check Detail reports can carry "Bill Pmt -Check",
+    "Paycheck", and "Transfer" blocks) — tallied into `skipped` so the
+    importer can warn instead of silently dropping them (#62 review).
+    """
     blocks = []
     current = None
     for n, row in enumerate(rows[start + 1 :], start=start + 2):
@@ -440,6 +446,14 @@ def _group_blocks(rows, cols, start, header_type):
         if rtype == header_type:
             current = {"row": n, "header": row, "details": []}
             blocks.append(current)
+            continue
+        if (
+            skipped is not None
+            and current is None
+            and rtype
+            and _parse_date(_cell(row, cols, "Date"))
+        ):
+            skipped[rtype] = skipped.get(rtype, 0) + 1
             continue
         if current is not None and _cell(row, cols, "Account"):
             current["details"].append(row)
@@ -455,7 +469,8 @@ def import_deposit_report(db: Session, csv_text: str) -> dict:
         result["errors"].append("Could not find the Deposit Detail header row.")
         return result
 
-    for block in _group_blocks(rows, cols, header_idx, "Deposit"):
+    skipped_types = {}
+    for block in _group_blocks(rows, cols, header_idx, "Deposit", skipped_types):
         sp = db.begin_nested()
         try:
             hdr = block["header"]
@@ -539,6 +554,11 @@ def import_deposit_report(db: Session, csv_text: str) -> dict:
             sp.rollback()
             result["errors"].append(f"Deposit block at row {block['row']}: {e}")
 
+    for btype, count in sorted(skipped_types.items()):
+        result["warnings"].append(
+            f"{count} '{btype}' block(s) skipped — this report import "
+            "handles Deposit blocks only"
+        )
     db.commit()
     return result
 
@@ -564,7 +584,8 @@ def import_check_report(db: Session, csv_text: str) -> dict:
         result["errors"].append("Could not find the Check Detail header row.")
         return result
 
-    for block in _group_blocks(rows, cols, header_idx, "Check"):
+    skipped_types = {}
+    for block in _group_blocks(rows, cols, header_idx, "Check", skipped_types):
         sp = db.begin_nested()
         try:
             hdr = block["header"]
@@ -663,6 +684,12 @@ def import_check_report(db: Session, csv_text: str) -> dict:
             sp.rollback()
             result["errors"].append(f"Check block at row {block['row']}: {e}")
 
+    for btype, count in sorted(skipped_types.items()):
+        result["warnings"].append(
+            f"{count} '{btype}' block(s) skipped — this report import "
+            "handles Check blocks only (Bill Pmt -Check, Paycheck, and "
+            "Transfer support is on the roadmap)"
+        )
     db.commit()
     return result
 
@@ -687,8 +714,10 @@ def detect_report_type(csv_text: str) -> str | None:
 def import_qb_report(db: Session, csv_text: str) -> dict:
     """Import any supported QB report CSV, auto-detected by its columns.
 
-    Check detection runs before deposit: the check signature is a strict
-    superset of the deposit signature minus Amount, so ordering matters.
+    Detection order (receipts, checks, deposits) is cosmetic: the three
+    column signatures are mutually exclusive on exact cell matches — the
+    deposit signature's bare "Amount" never appears in a check header
+    ("Original Amount"/"Paid Amount" are distinct cells). (#62 review)
     """
     kind = detect_report_type(csv_text)
     base = {

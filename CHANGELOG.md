@@ -7,6 +7,34 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.6.3 — Classes cross over, and report CSVs read ANSI
+
+**Classes now come across from QuickBooks.** A class list export
+(File > Utilities > Export > Lists > Class List) previously vanished on
+import: the IIF parser only recognized accounts, customers, vendors and
+items, so the `!CLASS` section fell through the skip-unknown-sections
+path. A transaction IIF never carries the definitions either — CLASS
+appears only as a column on split lines — which left no way into the
+class list but typing every name into Settings → Classes by hand, and
+every transaction citing one failed its document. The list imports now,
+ahead of anything that can cite a class, so a single file holding both
+the list and the transactions lands in one pass. QuickBooks'
+"Parent:Child" subclass paths are kept verbatim (the split lines use
+that same path, so this is exactly what makes the two match), inactive
+classes arrive archived, and re-importing a list is a no-op. An unknown
+class on a transaction still stops that document rather than being
+invented — the error now names the list export as the fix. (#69)
+
+**Report-CSV import follow-ups**, from the #62 post-merge review: block
+types the Check and Deposit Detail parsers don't handle are now counted
+and warned about ("3 'Bill Pmt -Check' block(s) skipped") instead of
+being silently dropped, so a full Check Detail export no longer looks
+like it imported cleanly when it didn't. CSV uploads also fall back to
+Windows-1252 when UTF-8 fails — QuickBooks Desktop's Save-as-CSV
+frequently writes ANSI, and a payee like "José" used to 500 the upload.
+All four CSV import endpoints got the fix; a file neither encoding can
+read returns a guided error. (#67)
+
 ### v2.6.2 — Report-CSV imports & field fixes
 
 **Field fixes** (both from a Server Edition user's report, #64/#65):

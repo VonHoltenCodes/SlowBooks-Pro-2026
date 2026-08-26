@@ -6,7 +6,7 @@
 # and collects per-row errors instead of aborting the entire import.
 #
 # Import order mirrors dependency chain:
-#   accounts -> customers -> vendors -> items -> transactions
+#   classes -> accounts -> customers -> vendors -> items -> transactions
 #
 # Duplicate detection: matches on name (accounts, customers, vendors, items)
 # or document number (invoices, payments) to prevent re-import collisions.
@@ -19,6 +19,7 @@ from decimal import Decimal, InvalidOperation
 from sqlalchemy.orm import Session
 
 from app.models.accounts import Account, AccountType
+from app.models.classes import TxnClass
 from app.models.contacts import Customer, Vendor
 from app.models.items import Item, ItemType
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
@@ -44,14 +45,20 @@ logger = logging.getLogger(__name__)
 def parse_iif(content: str) -> dict:
     """Parse IIF file content into structured sections.
 
-    Returns dict with keys like "ACCNT", "CUST", "VEND", "INVITEM",
-    and "TRNS" (list of transaction blocks).
+    Returns dict with keys like "ACCNT", "CLASS", "CUST", "VEND",
+    "INVITEM", and "TRNS" (list of transaction blocks).
 
     Each list/row section contains dicts keyed by header field names.
     Transaction blocks group TRNS + SPL lines until ENDTRNS.
     """
     result = {
         "ACCNT": [],
+        # QuickBooks exports the class list separately from transactions
+        # (File > Utilities > Export > Lists > Class List). A transaction
+        # IIF only ever carries CLASS as a column on SPL rows, never the
+        # definitions — so without this section there is nothing for
+        # _resolve_block_class to find.
+        "CLASS": [],
         "CUST": [],
         "VEND": [],
         "INVITEM": [],
@@ -104,7 +111,7 @@ def parse_iif(content: str) -> dict:
                 current_txn["spl"].append(row_dict)
             continue
 
-        # List rows: ACCNT, CUST, VEND, INVITEM
+        # List rows: ACCNT, CLASS, CUST, VEND, INVITEM
         if row_type in result and row_type != "TRNS":
             hdr = headers.get(row_type, [])
             row_dict = _fields_to_dict(hdr, fields)
@@ -215,6 +222,74 @@ def _find_account(db: Session, name: str) -> Account:
 # ============================================================================
 # Import Functions
 # ============================================================================
+
+
+# Read off the column rather than hardcoding 100, so the two can't drift.
+_CLASS_NAME_MAX = TxnClass.__table__.c.name.type.length
+
+
+def import_classes(db: Session, rows: list) -> dict:
+    """Import class-list rows (!CLASS) from IIF.
+
+    Names are stored verbatim, including QuickBooks' "Parent:Child"
+    subclass path. Classes are flat here, but the SPL CLASS column uses
+    that same full path, so keeping it intact is exactly what makes the
+    two match at transaction time.
+    """
+    imported = 0
+    errors = []
+
+    for i, row in enumerate(rows):
+        sp = db.begin_nested()
+        try:
+            name = row.get("NAME", "").strip()
+            if not name:
+                errors.append({"row": i + 1, "message": "Missing class NAME"})
+                sp.rollback()
+                continue
+
+            # Deliberately NOT truncated the way vendor/customer names are.
+            # A shortened class still imports but then matches no SPL CLASS
+            # value, so the problem resurfaces as a puzzling "class not
+            # found" on every transaction that cites it. Refuse the one row
+            # and name the limit instead.
+            if len(name) > _CLASS_NAME_MAX:
+                errors.append(
+                    {
+                        "row": i + 1,
+                        "message": (
+                            f"Class '{name[:40]}...' is {len(name)} characters, "
+                            f"over the {_CLASS_NAME_MAX}-character limit — "
+                            f"shorten it in QuickBooks and re-export"
+                        ),
+                    }
+                )
+                sp.rollback()
+                continue
+
+            # Case-insensitive dedup, matching both resolve_class_id's lookup
+            # and POST /api/classes' conflict check, so re-importing the same
+            # list is a no-op rather than a unique-constraint failure.
+            existing = db.query(TxnClass).filter(TxnClass.name.ilike(name)).first()
+            if existing:
+                sp.rollback()
+                continue
+
+            # QuickBooks flags inactive list entries with HIDDEN=Y, which is
+            # what archived means here: kept on historical rows, absent from
+            # entry-form dropdowns. Missing column -> "" -> active.
+            hidden = row.get("HIDDEN", "").strip().upper() in ("Y", "YES", "TRUE")
+
+            db.add(TxnClass(name=name, is_archived=hidden))
+            db.flush()
+            sp.commit()
+            imported += 1
+
+        except Exception as e:
+            sp.rollback()
+            errors.append({"row": i + 1, "message": str(e)})
+
+    return {"imported": imported, "errors": errors}
 
 
 def import_accounts(db: Session, rows: list) -> dict:
@@ -705,8 +780,10 @@ def _resolve_block_class(db: Session, trns_type: str, doc_ref: str, spls: list):
     class_id = resolve_class_id(db, name)
     if class_id is None:
         raise ValueError(
-            f"{trns_type} {doc_ref}: class '{name}' not found. Create it under "
-            f"Settings → Classes first, or correct the CLASS in the IIF file."
+            f"{trns_type} {doc_ref}: class '{name}' not found. Import your "
+            f"QuickBooks class list (File > Utilities > Export > Lists > Class "
+            f"List) or create it under Settings → Classes first, or correct "
+            f"the CLASS in the IIF file."
         )
     return class_id
 
@@ -1528,7 +1605,7 @@ def validate_iif(content: str) -> dict:
         return report
 
     # Check what sections exist
-    for section in ["ACCNT", "CUST", "VEND", "INVITEM"]:
+    for section in ["ACCNT", "CLASS", "CUST", "VEND", "INVITEM"]:
         count = len(parsed.get(section, []))
         if count > 0:
             report["sections_found"].append(section)
@@ -1555,6 +1632,19 @@ def validate_iif(content: str) -> dict:
             report["warnings"].append(
                 f"Account '{name}': unrecognized type '{atype}' (will default to Expense)"
             )
+
+    # Validate classes
+    for i, row in enumerate(parsed.get("CLASS", [])):
+        name = row.get("NAME", "").strip()
+        if not name:
+            report["errors"].append(f"Class row {i + 1}: missing NAME")
+            report["valid"] = False
+        elif len(name) > _CLASS_NAME_MAX:
+            report["errors"].append(
+                f"Class row {i + 1}: name is {len(name)} characters, over the "
+                f"{_CLASS_NAME_MAX}-character limit"
+            )
+            report["valid"] = False
 
     # Validate customers
     for i, row in enumerate(parsed.get("CUST", [])):
@@ -1618,10 +1708,12 @@ def validate_iif(content: str) -> dict:
 def import_all(db: Session, content: str) -> dict:
     """Import an entire IIF file into Slowbooks.
 
-    Processes in dependency order: accounts -> customers -> vendors -> items -> transactions.
+    Processes in dependency order: classes -> accounts -> customers ->
+    vendors -> items -> transactions.
     Returns counts of imported records and any errors.
     """
     result = {
+        "classes": 0,
         "accounts": 0,
         "opening_balance_lines": 0,
         "customers": 0,
@@ -1640,6 +1732,15 @@ def import_all(db: Session, content: str) -> dict:
     parsed = parse_iif(content)
 
     # Import lists first (order matters for FK resolution)
+
+    # Classes have no dependencies of their own, but transactions cite them
+    # by name and _resolve_block_class refuses unknown ones — so the list
+    # lands before anything that can carry a CLASS.
+    if parsed["CLASS"]:
+        r = import_classes(db, parsed["CLASS"])
+        result["classes"] = r["imported"]
+        result["errors"].extend(r["errors"])
+
     if parsed["ACCNT"]:
         r = import_accounts(db, parsed["ACCNT"])
         result["accounts"] = r["imported"]
