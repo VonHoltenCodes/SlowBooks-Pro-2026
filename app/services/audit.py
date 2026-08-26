@@ -17,7 +17,13 @@ def _actor(session) -> str | None:
     travels with the object, immune to task/context propagation quirks),
     falling back to the request contextvar for sessions created outside
     the request cycle."""
-    return session.info.get("acting_username") or acting_username.get()
+    # Fall back to an explicit "system" principal rather than NULL. A
+    # tamper-evident trail with anonymous rows is weaker than it looks:
+    # NULL is ambiguous between "the system did it" (token last_used_at
+    # stamps, startup writes) and "attribution failed". Naming the machine
+    # principal makes the distinction auditable — a NULL username is now
+    # always a bug, never a normal state.
+    return session.info.get("acting_username") or acting_username.get() or "system"
 
 
 # Tables to skip auditing.

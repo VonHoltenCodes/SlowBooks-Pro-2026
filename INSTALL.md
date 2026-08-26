@@ -90,8 +90,10 @@ separately tested Intel build is available.
 
 ## Option 1: Docker (Windows, macOS, Linux)
 
-**Recommended for servers, Intel Macs, and multi-user setups.** One command,
-no dependency headaches.
+**Recommended for Linux servers and Intel Macs.** One command, no
+dependency headaches. Note: multi-user over the LAN does **not** require
+Docker — Server Edition runs from the signed Windows installer (see
+[docs/server-edition.md](docs/server-edition.md)).
 
 ### Prerequisites
 
@@ -177,7 +179,7 @@ docker compose cp slowbooks:/app/backups ./my-backups
 
 ### Prerequisites
 
-- Python 3.13 (CI gates against 3.13; older 3.12 may work but isn't tested)
+- Python 3.13 (CI gates against 3.13; 3.12 is verified working)
 - PostgreSQL 17 (Docker image ships 17-alpine; older 16 still works for native installs)
 - System libraries for WeasyPrint
 
@@ -185,21 +187,36 @@ docker compose cp slowbooks:/app/backups ./my-backups
 
 ```bash
 # Install system dependencies (Ubuntu/Debian/Pop!_OS)
-sudo apt install -y postgresql libcairo2-dev libpango-1.0-0 \
+sudo apt install -y postgresql python3-venv libcairo2-dev libpango-1.0-0 \
     libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev
 
 # Create database
 sudo -u postgres createuser bookkeeper -P    # password: bookkeeper
 sudo -u postgres createdb bookkeeper -O bookkeeper
 
-# Clone and install
+# Clone
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git
 cd SlowBooks-Pro-2026
+
+# Create a virtual environment and install into it.
+# This is REQUIRED, not optional: Ubuntu 23.04+, Debian 12+, Pop!_OS 24.04
+# and Fedora 38+ implement PEP 668, so a bare `pip install` into the system
+# interpreter fails with "error: externally-managed-environment".
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
 # Set up environment
 cp .env.example .env
-# Edit .env if your database credentials differ
+# Edit .env if your database credentials differ.
+#
+# For a local development install, also set:
+#     APP_DEBUG=true
+# Leaving APP_DEBUG=false (the production default) turns on FORCE_HTTPS,
+# which 307-redirects http://localhost:3001 to https://localhost:3001 —
+# and a native install serves no TLS on that port, so the browser gets a
+# connection error. Production deployments should keep APP_DEBUG=false and
+# terminate TLS at a reverse proxy in front of the app.
 
 # Run migrations and seed
 alembic upgrade head
@@ -210,6 +227,10 @@ python run.py
 ```
 
 Open **http://localhost:3001**.
+
+> Every command above assumes the virtualenv is active (`source .venv/bin/activate`).
+> Without activating it, use the explicit paths instead: `.venv/bin/alembic`,
+> `.venv/bin/python`.
 
 ### Optional: Load demo data
 

@@ -410,7 +410,7 @@ const ReportsPage = {
                     `<tr><td style="padding-left:24px;">
                         <a href="javascript:void(0)" style="color:var(--qb-blue,#0066cc); text-decoration:none;"
                            onclick="${drillCall(i)}">${escapeHtml(i.account_name)}</a>
-                        </td><td class="amount">${formatCurrency(Math.abs(i.amount))}</td></tr>`
+                        </td><td class="amount">${formatCurrency(i.amount)}</td></tr>`
                 ).join("");
             };
             return `${pdfBtn}
@@ -444,7 +444,7 @@ const ReportsPage = {
                 `<tr><td style="padding-left:24px;">
                     <a href="javascript:void(0)" style="color:var(--qb-blue,#0066cc); text-decoration:none;"
                        onclick="${drillCall(i)}">${escapeHtml(i.account_name)}</a>
-                    </td><td class="amount">${formatCurrency(Math.abs(i.amount))}</td></tr>`
+                    </td><td class="amount">${formatCurrency(i.amount)}</td></tr>`
             ).join("") || `<tr><td colspan="2" style="color:var(--gray-400);">None</td></tr>`;
             return `${pdfBtn}
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>

@@ -1159,6 +1159,23 @@ def run_smoke_test(port: int = 3999) -> int:
 
 
 def main() -> int:
+    # Make every stdio write total BEFORE argparse can print anything.
+    # A frozen console=False build launched with redirected stdio (any
+    # pipe: `SlowBooksPro.exe --help | ...`, CI, an agent) gets whatever
+    # encoding the handle reports — cp1252 on US Windows — and this
+    # module docstring, which argparse prints for --help, contains
+    # characters cp1252 cannot encode. print_help() then raised
+    # UnicodeEncodeError; unhandled in a windowed build, the bootloader
+    # parked the process on an error dialog nobody can see. Field
+    # report: one such process survived ~7 hours. With errors="replace"
+    # the worst case is a "?" instead of an arrow.
+    for _stream in (sys.stdout, sys.stderr):
+        if _stream is not None:
+            try:
+                _stream.reconfigure(errors="replace")
+            except (AttributeError, OSError):
+                pass  # not a TextIOWrapper (test harness, log redirect)
+
     # Not a user flag — the frozen server child (see start_server) and
     # argparse must never meet, so handle it before parsing.
     if "--_serve" in sys.argv:

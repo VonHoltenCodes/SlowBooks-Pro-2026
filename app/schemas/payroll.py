@@ -2,7 +2,7 @@ from datetime import date
 from typing import Optional
 from pydantic import BaseModel, model_validator
 
-from app.models.payroll import FilingStatus, PayFrequency
+from app.models.payroll import EmployeeRole, FilingStatus, PayFrequency, PayType
 
 
 # ---------------------------------------------------------------------------
@@ -12,7 +12,7 @@ class EmployeeCreate(BaseModel):
     first_name: str
     last_name: str
     ssn_last_four: Optional[str] = None
-    pay_type: str = "hourly"
+    pay_type: PayType = PayType.HOURLY
     pay_rate: float = 0
     # Typed against the model enums so a bad value is a 422 at the edge
     # instead of a LookupError at flush (an opaque 500).
@@ -33,7 +33,7 @@ class EmployeeCreate(BaseModel):
     residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
     email: Optional[str] = None
-    role: str = "employee"
+    role: EmployeeRole = EmployeeRole.EMPLOYEE
     manager_id: Optional[int] = None
     hire_date: Optional[date] = None
     notes: Optional[str] = None
@@ -43,7 +43,7 @@ class EmployeeUpdate(BaseModel):
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     ssn_last_four: Optional[str] = None
-    pay_type: Optional[str] = None
+    pay_type: Optional[PayType] = None
     pay_rate: Optional[float] = None
     pay_frequency: Optional[PayFrequency] = None
     filing_status: Optional[FilingStatus] = None
@@ -61,7 +61,7 @@ class EmployeeUpdate(BaseModel):
     residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
     email: Optional[str] = None
-    role: Optional[str] = None
+    role: Optional[EmployeeRole] = None
     manager_id: Optional[int] = None
     hire_date: Optional[date] = None
     is_active: Optional[bool] = None
@@ -73,7 +73,7 @@ class EmployeeResponse(BaseModel):
     first_name: str
     last_name: str
     ssn_last_four: Optional[str] = None
-    pay_type: str
+    pay_type: PayType
     pay_rate: float = 0
     pay_frequency: str = "biweekly"
     filing_status: str
@@ -91,7 +91,7 @@ class EmployeeResponse(BaseModel):
     residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
     email: Optional[str] = None
-    role: str = "employee"
+    role: EmployeeRole = EmployeeRole.EMPLOYEE
     manager_id: Optional[int] = None
     is_active: bool = True
     hire_date: Optional[date] = None

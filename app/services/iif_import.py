@@ -439,7 +439,7 @@ def import_customers(db: Session, rows: list) -> dict:
     for i, row in enumerate(rows):
         sp = db.begin_nested()
         try:
-            name = row.get("NAME", "").strip()
+            name = row.get("NAME", "").strip()[:200]
             if not name:
                 errors.append({"row": i + 1, "message": "Missing customer NAME"})
                 sp.rollback()
@@ -492,7 +492,7 @@ def import_vendors(db: Session, rows: list) -> dict:
     for i, row in enumerate(rows):
         sp = db.begin_nested()
         try:
-            name = row.get("NAME", "").strip()
+            name = row.get("NAME", "").strip()[:200]
             if not name:
                 errors.append({"row": i + 1, "message": "Missing vendor NAME"})
                 sp.rollback()
@@ -591,13 +591,15 @@ def import_items(db: Session, rows: list) -> dict:
 def import_transactions(db: Session, blocks: list) -> dict:
     """Import transaction blocks (TRNS/SPL/ENDTRNS) from IIF.
 
-    Routes by TRNSTYPE: INVOICE, PAYMENT, ESTIMATE, BILL, DEPOSIT.
-    Other types (GENERAL JOURNAL, etc.) are silently skipped — extend
-    the dispatch table here when adding support.
+    Routes by TRNSTYPE: INVOICE, PAYMENT, ESTIMATE, BILL, DEPOSIT,
+    CASH SALE (QB's sales receipts). Other types (GENERAL JOURNAL, etc.)
+    are silently skipped — extend the dispatch table here when adding
+    support.
     """
     counts = {
         "invoices": 0,
         "payments": 0,
+        "sales_receipts": 0,
         "estimates": 0,
         "bills": 0,
         "deposits": 0,
@@ -630,6 +632,22 @@ def import_transactions(db: Session, blocks: list) -> dict:
                         warnings.append(
                             f"Payment block {i+1}: imported but journal entry could not be created (account mismatch)"
                         )
+            elif trns_type in ("CASH SALE", "CASHSALE", "SALES RECEIPT"):
+                if not trns.get("NAME", "").strip():
+                    warnings.append(
+                        f"Sales receipt block {i + 1}: no customer name; "
+                        f"assigned to '{WALK_IN_CUSTOMER_NAME}'"
+                    )
+                result = _import_cash_sale(db, trns, spls)
+                if result:
+                    counts["sales_receipts"] += 1
+                    if not result.transaction_id:
+                        doc = result.invoice_number or f"block {i+1}"
+                        warnings.append(
+                            f"Sales receipt {doc}: imported but journal entry could not be created (account mismatch)"
+                        )
+                else:
+                    counts["duplicates_skipped"] += 1
             elif trns_type == "ESTIMATE":
                 result = _import_estimate(db, trns, spls)
                 if result:
@@ -977,7 +995,13 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
             return None
 
     # Resolve customer
-    cust_name = trns.get("NAME", "").strip()
+    cust_name = trns.get("NAME", "").strip()[:200]
+    if not cust_name:
+        # A TRNS row with no NAME cannot anchor an AR document, and auto-
+        # creating a Customer(name="") plants a record that is invisible in
+        # list views and unsearchable — the API refuses blank names since
+        # 6c82e9a, so the importer must not sneak them in the back door.
+        return None
     customer = db.query(Customer).filter(Customer.name == cust_name).first()
     if not customer:
         # Auto-create customer
@@ -1243,6 +1267,119 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     return payment
 
 
+# QB allows sales receipts with a blank Customer:Job (counter sales); an
+# Invoice row can't. Blank-name CASH SALE blocks land on this named bucket
+# customer — a real, visible record, unlike the blank-name auto-creates
+# the importer refuses elsewhere.
+WALK_IN_CUSTOMER_NAME = "Walk-In Customer"
+
+
+def _import_cash_sale(db: Session, trns: dict, spls: list) -> Invoice:
+    """Create a paid invoice + payment from an IIF CASH SALE block.
+
+    QB writes sales receipts as TRNSTYPE "CASH SALE": the TRNS line debits
+    the deposit account (bank / Undeposited Funds) where an INVOICE block
+    would debit A/R, and SPL lines credit income/tax exactly like an
+    invoice. Imported as an invoice flagged is_sales_receipt plus a
+    same-day payment for the full total — the same pair of documents the
+    Enter Sales Receipts screen produces, so void/report behavior matches.
+    """
+    trns = dict(trns)
+    if not trns.get("NAME", "").strip():
+        trns["NAME"] = WALK_IN_CUSTOMER_NAME
+    if not trns.get("TERMS", "").strip():
+        trns["TERMS"] = "Due on Receipt"
+
+    if not trns.get("DOCNUM", "").strip():
+        # POS receipts are often unnumbered. Dedup on customer + date +
+        # amount (the DOCNUM-less analogue of _import_payment's check),
+        # then let the numbering service assign the next number.
+        cust_name = trns.get("NAME", "").strip()[:200]
+        sale_date = _parse_iif_date(trns.get("DATE", "")) or date.today()
+        total = abs(_parse_decimal(trns.get("AMOUNT", "")))
+        existing = (
+            db.query(Invoice)
+            .join(Customer, Invoice.customer_id == Customer.id)
+            .filter(
+                Customer.name == cust_name,
+                Invoice.date == sale_date,
+                Invoice.total == total,
+                Invoice.is_sales_receipt.is_(True),
+            )
+            .first()
+        )
+        if existing:
+            return None
+        from app.services.numbering import next_invoice_number
+
+        trns["DOCNUM"] = next_invoice_number(db)
+
+    invoice = _import_invoice(db, trns, spls)
+    if invoice is None:
+        return None
+    invoice.is_sales_receipt = True
+
+    # Deposit side: TRNS.ACCNT is the bank / Undeposited Funds account the
+    # receipt deposited to. Same fallback chain as _import_payment.
+    deposit_acct = _find_account(db, trns.get("ACCNT", "").strip())
+    if not deposit_acct:
+        from app.services.accounting import get_undeposited_funds_id
+
+        uf_id = get_undeposited_funds_id(db)
+        if uf_id:
+            deposit_acct = db.query(Account).filter(Account.id == uf_id).first()
+
+    total = Decimal(str(invoice.total))
+    payment = Payment(
+        customer_id=invoice.customer_id,
+        date=invoice.date,
+        amount=total,
+        method=trns.get("PAYMETH", "").strip() or None,
+        reference=invoice.invoice_number,
+        deposit_to_account_id=deposit_acct.id if deposit_acct else None,
+    )
+    db.add(payment)
+    db.flush()
+    db.add(
+        PaymentAllocation(payment_id=payment.id, invoice_id=invoice.id, amount=total)
+    )
+    invoice.amount_paid = total
+    invoice.balance_due = Decimal("0")
+    invoice.status = InvoiceStatus.PAID
+
+    # Payment journal: DR deposit account / CR A/R, clearing the A/R debit
+    # _import_invoice posted — the ledger nets to cash + income, matching
+    # the app's own sales-receipt flow.
+    ar_id = get_ar_account_id(db)
+    if ar_id and deposit_acct and total > 0:
+        journal_lines = [
+            {
+                "account_id": deposit_acct.id,
+                "debit": total,
+                "credit": Decimal("0"),
+                "description": f"Sales receipt {invoice.invoice_number}",
+            },
+            {
+                "account_id": ar_id,
+                "debit": Decimal("0"),
+                "credit": total,
+                "description": f"Sales receipt {invoice.invoice_number}",
+            },
+        ]
+        txn = create_journal_entry(
+            db,
+            invoice.date,
+            f"IIF Import — Sales receipt {invoice.invoice_number}",
+            journal_lines,
+            source_type="payment",
+            source_id=payment.id,
+        )
+        payment.transaction_id = txn.id
+
+    db.flush()
+    return invoice
+
+
 def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
     """Create an Estimate from IIF TRNS/SPL data."""
     doc_num = trns.get("DOCNUM", "").strip()
@@ -1254,7 +1391,13 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
         if existing:
             return None
 
-    cust_name = trns.get("NAME", "").strip()
+    cust_name = trns.get("NAME", "").strip()[:200]
+    if not cust_name:
+        # A TRNS row with no NAME cannot anchor an AR document, and auto-
+        # creating a Customer(name="") plants a record that is invisible in
+        # list views and unsearchable — the API refuses blank names since
+        # 6c82e9a, so the importer must not sneak them in the back door.
+        return None
     customer = db.query(Customer).filter(Customer.name == cust_name).first()
     if not customer:
         customer = Customer(name=cust_name, is_active=True)
@@ -1486,6 +1629,7 @@ def import_all(db: Session, content: str) -> dict:
         "items": 0,
         "invoices": 0,
         "payments": 0,
+        "sales_receipts": 0,
         "estimates": 0,
         "bills": 0,
         "deposits": 0,
@@ -1526,6 +1670,7 @@ def import_all(db: Session, content: str) -> dict:
         counts = r["imported"]
         result["invoices"] = counts.get("invoices", 0)
         result["payments"] = counts.get("payments", 0)
+        result["sales_receipts"] = counts.get("sales_receipts", 0)
         result["estimates"] = counts.get("estimates", 0)
         result["bills"] = counts.get("bills", 0)
         result["deposits"] = counts.get("deposits", 0)

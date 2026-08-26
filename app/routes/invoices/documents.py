@@ -26,11 +26,12 @@ def invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Invoice not found")
     company = get_settings(db)
     pdf_bytes = generate_invoice_pdf(inv, company)
+    doc_kind = "SalesReceipt" if inv.is_sales_receipt else "Invoice"
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=Invoice_{inv.invoice_number}.pdf"
+            "Content-Disposition": f"inline; filename={doc_kind}_{inv.invoice_number}.pdf"
         },
     )
 
@@ -94,30 +95,36 @@ def email_invoice(
             pay_url = f"{base_url}/pay/{inv.payment_token}"
 
         html_body = render_invoice_email(inv, company, pay_url=pay_url)
-        send_email(
+        # send_email() writes its own EmailLog row on every path (sent,
+        # failed, and SMTP-not-configured), so the route must not log again
+        # or every send produces two rows.
+        sent = send_email(
+            db=db,
             to_email=data.recipient,
             subject=subject,
             html_body=html_body,
-            settings=company,
-            attachments=[
-                {
-                    "filename": f"Invoice_{inv.invoice_number}.pdf",
-                    "content": pdf_bytes,
-                    "mime_type": "application/pdf",
-                }
-            ],
-        )
-        # Log the email
-        log = EmailLog(
+            attachment_bytes=pdf_bytes,
+            attachment_name=(
+                f"SalesReceipt_{inv.invoice_number}.pdf"
+                if inv.is_sales_receipt
+                else f"Invoice_{inv.invoice_number}.pdf"
+            ),
             entity_type="invoice",
             entity_id=inv.id,
-            recipient=data.recipient,
-            subject=subject,
-            status="sent",
         )
-        db.add(log)
-        db.commit()
+        # It returns False rather than raising when SMTP is unconfigured or
+        # the send fails; reporting "sent" regardless would be a lie.
+        if not sent:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Email could not be sent. Check the SMTP settings under "
+                    "Settings -> Email; the failure is recorded in the email log."
+                ),
+            )
         return {"status": "sent"}
+    except HTTPException:
+        raise
     except Exception as e:
         from app.models.email_log import EmailLog
 

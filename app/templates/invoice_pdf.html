@@ -46,23 +46,28 @@
             </div>
         </div>
         <div class="invoice-title">
-            <h1>INVOICE</h1>
+            <h1>{% if inv.is_sales_receipt %}SALES RECEIPT{% else %}INVOICE{% endif %}</h1>
             <div class="invoice-number">#{{ inv.invoice_number }}</div>
         </div>
     </div>
 
+    {# A sales receipt is paid at the time of sale — no due date, no terms. #}
     <table class="meta-table"><tr>
         <td class="meta-label">Date:</td><td>{{ inv.date | fdate }}</td>
+        {% if not inv.is_sales_receipt %}
         <td class="meta-label">Due Date:</td><td>{{ inv.due_date | fdate }}</td>
         <td class="meta-label">Terms:</td><td>{{ inv.terms or '' }}</td>
+        {% endif %}
         {% if inv.po_number %}<td class="meta-label">PO #:</td><td>{{ inv.po_number }}</td>{% endif %}
     </tr></table>
 
     <div class="addresses">
         <div class="address-block">
-            <div class="address-label">Bill To</div>
+            <div class="address-label">{% if inv.is_sales_receipt %}Sold To{% else %}Bill To{% endif %}</div>
             <div class="address-text">
-                <strong>{{ inv.customer_name or '' }}</strong><br>
+                {# customer_name is only stamped on by some callers; fall back
+                   to the relationship so the name always prints. #}
+                <strong>{{ inv.customer_name or (inv.customer.name if inv.customer else '') }}</strong><br>
                 {% if inv.bill_address1 %}{{ inv.bill_address1 }}<br>{% endif %}
                 {% if inv.bill_address2 %}{{ inv.bill_address2 }}<br>{% endif %}
                 {% if inv.bill_city %}{{ inv.bill_city }}, {{ inv.bill_state }} {{ inv.bill_zip }}{% endif %}
@@ -101,7 +106,10 @@
             <tr><td class="label">Tax ({{ "%.2f" | format(inv.tax_rate * 100) }}%)</td><td class="r">{{ inv.tax_amount | currency }}</td></tr>
             {% endif %}
             <tr><td class="label grand">Total</td><td class="r grand">{{ inv.total | currency }}</td></tr>
-            {% if inv.amount_paid and inv.amount_paid != 0 %}
+            {% if inv.is_sales_receipt %}
+            {# Paid at the time of sale — no balance line on a receipt. #}
+            <tr><td class="label">Paid</td><td class="r">{{ inv.amount_paid | currency }}</td></tr>
+            {% elif inv.amount_paid and inv.amount_paid != 0 %}
             <tr><td class="label">Paid</td><td class="r">{{ inv.amount_paid | currency }}</td></tr>
             <tr><td class="label grand">Balance Due</td><td class="r grand">{{ inv.balance_due | currency }}</td></tr>
             {% endif %}

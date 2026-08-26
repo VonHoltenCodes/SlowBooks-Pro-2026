@@ -10,6 +10,7 @@ import enum
 import uuid
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     String,
@@ -19,6 +20,7 @@ from sqlalchemy import (
     Text,
     Enum,
     ForeignKey,
+    false,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -88,6 +90,14 @@ class Invoice(Base):
 
     # Class tracking dimension (QB-style); NULL groups with Uncategorized
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
+
+    # Sales receipt = invoice + payment entered as one step (QB's "Enter
+    # Sales Receipts"). Stored as a regular Invoice so reports, PDFs, and
+    # exports need no special casing; the flag drives the dedicated list
+    # and QB interop typing.
+    is_sales_receipt = Column(
+        Boolean, nullable=False, default=False, server_default=false(), index=True
+    )
 
     # Multi-currency: document currency + rate it was booked at (GL is home)
     currency = Column(String(3), nullable=True)

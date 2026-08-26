@@ -212,10 +212,18 @@ def _expected_unnotarized_policy_result(
     """Recognize the lone pre-notary rejection produced by some macOS releases."""
     policy_output = syspolicy.stdout + syspolicy.stderr
     gatekeeper_output = gatekeeper.stdout + gatekeeper.stderr
+    # "Internal Xprotect Error" is the ephemeral-CI-runner variant of the
+    # same state: syspolicyd's local XProtect scan cannot run there, while
+    # spctl still confirms a valid but unnotarized Developer ID signature.
+    # Only accepted with every other guard intact; Apple's notary service
+    # performs the authoritative scan immediately afterwards.
     return (
         syspolicy.returncode != 0
         and gatekeeper.returncode != 0
-        and "Gatekeeper rejected this file" in policy_output
+        and (
+            "Gatekeeper rejected this file" in policy_output
+            or "Internal Xprotect Error" in policy_output
+        )
         and "source=Unnotarized Developer ID" in gatekeeper_output
         and policy_output.count("Severity: Fatal") == 1
         and "Severity: Warning" not in policy_output

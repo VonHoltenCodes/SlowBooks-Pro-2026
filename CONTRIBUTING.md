@@ -25,10 +25,12 @@ those are pytest fixtures, tracked as dismissed false positives.
 - **Windows + Docker + server**: @VonHoltenCodes (releases signed via
   Azure Trusted Signing in CI)
 - **macOS**: [@ContractorKeith](https://github.com/ContractorKeith) —
-  builds the `.app`/DMG from `packaging/macos/`, signs and notarizes
-  locally with his Apple Developer ID (credentials never enter the
-  repo or CI), and hands the checksummed DMG to the owner to attach to
-  releases.
+  maintains the `.app`/DMG build and release tooling in
+  `packaging/macos/`. Since v2.5.3, releases sign, notarize, and staple
+  in CI with the project's Apple Developer ID (credentials live only in
+  repo secrets); Keith's local run of the same tooling is the documented
+  fallback, and installed-app acceptance on real hardware remains a
+  human gate.
 
 ## Branch naming
 

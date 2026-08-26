@@ -109,6 +109,7 @@ class InvoiceResponse(BaseModel):
     balance_due: Decimal
     notes: Optional[str]
     class_id: Optional[int] = None
+    is_sales_receipt: bool = False
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     payment_token: Optional[str] = None

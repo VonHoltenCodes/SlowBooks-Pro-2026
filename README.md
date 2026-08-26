@@ -5,7 +5,9 @@
 Free, source-available, and complete: double-entry accounting, unlimited
 invoicing, US payroll with tamper-evident tax forms, perpetual inventory,
 bank feeds, analytics — with every record in local files you control. No
-cloud, no account, no telemetry, no caps, no paid tiers.
+cloud, no account, no telemetry, no caps, no paid tiers. **Multi-user
+Server Edition is built into the same signed installer — no Docker
+required** (Docker remains an optional path for Linux servers).
 
 **Get started:**
 [Windows installer](https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/releases/latest/download/SlowBooksPro-Setup-x64.exe) ·
@@ -41,6 +43,15 @@ source code or binaries were available, decompiled, or used.
 
 ## What's New
 
+**v2.6 — Sales receipts.** Point-of-sale style sales on one screen: the
+sale and its payment recorded together, deposited where you say, posted
+atomically — and kept on their own page so they don't clutter your
+invoices. Your existing receipt history imports too: `CASH SALE` blocks
+from QuickBooks Desktop IIF files and the SalesReceipt entity over the
+QuickBooks Online connection, with a migration guide covering both paths
+([docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md)).
+Built because a user asked for it.
+
 **v2.5 — Server Edition.** The same signed installer can serve your whole
 office from one Windows PC: users with roles (admin / bookkeeper /
 read-only), username logins, per-user audit attribution, and a startup
@@ -60,7 +71,7 @@ a native `.app` in a DMG, no Docker or Python required.
 [SimpleFIN](https://www.simplefin.org/) — you hold the bank credential,
 no middleman server, dedup + bank rules on arrival
 ([docs/setup-bank-feeds.md](docs/setup-bank-feeds.md)). Every install
-also serves a self-documenting 347-operation local REST API; point
+also serves a self-documenting 357-operation local REST API; point
 Claude Code or any agentic CLI at it —
 [slowbookspro.com/ai](https://www.slowbookspro.com/ai/) has the
 paste-prompt.
@@ -69,11 +80,6 @@ paste-prompt.
 Sage 50, Wave, Zoho Books, and GnuCash — every import dry-run-verified
 against your trial balance before a single record is written, with
 opening balances posted automatically.
-
-**v2.2 — Payments, classes, currencies, assets.** Stripe + PayPal +
-Square behind one provider abstraction; class tracking with P&L by
-Class; multi-currency with automatic FX gain/loss; fixed assets with
-depreciation runs; financial-report PDF pack.
 
 Full history in **[CHANGELOG.md](CHANGELOG.md)**.
 
@@ -133,7 +139,8 @@ Full catalog (300+ entries) in **[docs/features.md](docs/features.md)**. Highlig
 - **Online payments** — [Stripe](docs/setup-stripe.md),
   [PayPal](docs/setup-paypal.md), [Square](docs/setup-square.md) behind
   one abstraction, desktop-mode recording included
-- **Interop & migration** — QuickBooks IIF round-trip,
+- **Interop & migration** — QuickBooks IIF round-trip incl. sales
+  receipts ([docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md)),
   [QBO OAuth sync](docs/setup-qbo.md), Migrate Data for Xero / MYOB /
   Sage 50 / Wave / Zoho Books / GnuCash, Opening Balances wizard
 - **Fixed assets** — register, depreciation runs, disposal with
@@ -169,7 +176,11 @@ Download **[SlowBooksPro-macos-arm64.dmg](https://github.com/VonHoltenCodes/Slow
 drag **SlowBooks Pro** to Applications, launch. Signed and notarized;
 macOS 14+. Intel Macs: use Docker until a tested Intel build ships.
 
-### Docker (servers, Linux, Intel Mac)
+### Docker (Linux servers, Intel Mac)
+
+Docker is optional — multi-user LAN serving on Windows is **Server
+Edition**, built into the signed installer above (no containers involved).
+Docker remains the path for Linux servers and Intel Macs:
 
 ```bash
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git
@@ -219,9 +230,10 @@ PDFs; self-hosted Chart.js (no CDN, LAN-deployable). Hosted-checkout
 payments only — card data never touches the app. Port 3001.
 
 The Windows and Apple Silicon desktop builds freeze the same codebase
-with PyInstaller + pywebview. Windows signs in CI via Azure Trusted
-Signing; macOS transport artifacts build in CI, then are signed and
-notarized locally with the maintainer's Apple Developer ID.
+with PyInstaller + pywebview. Both sign in CI on every release tag:
+Windows via Azure Trusted Signing, macOS with the project's Apple
+Developer ID — signed, notarized, and stapled on the runner (signing
+credentials live only in repo secrets, never in the repo).
 
 Full layout in [docs/development.md](docs/development.md).
 
@@ -256,4 +268,4 @@ offer it as a paid service. Full terms in [LICENSE](LICENSE).
 - [Alex Jordan (@LayoverLogic)](https://github.com/LayoverLogic) — Security hardening, IIF BILL/DEPOSIT import, class tracking design, multi-currency design with the Bank of Canada FX service, sortable list columns, country dropdowns
 - [amazon1148](https://github.com/amazon1148) — CSV bank import with auto-detection for Chase and PayPal statement formats
 - [Joel Macklow (@joelmacklow)](https://github.com/joelmacklow) — Fixed assets, Xero import with dry-run, opening-balance wizard, report PDF pipeline, and security regression-suite concepts, specified in his NZ localization fork
-- [Keith (@ContractorKeith)](https://github.com/ContractorKeith) — macOS maintainer: native Apple Silicon `.app`/DMG pipeline with local Developer ID signing and notarization, per-user Application Support data layout, frozen-bundle fontconfig self-containment, `.env` permission hardening; long-time macOS field tester
+- [Keith (@ContractorKeith)](https://github.com/ContractorKeith) — macOS maintainer: built the native Apple Silicon `.app`/DMG pipeline and the sign/notarize/staple release tooling that now runs in CI, per-user Application Support data layout, frozen-bundle fontconfig self-containment, `.env` permission hardening; long-time macOS field tester
