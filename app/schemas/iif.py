@@ -2,6 +2,7 @@ from pydantic import BaseModel
 
 
 class IIFImportResult(BaseModel):
+    classes: int = 0
     accounts: int = 0
     customers: int = 0
     vendors: int = 0
