@@ -16,16 +16,26 @@ and Tesseract doesn't carry any.
   importer): dedup on order number, line items → bills/cc_charges,
   match against SimpleFIN bank feed. Start every dialect from a REAL
   export file (MYOB lesson).
-- **Tier 2 (this repo, NEW)**: lightweight local OCR via Tesseract +
-  pytesseract + Pillow (pdf pages via the poppler tools already used
-  for PDF work, or pypdfium2). Ground rules that make it mergeable:
-  - **Optional, graceful degrade**: pytesseract shells out to the
-    system `tesseract` binary. The feature detects the binary and,
-    when absent, the endpoint returns a clear "install Tesseract to
-    enable scanning" message — the app must run exactly as today
-    without it. No bundling into the signed Windows/macOS installers
-    in the first pass (signing/notarizing a nested binary is its own
-    project); Docker/native installs just add the system package.
+- **Tier 2 (this repo, NEW)**: lightweight local OCR via the system
+  Tesseract binary. Ground rules that make it mergeable:
+  - **Never bundled — policy, not a phase.** The tesseract binary is
+    the USER'S install, like their PostgreSQL or their browser:
+    Docker/native installs add the system package (`apt install
+    tesseract-ocr`), Windows/macOS users install it themselves if they
+    want the feature. It does not go into the signed installer or the
+    notarized DMG — that would make its CVEs and release cadence ours
+    (owner decision, 2026-08-25; see also the EasyAmp bundled-native-
+    dep signature saga for why). If field demand ever reopens this, it
+    reopens as its own project, not as scope creep on a PR.
+  - **Optional, graceful degrade**: detect the binary at runtime
+    (PATH + well-known install locations on Windows); when absent,
+    the endpoint returns a clear "install Tesseract to enable
+    scanning" message — the app must run exactly as today without it.
+  - **Zero new Python dependencies**: call the binary directly with
+    `subprocess` — pytesseract is only a subprocess wrapper, and
+    requirements.txt is deliberately hard to add to (every pin
+    carries CVE rationale). PDF pages rasterize via the poppler tools
+    the PDF stack already uses. Pillow is already present.
   - **Deterministic parsing first**: raw OCR text → regex/anchor
     extraction for date, total, vendor. The existing BYOK AI layer
     (`app/services/ai_service.py`, 7 providers incl. self-hosted) is
