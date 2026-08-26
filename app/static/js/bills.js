@@ -136,9 +136,9 @@ const BillsPage = {
                         <tr data-billline="0">
                             <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                             <td><input class="line-desc"></td>
-                            <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                            <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                            <td class="col-amount">$0.00</td>
+                            <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
+                            <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
+                            <td class="col-amount line-amount">$0.00</td>
                         </tr>
                     </tbody>
                 </table>
@@ -187,6 +187,7 @@ const BillsPage = {
                     rateInput.value = total.toFixed(2);
                 }
                 if (descInput && merchant) descInput.value = merchant;
+                BillsPage.recalc();
                 if (result.tax_detected && result.tax) {
                     const notes = form.querySelector('[name="notes"]');
                     if (notes) {
@@ -198,6 +199,15 @@ const BillsPage = {
         }
     },
 
+    recalc() {
+        $$('#bill-lines tr').forEach(row => {
+            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
+            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+            const amountCell = row.querySelector('.line-amount');
+            if (amountCell) amountCell.textContent = formatCurrency(qty * rate);
+        });
+    },
+
     addLine() {
         const idx = BillsPage.lineCount++;
         const itemOpts = BillsPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
@@ -205,9 +215,9 @@ const BillsPage = {
             <tr data-billline="${idx}">
                 <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                 <td><input class="line-desc"></td>
-                <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                <td class="col-amount">$0.00</td>
+                <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
+                <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
+                <td class="col-amount line-amount">$0.00</td>
             </tr>`);
     },
 
