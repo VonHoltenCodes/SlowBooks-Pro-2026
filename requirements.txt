@@ -29,6 +29,11 @@ python-multipart==0.0.32  # CVE-2026-53538/-53539 (fixed 0.0.30), CVE-2026-53540
 ofxparse>=0.21,<1.0
 python-dateutil>=2.9.0,<3.0
 
+# NOTE: receipt intake OCR (Tier 2) intentionally adds ZERO Python deps —
+# it shells out to the user-installed `tesseract` binary and, for PDFs, the
+# poppler-utils tools (pdftoppm/pdfinfo). Both are detected at runtime with
+# graceful degrade (see docs/design/receipt-intake-spec.md).
+
 # Third-party integrations
 stripe>=8.0.0,<16.0  # core Checkout/Webhook APIs stable across majors; verified by provider tests
 python-quickbooks>=0.9.0,<1.0
