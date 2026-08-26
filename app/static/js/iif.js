@@ -374,7 +374,7 @@ const IIFPage = {
             const result = await res.json();
             IIFPage._showImportResult(result);
 
-            const total = (result.accounts || 0) + (result.customers || 0) +
+            const total = (result.classes || 0) + (result.accounts || 0) + (result.customers || 0) +
                           (result.vendors || 0) + (result.items || 0) +
                           (result.invoices || 0) + (result.payments || 0) +
                           (result.sales_receipts || 0) +
@@ -390,6 +390,7 @@ const IIFPage = {
 
     _showImportResult(result) {
         const sections = [
+            ['Classes', result.classes],
             ['Accounts', result.accounts],
             ['Customers', result.customers],
             ['Vendors', result.vendors],
