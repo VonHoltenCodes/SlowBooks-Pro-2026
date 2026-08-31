@@ -39,7 +39,7 @@ INTAKE_MAX_FILES = 500
 INTAKE_MAX_BYTES = 1024**3  # 1 GB
 
 INTAKE_DIR = storage.files_root() / "uploads" / "intake"
-_INTAKE_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+_INTAKE_ID_RE = re.compile(r"\A[0-9a-f]{32}\Z")
 _INTAKE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".pdf"}
 
 OCR_TIMEOUT_SECONDS = 20
@@ -469,10 +469,12 @@ def save_intake(data: bytes, original_filename: str, mime_type: str) -> str:
 
 def get_intake(intake_id: str) -> Optional[dict]:
     """Load an unexpired intake with its file bytes, or None."""
-    if not _INTAKE_ID_RE.match(intake_id or ""):
+    if not _INTAKE_ID_RE.fullmatch(intake_id or ""):
         return None
     base = INTAKE_DIR
-    meta_path = base / f"{intake_id}.json"
+    meta_path = (base / f"{intake_id}.json").resolve()
+    if not meta_path.is_relative_to(INTAKE_DIR.resolve()):
+        return None
     if not meta_path.exists():
         return None
     try:
@@ -488,7 +490,9 @@ def get_intake(intake_id: str) -> Optional[dict]:
         delete_intake(intake_id)
         return None
     stored = Path(meta.get("stored_name") or f"{intake_id}.png").name
-    file_path = base / stored
+    file_path = (base / stored).resolve()
+    if not file_path.is_relative_to(INTAKE_DIR.resolve()):
+        return None
     if not file_path.is_file():
         return None
     try:
@@ -500,9 +504,11 @@ def get_intake(intake_id: str) -> Optional[dict]:
 
 def delete_intake(intake_id: str) -> None:
     """Remove the stored file and sidecar (best-effort)."""
-    if not _INTAKE_ID_RE.match(intake_id or ""):
+    if not _INTAKE_ID_RE.fullmatch(intake_id or ""):
         return
     for p in INTAKE_DIR.glob(f"{intake_id}.*"):
+        if not p.resolve().is_relative_to(INTAKE_DIR.resolve()):
+            continue
         try:
             p.unlink()
         except OSError:
