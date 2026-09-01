@@ -200,15 +200,11 @@ def attach_intake(
     target_name = f"{intake_id[:8]}-{safe_filename}"
 
     upload_dir = (UPLOAD_BASE / body.entity_type / str(body.entity_id)).resolve()
-    try:
-        upload_dir.relative_to(UPLOAD_BASE)
-    except ValueError:
+    if not upload_dir.is_relative_to(UPLOAD_BASE):
         raise HTTPException(status_code=400, detail="Invalid path")
     upload_dir.mkdir(parents=True, exist_ok=True)
     dest = (upload_dir / target_name).resolve()
-    try:
-        dest.relative_to(upload_dir)
-    except ValueError:
+    if not dest.is_relative_to(upload_dir):
         raise HTTPException(status_code=400, detail="Invalid path")
     dest.write_bytes(intake["data"])
 

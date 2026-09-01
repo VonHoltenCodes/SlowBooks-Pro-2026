@@ -454,7 +454,10 @@ def save_intake(data: bytes, original_filename: str, mime_type: str) -> str:
     if ext not in _INTAKE_EXTS:
         ext = ".png"  # validated by the route; never a traversal vector
     stored_name = f"{intake_id}{ext}"
-    (base / stored_name).write_bytes(data)
+    stored_path = (base / stored_name).resolve()
+    if not stored_path.is_relative_to(INTAKE_DIR.resolve()):
+        raise ValueError("path escapes intake directory")
+    stored_path.write_bytes(data)
     meta = {
         "intake_id": intake_id,
         "original_filename": Path(original_filename or "receipt").name,
@@ -463,7 +466,10 @@ def save_intake(data: bytes, original_filename: str, mime_type: str) -> str:
         "size": len(data),
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
-    (base / f"{intake_id}.json").write_text(json.dumps(meta), encoding="utf-8")
+    meta_path = (base / f"{intake_id}.json").resolve()
+    if not meta_path.is_relative_to(INTAKE_DIR.resolve()):
+        raise ValueError("path escapes intake directory")
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
     return intake_id
 
 
