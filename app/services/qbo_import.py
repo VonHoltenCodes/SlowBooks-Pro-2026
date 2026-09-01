@@ -734,6 +734,203 @@ def import_payments(db: Session) -> dict:
     return {"imported": imported, "errors": errors}
 
 
+def import_sales_receipts(db: Session) -> dict:
+    """Import sales receipts from QBO into Slowbooks.
+
+    QBO's SalesReceipt is an invoice paid at the time of sale. Each one
+    becomes an Invoice flagged is_sales_receipt (status PAID) plus a
+    Payment for the full total — the same document pair the Enter Sales
+    Receipts screen produces.
+    """
+    from quickbooks.objects.salesreceipt import SalesReceipt as QBOSalesReceipt
+
+    client = get_qbo_client(db)
+    imported = 0
+    errors = []
+
+    try:
+        qbo_receipts = QBOSalesReceipt.all(qb=client)
+    except Exception as e:
+        errors.append(
+            {"entity": "sales_receipts", "message": f"Failed to query QBO: {str(e)}"}
+        )
+        return {"imported": 0, "errors": errors}
+
+    for qbo_sr in qbo_receipts:
+        try:
+            qbo_id = _safe(qbo_sr, "Id", "")
+            if not qbo_id:
+                continue
+
+            if get_mapping_by_qbo_id(db, "sales_receipt", qbo_id):
+                continue
+
+            doc_num = _safe(qbo_sr, "DocNumber", "")
+
+            # Dedup by document number against existing invoices/receipts
+            if doc_num:
+                existing = (
+                    db.query(Invoice).filter(Invoice.invoice_number == doc_num).first()
+                )
+                if existing:
+                    create_mapping(
+                        db,
+                        "sales_receipt",
+                        existing.id,
+                        qbo_id,
+                        _safe(qbo_sr, "SyncToken"),
+                    )
+                    db.flush()
+                    continue
+
+            # Resolve customer
+            cust_ref = _safe(qbo_sr, "CustomerRef")
+            customer_id = None
+            if cust_ref:
+                cust_qbo_id = _safe(cust_ref, "value", "")
+                cust_map = get_mapping_by_qbo_id(db, "customer", cust_qbo_id)
+                if cust_map:
+                    customer_id = cust_map.slowbooks_id
+
+            if not customer_id:
+                cust_name = _safe(cust_ref, "name", "") if cust_ref else ""
+                if cust_name:
+                    cust = db.query(Customer).filter(Customer.name == cust_name).first()
+                    if cust:
+                        customer_id = cust.id
+                if not customer_id:
+                    errors.append(
+                        {
+                            "entity": "sales_receipt",
+                            "qbo_id": str(qbo_id),
+                            "message": "Customer not found",
+                        }
+                    )
+                    continue
+
+            total_amt = _safe_decimal(qbo_sr, "TotalAmt")
+            sr_date = _parse_qbo_date(_safe(qbo_sr, "TxnDate"))
+
+            # Extract tax
+            tax_amount = Decimal("0")
+            txn_tax = _safe(qbo_sr, "TxnTaxDetail")
+            if txn_tax:
+                tax_amount = _safe_decimal(txn_tax, "TotalTax")
+
+            if not doc_num:
+                from app.services.numbering import next_invoice_number
+
+                doc_num = next_invoice_number(db)
+
+            invoice = Invoice(
+                invoice_number=doc_num,
+                customer_id=customer_id,
+                date=sr_date,
+                due_date=sr_date,
+                terms="Due on Receipt",
+                status=InvoiceStatus.PAID,
+                is_sales_receipt=True,
+                subtotal=total_amt - tax_amount,
+                tax_rate=Decimal("0"),
+                tax_amount=tax_amount,
+                total=total_amt,
+                amount_paid=total_amt,
+                balance_due=Decimal("0"),
+                notes=(
+                    _safe(qbo_sr, "CustomerMemo", {}).get("value")
+                    if isinstance(_safe(qbo_sr, "CustomerMemo"), dict)
+                    else None
+                ),
+            )
+            db.add(invoice)
+            db.flush()
+
+            # Process line items — only SalesItemLineDetail
+            line_order = 0
+            lines = _safe(qbo_sr, "Line") or []
+            for qbo_line in lines:
+                detail_type = _safe(qbo_line, "DetailType", "")
+                if detail_type != "SalesItemLineDetail":
+                    continue  # Skip SubTotalLineDetail, DiscountLineDetail, etc.
+
+                detail = _safe(qbo_line, "SalesItemLineDetail")
+                if not detail:
+                    continue
+
+                item_id = None
+                item_ref = _safe(detail, "ItemRef")
+                if item_ref:
+                    item_qbo_id = _safe(item_ref, "value", "")
+                    item_map = get_mapping_by_qbo_id(db, "item", item_qbo_id)
+                    if item_map:
+                        item_id = item_map.slowbooks_id
+
+                qty = _safe_decimal(detail, "Qty") or Decimal("1")
+                rate = _safe_decimal(detail, "UnitPrice")
+                amount = _safe_decimal(qbo_line, "Amount")
+
+                inv_line = InvoiceLine(
+                    invoice_id=invoice.id,
+                    item_id=item_id,
+                    description=_safe(qbo_line, "Description") or None,
+                    quantity=qty,
+                    rate=rate,
+                    amount=amount,
+                    line_order=line_order,
+                )
+                db.add(inv_line)
+                line_order += 1
+
+            # Payment for the full total, deposited where QBO says
+            deposit_account_id = None
+            deposit_ref = _safe(qbo_sr, "DepositToAccountRef")
+            if deposit_ref:
+                deposit_qbo_id = _safe(deposit_ref, "value", "")
+                deposit_map = get_mapping_by_qbo_id(db, "account", deposit_qbo_id)
+                if deposit_map:
+                    deposit_account_id = deposit_map.slowbooks_id
+
+            payment = Payment(
+                customer_id=customer_id,
+                date=sr_date,
+                amount=total_amt,
+                method=(
+                    _safe(qbo_sr, "PaymentMethodRef", {}).get("name")
+                    if isinstance(_safe(qbo_sr, "PaymentMethodRef"), dict)
+                    else None
+                ),
+                reference=_safe(qbo_sr, "PaymentRefNum") or None,
+                deposit_to_account_id=deposit_account_id,
+            )
+            db.add(payment)
+            db.flush()
+            db.add(
+                PaymentAllocation(
+                    payment_id=payment.id, invoice_id=invoice.id, amount=total_amt
+                )
+            )
+
+            create_mapping(
+                db, "sales_receipt", invoice.id, qbo_id, _safe(qbo_sr, "SyncToken")
+            )
+
+            # Same inventory treatment as QBO-imported invoices
+            db.flush()
+            db.refresh(invoice)
+            from app.services.inventory_hooks import post_sale_for_invoice
+
+            post_sale_for_invoice(db, invoice, txn_date=invoice.date)
+
+            imported += 1
+
+        except Exception as e:
+            errors.append(
+                {"entity": "sales_receipt", "qbo_id": str(qbo_id), "message": str(e)}
+            )
+
+    return {"imported": imported, "errors": errors}
+
+
 # ============================================================================
 # Master import orchestrator
 # ============================================================================
@@ -751,6 +948,7 @@ def import_all(db: Session) -> dict:
         "items": 0,
         "invoices": 0,
         "payments": 0,
+        "sales_receipts": 0,
         "errors": [],
     }
 
@@ -782,6 +980,11 @@ def import_all(db: Session) -> dict:
     # 6. Payments
     r = import_payments(db)
     result["payments"] = r["imported"]
+    result["errors"].extend(r["errors"])
+
+    # 7. Sales receipts (self-contained invoice + payment pairs)
+    r = import_sales_receipts(db)
+    result["sales_receipts"] = r["imported"]
     result["errors"].extend(r["errors"])
 
     db.commit()

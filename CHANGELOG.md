@@ -7,6 +7,212 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.6.3 — Classes cross over, and report CSVs read ANSI
+
+**Classes now come across from QuickBooks.** A class list export
+(File > Utilities > Export > Lists > Class List) previously vanished on
+import: the IIF parser only recognized accounts, customers, vendors and
+items, so the `!CLASS` section fell through the skip-unknown-sections
+path. A transaction IIF never carries the definitions either — CLASS
+appears only as a column on split lines — which left no way into the
+class list but typing every name into Settings → Classes by hand, and
+every transaction citing one failed its document. The list imports now,
+ahead of anything that can cite a class, so a single file holding both
+the list and the transactions lands in one pass. QuickBooks'
+"Parent:Child" subclass paths are kept verbatim (the split lines use
+that same path, so this is exactly what makes the two match), inactive
+classes arrive archived, and re-importing a list is a no-op. An unknown
+class on a transaction still stops that document rather than being
+invented — the error now names the list export as the fix. (#69)
+
+**Report-CSV import follow-ups**, from the #62 post-merge review: block
+types the Check and Deposit Detail parsers don't handle are now counted
+and warned about ("3 'Bill Pmt -Check' block(s) skipped") instead of
+being silently dropped, so a full Check Detail export no longer looks
+like it imported cleanly when it didn't. CSV uploads also fall back to
+Windows-1252 when UTF-8 fails — QuickBooks Desktop's Save-as-CSV
+frequently writes ANSI, and a payee like "José" used to 500 the upload.
+All four CSV import endpoints got the fix; a file neither encoding can
+read returns a guided error. (#67)
+
+### v2.6.2 — Report-CSV imports & field fixes
+
+**Field fixes** (both from a Server Edition user's report, #64/#65):
+
+- Creating a customer or vendor with a blank Email box failed with an
+  unexplained "unprocessable entity" — blank email now means "no
+  email", and validation errors name the field they're about.
+  (Workaround before this release was entering any valid email.)
+- The Server Edition install script now copies existing desktop books
+  (company files, encryption key, uploads, backups) into the server's
+  data home, as the docs always claimed; a wrong run location stops
+  with a guided message; and — found reproducing the report on real
+  hardware — the startup task could never be registered from the
+  normal installed path at all (PowerShell 5.1 mangled the quoting on
+  the spaced "Program Files" path and the script printed success over
+  the failure). Task creation is fixed and failures now stop the
+  script loudly. Field-verified end-to-end on hardware.
+
+### Deposits and checks from QuickBooks report CSVs
+
+The report-CSV path now covers three exports, auto-detected by their
+columns on one upload: **Deposit Detail** (each deposit becomes the
+journal entry moving its payments from Undeposited Funds to the bank),
+**Check Detail** (bank credit + expense debits — including payroll
+checks, whose withholding lines credit their liability accounts and
+net to the check amount; sign-aware parsing again, proven against a
+real customer's export), and the Transaction Detail sales-receipt
+report below. Blocks that don't balance or reference missing accounts
+error individually with a pointer to import the chart of accounts
+first; re-uploads dedup.
+
+### Sales receipts from a QuickBooks report CSV
+
+QuickBooks Desktop can't export transactions to IIF, so the sales-
+receipt migration doc pointed Desktop users at a Transaction Detail
+report export — which previously had nowhere to land. It does now:
+**QuickBooks Interop → Sales Receipts from Report CSV** imports a
+"Transaction Detail by Date" export (filtered to Sales Receipt), each
+receipt becoming a paid sale + payment with balanced journals.
+
+Shaped by a real customer's export, so the parser handles what real
+files contain: applied-deposit contra lines that reduce the total
+(sign-aware — an absolute-value parse would inflate them), percentage
+tax rows carrying the tax agency's name, deposits-only receipts,
+thousands separators, and per-receipt balance checks with clear
+errors. Unmatched account names post to default income with a warning;
+re-uploads dedup by customer + date + total. Receipt numbers keep the
+report's Num where free (SR-prefixed on collision).
+
+### v2.6.1 — The receipt now looks like a receipt
+
+- The printed/saved sales receipt was the unmodified invoice template —
+  titled INVOICE, with Due Date, Terms, and Balance Due rows, saved as
+  `Invoice_<n>.pdf`. It now renders as a SALES RECEIPT: date only, Sold
+  To, Total + Paid (no balance line — nothing is due), filename
+  `SalesReceipt_<n>.pdf`, and the same for the email attachment name.
+  Found on macOS hardware by the build maintainer during the v2.6.0
+  release pass. (#60)
+- The PDF's Bill To / Sold To block always prints the customer's name
+  now: the template fell back on a `customer_name` attribute only some
+  callers stamped onto the invoice, so the direct PDF route printed a
+  bare header whenever the customer had no address on file.
+- `SHA256SUMS.macos` now also lists the stable-named
+  `SlowBooksPro-macos-arm64.dmg`, so the README's direct download can be
+  checksum-verified, not just the versioned asset.
+
+### v2.6.0 — Sales receipts: one-screen POS sales + QuickBooks import
+
+For businesses that ring up sales at a counter instead of invoicing:
+a QuickBooks sales receipt is an invoice paid at the moment of sale,
+and SlowBooks now models it exactly that way — an Invoice flagged
+`is_sales_receipt` plus a Payment for the full total, so every
+existing report, PDF, export, and void path works unchanged. Schema
+migration `c7d8e9f0a1b2` adds the flag (drop-in; new databases need
+nothing).
+
+- **Enter Sales Receipts screen** — new sidebar page with a
+  one-screen form: customer (with quick-add), payment method,
+  check #/reference, deposit-to account (defaults to Undeposited
+  Funds), tax, class, currency, and line items. `POST
+  /api/sales-receipts` composes the existing invoice and payment
+  routes, so numbering, closing-date enforcement, FX, and
+  inventory/COGS behave identically to documents entered separately;
+  if the payment half fails the invoice half is voided rather than
+  left as a stray open balance. Receipts list on their own page and
+  no longer clutter the Invoices list (`GET
+  /api/invoices?is_sales_receipt=...` filters either way; omitting
+  the param returns everything, as before).
+- **IIF import: `CASH SALE` blocks** — QuickBooks Desktop's sales
+  receipts previously fell into the silently-skipped bucket. They now
+  import as paid invoice + payment with balanced journals (deposit
+  account from the TRNS header, Undeposited Funds fallback).
+  Counter sales with a blank Customer:Job land on an auto-created
+  "Walk-In Customer" (reported as a warning); unnumbered receipts get
+  the next invoice number, and re-imports dedup by document number or
+  customer + date + total.
+- **QBO import: SalesReceipt entity** — the QuickBooks Online
+  importer pulls sales receipts alongside invoices and payments, with
+  the same id-mapping dedup; the QBO page gets a Sales Receipts
+  import checkbox (import-only — there is no matching export entity).
+- **docs/migrate-from-quickbooks.md** — new guide covering both
+  paths, including the fact that Desktop's built-in IIF export is
+  lists-only and the clean Transaction Detail report recipe for
+  getting sales history out.
+
+### v2.5.3 — API hardening, from a full-surface sweep
+
+Every one of the API's 357 operations was driven end-to-end on Windows
+(installer) and Linux (source, PostgreSQL 17); everything that surfaced is
+fixed here. No schema migrations; drop-in upgrade from 2.5.x.
+
+**Data-integrity fixes**
+
+- An invalid `pay_type` or `role` on an employee was written as-is and then
+  made the row permanently unreadable — one bad `PUT` returned 500 for the
+  record *and* for `GET /api/employees` company-wide, with no API-level
+  recovery. Both fields are now validated as enums (422 at the edge), the
+  same treatment `pay_frequency` and `filing_status` already had. For rows
+  corrupted before the fix, `scripts/repair_employee_enums.py` repairs in
+  raw SQL (dry-run by default; `--apply` to write).
+- The migration dry-run tolerated a one-cent journal imbalance the importer
+  then refused, so `ok=true` could precede a mid-import 500. The gate now
+  applies the importer's exact-balance rule, including to synthesized
+  opening-balance journals.
+- Customer and vendor names: blank/whitespace-only names rejected, lengths
+  capped to the column width (was: opaque 500 on PostgreSQL, silent
+  overflow on SQLite), obviously malformed emails rejected. The CSV and
+  IIF importers honor the same rules — an IIF transaction with a blank
+  NAME no longer auto-creates an unnamed customer.
+
+**Correctness / API behavior**
+
+- Emailing an invoice (and Settings → "send test email") called
+  `send_email()` with a stale signature and could never succeed; both now
+  work, report 502 with a pointer to the email log when SMTP fails, and no
+  longer double-log.
+- Account endpoints return 409 with a real message instead of leaking
+  database errors as 500s (delete-with-history, duplicate account number);
+  an account can no longer be made its own parent.
+- `/openapi.json` no longer requires auth, so the documented agent flow
+  ("discover from the spec") works; the spec now declares its bearer
+  security scheme, with genuinely public routes exempted.
+- API tokens can no longer clear or roll back the closing date, nor set
+  the closing-date override password; moving the date forward (tightening)
+  is still allowed, and signed-in users are unaffected.
+- Machine-originated audit rows (e.g. the token `last_used_at` stamp) are
+  attributed to an explicit `system` principal instead of NULL.
+- `SlowBooksPro.exe --help` with piped/redirected output hung the frozen
+  Windows build forever on an invisible error dialog (UnicodeEncodeError
+  under cp1252 inside argparse). Launcher stdio is now total; verified on
+  Windows before/after.
+
+**Docs**
+
+- INSTALL.md's native Linux path works as written on PEP 668 distros
+  (venv steps, `.env` honored by alembic, APP_DEBUG guidance);
+  `.env.example` no longer recommends a FORCE_HTTPS setting the app
+  refuses to boot with; README operation count corrected.
+
+**Report display fix**
+
+- Balance-sheet and P&L lines rendered in the app wrapped every amount in
+  an absolute value, so a contra-balance account displayed positive while
+  the totals summed real signed values — visibly "$100 + $400 + $600 =
+  $300" after an unapplied customer payment drove A/R negative (a
+  legitimate prepayment). Lines now render signed, matching the totals
+  and the PDF output, which were always correct. (#56)
+
+**macOS releases now sign themselves in CI**
+
+- Tag builds sign, notarize, and staple the macOS DMG on the runner using
+  the same release tooling the maintainer ran locally, and attach it to
+  the release alongside the Windows assets. Starting with this release the
+  macOS publisher identity is **Trenton Von Holten** (previously releases
+  were signed by the macOS maintainer's own Developer ID).
+
+20 new regression tests (1162 total).
+
 ### Native macOS desktop
 
 - Added a signed and Apple-notarized native app for Apple Silicon Macs running

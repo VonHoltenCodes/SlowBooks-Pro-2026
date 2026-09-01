@@ -105,6 +105,7 @@ _IMPORT_ENTITY_MAP = {
     "items": qbo_import.import_items,
     "invoices": qbo_import.import_invoices,
     "payments": qbo_import.import_payments,
+    "sales_receipts": qbo_import.import_sales_receipts,
 }
 
 

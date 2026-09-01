@@ -1,0 +1,27 @@
+,,,,,,,,,
+Check Detail,,,,,,,,,s
+"March 1 - 6, 2026",,,,,,,,,
+,Type,Date,Num,Name,Memo,Item,Account,Original Amount,Paid Amount
+ ,,,,,,,,,
+,Check,03/02/26,,Freight Express,office supplies- shipping charges,,Checking,-30.20,
+ ,,,,,,,,,
+,,,,,shipping chgs,,Office Supplies,30.20,-30.20
+TOTAL,,,,,,,,30.20,-30.20
+ ,,,,,,,,,
+,Check,03/06/26,1045,Registry of Vehicles,reg: J. Paulson,,Checking,-190.90,
+ ,,,,,,,,,
+,,,,,J. Paulson,,Utilities,190.90,-190.90
+TOTAL,,,,,,,,190.90,-190.90
+ ,,,,,,,,,
+,Check,03/06/26,,Shoreline Health Insurance,monthly health insurances,,Checking,"-1,185.90",
+ ,,,,,,,,,
+,,,,,March 2026,,Insurance,"1,185.90","-1,185.90"
+TOTAL,,,,,,,,"1,185.90","-1,185.90"
+ ,,,,,,,,,
+,Check,03/06/26,27866,Jenny Frey,w/e. 2/27/26,,Checking,-711.12,
+ ,,,,,,,,,
+,,,,,w/e. 2/27/26,,Wages & Salaries,"1,250.00","-1,250.00"
+,,,,,w/e. 2/27/26,,Federal Income Tax Payable,-275.00,275.00
+,,,,,w/e. 2/27/26,,Social Security Payable,-95.63,95.63
+,,,,,w/e. 2/27/26,,State Income Tax Payable,-168.25,168.25
+TOTAL,,,,,,,,711.12,-711.12

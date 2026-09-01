@@ -1,6 +1,50 @@
+import re
 from decimal import Decimal
+from typing import Annotated, Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator, StringConstraints
+
+# A required display name that cannot be blank.
+#
+# `min_length` alone is not enough: a name of "   " has length 3 and passes,
+# producing a record that is invisible in list views and unsearchable — there
+# is nothing to click and nothing to type to find it again. strip_whitespace
+# runs BEFORE the length check, so "   " collapses to "" and is rejected, and
+# a padded "  Acme  " is stored cleanly as "Acme".
+#
+# max_length mirrors the VARCHAR(200) width shared by Customer.name and
+# Vendor.name. Validating here keeps the two supported backends consistent:
+# PostgreSQL raises StringDataRightTruncation (an opaque HTTP 500) while
+# SQLite ignores VARCHAR(n) and stores the oversized value.
+# A stored email address. Deliberately a permissive shape check, not RFC 5322
+# validation: the goal is to reject "not-an-email", which was accepted and
+# stored verbatim, without pulling in the email-validator dependency that
+# pydantic.EmailStr requires — requirements.txt is tightly pinned with CVE
+# rationale per line and is not somewhere to add a dependency casually.
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+OptionalEmail = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, max_length=200, pattern=_EMAIL_RE.pattern),
+]
+
+
+def _blank_to_none(v):
+    if isinstance(v, str) and not v.strip():
+        return None
+    return v
+
+
+# An email field that treats blank as absent. HTML forms submit every empty
+# input as "" — Optional[OptionalEmail] alone rejects that with a pattern
+# 422 even though the user typed nothing (#64). Blank collapses to None
+# before the pattern runs; anything non-blank must still look like an email.
+BlankableEmail = Annotated[Optional[OptionalEmail], BeforeValidator(_blank_to_none)]
+
+
+NonBlankName = Annotated[
+    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
+]
 
 
 class MessageResponse(BaseModel):

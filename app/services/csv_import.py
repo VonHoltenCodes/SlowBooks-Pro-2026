@@ -29,7 +29,7 @@ def import_customers(db: Session, csv_text: str) -> dict:
 
     for i, row in enumerate(reader, start=2):
         try:
-            name = row.get("Name", "").strip()
+            name = row.get("Name", "").strip()[:200]
             if not name:
                 errors.append(f"Row {i}: Missing name")
                 continue
@@ -69,7 +69,7 @@ def import_vendors(db: Session, csv_text: str) -> dict:
 
     for i, row in enumerate(reader, start=2):
         try:
-            name = row.get("Name", "").strip()
+            name = row.get("Name", "").strip()[:200]
             if not name:
                 errors.append(f"Row {i}: Missing name")
                 continue
@@ -116,7 +116,7 @@ def import_items(db: Session, csv_text: str) -> dict:
 
     for i, row in enumerate(reader, start=2):
         try:
-            name = row.get("Name", "").strip()
+            name = row.get("Name", "").strip()[:200]
             if not name:
                 errors.append(f"Row {i}: Missing name")
                 continue

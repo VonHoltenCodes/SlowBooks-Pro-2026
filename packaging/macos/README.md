@@ -9,10 +9,25 @@ newer. Intel support needs a separate build and installed-app acceptance pass.
 ## Release model
 
 GitHub Actions builds and smoke-tests an exact commit without Apple
-credentials. PyInstaller ad-hoc signs the transport app, but the artifact is
-still called `unsigned` because it is not suitable for distribution.
+credentials in the `build` job. PyInstaller ad-hoc signs the transport app,
+but the artifact is still called `unsigned` because it is not suitable for
+distribution.
 
-Developer ID signing and notarization happen on the maintainer's Mac:
+Since 2026-08, the `sign` job then runs `release.py` on the runner itself:
+it imports the Developer ID Application certificate from repo secrets
+(`MACOS_CERT_P12`/`MACOS_CERT_PASSWORD`) into a throwaway keychain, stores
+notarization credentials (`APPLE_ID`/`APPLE_TEAM_ID`/`APPLE_APP_PASSWORD`)
+as the `slowbooks-notary` profile, and executes the exact script documented
+below. On `v*` tags the signed, notarized, stapled DMG — the versioned name,
+the stable `SlowBooksPro-macos-arm64.dmg` copy the website links to,
+`SHA256SUMS.macos`, and the evidence bundle — is attached to the GitHub
+release automatically.
+
+The local path below remains fully supported: same script, same evidence
+output. Use it as the fallback if CI signing is unavailable, and for
+installed-app acceptance, which stays a human gate either way.
+
+Developer ID signing and notarization on the maintainer's Mac:
 
 1. Actions builds the app, verifies its native-library closure, exercises the
    Cocoa backend, creates a company, starts the server, and renders a PDF.

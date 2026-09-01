@@ -239,3 +239,147 @@ def test_iif_bill_unknown_class_errors(db_session, seed_accounts):
     result = import_all(db_session, iif)
     assert result["bills"] == 0
     assert any("No Such Class" in e["message"] for e in result["errors"])
+
+
+# ── IIF class list (!CLASS) ──────────────────────────────────────────────
+
+
+# Shape of a real QuickBooks class-list export: File > Utilities > Export >
+# Lists > Class List. "Main Office:North" is a subclass — QB writes the full
+# parent:child path here AND in the SPL CLASS column, so it has to survive
+# the round trip verbatim for the two to match.
+IIF_CLASS_LIST = (
+    "!CLASS\tNAME\tREFNUM\tTIMESTAMP\tBASETYPE\tEXTRA\n"
+    "CLASS\tSide Gig\t1\t1187300000\tCLASS\t\n"
+    "CLASS\tMain Office\t2\t1187300000\tCLASS\t\n"
+    "CLASS\tMain Office:North\t3\t1187300000\tCLASS\t\n"
+)
+
+
+def _class_names(db_session):
+    return {c.name for c in db_session.query(TxnClass).all()}
+
+
+def test_iif_class_list_imports(db_session):
+    from app.services.iif_import import import_all
+
+    result = import_all(db_session, IIF_CLASS_LIST)
+    assert result["classes"] == 3, result["errors"]
+    assert not result["errors"]
+    names = _class_names(db_session)
+    assert {"Side Gig", "Main Office", "Main Office:North"} <= names
+
+
+def test_iif_class_list_dedups_case_insensitively(client, db_session):
+    from app.services.iif_import import import_all
+
+    client.post("/api/classes", json={"name": "side gig"})
+
+    result = import_all(db_session, IIF_CLASS_LIST)
+    assert result["classes"] == 2, result["errors"]
+    # The pre-existing row keeps its own casing; no second "Side Gig" appears.
+    names = _class_names(db_session)
+    assert "side gig" in names
+    assert "Side Gig" not in names
+
+
+def test_iif_class_list_reimport_is_a_noop(db_session):
+    from app.services.iif_import import import_all
+
+    import_all(db_session, IIF_CLASS_LIST)
+    again = import_all(db_session, IIF_CLASS_LIST)
+    assert again["classes"] == 0
+    assert not again["errors"]
+    assert db_session.query(TxnClass).filter(TxnClass.name == "Side Gig").count() == 1
+
+
+def test_iif_class_hidden_imports_archived(db_session):
+    from app.services.iif_import import import_all
+
+    iif = (
+        "!CLASS\tNAME\tREFNUM\tTIMESTAMP\tBASETYPE\tEXTRA\tHIDDEN\n"
+        "CLASS\tRetired Division\t1\t1187300000\tCLASS\t\tY\n"
+        "CLASS\tLive Division\t2\t1187300000\tCLASS\t\tN\n"
+    )
+    result = import_all(db_session, iif)
+    assert result["classes"] == 2, result["errors"]
+    retired = (
+        db_session.query(TxnClass).filter(TxnClass.name == "Retired Division").one()
+    )
+    live = db_session.query(TxnClass).filter(TxnClass.name == "Live Division").one()
+    assert retired.is_archived is True
+    assert live.is_archived is False
+
+
+def test_iif_class_missing_name_errors(db_session):
+    from app.services.iif_import import import_all
+
+    iif = (
+        "!CLASS\tNAME\tREFNUM\tTIMESTAMP\tBASETYPE\tEXTRA\n"
+        "CLASS\t\t1\t1187300000\tCLASS\t\n"
+        "CLASS\tGood One\t2\t1187300000\tCLASS\t\n"
+    )
+    result = import_all(db_session, iif)
+    assert result["classes"] == 1
+    assert any("Missing class NAME" in e["message"] for e in result["errors"])
+
+
+def test_iif_class_overlong_name_errors_rather_than_truncating(db_session):
+    """A truncated class would import but never match its SPL CLASS value."""
+    from app.services.iif_import import _CLASS_NAME_MAX, import_all
+
+    long_name = "L" * (_CLASS_NAME_MAX + 1)
+    iif = (
+        "!CLASS\tNAME\tREFNUM\tTIMESTAMP\tBASETYPE\tEXTRA\n"
+        f"CLASS\t{long_name}\t1\t1187300000\tCLASS\t\n"
+    )
+    result = import_all(db_session, iif)
+    assert result["classes"] == 0
+    assert any(str(_CLASS_NAME_MAX) in e["message"] for e in result["errors"])
+    assert db_session.query(TxnClass).filter(TxnClass.name == long_name).count() == 0
+
+
+def test_iif_class_list_then_transaction_resolves(db_session, seed_accounts):
+    """End-to-end: one file carrying both the class list and a bill that
+    cites it imports cleanly, with no class pre-created by hand."""
+    from app.models.bills import Bill
+    from app.models.contacts import Vendor
+    from app.services.iif_import import import_all
+
+    db_session.add(Vendor(name="Apple Store", is_active=True))
+    db_session.commit()
+
+    result = import_all(db_session, IIF_CLASS_LIST + IIF_BILL_WITH_CLASS)
+    assert result["classes"] == 3, result["errors"]
+    assert result["bills"] == 1, result["errors"]
+
+    cls = db_session.query(TxnClass).filter(TxnClass.name == "Side Gig").one()
+    bill = db_session.query(Bill).filter(Bill.bill_number == "B-CL-1").one()
+    assert bill.class_id == cls.id
+    txn = db_session.get(Transaction, bill.transaction_id)
+    assert txn.class_id == cls.id
+
+
+def test_iif_class_list_imports_before_transactions_regardless_of_order(
+    db_session, seed_accounts
+):
+    """The class list still lands first when it trails the transactions."""
+    from app.models.bills import Bill
+    from app.models.contacts import Vendor
+    from app.services.iif_import import import_all
+
+    db_session.add(Vendor(name="Apple Store", is_active=True))
+    db_session.commit()
+
+    result = import_all(db_session, IIF_BILL_WITH_CLASS + IIF_CLASS_LIST)
+    assert result["bills"] == 1, result["errors"]
+    assert db_session.query(Bill).filter(Bill.bill_number == "B-CL-1").one().class_id
+
+
+def test_validate_reports_class_section():
+    from app.services.iif_import import validate_iif
+
+    report = validate_iif(IIF_CLASS_LIST)
+    assert report["valid"] is True
+    assert "CLASS" in report["sections_found"]
+    assert report["record_counts"]["CLASS"] == 3

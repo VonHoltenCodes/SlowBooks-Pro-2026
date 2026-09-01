@@ -17,6 +17,31 @@ etiquette. Collaborators have full branch and Actions access: push
 branches, trigger workflows, download artifacts. CI (black/ruff,
 pytest, CodeQL, pip-audit) must be green before review.
 
+## First contribution? Fork — no access needed
+
+Pushing a branch to this repo requires collaborator access, which new
+contributors don't have (and don't need). The standard flow:
+
+1. **Fork** this repo on GitHub (the Fork button, top right).
+2. **Push your branch to the fork.** An existing clone doesn't need
+   re-cloning — add the fork as a remote:
+
+   ```sh
+   git remote add fork https://github.com/<you>/SlowBooks-Pro-2026.git
+   git checkout -b feat/my-topic
+   # ...commit...
+   git push -u fork feat/my-topic
+   ```
+
+3. **Open the PR against `main` here.** GitHub offers a "Compare &
+   pull request" button as soon as you push. CI runs on fork PRs
+   exactly as it does for collaborators; review and merge work the
+   same. (Fork PRs can't see repo secrets or trigger the release
+   workflows — that's by design, not a problem with your setup.)
+
+Good work gets merged under your name; polish happens in follow-up
+commits, so don't hold a PR hostage to perfection.
+
 GitGuardian flags the fake credentials in `tests/` from time to time —
 those are pytest fixtures, tracked as dismissed false positives.
 
@@ -25,10 +50,12 @@ those are pytest fixtures, tracked as dismissed false positives.
 - **Windows + Docker + server**: @VonHoltenCodes (releases signed via
   Azure Trusted Signing in CI)
 - **macOS**: [@ContractorKeith](https://github.com/ContractorKeith) —
-  builds the `.app`/DMG from `packaging/macos/`, signs and notarizes
-  locally with his Apple Developer ID (credentials never enter the
-  repo or CI), and hands the checksummed DMG to the owner to attach to
-  releases.
+  maintains the `.app`/DMG build and release tooling in
+  `packaging/macos/`. Since v2.5.3, releases sign, notarize, and staple
+  in CI with the project's Apple Developer ID (credentials live only in
+  repo secrets); Keith's local run of the same tooling is the documented
+  fallback, and installed-app acceptance on real hardware remains a
+  human gate.
 
 ## Branch naming
 

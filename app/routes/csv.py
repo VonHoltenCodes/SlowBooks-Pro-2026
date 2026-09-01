@@ -5,7 +5,7 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Request, UploadFile, File, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -79,11 +79,28 @@ def csv_export_accounts(request: Request, db: Session = Depends(get_db)):
     return _csv_response(csv_data, "chart_of_accounts.csv", request)
 
 
+def _decode_csv_upload(raw: bytes) -> str:
+    """Decode an uploaded CSV: UTF-8 (BOM-tolerant) first, then
+    Windows-1252 — QB Desktop's Print -> Save as CSV frequently writes
+    ANSI, and a payee like "José" previously 500'd (#62 review)."""
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            return raw.decode("cp1252")
+        except UnicodeDecodeError:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not read the file as text. Re-export it as a "
+                "UTF-8 / standard CSV and try again.",
+            )
+
+
 @router.post("/import/customers")
 async def csv_import_customers(
     file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
-    content = (await read_limited(file, label="CSV file")).decode("utf-8-sig")
+    content = _decode_csv_upload(await read_limited(file, label="CSV file"))
     result = import_customers(db, content)
     return result
 
@@ -92,13 +109,27 @@ async def csv_import_customers(
 async def csv_import_vendors(
     file: UploadFile = File(...), db: Session = Depends(get_db)
 ):
-    content = (await read_limited(file, label="CSV file")).decode("utf-8-sig")
+    content = _decode_csv_upload(await read_limited(file, label="CSV file"))
     result = import_vendors(db, content)
     return result
 
 
 @router.post("/import/items")
 async def csv_import_items(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    content = (await read_limited(file, label="CSV file")).decode("utf-8-sig")
+    content = _decode_csv_upload(await read_limited(file, label="CSV file"))
     result = import_items(db, content)
     return result
+
+
+@router.post("/import/qb-report")
+async def csv_import_qb_report(
+    file: UploadFile = File(...), db: Session = Depends(get_db)
+):
+    """Import a QuickBooks Desktop report CSV — the documented fallback
+    for Desktop, which can't export transactions to IIF. Auto-detects the
+    report by its columns: Transaction Detail filtered to Sales Receipt,
+    Deposit Detail, or Check Detail."""
+    from app.services.qb_report_import import import_qb_report
+
+    content = _decode_csv_upload(await read_limited(file, label="CSV file"))
+    return import_qb_report(db, content)
