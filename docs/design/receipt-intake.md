@@ -56,6 +56,44 @@ and Tesseract doesn't carry any.
   operator fixes update the template. Standalone keeps torch/CUDA
   weight out of this repo's clean footprint. Cloud OCR strictly opt-in.
 
+## Delivery plan (committed 2026-09-01) — integration branch
+
+`feat/receipt-intake` is now an integration branch, same pattern as
+`server-edition`: sub-PRs land here with CI + CodeQL, and ONE final PR
+carries the whole intake feature to `main` when v1–v3 are all on the
+branch and hardware-tested. Nobody waits on anybody: the contributor's
+v1 merges at its own cadence, v2/v3 build on top without a release in
+between, and `main` never sees a half-finished intake feature.
+
+1. **v1 — Scan Receipt (PR #71, Jeremy Patterson).** Full-page OCR,
+   deterministic parse, honest `partial` flag, intake bucket. Merges to
+   this branch after review. One hook requested now: return tesseract's
+   per-word bounding boxes (`tsv` output) alongside the parsed fields —
+   v2 draws them.
+2. **v2 — Auto-first, box-to-fix canvas.** The image with v1's detected
+   boxes drawn on it; drag to adjust or draw; click a box to assign a
+   field. Per-field OCR on the adjusted box: crop → upscale 3× →
+   Otsu/adaptive threshold (the low-contrast rescue) → single-line
+   `--psm 7` with a per-field character whitelist (digits/`.`/`$` for
+   amounts, digits/`/`/`-` for dates). This is why a known-type region
+   OCRs far better than a whole receipt. Vanilla-JS canvas — no
+   frontend build step, no new deps; cropping uses the Pillow already
+   pulled in by WeasyPrint. Five drags per receipt is worse than
+   typing, so the canvas is a correction tool, never a required step.
+3. **v3 — Merchant template memory.** Corrections persist: box
+   positions stored relative to text anchors (never absolute pixels —
+   receipt length and photo scale vary), keyed by a normalized merchant
+   name (strip store numbers/cities; fuzzy-match; confirm "same as Home
+   Depot?" once). Confidence-gated: when the template's boxes OCR
+   cleanly and subtotal + tax = total, no canvas is shown at all — the
+   form just fills. Hard the first time, drop-in-and-confirm after.
+   Call it "remembers your receipt layouts" — template learning, not
+   ML, per the honesty rule above.
+
+Hardware gate: the branch → main PR needs the same Windows + macOS
+installed-app pass every release gets; Docker gets tesseract/poppler in
+the image, installers never do.
+
 ## Honest framing (unchanged)
 
 Template learning is anchor matching plus operator feedback — say
