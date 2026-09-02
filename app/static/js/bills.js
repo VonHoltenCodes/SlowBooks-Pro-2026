@@ -150,7 +150,21 @@ const BillsPage = {
                     <button type="submit" class="btn btn-primary">Save Bill</button>
                 </div>
             </form>`);
-        ScanHelper.wire(BillsPage._applyScan, BillsPage._applyScanField);
+        ScanHelper.wire(BillsPage._applyScan, BillsPage._applyScanField, BillsPage._scanFieldTarget);
+    },
+
+    // Where each canvas field lands — the canvas outlines these inputs in
+    // the field's color so the form doubles as the legend. Mirrors
+    // _applyScanField below.
+    _scanFieldTarget(fieldKey) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return null;
+        const row = document.querySelector('#bill-lines tr');
+        if (fieldKey === 'date') return form.querySelector('[name="date"]');
+        if (fieldKey === 'merchant') return row && row.querySelector('.line-desc');
+        if (fieldKey === 'total' || fieldKey === 'subtotal') return row && row.querySelector('.line-rate');
+        if (fieldKey === 'tax') return form.querySelector('[name="notes"]');
+        return null;
     },
 
     // Box-to-fix canvas: apply one re-read field into the bill form.
