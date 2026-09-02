@@ -307,12 +307,20 @@ def _native_engine_for_platform():
     return None
 
 
-def get_engine():
+def get_engine(preference: str | None = None):
     """The engine to use right now. Never raises; the returned engine may
-    report unavailable (routes turn that into the guidance envelope)."""
+    report unavailable (routes turn that into the guidance envelope).
+
+    `preference` is the stored Settings choice ("auto"/"tesseract"/...);
+    the SLOWBOOKS_OCR_ENGINE env var (support tool) outranks it, and
+    anything unrecognized falls through to auto-selection.
+    """
     override = os.environ.get("SLOWBOOKS_OCR_ENGINE", "auto").strip().lower()
     if override in _ENGINES:
         return _ENGINES[override]()
+    pref = (preference or "auto").strip().lower()
+    if pref in _ENGINES:
+        return _ENGINES[pref]()
     native = _native_engine_for_platform()
     if native is not None and native.available():
         return native
@@ -324,9 +332,9 @@ def get_engine():
     return tess
 
 
-def engine_status() -> dict:
+def engine_status(preference: str | None = None) -> dict:
     """For /api/ocr/status: the active engine's info + which engine it is."""
-    engine = get_engine()
+    engine = get_engine(preference)
     info = engine.info()
     info["engine"] = engine.name
     return info
