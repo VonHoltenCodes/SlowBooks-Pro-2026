@@ -527,8 +527,10 @@ const SettingsPage = {
             const s = await API.get('/ocr/status');
             if (s.available) {
                 const langs = (s.languages || []).join(', ') || '—';
-                el.innerHTML = '<strong style="color:#166534;">Tesseract OCR is installed</strong>'
-                    + (s.version ? ` <span style="color:var(--text-muted);">(v${escapeHtml(s.version)})</span>` : '')
+                const engineNames = { tesseract: 'Tesseract OCR', vision: 'Apple Vision (built into macOS)', winrt: 'Windows OCR (built into Windows)' };
+                const engineLabel = engineNames[s.engine] || 'OCR engine';
+                el.innerHTML = `<strong style="color:#166534;">${escapeHtml(engineLabel)} is ready</strong>`
+                    + (s.version ? ` <span style="color:var(--text-muted);">(${escapeHtml(s.version)})</span>` : '')
                     + ` &middot; languages: ${escapeHtml(langs)}`;
             } else {
                 el.innerHTML = '<strong style="color:#b45309;">Tesseract OCR is not installed — scanning is disabled.</strong>'

@@ -25,8 +25,9 @@ from app.schemas.ocr import (
     OcrField,
     OcrReceiptResponse,
     OcrStatusResponse,
+    OcrWordBox,
 )
-from app.services import ocr_service, storage
+from app.services import ocr_engines, ocr_service, storage
 from app.services.rate_limit import limiter
 from app.services.upload_limits import MAX_IMPORT_BYTES, read_limited
 
@@ -40,12 +41,6 @@ _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9 ._()\-]")
 
 STATIC_BASE = storage.files_root().resolve()
 UPLOAD_BASE = (STATIC_BASE / "uploads" / "attachments").resolve()
-
-_TESSERACT_MESSAGE = (
-    "Tesseract OCR is not installed. Install it to enable scanning "
-    "(Ubuntu: sudo apt-get install tesseract-ocr; macOS: brew install "
-    "tesseract; Windows: see Settings for an installer link)."
-)
 
 
 def _sanitize_filename(raw: str) -> str:
@@ -62,12 +57,14 @@ def _sanitize_filename(raw: str) -> str:
 
 @router.get("/status", response_model=OcrStatusResponse)
 def ocr_status():
-    """Frontend gating + Settings-page status row (spec §6.6)."""
-    info = ocr_service.tesseract_info()
+    """Frontend gating + Settings-page status row (spec §6.6). Reports the
+    active engine for this platform (engine seam, design doc §engines)."""
+    info = ocr_engines.engine_status()
     return OcrStatusResponse(
         available=info["available"],
         version=info["version"],
         languages=info["languages"] or None,
+        engine=info["engine"],
     )
 
 
@@ -91,8 +88,10 @@ async def scan_receipt(request: Request, file: UploadFile = File(...)):
             status_code=400, detail=f"File extension '{extension}' not allowed"
         )
 
-    if not ocr_service.tesseract_available():
-        return OcrReceiptResponse(ocr_available=False, message=_TESSERACT_MESSAGE)
+    engine = ocr_engines.get_engine()
+    reason = engine.unavailable_reason()
+    if reason:
+        return OcrReceiptResponse(ocr_available=False, message=reason)
 
     # Rasterize PDFs via poppler-utils (page 1, per spec §3); images pass
     # through as-is — Tesseract decodes PNG/JPEG/WebP natively, so no image
@@ -107,21 +106,19 @@ async def scan_receipt(request: Request, file: UploadFile = File(...)):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
-    lang = ocr_service.ocr_language()
-    if lang is None:
-        return OcrReceiptResponse(
-            ocr_available=False,
-            message=(
-                "Tesseract is installed but has no usable language data "
-                "(expected at least 'eng'). Install the tesseract-ocr "
-                "language packs and try again."
-            ),
-        )
-
     try:
-        raw_text = ocr_service.ocr_image_bytes(ocr_input, lang=lang)
+        result = engine.recognize(ocr_input)
+    except ocr_engines.EngineUnavailable as exc:
+        return OcrReceiptResponse(ocr_available=False, message=str(exc))
     except ocr_service.OCRRuntimeError as exc:
-        raise HTTPException(status_code=500, detail=f"OCR failed: {exc}")
+        # The engine ran and rejected the input — a corrupt or non-image
+        # file with a valid MIME type is the user's to fix, not a 500.
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read the image — is it a valid receipt scan? ({exc})",
+        )
+    raw_text = result.text
+    lang = result.language
 
     extracted = ocr_service.extract_receipt(raw_text)
     intake_id = ocr_service.save_intake(
@@ -155,6 +152,8 @@ async def scan_receipt(request: Request, file: UploadFile = File(...)):
         tax=extracted["tax"],
         tax_detected=extracted["tax_detected"],
         language=lang,
+        engine=result.engine,
+        words=[OcrWordBox(**vars(w)) for w in result.words] or None,
         multi_page=multi_page,
         partial=bool(partial_reasons),
         partial_reasons=partial_reasons,
