@@ -219,3 +219,25 @@ def test_status_endpoint_honors_setting(client, db_session, monkeypatch):
     r = client.get("/api/ocr/status")
     assert r.status_code == 200
     assert r.json()["engine"] == "tesseract"
+
+
+def test_run_winrt_coroutine_inside_and_outside_event_loop():
+    """The WinRT bridge must complete its coroutine whether or not the
+    caller already sits on a running event loop (async scan route vs sync
+    region route) — the VH308 500-on-every-scan regression."""
+    import asyncio
+
+    from app.services.ocr_engines import _run_winrt_coroutine
+
+    async def op():
+        await asyncio.sleep(0)
+        return "ok"
+
+    # No running loop (sync route / CLI context)
+    assert _run_winrt_coroutine(op) == "ok"
+
+    # From inside a running loop (async def route)
+    async def caller():
+        return _run_winrt_coroutine(op)
+
+    assert asyncio.run(caller()) == "ok"
