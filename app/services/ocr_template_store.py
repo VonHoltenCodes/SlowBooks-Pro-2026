@@ -89,6 +89,7 @@ def apply_template(
     template: OcrTemplate,
     image_data: bytes,
     words: list[dict],
+    engine=None,
 ) -> dict:
     """Region-OCR every remembered field box against a new scan. Returns
     {field_key: {"value": str, "confidence": str}} for the boxes that both
@@ -106,6 +107,7 @@ def apply_template(
                 width=box["width"],
                 height=box["height"],
                 field_type=FIELD_OCR_TYPE.get(field_key, "text"),
+                engine=engine,
             )
         except Exception as exc:  # fail closed, canvas takes over
             logger.debug("template region read failed for %s: %s", field_key, exc)
