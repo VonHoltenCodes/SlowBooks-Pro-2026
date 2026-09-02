@@ -72,10 +72,26 @@ def _norm_word(text: str) -> str:
     return _NON_ALNUM_RE.sub("", text.upper())
 
 
+def _text_counts(words: list[dict]) -> dict:
+    counts: dict = {}
+    for w in words:
+        t = _norm_word(w["text"])
+        counts[t] = counts.get(t, 0) + 1
+    return counts
+
+
 def pick_anchor(box: dict, words: list[dict]) -> Optional[dict]:
     """The anchor for a field box: prefer a same-line word to its LEFT that
     looks like a label (alphabetic, e.g. TOTAL/TAX/DATE); fall back to the
-    topmost alphabetic word on the page (the merchant block)."""
+    topmost alphabetic word on the page (the merchant block).
+
+    Among same-line labels, a word that appears only ONCE on the page wins
+    over a nearer repeated one: "Total Sales (Inclusive of GST) : 29.68"
+    anchors on INCLUSIVE, not GST — on a GST receipt "GST" shows up in the
+    GST ID line, the exclusive/inclusive totals and the tax line, and the
+    SkyTech lap (2026-09-02) saw a tax template resolve onto the GST ID
+    number.  When every label on the line repeats, the ordinal is stored
+    alongside (see encode_field)."""
     cy = box["top"] + box["height"] / 2.0
     same_line = [
         w
@@ -86,7 +102,9 @@ def pick_anchor(box: dict, words: list[dict]) -> Optional[dict]:
         and len(_norm_word(w["text"])) >= 3
     ]
     if same_line:
-        return max(same_line, key=lambda w: w["left"])  # nearest on the left
+        counts = _text_counts(words)
+        unique = [w for w in same_line if counts[_norm_word(w["text"])] == 1]
+        return max(unique or same_line, key=lambda w: w["left"])  # nearest on the left
     page_words = [
         w
         for w in words
@@ -97,6 +115,15 @@ def pick_anchor(box: dict, words: list[dict]) -> Optional[dict]:
     return None
 
 
+def _same_text(anchor: dict, words: list[dict]) -> list[dict]:
+    """Every word with the anchor's normalized text, in reading order."""
+    target = _norm_word(anchor["text"])
+    return sorted(
+        (w for w in words if _norm_word(w["text"]) == target),
+        key=lambda w: (w["top"], w["left"]),
+    )
+
+
 def encode_field(box: dict, words: list[dict]) -> Optional[dict]:
     """Encode a corrected field box relative to its anchor. Returns the
     storable dict or None when no usable anchor exists."""
@@ -104,8 +131,13 @@ def encode_field(box: dict, words: list[dict]) -> Optional[dict]:
     if anchor is None or anchor["height"] <= 0:
         return None
     unit = float(anchor["height"])
+    # A repeated anchor word is disambiguated by its ordinal in reading
+    # order plus how many there were — resolution insists both still hold.
+    peers = _same_text(anchor, words)
     return {
         "anchor_text": _norm_word(anchor["text"]),
+        "anchor_index": peers.index(anchor),
+        "anchor_count": len(peers),
         "dx": (box["left"] - anchor["left"]) / unit,
         "dy": (box["top"] - anchor["top"]) / unit,
         "w": box["width"] / unit,
@@ -116,17 +148,31 @@ def encode_field(box: dict, words: list[dict]) -> Optional[dict]:
 def resolve_field(encoded: dict, words: list[dict]) -> Optional[dict]:
     """Resolve a stored field against a NEW scan's words: find the anchor
     word by normalized text, apply the height-scaled offsets. None when the
-    anchor doesn't appear (layout changed -> canvas takes over)."""
+    anchor doesn't appear (layout changed -> canvas takes over).
+
+    A repeated anchor word ("GST" four times on a Malaysian tax invoice) is
+    only trusted when the new scan repeats it the same number of times —
+    then the stored ordinal picks the right one.  Any other repeat count,
+    or a pre-ordinal template meeting a repeated anchor, is ambiguous and
+    fails closed rather than guessing the topmost hit."""
     target = encoded.get("anchor_text") or ""
     if not target:
         return None
-    candidates = [w for w in words if _norm_word(w["text"]) == target]
+    candidates = sorted(
+        (w for w in words if _norm_word(w["text"]) == target),
+        key=lambda w: (w["top"], w["left"]),
+    )
     if not candidates:
         return None
-    # Multiple hits ("TOTAL" and "SUBTOTAL" lines both matching "TOTAL"
-    # never happens post-normalization, but repeated words do): take the
-    # one whose implied box stays on-page — first by top position.
-    anchor = min(candidates, key=lambda w: (w["top"], w["left"]))
+    if len(candidates) == 1:
+        anchor = candidates[0]
+    else:
+        index = encoded.get("anchor_index")
+        if index is None or encoded.get("anchor_count") != len(candidates):
+            return None
+        if not 0 <= index < len(candidates):
+            return None
+        anchor = candidates[index]
     unit = float(anchor["height"]) or 1.0
     return {
         "left": int(round(anchor["left"] + encoded["dx"] * unit)),

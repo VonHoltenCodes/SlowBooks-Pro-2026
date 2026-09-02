@@ -146,6 +146,28 @@ def test_apply_template_survives_scale_and_shift(db_session, monkeypatch):
     assert template.use_count == 1
 
 
+def test_apply_template_drops_low_confidence_amount_reads(db_session, monkeypatch):
+    """A remembered tax box that lands on a bare digit run (the GST ID
+    number, SkyTech lap 2026-09-02) reads low — that read is dropped so the
+    v1 parse stands instead of 'Tax detected: $506739'."""
+    _teach(db_session)
+    template = db_session.query(OcrTemplate).one()
+    words = _words()
+    real = _fake_region_reader(words)
+
+    def fake(image_data, left, top, width, height, field_type, engine=None):
+        out = real(image_data, left, top, width, height, field_type, engine)
+        if out["value"] == "2.89":
+            return {**out, "value": "506739", "confidence": "low"}
+        return out
+
+    monkeypatch.setattr(ocr_regions, "ocr_region", fake)
+    reads = ocr_template_store.apply_template(db_session, template, b"png", words)
+    assert "tax" not in reads
+    assert reads["total"]["value"] == "49.13"
+    assert not ocr_template_store.reads_are_clean(reads)
+
+
 def test_reads_are_clean_gate():
     good = {
         k: {"value": v, "confidence": "high"}

@@ -167,6 +167,16 @@ const OcrCanvas = {
         this._outlined = [];
     },
 
+    // Which words on a value's line say it IS that field. Placement only —
+    // the values come from the line-based parser; these just pick which of
+    // several identical words to highlight (a line-item price and the
+    // grand total both read "29.68" on the SkyTech lap, 2026-09-02).
+    LINE_HINTS: {
+        total: /total|amount|due|balance|payable|grand/i,
+        subtotal: /sub|excl|before|net/i,
+        tax: /tax|gst|vat|hst|pst|qst/i,
+    },
+
     _suggest(result) {
         const found = [];
         const used = new Set();
@@ -175,23 +185,56 @@ const OcrCanvas = {
         ];
         for (const [key, value] of amountKeys) {
             if (!value) continue;
-            const w = this._findAmountWord(value, used);
+            const w = this._findAmountWord(value, used, key);
             if (w) { used.add(w); found.push({ key, label: this.FIELD_LABELS[key], box: this._pad(w) }); }
         }
         if (result.date && !result.date_is_default) {
-            const w = this._words.find(x => !used.has(x) && /\d/.test(x.text) &&
-                (x.text.includes('/') || x.text.includes('-')));
+            const w = this._findDateWord(result.date, used);
             if (w) { used.add(w); found.push({ key: 'date', label: this.FIELD_LABELS.date, box: this._pad(w) }); }
         }
         return found;
     },
 
-    _findAmountWord(value, used) {
+    /** Words sharing a text line with `w` (vertical centers overlap). */
+    _lineOf(w) {
+        const cy = w.top + w.height / 2;
+        return this._words.filter(x => x.top <= cy && cy <= x.top + x.height);
+    },
+
+    /** The word to highlight for an amount: among words printing this
+     *  value, the lowest one whose line carries the field's label — totals
+     *  sit below the line items, and "CASH 29.68" repeats the total. */
+    _findAmountWord(value, used, key) {
         const plain = String(value);                    // "49.13"
         const variants = [plain, '$' + plain,
             plain.replace(/\B(?=(\d{3})+(?!\d))/g, ','),
             '$' + plain.replace(/\B(?=(\d{3})+(?!\d))/g, ',')];
-        return this._words.find(w => !used.has(w) && variants.includes(w.text));
+        const hits = this._words.filter(w => !used.has(w) && variants.includes(w.text));
+        if (!hits.length) return null;
+        const hint = key && this.LINE_HINTS[key];
+        const labeled = hint
+            ? hits.filter(w => this._lineOf(w).some(x => x !== w && hint.test(x.text)))
+            : [];
+        const pool = labeled.length ? labeled : hits;
+        return pool.reduce((best, w) => (w.top > best.top ? w : best));
+    },
+
+    /** The word that prints the parsed ISO date, in whatever order/format
+     *  the receipt used — not merely the first thing with a slash in it
+     *  ("(81109-A)" took the Date box on the SkyTech lap). */
+    _findDateWord(iso, used) {
+        const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+        if (!m) return null;
+        const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+        const full = [y, mo, d].sort((a, b) => a - b).join(',');
+        const short = [y % 100, mo, d].sort((a, b) => a - b).join(',');
+        return this._words.find(w => {
+            if (used.has(w) || !/\d/.test(w.text)) return false;
+            const parts = (w.text.match(/\d+/g) || []).map(Number);
+            if (parts.length !== 3) return false;
+            const got = parts.sort((a, b) => a - b).join(',');
+            return got === full || got === short;
+        }) || null;
     },
 
     _pad(w, p = 6) {

@@ -55,6 +55,25 @@ the field buttons, so the next drag starts clean. Field buttons moved
 below the canvas, a drag paints immediately, and a box recolors the
 moment it's labeled instead of after the read comes back.
 
+**Highlights land on the right words.** The colored boxes the scan
+draws over the image are placed by matching the parsed values back to
+the recognized words; a receipt that prints the same figure twice (a
+line-item price and the grand total, or "CASH" repeating the total)
+used to get the box on the first hit, and the Date box went to the
+first thing with a slash or dash in it (an invoice number). The boxes
+now go to the word on the labeled line — lowest one for totals — and
+to the word that actually prints the parsed date in whatever order the
+receipt used. The values on the form were already right; only the
+highlight moved.
+
+**Merchant template memory** no longer anchors a remembered box on a
+word that repeats on the page when a unique label is on the same line
+("Inclusive" over "GST"), records which occurrence it meant when every
+label repeats, and fails closed — canvas takes over — when a rescan
+doesn't repeat the anchor the same way. A remembered amount or date box
+that reads only a bare digit run on a new print (a template that landed
+on a tax-ID number) is discarded instead of filling the form with it.
+
 **Desktop launcher:** `--data-dir` (Server Edition scheduled task,
 headless test rigs) now relocates the per-user `.env` along with the
 data directory; it used to write `DATABASE_URL` into the launching

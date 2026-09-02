@@ -112,11 +112,15 @@ def apply_template(
         except Exception as exc:  # fail closed, canvas takes over
             logger.debug("template region read failed for %s: %s", field_key, exc)
             continue
+        confidence = result.get("confidence", "low")
+        # An amount/date box that read only a bare digit run ("506739" off
+        # a GST ID line — SkyTech lap, 2026-09-02) is a template that landed
+        # somewhere else on this print.  A low read is worse than the v1
+        # parse it would replace: drop it and let the parse + canvas stand.
+        if FIELD_OCR_TYPE.get(field_key) in ("amount", "date") and confidence != "high":
+            continue
         if result.get("value"):
-            reads[field_key] = {
-                "value": result["value"],
-                "confidence": result.get("confidence", "low"),
-            }
+            reads[field_key] = {"value": result["value"], "confidence": confidence}
     if reads:
         template.use_count = (template.use_count or 0) + 1
         db.commit()
