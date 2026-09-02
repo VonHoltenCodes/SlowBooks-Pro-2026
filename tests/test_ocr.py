@@ -515,3 +515,121 @@ def test_parse_tax_looks_ahead_across_split_lines():
 def test_parse_tax_trailing_anchor_does_not_crash():
     tax, subtotal = ocr_service.parse_tax("stuff\nSUBTOTAL\nTAX")
     assert tax is None and subtotal is None
+
+
+# ---------------------------------------------------------------------------
+# Real-receipt parser behaviour (SROIE corpus eval, 2026-09-02).  The
+# synthetic receipts hid every one of these; real thermal prints exposed
+# them.  Texts below are trimmed OCR output with the merchant renamed.
+# ---------------------------------------------------------------------------
+
+GST_RECEIPT = """\
+SAMPLE HARDWARE TRADING
+NO 290, JALAN AIR PANAS.
+| SIMPLIFIED TAX INVOICE
+Salesperson ~ Ref. :
+4 742 7.42 SR
+"Tetal Oy" 4 742
+| Total Sales (Excluding GST) . 7.00
+if Discount ‘ 0.00
+: TotalGST . 0.42
+| Rounding . 0.00
+| Total Sales (inclusive of GST) : ( 7.42)
+{ CASH : T.A2
+Change : 0.00
+GST SUMMARY
+Tax Code % Amt (RM) Tax (RM)
+SR 6 7 00 042
+Totel: 7.00 0.42
+"""
+
+
+def test_parse_total_prefers_tax_inclusive_total_over_first_anchor():
+    """GST/VAT receipts print "Total (Excluding GST)" BEFORE the real total;
+    first-anchor-wins picked the pre-tax figure on 11/20 real receipts."""
+    total, conf = ocr_service.parse_total(GST_RECEIPT)
+    assert (total, conf) == ("7.42", "high")
+
+
+def test_parse_tax_reads_gst_and_excluding_total_as_subtotal():
+    tax, subtotal = ocr_service.parse_tax(GST_RECEIPT)
+    assert tax == "0.42"
+    assert subtotal == "7.00"
+
+
+def test_parse_total_handles_ocr_misspellings_of_total():
+    text = "Cashier: X\nTatal (Excluding GST): 4130\nGST Payable: 2.f3\ntotal (Inclusive af GST): 48.15\nTOTAL: 48.15\nCASH : 50.60\n"
+    assert ocr_service.parse_total(text) == ("48.15", "high")
+    # "Tota!" — the fuzzy word must still be recognised as a subtotal anchor
+    _, subtotal = ocr_service.parse_tax(
+        "Tota! ':ales (Excluding GST) - 89 50\nTotal GST : 5.37\n"
+    )
+    assert subtotal == "89.50"
+
+
+def test_parse_total_takes_post_rounding_total_when_no_strong_anchor():
+    text = "Subtotal 87.80\nGST @6% 5.81\nService 8.78\nTotal: 102.39\nTotal 102.40\nCASH 110.00\n"
+    assert ocr_service.parse_total(text) == ("102.40", "high")
+
+
+def test_parse_total_lookahead_only_accepts_amount_only_line():
+    """A column header ending in TOTAL / TAX must not swallow the first line
+    item on the next line (h007: total=22.50, tax=22.50 before the fix)."""
+    text = (
+        "Description Qty U.price Total TAX\nBURGER 1 x 22.50 22.50 SR\nTOTAL: 48.15\n"
+    )
+    assert ocr_service.parse_total(text) == ("48.15", "high")
+    tax, _ = ocr_service.parse_tax(text)
+    assert tax is None
+    # ...but a genuinely split anchor/amount pair still works (WinRT).
+    assert ocr_service.parse_total("TOTAL\n49.13\n") == ("49.13", "high")
+
+
+def test_parse_total_loose_decimal_on_anchor_line():
+    """OCR drops the decimal point on thermal prints: "7 00", "140. 00"."""
+    assert ocr_service.parse_total(
+        "Subtotal 7.06\nTotal Incl. of GST 7 00\nPayment 7.00\n"
+    ) == ("7.00", "high")
+    assert ocr_service.parse_total("Total Sales (Inclusive of GST) : 140. 00\n") == (
+        "140.00",
+        "high",
+    )
+
+
+def test_parse_total_skips_excluded_and_zero_anchors():
+    text = "Total Qty 3 23.32\nTotal Items: 3\nSub Total 22.00\nTotal GST 1.32\nBalance Due 0.00\nTOTAL 23.32\n"
+    assert ocr_service.parse_total(text) == ("23.32", "high")
+    tax, subtotal = ocr_service.parse_tax(text)
+    assert (tax, subtotal) == ("1.32", "22.00")
+
+
+def test_parse_tax_ignores_total_lines_that_mention_gst():
+    """ "Tota] RM Sucluding GST 6% 73.30" is a total line, not the tax."""
+    text = "Tota] RM Sucluding GST 6% 73.30\nRounding 0.00\nTotal Rounded 73.30\nGST SR 69.15 4.18\n"
+    tax, _ = ocr_service.parse_tax(text)
+    assert tax == "4.18"
+    assert ocr_service.parse_total(text) == ("73.30", "high")
+
+
+def test_parse_tax_skips_headers_and_percent_only_lines():
+    text = "Tax Invoice\nGST ID : 000750673920\nGST 6.00 % RO. 2\nTax Code % Amt (RM) Tax (RM)\nSR 6 12.50 0.75\n"
+    tax, _ = ocr_service.parse_tax(text)
+    assert tax is None
+
+
+def test_extract_receipt_reconciles_pre_tax_total_with_tax():
+    """Total == subtotal means we read the pre-tax line; with tax known the
+    real total is the sum, offered at low confidence."""
+    r = ocr_service.extract_receipt(
+        "SHOP NAME HERE\nSub Total 28.00\nTax 1.68\nTotal 28.00\n"
+    )
+    assert r["total"] == "29.68"
+    assert r["total_confidence"] == "low"
+    assert any("low-confidence" in x for x in r["partial_reasons"])
+
+
+def test_parse_merchant_skips_ocr_noise_lines():
+    text = "0) y BO3Z0ly\n—  ByBOlOtd\nSWEET FOREST CAFE\nNO 21,JLN BUNGA KANTAN\n"
+    merchant, conf = ocr_service.parse_merchant(text)
+    assert merchant == "SWEET FOREST CAFE"
+    assert conf == "low"
