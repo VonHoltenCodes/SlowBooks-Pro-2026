@@ -90,6 +90,30 @@ between, and `main` never sees a half-finished intake feature.
    Call it "remembers your receipt layouts" — template learning, not
    ML, per the honesty rule above.
 
+### v2 talk list (carried from the #71 review, 2026-09-01)
+
+Items deliberately NOT blocking v1 — raise them when v2 work starts:
+
+- **entity_type allowlist belongs in the schema, not the route.** The
+  attach endpoint checks `entity_type in ("invoice", "bill")` in route
+  code with a comment saying so; the repo convention since the v2.5.3
+  enum fixes is validate-at-the-edge with types — a
+  `Literal["invoice", "bill"]` on the schema. Worth doing right.
+- The v1 PR-template nits: Database-changes checkboxes (all three
+  checked; should be "no schema changes" only) and the screenshot TODO.
+- `upload_dir.is_relative_to(UPLOAD_BASE)` compares against an
+  unresolved base while every other guard resolves both sides —
+  harmless today, make it consistent when touching the file.
+- The tesseract word-bbox (`tsv`) hook, if it hasn't landed in v1 by
+  then — v2's canvas needs it first.
+
+CodeQL note for future intake PRs: the 10 py/path-injection alerts on
+v1 were dismissed as false positives (guards: fullmatch'd hex ids,
+resolve()+is_relative_to containment, allowlisted entity_type) — the
+scanner cannot model these sanitizers, and adding correct hardening
+INCREASED the alert count. Same class as the dismissed SSRF alert #37.
+Don't chase these with code contortions; dismiss with justification.
+
 Hardware gate: the branch → main PR needs the same Windows + macOS
 installed-app pass every release gets; Docker gets tesseract/poppler in
 the image, installers never do.
