@@ -9,11 +9,25 @@ from pydantic import BaseModel
 
 
 class OcrStatusResponse(BaseModel):
-    """GET /api/ocr/status — is the Tesseract binary usable?"""
+    """GET /api/ocr/status — is an OCR engine usable, and which one?"""
 
     available: bool
     version: Optional[str] = None
     languages: Optional[list[str]] = None
+    # Which engine answers scans on this platform: tesseract | vision | winrt
+    engine: str = "tesseract"
+
+
+class OcrWordBox(BaseModel):
+    """A recognized word (or line, engine-dependent) with pixel bounds —
+    the v2 box-to-fix canvas draws these over the scanned image."""
+
+    text: str
+    left: int
+    top: int
+    width: int
+    height: int
+    conf: float = -1.0
 
 
 class OcrField(BaseModel):
@@ -47,6 +61,8 @@ class OcrReceiptResponse(BaseModel):
     tax_detected: bool = False
 
     language: Optional[str] = None
+    engine: Optional[str] = None
+    words: Optional[list[OcrWordBox]] = None
     multi_page: bool = False
 
     partial: bool = False

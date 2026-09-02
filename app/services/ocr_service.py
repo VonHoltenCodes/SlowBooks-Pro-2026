@@ -125,7 +125,7 @@ def ocr_language() -> Optional[str]:
     usable = installed & ALLOWED_LANGS
     if not usable:
         return None
-    return "eng" if "eng" in usable else ",".join(sorted(usable))
+    return "eng" if "eng" in usable else "+".join(sorted(usable))
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +164,97 @@ def ocr_image_bytes(data: bytes, lang: Optional[str] = None) -> str:
             + (f": {stderr[:300]}" if stderr else "")
         )
     return (proc.stdout or b"").decode("utf-8", errors="replace")
+
+
+def ocr_image_words(data: bytes, lang: Optional[str] = None):
+    """OCR raw image bytes via `tesseract stdin stdout tsv`.
+
+    Returns (text, words): `text` reconstructed from the TSV word rows
+    (line-faithful — the deterministic parsers are line-based), `words` a
+    list of {text, left, top, width, height, conf} dicts for the v2
+    canvas. One subprocess call serves both. Raises OCRRuntimeError like
+    ocr_image_bytes.
+    """
+    cmd = ["tesseract", "stdin", "stdout", "--psm", "3"]
+    if lang:
+        cmd += ["-l", lang]
+    cmd += ["tsv"]
+    try:
+        proc = subprocess.run(
+            cmd,
+            input=data,
+            capture_output=True,
+            timeout=OCR_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise OCRRuntimeError(
+            f"Tesseract timed out after {OCR_TIMEOUT_SECONDS}s"
+        ) from exc
+    except OSError as exc:
+        raise OCRRuntimeError(f"Could not run tesseract: {exc}") from exc
+    if proc.returncode != 0:
+        stderr = (proc.stderr or b"").decode("utf-8", errors="replace").strip()
+        raise OCRRuntimeError(
+            f"Tesseract failed (exit {proc.returncode})"
+            + (f": {stderr[:300]}" if stderr else "")
+        )
+    tsv = (proc.stdout or b"").decode("utf-8", errors="replace")
+    return _parse_tesseract_tsv(tsv)
+
+
+def _parse_tesseract_tsv(tsv: str):
+    """TSV rows -> (reconstructed_text, word dicts).
+
+    Columns: level page block par line word left top width height conf text.
+    Word rows are level 5; lines break on (block, par, line) changes; a
+    paragraph change inserts a blank line so multi-block receipts keep
+    their visual grouping for the line-based parsers.
+    """
+    words: list[dict] = []
+    lines: list[str] = []
+    current_key = None
+    current_words: list[str] = []
+    for row in tsv.splitlines()[1:]:
+        cols = row.split("\t")
+        if len(cols) < 12:
+            continue
+        try:
+            level = int(cols[0])
+        except ValueError:
+            continue
+        if level != 5:
+            continue
+        text = cols[11]
+        if not text.strip():
+            continue
+        try:
+            left, top, width, height = (int(c) for c in cols[6:10])
+            conf = float(cols[10])
+        except ValueError:
+            left = top = width = height = 0
+            conf = -1.0
+        key = (cols[2], cols[3], cols[4])  # block, par, line
+        if key != current_key:
+            if current_words:
+                lines.append(" ".join(current_words))
+            if current_key is not None and cols[2:4] != list(current_key[:2]):
+                lines.append("")  # block/par boundary -> blank line
+            current_key = key
+            current_words = []
+        current_words.append(text)
+        words.append(
+            {
+                "text": text,
+                "left": left,
+                "top": top,
+                "width": width,
+                "height": height,
+                "conf": conf,
+            }
+        )
+    if current_words:
+        lines.append(" ".join(current_words))
+    return "\n".join(lines), words
 
 
 # ---------------------------------------------------------------------------

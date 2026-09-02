@@ -157,7 +157,9 @@ def _scan(client, monkeypatch, tmp_path, text=CANNED_RECEIPT_TEXT) -> str:
     monkeypatch.setattr(ocr_service, "INTAKE_DIR", tmp_path)
     monkeypatch.setattr(ocr_service, "tesseract_available", lambda: True)
     monkeypatch.setattr(ocr_service, "ocr_language", lambda: "eng")
-    monkeypatch.setattr(ocr_service, "ocr_image_bytes", lambda data, lang=None: text)
+    monkeypatch.setattr(
+        ocr_service, "ocr_image_words", lambda data, lang=None: (text, [])
+    )
     r = client.post(
         "/api/ocr/receipt",
         files={"file": ("receipt.png", _png_bytes(), "image/png")},
@@ -202,7 +204,9 @@ def test_scan_response_fields(client, monkeypatch, tmp_path):
     monkeypatch.setattr(ocr_service, "tesseract_available", lambda: True)
     monkeypatch.setattr(ocr_service, "ocr_language", lambda: "eng")
     monkeypatch.setattr(
-        ocr_service, "ocr_image_bytes", lambda data, lang=None: CANNED_RECEIPT_TEXT
+        ocr_service,
+        "ocr_image_words",
+        lambda data, lang=None: (CANNED_RECEIPT_TEXT, []),
     )
     r = client.post(
         "/api/ocr/receipt",
@@ -243,8 +247,8 @@ def test_scan_missing_date_defaults_today(client, monkeypatch, tmp_path):
     monkeypatch.setattr(ocr_service, "ocr_language", lambda: "eng")
     monkeypatch.setattr(
         ocr_service,
-        "ocr_image_bytes",
-        lambda data, lang=None: "MY VENDOR\nTOTAL $10.00\n",
+        "ocr_image_words",
+        lambda data, lang=None: ("MY VENDOR\nTOTAL $10.00\n", []),
     )
     r = client.post(
         "/api/ocr/receipt",
@@ -303,7 +307,9 @@ def test_scan_pdf_multi_page(client, monkeypatch, tmp_path):
     monkeypatch.setattr(ocr_service, "tesseract_available", lambda: True)
     monkeypatch.setattr(ocr_service, "ocr_language", lambda: "eng")
     monkeypatch.setattr(
-        ocr_service, "ocr_image_bytes", lambda data, lang=None: CANNED_RECEIPT_TEXT
+        ocr_service,
+        "ocr_image_words",
+        lambda data, lang=None: (CANNED_RECEIPT_TEXT, []),
     )
     monkeypatch.setattr(
         ocr_service,
