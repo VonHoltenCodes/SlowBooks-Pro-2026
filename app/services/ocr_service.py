@@ -697,6 +697,44 @@ def parse_merchant(text: str) -> tuple[Optional[str], str]:
     return None, "missing"
 
 
+_REF_LABEL_RE = re.compile(
+    r"\b(?:invoice|inv|receipt|rcpt|reference|ref|bill|order|ticket|"
+    r"transaction|trans|txn|doc(?:ument)?|check|chk|slip)\b\.?\s*"
+    r"(?:no|num|number|id|#)?\.?\s*[:#.]?\s*"
+    r"([A-Za-z0-9][A-Za-z0-9/-]{1,24})",
+    re.I,
+)
+# Lines whose number is something else: a tax registration, a phone, a
+# table/terminal id. "GST Reg No: 001234" must not become the bill number.
+_REF_SKIP_RE = re.compile(
+    r"\b(?:reg|gst|vat|tin|ssm|tax\s*id|tel|phone|fax|table|pax|terminal|"
+    r"cashier|company|co\.?\s*no|roc|pos\s*id|card|acct|account)\b",
+    re.I,
+)
+
+
+def parse_reference(text: str) -> Optional[str]:
+    """The vendor's own document number ("Invoice No: 7011", "Receipt #
+    A-1187") — what goes in Bill # / Reference so the same receipt can't
+    be entered twice. Labeled numbers only: a bare digit run is as likely
+    a registration or phone number."""
+    for line in (ln.strip() for ln in text.splitlines()):
+        if not line or _REF_SKIP_RE.search(line):
+            continue
+        m = _REF_LABEL_RE.search(line)
+        if not m:
+            continue
+        token = m.group(1).rstrip("/-")
+        if not re.search(r"\d", token) or len(token) < 2:
+            continue
+        if re.match(r"^\d{1,2}/\d{1,2}(?:/\d{2,4})?$", token):
+            continue  # a date after "Receipt" — not a number
+        if token.lower() in ("no", "num", "number", "id"):
+            continue
+        return token[:40]
+    return None
+
+
 def extract_receipt(text: str) -> dict:
     """Run every parser and assemble the extraction result + partial flags."""
     merchant_value, merchant_conf = parse_merchant(text)
@@ -734,6 +772,7 @@ def extract_receipt(text: str) -> dict:
         "subtotal": subtotal,
         "tax": tax,
         "tax_detected": tax is not None,
+        "reference": parse_reference(text),
         "partial_reasons": reasons,
     }
 

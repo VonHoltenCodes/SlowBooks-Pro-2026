@@ -330,6 +330,7 @@
 [data-theme="dark"] .badge-draft { background: #2a2e38; color: #a0a8b8; border-color: #3a4050; }
 [data-theme="dark"] .badge-sent { background: #1a3a5a; color: #6bb3e8; border-color: #2a5a8a; }
 [data-theme="dark"] .badge-paid { background: #1a3a2a; color: #4caf7a; border-color: #2a6a4a; }
+[data-theme="dark"] .badge-recorded { background: #1a3a2a; color: #4caf7a; border-color: #2a6a4a; }
 [data-theme="dark"] .badge-partial { background: #3a3010; color: #e0a840; border-color: #5a5020; }
 [data-theme="dark"] .badge-void { background: #3a1a1a; color: #e05555; border-color: #5a2a2a; }
 [data-theme="dark"] .badge-overdue { background: #3a1a1a; color: #e05555; border-color: #5a2a2a; }
@@ -367,3 +368,14 @@
     background: rgba(138, 180, 224, 0.08);
     border-top-color: var(--panel-border);
 }
+
+/* Scan Receipt field picker: deep opaque fill, light text — the pastel
+   light-mode fills have no contrast on a dark ground. */
+[data-theme="dark"] .btn.ocr-pick,
+[data-theme="dark"] .btn.ocr-pick:hover,
+[data-theme="dark"] .btn.ocr-pick:active {
+    background: var(--pick-dark);
+    color: #f3f4f6;
+    border-color: var(--pick-stroke);
+}
+[data-theme="dark"] .btn.ocr-pick:hover { filter: brightness(1.15); }

@@ -59,6 +59,8 @@ class OcrReceiptResponse(BaseModel):
     subtotal: Optional[str] = None
     tax: Optional[str] = None
     tax_detected: bool = False
+    # The vendor's own document number, when the receipt prints one.
+    reference: Optional[str] = None
 
     language: Optional[str] = None
     engine: Optional[str] = None

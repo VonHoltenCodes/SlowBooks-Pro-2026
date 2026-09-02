@@ -90,3 +90,45 @@ def test_expense_respects_closing_date(client, seed_accounts):
     assert r.status_code == 200, r.text
     r = _post(client, seed_accounts, date="2026-09-02")
     assert r.status_code == 403, r.text
+
+
+def test_void_expense_posts_reversal_and_marks_status(
+    client, db_session, seed_accounts, vendor
+):
+    body = _post(client, seed_accounts, vendor_id=vendor["id"]).json()
+    assert body["status"] == "recorded"
+
+    r = client.post(f"/api/expenses/{body['id']}/void")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "void"
+
+    reversal = (
+        db_session.query(Transaction)
+        .filter(
+            Transaction.source_type == "expense_void",
+            Transaction.source_id == body["id"],
+        )
+        .one()
+    )
+    assert reversal.description == "VOID Expense: Sweet Forest Cafe"
+    debits = {ln.account_id: ln.debit for ln in reversal.lines if ln.debit > 0}
+    credits = {ln.account_id: ln.credit for ln in reversal.lines if ln.credit > 0}
+    assert debits == {seed_accounts["1000"].id: Decimal("30.30")}
+    assert credits == {seed_accounts["6000"].id: Decimal("30.30")}
+
+    # The list shows it void, the reversal itself is not an expense row,
+    # and a second void is refused.
+    listed = client.get("/api/expenses").json()
+    assert [(x["id"], x["status"]) for x in listed] == [(body["id"], "void")]
+    assert client.get(f"/api/expenses/{body['id']}").json()["status"] == "void"
+    r = client.post(f"/api/expenses/{body['id']}/void")
+    assert r.status_code == 400
+    assert "already void" in r.json()["detail"]
+
+
+def test_void_expense_respects_closing_date(client, seed_accounts):
+    body = _post(client, seed_accounts, date="2026-01-15").json()
+    r = client.put("/api/settings", json={"closing_date": "2026-06-30"})
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/expenses/{body['id']}/void")
+    assert r.status_code == 403, r.text

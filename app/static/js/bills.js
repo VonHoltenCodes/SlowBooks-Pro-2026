@@ -116,8 +116,8 @@ const BillsPage = {
                 <div class="form-grid">
                     <div class="form-group"><label>Vendor *</label>
                         ${VendorQuickAdd.html(vendors, { id: 'bill-vendor', onchange: 'BillsPage.vendorSelected(this.value)' })}</div>
-                    <div class="form-group"><label>Bill Number *</label>
-                        <input name="bill_number" required></div>
+                    <div class="form-group"><label>Bill Number</label>
+                        <input name="bill_number" placeholder="from the receipt, or left blank"></div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Terms</label>
@@ -198,6 +198,9 @@ const BillsPage = {
         const form = document.querySelector('#modal-body form');
         if (!form) return;
         if (result.date) form.querySelector('[name="date"]').value = result.date;
+        // The vendor's invoice number; left blank, the server generates one.
+        const num = form.querySelector('[name="bill_number"]');
+        if (result.reference && num && !num.value) num.value = result.reference;
 
         const merchant = result.merchant && result.merchant.value;
         if (merchant) {
@@ -275,7 +278,7 @@ const BillsPage = {
             const vendorId = await VendorQuickAdd.ensure('bill-vendor');
             const result = await API.post('/bills', {
                 vendor_id: vendorId,
-                bill_number: form.bill_number.value,
+                bill_number: form.bill_number.value.trim() || null,
                 date: form.date.value,
                 terms: form.terms.value,
                 notes: form.notes.value || null,

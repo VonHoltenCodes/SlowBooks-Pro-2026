@@ -24,16 +24,21 @@ const ExpensesPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr><th>Date</th><th>Payee</th><th>Expense Account</th><th>Paid From</th><th>Reference</th>
-                <th class="amount">Amount</th><th></th></tr></thead><tbody>`;
+                <th>Status</th><th class="amount">Amount</th><th></th></tr></thead><tbody>`;
             for (const x of expenses) {
-                html += `<tr>
+                const isVoid = x.status === 'void';
+                html += `<tr data-status="${x.status}"${isVoid ? ' style="opacity:0.6; text-decoration:line-through;"' : ''}>
                     <td>${formatDate(x.date)}</td>
                     <td>${escapeHtml(x.payee || '')}</td>
                     <td>${escapeHtml(x.expense_account_name || '')}</td>
                     <td>${escapeHtml(x.paid_from_account_name || '')}</td>
                     <td>${escapeHtml(x.reference || '')}</td>
+                    <td style="text-decoration:none;">${statusBadge(x.status)}</td>
                     <td class="amount">${formatCurrency(x.amount)}</td>
-                    <td><button class="btn btn-sm btn-secondary" onclick="ExpensesPage.showDetail(${x.id})">View</button></td>
+                    <td class="actions" style="text-decoration:none;">
+                        <button class="btn btn-sm btn-secondary" onclick="ExpensesPage.showDetail(${x.id})">View</button>
+                        ${isVoid ? '' : `<button class="btn btn-sm btn-danger" onclick="ExpensesPage.void(${x.id})">Void</button>`}
+                    </td>
                 </tr>`;
             }
             html += '</tbody></table></div>';
@@ -152,6 +157,8 @@ const ExpensesPage = {
         const form = $('#expense-form');
         if (!form) return;
         if (result.date) form.querySelector('[name="date"]').value = result.date;
+        const ref = form.querySelector('[name="reference"]');
+        if (result.reference && ref && !ref.value) ref.value = result.reference;
 
         const merchant = result.merchant && result.merchant.value;
         if (merchant) {
@@ -193,9 +200,22 @@ const ExpensesPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    /** Wrong account, wrong amount? Void posts the mirror-image entry
+     *  (the original stays in the ledger) — then enter it again. */
+    async void(id) {
+        if (!confirm('Void this expense? A reversing entry will be posted; enter it again to correct it.')) return;
+        try {
+            await API.post(`/expenses/${id}/void`);
+            toast('Expense voided');
+            closeModal();
+            App.navigate('#/expenses');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     async showDetail(id) {
         const x = await API.get(`/expenses/${id}`);
-        openModal(`Expense — ${escapeHtml(x.payee || '')}`, `
+        const isVoid = x.status === 'void';
+        openModal(`Expense — ${escapeHtml(x.payee || '')}${isVoid ? ' (VOID)' : ''}`, `
             <div style="font-size:13px; line-height:1.7;">
                 <strong>Date:</strong> ${formatDate(x.date)}<br>
                 <strong>Payee:</strong> ${escapeHtml(x.payee || '')}<br>
@@ -214,6 +234,7 @@ const ExpensesPage = {
                 </div>
             </div>
             <div class="form-actions">
+                ${isVoid ? '' : `<button type="button" class="btn btn-danger" onclick="ExpensesPage.void(${x.id})">Void</button>`}
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
         ExpensesPage.loadAttachments(x.id);

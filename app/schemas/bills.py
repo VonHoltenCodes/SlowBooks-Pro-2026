@@ -34,7 +34,8 @@ class BillLineResponse(BaseModel):
 
 class BillCreate(BaseModel):
     vendor_id: int
-    bill_number: str
+    # The vendor's invoice number; blank → generated (date + vendor initials).
+    bill_number: Optional[str] = None
     date: dt_date
     due_date: Optional[dt_date] = None
     terms: str = "Net 30"

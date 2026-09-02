@@ -699,3 +699,38 @@ def test_tesseract_candidates_windows_locations(monkeypatch):
     assert "C:/Users/x/AppData/Local/Programs/Tesseract-OCR/tesseract.exe" in cands
     posix = [c.as_posix() for c in ocr_service._tesseract_candidates(windows=False)]
     assert "/opt/homebrew/bin/tesseract" in posix
+
+
+# ---------------------------------------------------------------------------
+# Vendor document number → Bill # / Reference (2026-09-02)
+# ---------------------------------------------------------------------------
+
+
+def test_parse_reference_reads_labeled_document_numbers():
+    from app.services.ocr_service import parse_reference
+
+    assert (
+        parse_reference("GIN KEE\n(81109-A)\nInvoice No: 7011\nDate: 02/12/2017")
+        == "7011"
+    )
+    assert parse_reference("SHOP\nGST Reg No: 001234567\nReceipt # A-1187") == "A-1187"
+    assert parse_reference("Tel: 03-2164 1400\nCheck: 2098213\nTable 41") == "2098213"
+    assert parse_reference("Trans No: 00123456\nCard ****1234") == "00123456"
+
+
+def test_parse_reference_refuses_unlabeled_and_lookalike_numbers():
+    from app.services.ocr_service import parse_reference
+
+    assert parse_reference("SHOP\n(81109-A)\nTOTAL 5.00") is None  # bare reg no
+    assert parse_reference("Receipt 02/12/2017\nTOTAL 1.00") is None  # a date
+    assert parse_reference("Invoice No.\nTOTAL 1.00") is None  # label alone
+    assert parse_reference("GST Reg No: 001234567") is None  # tax registration
+    assert parse_reference("Order Tel: 5551234") is None
+
+
+def test_extract_receipt_carries_reference():
+    from app.services.ocr_service import extract_receipt
+
+    text = "NEON PULSE TECHSHOP\nInvoice #: NP-2201\nTOTAL 49.13"
+    assert extract_receipt(text)["reference"] == "NP-2201"
+    assert extract_receipt("SHOP\nTOTAL 1.00")["reference"] is None

@@ -205,6 +205,7 @@ async def scan_receipt(
         subtotal=extracted["subtotal"],
         tax=extracted["tax"],
         tax_detected=extracted["tax_detected"],
+        reference=extracted.get("reference"),
         language=lang,
         engine=result.engine,
         words=[OcrWordBox(**vars(w)) for w in result.words] or None,

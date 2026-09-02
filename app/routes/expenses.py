@@ -20,12 +20,32 @@ from app.services.closing_date import check_closing_date
 router = APIRouter(prefix="/api/expenses", tags=["expenses"])
 
 SOURCE_TYPE = "expense"
+VOID_SOURCE_TYPE = "expense_void"
 
 # Accounts an expense can be paid from: cash on hand or credit extended.
 PAID_FROM_TYPES = ("asset", "liability")
 
 
-def _serialize(txn: Transaction, db: Session) -> ExpenseResponse:
+def _void_ids(db: Session, txn_ids: list[int]) -> set[int]:
+    """Ids of expenses that already have a reversing entry posted."""
+    if not txn_ids:
+        return set()
+    rows = (
+        db.query(Transaction.source_id)
+        .filter(
+            Transaction.source_type == VOID_SOURCE_TYPE,
+            Transaction.source_id.in_(txn_ids),
+        )
+        .all()
+    )
+    return {r[0] for r in rows}
+
+
+def _serialize(
+    txn: Transaction, db: Session, voided: bool | None = None
+) -> ExpenseResponse:
+    if voided is None:
+        voided = txn.id in _void_ids(db, [txn.id])
     debit_line = next((ln for ln in txn.lines if ln.debit > 0), None)
     credit_line = next((ln for ln in txn.lines if ln.credit > 0), None)
     vendor = (
@@ -49,6 +69,7 @@ def _serialize(txn: Transaction, db: Session) -> ExpenseResponse:
         amount=float(debit_line.debit) if debit_line else 0.0,
         reference=txn.reference or "",
         memo=(debit_line.description or "") if debit_line else "",
+        status="void" if voided else "recorded",
     )
 
 
@@ -60,7 +81,8 @@ def list_expenses(db: Session = Depends(get_db)):
         .order_by(Transaction.date.desc(), Transaction.id.desc())
         .all()
     )
-    return [_serialize(t, db) for t in txns]
+    voided = _void_ids(db, [t.id for t in txns])
+    return [_serialize(t, db, t.id in voided) for t in txns]
 
 
 @router.get("/{expense_id}", response_model=ExpenseResponse)
@@ -73,6 +95,48 @@ def get_expense(expense_id: int, db: Session = Depends(get_db)):
     if txn is None:
         raise HTTPException(status_code=404, detail="Expense not found")
     return _serialize(txn, db)
+
+
+@router.post("/{expense_id}/void", response_model=ExpenseResponse)
+def void_expense(expense_id: int, db: Session = Depends(get_db)):
+    """Reverse a recorded expense — same convention as bills and manual
+    entries: the original stays in the ledger, a mirror-image entry
+    cancels it, and the expense shows as void. Booked it to the wrong
+    account? Void it and enter it again."""
+    txn = (
+        db.query(Transaction)
+        .filter(Transaction.id == expense_id, Transaction.source_type == SOURCE_TYPE)
+        .first()
+    )
+    if txn is None:
+        raise HTTPException(status_code=404, detail="Expense not found")
+    if txn.id in _void_ids(db, [txn.id]):
+        raise HTTPException(status_code=400, detail="Expense is already void")
+
+    check_closing_date(db, txn.date)
+
+    reverse_lines = [
+        {
+            "account_id": ln.account_id,
+            "debit": ln.credit,
+            "credit": ln.debit,
+            "description": f"VOID: {ln.description or ''}",
+        }
+        for ln in txn.lines
+    ]
+    create_journal_entry(
+        db,
+        txn.date,
+        f"VOID {txn.description or 'Expense'}",
+        reverse_lines,
+        source_type=VOID_SOURCE_TYPE,
+        source_id=txn.id,
+        reference=txn.reference or "",
+        class_id=txn.class_id,
+    )
+    db.commit()
+    db.refresh(txn)
+    return _serialize(txn, db, True)
 
 
 @router.post("", response_model=ExpenseResponse, status_code=201)

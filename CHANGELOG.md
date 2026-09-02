@@ -89,6 +89,27 @@ alongside the totals and date, so it can be corrected by tapping like
 the others; a name recalled from a remembered layout that isn't printed
 on the page draws nothing.
 
+**Bill numbers come off the receipt, and never block the entry.** The
+Bill # is the vendor's own invoice number — that is what stops the same
+invoice being entered twice (the check is per vendor, so two vendors
+can both send invoice 111). The scan now reads it from the receipt
+("Invoice No", "Receipt #", "Check", "Trans No" …) into Bill # and the
+expense Reference; a receipt that prints none can be saved with the
+field blank and gets `<date>-<vendor initials>` (suffixed if that vendor
+already has one that day).
+
+**Expenses can be voided.** A recorded expense booked to the wrong
+account (checking instead of the credit card) now has a Void button on
+the list and in its detail; like bills and journal entries it posts the
+mirror-image reversing entry, keeps the original in the ledger, respects
+the closing date, and shows the row as void. Enter it again to correct.
+
+**Scan Receipt field buttons are readable in dark mode.** The Total /
+Tax / Subtotal / Date / Merchant buttons under the receipt used pale
+fills with dark text regardless of theme — near-invisible on the dark
+theme. Dark mode now uses deep opaque fills with light text (8–10:1
+contrast); light mode keeps the pale fills with darker text.
+
 **Desktop launcher:** `--data-dir` (Server Edition scheduled task,
 headless test rigs) now relocates the per-user `.env` along with the
 data directory; it used to write `DATABASE_URL` into the launching

@@ -30,3 +30,4 @@ class ExpenseResponse(BaseModel):
     amount: float
     reference: str = ""
     memo: str = ""
+    status: str = "recorded"  # "recorded" | "void"

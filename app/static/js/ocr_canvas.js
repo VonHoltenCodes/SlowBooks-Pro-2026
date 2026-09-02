@@ -44,12 +44,17 @@ const OcrCanvas = {
     // form itself: while the canvas is open, each destination input wears
     // its field's color as an outline (see _outlineTargets). Fills are
     // translucent so the receipt text underneath stays legible.
+    // `ink`/`dark` are the picker-button colors: ink on the pale fill in
+    // light mode, near-white text on the deep `dark` fill in dark mode
+    // (the pastel fills washed out on SkyTech's dark theme, 2026-09-02).
+    // The boxes on the image always use stroke/fill — the photo is the
+    // background there, not the theme.
     FIELD_COLORS: {
-        total:    { stroke: '#15803d', fill: 'rgba(134,239,172,0.38)' },  // green
-        tax:      { stroke: '#c2410c', fill: 'rgba(253,186,116,0.42)' },  // orange
-        subtotal: { stroke: '#1d4ed8', fill: 'rgba(147,197,253,0.42)' },  // blue
-        date:     { stroke: '#6d28d9', fill: 'rgba(196,181,253,0.45)' },  // violet
-        merchant: { stroke: '#be185d', fill: 'rgba(249,168,212,0.42)' },  // pink
+        total:    { stroke: '#15803d', fill: 'rgba(134,239,172,0.38)', ink: '#166534', dark: '#14532d' },  // green
+        tax:      { stroke: '#c2410c', fill: 'rgba(253,186,116,0.42)', ink: '#9a3412', dark: '#7c2d12' },  // orange
+        subtotal: { stroke: '#1d4ed8', fill: 'rgba(147,197,253,0.42)', ink: '#1e40af', dark: '#1e3a8a' },  // blue
+        date:     { stroke: '#6d28d9', fill: 'rgba(196,181,253,0.45)', ink: '#5b21b6', dark: '#4c1d95' },  // violet
+        merchant: { stroke: '#be185d', fill: 'rgba(249,168,212,0.42)', ink: '#9d174d', dark: '#831843' },  // pink
     },
     FIELD_OCR_TYPE: {
         total: 'amount', tax: 'amount', subtotal: 'amount',
@@ -72,8 +77,8 @@ const OcrCanvas = {
             <div id="ocr-field-picker" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;">
                 <span id="ocr-picker-hint" style="font-size:11px; min-width:120px;">Drag a box, then tap a field:</span>
                 ${['total', 'tax', 'subtotal', 'date', 'merchant'].map(k => `
-                <button type="button" class="btn btn-sm" data-key="${k}"
-                    style="border:2px solid ${this.FIELD_COLORS[k].stroke}; background:${this.FIELD_COLORS[k].fill}; color:${this.FIELD_COLORS[k].stroke};"
+                <button type="button" class="btn btn-sm ocr-pick" data-key="${k}"
+                    style="--pick-stroke:${this.FIELD_COLORS[k].stroke}; --pick-fill:${this.FIELD_COLORS[k].fill}; --pick-ink:${this.FIELD_COLORS[k].ink}; --pick-dark:${this.FIELD_COLORS[k].dark};"
                     onclick="OcrCanvas.pick('${k}')">${this.FIELD_LABELS[k]}</button>`).join('')}
                 <button type="button" id="ocr-picker-clear" class="btn btn-sm btn-secondary" style="display:none;"
                     onclick="OcrCanvas.cancelPending()">✕ Clear box</button>
