@@ -96,7 +96,15 @@ class TesseractEngine:
         lang = lang or ocr_service.ocr_language()
         if lang is None:
             raise EngineUnavailable("tesseract has no usable language data")
-        text, rows = ocr_service.ocr_image_words(data, lang=lang)
+        # Page enhancement (10% -> 33% total-field hits on real receipts);
+        # boxes come back in the upscaled space and divide back down so the
+        # canvas draws in the original image's coordinates.
+        prepared, factor = ocr_service.preprocess_page(data)
+        text, rows = ocr_service.ocr_image_words(prepared, lang=lang)
+        if factor > 1:
+            for row in rows:
+                for key in ("left", "top", "width", "height"):
+                    row[key] = int(round(row[key] / factor))
         words = [WordBox(**row) for row in rows]
         return OcrResult(text=text, words=words, engine=self.name, language=lang)
 

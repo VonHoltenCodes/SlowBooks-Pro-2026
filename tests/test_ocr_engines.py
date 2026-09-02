@@ -144,3 +144,39 @@ def test_total_anchor_on_last_line_does_not_crash():
     # And the legitimate two-line-lookahead case is preserved
     total, conf = ocr_service.parse_total("AMOUNT DUE\n\n$123.45")
     assert total == "123.45" and conf == "high"
+
+
+def test_recognize_rescales_boxes_to_original_space(monkeypatch):
+    """preprocess_page upscales; recognize must divide word boxes back so
+    the canvas draws in the original image's coordinates."""
+    monkeypatch.setattr(
+        ocr_service,
+        "tesseract_info",
+        lambda: {"available": True, "version": "5", "languages": ["eng"]},
+    )
+    monkeypatch.setattr(ocr_service, "preprocess_page", lambda data: (data, 3))
+    monkeypatch.setattr(
+        ocr_service,
+        "ocr_image_words",
+        lambda data, lang=None: (
+            "TOTAL 49.13",
+            [
+                {
+                    "text": "49.13",
+                    "left": 300,
+                    "top": 90,
+                    "width": 60,
+                    "height": 30,
+                    "conf": 90.0,
+                }
+            ],
+        ),
+    )
+    result = ocr_engines.TesseractEngine().recognize(b"png")
+    box = result.words[0]
+    assert (box.left, box.top, box.width, box.height) == (100, 30, 20, 10)
+
+
+def test_preprocess_page_survives_junk_bytes():
+    data, factor = ocr_service.preprocess_page(b"not an image at all")
+    assert data == b"not an image at all" and factor == 1
