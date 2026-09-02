@@ -241,3 +241,83 @@ def test_run_winrt_coroutine_inside_and_outside_event_loop():
         return _run_winrt_coroutine(op)
 
     assert asyncio.run(caller()) == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Reading order rebuilt from geometry (hardware finding, WinRT 2026-09-02)
+# ---------------------------------------------------------------------------
+
+
+def _wb(text, left, top, width=60, height=18):
+    return ocr_engines.WordBox(
+        text=text, left=left, top=top, width=width, height=height
+    )
+
+
+def test_lines_from_words_restores_page_order_from_region_order():
+    # Exactly the shape Windows.Media.Ocr returned on hardware: left column,
+    # then the amounts column, then the header line LAST, with the decimal
+    # points tokenized as their own 5x4 boxes.
+    words = [
+        _wb("SUBTOTAL", 40, 432, 134),
+        _wb("TAX", 41, 476, 50),
+        _wb("6.25%", 108, 476, 83),
+        _wb("TOTAL", 41, 520, 82),
+        _wb("NEON", 42, 36, 63),
+        _wb("PULSE", 126, 36, 81),
+        _wb("TECHSHOP", 226, 36, 132),
+        _wb("46.24", 343, 432, 83),
+        _wb("2.89", 360, 476, 65),
+        _wb("49", 343, 520, 31),
+        _wb(".", 382, 534, 5, 4),
+        _wb("13", 395, 520, 31),
+    ]
+    text = ocr_engines.lines_from_words(words)
+    assert text.splitlines() == [
+        "NEON PULSE TECHSHOP",
+        "SUBTOTAL 46.24",
+        "TAX 6.25% 2.89",
+        "TOTAL 49.13",
+    ]
+    # ...and the downstream parsers see what they were tuned on.
+    assert ocr_service.parse_total(text)[0] == "49.13"
+    assert ocr_service.parse_tax(text) == ("2.89", "46.24")
+    assert ocr_service.parse_merchant(text)[0] == "NEON PULSE TECHSHOP"
+
+
+def test_lines_from_words_tolerates_skew_and_empty_input():
+    assert ocr_engines.lines_from_words([]) == ""
+    # A phone photo tilts the row: the right-hand amount sits 8px lower than
+    # the anchor but still belongs to the same line.
+    words = [_wb("TOTAL", 40, 100), _wb("12.34", 300, 108), _wb("THANKS", 40, 150)]
+    assert ocr_engines.lines_from_words(words) == "TOTAL 12.34\nTHANKS"
+
+
+def test_winrt_adapter_text_is_rebuilt_from_words(monkeypatch):
+    class _Rect:
+        def __init__(self, x, y, w, h):
+            self.x, self.y, self.width, self.height = x, y, w, h
+
+    class _Word:
+        def __init__(self, text, x, y, w=60, h=18):
+            self.text, self.bounding_rect = text, _Rect(x, y, w, h)
+
+    class _Line:
+        def __init__(self, *words):
+            self.words = list(words)
+            self.text = " ".join(w.text for w in words)
+
+    class _Result:
+        # Engine order: amounts column first, header last.
+        lines = [
+            _Line(_Word("TOTAL", 40, 100)),
+            _Line(_Word("9.99", 300, 100)),
+            _Line(_Word("SHOP", 40, 20)),
+        ]
+
+    engine = ocr_engines.WinRTEngine()
+    monkeypatch.setattr(engine, "_bridge", lambda: (None, None, None, None))
+    monkeypatch.setattr(ocr_engines, "_run_winrt_coroutine", lambda factory: _Result())
+    result = engine.recognize(b"not-a-real-png")
+    assert result.text == "SHOP\nTOTAL 9.99"
+    assert [w.text for w in result.words] == ["TOTAL", "9.99", "SHOP"]
