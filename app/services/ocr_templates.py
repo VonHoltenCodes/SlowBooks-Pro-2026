@@ -40,7 +40,7 @@ def merchant_key(name: str) -> Optional[str]:
         return None
     # Cap the input (merchant strings come from OCR or the client) and
     # collapse whitespace BEFORE the store-number strip — see _STORE_NUM_RE.
-    key = _NON_ALNUM_RE.sub(" ", name[:200].upper())
+    key = _NON_ALNUM_RE.sub(" ", name.strip()[:200].upper())
     key = _WS_RE.sub(" ", key).strip()
     key = _STORE_NUM_RE.sub(" ", key)
     key = _WS_RE.sub(" ", key).strip()
