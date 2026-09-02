@@ -192,12 +192,28 @@ class WinRTEngine:
     name = "winrt"
 
     def _bridge(self):
-        from winsdk.windows.graphics.imaging import BitmapDecoder
-        from winsdk.windows.media.ocr import OcrEngine as WinOcr
-        from winsdk.windows.storage.streams import (
-            DataWriter,
-            InMemoryRandomAccessStream,
-        )
+        # The maintained WinRT projection is the `winrt-*` namespace
+        # packages (cp313+ wheels); `winsdk` (same API, older) is the
+        # fallback for existing installs. Identical class surface.
+        # Frozen-build pins (hardware-validated on real Windows 11,
+        # 2026-09-02): winrt-runtime + winrt-Windows.{Media.Ocr,
+        # Graphics.Imaging, Storage.Streams, Foundation,
+        # Foundation.Collections, Globalization} — Collections is split
+        # into its own wheel and iterating OcrResult.lines needs it.
+        try:
+            from winrt.windows.graphics.imaging import BitmapDecoder
+            from winrt.windows.media.ocr import OcrEngine as WinOcr
+            from winrt.windows.storage.streams import (
+                DataWriter,
+                InMemoryRandomAccessStream,
+            )
+        except ImportError:
+            from winsdk.windows.graphics.imaging import BitmapDecoder
+            from winsdk.windows.media.ocr import OcrEngine as WinOcr
+            from winsdk.windows.storage.streams import (
+                DataWriter,
+                InMemoryRandomAccessStream,
+            )
 
         return BitmapDecoder, WinOcr, DataWriter, InMemoryRandomAccessStream
 
