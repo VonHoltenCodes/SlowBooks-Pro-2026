@@ -183,7 +183,26 @@ const SalesReceiptsPage = {
                 </div>
             </form>`);
         SalesReceiptsPage.recalc();
-        ScanHelper.wire(SalesReceiptsPage._applyScan, SalesReceiptsPage._applyScanField);
+        ScanHelper.wire(SalesReceiptsPage._applyScan, SalesReceiptsPage._applyScanField,
+            SalesReceiptsPage._scanFieldTarget);
+    },
+
+    // Where each canvas field lands — the canvas outlines these inputs in
+    // the field's color so the form doubles as the legend. Mirrors
+    // _applyScanField below.
+    _scanFieldTarget(fieldKey) {
+        const form = $('#sales-receipt-form');
+        if (!form) return null;
+        const row = document.querySelector('#sr-lines tr');
+        if (fieldKey === 'date') return form.querySelector('[name="date"]');
+        if (fieldKey === 'merchant') {
+            const nameInput = $('#sr-new-cust-name');
+            if (nameInput && nameInput.offsetParent) return nameInput;  // new-customer form open
+            return row && row.querySelector('.line-desc');
+        }
+        if (fieldKey === 'total' || fieldKey === 'subtotal') return row && row.querySelector('.line-rate');
+        if (fieldKey === 'tax') return form.querySelector('[name="tax_rate"]');
+        return null;
     },
 
     // Box-to-fix canvas: apply one re-read field into the form.

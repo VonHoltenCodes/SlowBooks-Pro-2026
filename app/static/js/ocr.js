@@ -20,6 +20,7 @@ const ScanHelper = {
     _intakeId: null,
     _lastResult: null,
     _applyField: null,
+    _fieldTargets: null,
     _status: null,
     _statusAt: 0,
     _STATUS_TTL: 120000, // 2 minutes
@@ -58,12 +59,13 @@ const ScanHelper = {
 
     reviewBoxes() {
         if (this._lastResult && this._applyField) {
-            OcrCanvas.open(this._lastResult, this._applyField);
+            OcrCanvas.open(this._lastResult, this._applyField, this._fieldTargets);
         }
     },
 
-    async wire(applyCallback, applyField) {
+    async wire(applyCallback, applyField, fieldTargets) {
         this._applyField = applyField || null;
+        this._fieldTargets = fieldTargets || null;
         const btn = $('#scan-btn');
         const input = $('#scan-file');
         if (!btn || !input) return;
@@ -109,7 +111,7 @@ const ScanHelper = {
             // Partial scans open the canvas automatically — the box-to-fix
             // moment is exactly when auto-parse fell short.
             if (result.partial && result.intake_id && this._applyField) {
-                OcrCanvas.open(result, this._applyField);
+                OcrCanvas.open(result, this._applyField, this._fieldTargets);
             }
             if (statusEl) {
                 statusEl.textContent = this.summary(result);
