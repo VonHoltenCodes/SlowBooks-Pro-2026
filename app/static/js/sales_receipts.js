@@ -206,8 +206,8 @@ const SalesReceiptsPage = {
     },
 
     // Box-to-fix canvas: apply one re-read field into the form.
-    // Returns nothing when the value landed, or a string explaining why it
-    // didn't (the canvas shows it as the read's outcome).
+    // Returns nothing when the value landed, {error} when it was refused, or
+    // {note} when it landed with a remark (the canvas shows either).
     _applyScanField(fieldKey, value, meta) {
         const form = $('#sales-receipt-form');
         if (!form) return;
@@ -229,10 +229,10 @@ const SalesReceiptsPage = {
             const sub = rate ? parseFloat(rate.value) : 0;
             const taxInput = form.querySelector('[name="tax_rate"]');
             const r = ScanHelper.taxPercent(value, sub, meta && meta.text);
-            if (r.error) { SalesReceiptsPage.recalc(); return r.error; }
+            if (r.error) { SalesReceiptsPage.recalc(); return { error: r.error }; }
             if (taxInput) taxInput.value = r.pct.toFixed(2);
             SalesReceiptsPage.recalc();
-            return `— tax rate set to ${r.pct.toFixed(2)}%.`;
+            return { note: `— tax rate set to ${r.pct.toFixed(2)}%.` };
         }
         SalesReceiptsPage.recalc();
     },

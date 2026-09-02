@@ -87,7 +87,7 @@ const BillsPage = {
     lineCount: 0,
 
     vendorSelected(vendorId) {
-        if (!vendorId) return;
+        if (!vendorId || vendorId === VendorQuickAdd.NEW) return;
         const vendor = BillsPage._vendors.find(v => v.id == vendorId);
         if (vendor && vendor.default_expense_account_id) {
             // Store for use when adding lines
@@ -108,7 +108,6 @@ const BillsPage = {
         const classGroup = await classFormGroupHtml();
 
         BillsPage._vendors = vendors;
-        const vendorOpts = vendors.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
         const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
 
         openModal('Enter Bill', `
@@ -116,7 +115,7 @@ const BillsPage = {
                 ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
                     <div class="form-group"><label>Vendor *</label>
-                        <select name="vendor_id" required onchange="BillsPage.vendorSelected(this.value)"><option value="">Select...</option>${vendorOpts}</select></div>
+                        ${VendorQuickAdd.html(vendors, { id: 'bill-vendor', onchange: 'BillsPage.vendorSelected(this.value)' })}</div>
                     <div class="form-group"><label>Bill Number *</label>
                         <input name="bill_number" required></div>
                     <div class="form-group"><label>Date *</label>
@@ -161,7 +160,9 @@ const BillsPage = {
         if (!form) return null;
         const row = document.querySelector('#bill-lines tr');
         if (fieldKey === 'date') return form.querySelector('[name="date"]');
-        if (fieldKey === 'merchant') return row && row.querySelector('.line-desc');
+        if (fieldKey === 'merchant') {
+            return VendorQuickAdd.nameInput('bill-vendor') || (row && row.querySelector('.line-desc'));
+        }
         if (fieldKey === 'total' || fieldKey === 'subtotal') return row && row.querySelector('.line-rate');
         if (fieldKey === 'tax') return form.querySelector('[name="notes"]');
         return null;
@@ -175,6 +176,7 @@ const BillsPage = {
         if (fieldKey === 'date') {
             form.querySelector('[name="date"]').value = value;
         } else if (fieldKey === 'merchant') {
+            VendorQuickAdd.prefill('bill-vendor', value, BillsPage._vendors);
             const desc = row && row.querySelector('.line-desc');
             if (desc) desc.value = value;
         } else if (fieldKey === 'total' || fieldKey === 'subtotal') {
@@ -198,18 +200,14 @@ const BillsPage = {
         if (result.date) form.querySelector('[name="date"]').value = result.date;
 
         const merchant = result.merchant && result.merchant.value;
-        const sel = form.querySelector('[name="vendor_id"]');
-        if (merchant && sel) {
-            const match = BillsPage._vendors.find(v =>
-                v.name && v.name.toLowerCase() === merchant.toLowerCase());
+        if (merchant) {
+            const match = VendorQuickAdd.prefill('bill-vendor', merchant, BillsPage._vendors);
             if (match) {
-                sel.value = match.id;
+                BillsPage.vendorSelected(match.id);
             } else {
-                // No vendor quick-add on the bill form — point the operator
-                // at the dropdown (spec §6.4: name + manual pick).
                 const statusEl = $('#scan-status');
                 if (statusEl) {
-                    statusEl.textContent = `Detected: ${merchant} — select from the list or add new.`;
+                    statusEl.textContent = `Detected: ${merchant} — new vendor; it's added when you save (or pick one from the list).`;
                 }
             }
         }
@@ -274,8 +272,9 @@ const BillsPage = {
             });
         });
         try {
+            const vendorId = await VendorQuickAdd.ensure('bill-vendor');
             const result = await API.post('/bills', {
-                vendor_id: parseInt(form.vendor_id.value),
+                vendor_id: vendorId,
                 bill_number: form.bill_number.value,
                 date: form.date.value,
                 terms: form.terms.value,

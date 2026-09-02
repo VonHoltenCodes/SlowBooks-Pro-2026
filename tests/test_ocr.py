@@ -380,6 +380,42 @@ def test_attach_to_invoice(
     assert list(tmp_path.glob(f"{intake_id}.*")) == []
 
 
+def test_attach_to_expense(client, db_session, monkeypatch, tmp_path, seed_accounts):
+    """Paid receipts land on the one-step Expense form; the scan attaches to
+    the posted transaction."""
+    intake_id = _scan(client, monkeypatch, tmp_path)
+    exp = client.post(
+        "/api/expenses",
+        json={
+            "date": "2026-09-02",
+            "payee": "Sweet Forest Cafe",
+            "expense_account_id": seed_accounts["6000"].id,
+            "paid_from_account_id": seed_accounts["1000"].id,
+            "amount": "30.30",
+        },
+    )
+    assert exp.status_code == 201, exp.text
+    exp_id = exp.json()["id"]
+
+    r = client.post(
+        f"/api/ocr/intake/{intake_id}/attach",
+        json={"entity_type": "expense", "entity_id": exp_id},
+    )
+    assert r.status_code == 201, r.text
+    assert r.json()["entity_type"] == "expense"
+    listed = client.get(f"/api/attachments/expense/{exp_id}")
+    assert listed.status_code == 200 and len(listed.json()) == 1
+    assert list(tmp_path.glob(f"{intake_id}.*")) == []
+
+    # A non-expense transaction id is not an expense.
+    intake_id = _scan(client, monkeypatch, tmp_path)
+    r = client.post(
+        f"/api/ocr/intake/{intake_id}/attach",
+        json={"entity_type": "expense", "entity_id": 999999},
+    )
+    assert r.status_code == 404
+
+
 def test_attach_missing_entity(client, monkeypatch, tmp_path):
     intake_id = _scan(client, monkeypatch, tmp_path)
     r = client.post(

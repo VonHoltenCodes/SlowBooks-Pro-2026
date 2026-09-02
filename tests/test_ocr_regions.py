@@ -48,6 +48,14 @@ def test_unreadable_image_rejected():
 def test_amount_normalization():
     assert ocr_regions._normalize("$1,234.56", "amount") == ("1234.56", "high")
     assert ocr_regions._normalize("4913", "amount") == ("4913", "low")
+    # A box drawn over tax AND tip (SkyTech build-42 lap) must refuse, not
+    # quietly take the first figure — the operator redraws around one.
+    assert ocr_regions._normalize("2.89 5.00", "amount") == (None, "multiple")
+    assert ocr_regions._normalize("SST 6% 5.79 SVC 9.30", "amount") == (
+        None,
+        "multiple",
+    )
+    assert ocr_regions._normalize("TAX 6.00% 2.89", "amount") == ("2.89", "high")
     assert ocr_regions._normalize("", "amount") == (None, "missing")
 
 

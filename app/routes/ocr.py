@@ -20,6 +20,7 @@ from app.database import get_db
 from app.models.attachments import Attachment
 from app.models.bills import Bill
 from app.models.invoices import Invoice
+from app.models.transactions import Transaction
 from app.schemas.attachments import AttachmentResponse
 from app.schemas.ocr import (
     OcrAttachRequest,
@@ -225,10 +226,10 @@ def attach_intake(
     """Move a stored scan into the attachments store for a saved document.
     The frontend calls this after the bill/receipt is created (spec §6.5);
     sales receipts attach as entity_type='invoice'."""
-    if body.entity_type not in ("invoice", "bill"):
+    if body.entity_type not in ("invoice", "bill", "expense"):
         raise HTTPException(
             status_code=400,
-            detail="entity_type must be 'invoice' or 'bill'",
+            detail="entity_type must be 'invoice', 'bill' or 'expense'",
         )
 
     intake = ocr_service.get_intake(intake_id)
@@ -240,6 +241,15 @@ def attach_intake(
 
     if body.entity_type == "invoice":
         entity = db.query(Invoice).filter(Invoice.id == body.entity_id).first()
+    elif body.entity_type == "expense":
+        entity = (
+            db.query(Transaction)
+            .filter(
+                Transaction.id == body.entity_id,
+                Transaction.source_type == "expense",
+            )
+            .first()
+        )
     else:
         entity = db.query(Bill).filter(Bill.id == body.entity_id).first()
     if entity is None:

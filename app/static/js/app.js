@@ -51,6 +51,7 @@ const App = {
         '/deposits':      { page: 'deposits',        label: 'Make Deposits',      render: () => DepositsPage.render() },
         '/check-register': { page: 'check-register', label: 'Check Register',     render: () => CheckRegisterPage.render() },
         '/cc-charges':    { page: 'cc-charges',      label: 'CC Charges',         render: () => CCChargesPage.render() },
+        '/expenses':      { page: 'expenses',        label: 'Enter Expenses',     render: () => ExpensesPage.render() },
         // Phase 10: Quick Wins + Medium Effort Features
         '/budgets':       { page: 'budgets',         label: 'Budget vs Actual',   render: () => BudgetsPage.render() },
         '/bank-rules':    { page: 'bank-rules',      label: 'Bank Rules',         render: () => BankRulesPage.render() },

@@ -36,7 +36,7 @@ def test_prepare_env_persists_settings_key_outside_bundle(tmp_path, monkeypatch)
 
     env_file = tmp_path / "Application Support" / "SlowBooksPro" / ".env"
     data_dir = env_file.parent / "data"
-    monkeypatch.setattr(desktop_launcher, "ENV_FILE", env_file)
+    monkeypatch.setattr(desktop_launcher, "env_file", lambda: env_file)
     monkeypatch.setattr(desktop_launcher, "ENV_EXAMPLE", tmp_path / "missing.example")
     monkeypatch.setattr(desktop_launcher, "get_data_dir", lambda: data_dir)
     # prepare_env mutates os.environ directly; register the key so pytest
@@ -387,3 +387,16 @@ def test_webview_cache_purged_on_version_change(tmp_path):
     desktop_launcher._purge_stale_webview_cache(storage, "10.0.0")
     assert not probe.exists()
     assert (storage / "app-version.txt").read_text().strip() == "10.0.0"
+
+
+def test_env_file_follows_data_dir_override(tmp_path, monkeypatch):
+    """--data-dir (Server Edition, headless test rigs) must relocate the .env
+    too; otherwise a second data dir writes DATABASE_URL into the user's
+    own %LOCALAPPDATA% .env."""
+    import desktop_launcher
+
+    monkeypatch.setattr(desktop_launcher, "FROZEN", True)
+    monkeypatch.setenv("SLOWBOOKS_DATA_DIR", str(tmp_path / "rig" / "data"))
+    assert desktop_launcher.env_file() == tmp_path / "rig" / ".env"
+    monkeypatch.setenv("SLOWBOOKS_DATA_DIR", str(tmp_path / "other" / "data"))
+    assert desktop_launcher.env_file() == tmp_path / "other" / ".env"

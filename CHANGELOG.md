@@ -28,6 +28,38 @@ deterministic (regex/anchor extraction for date, total, tax, merchant) —
 no AI, no bundled models. Design + API contract:
 [docs/design/receipt-intake-spec.md](docs/design/receipt-intake-spec.md).
 
+**Expenses — the form most receipts actually belong on.** A receipt for
+something already paid (card, cash, check) is neither a bill (money
+still owed) nor a sales receipt (money taken in); entering one used to
+mean a bill plus a payment, or a journal entry. The new **Expenses**
+page (Vendors & Payables) records it in one step — vendor, expense
+account, the bank or credit-card account it was paid from, amount — as
+a single balanced posting (DR expense, CR paid-from), with the Scan
+Receipt button, box-to-fix canvas, and attachment on save, exactly like
+bills. Paid From lists bank/cash assets and credit-card liabilities,
+defaulting to Checking.
+
+**Vendor quick-add on the Bill and Expense forms.** A scanned merchant
+the books don't know yet no longer dead-ends the form: the vendor
+picker gained "+ New Vendor" with an inline name box; a scan that
+doesn't match an existing vendor pre-fills it, and the vendor is
+created on save (a near-duplicate name resolves to the existing
+record instead of a twin).
+
+**Box-to-fix canvas hardening**, from the first hands-on hardware lap:
+a box dragged over two figures (tax + tip) is refused with the numbers
+it saw rather than silently taking the first; any refused read — no
+value, two values, or a value the form won't accept (a "tax" larger
+than the subtotal) — leaves no box on the scan and no stale value on
+the field buttons, so the next drag starts clean. Field buttons moved
+below the canvas, a drag paints immediately, and a box recolors the
+moment it's labeled instead of after the read comes back.
+
+**Desktop launcher:** `--data-dir` (Server Edition scheduled task,
+headless test rigs) now relocates the per-user `.env` along with the
+data directory; it used to write `DATABASE_URL` into the launching
+user's own `%LOCALAPPDATA%` `.env`.
+
 ### v2.6.3 — Classes cross over, and report CSVs read ANSI
 
 **Classes now come across from QuickBooks.** A class list export

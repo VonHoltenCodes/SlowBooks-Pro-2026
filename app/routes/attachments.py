@@ -29,6 +29,7 @@ UPLOAD_BASE = (STATIC_BASE / "uploads" / "attachments").resolve()
 _ENTITY_TYPE_DIRS = {
     "invoice": "invoice",
     "bill": "bill",
+    "expense": "expense",
     "estimate": "estimate",
     "purchase_order": "purchase_order",
     "vendor": "vendor",

@@ -76,7 +76,7 @@ from app.routes import provider_payments, public
 from app.routes import qbo
 
 # Phase 9: Forum Bug Fixes & Missing Features
-from app.routes import journal, deposits, cc_charges, checks
+from app.routes import journal, deposits, cc_charges, checks, expenses
 
 # Phase 10: Quick Wins + Medium Effort Features
 from app.routes import bank_rules, budgets, attachments, email_templates
@@ -554,6 +554,7 @@ app.include_router(analytics.router)
 app.include_router(journal.router)
 app.include_router(deposits.router)
 app.include_router(cc_charges.router)
+app.include_router(expenses.router)
 app.include_router(checks.router)
 # Phase 10: Quick Wins + Medium Effort Features
 app.include_router(bank_rules.router)

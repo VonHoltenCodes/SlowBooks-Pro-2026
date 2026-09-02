@@ -433,37 +433,58 @@ const OcrCanvas = {
                     save_template: !!(this._merchant || fieldKey === 'merchant'),
                 });
         } catch (err) {
-            entry.reading = false;
-            entry.value = null;
-            this._draw();
+            this._drop(entry);
             this._msg(err.message, true);
             return;
         }
         entry.reading = false;
         entry.value = result.value || null;
-        if (result.value) this._values[fieldKey] = result.value;
-        this._draw();
-        this._refreshToolbar();
         if (!result.value) {
-            this._msg(`Nothing readable in that box (saw "${result.text || ''}") — try a slightly larger one.`, true);
+            // A refused read leaves no box behind: a box over "tax + tip"
+            // stayed painted across both figures on the build-42 lap and
+            // read as if the tip had been taken.
+            this._drop(entry);
+            const saw = result.text ? ` (read "${result.text}")` : '';
+            if (result.confidence === 'multiple') {
+                this._msg(`That box covers more than one number${saw} — draw it around just the ${this.FIELD_LABELS[fieldKey] || fieldKey}.`, true);
+            } else {
+                this._msg(`Nothing readable in that box${saw} — try a slightly larger one.`, true);
+            }
             return;
         }
-        if (fieldKey === 'merchant') this._merchant = result.value;
         let applied = null;
         if (this._applyField) {
             try { applied = this._applyField(fieldKey, result.value, result); }
-            catch (err) { applied = `Couldn't write to the form: ${err.message}`; }
+            catch (err) { applied = { error: `Couldn't write to the form: ${err.message}` }; }
         }
+        // The host's apply hook may answer {error} (value refused — e.g. a
+        // "tax" that can't be a tax on this subtotal), {note} (applied, with
+        // a remark), or nothing (applied). A bare string is an error.
+        if (typeof applied === 'string') applied = { error: applied };
+        const raw = result.text && result.text !== result.value ? ` (read "${result.text}")` : '';
+        if (applied && applied.error) {
+            this._drop(entry);
+            this._msg(`${this.FIELD_LABELS[fieldKey] || fieldKey}: ${result.value}${raw} — ${applied.error}`, true);
+            return;
+        }
+        this._values[fieldKey] = result.value;
+        if (fieldKey === 'merchant') this._merchant = result.value;
+        this._draw();
+        this._refreshToolbar();
         const note = result.confidence === 'low' ? ' (low confidence — double-check)' : '';
         const saved = result.template_saved ? ' Layout remembered for this merchant.' : '';
         // Reassigned box: the field it used to fill still holds that value.
         const moved = wasKey ? ` Was ${this.FIELD_LABELS[wasKey]} — check that field.` : '';
-        const raw = result.text && result.text !== result.value ? ` (read "${result.text}")` : '';
-        // The host's apply hook may return a note — e.g. a tax amount that
-        // can't be a tax on this subtotal — which then IS the message.
-        const outcome = typeof applied === 'string' ? ` ${applied}` : ' — applied to the form.';
-        this._msg(`${this.FIELD_LABELS[fieldKey] || fieldKey}: ${result.value}${raw}${note}${outcome}${moved}${saved}`,
-            typeof applied === 'string');
+        const outcome = applied && applied.note ? ` ${applied.note}` : ' — applied to the form.';
+        this._msg(`${this.FIELD_LABELS[fieldKey] || fieldKey}: ${result.value}${raw}${note}${outcome}${moved}${saved}`);
+    },
+
+    // Forget a box whose read was refused, so nothing lingers on the scan
+    // or the field buttons.
+    _drop(entry) {
+        this._suggestions = this._suggestions.filter(x => x !== entry);
+        this._draw();
+        this._refreshToolbar();
     },
 
     _msg(text, isError) {

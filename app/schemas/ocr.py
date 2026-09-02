@@ -112,6 +112,6 @@ class OcrRegionResponse(BaseModel):
     text: str
     value: Optional[str] = None
     field_type: str
-    confidence: str = "missing"  # high | low | missing
+    confidence: str = "missing"  # high | low | missing | multiple
     # v3: did this read get saved into the merchant's template?
     template_saved: bool = False

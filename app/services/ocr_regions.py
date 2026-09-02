@@ -177,6 +177,11 @@ def _normalize(text: str, field_type: str):
         amounts = ocr_service._amounts_in_line(line) or ocr_service._amounts_in_line(
             compact
         )
+        if len(amounts) > 1:
+            # A box that swallowed two figures (tax + tip, qty x rate) is a
+            # user-geometry problem: refuse rather than silently apply the
+            # first one, and name what was seen so the fix is obvious.
+            return None, "multiple"
         if amounts:
             return amounts[0], "high"
         # Whitelisted OCR can drop separators; a bare digit run like
