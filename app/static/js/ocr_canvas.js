@@ -18,6 +18,7 @@ const OcrCanvas = {
     _words: [],          // [{text,left,top,width,height,conf}] natural px
     _suggestions: [],    // [{key,label,box:{left,top,width,height}}]
     _intakeId: null,
+    _merchant: null,     // merchant string for template saves (v3)
     _applyField: null,   // (fieldKey, value, meta) => void
     _drag: null,         // {x0,y0,x1,y1} in display px while dragging
     _pendingBox: null,   // natural-px box awaiting a field-type choice
@@ -66,6 +67,7 @@ const OcrCanvas = {
         const canvas = $('#ocr-canvas');
         if (!panel || !canvas || !result || !result.intake_id) return;
         this._intakeId = result.intake_id;
+        this._merchant = (result.merchant && result.merchant.value) || null;
         this._applyField = applyField;
         this._words = result.words || [];
         this._pendingBox = null;
@@ -247,14 +249,24 @@ const OcrCanvas = {
         try {
             const result = await API.post(
                 `/ocr/intake/${encodeURIComponent(this._intakeId)}/region`,
-                { ...box, field_type: this.FIELD_OCR_TYPE[fieldKey] || 'text' });
+                {
+                    ...box,
+                    field_type: this.FIELD_OCR_TYPE[fieldKey] || 'text',
+                    // v3 template memory: a blessed read teaches this
+                    // merchant's layout for next time.
+                    merchant: this._merchant,
+                    field_key: fieldKey,
+                    save_template: !!(this._merchant || fieldKey === 'merchant'),
+                });
             if (!result.value) {
                 this._msg('Nothing readable in that box — try a slightly larger one.', true);
                 return;
             }
+            if (fieldKey === 'merchant') this._merchant = result.value;
             if (this._applyField) this._applyField(fieldKey, result.value, result);
             const note = result.confidence === 'low' ? ' (low confidence — double-check)' : '';
-            this._msg(`${this.FIELD_LABELS[fieldKey] || fieldKey}: ${result.value}${note} — applied to the form.`);
+            const saved = result.template_saved ? ' Layout remembered for this merchant.' : '';
+            this._msg(`${this.FIELD_LABELS[fieldKey] || fieldKey}: ${result.value}${note} — applied to the form.${saved}`);
         } catch (err) {
             this._msg(err.message, true);
         }

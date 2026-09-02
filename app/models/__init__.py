@@ -137,3 +137,4 @@ __all__ = [
     # Reseller permits — expiry tracking + manual verification trail
     "ResellerPermit",
 ]
+from app.models.ocr_templates import OcrTemplate  # noqa: F401

@@ -69,6 +69,13 @@ class OcrReceiptResponse(BaseModel):
     partial_reasons: list[str] = []
     raw_text: Optional[str] = None
 
+    # v3 template memory: True when a saved merchant template supplied the
+    # amount fields cleanly (all high confidence, arithmetic closes) — the
+    # frontend can skip the review canvas. template_fields lists which
+    # fields came from the template regardless of the clean gate.
+    template_applied: bool = False
+    template_fields: list[str] = []
+
 
 class OcrAttachRequest(BaseModel):
     """POST /api/ocr/intake/{intake_id}/attach — link the scan to a document.
@@ -94,9 +101,17 @@ class OcrRegionRequest(BaseModel):
     # amount | date | merchant | text
     field_type: str = "text"
 
+    # v3 template memory: when the canvas knows the merchant and which form
+    # field this box feeds, a successful read teaches the merchant template.
+    merchant: Optional[str] = None
+    field_key: Optional[str] = None
+    save_template: bool = False
+
 
 class OcrRegionResponse(BaseModel):
     text: str
     value: Optional[str] = None
     field_type: str
     confidence: str = "missing"  # high | low | missing
+    # v3: did this read get saved into the merchant's template?
+    template_saved: bool = False
