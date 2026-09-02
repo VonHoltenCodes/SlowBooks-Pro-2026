@@ -180,3 +180,42 @@ def test_recognize_rescales_boxes_to_original_space(monkeypatch):
 def test_preprocess_page_survives_junk_bytes():
     data, factor = ocr_service.preprocess_page(b"not an image at all")
     assert data == b"not an image at all" and factor == 1
+
+
+def test_engine_preference_from_settings(monkeypatch):
+    """The stored ocr_engine setting steers selection; the env override
+    (support tool) still outranks it; junk values fall through to auto."""
+    from app.services import ocr_engines
+
+    monkeypatch.delenv("SLOWBOOKS_OCR_ENGINE", raising=False)
+    assert ocr_engines.get_engine("tesseract").name == "tesseract"
+    # Unrecognized preference -> auto path (never raises)
+    assert ocr_engines.get_engine("copperplate").name in (
+        "tesseract",
+        "vision",
+        "winrt",
+    )
+    # Env override wins over the stored preference
+    monkeypatch.setenv("SLOWBOOKS_OCR_ENGINE", "tesseract")
+    assert ocr_engines.get_engine("winrt").name == "tesseract"
+
+
+def test_status_endpoint_honors_setting(client, db_session, monkeypatch):
+    """Setting ocr_engine=tesseract makes /api/ocr/status report tesseract
+    even where a native engine would win auto-selection."""
+    from app.services import ocr_service
+    from app.services.settings_service import set_setting
+
+    monkeypatch.setattr(ocr_service, "tesseract_available", lambda: True)
+    monkeypatch.setattr(
+        ocr_service,
+        "tesseract_info",
+        lambda: {"available": True, "version": "5.0-test", "languages": ["eng"]},
+    )
+
+    set_setting(db_session, "ocr_engine", "tesseract")
+    db_session.commit()
+
+    r = client.get("/api/ocr/status")
+    assert r.status_code == 200
+    assert r.json()["engine"] == "tesseract"

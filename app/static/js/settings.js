@@ -14,6 +14,7 @@ const SettingsPage = {
             SettingsPage.loadUsers();
             SettingsPage.loadApiTokens();
             SettingsPage.loadOcrStatus();
+            SettingsPage.loadOcrEnginePref();
             SettingsPage.scrollToFocus();
         }, 0);
         return `
@@ -237,10 +238,26 @@ const SettingsPage = {
                     <h3>Receipt Scanning</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Local OCR for the Scan Receipt button on the Enter Sales Receipt and Enter Bill forms.
-                        Runs on this computer via the Tesseract binary — no cloud, no data leaves the machine.
-                        Tesseract is never bundled with the app; it is installed separately.
+                        Everything runs on this computer — no cloud, no data leaves the machine.
+                        The desktop app ships with a built-in engine (Windows OCR / Apple Vision), so scanning
+                        works out of the box; Tesseract is an optional extra engine you can install yourself.
                     </div>
                     <div id="ocr-status" style="font-size:12px;">Checking…</div>
+                    <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
+                        <label for="ocr-engine-pref" style="font-size:11px;">OCR engine:</label>
+                        <select id="ocr-engine-pref" style="font-size:11px;"
+                            onchange="SettingsPage.saveOcrEngine(this.value)">
+                            <option value="auto">Automatic (recommended) — built-in engine first</option>
+                            <option value="tesseract">Prefer Tesseract (if installed)</option>
+                        </select>
+                    </div>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                        Optional: Tesseract can sharpen box re-reads on faded receipts. Install it with
+                        <code>sudo apt-get install tesseract-ocr</code> (Ubuntu),
+                        <code>brew install tesseract</code> (macOS), or the
+                        UB&nbsp;Mannheim build from
+                        <code>github.com/UB-Mannheim/tesseract</code> (Windows), then choose it here.
+                    </div>
                 </div>
 
                 <div class="settings-section">
@@ -518,6 +535,23 @@ const SettingsPage = {
             await API.post('/settings/test-email');
             toast('Test email sent');
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async saveOcrEngine(value) {
+        try {
+            await API.put('/settings', { ocr_engine: value });
+            toast('OCR engine preference saved');
+            this.loadOcrStatus();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async loadOcrEnginePref() {
+        const sel = $('#ocr-engine-pref');
+        if (!sel) return;
+        try {
+            const settings = await API.get('/settings');
+            if (settings.ocr_engine) sel.value = settings.ocr_engine;
+        } catch (e) { /* leave the default selected */ }
     },
 
     async loadOcrStatus() {

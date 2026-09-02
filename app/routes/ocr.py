@@ -38,6 +38,7 @@ from app.services import (
     storage,
 )
 from app.services.rate_limit import limiter
+from app.services.settings_service import get_setting_raw
 from app.services.upload_limits import MAX_IMPORT_BYTES, read_limited
 
 logger = logging.getLogger(__name__)
@@ -67,10 +68,10 @@ def _sanitize_filename(raw: str) -> str:
 
 
 @router.get("/status", response_model=OcrStatusResponse)
-def ocr_status():
+def ocr_status(db: Session = Depends(get_db)):
     """Frontend gating + Settings-page status row (spec §6.6). Reports the
     active engine for this platform (engine seam, design doc §engines)."""
-    info = ocr_engines.engine_status()
+    info = ocr_engines.engine_status(get_setting_raw(db, "ocr_engine"))
     return OcrStatusResponse(
         available=info["available"],
         version=info["version"],
@@ -103,7 +104,7 @@ async def scan_receipt(
             status_code=400, detail=f"File extension '{extension}' not allowed"
         )
 
-    engine = ocr_engines.get_engine()
+    engine = ocr_engines.get_engine(get_setting_raw(db, "ocr_engine"))
     reason = engine.unavailable_reason()
     if reason:
         return OcrReceiptResponse(ocr_available=False, message=reason)
@@ -328,7 +329,7 @@ def ocr_intake_region(
             status_code=404,
             detail="Scan not found or expired — scan the receipt again",
         )
-    engine = ocr_engines.get_engine()
+    engine = ocr_engines.get_engine(get_setting_raw(db, "ocr_engine"))
     reason = engine.unavailable_reason()
     if reason:
         raise HTTPException(status_code=400, detail=reason)
