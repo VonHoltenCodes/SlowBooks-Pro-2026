@@ -164,16 +164,21 @@ def _normalize(text: str, field_type: str):
     line = " ".join(text.split())
     if not line:
         return None, "missing"
+    # WinRT tokenizes upscaled crops aggressively ("49 .13", "46 . 24" —
+    # VH308 hardware lap), so amounts and dates also get a spaceless try.
+    compact = line.replace(" ", "")
     if field_type == "amount":
-        amounts = ocr_service._amounts_in_line(line)
+        amounts = ocr_service._amounts_in_line(line) or ocr_service._amounts_in_line(
+            compact
+        )
         if amounts:
             return amounts[0], "high"
         # Whitelisted OCR can drop separators; a bare digit run like
         # "4913" is ambiguous — hand it back low-confidence.
-        digits = line.replace("$", "").replace(",", "").strip()
+        digits = compact.replace("$", "").replace(",", "")
         return (digits, "low") if digits else (None, "missing")
     if field_type == "date":
-        iso = ocr_service.parse_date(line)
+        iso = ocr_service.parse_date(line) or ocr_service.parse_date(compact)
         return (iso, "high") if iso else (line, "low")
     # merchant / free text
     return line[:80], "high"

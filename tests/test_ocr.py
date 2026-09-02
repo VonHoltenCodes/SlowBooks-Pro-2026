@@ -501,3 +501,17 @@ def test_ocr_image_bytes_failure_raises(tmp_path, monkeypatch):
     with pytest.raises(ocr_service.OCRRuntimeError) as excinfo:
         ocr_service.ocr_image_bytes(b"junk", lang="eng")
     assert "exit 2" in str(excinfo.value)
+
+
+def test_parse_tax_looks_ahead_across_split_lines():
+    """WinRT puts anchor and amount on separate lines; subtotal/tax get the
+    same bounded lookahead as total (VH308 hardware-lap regression)."""
+    text = "NEON PULSE\nSUBTOTAL\n46.24\nTAX 6.25%\n2.89\nTOTAL\n49.13\n"
+    tax, subtotal = ocr_service.parse_tax(text)
+    assert tax == "2.89"
+    assert subtotal == "46.24"
+
+
+def test_parse_tax_trailing_anchor_does_not_crash():
+    tax, subtotal = ocr_service.parse_tax("stuff\nSUBTOTAL\nTAX")
+    assert tax is None and subtotal is None
