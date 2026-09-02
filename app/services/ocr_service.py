@@ -388,14 +388,65 @@ for _num, _names in enumerate(
 # amount on a tax line.
 _AMOUNT_RE = re.compile(r"\$?\s?\d{1,3}(?:,\d{3})*\.\d{2}(?!\s*%)")
 
-# Anchor words whose adjacent amount is (almost always) the grand total.
-# \b around "total" keeps "Subtotal" from matching.
+# "total" as OCR actually renders it — Tesseract on real thermal receipts
+# gives "Tatal", "Totel", "Tota!" (corpus eval, 2026-09-02).  \b keeps
+# "Subtotal" from matching; "TotalGST"/"TotalQty" (no space) are caught by
+# the exclude pattern below.
+_TOTAL_WORD = r"t[oae0]t[aeo][l!1\]](?![a-z])"
 _TOTAL_ANCHOR_RE = re.compile(
-    r"\b(?:grand\s+)?total\b|\bamount\s+due\b|\bbalance\s+due\b", re.IGNORECASE
+    rf"\b(?:grand\s+)?{_TOTAL_WORD}|\bamount\s+due\b|\bbalance\s+due\b",
+    re.IGNORECASE,
+)
+# A "total" line that is definitely the grand total, not a running one:
+# tax-inclusive totals, amount/balance due, payable.  GST/VAT receipts
+# print "Total (Excluding GST)" *before* "Total (Inclusive of GST)", so
+# first-anchor-wins picked the pre-tax figure on 11/20 real receipts.
+_TOTAL_STRONG_RE = re.compile(
+    r"grand\s*total|incl(?:usive|uding|\.)?\b|\bamount\s+due\b|\bbalance\s+due\b"
+    r"|total\s+due\b|total\s+payable\b|amount\s+payable\b|net\s+total\b",
+    re.IGNORECASE,
+)
+# A "total" line that is NOT the grand total: pre-tax totals, subtotals,
+# item/quantity counts, the tax line itself ("Total GST"), summary tables.
+_TOTAL_EXCLUDE_RE = re.compile(
+    r"excl(?:uding|usive|\.)?\b|exc[il1]d|before\s+tax|pre-?tax|sub\s*-?\s*total"
+    r"|total\s*(?:gst|vat|hst|pst|tax|sales\s+tax)\b"
+    r"|total\s*[qog0][t1l][yv]\b|total\s*(?:items?|units?|pcs|pieces|savings?|discount)"
+    r"|tax\s*code|tax\s*\(",
+    re.IGNORECASE,
+)
+# When an anchor's amount sits on the NEXT line (WinRT splits "TOTAL" /
+# "49.13"; some printers do too) that line must be *only* an amount.
+# Without this, a column header "Description Qty U.price Total TAX" swallowed
+# the first line item as the total/tax.
+_AMOUNT_ONLY_LINE_RE = re.compile(
+    r"^[\s$(:;.,\-–|]*\d{1,3}(?:,\d{3})*\.\d{2}[\s)|]*[A-Za-z]{0,2}\s*$"
 )
 
+# Lenient amount for anchor lines only: OCR drops or displaces the decimal
+# point on thermal prints ("Total Incl. of GST 7 00", "Total _ 140. 00").
+# Used only when the line has no properly-formed amount.
+_LOOSE_AMOUNT_RE = re.compile(
+    r"(?<![\d.])(\d{1,3}(?:,\d{3})*)\s?[.\s]\s?(\d{2})(?![\d.]|\s*%)"
+)
+
+_TAX_ANCHOR_RE = re.compile(
+    r"\b(?:total\s*)?(?:tax|gst|vat|hst|pst|qst)\b", re.IGNORECASE
+)
+# The one TOTAL line that *is* the tax: "Total GST 8.40" / "TotalTax".
+_TAX_TOTAL_LINE_RE = re.compile(r"total\s*(?:gst|vat|hst|pst|qst|tax)\b", re.IGNORECASE)
 _TAX_EXCLUDE_RE = re.compile(
-    r"tax\s+(?:included|free|exempt)|no\s+tax|tax\s*(?:-|–)?\s*exempt",
+    r"tax\s+(?:included|free|exempt)|no\s+tax|tax\s*(?:-|–)?\s*exempt"
+    # headers / labels that mention tax but carry no tax amount
+    r"|tax\s+(?:invoice|receipt|code|summary|id|reg|no\b)"
+    r"|gst\s*(?:id|reg|no\b|summary|tin)|vat\s*(?:reg|no\b|number|id)"
+    r"|\bqty\b|\bprice\b|description|amount\s*\("
+    # tax-inclusive / tax-exclusive TOTAL lines belong to parse_total
+    r"|incl(?:usive|uding|\.)?\b|excl(?:uding|usive|\.)?\b|exc[il1]d",
+    re.IGNORECASE,
+)
+_SUBTOTAL_RE = re.compile(
+    rf"sub\s*-?\s*total|\b{_TOTAL_WORD}[^\n]{{0,12}}\(?\s*(?:excl|exc[il1]d|before\s+tax|pre-?tax)",
     re.IGNORECASE,
 )
 
@@ -474,54 +525,117 @@ def parse_date(text: str) -> Optional[str]:
     return None
 
 
+def _anchored_amounts(lines: list[str], i: int) -> list[str]:
+    """Amounts on anchor line i, or on the next amount-only line (≤2 ahead,
+    never past the last line — an anchor as the final OCR line with nothing
+    after it crashed here; found by corpus eval)."""
+    amounts = _amounts_in_line(lines[i])
+    if not amounts:
+        amounts = [
+            _normalize_amount(f"{m.group(1)}.{m.group(2)}")
+            for m in _LOOSE_AMOUNT_RE.finditer(lines[i])
+        ]
+    j = i
+    while not amounts and j < min(i + 2, len(lines) - 1):
+        j += 1
+        if _AMOUNT_ONLY_LINE_RE.match(lines[j]):
+            amounts = _amounts_in_line(lines[j])
+        elif lines[j].strip():
+            break  # a real line of other content — the anchor had no amount
+    return amounts
+
+
 def parse_total(text: str) -> tuple[Optional[str], str]:
-    """(total, confidence) — anchor-first per spec §5.4: an amount on a
-    TOTAL/AMOUNT DUE/BALANCE DUE line is high-confidence; otherwise the
-    largest currency amount is a low-confidence fallback."""
+    """(total, confidence) — anchor-first per spec §5.4, but *which* anchor
+    matters on real receipts (SROIE corpus eval, 2026-09-02):
+
+    * strong anchors (tax-inclusive total, grand total, amount/balance due,
+      payable) win outright — the last one, since "Total: 102.39" is
+      routinely followed by the post-rounding "Total 102.40";
+    * excluded anchors (pre-tax totals, subtotals, Total Qty, Total GST,
+      GST-summary tables) are never the grand total;
+    * otherwise the last plain TOTAL line, preferring one with a single
+      amount over a summary row with several.
+
+    Zero amounts are skipped ("Balance Due 0.00" after payment).  No usable
+    anchor → the largest currency amount, low confidence."""
     lines = text.splitlines()
+    strong: list[str] = []
+    plain: list[tuple[str, int]] = []
     for i, line in enumerate(lines):
-        if _TOTAL_ANCHOR_RE.search(line):
-            amounts = _amounts_in_line(line)
-            # The amount may sit on the next non-empty line
-            # ("AMOUNT DUE\n$123.45"); peek up to two lines ahead —
-            # never past the last line (an anchor as the final OCR line
-            # with nothing after it crashed here; found by corpus eval).
-            j = i
-            while not amounts and j < min(i + 2, len(lines) - 1):
-                j += 1
-                amounts = _amounts_in_line(lines[j])
-            if amounts:
-                return amounts[0], "high"
+        if not _TOTAL_ANCHOR_RE.search(line):
+            continue
+        if _TOTAL_EXCLUDE_RE.search(line) and not _TOTAL_STRONG_RE.search(line):
+            continue
+        amounts = [a for a in _anchored_amounts(lines, i) if _is_positive(a)]
+        if not amounts:
+            continue
+        if _TOTAL_STRONG_RE.search(line):
+            strong.append(amounts[0])
+        else:
+            plain.append((amounts[0], len(amounts)))
+    if strong:
+        return strong[-1], "high"
+    if plain:
+        singles = [a for a, n in plain if n == 1]
+        return (singles[-1] if singles else plain[-1][0]), "high"
     fallback = _largest_amount(text)
     return (fallback, "low") if fallback else (None, "missing")
+
+
+def _smallest(amounts: list[str]) -> str:
+    try:
+        return min(amounts, key=Decimal)
+    except InvalidOperation:
+        return amounts[0]
+
+
+def _is_positive(amount: str) -> bool:
+    try:
+        return Decimal(amount) > 0
+    except InvalidOperation:
+        return False
 
 
 def parse_tax(text: str) -> tuple[Optional[str], Optional[str]]:
     """(tax, subtotal) — anchored lines, tax-included/exempt excluded.
 
+    Tax anchors cover TAX plus GST/VAT/HST/PST/QST; header-ish lines ("Tax
+    Invoice", "GST ID", "Tax Code % Amt Tax", column headers) and the
+    tax-inclusive/-exclusive TOTAL lines are skipped — those belong to
+    parse_total.  Subtotal anchors: "Subtotal", "Sub Total", and the GST
+    receipt form "Total (Excluding GST)".
+
     Like parse_total, an anchor's amount may sit on the next line — the
     WinRT engine in particular splits "TAX 6.25%" and "2.89" into separate
-    lines (seen on the VH308 hardware lap) — so peek up to two lines
-    ahead, never past the last line."""
+    lines (seen on the VH308 hardware lap) — but only an amount-only line
+    counts (see _anchored_amounts)."""
     lines = text.splitlines()
-
-    def _anchored_amount(i: int) -> Optional[str]:
-        amounts = _amounts_in_line(lines[i])
-        j = i
-        while not amounts and j < min(i + 2, len(lines) - 1):
-            j += 1
-            amounts = _amounts_in_line(lines[j])
-        return amounts[0] if amounts else None
-
     tax: Optional[str] = None
     subtotal: Optional[str] = None
     for i, line in enumerate(lines):
-        if subtotal is None and re.search(r"\bsubtotal\b", line, re.IGNORECASE):
-            subtotal = _anchored_amount(i)
-        if tax is None and re.search(r"\btax\b", line, re.IGNORECASE):
+        if subtotal is None and _SUBTOTAL_RE.search(line):
+            amounts = _anchored_amounts(lines, i)
+            subtotal = amounts[0] if amounts else None
+            continue
+        if tax is None and _TAX_ANCHOR_RE.search(line):
+            if _TOTAL_ANCHOR_RE.search(line) and not _TAX_TOTAL_LINE_RE.search(line):
+                continue  # a TOTAL line that mentions GST/tax — parse_total's job
             if not _TAX_EXCLUDE_RE.search(line):
-                tax = _anchored_amount(i)
+                amounts = _anchored_amounts(lines, i)
+                # "SR 6% 69.15 4.18" — tax is always smaller than its base
+                tax = _smallest(amounts) if amounts else None
     return tax, subtotal
+
+
+def _looks_like_words(line: str) -> bool:
+    """True when a line is mostly letters — at least 5 letters, letters make
+    up 70%+ of its non-space characters, and at least two tokens carry two
+    or more letters.  Logo/edge noise ("0) y BO3Z0ly", "—  ByBOlOtd") fails."""
+    compact = re.sub(r"\s+", "", line)
+    letters = sum(ch.isalpha() for ch in compact)
+    wordy = sum(1 for tok in line.split() if sum(ch.isalpha() for ch in tok) >= 2)
+    return letters >= 5 and letters / max(len(compact), 1) >= 0.7 and wordy >= 2
 
 
 def parse_merchant(text: str) -> tuple[Optional[str], str]:
@@ -539,6 +653,8 @@ def parse_merchant(text: str) -> tuple[Optional[str], str]:
             continue  # phone number
         if re.match(r"^[\d\s.,#-]+$", line):
             continue  # pure number / address number
+        if not _looks_like_words(line):
+            continue  # OCR noise from a logo / torn edge ("0) y BO3Z0ly")
         return line[:60], ("high" if idx == 0 else "low")
     return None, "missing"
 
@@ -550,6 +666,20 @@ def extract_receipt(text: str) -> dict:
     tax, subtotal = parse_tax(text)
 
     reasons: list[str] = []
+    # A "total" that equals the subtotal is the pre-tax figure (GST/VAT
+    # receipts print several TOTAL lines); when the tax is known, the real
+    # total is their sum — offered at low confidence so the operator checks.
+    if (
+        total is not None
+        and subtotal is not None
+        and tax is not None
+        and total == subtotal
+    ):
+        try:
+            total = f"{Decimal(subtotal) + Decimal(tax):.2f}"
+            total_conf = "low"
+        except InvalidOperation:
+            pass
     if total is None:
         reasons.append("total not detected")
     elif total_conf == "low":
