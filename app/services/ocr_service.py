@@ -497,19 +497,30 @@ def parse_total(text: str) -> tuple[Optional[str], str]:
 
 
 def parse_tax(text: str) -> tuple[Optional[str], Optional[str]]:
-    """(tax, subtotal) — anchored lines, tax-included/exempt excluded."""
+    """(tax, subtotal) — anchored lines, tax-included/exempt excluded.
+
+    Like parse_total, an anchor's amount may sit on the next line — the
+    WinRT engine in particular splits "TAX 6.25%" and "2.89" into separate
+    lines (seen on the VH308 hardware lap) — so peek up to two lines
+    ahead, never past the last line."""
+    lines = text.splitlines()
+
+    def _anchored_amount(i: int) -> Optional[str]:
+        amounts = _amounts_in_line(lines[i])
+        j = i
+        while not amounts and j < min(i + 2, len(lines) - 1):
+            j += 1
+            amounts = _amounts_in_line(lines[j])
+        return amounts[0] if amounts else None
+
     tax: Optional[str] = None
     subtotal: Optional[str] = None
-    for line in text.splitlines():
+    for i, line in enumerate(lines):
         if subtotal is None and re.search(r"\bsubtotal\b", line, re.IGNORECASE):
-            amounts = _amounts_in_line(line)
-            if amounts:
-                subtotal = amounts[0]
+            subtotal = _anchored_amount(i)
         if tax is None and re.search(r"\btax\b", line, re.IGNORECASE):
             if not _TAX_EXCLUDE_RE.search(line):
-                amounts = _amounts_in_line(line)
-                if amounts:
-                    tax = amounts[0]
+                tax = _anchored_amount(i)
     return tax, subtotal
 
 

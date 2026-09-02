@@ -214,3 +214,11 @@ def test_tesseract_engine_still_uses_subprocess_path(monkeypatch):
         buf.getvalue(), 10, 10, 120, 40, field_type="amount", engine=_Tess()
     )
     assert result["value"] == "49.13"
+
+
+def test_amount_and_date_normalization_tolerates_winrt_spacing():
+    """WinRT splits tokens in upscaled crops ("49 .13"); the normalizer
+    must still produce clean values (VH308 hardware-lap regression)."""
+    assert ocr_regions._normalize("49 .13", "amount") == ("49.13", "high")
+    assert ocr_regions._normalize("46 . 24", "amount") == ("46.24", "high")
+    assert ocr_regions._normalize("08 / 30 / 2026", "date") == ("2026-08-30", "high")
