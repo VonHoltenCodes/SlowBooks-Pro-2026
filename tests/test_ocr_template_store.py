@@ -63,7 +63,7 @@ def _fake_region_reader(words):
     """Region OCR fake: return the text of the word whose center falls in
     the requested box — position-faithful, no tesseract."""
 
-    def fake(image_data, left, top, width, height, field_type):
+    def fake(image_data, left, top, width, height, field_type, engine=None):
         for w in words:
             cx = w["left"] + w["width"] / 2
             cy = w["top"] + w["height"] / 2

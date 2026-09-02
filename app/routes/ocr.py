@@ -152,18 +152,18 @@ async def scan_receipt(
         partial_reasons.append("date not found — today's date used")
 
     # v3 template memory: if this merchant has a saved layout, region-OCR the
-    # remembered boxes and prefer those reads. Tesseract-only today (region
-    # OCR is tesseract-config-driven); fails closed to the v1 parse + canvas.
+    # remembered boxes and prefer those reads (any engine — native engines
+    # read prepared crops too). Fails closed to the v1 parse + canvas.
     template_fields: list[str] = []
     template_applied = False
-    if result.words and engine.name == "tesseract":
+    if result.words:
         word_dicts = [vars(w) for w in result.words]
         template = ocr_template_store.find_for_scan(
             db, extracted["merchant"]["value"], raw_text
         )
         if template is not None:
             reads = ocr_template_store.apply_template(
-                db, template, ocr_input, word_dicts
+                db, template, ocr_input, word_dicts, engine=engine
             )
             template_fields = sorted(reads)
             for key in ("total", "subtotal", "tax"):
@@ -330,9 +330,7 @@ def ocr_intake_region(
         )
     engine = ocr_engines.get_engine()
     reason = engine.unavailable_reason()
-    if reason and engine.name == "tesseract":
-        # Region OCR is tesseract-config-driven today; native-engine region
-        # support arrives with the hardware laps (design doc).
+    if reason:
         raise HTTPException(status_code=400, detail=reason)
     try:
         image_data = _intake_image_bytes(intake)
@@ -343,6 +341,7 @@ def ocr_intake_region(
             width=body.width,
             height=body.height,
             field_type=body.field_type,
+            engine=engine,
         )
     except ocr_regions.RegionError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -358,13 +357,7 @@ def ocr_intake_region(
     # template (anchor-relative box). Fails closed — a save miss never
     # breaks the read that just succeeded.
     template_saved = False
-    if (
-        body.save_template
-        and body.merchant
-        and body.field_key
-        and result.get("value")
-        and engine.name == "tesseract"
-    ):
+    if body.save_template and body.merchant and body.field_key and result.get("value"):
         try:
             page = engine.recognize(image_data)
             words = [vars(w) for w in page.words]

@@ -139,3 +139,78 @@ def test_region_endpoint_end_to_end(client, monkeypatch, tmp_path):
         json={"left": 0, "top": 0, "width": 2, "height": 2, "field_type": "text"},
     )
     assert bad.status_code == 400
+
+
+class _FakeNativeEngine:
+    """Native-engine stand-in: name != tesseract, recognizes a prepared crop."""
+
+    name = "winrt"
+
+    def __init__(self, text):
+        self._text = text
+        self.saw = None
+
+    def recognize(self, data):
+        from app.services.ocr_engines import OcrResult
+
+        self.saw = data
+        return OcrResult(text=self._text, words=[], language="en-US", engine=self.name)
+
+
+def test_native_engine_region_path_skips_tesseract(monkeypatch):
+    """With a native engine, ocr_region must read via engine.recognize and
+    never spawn tesseract (frozen builds without it stay fully featured)."""
+    import subprocess as sp
+
+    def boom(*a, **k):
+        raise AssertionError("tesseract must not be spawned on the native path")
+
+    monkeypatch.setattr(sp, "run", boom)
+
+    import io as _io
+
+    from PIL import Image
+
+    buf = _io.BytesIO()
+    Image.new("L", (200, 80), 255).save(buf, format="PNG")
+
+    eng = _FakeNativeEngine("$1,234.56")
+    result = ocr_regions.ocr_region(
+        buf.getvalue(), 10, 10, 120, 40, field_type="amount", engine=eng
+    )
+    assert result["value"] == "1234.56"
+    assert result["confidence"] == "high"
+    assert eng.saw is not None  # the engine really was handed the crop
+    with Image.open(_io.BytesIO(eng.saw)) as crop:
+        assert crop.size == (120 * ocr_regions.UPSCALE, 40 * ocr_regions.UPSCALE)
+
+
+def test_tesseract_engine_still_uses_subprocess_path(monkeypatch):
+    """A tesseract engine (or engine=None) keeps the PSM/whitelist path."""
+
+    class _Tess:
+        name = "tesseract"
+
+        def recognize(self, data):  # pragma: no cover — must not be called
+            raise AssertionError("tesseract engine must use the subprocess path")
+
+    import subprocess as sp
+
+    class _Proc:
+        returncode = 0
+        stdout = b"49.13"
+        stderr = b""
+
+    monkeypatch.setattr(sp, "run", lambda *a, **k: _Proc())
+    monkeypatch.setattr(ocr_service, "ocr_language", lambda: "eng")
+
+    import io as _io
+
+    from PIL import Image
+
+    buf = _io.BytesIO()
+    Image.new("L", (200, 80), 255).save(buf, format="PNG")
+    result = ocr_regions.ocr_region(
+        buf.getvalue(), 10, 10, 120, 40, field_type="amount", engine=_Tess()
+    )
+    assert result["value"] == "49.13"

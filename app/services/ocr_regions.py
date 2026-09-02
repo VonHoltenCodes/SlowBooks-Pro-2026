@@ -9,8 +9,10 @@
 # low-contrast answer — a known-type crop reads far better than a full page.
 #
 # Pillow is already in the dependency tree (WeasyPrint); no new pins.
-# Region OCR is tesseract-config-driven today; when the native engines get
-# region support they slot in behind the same service function.
+# Two read paths behind one function: tesseract (PSM + charset whitelist,
+# the sharpest option when it's installed) and the native engines (Vision /
+# WinRT recognize a prepared crop — no whitelist, but the field normalizer
+# filters the noise). Frozen builds without tesseract stay fully featured.
 # ============================================================================
 
 import io
@@ -49,8 +51,14 @@ def _load_image(data: bytes):
     return img
 
 
-def _prepare_region(img, left: int, top: int, width: int, height: int) -> bytes:
-    """Crop -> grayscale -> upscale -> autocontrast -> binarize -> PNG bytes."""
+def _prepare_region(
+    img, left: int, top: int, width: int, height: int, binarize: bool = True
+) -> bytes:
+    """Crop -> grayscale -> upscale -> autocontrast [-> binarize] -> PNG.
+
+    The hard threshold helps tesseract; the native engines do their own
+    binarization and read the contrast-stretched grayscale better, so they
+    get binarize=False."""
     from PIL import Image, ImageOps
 
     iw, ih = img.size
@@ -69,7 +77,8 @@ def _prepare_region(img, left: int, top: int, width: int, height: int) -> bytes:
     # midpoint threshold after that is a serviceable Otsu stand-in without
     # adding a CV dependency.
     region = ImageOps.autocontrast(region, cutoff=1)
-    region = region.point(lambda p: 255 if p > 140 else 0)
+    if binarize:
+        region = region.point(lambda p: 255 if p > 140 else 0)
     out = io.BytesIO()
     region.save(out, format="PNG")
     return out.getvalue()
@@ -83,13 +92,19 @@ def ocr_region(
     height: int,
     field_type: str = "text",
     lang: Optional[str] = None,
+    engine=None,
 ) -> dict:
     """OCR one typed region of a scanned image.
 
     Returns {"text", "value", "field_type", "confidence"} where `value` is
     the field-normalized reading (amounts -> '1234.56', dates -> ISO) and
     `text` is the raw region text. Raises RegionError for geometry/image
-    problems and ocr_service.OCRRuntimeError when tesseract fails.
+    problems and ocr_service.OCRRuntimeError when OCR fails.
+
+    `engine` is the active OcrEngine; a native engine (vision/winrt) reads
+    the prepared crop itself, so frozen builds without tesseract keep the
+    canvas and template features. None or a tesseract engine uses the
+    subprocess path with PSM + charset whitelist (sharpest when present).
     """
     config = FIELD_CONFIGS.get(field_type)
     if config is None:
@@ -98,6 +113,19 @@ def ocr_region(
             f"(expected one of {sorted(FIELD_CONFIGS)})"
         )
     img = _load_image(image_data)
+
+    if engine is not None and engine.name != "tesseract":
+        png = _prepare_region(img, left, top, width, height, binarize=False)
+        result = engine.recognize(png)
+        text = " ".join((result.text or "").split())
+        value, confidence = _normalize(text, field_type)
+        return {
+            "text": text,
+            "value": value,
+            "field_type": field_type,
+            "confidence": confidence,
+        }
+
     png = _prepare_region(img, left, top, width, height)
 
     lang = lang or ocr_service.ocr_language()
