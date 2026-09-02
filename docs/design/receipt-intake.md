@@ -70,6 +70,11 @@ between, and `main` never sees a half-finished intake feature.
    this branch after review. One hook requested now: return tesseract's
    per-word bounding boxes (`tsv` output) alongside the parsed fields —
    v2 draws them.
+1.5. **Engine seam + platform-native adapters** (see "OCR engine
+   strategy" below): refactor the tesseract call site behind an
+   `OcrEngine` interface, add the Vision (macOS) and WinRT (Windows)
+   adapters with frozen-build-only conditional deps. Can proceed in
+   parallel with v2 — the canvas consumes whichever engine is active.
 2. **v2 — Auto-first, box-to-fix canvas.** The image with v1's detected
    boxes drawn on it; drag to adjust or draw; click a box to assign a
    field. Per-field OCR on the adjusted box: crop → upscale 3× →
@@ -117,6 +122,61 @@ Don't chase these with code contortions; dismiss with justification.
 Hardware gate: the branch → main PR needs the same Windows + macOS
 installed-app pass every release gets; Docker gets tesseract/poppler in
 the image, installers never do.
+
+## OCR engine strategy (decided 2026-09-02): platform-native engines
+
+Owner decision, superseding the "tesseract everywhere + install
+pointer" experience. The product rule that forced it: **never point a
+user anywhere to make the software work.** Integrators (banks, payment
+processors, BYO-AI) are services — pointing outward is inherent to
+them. OCR is a local capability, so it ships working. "Install
+Tesseract to enable scanning" violated that on Windows and macOS, and
+macOS having no install path at all made it worse.
+
+The engine per platform is the one the OS already ships:
+
+| Platform | Engine | Why |
+|---|---|---|
+| macOS | Apple Vision framework (`VNRecognizeTextRequest`) | Preinstalled on every Mac, best-in-class accuracy, returns word bounding boxes natively. App already requires macOS 14+, well above Vision's floor. |
+| Windows 10/11 | `Windows.Media.Ocr` (WinRT) | Built into the OS. Decent-not-great on low contrast — exactly what the v2 box-select canvas absorbs. |
+| Linux / Docker | Tesseract (system package / in the image) | Already genuinely built-in for self-hosters; the Docker image installs it. |
+
+Tesseract additionally remains a detect-if-present engine on every
+platform (override + fallback), so nothing regresses for anyone who
+has it.
+
+Why this beats the alternatives considered (vendored tesseract build,
+ONNX/RapidOCR-class models, from-scratch): **zero install pointers,
+zero binary custody** — the OS vendors steward their own engines'
+CVEs and updates; nothing new enters the signed bundle beyond Python
+wheels; the never-bundled policy stands untouched; and the macOS
+story flips from worst (no path) to best (Apple's own OCR).
+
+Implementation shape:
+
+- **Engine seam**: `ocr_service` funnels through a single tesseract
+  call site today — replace with an `OcrEngine` interface + per-
+  platform adapters selected at runtime. `/api/ocr/status` reports
+  engine name/version/languages so support conversations stay sane.
+- **Dependencies**: platform-conditional and frozen-build-only —
+  `pyobjc` in the macOS build, `winsdk` (WinRT projection) in the
+  Windows build. Neither enters the server/Docker dependency set;
+  requirements.txt stays clean.
+- **The degrade path stays, permanently.** Engines can still be
+  unavailable (Windows OCR language packs follow OS languages; Linux
+  without tesseract; corrupt installs). v1's honest
+  detect-and-degrade layer is the foundation every engine sits on.
+- **Word boxes come free**: Vision and WinRT both return word/line
+  bounding boxes natively — the v2 canvas's auto-drawn boxes work on
+  native engines without the tesseract `tsv` detour.
+- Recorded trade-off: per-platform engines mean per-platform text
+  quirks. The parser already treats OCR output as untrusted input, and
+  the ground-truth fixture tests should eventually run per-engine (CI
+  covers tesseract; macOS/Windows engine runs are hardware-pass
+  items).
+- Optional future garnish, not committed: a tiny homegrown digits-only
+  recognizer (`0-9.,$`) for v2's typed amount boxes, trained on
+  synthetic WeasyPrint receipts — pure-numpy inference, truly ours.
 
 ## Honest framing (unchanged)
 
