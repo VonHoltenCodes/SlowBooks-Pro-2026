@@ -16,8 +16,10 @@
 
 import asyncio
 import os
+import threading
 import re
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -244,31 +246,99 @@ class VisionEngine:
         )
 
 
+# ---------------------------------------------------------------------------
+# One WinRT thread for the life of the process.
+#
+# Hardware finding (SkyTech, build 44, 2026-09-02): the server child died
+# with an access violation inside _winrt_windows_media_ocr.pyd on the
+# SECOND scan of a session — every time. cppwinrt caches the OcrEngine
+# activation factory in a static; when the throwaway thread that made the
+# first call exits, the COM apartment it implicitly joined is torn down,
+# the in-proc factory goes with it, and the next call jumps through a
+# dangling pointer (no Python traceback — the GUI just reports "network
+# error"). So: every WinRT call runs on ONE persistent worker that joins
+# the multithreaded apartment explicitly and never exits, and nothing
+# WinRT-owned leaves that thread — results come back as plain WordBoxes.
+# ---------------------------------------------------------------------------
+
+_winrt_pool: Optional[ThreadPoolExecutor] = None
+_winrt_pool_lock = threading.Lock()
+_winrt_thread_ident: Optional[int] = None
+
+
+def _winrt_thread_init():
+    """Runs once on the worker before its first task. Joining the MTA from
+    a thread that lives as long as the server keeps the apartment (and the
+    cached factories) alive; the thread's ident lets re-entrant calls run
+    inline instead of deadlocking on their own executor."""
+    global _winrt_thread_ident
+    _winrt_thread_ident = threading.get_ident()
+    try:
+        from winrt.runtime import ApartmentType, init_apartment
+    except ImportError:
+        # winsdk (older projection) initializes the apartment on import.
+        return
+    try:
+        init_apartment(ApartmentType.MULTI_THREADED)
+    except Exception:
+        # Already initialized (or a different model on this thread) —
+        # either way the apartment exists and this thread pins it.
+        pass
+
+
+def _winrt_executor() -> ThreadPoolExecutor:
+    global _winrt_pool
+    with _winrt_pool_lock:
+        if _winrt_pool is None:
+            _winrt_pool = ThreadPoolExecutor(
+                max_workers=1,
+                thread_name_prefix="winrt-ocr",
+                initializer=_winrt_thread_init,
+            )
+        return _winrt_pool
+
+
+def _on_winrt_thread(fn):
+    """Run `fn()` on the persistent WinRT thread and return its result."""
+    if threading.get_ident() == _winrt_thread_ident:
+        return fn()
+    return _winrt_executor().submit(fn).result()
+
+
 def _run_winrt_coroutine(factory):
     """Run a WinRT async operation to completion from ANY calling context.
 
-    asyncio.run() works only when no event loop is running — true for sync
-    routes (threadpool workers) and CLI/standalone use, but the scan route
-    is `async def` and lives ON the loop, where asyncio.run() raises. In
-    that case the operation runs on a dedicated thread with its own loop.
-    (Field-found on the VH308 hardware lap: standalone harness passed, the
-    frozen app 500'd on every scan.)
+    asyncio.run() works only when no event loop is running — the scan
+    route is `async def` and lives ON the loop, where it raises (the VH308
+    500-on-every-scan regression). The coroutine is therefore created AND
+    run on the WinRT worker, whose own short-lived loop is fine because the
+    thread underneath it — the one that owns the apartment — persists.
     """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        return asyncio.run(factory())
-
-    import concurrent.futures
-
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
-        return pool.submit(asyncio.run, factory()).result()
+    return _on_winrt_thread(lambda: asyncio.run(factory()))
 
 
 # ---------------------------------------------------------------------------
-# Windows.Media.Ocr (Windows 10/11) via winsdk. Word-level boxes.
-# HARDWARE-VERIFY-PENDING.
+# Windows.Media.Ocr (Windows 10/11) via the winrt-* projection. Word-level boxes.
+# Hardware-validated on Windows 11 (2026-09-02).
 # ---------------------------------------------------------------------------
+
+
+def _winrt_words(result) -> list[WordBox]:
+    """OcrResult lines/words → plain WordBoxes (engine order preserved)."""
+    words: list[WordBox] = []
+    for line in result.lines:
+        for word in line.words:
+            r = word.bounding_rect
+            words.append(
+                WordBox(
+                    text=str(word.text),
+                    left=int(r.x),
+                    top=int(r.y),
+                    width=int(r.width),
+                    height=int(r.height),
+                )
+            )
+    return words
 
 
 class WinRTEngine:
@@ -305,13 +375,20 @@ class WinRTEngine:
             return {"available": False, "version": None, "languages": None}
         try:
             _, WinOcr, _, _ = self._bridge()
-            engine = WinOcr.try_create_from_user_profile_languages()
-            if engine is None:
+
+            def _probe():
+                engine = WinOcr.try_create_from_user_profile_languages()
+                if engine is None:
+                    return None
+                return str(engine.recognizer_language.language_tag)
+
+            tag = _on_winrt_thread(_probe)
+            if tag is None:
                 return {"available": False, "version": None, "languages": None}
             return {
                 "available": True,
                 "version": "Windows.Media.Ocr",
-                "languages": [str(engine.recognizer_language.language_tag)],
+                "languages": [tag],
             }
         except Exception:
             return {"available": False, "version": None, "languages": None}
@@ -335,22 +412,11 @@ class WinRTEngine:
             engine = WinOcr.try_create_from_user_profile_languages()
             if engine is None:
                 raise EngineUnavailable("No OCR language available in Windows")
-            return await engine.recognize_async(bitmap)
+            # Flatten on the WinRT thread: no OcrResult/OcrWord proxies
+            # cross back to the caller, so their releases happen here too.
+            return _winrt_words(await engine.recognize_async(bitmap))
 
-        result = _run_winrt_coroutine(_run)
-        words: list[WordBox] = []
-        for line in result.lines:
-            for word in line.words:
-                r = word.bounding_rect
-                words.append(
-                    WordBox(
-                        text=str(word.text),
-                        left=int(r.x),
-                        top=int(r.y),
-                        width=int(r.width),
-                        height=int(r.height),
-                    )
-                )
+        words = _run_winrt_coroutine(_run)
         return OcrResult(
             text=lines_from_words(words),
             words=words,

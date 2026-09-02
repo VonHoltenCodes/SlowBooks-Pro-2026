@@ -192,6 +192,13 @@ const OcrCanvas = {
             const w = this._findDateWord(result.date, used);
             if (w) { used.add(w); found.push({ key: 'date', label: this.FIELD_LABELS.date, box: this._pad(w) }); }
         }
+        if (result.merchant && result.merchant.value) {
+            const run = this._findMerchantWords(result.merchant.value, used);
+            if (run) {
+                run.forEach(w => used.add(w));
+                found.push({ key: 'merchant', label: this.FIELD_LABELS.merchant, box: this._pad(this._union(run)) });
+            }
+        }
         return found;
     },
 
@@ -235,6 +242,41 @@ const OcrCanvas = {
             const got = parts.sort((a, b) => a - b).join(',');
             return got === full || got === short;
         }) || null;
+    },
+
+    /** The words that print the merchant name: the shortest run of
+     *  consecutive same-line words whose letters/digits spell it, so the
+     *  header line gets its box too ("merchant name was still
+     *  unhighlighted" — SkyTech lap, 2026-09-02). Null when the name was
+     *  remembered from a template rather than read off this page. */
+    _findMerchantWords(name, used) {
+        const norm = t => String(t).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const want = norm(name);
+        if (!want) return null;
+        const seen = new Set();
+        for (const w of this._words) {
+            if (seen.has(w)) continue;
+            const line = this._lineOf(w).filter(x => !used.has(x))
+                .sort((a, b) => a.left - b.left);
+            line.forEach(x => seen.add(x));
+            for (let i = 0; i < line.length; i++) {
+                let acc = '';
+                for (let j = i; j < line.length; j++) {
+                    acc += norm(line[j].text);
+                    if (acc === want) return line.slice(i, j + 1);
+                    if (acc.length >= want.length) break;
+                }
+            }
+        }
+        return null;
+    },
+
+    _union(words) {
+        const left = Math.min(...words.map(w => w.left));
+        const top = Math.min(...words.map(w => w.top));
+        const right = Math.max(...words.map(w => w.left + w.width));
+        const bottom = Math.max(...words.map(w => w.top + w.height));
+        return { left, top, width: right - left, height: bottom - top };
     },
 
     _pad(w, p = 6) {

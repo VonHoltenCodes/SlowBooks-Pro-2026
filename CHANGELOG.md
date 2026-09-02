@@ -74,6 +74,21 @@ doesn't repeat the anchor the same way. A remembered amount or date box
 that reads only a bare digit run on a new print (a template that landed
 on a tax-ID number) is discarded instead of filling the form with it.
 
+**Windows: the second scan of a session no longer crashes the app.** On
+Windows the built-in text recognizer was driven from a throwaway thread
+per scan; when that thread exited, Windows tore down the component
+runtime the recognizer had been created in, and the next scan jumped
+through a stale handle — the server process died and the window
+reported "SlowBooks isn't responding (network error)" right after the
+first bill or expense was saved from a receipt. All recognizer work now
+runs on one thread that lives as long as the app does.
+
+**The merchant name gets a highlight box too.** The scan now boxes the
+run of words on the image that spells the parsed merchant name (pink),
+alongside the totals and date, so it can be corrected by tapping like
+the others; a name recalled from a remembered layout that isn't printed
+on the page draws nothing.
+
 **Desktop launcher:** `--data-dir` (Server Edition scheduled task,
 headless test rigs) now relocates the per-user `.env` along with the
 data directory; it used to write `DATABASE_URL` into the launching

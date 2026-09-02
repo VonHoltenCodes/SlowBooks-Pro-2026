@@ -317,7 +317,109 @@ def test_winrt_adapter_text_is_rebuilt_from_words(monkeypatch):
 
     engine = ocr_engines.WinRTEngine()
     monkeypatch.setattr(engine, "_bridge", lambda: (None, None, None, None))
-    monkeypatch.setattr(ocr_engines, "_run_winrt_coroutine", lambda factory: _Result())
+    monkeypatch.setattr(
+        ocr_engines,
+        "_run_winrt_coroutine",
+        lambda factory: ocr_engines._winrt_words(_Result()),
+    )
     result = engine.recognize(b"not-a-real-png")
     assert result.text == "SHOP\nTOTAL 9.99"
     assert [w.text for w in result.words] == ["TOTAL", "9.99", "SHOP"]
+
+
+# ---------------------------------------------------------------------------
+# One apartment thread for the life of the process (SkyTech crash, build 44)
+# ---------------------------------------------------------------------------
+
+
+def test_winrt_calls_all_run_on_one_persistent_thread(monkeypatch):
+    """Every WinRT touch — the status probe, the scan, the flattening of
+    the result — must happen on the same long-lived thread. Per-call
+    threads let the COM apartment die between scans, and the cached
+    OcrEngine factory took the server child down with it."""
+    import threading
+
+    seen: list[int] = []
+
+    class _Rect:
+        x, y, width, height = 1, 2, 30, 10
+
+    class _Word:
+        text = "TOTAL"
+        bounding_rect = _Rect()
+
+    class _Line:
+        words = [_Word()]
+
+    class _Result:
+        @property
+        def lines(self):
+            seen.append(threading.get_ident())
+            return [_Line()]
+
+    class _Lang:
+        language_tag = "en-US"
+
+    class _Engine:
+        recognizer_language = _Lang()
+
+        async def recognize_async(self, bitmap):
+            seen.append(threading.get_ident())
+            return _Result()
+
+    class _WinOcr:
+        @staticmethod
+        def try_create_from_user_profile_languages():
+            seen.append(threading.get_ident())
+            return _Engine()
+
+    class _Stream:
+        def get_output_stream_at(self, _pos):
+            return None
+
+    class _Writer:
+        def __init__(self, _out):
+            pass
+
+        def write_bytes(self, _data):
+            pass
+
+        async def store_async(self):
+            return None
+
+    class _Decoder:
+        @staticmethod
+        async def create_async(_stream):
+            return _Decoder()
+
+        async def get_software_bitmap_async(self):
+            return object()
+
+    inits: list[int] = []
+    real_init = ocr_engines._winrt_thread_init
+
+    def _init():
+        inits.append(threading.get_ident())
+        real_init()
+
+    monkeypatch.setattr(ocr_engines, "_winrt_pool", None)
+    monkeypatch.setattr(ocr_engines, "_winrt_thread_init", _init)
+    monkeypatch.setattr(ocr_engines.sys, "platform", "win32")
+
+    engine = ocr_engines.WinRTEngine()
+    monkeypatch.setattr(
+        engine, "_bridge", lambda: (_Decoder, _WinOcr, _Writer, _Stream)
+    )
+
+    assert engine.info()["languages"] == ["en-US"]
+    first = engine.recognize(b"png")
+    second = engine.recognize(b"png")
+    assert first.words[0].text == "TOTAL" and second.text == "TOTAL"
+
+    # probe + 2 x (create, recognize, flatten) = 7 touches, one thread,
+    # not the caller's, initialized exactly once and still alive after.
+    assert len(seen) == 7
+    assert len(set(seen)) == 1
+    assert seen[0] != threading.get_ident()
+    assert inits == [seen[0]]
+    assert any(t.ident == seen[0] and t.is_alive() for t in threading.enumerate())
