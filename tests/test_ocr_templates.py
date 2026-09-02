@@ -54,8 +54,13 @@ def test_resolution_survives_scale_and_shift():
     box = {"left": 145, "top": 196, "width": 80, "height": 28}
     enc = tpl.encode_field(box, WORDS)
     rescanned = [
-        {**w, "left": w["left"] * 2 + 33, "top": w["top"] * 2 + 90,
-         "width": w["width"] * 2, "height": w["height"] * 2}
+        {
+            **w,
+            "left": w["left"] * 2 + 33,
+            "top": w["top"] * 2 + 90,
+            "width": w["width"] * 2,
+            "height": w["height"] * 2,
+        }
         for w in WORDS
     ]
     out = tpl.resolve_field(enc, rescanned)
