@@ -70,7 +70,7 @@ between, and `main` never sees a half-finished intake feature.
    this branch after review. One hook requested now: return tesseract's
    per-word bounding boxes (`tsv` output) alongside the parsed fields —
    v2 draws them.
-1.5. **Engine seam + platform-native adapters** (see "OCR engine
+1.5. **Engine seam + platform-native adapters** *(maintainer-built — not on the v1 contributor)* (see "OCR engine
    strategy" below): refactor the tesseract call site behind an
    `OcrEngine` interface, add the Vision (macOS) and WinRT (Windows)
    adapters with frozen-build-only conditional deps. Can proceed in
