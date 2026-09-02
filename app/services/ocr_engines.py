@@ -190,6 +190,27 @@ class VisionEngine:
         )
 
 
+def _run_winrt_coroutine(factory):
+    """Run a WinRT async operation to completion from ANY calling context.
+
+    asyncio.run() works only when no event loop is running — true for sync
+    routes (threadpool workers) and CLI/standalone use, but the scan route
+    is `async def` and lives ON the loop, where asyncio.run() raises. In
+    that case the operation runs on a dedicated thread with its own loop.
+    (Field-found on the VH308 hardware lap: standalone harness passed, the
+    frozen app 500'd on every scan.)
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(factory())
+
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, factory()).result()
+
+
 # ---------------------------------------------------------------------------
 # Windows.Media.Ocr (Windows 10/11) via winsdk. Word-level boxes.
 # HARDWARE-VERIFY-PENDING.
@@ -262,7 +283,7 @@ class WinRTEngine:
                 raise EngineUnavailable("No OCR language available in Windows")
             return await engine.recognize_async(bitmap)
 
-        result = asyncio.run(_run())
+        result = _run_winrt_coroutine(_run)
         text_lines = []
         words: list[WordBox] = []
         for line in result.lines:
