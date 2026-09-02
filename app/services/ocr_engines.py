@@ -16,6 +16,7 @@
 
 import asyncio
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 from typing import Optional
@@ -42,6 +43,58 @@ class OcrResult:
     words: list[WordBox] = field(default_factory=list)
     engine: str = "tesseract"
     language: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Reading order. Native engines report lines in *region* order, not page
+# order — hardware finding on Windows.Media.Ocr (2026-09-02): a receipt's
+# header line came back AFTER the amounts column, so "merchant = first
+# line" picked the street address and every "TOTAL" anchor sat a dozen
+# lines away from its amount. The text parsers were tuned on tesseract's
+# top-to-bottom output, so rebuild that ordering from box geometry instead
+# of trusting the engine's sequence. Tesseract keeps its own assembly.
+# ---------------------------------------------------------------------------
+
+# WinRT tokenizes a decimal point as its own tiny word ("49 . 13", "24 .50").
+_SPLIT_DECIMAL_RE = re.compile(r"(\d)\s*\.\s*(\d{2})\b")
+
+
+def lines_from_words(words: list[WordBox]) -> str:
+    """Rebuild top-to-bottom, left-to-right text from word boxes.
+
+    A word joins the current row when its vertical centre lies within ~60%
+    of a line height of the row's centre; rows are then read left to
+    right. Tolerant of the small skew a phone photo introduces.
+    """
+    if not words:
+        return ""
+    ordered = sorted(words, key=lambda w: (w.top + w.height / 2.0, w.left))
+    rows: list[list[WordBox]] = []
+    centres: list[float] = []
+    heights: list[float] = []
+    for w in ordered:
+        cy = w.top + w.height / 2.0
+        if rows:
+            tol = 0.6 * max(heights[-1], float(w.height), 1.0)
+            if abs(cy - centres[-1]) <= tol:
+                row = rows[-1]
+                row.append(w)
+                n = len(row)
+                centres[-1] += (cy - centres[-1]) / n
+                # Tiny punctuation boxes must not shrink the row height.
+                heights[-1] = max(heights[-1], float(w.height))
+                continue
+        rows.append([w])
+        centres.append(cy)
+        heights.append(float(w.height))
+    out = []
+    for row in rows:
+        row.sort(key=lambda w: w.left)
+        line = " ".join(w.text.strip() for w in row if w.text and w.text.strip())
+        line = _SPLIT_DECIMAL_RE.sub(r"\1.\2", line)
+        if line:
+            out.append(line)
+    return "\n".join(out)
 
 
 class EngineUnavailable(Exception):
@@ -182,9 +235,10 @@ class VisionEngine:
             )
             lines.append((top, text, box))
         lines.sort(key=lambda item: item[0])
+        boxes = [item[2] for item in lines]
         return OcrResult(
-            text="\n".join(item[1] for item in lines),
-            words=[item[2] for item in lines],
+            text=lines_from_words(boxes),
+            words=boxes,
             engine=self.name,
             language=lang,
         )
@@ -284,10 +338,8 @@ class WinRTEngine:
             return await engine.recognize_async(bitmap)
 
         result = _run_winrt_coroutine(_run)
-        text_lines = []
         words: list[WordBox] = []
         for line in result.lines:
-            text_lines.append(str(line.text))
             for word in line.words:
                 r = word.bounding_rect
                 words.append(
@@ -300,7 +352,7 @@ class WinRTEngine:
                     )
                 )
         return OcrResult(
-            text="\n".join(text_lines),
+            text=lines_from_words(words),
             words=words,
             engine=self.name,
             language=lang,
