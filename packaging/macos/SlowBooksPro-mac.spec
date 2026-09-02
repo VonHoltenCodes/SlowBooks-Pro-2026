@@ -87,6 +87,15 @@ hiddenimports = (
     ]
 )
 
+# Built-in OCR: Apple Vision via pyobjc (requirements-build.txt), imported
+# lazily inside VisionEngine._bridge — invisible to the scanner. Guarded so
+# a build env without the Vision wheels still bundles (tesseract fallback).
+for _mod in ("Vision", "Quartz", "objc", "Foundation"):
+    try:
+        hiddenimports += collect_submodules(_mod)
+    except Exception:
+        pass
+
 a = Analysis(
     [os.path.join(ROOT, "desktop_launcher.py")],
     pathex=[ROOT],

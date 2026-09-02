@@ -1,0 +1,13 @@
+# Built-in OCR engine (receipt intake 1.5): the WinRT projection of
+# Windows.Media.Ocr, bundled ONLY into the frozen Windows build — dev/server
+# installs use tesseract (see app/services/ocr_engines.py). Pin exact
+# versions; all winrt-* wheels must share one version. This set is
+# hardware-validated (real Windows 11, 2026-09-02): Foundation.Collections
+# is a separate wheel and iterating OcrResult.lines fails without it.
+winrt-runtime==3.2.1
+winrt-Windows.Media.Ocr==3.2.1
+winrt-Windows.Graphics.Imaging==3.2.1
+winrt-Windows.Storage.Streams==3.2.1
+winrt-Windows.Foundation==3.2.1
+winrt-Windows.Foundation.Collections==3.2.1
+winrt-Windows.Globalization==3.2.1

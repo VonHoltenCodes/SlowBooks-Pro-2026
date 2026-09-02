@@ -3,3 +3,7 @@
 pyinstaller==6.22.0
 pyinstaller-hooks-contrib==2026.6
 pillow==12.3.0
+# Built-in OCR engine (receipt intake 1.5): Apple Vision via pyobjc,
+# bundled ONLY into the frozen mac build (see app/services/ocr_engines.py).
+pyobjc-framework-Vision==12.2.2
+pyobjc-framework-Quartz==12.2.2
