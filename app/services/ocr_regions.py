@@ -129,7 +129,13 @@ def ocr_region(
     png = _prepare_region(img, left, top, width, height)
 
     lang = lang or ocr_service.ocr_language()
-    cmd = ["tesseract", "stdin", "stdout", "--psm", config["psm"]]
+    cmd = [
+        ocr_service.tesseract_cmd() or "tesseract",
+        "stdin",
+        "stdout",
+        "--psm",
+        config["psm"],
+    ]
     if lang:
         cmd += ["-l", lang]
     if config["whitelist"]:

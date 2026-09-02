@@ -633,3 +633,33 @@ def test_parse_merchant_skips_ocr_noise_lines():
     merchant, conf = ocr_service.parse_merchant(text)
     assert merchant == "SWEET FOREST CAFE"
     assert conf == "low"
+
+
+def test_tesseract_cmd_falls_back_to_stock_install_dir(tmp_path, monkeypatch):
+    """The UB Mannheim Windows installer (and Homebrew on a macOS GUI app)
+    leave tesseract off PATH; the resolver checks the stock locations."""
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    monkeypatch.setattr(ocr_service, "_cache", {"at": 0.0, "info": None})
+    assert ocr_service.tesseract_cmd() is None
+    assert ocr_service.tesseract_info()["available"] is False
+
+    stock = tmp_path / "Tesseract-OCR" / "tesseract"
+    stock.parent.mkdir()
+    stock.write_text("#!/bin/sh\nexit 0\n")
+    stock.chmod(0o755)
+    monkeypatch.setattr(ocr_service, "_tesseract_candidates", lambda: [stock])
+    monkeypatch.setattr(ocr_service, "_cache", {"at": 0.0, "info": None})
+    assert ocr_service.tesseract_cmd() == str(stock)
+    info = ocr_service.tesseract_info()
+    assert info["available"] is True
+    assert info["path"] == str(stock)
+
+
+def test_tesseract_candidates_windows_locations(monkeypatch):
+    monkeypatch.setenv("ProgramFiles", "C:/Program Files")
+    monkeypatch.setenv("LOCALAPPDATA", "C:/Users/x/AppData/Local")
+    cands = [c.as_posix() for c in ocr_service._tesseract_candidates(windows=True)]
+    assert "C:/Program Files/Tesseract-OCR/tesseract.exe" in cands
+    assert "C:/Users/x/AppData/Local/Programs/Tesseract-OCR/tesseract.exe" in cands
+    posix = [c.as_posix() for c in ocr_service._tesseract_candidates(windows=False)]
+    assert "/opt/homebrew/bin/tesseract" in posix

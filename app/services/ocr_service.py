@@ -12,6 +12,7 @@
 
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -74,14 +75,51 @@ def tesseract_info() -> dict:
     return info
 
 
+# Where the stock installers put tesseract when it is NOT on PATH. The UB
+# Mannheim Windows installer (the one Settings links to) defaults to Program
+# Files and does not touch PATH; macOS GUI apps never see the Homebrew PATH
+# a terminal has. VH308 had tesseract.exe in Program Files the whole time
+# the app reported it missing (2026-09-02).
+def _tesseract_candidates(windows: bool = os.name == "nt") -> list[Path]:
+    out: list[Path] = []
+    if windows:
+        for var in ("ProgramFiles", "ProgramFiles(x86)", "ProgramW6432"):
+            base = os.environ.get(var)
+            if base:
+                out.append(Path(base) / "Tesseract-OCR" / "tesseract.exe")
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            out.append(Path(local) / "Programs" / "Tesseract-OCR" / "tesseract.exe")
+    else:
+        out += [
+            Path("/opt/homebrew/bin/tesseract"),
+            Path("/usr/local/bin/tesseract"),
+            Path("/opt/local/bin/tesseract"),
+        ]
+    return out
+
+
+def tesseract_cmd() -> Optional[str]:
+    """Path to the tesseract binary: PATH first, then the stock install
+    locations. None when nothing is found."""
+    found = shutil.which("tesseract")
+    if found:
+        return found
+    for cand in _tesseract_candidates():
+        if cand.is_file():
+            return str(cand)
+    return None
+
+
 def _probe_tesseract() -> dict:
-    if shutil.which("tesseract") is None:
-        return {"available": False, "version": None, "languages": []}
+    cmd = tesseract_cmd()
+    if cmd is None:
+        return {"available": False, "version": None, "languages": [], "path": None}
     version = None
     languages: list[str] = []
     try:
         out = subprocess.run(
-            ["tesseract", "--version"], capture_output=True, text=True, timeout=10
+            [cmd, "--version"], capture_output=True, text=True, timeout=10
         )
         first = (out.stdout or out.stderr or "").strip().splitlines()
         if first:
@@ -92,7 +130,7 @@ def _probe_tesseract() -> dict:
         pass
     try:
         out = subprocess.run(
-            ["tesseract", "--list-langs"], capture_output=True, text=True, timeout=10
+            [cmd, "--list-langs"], capture_output=True, text=True, timeout=10
         )
         for line in (out.stdout or "").splitlines():
             line = line.strip()
@@ -102,7 +140,7 @@ def _probe_tesseract() -> dict:
                 languages.append(line)
     except (OSError, subprocess.TimeoutExpired):
         pass
-    return {"available": True, "version": version, "languages": languages}
+    return {"available": True, "version": version, "languages": languages, "path": cmd}
 
 
 def _poppler_available() -> bool:
@@ -141,7 +179,7 @@ def ocr_image_bytes(data: bytes, lang: Optional[str] = None) -> str:
     library is needed on the Python side. Raises OCRRuntimeError on any
     failure (nonzero exit, timeout, missing binary).
     """
-    cmd = ["tesseract", "stdin", "stdout", "--psm", "3"]
+    cmd = [tesseract_cmd() or "tesseract", "stdin", "stdout", "--psm", "3"]
     if lang:
         cmd += ["-l", lang]
     try:
@@ -175,7 +213,7 @@ def ocr_image_words(data: bytes, lang: Optional[str] = None):
     canvas. One subprocess call serves both. Raises OCRRuntimeError like
     ocr_image_bytes.
     """
-    cmd = ["tesseract", "stdin", "stdout", "--psm", "3"]
+    cmd = [tesseract_cmd() or "tesseract", "stdin", "stdout", "--psm", "3"]
     if lang:
         cmd += ["-l", lang]
     cmd += ["tsv"]
