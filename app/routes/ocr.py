@@ -24,10 +24,12 @@ from app.schemas.ocr import (
     OcrAttachRequest,
     OcrField,
     OcrReceiptResponse,
+    OcrRegionRequest,
+    OcrRegionResponse,
     OcrStatusResponse,
     OcrWordBox,
 )
-from app.services import ocr_engines, ocr_service, storage
+from app.services import ocr_engines, ocr_regions, ocr_service, storage
 from app.services.rate_limit import limiter
 from app.services.upload_limits import MAX_IMPORT_BYTES, read_limited
 
@@ -221,6 +223,80 @@ def attach_intake(
 
     ocr_service.delete_intake(intake_id)
     return attachment
+
+
+def _intake_image_bytes(intake: dict) -> bytes:
+    """The intake as image bytes: PDFs rasterize (page 1) so the canvas and
+    region OCR share one coordinate space; images pass through."""
+    if (intake.get("mime_type") or "").lower() == "application/pdf":
+        png, _pages = ocr_service.rasterize_pdf(intake["data"])
+        return png
+    return intake["data"]
+
+
+@router.get("/intake/{intake_id}/image")
+def intake_image(intake_id: str):
+    """Serve the stored scan as a PNG/image for the box-to-fix canvas.
+    Auth'd like everything else; the intake id is unguessable and expiring,
+    but this endpoint still sits behind the session like the rest."""
+    intake = ocr_service.get_intake(intake_id)
+    if intake is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Scan not found or expired — scan the receipt again",
+        )
+    mime = (intake.get("mime_type") or "").lower()
+    if mime == "application/pdf":
+        try:
+            data = _intake_image_bytes(intake)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        mime = "image/png"
+    else:
+        data = intake["data"]
+    from fastapi.responses import Response
+
+    return Response(content=data, media_type=mime)
+
+
+@router.post("/intake/{intake_id}/region", response_model=OcrRegionResponse)
+@limiter.limit("60/minute")
+def ocr_intake_region(intake_id: str, body: OcrRegionRequest, request: Request):
+    """OCR one user-drawn rectangle of a stored scan with field-aware
+    settings (crop + upscale + contrast + single-line PSM + charset). The
+    canvas calls this when the operator adjusts or draws a box."""
+    intake = ocr_service.get_intake(intake_id)
+    if intake is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Scan not found or expired — scan the receipt again",
+        )
+    engine = ocr_engines.get_engine()
+    reason = engine.unavailable_reason()
+    if reason and engine.name == "tesseract":
+        # Region OCR is tesseract-config-driven today; native-engine region
+        # support arrives with the hardware laps (design doc).
+        raise HTTPException(status_code=400, detail=reason)
+    try:
+        image_data = _intake_image_bytes(intake)
+        result = ocr_regions.ocr_region(
+            image_data,
+            left=body.left,
+            top=body.top,
+            width=body.width,
+            height=body.height,
+            field_type=body.field_type,
+        )
+    except ocr_regions.RegionError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except ocr_service.OCRRuntimeError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Could not read that region — try a larger box. ({exc})",
+        )
+    return OcrRegionResponse(**result)
 
 
 @router.delete("/intake/{intake_id}")

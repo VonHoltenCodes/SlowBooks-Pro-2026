@@ -150,7 +150,30 @@ const BillsPage = {
                     <button type="submit" class="btn btn-primary">Save Bill</button>
                 </div>
             </form>`);
-        ScanHelper.wire(BillsPage._applyScan);
+        ScanHelper.wire(BillsPage._applyScan, BillsPage._applyScanField);
+    },
+
+    // Box-to-fix canvas: apply one re-read field into the bill form.
+    _applyScanField(fieldKey, value) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        const row = document.querySelector('#bill-lines tr');
+        if (fieldKey === 'date') {
+            form.querySelector('[name="date"]').value = value;
+        } else if (fieldKey === 'merchant') {
+            const desc = row && row.querySelector('.line-desc');
+            if (desc) desc.value = value;
+        } else if (fieldKey === 'total' || fieldKey === 'subtotal') {
+            const rate = row && row.querySelector('.line-rate');
+            if (rate) rate.value = parseFloat(value).toFixed(2);
+        } else if (fieldKey === 'tax') {
+            const notes = form.querySelector('[name="notes"]');
+            if (notes) {
+                const existing = notes.value ? notes.value.replace(/\s*$/, '') + '\n' : '';
+                notes.value = existing + `Tax detected: $${value}`;
+            }
+        }
+        BillsPage.recalc();
     },
 
     _applyScan(result) {

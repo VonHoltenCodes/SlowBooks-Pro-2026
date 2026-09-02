@@ -80,3 +80,23 @@ class OcrAttachRequest(BaseModel):
 
     entity_type: str  # "invoice" | "bill" (validated in the route)
     entity_id: int
+
+
+class OcrRegionRequest(BaseModel):
+    """POST /api/ocr/intake/{intake_id}/region — OCR one typed rectangle of
+    a stored scan (the v2 box-to-fix canvas). Pixel coordinates in the
+    intake image's space (the same space /intake/{id}/image serves)."""
+
+    left: int
+    top: int
+    width: int
+    height: int
+    # amount | date | merchant | text
+    field_type: str = "text"
+
+
+class OcrRegionResponse(BaseModel):
+    text: str
+    value: Optional[str] = None
+    field_type: str
+    confidence: str = "missing"  # high | low | missing

@@ -183,7 +183,35 @@ const SalesReceiptsPage = {
                 </div>
             </form>`);
         SalesReceiptsPage.recalc();
-        ScanHelper.wire(SalesReceiptsPage._applyScan);
+        ScanHelper.wire(SalesReceiptsPage._applyScan, SalesReceiptsPage._applyScanField);
+    },
+
+    // Box-to-fix canvas: apply one re-read field into the form.
+    _applyScanField(fieldKey, value) {
+        const form = $('#sales-receipt-form');
+        if (!form) return;
+        const row = document.querySelector('#sr-lines tr');
+        if (fieldKey === 'date') {
+            form.querySelector('[name="date"]').value = value;
+        } else if (fieldKey === 'merchant') {
+            const nameInput = $('#sr-new-cust-name');
+            if (nameInput) nameInput.value = value;
+            const desc = row && row.querySelector('.line-desc');
+            if (desc) desc.value = value;
+        } else if (fieldKey === 'total' || fieldKey === 'subtotal') {
+            if (row) {
+                const rate = row.querySelector('.line-rate');
+                if (rate) rate.value = parseFloat(value).toFixed(2);
+            }
+        } else if (fieldKey === 'tax') {
+            const rate = row && row.querySelector('.line-rate');
+            const sub = rate ? parseFloat(rate.value) : 0;
+            const taxInput = form.querySelector('[name="tax_rate"]');
+            if (taxInput && sub > 0) {
+                taxInput.value = ((parseFloat(value) / sub) * 100).toFixed(2);
+            }
+        }
+        SalesReceiptsPage.recalc();
     },
 
     _applyScan(result) {

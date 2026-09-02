@@ -96,7 +96,15 @@ class TesseractEngine:
         lang = lang or ocr_service.ocr_language()
         if lang is None:
             raise EngineUnavailable("tesseract has no usable language data")
-        text, rows = ocr_service.ocr_image_words(data, lang=lang)
+        # Page enhancement (10% -> 33% total-field hits on real receipts);
+        # boxes come back in the upscaled space and divide back down so the
+        # canvas draws in the original image's coordinates.
+        prepared, factor = ocr_service.preprocess_page(data)
+        text, rows = ocr_service.ocr_image_words(prepared, lang=lang)
+        if factor > 1:
+            for row in rows:
+                for key in ("left", "top", "width", "height"):
+                    row[key] = int(round(row[key] / factor))
         words = [WordBox(**row) for row in rows]
         return OcrResult(text=text, words=words, engine=self.name, language=lang)
 
@@ -192,12 +200,28 @@ class WinRTEngine:
     name = "winrt"
 
     def _bridge(self):
-        from winsdk.windows.graphics.imaging import BitmapDecoder
-        from winsdk.windows.media.ocr import OcrEngine as WinOcr
-        from winsdk.windows.storage.streams import (
-            DataWriter,
-            InMemoryRandomAccessStream,
-        )
+        # The maintained WinRT projection is the `winrt-*` namespace
+        # packages (cp313+ wheels); `winsdk` (same API, older) is the
+        # fallback for existing installs. Identical class surface.
+        # Frozen-build pins (hardware-validated on real Windows 11,
+        # 2026-09-02): winrt-runtime + winrt-Windows.{Media.Ocr,
+        # Graphics.Imaging, Storage.Streams, Foundation,
+        # Foundation.Collections, Globalization} — Collections is split
+        # into its own wheel and iterating OcrResult.lines needs it.
+        try:
+            from winrt.windows.graphics.imaging import BitmapDecoder
+            from winrt.windows.media.ocr import OcrEngine as WinOcr
+            from winrt.windows.storage.streams import (
+                DataWriter,
+                InMemoryRandomAccessStream,
+            )
+        except ImportError:
+            from winsdk.windows.graphics.imaging import BitmapDecoder
+            from winsdk.windows.media.ocr import OcrEngine as WinOcr
+            from winsdk.windows.storage.streams import (
+                DataWriter,
+                InMemoryRandomAccessStream,
+            )
 
         return BitmapDecoder, WinOcr, DataWriter, InMemoryRandomAccessStream
 

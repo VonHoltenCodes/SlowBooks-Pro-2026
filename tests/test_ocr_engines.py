@@ -131,3 +131,52 @@ def test_real_scan_returns_words_and_engine(client, monkeypatch, tmp_path):
     assert body["words"], "expected word boxes from the tsv path"
     first = body["words"][0]
     assert {"text", "left", "top", "width", "height", "conf"} <= set(first)
+
+
+def test_total_anchor_on_last_line_does_not_crash():
+    """Corpus-found crash: a TOTAL anchor as the final OCR line with no
+    amount after it indexed past the end of the line list."""
+    total, conf = ocr_service.parse_total("SOME SHOP\nitems here\nTOTAL")
+    assert total is None and conf == "missing"
+    # Anchor on last line WITH an amount on it still works
+    total, conf = ocr_service.parse_total("SOME SHOP\nTOTAL 12.34")
+    assert total == "12.34" and conf == "high"
+    # And the legitimate two-line-lookahead case is preserved
+    total, conf = ocr_service.parse_total("AMOUNT DUE\n\n$123.45")
+    assert total == "123.45" and conf == "high"
+
+
+def test_recognize_rescales_boxes_to_original_space(monkeypatch):
+    """preprocess_page upscales; recognize must divide word boxes back so
+    the canvas draws in the original image's coordinates."""
+    monkeypatch.setattr(
+        ocr_service,
+        "tesseract_info",
+        lambda: {"available": True, "version": "5", "languages": ["eng"]},
+    )
+    monkeypatch.setattr(ocr_service, "preprocess_page", lambda data: (data, 3))
+    monkeypatch.setattr(
+        ocr_service,
+        "ocr_image_words",
+        lambda data, lang=None: (
+            "TOTAL 49.13",
+            [
+                {
+                    "text": "49.13",
+                    "left": 300,
+                    "top": 90,
+                    "width": 60,
+                    "height": 30,
+                    "conf": 90.0,
+                }
+            ],
+        ),
+    )
+    result = ocr_engines.TesseractEngine().recognize(b"png")
+    box = result.words[0]
+    assert (box.left, box.top, box.width, box.height) == (100, 30, 20, 10)
+
+
+def test_preprocess_page_survives_junk_bytes():
+    data, factor = ocr_service.preprocess_page(b"not an image at all")
+    assert data == b"not an image at all" and factor == 1

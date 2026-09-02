@@ -257,6 +257,39 @@ def _parse_tesseract_tsv(tsv: str):
     return "\n".join(lines), words
 
 
+def preprocess_page(data: bytes):
+    """Full-page enhancement before tesseract: grayscale -> upscale toward
+    ~1800px height -> autocontrast -> binarize. Returns (png_bytes, factor)
+    where factor is the integer upscale (word boxes divide by it to return
+    to the original image's coordinate space).
+
+    Measured on 39 real-world SROIE receipts: total-field extraction went
+    10% -> 33% with this pass. Applied on the tesseract path only — the
+    platform-native engines handle photographic input themselves. Falls
+    back to the raw bytes on any decode problem (tesseract then reports
+    its own error).
+    """
+    try:
+        import io as _io
+
+        from PIL import Image, ImageOps
+
+        img = Image.open(_io.BytesIO(data))
+        img.load()
+        img = ImageOps.exif_transpose(img).convert("L")
+        factor = 1
+        if img.height < 1800:
+            factor = max(1, round(1800 / img.height))
+            img = img.resize((img.width * factor, img.height * factor), Image.LANCZOS)
+        img = ImageOps.autocontrast(img, cutoff=1)
+        img = img.point(lambda p: 255 if p > 140 else 0)
+        out = _io.BytesIO()
+        img.save(out, format="PNG")
+        return out.getvalue(), factor
+    except Exception:
+        return data, 1
+
+
 # ---------------------------------------------------------------------------
 # PDF handling — poppler-utils (pdftoppm/pdfinfo), page 1 only (spec §3)
 # ---------------------------------------------------------------------------
@@ -450,9 +483,11 @@ def parse_total(text: str) -> tuple[Optional[str], str]:
         if _TOTAL_ANCHOR_RE.search(line):
             amounts = _amounts_in_line(line)
             # The amount may sit on the next non-empty line
-            # ("AMOUNT DUE\n$123.45"); peek up to two lines ahead.
+            # ("AMOUNT DUE\n$123.45"); peek up to two lines ahead —
+            # never past the last line (an anchor as the final OCR line
+            # with nothing after it crashed here; found by corpus eval).
             j = i
-            while not amounts and j < min(i + 3, len(lines)):
+            while not amounts and j < min(i + 2, len(lines) - 1):
                 j += 1
                 amounts = _amounts_in_line(lines[j])
             if amounts:

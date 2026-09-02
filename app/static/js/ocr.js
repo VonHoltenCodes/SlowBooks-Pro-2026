@@ -18,6 +18,8 @@
  */
 const ScanHelper = {
     _intakeId: null,
+    _lastResult: null,
+    _applyField: null,
     _status: null,
     _statusAt: 0,
     _STATUS_TTL: 120000, // 2 minutes
@@ -42,8 +44,11 @@ const ScanHelper = {
              padding:10px 12px; border:1px dashed var(--gray-300); border-radius:6px; background:var(--primary-light);">
             <button type="button" id="scan-btn" class="btn btn-secondary" onclick="ScanHelper.pick()">📄 Scan Receipt</button>
             <input type="file" id="scan-file" accept="image/png,image/jpeg,image/webp,application/pdf" style="display:none;">
+            <button type="button" id="scan-review-btn" class="btn btn-sm btn-secondary" style="display:none;"
+                onclick="ScanHelper.reviewBoxes()">🔍 Review boxes</button>
             <span id="scan-status" style="font-size:12px; color:var(--gray-600);"></span>
-        </div>`;
+        </div>
+        ${OcrCanvas.panelHtml()}`;
     },
 
     pick() {
@@ -51,7 +56,14 @@ const ScanHelper = {
         if (input) input.click();
     },
 
-    async wire(applyCallback) {
+    reviewBoxes() {
+        if (this._lastResult && this._applyField) {
+            OcrCanvas.open(this._lastResult, this._applyField);
+        }
+    },
+
+    async wire(applyCallback, applyField) {
+        this._applyField = applyField || null;
         const btn = $('#scan-btn');
         const input = $('#scan-file');
         if (!btn || !input) return;
@@ -90,7 +102,15 @@ const ScanHelper = {
                 return;
             }
             this._intakeId = result.intake_id || null;
+            this._lastResult = result;
             applyCallback(result);
+            const reviewBtn = $('#scan-review-btn');
+            if (reviewBtn && result.intake_id) reviewBtn.style.display = 'inline-block';
+            // Partial scans open the canvas automatically — the box-to-fix
+            // moment is exactly when auto-parse fell short.
+            if (result.partial && result.intake_id && this._applyField) {
+                OcrCanvas.open(result, this._applyField);
+            }
             if (statusEl) {
                 statusEl.textContent = this.summary(result);
                 statusEl.style.color = result.partial ? '#b45309' : '#166534';
