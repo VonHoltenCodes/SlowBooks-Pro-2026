@@ -450,9 +450,11 @@ def parse_total(text: str) -> tuple[Optional[str], str]:
         if _TOTAL_ANCHOR_RE.search(line):
             amounts = _amounts_in_line(line)
             # The amount may sit on the next non-empty line
-            # ("AMOUNT DUE\n$123.45"); peek up to two lines ahead.
+            # ("AMOUNT DUE\n$123.45"); peek up to two lines ahead —
+            # never past the last line (an anchor as the final OCR line
+            # with nothing after it crashed here; found by corpus eval).
             j = i
-            while not amounts and j < min(i + 3, len(lines)):
+            while not amounts and j < min(i + 2, len(lines) - 1):
                 j += 1
                 amounts = _amounts_in_line(lines[j])
             if amounts:

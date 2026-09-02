@@ -131,3 +131,16 @@ def test_real_scan_returns_words_and_engine(client, monkeypatch, tmp_path):
     assert body["words"], "expected word boxes from the tsv path"
     first = body["words"][0]
     assert {"text", "left", "top", "width", "height", "conf"} <= set(first)
+
+
+def test_total_anchor_on_last_line_does_not_crash():
+    """Corpus-found crash: a TOTAL anchor as the final OCR line with no
+    amount after it indexed past the end of the line list."""
+    total, conf = ocr_service.parse_total("SOME SHOP\nitems here\nTOTAL")
+    assert total is None and conf == "missing"
+    # Anchor on last line WITH an amount on it still works
+    total, conf = ocr_service.parse_total("SOME SHOP\nTOTAL 12.34")
+    assert total == "12.34" and conf == "high"
+    # And the legitimate two-line-lookahead case is preserved
+    total, conf = ocr_service.parse_total("AMOUNT DUE\n\n$123.45")
+    assert total == "123.45" and conf == "high"
