@@ -18,8 +18,11 @@ import re
 from typing import Optional
 
 # Store-number / location suffixes that make one chain look like many
-# merchants: "HOME DEPOT #4521 SHOREWOOD" -> "HOME DEPOT".
-_STORE_NUM_RE = re.compile(r"#?\s*\d{2,6}\b")
+# merchants: "HOME DEPOT #4521 SHOREWOOD" -> "HOME DEPOT". Runs AFTER
+# whitespace collapse, so a single optional space suffices — an unbounded
+# \s* before \d is polynomial on adversarial all-space input (CodeQL
+# py/polynomial-redos, and it's right).
+_STORE_NUM_RE = re.compile(r"#? ?\d{2,6}\b")
 _NON_ALNUM_RE = re.compile(r"[^A-Z0-9 ]+")
 _WS_RE = re.compile(r"\s+")
 
@@ -35,7 +38,10 @@ def merchant_key(name: str) -> Optional[str]:
     """
     if not name:
         return None
-    key = _NON_ALNUM_RE.sub(" ", name.upper())
+    # Cap the input (merchant strings come from OCR or the client) and
+    # collapse whitespace BEFORE the store-number strip — see _STORE_NUM_RE.
+    key = _NON_ALNUM_RE.sub(" ", name[:200].upper())
+    key = _WS_RE.sub(" ", key).strip()
     key = _STORE_NUM_RE.sub(" ", key)
     key = _WS_RE.sub(" ", key).strip()
     return key or None
