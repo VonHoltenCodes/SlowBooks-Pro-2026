@@ -8,6 +8,7 @@
 # DELETE /api/ocr/intake/{id}    discard a pending scan
 # ============================================================================
 
+import logging
 import re
 from datetime import date as date_cls
 from pathlib import Path
@@ -29,9 +30,17 @@ from app.schemas.ocr import (
     OcrStatusResponse,
     OcrWordBox,
 )
-from app.services import ocr_engines, ocr_regions, ocr_service, storage
+from app.services import (
+    ocr_engines,
+    ocr_regions,
+    ocr_service,
+    ocr_template_store,
+    storage,
+)
 from app.services.rate_limit import limiter
 from app.services.upload_limits import MAX_IMPORT_BYTES, read_limited
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/ocr", tags=["ocr"])
 
@@ -72,7 +81,11 @@ def ocr_status():
 
 @router.post("/receipt", response_model=OcrReceiptResponse)
 @limiter.limit("30/minute")
-async def scan_receipt(request: Request, file: UploadFile = File(...)):
+async def scan_receipt(
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
     """Scan a receipt image/PDF, extract fields, store the scan for later
     attachment. Synchronous with a bounded Tesseract call (spec §5.2)."""
     content = await read_limited(file, MAX_IMPORT_BYTES, "Receipt scan")
@@ -138,6 +151,43 @@ async def scan_receipt(request: Request, file: UploadFile = File(...)):
     if date_is_default:
         partial_reasons.append("date not found — today's date used")
 
+    # v3 template memory: if this merchant has a saved layout, region-OCR the
+    # remembered boxes and prefer those reads. Tesseract-only today (region
+    # OCR is tesseract-config-driven); fails closed to the v1 parse + canvas.
+    template_fields: list[str] = []
+    template_applied = False
+    if result.words and engine.name == "tesseract":
+        word_dicts = [vars(w) for w in result.words]
+        template = ocr_template_store.find_for_scan(
+            db, extracted["merchant"]["value"], raw_text
+        )
+        if template is not None:
+            reads = ocr_template_store.apply_template(
+                db, template, ocr_input, word_dicts
+            )
+            template_fields = sorted(reads)
+            for key in ("total", "subtotal", "tax"):
+                if key in reads:
+                    extracted[key] = reads[key]["value"]
+                    if key == "total":
+                        extracted["total_confidence"] = reads[key]["confidence"]
+                    if key == "tax":
+                        extracted["tax_detected"] = True
+            if "date" in reads:
+                date_value = reads["date"]["value"]
+                date_is_default = False
+                partial_reasons = [
+                    r for r in partial_reasons if not r.startswith("date not found")
+                ]
+            if "merchant" in reads:
+                extracted["merchant"] = {
+                    "value": reads["merchant"]["value"],
+                    "confidence": reads["merchant"]["confidence"],
+                }
+            if ocr_template_store.reads_are_clean(reads):
+                template_applied = True
+                partial_reasons = []
+
     return OcrReceiptResponse(
         intake_id=intake_id,
         merchant=(
@@ -160,6 +210,8 @@ async def scan_receipt(request: Request, file: UploadFile = File(...)):
         partial=bool(partial_reasons),
         partial_reasons=partial_reasons,
         raw_text=raw_text[:4000],
+        template_applied=template_applied,
+        template_fields=template_fields,
     )
 
 
@@ -261,7 +313,12 @@ def intake_image(intake_id: str):
 
 @router.post("/intake/{intake_id}/region", response_model=OcrRegionResponse)
 @limiter.limit("60/minute")
-def ocr_intake_region(intake_id: str, body: OcrRegionRequest, request: Request):
+def ocr_intake_region(
+    intake_id: str,
+    body: OcrRegionRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
     """OCR one user-drawn rectangle of a stored scan with field-aware
     settings (crop + upscale + contrast + single-line PSM + charset). The
     canvas calls this when the operator adjusts or draws a box."""
@@ -296,7 +353,42 @@ def ocr_intake_region(intake_id: str, body: OcrRegionRequest, request: Request):
             status_code=400,
             detail=f"Could not read that region — try a larger box. ({exc})",
         )
-    return OcrRegionResponse(**result)
+
+    # v3 template memory: an operator-blessed read teaches the merchant
+    # template (anchor-relative box). Fails closed — a save miss never
+    # breaks the read that just succeeded.
+    template_saved = False
+    if (
+        body.save_template
+        and body.merchant
+        and body.field_key
+        and result.get("value")
+        and engine.name == "tesseract"
+    ):
+        try:
+            page = engine.recognize(image_data)
+            words = [vars(w) for w in page.words]
+            if words:
+                # A corrected merchant box should teach the template under
+                # the value the operator just blessed, not the stale scan.
+                merchant_name = (
+                    result["value"] if body.field_key == "merchant" else body.merchant
+                )
+                template_saved = ocr_template_store.record_correction(
+                    db,
+                    merchant_name,
+                    body.field_key,
+                    {
+                        "left": body.left,
+                        "top": body.top,
+                        "width": body.width,
+                        "height": body.height,
+                    },
+                    words,
+                )
+        except Exception:
+            logger.debug("template save skipped", exc_info=True)
+    return OcrRegionResponse(**result, template_saved=template_saved)
 
 
 @router.delete("/intake/{intake_id}")

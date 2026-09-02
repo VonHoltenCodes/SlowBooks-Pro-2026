@@ -124,6 +124,11 @@ const ScanHelper = {
 
     summary(result) {
         let msg = 'Scan complete — review before saving.';
+        if (result.template_applied) {
+            // v3 template memory: this merchant's saved layout filled the
+            // amounts and the arithmetic checks out.
+            msg = 'Saved layout for this merchant filled the fields — review before saving.';
+        }
         if (result.partial && result.partial_reasons && result.partial_reasons.length) {
             msg = 'Partial: ' + result.partial_reasons.join('; ');
         }
