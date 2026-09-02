@@ -13,6 +13,7 @@ const SettingsPage = {
             SettingsPage.loadClasses();
             SettingsPage.loadUsers();
             SettingsPage.loadApiTokens();
+            SettingsPage.loadOcrStatus();
             SettingsPage.scrollToFocus();
         }, 0);
         return `
@@ -230,6 +231,16 @@ const SettingsPage = {
                     <div id="ai-config-container" class="ai-settings-form">
                         <div style="font-size:11px; color:var(--text-muted);">Loading…</div>
                     </div>
+                </div>
+
+                <div class="settings-section" id="settings-ocr">
+                    <h3>Receipt Scanning</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Local OCR for the Scan Receipt button on the Enter Sales Receipt and Enter Bill forms.
+                        Runs on this computer via the Tesseract binary — no cloud, no data leaves the machine.
+                        Tesseract is never bundled with the app; it is installed separately.
+                    </div>
+                    <div id="ocr-status" style="font-size:12px;">Checking…</div>
                 </div>
 
                 <div class="settings-section">
@@ -507,6 +518,32 @@ const SettingsPage = {
             await API.post('/settings/test-email');
             toast('Test email sent');
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async loadOcrStatus() {
+        const el = $('#ocr-status');
+        if (!el) return;
+        try {
+            const s = await API.get('/ocr/status');
+            if (s.available) {
+                const langs = (s.languages || []).join(', ') || '—';
+                el.innerHTML = '<strong style="color:#166534;">Tesseract OCR is installed</strong>'
+                    + (s.version ? ` <span style="color:var(--text-muted);">(v${escapeHtml(s.version)})</span>` : '')
+                    + ` &middot; languages: ${escapeHtml(langs)}`;
+            } else {
+                el.innerHTML = '<strong style="color:#b45309;">Tesseract OCR is not installed — scanning is disabled.</strong>'
+                    + '<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">'
+                    + 'Ubuntu: <code>sudo apt-get install tesseract-ocr</code> &middot; '
+                    + 'macOS: <code>brew install tesseract</code> &middot; '
+                    + 'Windows: install the UB Mannheim Tesseract build.<br>'
+                    + 'PDFs also need poppler-utils: '
+                    + '<code>sudo apt-get install poppler-utils</code> (Ubuntu) / '
+                    + '<code>brew install poppler</code> (macOS).'
+                    + '</div>';
+            }
+        } catch (e) {
+            el.textContent = 'Could not check OCR status.';
+        }
     },
 
     async createBackup() {

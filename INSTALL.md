@@ -190,6 +190,10 @@ docker compose cp slowbooks:/app/backups ./my-backups
 sudo apt install -y postgresql python3-venv libcairo2-dev libpango-1.0-0 \
     libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev
 
+# Optional — receipt scanning (Tier 2 OCR). The feature degrades
+# gracefully without these; the Scan Receipt button just stays disabled.
+sudo apt install -y tesseract-ocr poppler-utils
+
 # Create database
 sudo -u postgres createuser bookkeeper -P    # password: bookkeeper
 sudo -u postgres createdb bookkeeper -O bookkeeper

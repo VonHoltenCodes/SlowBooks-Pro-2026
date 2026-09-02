@@ -103,6 +103,9 @@ from app.routes import deductions
 from app.routes import onboarding, portal
 from app.routes import document_audit as document_audit_routes
 from app.routes import reseller_permits as reseller_permits_routes
+
+# Tier 2: Receipt / document intake — local OCR (docs/design/receipt-intake.md)
+from app.routes import ocr as ocr_routes
 from app.services.auth import get_session_secret
 
 from app import __version__
@@ -573,6 +576,7 @@ app.include_router(onboarding.router)
 app.include_router(portal.router)
 app.include_router(document_audit_routes.router)
 app.include_router(reseller_permits_routes.router)
+app.include_router(ocr_routes.router)
 
 # Register audit log hooks
 register_audit_hooks(SessionLocal)

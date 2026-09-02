@@ -124,6 +124,7 @@ const SalesReceiptsPage = {
 
         openModal('Enter Sales Receipt', `
             <form id="sales-receipt-form" onsubmit="SalesReceiptsPage.save(event)">
+                ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
                     <div class="form-group"><label>Customer *</label>
                         <select name="customer_id" id="sr-customer-select" required onchange="SalesReceiptsPage.customerSelected(this.value)"><option value="">Select...</option><option value="__new__">+ New Customer</option>${custOpts}</select>
@@ -177,11 +178,58 @@ const SalesReceiptsPage = {
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="ScanHelper.discard(); closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Record Sales Receipt</button>
                 </div>
             </form>`);
         SalesReceiptsPage.recalc();
+        ScanHelper.wire(SalesReceiptsPage._applyScan);
+    },
+
+    _applyScan(result) {
+        const form = $('#sales-receipt-form');
+        if (!form) return;
+        if (result.date) form.querySelector('[name="date"]').value = result.date;
+
+        const merchant = result.merchant && result.merchant.value;
+        const sel = $('#sr-customer-select');
+        if (merchant && sel) {
+            const match = SalesReceiptsPage._customers.find(c =>
+                c.name && c.name.toLowerCase() === merchant.toLowerCase());
+            if (match) {
+                sel.value = match.id;
+            } else {
+                const nameInput = $('#sr-new-cust-name');
+                if (nameInput) nameInput.value = merchant;
+                const statusEl = $('#scan-status');
+                if (statusEl) {
+                    statusEl.textContent = `Detected: ${merchant} — select from the list or add new.`;
+                }
+            }
+        }
+
+        const total = parseFloat(result.total || '0');
+        if (total > 0) {
+            const row = document.querySelector('#sr-lines tr');
+            if (row) {
+                const rateInput = row.querySelector('.line-rate');
+                const descInput = row.querySelector('.line-desc');
+                if (rateInput) {
+                    // Tax-split rule (spec §6.4): line = subtotal, tax rate
+                    // populated, so the saved total matches the receipt.
+                    if (result.tax_detected && result.subtotal && parseFloat(result.subtotal) > 0) {
+                        rateInput.value = parseFloat(result.subtotal).toFixed(2);
+                        const taxRate = (parseFloat(result.tax) / parseFloat(result.subtotal)) * 100;
+                        const taxInput = form.querySelector('[name="tax_rate"]');
+                        if (taxInput) taxInput.value = taxRate.toFixed(2);
+                    } else {
+                        rateInput.value = total.toFixed(2);
+                    }
+                }
+                if (descInput && merchant) descInput.value = merchant;
+                SalesReceiptsPage.recalc();
+            }
+        }
     },
 
     customerSelected(customerId) {
@@ -297,6 +345,7 @@ const SalesReceiptsPage = {
 
         try {
             const result = await API.post('/sales-receipts', data);
+            await ScanHelper.attachAfterSave('invoice', result.invoice.id);
             toast(`Sales Receipt #${result.invoice.invoice_number} recorded`);
             closeModal();
             App.navigate(location.hash);

@@ -43,6 +43,12 @@ source code or binaries were available, decompiled, or used.
 
 ## What's New
 
+**Receipt intake — scan a receipt into a form.** A Scan Receipt button on
+the Enter Sales Receipt and Enter Bill forms runs a receipt photo or PDF
+through local OCR (Tesseract, user-installed) and pre-fills the form for
+review before saving; the source image attaches to the document. Zero new
+Python dependencies — the design notes keep Tesseract the user's install.
+
 **v2.6 — Sales receipts.** Point-of-sale style sales on one screen: the
 sale and its payment recorded together, deposited where you say, posted
 atomically — and kept on their own page so they don't clutter your
@@ -189,7 +195,10 @@ docker compose up
 ```
 
 Open **http://localhost:3001** — PostgreSQL, migrations, and seed data
-are automatic.
+are automatic. The image includes `tesseract-ocr` and `poppler-utils` so
+receipt scanning works out of the box; native installs add them with
+`sudo apt install tesseract-ocr poppler-utils` (optional — scanning
+degrades gracefully when they're absent).
 
 Native installs, demo data, troubleshooting: **[INSTALL.md](INSTALL.md)**.
 Backups, restore, key rotation: **[docs/operations.md](docs/operations.md)**.

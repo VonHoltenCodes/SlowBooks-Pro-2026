@@ -113,6 +113,7 @@ const BillsPage = {
 
         openModal('Enter Bill', `
             <form onsubmit="BillsPage.save(event)">
+                ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
                     <div class="form-group"><label>Vendor *</label>
                         <select name="vendor_id" required onchange="BillsPage.vendorSelected(this.value)"><option value="">Select...</option>${vendorOpts}</select></div>
@@ -135,9 +136,9 @@ const BillsPage = {
                         <tr data-billline="0">
                             <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                             <td><input class="line-desc"></td>
-                            <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                            <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                            <td class="col-amount">$0.00</td>
+                            <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
+                            <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
+                            <td class="col-amount line-amount">$0.00</td>
                         </tr>
                     </tbody>
                 </table>
@@ -145,10 +146,66 @@ const BillsPage = {
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="ScanHelper.discard(); closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Bill</button>
                 </div>
             </form>`);
+        ScanHelper.wire(BillsPage._applyScan);
+    },
+
+    _applyScan(result) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        if (result.date) form.querySelector('[name="date"]').value = result.date;
+
+        const merchant = result.merchant && result.merchant.value;
+        const sel = form.querySelector('[name="vendor_id"]');
+        if (merchant && sel) {
+            const match = BillsPage._vendors.find(v =>
+                v.name && v.name.toLowerCase() === merchant.toLowerCase());
+            if (match) {
+                sel.value = match.id;
+            } else {
+                // No vendor quick-add on the bill form — point the operator
+                // at the dropdown (spec §6.4: name + manual pick).
+                const statusEl = $('#scan-status');
+                if (statusEl) {
+                    statusEl.textContent = `Detected: ${merchant} — select from the list or add new.`;
+                }
+            }
+        }
+
+        const total = parseFloat(result.total || '0');
+        if (total > 0) {
+            const row = document.querySelector('#bill-lines tr');
+            if (row) {
+                const rateInput = row.querySelector('.line-rate');
+                const descInput = row.querySelector('.line-desc');
+                if (rateInput) {
+                    // Bill rule (spec §6.4): grand total as the line — the
+                    // amount owed includes tax; tax noted in Notes.
+                    rateInput.value = total.toFixed(2);
+                }
+                if (descInput && merchant) descInput.value = merchant;
+                BillsPage.recalc();
+                if (result.tax_detected && result.tax) {
+                    const notes = form.querySelector('[name="notes"]');
+                    if (notes) {
+                        const existing = notes.value ? notes.value.replace(/\s*$/, '') + '\n' : '';
+                        notes.value = existing + `Tax detected: $${result.tax}`;
+                    }
+                }
+            }
+        }
+    },
+
+    recalc() {
+        $$('#bill-lines tr').forEach(row => {
+            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
+            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+            const amountCell = row.querySelector('.line-amount');
+            if (amountCell) amountCell.textContent = formatCurrency(qty * rate);
+        });
     },
 
     addLine() {
@@ -158,9 +215,9 @@ const BillsPage = {
             <tr data-billline="${idx}">
                 <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                 <td><input class="line-desc"></td>
-                <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                <td class="col-amount">$0.00</td>
+                <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
+                <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
+                <td class="col-amount line-amount">$0.00</td>
             </tr>`);
     },
 
@@ -178,7 +235,7 @@ const BillsPage = {
             });
         });
         try {
-            await API.post('/bills', {
+            const result = await API.post('/bills', {
                 vendor_id: parseInt(form.vendor_id.value),
                 bill_number: form.bill_number.value,
                 date: form.date.value,
@@ -188,6 +245,7 @@ const BillsPage = {
                 ...currencyPayloadFromForm(form),
                 lines,
             });
+            await ScanHelper.attachAfterSave('bill', result.id);
             toast('Bill saved');
             closeModal();
             App.navigate('#/bills');
