@@ -70,6 +70,15 @@ hiddenimports = (
     ]
 )
 
+# Built-in OCR: the WinRT projection (packaging/windows/requirements-ocr.txt)
+# is imported lazily inside WinRTEngine._bridge, invisible to the scanner.
+# Guarded so a local `pyinstaller SlowBooksPro.spec` without winrt installed
+# still produces a testable (tesseract-fallback) bundle.
+try:
+    hiddenimports += collect_submodules("winrt")
+except Exception:
+    pass
+
 a = Analysis(
     [os.path.join(ROOT, "desktop_launcher.py")],
     pathex=[ROOT],
