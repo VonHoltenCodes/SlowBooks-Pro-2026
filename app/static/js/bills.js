@@ -183,8 +183,10 @@ const BillsPage = {
         } else if (fieldKey === 'tax') {
             const notes = form.querySelector('[name="notes"]');
             if (notes) {
-                const existing = notes.value ? notes.value.replace(/\s*$/, '') + '\n' : '';
-                notes.value = existing + `Tax detected: $${value}`;
+                // Replace an earlier "Tax detected" line rather than stacking
+                // one per re-read.
+                const kept = notes.value.split('\n').filter(l => !/^Tax detected:/.test(l)).join('\n').replace(/\s*$/, '');
+                notes.value = (kept ? kept + '\n' : '') + `Tax detected: $${value}`;
             }
         }
         BillsPage.recalc();

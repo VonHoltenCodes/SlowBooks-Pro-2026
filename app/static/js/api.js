@@ -12,7 +12,14 @@ const API = {
         const companyId = localStorage.getItem('slowbooks_company');
         if (companyId) opts.headers['X-Company-Id'] = companyId;
         if (body) opts.body = JSON.stringify(body);
-        const res = await fetch(`/api${path}`, opts);
+        let res;
+        try {
+            res = await fetch(`/api${path}`, opts);
+        } catch (err) {
+            // The browser's bare "Failed to fetch" means the local server is
+            // gone (desktop shell still showing the page). Say so.
+            throw new Error("SlowBooks isn't responding (network error) — if this keeps happening, close and relaunch SlowBooks Pro.");
+        }
         if (res.status === 401 && window.SlowbooksAuth) {
             // Session expired, never authed, or fresh install -- let auth.js
             // re-check status and pick setup vs. login. Hardcoding promptLogin

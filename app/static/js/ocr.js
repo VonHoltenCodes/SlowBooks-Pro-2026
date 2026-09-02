@@ -93,7 +93,9 @@ const ScanHelper = {
         if (btn) btn.disabled = true;
         if (statusEl) { statusEl.textContent = 'Scanning…'; statusEl.style.color = 'var(--gray-600)'; }
         try {
-            const resp = await fetch('/api/ocr/receipt', { method: 'POST', body: fd });
+            let resp;
+            try { resp = await fetch('/api/ocr/receipt', { method: 'POST', body: fd }); }
+            catch (err) { throw new Error("SlowBooks isn't responding (network error) — if this keeps happening, close and relaunch SlowBooks Pro."); }
             if (!resp.ok) {
                 const d = await resp.json().catch(() => ({}));
                 throw new Error(d.detail || `Scan failed (HTTP ${resp.status})`);
@@ -152,6 +154,10 @@ const ScanHelper = {
     },
 
     async discard() {
+        // Runs from the modal's Cancel button ahead of closeModal(): nothing
+        // in here may throw or block, or the modal never closes.
+        try { if (window.OcrCanvas) OcrCanvas.close(); } catch (_) { /* never block Cancel */ }
+        this._lastResult = null;
         if (!this._intakeId) return;
         const intakeId = this._intakeId;
         this._intakeId = null;
@@ -160,5 +166,33 @@ const ScanHelper = {
         } catch (err) {
             // Idempotent on the server; the TTL sweep is the backstop.
         }
+    },
+
+    /**
+     * Turn a boxed tax read into a percent for a tax-rate input, or explain
+     * why it can't be one. `raw` is the region's raw text: a read that
+     * carried a "%" IS the rate ("8.25%"). Otherwise value is an amount and
+     * the rate is amount / subtotal — refused when the amount is as big as
+     * the subtotal (the box caught the total, or several numbers) or the
+     * rate lands past 50%, so one wrong drag can't write 1204.17% into the
+     * form (VH308 lap, 2026-09-02).
+     * Returns { pct } or { error }.
+     */
+    taxPercent(value, subtotal, raw) {
+        const text = String(raw || '');
+        const num = parseFloat(String(value).replace(/[^0-9.]/g, ''));
+        if (!(num > 0)) return { error: `Tax read "${value}" isn't a number — not applied.` };
+        if (text.includes('%') || String(value).includes('%')) {
+            if (num > 50) return { error: `Tax rate ${num}% is not plausible — not applied.` };
+            return { pct: num };
+        }
+        const sub = parseFloat(subtotal);
+        if (!(sub > 0)) return { error: `Tax ${num.toFixed(2)} read, but there's no subtotal yet — read the Total or Subtotal first.` };
+        if (num >= sub) {
+            return { error: `Tax ${num.toFixed(2)} is at least the subtotal (${sub.toFixed(2)}) — not applied. Draw the box around just the tax amount.` };
+        }
+        const pct = (num / sub) * 100;
+        if (pct > 50) return { error: `Tax ${num.toFixed(2)} on ${sub.toFixed(2)} would be ${pct.toFixed(2)}% — not applied. Draw the box around just the tax amount.` };
+        return { pct: Math.round(pct * 100) / 100 };
     },
 };

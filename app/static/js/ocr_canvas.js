@@ -8,6 +8,13 @@
  * runs field-aware region OCR (crop + upscale + contrast + charset) on the
  * server and applies the result to the form — the low-contrast rescue.
  *
+ * Two orders both work, no scrolling away from the receipt (VH308 lap,
+ * 2026-09-02): box-first — drag, then tap a field button on the toolbar
+ * UNDER the canvas; or arm-first — tap the field button, then drag. Every
+ * step redraws immediately: a drawn box lights up amber the moment the
+ * mouse lifts, and tapping a field recolors it before the server read
+ * starts (the read only fills in the value).
+ *
  * Coordinates: the canvas is drawn at display scale; all regions are sent
  * to the server in natural image pixels (the /intake/{id}/image space).
  * Vanilla JS + 2D canvas — no dependencies, per the design doc.
@@ -23,8 +30,11 @@ const OcrCanvas = {
     _drag: null,         // {x0,y0,x1,y1} in display px while dragging
     _pendingBox: null,   // natural-px box awaiting a field-type choice
     _pendingSug: null,   // the suggestion that was clicked (null for a drag)
+    _armed: null,        // field key chosen BEFORE drawing a box (arm-first)
+    _values: {},         // fieldKey -> last value read, shown on the toolbar buttons
     _fieldTargets: null, // (fieldKey) => form input the value lands in, or null
     _outlined: [],       // [{el, outline, boxShadow}] to restore on close
+    _winBound: false,    // window mouseup listener installed once
 
     FIELD_LABELS: {
         total: 'Total', tax: 'Tax', subtotal: 'Subtotal',
@@ -49,24 +59,26 @@ const OcrCanvas = {
     panelHtml() {
         return `
         <div id="ocr-canvas-panel" style="display:none; margin-bottom:14px; border:1px solid var(--gray-300); border-radius:6px; padding:10px; background:var(--content-bg, #fff);">
-            <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+            <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
                 <strong style="font-size:12px;">Review scan</strong>
-                <span id="ocr-canvas-hint" style="font-size:11px; color:var(--gray-600);">
-                    Click a colored box to re-read it or change what it is, or drag a rectangle around anything the scan missed.
+                <span style="font-size:11px; color:var(--gray-600);">
+                    Drag a box around a value, then tap what it is below — or tap a field first, then drag.
+                    Click a colored box to change or re-read it.
                 </span>
-                <button type="button" class="btn btn-sm btn-secondary" style="margin-left:auto;"
-                    onclick="OcrCanvas.close()">Close</button>
             </div>
-            <div id="ocr-field-picker" style="display:none; flex-wrap:wrap; gap:6px; margin-bottom:8px; align-items:center;">
-                <span id="ocr-picker-hint" style="font-size:11px;">Read this box as:</span>
+            <div style="max-height:min(420px, 55vh); overflow:auto; border:1px solid var(--gray-200);">
+                <canvas id="ocr-canvas" style="display:block; cursor:crosshair;"></canvas>
+            </div>
+            <div id="ocr-field-picker" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;">
+                <span id="ocr-picker-hint" style="font-size:11px; min-width:120px;">Drag a box, then tap a field:</span>
                 ${['total', 'tax', 'subtotal', 'date', 'merchant'].map(k => `
                 <button type="button" class="btn btn-sm" data-key="${k}"
-                    style="border:1px solid ${this.FIELD_COLORS[k].stroke}; background:${this.FIELD_COLORS[k].fill}; color:${this.FIELD_COLORS[k].stroke};"
-                    onclick="OcrCanvas.readPending('${k}')">${this.FIELD_LABELS[k]}</button>`).join('')}
-                <button type="button" class="btn btn-sm" onclick="OcrCanvas.cancelPending()">✕</button>
-            </div>
-            <div style="max-height:420px; overflow:auto; border:1px solid var(--gray-200);">
-                <canvas id="ocr-canvas" style="display:block; cursor:crosshair;"></canvas>
+                    style="border:2px solid ${this.FIELD_COLORS[k].stroke}; background:${this.FIELD_COLORS[k].fill}; color:${this.FIELD_COLORS[k].stroke};"
+                    onclick="OcrCanvas.pick('${k}')">${this.FIELD_LABELS[k]}</button>`).join('')}
+                <button type="button" id="ocr-picker-clear" class="btn btn-sm btn-secondary" style="display:none;"
+                    onclick="OcrCanvas.cancelPending()">✕ Clear box</button>
+                <button type="button" class="btn btn-sm btn-secondary" style="margin-left:auto;"
+                    onclick="OcrCanvas.close()">Close</button>
             </div>
             <div id="ocr-canvas-msg" style="font-size:11px; margin-top:6px; color:var(--gray-600);"></div>
         </div>`;
@@ -85,7 +97,14 @@ const OcrCanvas = {
         this._fieldTargets = fieldTargets || null;
         this._words = result.words || [];
         this._pendingBox = null;
+        this._pendingSug = null;
+        this._armed = null;
         this._drag = null;
+        this._values = {};
+        for (const k of ['total', 'tax', 'subtotal', 'date']) {
+            if (result[k] && !(k === 'date' && result.date_is_default)) this._values[k] = result[k];
+        }
+        if (result.merchant && result.merchant.value) this._values.merchant = result.merchant.value;
 
         const img = new Image();
         img.onload = () => {
@@ -95,22 +114,27 @@ const OcrCanvas = {
             this._outlineTargets();
             this._layout();
             this._bind(canvas);
+            this._refreshToolbar();
             this._msg(this._suggestions.length
-                ? 'Highlighted: what the scan thinks it found. Click one to re-read just that box.'
-                : 'Drag a rectangle around a value to read it precisely.');
+                ? 'Colored boxes are what the scan found. Drag a new box to fix anything it missed or got wrong.'
+                : 'Drag a box around a value, then tap what it is.');
         };
-        img.onerror = () => this._msg('Could not load the scan image.', true);
+        img.onerror = () => this._msg('Could not load the scan image — is SlowBooks still running?', true);
         img.src = `/api/ocr/intake/${encodeURIComponent(result.intake_id)}/image`;
     },
 
     close() {
-        const panel = $('#ocr-canvas-panel');
-        if (panel) panel.style.display = 'none';
-        this._clearOutlines();
+        // Called from Close, from the modal's Cancel, and on modal teardown —
+        // must never throw, or the host form's own close path dies with it.
+        try {
+            const panel = $('#ocr-canvas-panel');
+            if (panel) panel.style.display = 'none';
+            this._clearOutlines();
+        } catch (_) { /* panel already gone */ }
         this._pendingBox = null;
         this._pendingSug = null;
-        const picker = $('#ocr-field-picker');
-        if (picker) picker.style.display = 'none';
+        this._armed = null;
+        this._drag = null;
     },
 
     /** Locate suggested field boxes by matching parse values to words. */
@@ -138,8 +162,7 @@ const OcrCanvas = {
 
     _clearOutlines() {
         for (const o of this._outlined) {
-            o.el.style.outline = o.outline;
-            o.el.style.boxShadow = o.boxShadow;
+            try { o.el.style.outline = o.outline; o.el.style.boxShadow = o.boxShadow; } catch (_) { /* detached */ }
         }
         this._outlined = [];
     },
@@ -211,29 +234,47 @@ const OcrCanvas = {
             ctx.strokeStyle = c.stroke;
             ctx.lineWidth = 2;
             ctx.strokeRect(b.left * s, b.top * s, b.width * s, b.height * s);
-            ctx.fillStyle = c.stroke;
-            ctx.font = 'bold 11px sans-serif';
-            ctx.fillText(sug.label, b.left * s, Math.max(10, b.top * s - 3));
+            const tag = sug.reading ? `${sug.label} · reading…`
+                : (sug.value ? `${sug.label} · ${sug.value}` : sug.label);
+            this._label(ctx, tag, b.left * s, b.top * s, c.stroke);
         }
-        // Live drag rectangle — neutral, so it never reads as a field color
-        if (this._drag) {
-            const d = this._drag;
-            ctx.strokeStyle = '#334155';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 3]);
-            ctx.strokeRect(Math.min(d.x0, d.x1), Math.min(d.y0, d.y1),
-                Math.abs(d.x1 - d.x0), Math.abs(d.y1 - d.y0));
+        // Live drag rectangle — thick amber so it reads on a photographed
+        // receipt (the old thin dashed gray vanished on real paper).
+        const hot = this._drag || this._pendingBox;
+        if (hot) {
+            let x, y, w, h;
+            if (this._drag) {
+                const d = this._drag;
+                x = Math.min(d.x0, d.x1); y = Math.min(d.y0, d.y1);
+                w = Math.abs(d.x1 - d.x0); h = Math.abs(d.y1 - d.y0);
+            } else {
+                const b = this._pendingBox;
+                x = b.left * s; y = b.top * s; w = b.width * s; h = b.height * s;
+            }
+            ctx.fillStyle = 'rgba(251,191,36,0.30)';
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeStyle = '#b45309';
+            ctx.lineWidth = 3;
+            ctx.setLineDash(this._drag ? [6, 4] : []);
+            ctx.strokeRect(x, y, w, h);
             ctx.setLineDash([]);
+            if (!this._drag) {
+                const armed = this._armed ? this.FIELD_LABELS[this._armed] : null;
+                this._label(ctx, armed ? `${armed}?` : 'Tap a field below ↓', x, y, '#b45309');
+            }
         }
-        // Pending (awaiting field choice)
-        if (this._pendingBox) {
-            const b = this._pendingBox;
-            ctx.strokeStyle = '#334155';
-            ctx.lineWidth = 2;
-            ctx.setLineDash([5, 3]);
-            ctx.strokeRect(b.left * s, b.top * s, b.width * s, b.height * s);
-            ctx.setLineDash([]);
-        }
+    },
+
+    /** Label pill above (or inside, at the top edge) a box. */
+    _label(ctx, text, x, y, color) {
+        ctx.font = 'bold 11px sans-serif';
+        const pad = 3;
+        const tw = ctx.measureText(text).width;
+        const ty = y - 16 < 0 ? y + 2 : y - 16;
+        ctx.fillStyle = 'rgba(255,255,255,0.9)';
+        ctx.fillRect(x, ty, tw + pad * 2, 14);
+        ctx.fillStyle = color;
+        ctx.fillText(text, x + pad, ty + 11);
     },
 
     _bind(canvas) {
@@ -253,22 +294,38 @@ const OcrCanvas = {
             this._drag.x1 = p.x; this._drag.y1 = p.y;
             this._draw();
         });
-        canvas.addEventListener('mouseup', evt => {
+        // One window-level mouseup for the module's lifetime (the canvas is
+        // re-rendered with every modal, the window isn't): a drag released
+        // off the canvas still lands.
+        if (this._winBound) return;
+        this._winBound = true;
+        window.addEventListener('mouseup', evt => {
             if (!this._drag) return;
+            const canvas = $('#ocr-canvas');
+            if (!canvas) { this._drag = null; return; }
             const d = this._drag;
             this._drag = null;
             const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
-            if (w < 6 && h < 6) { this._click(pos(evt)); this._draw(); return; }
+            const r = canvas.getBoundingClientRect();
+            if (w < 6 && h < 6) { this._click({ x: evt.clientX - r.left, y: evt.clientY - r.top }); this._draw(); return; }
             const s = this._scale;
             this._pendingBox = {
-                left: Math.round(Math.min(d.x0, d.x1) / s),
-                top: Math.round(Math.min(d.y0, d.y1) / s),
+                left: Math.max(0, Math.round(Math.min(d.x0, d.x1) / s)),
+                top: Math.max(0, Math.round(Math.min(d.y0, d.y1) / s)),
                 width: Math.round(w / s),
                 height: Math.round(h / s),
             };
             this._pendingSug = null;
-            this._showPicker();
             this._draw();
+            if (this._armed) {
+                // Arm-first: the field was chosen already — read right away.
+                const key = this._armed;
+                this._armed = null;
+                this._assign(key);
+            } else {
+                this._refreshToolbar();
+                this._msg('Box drawn — tap what it is on the toolbar below.');
+            }
         });
     },
 
@@ -284,54 +341,87 @@ const OcrCanvas = {
         // so the operator can re-read it OR say "no, this box is the Total".
         this._pendingBox = { ...hit.box };
         this._pendingSug = hit;
-        this._showPicker();
+        this._armed = null;
+        this._refreshToolbar();
+        this._msg(`Selected the ${hit.label} box — tap a field below to re-read it or change what it is.`);
     },
 
-    _showPicker() {
-        const picker = $('#ocr-field-picker');
-        if (!picker) return;
-        const cur = this._pendingSug ? this._pendingSug.key : null;
-        const hint = $('#ocr-picker-hint');
-        if (hint) {
-            hint.textContent = cur
-                ? `This box is ${this.FIELD_LABELS[cur]}. Re-read it, or change it to:`
-                : 'Read this box as:';
-        }
-        picker.querySelectorAll('button[data-key]').forEach(btn => {
-            const active = btn.dataset.key === cur;
-            btn.style.fontWeight = active ? '700' : '400';
-            btn.style.boxShadow = active ? `0 0 0 2px ${this.FIELD_COLORS[cur].stroke}` : 'none';
-        });
-        picker.style.display = 'flex';
+    /** Toolbar button. With a box pending: assign it. Without one: arm the
+     * field so the next drag reads as it. Tapping the armed field again
+     * disarms. */
+    pick(fieldKey) {
+        if (this._pendingBox) { this._assign(fieldKey); return; }
+        this._armed = this._armed === fieldKey ? null : fieldKey;
+        this._refreshToolbar();
+        this._msg(this._armed
+            ? `Now drag a box around the ${this.FIELD_LABELS[this._armed]} on the receipt.`
+            : 'Drag a box around a value, then tap what it is.');
     },
 
-    readPending(fieldKey) {
-        if (!this._pendingBox) return;
+    /** Kept for callers of the previous API (readPending == assign). */
+    readPending(fieldKey) { this.pick(fieldKey); },
+
+    _assign(fieldKey) {
         const box = this._pendingBox;
+        if (!box) return;
         const sug = this._pendingSug;
-        this.cancelPending();
+        this._pendingBox = null;
+        this._pendingSug = null;
+        this._armed = null;
         // Whichever box was last read as this field becomes its suggestion:
         // a reassigned box drops its old label, and any box previously
         // holding this label steps aside. Keeps the canvas honest about
         // where each field value came from.
         const reassigned = sug && sug.key !== fieldKey;
         this._suggestions = this._suggestions.filter(x => x !== sug && x.key !== fieldKey);
-        this._suggestions.push({ key: fieldKey, label: this.FIELD_LABELS[fieldKey], box });
-        this._read(box, fieldKey, reassigned ? sug.key : null);
+        const entry = { key: fieldKey, label: this.FIELD_LABELS[fieldKey], box, reading: true };
+        this._suggestions.push(entry);
+        this._draw();            // recolor NOW — before the network round-trip
+        this._refreshToolbar();
+        this._read(entry, fieldKey, reassigned ? sug.key : null);
     },
 
     cancelPending() {
         this._pendingBox = null;
         this._pendingSug = null;
-        const picker = $('#ocr-field-picker');
-        if (picker) picker.style.display = 'none';
+        this._armed = null;
+        this._refreshToolbar();
         this._draw();
+        this._msg('Drag a box around a value, then tap what it is.');
     },
 
-    async _read(box, fieldKey, wasKey = null) {
+    /** Toolbar reflects the mode: which field is armed / selected, the
+     * value each field currently holds, and whether a box is pending. */
+    _refreshToolbar() {
+        const picker = $('#ocr-field-picker');
+        if (!picker) return;
+        const cur = this._pendingSug ? this._pendingSug.key : this._armed;
+        const hint = $('#ocr-picker-hint');
+        if (hint) {
+            if (this._pendingSug) hint.textContent = `This box is ${this.FIELD_LABELS[cur]} — re-read it, or make it:`;
+            else if (this._pendingBox) hint.textContent = 'Read this box as:';
+            else if (this._armed) hint.textContent = `Drag a box around the ${this.FIELD_LABELS[this._armed]}:`;
+            else hint.textContent = 'Drag a box, then tap a field:';
+        }
+        picker.querySelectorAll('button[data-key]').forEach(btn => {
+            const k = btn.dataset.key;
+            const active = k === cur;
+            const v = this._values[k];
+            btn.textContent = v ? `${this.FIELD_LABELS[k]} · ${String(v).slice(0, 18)}` : this.FIELD_LABELS[k];
+            btn.style.fontWeight = active ? '700' : '400';
+            btn.style.boxShadow = active ? `0 0 0 3px ${this.FIELD_COLORS[k].stroke}` : 'none';
+            btn.style.opacity = (this._pendingBox || this._armed === k || !this._armed) ? '1' : '0.55';
+        });
+        const clear = $('#ocr-picker-clear');
+        if (clear) clear.style.display = (this._pendingBox || this._armed) ? 'inline-block' : 'none';
+    },
+
+    async _read(entry, fieldKey, wasKey = null) {
+        const box = entry.box;
         this._msg(`Reading ${this.FIELD_LABELS[fieldKey] || fieldKey}…`);
+        let result;
         try {
-            const result = await API.post(
+            result = await API.post(
                 `/ocr/intake/${encodeURIComponent(this._intakeId)}/region`,
                 {
                     ...box,
@@ -342,21 +432,38 @@ const OcrCanvas = {
                     field_key: fieldKey,
                     save_template: !!(this._merchant || fieldKey === 'merchant'),
                 });
-            this._draw();
-            if (!result.value) {
-                this._msg('Nothing readable in that box — try a slightly larger one.', true);
-                return;
-            }
-            if (fieldKey === 'merchant') this._merchant = result.value;
-            if (this._applyField) this._applyField(fieldKey, result.value, result);
-            const note = result.confidence === 'low' ? ' (low confidence — double-check)' : '';
-            const saved = result.template_saved ? ' Layout remembered for this merchant.' : '';
-            // Reassigned box: the field it used to fill still holds that value.
-            const moved = wasKey ? ` Was ${this.FIELD_LABELS[wasKey]} — check that field.` : '';
-            this._msg(`${this.FIELD_LABELS[fieldKey] || fieldKey}: ${result.value}${note} — applied to the form.${moved}${saved}`);
         } catch (err) {
+            entry.reading = false;
+            entry.value = null;
+            this._draw();
             this._msg(err.message, true);
+            return;
         }
+        entry.reading = false;
+        entry.value = result.value || null;
+        if (result.value) this._values[fieldKey] = result.value;
+        this._draw();
+        this._refreshToolbar();
+        if (!result.value) {
+            this._msg(`Nothing readable in that box (saw "${result.text || ''}") — try a slightly larger one.`, true);
+            return;
+        }
+        if (fieldKey === 'merchant') this._merchant = result.value;
+        let applied = null;
+        if (this._applyField) {
+            try { applied = this._applyField(fieldKey, result.value, result); }
+            catch (err) { applied = `Couldn't write to the form: ${err.message}`; }
+        }
+        const note = result.confidence === 'low' ? ' (low confidence — double-check)' : '';
+        const saved = result.template_saved ? ' Layout remembered for this merchant.' : '';
+        // Reassigned box: the field it used to fill still holds that value.
+        const moved = wasKey ? ` Was ${this.FIELD_LABELS[wasKey]} — check that field.` : '';
+        const raw = result.text && result.text !== result.value ? ` (read "${result.text}")` : '';
+        // The host's apply hook may return a note — e.g. a tax amount that
+        // can't be a tax on this subtotal — which then IS the message.
+        const outcome = typeof applied === 'string' ? ` ${applied}` : ' — applied to the form.';
+        this._msg(`${this.FIELD_LABELS[fieldKey] || fieldKey}: ${result.value}${raw}${note}${outcome}${moved}${saved}`,
+            typeof applied === 'string');
     },
 
     _msg(text, isError) {
