@@ -29,6 +29,7 @@ FIELD_OCR_TYPE = {
     "subtotal": "amount",
     "date": "date",
     "merchant": "merchant",
+    "reference": "reference",
 }
 
 
@@ -117,7 +118,10 @@ def apply_template(
         # a GST ID line — SkyTech lap, 2026-09-02) is a template that landed
         # somewhere else on this print.  A low read is worse than the v1
         # parse it would replace: drop it and let the parse + canvas stand.
-        if FIELD_OCR_TYPE.get(field_key) in ("amount", "date") and confidence != "high":
+        if (
+            FIELD_OCR_TYPE.get(field_key) in ("amount", "date", "reference")
+            and confidence != "high"
+        ):
             continue
         if result.get("value"):
             reads[field_key] = {"value": result["value"], "confidence": confidence}

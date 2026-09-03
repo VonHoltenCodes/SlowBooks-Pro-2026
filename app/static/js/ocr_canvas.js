@@ -38,7 +38,7 @@ const OcrCanvas = {
 
     FIELD_LABELS: {
         total: 'Total', tax: 'Tax', subtotal: 'Subtotal',
-        date: 'Date', merchant: 'Merchant / Name',
+        date: 'Date', merchant: 'Merchant / Name', reference: 'Invoice / Ref #',
     },
     // One pastel per field so the boxes read at a glance. The legend is the
     // form itself: while the canvas is open, each destination input wears
@@ -55,10 +55,11 @@ const OcrCanvas = {
         subtotal: { stroke: '#1d4ed8', fill: 'rgba(147,197,253,0.42)', ink: '#1e40af', dark: '#1e3a8a' },  // blue
         date:     { stroke: '#6d28d9', fill: 'rgba(196,181,253,0.45)', ink: '#5b21b6', dark: '#4c1d95' },  // violet
         merchant: { stroke: '#be185d', fill: 'rgba(249,168,212,0.42)', ink: '#9d174d', dark: '#831843' },  // pink
+        reference: { stroke: '#0f766e', fill: 'rgba(153,246,228,0.45)', ink: '#115e59', dark: '#134e4a' },  // teal
     },
     FIELD_OCR_TYPE: {
         total: 'amount', tax: 'amount', subtotal: 'amount',
-        date: 'date', merchant: 'merchant',
+        date: 'date', merchant: 'merchant', reference: 'reference',
     },
 
     panelHtml() {
@@ -204,6 +205,10 @@ const OcrCanvas = {
                 found.push({ key: 'merchant', label: this.FIELD_LABELS.merchant, box: this._pad(this._union(run)) });
             }
         }
+        if (result.reference) {
+            const w = this._findReferenceWord(result.reference, used);
+            if (w) { used.add(w); found.push({ key: 'reference', label: this.FIELD_LABELS.reference, box: this._pad(w) }); }
+        }
         return found;
     },
 
@@ -274,6 +279,16 @@ const OcrCanvas = {
             }
         }
         return null;
+    },
+
+    /** The word printing the parsed document number — exact, or with the
+     *  label glued on ("#7011", "No:593101"). */
+    _findReferenceWord(ref, used) {
+        const want = String(ref).toUpperCase();
+        const strip = t => String(t).toUpperCase().replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
+        return this._words.find(w => !used.has(w) && strip(w.text) === want)
+            || this._words.find(w => !used.has(w) && /\d/.test(w.text) && strip(w.text).endsWith(want))
+            || null;
     },
 
     _union(words) {
@@ -537,6 +552,10 @@ const OcrCanvas = {
             const saw = result.text ? ` (read "${result.text}")` : '';
             if (result.confidence === 'multiple') {
                 this._msg(`That box covers more than one number${saw} — draw it around just the ${this.FIELD_LABELS[fieldKey] || fieldKey}.`, true);
+            } else if (result.confidence === 'low' && result.text) {
+                // Read something, but not a value the form can take (a
+                // date in an order the parser doesn't know, say).
+                this._msg(`Couldn't make a ${this.FIELD_LABELS[fieldKey] || fieldKey} out of "${result.text}" — type it in, or redraw the box.`, true);
             } else {
                 this._msg(`Nothing readable in that box${saw} — try a slightly larger one.`, true);
             }

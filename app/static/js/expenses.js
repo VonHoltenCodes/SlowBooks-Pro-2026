@@ -123,6 +123,7 @@ const ExpensesPage = {
         if (fieldKey === 'merchant') return VendorQuickAdd.nameInput('expense-vendor') || form.querySelector('#expense-vendor');
         if (fieldKey === 'total') return form.querySelector('[name="amount"]');
         if (fieldKey === 'subtotal' || fieldKey === 'tax') return form.querySelector('[name="memo"]');
+        if (fieldKey === 'reference') return form.querySelector('[name="reference"]');
         return null;
     },
 
@@ -146,6 +147,9 @@ const ExpensesPage = {
         } else if (fieldKey === 'total') {
             // The receipt total is what left the account — tax included.
             form.querySelector('[name="amount"]').value = parseFloat(value).toFixed(2);
+        } else if (fieldKey === 'reference') {
+            const ref = form.querySelector('[name="reference"]');
+            if (ref) ref.value = value;
         } else if (fieldKey === 'subtotal') {
             ExpensesPage._noteLine(form, 'Subtotal', value);
         } else if (fieldKey === 'tax') {

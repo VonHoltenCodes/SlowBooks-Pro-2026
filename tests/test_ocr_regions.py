@@ -61,8 +61,33 @@ def test_amount_normalization():
 
 def test_date_normalization():
     assert ocr_regions._normalize("08/30/2026", "date") == ("2026-08-30", "high")
-    value, conf = ocr_regions._normalize("3O/O8/26", "date")
-    assert conf == "low"
+    assert ocr_regions._normalize("14-02-2018 13:02:42", "date") == (
+        "2018-02-14",
+        "high",
+    )
+    # Unreadable → no value. Build 46 handed the raw text back and the form's
+    # date input silently refused it.
+    assert ocr_regions._normalize("3O/O8/26", "date") == (None, "low")
+
+
+def test_reference_normalization():
+    assert ocr_regions._normalize("593101", "reference") == ("593101", "high")
+    assert ocr_regions._normalize("INV No.: 593101 Pax(s): 2", "reference") == (
+        "593101",
+        "high",
+    )
+    assert ocr_regions._normalize("Receipt # A-1187", "reference") == (
+        "A-1187",
+        "high",
+    )
+    # Two candidates and no label: first one, flagged.
+    assert ocr_regions._normalize("81109-A 593101", "reference") == (
+        "81109-A",
+        "low",
+    )
+    assert ocr_regions._normalize("14-02-2018", "reference") == (None, "missing")
+    assert ocr_regions._normalize("", "reference") == (None, "missing")
+    assert "reference" in ocr_regions.FIELD_CONFIGS
 
 
 @needs_pipeline

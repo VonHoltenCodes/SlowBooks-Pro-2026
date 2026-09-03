@@ -524,25 +524,37 @@ def _largest_amount(text: str) -> Optional[str]:
     return best[1] if best else None
 
 
+def _numeric_date(line: str) -> Optional[str]:
+    """Any numeric triplet with one consistent separator: 2018-02-14,
+    02/14/2018, 14-02-2018, 14.02.18. US ordering (MM/DD) wins when both
+    readings are valid dates; day-first is the fallback that rescues
+    "14-02-2018" (SkyTech hardware lap — the raw string landed in the
+    form and the date input refused it)."""
+    m = re.search(r"\b(\d{1,4})([-/.])(\d{1,2})\2(\d{2,4})\b", line)
+    if not m:
+        return None
+    a, b, c = int(m.group(1)), int(m.group(3)), int(m.group(4))
+    if len(m.group(1)) == 4:
+        candidates = [(a, b, c)]  # YYYY-MM-DD
+    else:
+        if len(m.group(4)) not in (2, 4):
+            return None
+        y = c + 2000 if c < 100 else c
+        candidates = [(y, a, b), (y, b, a)]  # MM-DD-YYYY, then DD-MM-YYYY
+    for y, mo, d in candidates:
+        if _valid_date(y, mo, d):
+            return f"{y:04d}-{mo:02d}-{d:02d}"
+    return None
+
+
 def parse_date(text: str) -> Optional[str]:
     """First parseable date in the text (receipts print the purchase date
     near the top), US-first ordering, ISO YYYY-MM-DD out."""
     for line in text.splitlines():
         line = line.strip()
-        # YYYY-MM-DD
-        m = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", line)
-        if m:
-            y, mo, d = (int(g) for g in m.groups())
-            if _valid_date(y, mo, d):
-                return f"{y:04d}-{mo:02d}-{d:02d}"
-        # MM/DD/YYYY or MM/DD/YY (US-first)
-        m = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{2,4})\b", line)
-        if m:
-            mo, d, y = (int(g) for g in m.groups())
-            if y < 100:
-                y += 2000
-            if _valid_date(y, mo, d):
-                return f"{y:04d}-{mo:02d}-{d:02d}"
+        iso = _numeric_date(line)
+        if iso:
+            return iso
         # "Aug 14, 2026" / "Aug 14 2026"
         m = re.search(r"\b([A-Za-z]{3,9})\s+(\d{1,2}),?\s+(\d{4})\b", line)
         if m and m.group(1).lower() in _MONTH_NAMES:
@@ -719,10 +731,12 @@ def parse_reference(text: str) -> Optional[str]:
     be entered twice. Labeled numbers only: a bare digit run is as likely
     a registration or phone number."""
     for line in (ln.strip() for ln in text.splitlines()):
-        if not line or _REF_SKIP_RE.search(line):
-            continue
-        m = _REF_LABEL_RE.search(line)
+        m = _REF_LABEL_RE.search(line) if line else None
         if not m:
+            continue
+        # A lookalike label ("Reg No", "Tel") only disqualifies the number
+        # it introduces — "INV No.: 593101 Pax(s): 2" is still an invoice.
+        if _REF_SKIP_RE.search(line[: m.start()]):
             continue
         token = m.group(1).rstrip("/-")
         if not re.search(r"\d", token) or len(token) < 2:

@@ -181,6 +181,8 @@ async def scan_receipt(
                 partial_reasons = [
                     r for r in partial_reasons if not r.startswith("date not found")
                 ]
+            if "reference" in reads:
+                extracted["reference"] = reads["reference"]["value"]
             if "merchant" in reads:
                 extracted["merchant"] = {
                     "value": reads["merchant"]["value"],

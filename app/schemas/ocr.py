@@ -100,7 +100,7 @@ class OcrRegionRequest(BaseModel):
     top: int
     width: int
     height: int
-    # amount | date | merchant | text
+    # amount | date | merchant | reference | text
     field_type: str = "text"
 
     # v3 template memory: when the canvas knows the merchant and which form

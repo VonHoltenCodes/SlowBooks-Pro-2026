@@ -165,6 +165,7 @@ const BillsPage = {
         }
         if (fieldKey === 'total' || fieldKey === 'subtotal') return row && row.querySelector('.line-rate');
         if (fieldKey === 'tax') return form.querySelector('[name="notes"]');
+        if (fieldKey === 'reference') return form.querySelector('[name="bill_number"]');
         return null;
     },
 
@@ -182,6 +183,9 @@ const BillsPage = {
         } else if (fieldKey === 'total' || fieldKey === 'subtotal') {
             const rate = row && row.querySelector('.line-rate');
             if (rate) rate.value = parseFloat(value).toFixed(2);
+        } else if (fieldKey === 'reference') {
+            const num = form.querySelector('[name="bill_number"]');
+            if (num) num.value = value;
         } else if (fieldKey === 'tax') {
             const notes = form.querySelector('[name="notes"]');
             if (notes) {

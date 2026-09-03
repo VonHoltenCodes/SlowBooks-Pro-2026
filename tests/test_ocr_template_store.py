@@ -168,6 +168,48 @@ def test_apply_template_drops_low_confidence_amount_reads(db_session, monkeypatc
     assert not ocr_template_store.reads_are_clean(reads)
 
 
+def test_template_remembers_reference_box(db_session, monkeypatch):
+    """A taught Invoice # box is replayed on the next scan and lands in the
+    response's reference field; a low read is dropped like amounts."""
+    words = _words() + [
+        {
+            "text": "INV",
+            "left": 10,
+            "top": 160,
+            "width": 30,
+            "height": 16,
+            "conf": 90.0,
+        },
+        {
+            "text": "593101",
+            "left": 60,
+            "top": 160,
+            "width": 60,
+            "height": 16,
+            "conf": 90.0,
+        },
+    ]
+    assert ocr_template_store.record_correction(
+        db_session, "NEON PULSE TECHSHOP", "reference", _box_around(words[-1]), words
+    )
+    template = db_session.query(OcrTemplate).one()
+    monkeypatch.setattr(ocr_regions, "ocr_region", _fake_region_reader(words))
+    reads = ocr_template_store.apply_template(db_session, template, b"png", words)
+    assert reads == {"reference": {"value": "593101", "confidence": "high"}}
+
+    real = _fake_region_reader(words)
+
+    def low(image_data, left, top, width, height, field_type, engine=None):
+        assert field_type == "reference"
+        return {
+            **real(image_data, left, top, width, height, field_type),
+            "confidence": "low",
+        }
+
+    monkeypatch.setattr(ocr_regions, "ocr_region", low)
+    assert ocr_template_store.apply_template(db_session, template, b"png", words) == {}
+
+
 def test_reads_are_clean_gate():
     good = {
         k: {"value": v, "confidence": "high"}

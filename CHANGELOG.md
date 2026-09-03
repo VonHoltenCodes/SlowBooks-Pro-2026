@@ -110,6 +110,22 @@ fills with dark text regardless of theme — near-invisible on the dark
 theme. Dark mode now uses deep opaque fills with light text (8–10:1
 contrast); light mode keeps the pale fills with darker text.
 
+**Invoice / Ref # has its own box on the scan.** The picker under the
+receipt gained an **Invoice / Ref #** button (teal): draw it around the
+vendor's document number and it lands in Bill Number (bills) or
+Reference (expenses); the auto-parse also outlines the number it found,
+and a taught box is remembered per merchant like the others. The
+auto-parse no longer skips an invoice line because a "Pax"/"Table"/"Tel"
+word sits after the number on the same line.
+
+**Day-first dates parse.** `14-02-2018`, `14/02/2018`, `14.02.18` — any
+numeric date whose US reading is impossible — now resolves day-first
+(US ordering still wins when both readings are valid, so `12/02/17` is
+December 2). A date box that reads something the parser cannot turn into
+a date no longer reports "applied to the form" while the date input
+stays empty; it says what it read and asks for a redraw or a manual
+entry.
+
 **Desktop launcher:** `--data-dir` (Server Edition scheduled task,
 headless test rigs) now relocates the per-user `.env` along with the
 data directory; it used to write `DATABASE_URL` into the launching

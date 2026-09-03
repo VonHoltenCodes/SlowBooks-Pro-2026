@@ -718,6 +718,15 @@ def test_parse_reference_reads_labeled_document_numbers():
     assert parse_reference("Trans No: 00123456\nCard ****1234") == "00123456"
 
 
+def test_parse_reference_survives_a_lookalike_later_on_the_line():
+    from app.services.ocr_service import parse_reference
+
+    # SkyTech lap, build 46: "Pax(s)" after the invoice number was enough
+    # to skip the whole line and leave Bill # empty.
+    assert parse_reference("INV No.: 593101 Pax(s): 2\nDate : 14-02-2018") == "593101"
+    assert parse_reference("Receipt # A-1187 Table 4") == "A-1187"
+
+
 def test_parse_reference_refuses_unlabeled_and_lookalike_numbers():
     from app.services.ocr_service import parse_reference
 
@@ -726,6 +735,25 @@ def test_parse_reference_refuses_unlabeled_and_lookalike_numbers():
     assert parse_reference("Invoice No.\nTOTAL 1.00") is None  # label alone
     assert parse_reference("GST Reg No: 001234567") is None  # tax registration
     assert parse_reference("Order Tel: 5551234") is None
+
+
+def test_parse_date_day_first_and_dotted_forms():
+    from app.services.ocr_service import parse_date
+
+    # Day-first is the fallback when the US reading is impossible.
+    assert parse_date("Date : 14-02-2018 13:02:42") == "2018-02-14"
+    assert parse_date("14/02/2018") == "2018-02-14"
+    assert parse_date("14.02.18") == "2018-02-14"
+    assert parse_date("02-14-2018") == "2018-02-14"
+    # Both readings valid → US ordering still wins.
+    assert parse_date("12/02/17") == "2017-12-02"
+    assert parse_date("2018-02-14") == "2018-02-14"
+    # Not dates: phone numbers, times, bare digit runs, mixed separators.
+    assert parse_date("Tel: 03-2164 1400") is None
+    assert parse_date("1-630-423-2040") is None
+    assert parse_date("13:02:42") is None
+    assert parse_date("14-02/2018") is None
+    assert parse_date("2018-13-01") is None
 
 
 def test_extract_receipt_carries_reference():

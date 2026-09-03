@@ -16,6 +16,7 @@
 # ============================================================================
 
 import io
+import re
 import subprocess
 from typing import Optional
 
@@ -27,6 +28,7 @@ FIELD_CONFIGS: dict[str, dict] = {
     "amount": {"psm": "7", "whitelist": "0123456789.,$"},
     "date": {"psm": "7", "whitelist": "0123456789/-.,: APMapmJanFebMrouyglSctNvDei"},
     "merchant": {"psm": "6", "whitelist": None},
+    "reference": {"psm": "7", "whitelist": None},
     "text": {"psm": "6", "whitelist": None},
 }
 
@@ -165,6 +167,28 @@ def ocr_region(
     }
 
 
+# A document-number token: letters/digits with the separators vendors
+# actually print ("A-1187", "593101", "R/2026/0042"); must carry a digit.
+_REF_TOKEN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9/-]{1,24}")
+
+
+def _reference_value(line: str):
+    """Invoice / receipt number out of a box: the labeled parse when the
+    label made it into the box, else the first digit-bearing token."""
+    labeled = ocr_service.parse_reference(line)
+    if labeled:
+        return labeled, "high"
+    tokens = [
+        t.rstrip("/-")
+        for t in _REF_TOKEN_RE.findall(line)
+        if re.search(r"\d", t) and len(t.rstrip("/-")) >= 2
+    ]
+    tokens = [t for t in tokens if not ocr_service.parse_date(t)]
+    if not tokens:
+        return None, "missing"
+    return tokens[0][:40], "high" if len(tokens) == 1 else "low"
+
+
 def _normalize(text: str, field_type: str):
     """Field-aware normalization of the raw region text."""
     line = " ".join(text.split())
@@ -190,6 +214,11 @@ def _normalize(text: str, field_type: str):
         return (digits, "low") if digits else (None, "missing")
     if field_type == "date":
         iso = ocr_service.parse_date(line) or ocr_service.parse_date(compact)
-        return (iso, "high") if iso else (line, "low")
+        # Never hand the raw text back as the value: "14-02-2018" (low)
+        # was "applied" on the SkyTech lap and the date input just stayed
+        # empty. No ISO date, no value — the canvas says what it read.
+        return (iso, "high") if iso else (None, "low")
+    if field_type == "reference":
+        return _reference_value(line)
     # merchant / free text
     return line[:80], "high"
