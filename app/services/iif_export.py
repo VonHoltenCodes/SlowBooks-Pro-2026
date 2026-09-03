@@ -71,6 +71,41 @@ def _class_name(db: Session, class_id) -> str:
     return _iif_clean(row.name) if row else ""
 
 
+# Column sets for transaction blocks. Every block ends with CLASS so a tag
+# never falls off on the way out (#70); the importer reads it back.
+_TXN_COLUMNS = [
+    "TRNSTYPE",
+    "DATE",
+    "ACCNT",
+    "NAME",
+    "AMOUNT",
+    "DOCNUM",
+    "DUEDATE",
+    "TERMS",
+    "MEMO",
+    "CLASS",
+]
+_TXN_COLUMNS_SHORT = [
+    "TRNSTYPE",
+    "DATE",
+    "ACCNT",
+    "NAME",
+    "AMOUNT",
+    "DOCNUM",
+    "MEMO",
+    "CLASS",
+]
+
+
+def _txn_header(columns: list[str] = _TXN_COLUMNS) -> str:
+    """!TRNS / !SPL / !ENDTRNS header trio for one column set."""
+    return (
+        _iif_line(["!TRNS"] + columns)
+        + _iif_line(["!SPL"] + columns)
+        + _iif_line(["!ENDTRNS"])
+    )
+
+
 def _resolve_account_name(db: Session, account_id: int) -> str:
     """Get account name with parent:child notation for QB2003."""
     if not account_id:
@@ -302,39 +337,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
       Sum of TRNS + all SPL = 0 (balanced transaction)
     """
     # Transaction header — defines columns for both TRNS and SPL lines
-    header = (
-        _iif_line(
-            [
-                "!TRNS",
-                "TRNSTYPE",
-                "DATE",
-                "ACCNT",
-                "NAME",
-                "AMOUNT",
-                "DOCNUM",
-                "DUEDATE",
-                "TERMS",
-                "MEMO",
-                "CLASS",
-            ]
-        )
-        + _iif_line(
-            [
-                "!SPL",
-                "TRNSTYPE",
-                "DATE",
-                "ACCNT",
-                "NAME",
-                "AMOUNT",
-                "DOCNUM",
-                "DUEDATE",
-                "TERMS",
-                "MEMO",
-                "CLASS",
-            ]
-        )
-        + _iif_line(["!ENDTRNS"])
-    )
+    header = _txn_header(_TXN_COLUMNS)
 
     query = (
         db.query(Invoice)
@@ -436,35 +439,7 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
       TRNS line: positive amount (debit to deposit account / bank)
       SPL line:  negative amount (credit to Accounts Receivable)
     """
-    header = (
-        _iif_line(
-            [
-                "!TRNS",
-                "TRNSTYPE",
-                "DATE",
-                "ACCNT",
-                "NAME",
-                "AMOUNT",
-                "DOCNUM",
-                "MEMO",
-                "CLASS",
-            ]
-        )
-        + _iif_line(
-            [
-                "!SPL",
-                "TRNSTYPE",
-                "DATE",
-                "ACCNT",
-                "NAME",
-                "AMOUNT",
-                "DOCNUM",
-                "MEMO",
-                "CLASS",
-            ]
-        )
-        + _iif_line(["!ENDTRNS"])
-    )
+    header = _txn_header(_TXN_COLUMNS_SHORT)
 
     query = (
         db.query(Payment)
@@ -558,35 +533,7 @@ def export_estimates(db: Session) -> str:
     Estimates don't post to A/R in QB2003 — they're non-posting transactions.
     But the IIF format is identical to invoices with ESTIMATE type.
     """
-    header = (
-        _iif_line(
-            [
-                "!TRNS",
-                "TRNSTYPE",
-                "DATE",
-                "ACCNT",
-                "NAME",
-                "AMOUNT",
-                "DOCNUM",
-                "MEMO",
-                "CLASS",
-            ]
-        )
-        + _iif_line(
-            [
-                "!SPL",
-                "TRNSTYPE",
-                "DATE",
-                "ACCNT",
-                "NAME",
-                "AMOUNT",
-                "DOCNUM",
-                "MEMO",
-                "CLASS",
-            ]
-        )
-        + _iif_line(["!ENDTRNS"])
-    )
+    header = _txn_header(_TXN_COLUMNS_SHORT)
 
     estimates = (
         db.query(Estimate)
@@ -679,28 +626,6 @@ def export_classes(db: Session) -> str:
     for c in rows:
         lines += _iif_line(["CLASS", _iif_clean(c.name), "Y" if c.is_archived else "N"])
     return lines
-
-
-_TXN_COLUMNS = [
-    "TRNSTYPE",
-    "DATE",
-    "ACCNT",
-    "NAME",
-    "AMOUNT",
-    "DOCNUM",
-    "DUEDATE",
-    "TERMS",
-    "MEMO",
-    "CLASS",
-]
-
-
-def _txn_header() -> str:
-    return (
-        _iif_line(["!TRNS"] + _TXN_COLUMNS)
-        + _iif_line(["!SPL"] + _TXN_COLUMNS)
-        + _iif_line(["!ENDTRNS"])
-    )
 
 
 def _row(

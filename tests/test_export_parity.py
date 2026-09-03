@@ -236,3 +236,31 @@ def test_section_endpoints_and_csv_exports(
     assert "Field:North" in classes_csv and "Old,Y" in classes_csv.replace('"', "")
     jobs_csv = client.get("/api/csv/export/jobs").text
     assert f"{seed_customer.name}:Deck" in jobs_csv
+
+
+def test_non_numeric_account_number_does_not_break_the_chart_export(
+    client, seed_accounts
+):
+    """Found by sweeping the API against a real company file: one account
+    numbered "sweep-account_number" crashed export_all."""
+    r = client.post(
+        "/api/accounts",
+        json={
+            "name": "Odd numbered",
+            "account_number": "sweep-account_number",
+            "account_type": "asset",
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    r2 = client.post(
+        "/api/accounts",
+        json={"name": "Dashed", "account_number": "1000-A", "account_type": "asset"},
+    )
+    assert r2.status_code in (200, 201), r2.text
+    text = client.get("/api/iif/export/accounts").text
+    assert "Odd numbered" in text and "Dashed" in text
+    from app.services.iif_common import _account_number_value
+
+    assert _account_number_value("sweep-account_number") == 0
+    assert _account_number_value("1000-A") == 1000
+    assert _account_number_value(None) == 0

@@ -43,6 +43,17 @@ IIF_TO_ITEM_TYPE = {
 }
 
 
+def _account_number_value(raw) -> int:
+    """Leading digits of an account number, or 0. Account numbers are free
+    text ("1000", "1000-A", "sweep-account_number"), and a non-numeric one
+    used to crash the whole chart export (found by the API sweep on a real
+    company file)."""
+    import re
+
+    m = re.match(r"\s*(\d+)", str(raw or ""))
+    return int(m.group(1)) if m else 0
+
+
 def account_to_iif_type(acct: Account) -> str:
     """Map Slowbooks AccountType + account_number to IIF ACCNTTYPE.
 
@@ -50,7 +61,7 @@ def account_to_iif_type(acct: Account) -> str:
     We use account_number ranges to distinguish sub-types within
     each Slowbooks category.
     """
-    num = int(acct.account_number or "0")
+    num = _account_number_value(acct.account_number)
     atype = acct.account_type.value
 
     if atype == "asset":

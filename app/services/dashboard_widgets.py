@@ -324,39 +324,25 @@ def open_pos(db: Session) -> dict:
 def receipts_review(db: Session) -> dict:
     """Scanned receipts sitting in the intake bucket, not yet attached to a
     document (they expire after INTAKE_TTL_HOURS)."""
-    import json
-    from datetime import datetime
-
     from app.services import ocr_service
 
-    items = []
     try:
-        base = ocr_service._intake_dir()
-        now = datetime.now()
-        for meta_path in sorted(
-            base.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
-        ):
-            try:
-                meta = json.loads(meta_path.read_text(encoding="utf-8"))
-                created = datetime.fromisoformat(meta["created_at"])
-            except (OSError, ValueError, KeyError, json.JSONDecodeError):
-                continue
-            age_h = (now - created).total_seconds() / 3600
-            if age_h > ocr_service.INTAKE_TTL_HOURS:
-                continue
-            items.append(
-                {
-                    "intake_id": meta.get("intake_id"),
-                    "filename": meta.get("original_filename", ""),
-                    "created_at": meta["created_at"],
-                    "expires_in_hours": round(ocr_service.INTAKE_TTL_HOURS - age_h, 1),
-                }
-            )
+        entries = ocr_service.list_intake()
     except Exception:
-        items = []
+        entries = []
     return {
-        "count": len(items),
-        "items": items[:8],
+        "count": len(entries),
+        "items": [
+            {
+                "intake_id": e["intake_id"],
+                "filename": e["original_filename"],
+                "created_at": e["created_at"],
+                "expires_in_hours": round(
+                    ocr_service.INTAKE_TTL_HOURS - e["age_hours"], 1
+                ),
+            }
+            for e in entries[:8]
+        ],
         "ttl_hours": ocr_service.INTAKE_TTL_HOURS,
     }
 
