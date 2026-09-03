@@ -113,6 +113,7 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
         source_type="deposit",
         reference=data.reference or "",
         class_id=data.class_id,
+        job_id=data.job_id,
     )
 
     db.commit()

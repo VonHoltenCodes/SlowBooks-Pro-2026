@@ -90,6 +90,8 @@ class Invoice(Base):
 
     # Class tracking dimension (QB-style); NULL groups with Uncategorized
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
+    # Job-costing dimension (QB "Customer:Job"); NULL = no job
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
 
     # Sales receipt = invoice + payment entered as one step (QB's "Enter
     # Sales Receipts"). Stored as a regular Invoice so reports, PDFs, and
@@ -131,6 +133,9 @@ class InvoiceLine(Base):
     rate = Column(Numeric(12, 2), default=0)
     amount = Column(Numeric(12, 2), default=0)
     class_name = Column(String(100), nullable=True)
+    # Per-line job / class; NULL falls back to the transaction header
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     line_order = Column(Integer, default=0)
 
     invoice = relationship("Invoice", back_populates="lines")

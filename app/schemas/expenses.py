@@ -18,6 +18,7 @@ class ExpenseCreate(BaseModel):
     reference: Optional[str] = Field(None, max_length=100)
     memo: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
 
 
 class ExpenseResponse(BaseModel):

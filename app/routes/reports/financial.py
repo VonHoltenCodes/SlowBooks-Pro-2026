@@ -537,6 +537,37 @@ def profit_loss_by_class(
     }
 
 
+@router.get("/job-profitability")
+def job_profitability_report(
+    start_date: date = Query(default=None),
+    end_date: date = Query(default=None),
+    customer_id: int = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Income, costs and margin per job from posted lines.
+
+    A line's job is its own job_id, else its transaction's; untagged
+    activity is the "No job" row, so the totals equal the plain Profit &
+    Loss for the same period (the same reconciliation promise as P&L by
+    Class).
+    """
+    from app.services.jobs_service import job_profitability
+
+    if not start_date:
+        start_date = date(date.today().year, 1, 1)
+    if not end_date:
+        end_date = date.today()
+    rows = job_profitability(db, start_date, end_date, customer_id=customer_id)
+    return {
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "jobs": rows,
+        "total_income": sum(r["income"] for r in rows),
+        "total_costs": sum(r["total_costs"] for r in rows),
+        "total_net_income": sum(r["net_income"] for r in rows),
+    }
+
+
 # ── Financial-report PDFs ────────────────────────────────────────────────
 # One shared renderer (report_pdf.html + _report_theme.html) with the
 # pdf_paper_size setting (letter default, a4 selectable). The statements

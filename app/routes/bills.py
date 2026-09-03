@@ -152,6 +152,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         total=total,
         balance_due=total,
         class_id=data.class_id,
+        job_id=data.job_id,
         notes=data.notes,
     )
     db.add(bill)
@@ -226,6 +227,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                 quantity=line_data.quantity,
                 rate=line_data.rate,
                 amount=amt,
+                job_id=line_data.job_id,
+                class_id=line_data.class_id,
                 line_order=line_data.line_order or i,
             )
         )
@@ -237,6 +240,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                     "debit": amt,
                     "credit": Decimal("0"),
                     "description": line_data.description or "",
+                    "job_id": line_data.job_id,
+                    "class_id": line_data.class_id,
                 }
             )
 
@@ -272,6 +277,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
             source_type="bill",
             source_id=bill.id,
             class_id=bill.class_id,
+            job_id=bill.job_id,
         )
         bill.transaction_id = txn.id
 
@@ -347,6 +353,7 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
                 source_type="bill_void",
                 source_id=bill.id,
                 class_id=bill.class_id,
+                job_id=bill.job_id,
             )
 
     # Phase 11: reverse inventory receipts (the reversing JE already undoes

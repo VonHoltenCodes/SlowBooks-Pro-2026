@@ -114,6 +114,7 @@ const SalesReceiptsPage = {
             lines: [{ item_id: '', description: '', quantity: 1, rate: 0 }],
         };
         const classGroup = await classFormGroupHtml(null);
+        const jobGroup = await jobFormGroupHtml(null);
 
         SalesReceiptsPage.lineCount = sr.lines.length;
         SalesReceiptsPage._items = items;
@@ -153,7 +154,7 @@ const SalesReceiptsPage = {
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
                             <option value="">Undeposited Funds (default)</option>${bankOpts}</select></div>
-                    ${classGroup}
+                    ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml(null, null)}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.01" value="${(sr.tax_rate * 100) || 0}"
@@ -388,6 +389,7 @@ const SalesReceiptsPage = {
             reference: form.reference.value || null,
             deposit_to_account_id: form.deposit_to_account_id.value ? parseInt(form.deposit_to_account_id.value) : null,
             class_id: classIdFromForm(form),
+            job_id: jobIdFromForm(form),
             ...currencyPayloadFromForm(form),
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
             notes: form.notes.value || null,

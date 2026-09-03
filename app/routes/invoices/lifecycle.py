@@ -73,6 +73,7 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
                 source_type="invoice_void",
                 source_id=invoice.id,
                 class_id=invoice.class_id,
+                job_id=invoice.job_id,
                 reference=invoice.invoice_number,
             )
 

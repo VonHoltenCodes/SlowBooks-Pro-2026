@@ -578,3 +578,17 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 | `/api/analytics/ai-insights` | POST | Run the dashboard through the configured LLM; `?force=true` bypasses 10-min cache |
 | `/api/analytics/ai-query` | POST | Tool-calling Q&A — LLM autonomously calls 16 read-only tools to answer `?question=...` |
 | `/analytics` | GET | Backwards-compat 307 redirect to the SPA hash route `/#/analytics` |
+
+## Jobs (Customer:Job / Projects)
+
+- A job belongs to one customer; status, number, type, dates, site address,
+  contract amount. Managed on the Jobs page or from the Customer Center.
+- Job (and per-line job/class) on invoices, bills, expenses, card charges,
+  journal entries, sales receipts, estimates, purchase orders and time
+  entries. A line without its own job inherits the document's.
+- Job Profitability report and per-job detail from posted ledger lines;
+  "No job" bucket keeps totals equal to the P&L.
+- IIF `Customer:Job` and QBO sub-customers import as jobs under the customer.
+- Roadmap (cost codes, committed cost, change orders, progress billing,
+  time/burden, WIP): `docs/design/projects.md`.
+

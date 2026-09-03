@@ -13,6 +13,7 @@ class CCChargeCreate(BaseModel):
     memo: Optional[str] = None
     reference: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
 
 
 class CCChargeResponse(BaseModel):

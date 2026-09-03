@@ -48,6 +48,9 @@ class PurchaseOrder(Base):
     total = Column(Numeric(12, 2), default=0)
 
     notes = Column(Text, nullable=True)
+    # Job-costing dimension (QB "Customer:Job"); NULL = no job
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -75,6 +78,8 @@ class PurchaseOrderLine(Base):
     rate = Column(Numeric(12, 2), default=0)
     amount = Column(Numeric(12, 2), default=0)
     received_qty = Column(Numeric(10, 2), default=0)
+    # Per-line job; NULL falls back to the document header
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     line_order = Column(Integer, default=0)
 
     purchase_order = relationship("PurchaseOrder", back_populates="lines")

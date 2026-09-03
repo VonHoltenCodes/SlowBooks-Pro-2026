@@ -114,6 +114,7 @@ imports each one as:
 
 Details worth knowing:
 
+- **Customer:Job names** — the colon splits the customer from the job: `Smith:Kitchen Remodel` becomes customer *Smith* with job *Kitchen Remodel*, and the invoice, sales receipt or estimate is tagged to that job (see the Jobs page). A deeper `A:B:C` path becomes job `B:C` under `A`.
 - **Blank customer** — QB allows counter sales with no Customer:Job.
   Those import against an auto-created **"Walk-In Customer"** (the
   import report notes each one).

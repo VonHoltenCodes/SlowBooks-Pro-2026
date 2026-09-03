@@ -106,6 +106,7 @@ const BillsPage = {
         BillsPage._items = items;
         BillsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
+        const jobGroup = await jobFormGroupHtml(null);
 
         BillsPage._vendors = vendors;
         const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
@@ -125,7 +126,7 @@ const BillsPage = {
                             ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
                                 `<option ${t==='Net 30'?'selected':''}>${t}</option>`).join('')}
                         </select></div>
-                    ${classGroup}
+                    ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml()}
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
@@ -287,6 +288,7 @@ const BillsPage = {
                 terms: form.terms.value,
                 notes: form.notes.value || null,
                 class_id: classIdFromForm(form),
+                job_id: jobIdFromForm(form),
                 ...currencyPayloadFromForm(form),
                 lines,
             });

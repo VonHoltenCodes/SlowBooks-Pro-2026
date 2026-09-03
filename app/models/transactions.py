@@ -36,6 +36,8 @@ class Transaction(Base):
 
     # Class tracking dimension (QB-style); NULL groups with Uncategorized
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
+    # Job-costing dimension (QB "Customer:Job"); NULL = no job
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -70,6 +72,9 @@ class TransactionLine(Base):
     debit = Column(Numeric(12, 2), default=0, nullable=False)  # BCD[6] at offset 0x0C
     credit = Column(Numeric(12, 2), default=0, nullable=False)  # BCD[6] at offset 0x12
     description = Column(String(300), nullable=True)  # split memo, 0x18
+    # Per-line job / class; NULL falls back to the transaction header
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
 
     transaction = relationship("Transaction", back_populates="lines")
     account = relationship("Account", back_populates="transaction_lines")

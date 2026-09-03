@@ -61,6 +61,7 @@ from app.routes import bank_import, simplefin, tax, backups
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
 from app.routes import classes as classes_routes
+from app.routes import jobs as jobs_routes
 from app.routes import fx as fx_routes
 from app.routes import fixed_assets as fixed_assets_routes
 from app.routes import migration as migration_routes
@@ -500,6 +501,7 @@ app.include_router(auth_routes.router)
 app.include_router(dashboard.router)
 app.include_router(accounts.router)
 app.include_router(classes_routes.router)
+app.include_router(jobs_routes.router)
 app.include_router(fx_routes.router)
 app.include_router(fixed_assets_routes.router)
 app.include_router(migration_routes.router)

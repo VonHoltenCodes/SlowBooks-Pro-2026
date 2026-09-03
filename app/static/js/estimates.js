@@ -126,6 +126,7 @@ const EstimatesPage = {
         };
         if (id) est = await API.get(`/estimates/${id}`);
         const classGroup = await classFormGroupHtml(est.class_id);
+        const jobGroup = await jobFormGroupHtml(est.job_id, 'est-customer-select');
         if (est.lines.length === 0) est.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
 
         EstimatesPage.lineCount = est.lines.length;
@@ -156,6 +157,7 @@ const EstimatesPage = {
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.01" value="${(est.tax_rate * 100) || 0}"
                             oninput="EstimatesPage.recalc()"></div>
+                    ${classGroup}${jobGroup}
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
@@ -258,6 +260,7 @@ const EstimatesPage = {
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
             notes: form.notes.value || null,
             class_id: classIdFromForm(form),
+            job_id: jobIdFromForm(form),
             lines,
         };
 

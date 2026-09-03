@@ -7,6 +7,38 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Jobs — QuickBooks-style Customer:Job / Projects (milestone 1)
+
+**Every posted line can now carry a job (and a class).** A job is a
+customer's project — "Smith: Kitchen Remodel" — and the unit of job
+costing. Invoices, bills, expenses, card charges, journal entries, sales
+receipts and estimates take a Job on the header; invoice, bill and journal
+lines can set their own job and class, and a line without one inherits the
+header's. The ledger line is the source of truth, so the new **Jobs** page
+(Customers & Sales) and the **Job Profitability** report show income,
+costs, net and margin per job straight from posted activity — the "No job"
+row holds everything untagged, so the report's totals equal the Profit &
+Loss for the same period, the same reconciliation promise P&L by Class
+makes. Job detail lists every posted line attributed to it (the job cost
+detail). The Customer Center lists a customer's jobs and can create one.
+
+Jobs carry what a contractor tracks: status (pending, awarded, in progress,
+closed, not awarded), job number, type, dates, site address and contract
+amount, so the detail can show billed-vs-contract. A job with posted
+activity is never deleted — mark it inactive and it leaves the pickers.
+
+**QuickBooks migration keeps the hierarchy.** IIF imports split
+`Customer:Job` names into the customer and a job under it (customer list
+rows and every invoice, sales receipt and estimate); QBO imports turn
+sub-customers ("Projects") into jobs under their parent. A flat customer
+that already carries the colon from an earlier import keeps matching, so
+re-imports are stable.
+
+The estimate form also gained the Class field that was computed but never
+rendered. Design and the rest of the plan (cost codes, committed cost,
+change orders, progress billing, time and burden, WIP):
+[docs/design/projects.md](docs/design/projects.md).
+
 ### Receipt intake — scan a receipt into the Sales Receipt / Bill form
 
 A new **Scan Receipt** button on both the Enter Sales Receipt and Enter

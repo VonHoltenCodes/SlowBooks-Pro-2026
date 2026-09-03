@@ -57,6 +57,7 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
         tax_rate=data.tax_rate,
         notes=data.notes,
         class_id=data.class_id,
+        job_id=data.job_id,
     )
     db.add(rec)
     db.flush()

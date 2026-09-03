@@ -203,6 +203,7 @@ def create_expense(data: ExpenseCreate, db: Session = Depends(get_db)):
         source_id=vendor.id if vendor else None,
         reference=data.reference or "",
         class_id=data.class_id,
+        job_id=data.job_id,
     )
     db.commit()
     db.refresh(txn)

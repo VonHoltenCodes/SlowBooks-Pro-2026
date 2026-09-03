@@ -273,6 +273,45 @@ function classIdFromForm(form) {
 }
 
 // ---------------------------------------------------------------------------
+// Job-costing dimension — shared "Customer: Job" dropdown for entry forms.
+// Lists every active job; when the form has a customer select (pass its id),
+// the list narrows to that customer's jobs each time the picker gets focus,
+// so the customer can be changed at any point and the jobs follow. Returns
+// '' when the company has no jobs yet — the field simply doesn't exist.
+// ---------------------------------------------------------------------------
+async function jobFormGroupHtml(selectedId, customerSelectId) {
+    let jobs = [];
+    try { jobs = await API.get('/jobs'); } catch (e) { return ''; }
+    if (!jobs.length) return '';
+    const opts = jobs.map(j =>
+        `<option value="${j.id}" data-customer="${j.customer_id}" ${selectedId === j.id ? 'selected' : ''}>${escapeHtml(j.full_name || j.name)}</option>`
+    ).join('');
+    const bind = customerSelectId ? `data-customer-select="${customerSelectId}" onfocus="JobPicker.sync(this)"` : '';
+    return `<div class="form-group"><label>Job</label>
+        <select name="job_id" ${bind}><option value="">— No job —</option>${opts}</select></div>`;
+}
+
+const JobPicker = {
+    // Hide jobs that belong to other customers than the one selected.
+    sync(select) {
+        const custSel = document.getElementById(select.dataset.customerSelect);
+        const cid = custSel ? custSel.value : '';
+        for (const opt of select.options) {
+            if (!opt.value) continue;
+            const mine = !cid || cid === '__new__' || opt.dataset.customer === cid;
+            opt.hidden = !mine;
+            if (!mine && opt.selected) select.value = '';
+        }
+    },
+};
+
+// Normalize a form's job_id string to int-or-null for the API payload.
+function jobIdFromForm(form) {
+    const v = form.job_id ? form.job_id.value : '';
+    return v ? parseInt(v) : null;
+}
+
+// ---------------------------------------------------------------------------
 // Multi-currency: currency + exchange-rate inputs for document forms.
 // Selecting a foreign currency prefills the rate from /api/fx/rate
 // (Bank of Canada feed); the operator can always override.

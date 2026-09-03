@@ -57,6 +57,10 @@ const ReportsPage = {
                     <div class="card-header">P&L by Class</div>
                     <p style="font-size:13px; color:var(--gray-500);">Income vs expenses split by class</p>
                 </div>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.jobProfitability()">
+                    <div class="card-header">Job Profitability</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Income, costs and margin per job</p>
+                </div>
                 <div class="card" style="cursor:pointer" onclick="ReportsPage.financialStatementsPdf()">
                     <div class="card-header">Financial Statements Pack (PDF)</div>
                     <p style="font-size:13px; color:var(--gray-500);">P&L + Balance Sheet + Trial Balance, one audit-ready PDF</p>
@@ -860,5 +864,37 @@ ReportsPage.financialStatementsPdf = async function () {
             P&L and Trial Balance for ${escapeHtml(range.start)} — ${escapeHtml(range.end)},
             Balance Sheet as of ${escapeHtml(range.end)}. Paper size follows
             Settings → Report PDF Paper Size.</div>`;
+    });
+};
+
+ReportsPage.jobProfitability = async function () {
+    await ReportsPage.openPeriodModal("Job Profitability", "this_year_to_date", async (_period, range) => {
+        const data = await API.get(`/reports/job-profitability?start_date=${range.start}&end_date=${range.end}`);
+        const pct = v => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
+        const rows = data.jobs.map(j => `<tr ${j.job_id ? `style="cursor:pointer" onclick="closeModal();App.navigate('#/jobs');JobsPage.showDetails(${j.job_id})"` : ''}>
+            <td>${escapeHtml(j.customer_name || '')}</td>
+            <td>${escapeHtml(j.job_name)}</td>
+            <td class="amount">${j.contract_amount !== null && j.contract_amount !== undefined ? formatCurrency(j.contract_amount) : ''}</td>
+            <td class="amount">${formatCurrency(j.income)}</td>
+            <td class="amount">${formatCurrency(j.total_costs)}</td>
+            <td class="amount" style="font-weight:700;">${formatCurrency(j.net_income)}</td>
+            <td class="amount">${pct(j.margin_pct)}</td>
+        </tr>`).join('');
+        return `
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)} · "No job" holds untagged activity so the totals match the P&L
+            </div>
+            <div class="table-container"><table>
+                <thead><tr><th>Customer</th><th>Job</th><th class="amount">Contract</th><th class="amount">Income</th>
+                <th class="amount">Costs</th><th class="amount">Net</th><th class="amount">Margin</th></tr></thead>
+                <tbody>${rows.length ? rows : '<tr><td colspan="7">No activity in this period</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);">
+                    <td colspan="3">Total</td>
+                    <td class="amount">${formatCurrency(data.total_income)}</td>
+                    <td class="amount">${formatCurrency(data.total_costs)}</td>
+                    <td class="amount">${formatCurrency(data.total_net_income)}</td>
+                    <td></td>
+                </tr></tfoot>
+            </table></div>`;
     });
 };

@@ -52,3 +52,23 @@ files under `migrations/versions/`; for model code, see `app/models/`.
 | `portal_accesses` | Audit log for self-service portal hits (success + failure) |
 | `login_attempts` | Authentication-attempt audit log |
 | `reseller_permits` | Per-entity sales-tax reseller permits with expiration + verification trail |
+
+## jobs (Customer:Job / Projects)
+
+| column | notes |
+|---|---|
+| id, customer_id (FK customers) | a job belongs to exactly one customer |
+| name, job_number | name unique per customer, case-insensitive (API-enforced) |
+| status | pending · awarded · in_progress · closed · not_awarded |
+| job_type, description, site_address, notes | free text |
+| start_date, projected_end_date, end_date | |
+| contract_amount | Numeric(12,2), drives billed-vs-contract |
+| is_active | inactive = hidden from pickers, kept on history |
+
+`job_id` (nullable FK) lives on: transactions, transaction_lines, invoices,
+invoice_lines, bills, bill_lines, estimates, estimate_lines, purchase_orders,
+purchase_order_lines, credit_memos, recurring_invoices, time_entries.
+`class_id` was added to transaction_lines, invoice_lines and bill_lines.
+Attribution rule for reports: `coalesce(line.job_id, transaction.job_id)`.
+Migration `e9f0a1b2c3d4_add_jobs`.
+

@@ -101,6 +101,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             total=total,
             notes=data.notes,
             class_id=data.class_id,
+            job_id=data.job_id,
         )
         db.add(estimate)
         try:
@@ -127,6 +128,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             rate=line_data.rate,
             amount=_q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))),
             class_name=line_data.class_name,
+            job_id=line_data.job_id,
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -168,6 +170,7 @@ def update_estimate(
                     Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
                 ),
                 class_name=line_data.class_name,
+                job_id=line_data.job_id,
                 line_order=line_data.line_order or i,
             )
             db.add(line)
@@ -276,6 +279,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
         total=estimate.total,
         balance_due=estimate.total,
         class_id=estimate.class_id,
+        job_id=estimate.job_id,
         notes=estimate.notes,
     )
     db.add(invoice)
@@ -290,6 +294,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
             rate=eline.rate,
             amount=eline.amount,
             class_name=eline.class_name,
+            job_id=eline.job_id,
             line_order=eline.line_order,
         )
         db.add(iline)
@@ -354,6 +359,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
             source_id=invoice.id,
             reference=invoice_number,
             class_id=invoice.class_id,
+            job_id=invoice.job_id,
         )
         invoice.transaction_id = txn.id
 

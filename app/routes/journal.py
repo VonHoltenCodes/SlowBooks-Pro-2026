@@ -41,6 +41,8 @@ def list_journal_entries(source_type: str = None, db: Session = Depends(get_db))
                     "debit": float(line.debit),
                     "credit": float(line.credit),
                     "description": line.description or "",
+                    "job_id": line.job_id,
+                    "class_id": line.class_id,
                 }
             )
         results.append(
@@ -110,6 +112,8 @@ def create_manual_journal_entry(
                 "debit": Decimal(str(line.debit)),
                 "credit": Decimal(str(line.credit)),
                 "description": line.description or "",
+                "job_id": line.job_id,
+                "class_id": line.class_id,
             }
         )
 
@@ -125,6 +129,7 @@ def create_manual_journal_entry(
             source_type="manual",
             reference=data.reference or "",
             class_id=data.class_id,
+            job_id=data.job_id,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

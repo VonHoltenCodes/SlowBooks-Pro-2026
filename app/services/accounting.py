@@ -84,11 +84,14 @@ def create_journal_entry(
     reference: str = None,
     bypass_closing_date: bool = False,
     class_id: int = None,
+    job_id: int = None,
 ) -> Transaction:
     """Create a balanced journal entry.
 
     lines: [{"account_id": int, "debit": Decimal, "credit": Decimal}, ...]
-    Each line must have debit > 0 OR credit > 0, not both.
+    Each line must have debit > 0 OR credit > 0, not both. A line may carry
+    its own "job_id" / "class_id"; otherwise it inherits the header values,
+    so job and class reports can always group on the line.
     Total debits must equal total credits.
 
     Closing-date enforcement runs here so every JE-posting path inherits it
@@ -128,6 +131,7 @@ def create_journal_entry(
         source_id=source_id,
         reference=reference,
         class_id=class_id,
+        job_id=job_id,
     )
     db.add(txn)
     db.flush()
@@ -144,6 +148,8 @@ def create_journal_entry(
             debit=debit,
             credit=credit,
             description=line_data.get("description", ""),
+            job_id=line_data.get("job_id") or job_id,
+            class_id=line_data.get("class_id") or class_id,
         )
         db.add(txn_line)
 

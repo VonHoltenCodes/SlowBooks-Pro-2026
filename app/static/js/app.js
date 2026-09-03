@@ -6,6 +6,7 @@ const App = {
     routes: {
         '/':              { page: 'dashboard',       label: 'Dashboard',          render: () => App.renderDashboard() },
         '/customers':     { page: 'customers',       label: 'Customer Center',    render: () => CustomersPage.render() },
+        '/jobs':          { page: 'jobs',            label: 'Jobs',               render: () => JobsPage.render() },
         '/vendors':       { page: 'vendors',         label: 'Vendor Center',      render: () => VendorsPage.render() },
         '/items':         { page: 'items',           label: 'Item List',          render: () => ItemsPage.render() },
         '/invoices':      { page: 'invoices',        label: 'Create Invoices',    render: () => InvoicesPage.render() },
