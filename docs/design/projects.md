@@ -82,7 +82,7 @@ rewrite.
 
 | Step | Scope | Status |
 |---|---|---|
-| M1 | line dimensions · `jobs` table + API · posting carries job to every line · job pickers on invoice / bill / expense / card charge / estimate / journal · Jobs page + Customer Center jobs · **Job Profitability** report reconciling to the P&L · IIF + QBO `Customer:Job` split | building |
+| M1 | line dimensions · `jobs` table + API · posting carries job to every line · job pickers on invoice / bill / expense / card charge / estimate / journal · Jobs page + Customer Center jobs · **Job Profitability** report reconciling to the P&L · IIF + QBO `Customer:Job` split | built 2026-09-03 (301d480) |
 | M2 | cost codes + cost types · job cost detail by code · PO committed cost · billable flags on cost lines (bill lines, expenses; `billed_invoice_line_id` reserved for M3) | built 2026-09-03 |
 | M3 | estimate lines by cost code · change orders · progress invoicing · unbilled time & costs → invoice · retainage | next |
 | M4 | time entries → jobs, employee cost rates, payroll burden distribution (needs benefits-engine seam) | |
