@@ -320,7 +320,7 @@ const CostCodes = {
     any() { return !!(CostCodes._list && CostCodes._list.length); },
     optionsHtml(selectedId) {
         return '<option value="">--</option>' + (CostCodes._list || []).map(c =>
-            `<option value="${c.id}" ${selectedId === c.id ? 'selected' : ''}>${escapeHtml(c.label || (c.code + ' ' + c.name))}</option>`).join('');
+            `<option value="${c.id}" ${selectedId === c.id ? 'selected' : ''}>${'\u00a0\u00a0'.repeat(c.depth || 0)}${escapeHtml(c.label || (c.code + ' ' + c.name))}</option>`).join('');
     },
     // <td> for a line row, or '' when the company has no cost codes
     cellHtml(cls, selectedId) {

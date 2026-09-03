@@ -7,6 +7,8 @@ const App = {
         '/':              { page: 'dashboard',       label: 'Dashboard',          render: () => App.renderDashboard() },
         '/customers':     { page: 'customers',       label: 'Customer Center',    render: () => CustomersPage.render() },
         '/jobs':          { page: 'jobs',            label: 'Jobs',               render: () => JobsPage.render() },
+        '/jobs/:id':      { page: 'jobs',            label: 'Job',                render: (id) => JobsPage.renderDetail(id) },
+        '/job-costs':     { page: 'job-costs',       label: 'Job Cost Entries',   render: () => JobCostsPage.render() },
         '/vendors':       { page: 'vendors',         label: 'Vendor Center',      render: () => VendorsPage.render() },
         '/items':         { page: 'items',           label: 'Item List',          render: () => ItemsPage.render() },
         '/invoices':      { page: 'invoices',        label: 'Create Invoices',    render: () => InvoicesPage.render() },
@@ -65,7 +67,17 @@ const App = {
 
     async navigate(hash) {
         const path = hash.replace('#', '') || '/';
-        const route = App.routes[path];
+        let route = App.routes[path];
+        let param = null;
+        if (!route) {
+            // One-segment parameter routes: '/jobs/:id' matches '/jobs/12'
+            for (const [key, r] of Object.entries(App.routes)) {
+                const i = key.indexOf('/:');
+                if (i > 0 && path.startsWith(key.slice(0, i + 1)) && !path.slice(i + 1).includes('/')) {
+                    route = r; param = decodeURIComponent(path.slice(i + 1)); break;
+                }
+            }
+        }
         if (!route) { $('#page-content').innerHTML = '<p>Page not found</p>'; return; }
 
         // Update active nav
@@ -77,7 +89,7 @@ const App = {
         App.setStatus(`Loading ${route.label}...`);
 
         try {
-            const html = await route.render();
+            const html = await route.render(param);
             $('#page-content').innerHTML = html;
             App.setStatus(`${route.label} — Ready`);
         } catch (err) {

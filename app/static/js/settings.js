@@ -12,6 +12,8 @@ const SettingsPage = {
             SettingsPage.loadAiConfig();
             SettingsPage.loadClasses();
             SettingsPage.loadCostCodes();
+            SettingsPage.loadCostTypes();
+            SettingsPage.loadEquipment();
             SettingsPage.loadUsers();
             SettingsPage.loadApiTokens();
             SettingsPage.loadOcrStatus();
@@ -305,6 +307,25 @@ const SettingsPage = {
                 </div>
 
                 <div class="settings-section">
+                    <h3>Cost Types</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        How job costs roll up: labor, material, subcontract, equipment, other — add your own
+                        (permits, bonding, warranty…). A labor-type carries a burden % (employer taxes, benefits,
+                        insurance) posted as its own line. The cost account is where a job-cost line lands when its
+                        code has none; the offset accounts are the credit side of job cost entries (payroll clearing,
+                        applied equipment, applied overhead).
+                    </div>
+                    <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                        <input type="text" id="new-ct-code" placeholder="Code (e.g. permits)" style="width:150px;">
+                        <input type="text" id="new-ct-name" placeholder="Name" style="width:200px;">
+                        <label style="font-weight:normal;font-size:11px;"><input type="checkbox" id="new-ct-labor"> labor-type (burden applies)</label>
+                        <button type="button" class="btn btn-primary" onclick="SettingsPage.addCostType()">Add Cost Type</button>
+                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupOffsets()" title="Creates Payroll Clearing, Applied Labor Burden, Applied Equipment Cost, Applied Overhead and Job Costs if missing, and fills in any blank accounts">Create default offset accounts</button>
+                    </div>
+                    <div id="cost-types-list"></div>
+                </div>
+
+                <div class="settings-section">
                     <h3>Cost Codes</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         The job-costing chart: which part of a job a cost belongs to
@@ -320,10 +341,27 @@ const SettingsPage = {
                             <option value="subcontract">Subcontract</option><option value="equipment">Equipment</option>
                             <option value="other" selected>Other</option>
                         </select>
+                        <select id="new-cc-parent"><option value="">(top level)</option></select>
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.addCostCode()">Add Cost Code</button>
                         <button type="button" class="btn btn-secondary" onclick="SettingsPage.loadStandardCostCodes()" title="CSI MasterFormat divisions + Labor + Equipment Rental">Load standard list</button>
+                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.showCostCodeImport()">Import CSV</button>
                     </div>
                     <div id="cost-codes-list"></div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Equipment</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Owned machines charged to jobs by the hour from a Job Cost Entry. The recovery account is
+                        the credit side (defaults to the equipment cost type's offset).
+                    </div>
+                    <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                        <input type="text" id="new-eq-code" placeholder="Code" style="width:90px;">
+                        <input type="text" id="new-eq-name" placeholder="Name (Skid steer, F-250…)" style="width:220px;">
+                        <input type="number" step="0.01" id="new-eq-rate" placeholder="$/hr" style="width:90px;">
+                        <button type="button" class="btn btn-primary" onclick="SettingsPage.addEquipment()">Add Equipment</button>
+                    </div>
+                    <div id="equipment-list"></div>
                 </div>
 
                 <div class="settings-section">
@@ -989,10 +1027,12 @@ SettingsPage.loadCostCodes = async function () {
             el.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">No cost codes yet. Add your own, or load the standard CSI list.</div>';
             return;
         }
+        const parentSel = document.getElementById('new-cc-parent');
+        if (parentSel) parentSel.innerHTML = '<option value="">(top level)</option>' + codes.filter(c => c.is_active).map(c => `<option value="${c.id}">${'\u00a0\u00a0'.repeat(c.depth || 0)}${escapeHtml(c.label)}</option>`).join('');
         el.innerHTML = `<div class="table-container"><table>
             <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Default account</th><th>Status</th><th>Actions</th></tr></thead>
             <tbody>` + codes.map(c => `<tr>
-                <td><code>${escapeHtml(c.code)}</code></td>
+                <td style="padding-left:${8 + (c.depth || 0) * 16}px">${c.depth ? '<span style="color:#aaa">└ </span>' : ''}<code>${escapeHtml(c.code)}</code></td>
                 <td>${escapeHtml(c.name)}</td>
                 <td>${escapeHtml(c.cost_type)}</td>
                 <td>${escapeHtml(c.account_name || '')}</td>
@@ -1011,9 +1051,10 @@ SettingsPage.addCostCode = async function () {
     const code = (document.getElementById('new-cc-code')?.value || '').trim();
     const name = (document.getElementById('new-cc-name')?.value || '').trim();
     const cost_type = document.getElementById('new-cc-type')?.value || 'other';
+    const parentVal = document.getElementById('new-cc-parent')?.value;
     if (!code || !name) { toast('Enter a code and a name', 'error'); return; }
     try {
-        await API.post('/cost-codes', { code, name, cost_type });
+        await API.post('/cost-codes', { code, name, cost_type, parent_id: parentVal ? parseInt(parentVal) : null });
         document.getElementById('new-cc-code').value = '';
         document.getElementById('new-cc-name').value = '';
         toast('Cost code added');
@@ -1046,3 +1087,166 @@ SettingsPage.toggleCostCode = async function (id, active) {
         SettingsPage.loadCostCodes();
     } catch (err) { toast(err.message, 'error'); }
 };
+
+SettingsPage.showCostCodeImport = function () {
+    openModal('Import Cost Codes', `
+        <p style="font-size:12px;margin:0 0 8px 0">Paste CSV rows as <code>code,name,cost_type,parent_code</code> (header optional). Existing codes are updated, parents linked afterwards, so order doesn't matter.</p>
+        <textarea id="cc-import-csv" rows="12" style="width:100%;font-family:monospace;font-size:12px" placeholder="03,Concrete,subcontract,
+03-300,Cast-in-place concrete,subcontract,03
+03-310,Footings,subcontract,03-300"></textarea>
+        <div class="form-actions">
+            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="SettingsPage.importCostCodes()">Import</button>
+        </div>`);
+};
+
+SettingsPage.importCostCodes = async function () {
+    const csv = document.getElementById('cc-import-csv')?.value || '';
+    if (!csv.trim()) { toast('Paste some rows first', 'error'); return; }
+    try {
+        const r = await API.post('/cost-codes/import', { csv });
+        toast(`${r.created} created, ${r.updated} updated${r.errors.length ? `, ${r.errors.length} skipped: ${r.errors[0]}` : ''}`, r.errors.length ? 'error' : undefined);
+        closeModal();
+        SettingsPage.loadCostCodes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+// --- Cost types (Settings > Cost Types) ----------------------------------
+SettingsPage._accountsCache = null;
+SettingsPage._accountOptions = async function (selected) {
+    if (!SettingsPage._accountsCache) { try { SettingsPage._accountsCache = await API.get('/accounts'); } catch (e) { SettingsPage._accountsCache = []; } }
+    return '<option value="">--</option>' + SettingsPage._accountsCache.map(a => `<option value="${a.id}" ${selected === a.id ? 'selected' : ''}>${escapeHtml((a.account_number ? a.account_number + ' ' : '') + a.name)}</option>`).join('');
+};
+
+SettingsPage.loadCostTypes = async function () {
+    const el = document.getElementById('cost-types-list');
+    if (!el) return;
+    try {
+        const types = await API.get('/cost-types?include_inactive=true');
+        const rows = [];
+        for (const t of types) {
+            rows.push(`<tr data-ct="${t.id}">
+                <td><code>${escapeHtml(t.code)}</code></td>
+                <td><input class="ct-name" value="${escapeHtml(t.name)}" style="width:130px"></td>
+                <td style="text-align:center"><input type="checkbox" class="ct-labor" ${t.is_labor ? 'checked' : ''}></td>
+                <td><input type="number" step="0.01" class="ct-burden" value="${t.burden_pct ?? ''}" style="width:70px" placeholder="%"></td>
+                <td><select class="ct-default">${await SettingsPage._accountOptions(t.default_account_id)}</select></td>
+                <td><select class="ct-offset">${await SettingsPage._accountOptions(t.offset_account_id)}</select></td>
+                <td><select class="ct-burden-offset">${await SettingsPage._accountOptions(t.burden_offset_account_id)}</select></td>
+                <td class="actions">
+                    <button type="button" class="btn btn-sm btn-primary" onclick="SettingsPage.saveCostType(${t.id})">Save</button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.toggleCostType(${t.id}, ${!t.is_active})">${t.is_active ? 'Deactivate' : 'Activate'}</button>
+                </td>
+            </tr>`);
+        }
+        el.innerHTML = `<div class="table-container"><table style="font-size:12px">
+            <thead><tr><th>Code</th><th>Name</th><th>Labor?</th><th>Burden %</th><th>Cost account</th><th>Offset account</th><th>Burden offset</th><th>Actions</th></tr></thead>
+            <tbody>${rows.join('')}</tbody></table></div>`;
+    } catch (err) {
+        el.innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
+    }
+};
+
+SettingsPage.saveCostType = async function (id) {
+    const tr = document.querySelector(`[data-ct="${id}"]`);
+    if (!tr) return;
+    const sel = cls => { const v = tr.querySelector(cls)?.value; return v ? parseInt(v) : null; };
+    const burden = tr.querySelector('.ct-burden')?.value;
+    try {
+        await API.put(`/cost-types/${id}`, {
+            name: tr.querySelector('.ct-name').value.trim(),
+            is_labor: tr.querySelector('.ct-labor').checked,
+            burden_pct: burden === '' ? null : parseFloat(burden),
+            default_account_id: sel('.ct-default'),
+            offset_account_id: sel('.ct-offset'),
+            burden_offset_account_id: sel('.ct-burden-offset'),
+        });
+        toast('Cost type saved');
+        SettingsPage.loadCostTypes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.addCostType = async function () {
+    const code = (document.getElementById('new-ct-code')?.value || '').trim();
+    const name = (document.getElementById('new-ct-name')?.value || '').trim();
+    const is_labor = !!document.getElementById('new-ct-labor')?.checked;
+    if (!code || !name) { toast('Enter a code and a name', 'error'); return; }
+    try {
+        await API.post('/cost-types', { code, name, is_labor });
+        document.getElementById('new-ct-code').value = '';
+        document.getElementById('new-ct-name').value = '';
+        toast('Cost type added');
+        SettingsPage.loadCostTypes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.toggleCostType = async function (id, active) {
+    try {
+        await API.put(`/cost-types/${id}`, { is_active: active });
+        SettingsPage.loadCostTypes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.setupOffsets = async function () {
+    try {
+        await API.post('/cost-types/setup-offsets', {});
+        SettingsPage._accountsCache = null;
+        toast('Offset accounts ready — job cost entries and time postings can post');
+        SettingsPage.loadCostTypes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+// --- Equipment (Settings > Equipment) ------------------------------------
+SettingsPage.loadEquipment = async function () {
+    const el = document.getElementById('equipment-list');
+    if (!el) return;
+    try {
+        const list = await API.get('/equipment?include_inactive=true');
+        if (!list.length) { el.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">No equipment yet.</div>'; return; }
+        el.innerHTML = `<div class="table-container"><table>
+            <thead><tr><th>Code</th><th>Name</th><th class="amount">$/hr</th><th>Cost code</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>` + list.map(q => `<tr>
+                <td><code>${escapeHtml(q.code || '')}</code></td>
+                <td>${escapeHtml(q.name)}</td>
+                <td class="amount">${formatCurrency(q.hourly_rate)}</td>
+                <td>${escapeHtml(q.cost_code_label || '')}</td>
+                <td>${q.is_active ? 'Active' : 'Inactive'}</td>
+                <td class="actions">
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.rateEquipment(${q.id})">Set rate</button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.toggleEquipment(${q.id}, ${!q.is_active})">${q.is_active ? 'Deactivate' : 'Activate'}</button>
+                </td>
+            </tr>`).join('') + `</tbody></table></div>`;
+    } catch (err) {
+        el.innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
+    }
+};
+
+SettingsPage.addEquipment = async function () {
+    const code = (document.getElementById('new-eq-code')?.value || '').trim();
+    const name = (document.getElementById('new-eq-name')?.value || '').trim();
+    const rate = parseFloat(document.getElementById('new-eq-rate')?.value) || 0;
+    if (!name) { toast('Enter a name', 'error'); return; }
+    try {
+        await API.post('/equipment', { code: code || null, name, hourly_rate: rate });
+        document.getElementById('new-eq-name').value = '';
+        toast('Equipment added');
+        SettingsPage.loadEquipment();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.rateEquipment = async function (id) {
+    const v = prompt('Hourly rate:');
+    if (v === null) return;
+    try {
+        await API.put(`/equipment/${id}`, { hourly_rate: parseFloat(v) || 0 });
+        SettingsPage.loadEquipment();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.toggleEquipment = async function (id, active) {
+    try {
+        await API.put(`/equipment/${id}`, { is_active: active });
+        SettingsPage.loadEquipment();
+    } catch (err) { toast(err.message, 'error'); }
+};
+

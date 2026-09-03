@@ -127,6 +127,7 @@ const EstimatesPage = {
         if (id) est = await API.get(`/estimates/${id}`);
         const classGroup = await classFormGroupHtml(est.class_id);
         const jobGroup = await jobFormGroupHtml(est.job_id, 'est-customer-select');
+        await CostCodes.load();
         if (est.lines.length === 0) est.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
 
         EstimatesPage.lineCount = est.lines.length;
@@ -162,7 +163,7 @@ const EstimatesPage = {
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th>Item</th><th>Description</th><th class="col-qty">Qty</th>
+                        <th>Item</th><th>Description</th>${CostCodes.headHtml()}<th title='Unit cost (budget side)'>Cost</th><th class="col-qty">Qty</th>
                         <th class="col-rate">Rate</th><th class="col-amount">Amount</th><th class="col-actions"></th>
                     </tr></thead>
                     <tbody id="est-lines">
@@ -192,6 +193,8 @@ const EstimatesPage = {
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
+            ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}
+            <td><input class="line-unit-cost" type="number" step="0.01" value="${line.unit_cost ?? ''}" placeholder="cost" title="Unit cost (budget side); rate is what you charge"></td>
             <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" onclick="EstimatesPage.removeLine(${idx})">X</button></td>
@@ -249,6 +252,8 @@ const EstimatesPage = {
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                cost_code_id: CostCodes.fromRow(row, 'line-cost-code'),
+                unit_cost: row.querySelector('.line-unit-cost')?.value ? parseFloat(row.querySelector('.line-unit-cost').value) : null,
                 line_order: i,
             });
         });

@@ -28,7 +28,46 @@ def _resp(entry: TimeEntry) -> TimeEntryResponse:
     r = TimeEntryResponse.model_validate(entry)
     if entry.employee:
         r.employee_name = entry.employee.full_name
+    if entry.job_id and entry.job:
+        r.job_name = entry.job.full_name
+    if entry.cost_code_id and entry.cost_code:
+        r.cost_code_label = entry.cost_code.label
     return r
+
+
+class PostToJobRequest(BaseModel):
+    ids: list[int]
+
+
+@router.post("/post-to-job")
+def post_entries_to_job(data: PostToJobRequest, db: Session = Depends(get_db)):
+    """Post several approved time entries to their jobs as labor cost (one
+    Job Cost Entry each). Returns per-entry results; nothing is rolled
+    back for a single failure, so the caller sees exactly what posted."""
+    from app.services.job_costing import post_time_entry_to_job
+
+    results = []
+    for entry_id in data.ids:
+        entry = db.get(TimeEntry, entry_id)
+        if not entry:
+            results.append({"id": entry_id, "ok": False, "error": "not found"})
+            continue
+        try:
+            jc = post_time_entry_to_job(db, entry)
+            db.commit()
+            results.append(
+                {
+                    "id": entry_id,
+                    "ok": True,
+                    "job_cost_id": jc.id,
+                    "number": jc.number,
+                    "total": float(jc.total),
+                }
+            )
+        except ValueError as exc:
+            db.rollback()
+            results.append({"id": entry_id, "ok": False, "error": str(exc)})
+    return {"results": results, "posted": sum(1 for r in results if r["ok"])}
 
 
 @router.get("", response_model=list[TimeEntryResponse])
@@ -129,6 +168,28 @@ def approve_time_entry(
     db.commit()
     db.refresh(entry)
     return _resp(entry)
+
+
+@router.post("/{entry_id}/post-to-job")
+def post_entry_to_job(entry_id: int, db: Session = Depends(get_db)):
+    """Post one approved time entry to its job as labor cost at the
+    employee's loaded rate, with burden as its own line."""
+    from app.services.job_costing import post_time_entry_to_job
+
+    entry = db.get(TimeEntry, entry_id)
+    if not entry:
+        raise HTTPException(status_code=404, detail="Time entry not found")
+    try:
+        jc = post_time_entry_to_job(db, entry)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    db.commit()
+    return {
+        "id": entry.id,
+        "job_cost_id": jc.id,
+        "number": jc.number,
+        "total": float(jc.total),
+    }
 
 
 @router.post("/{entry_id}/reject", response_model=TimeEntryResponse)

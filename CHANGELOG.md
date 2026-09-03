@@ -27,6 +27,45 @@ closed, not awarded), job number, type, dates, site address and contract
 amount, so the detail can show billed-vs-contract. A job with posted
 activity is never deleted — mark it inactive and it leaves the pickers.
 
+**The cost model: drill-down, every kind of cost, burden, budgets and
+variance (milestone 3).** Feedback from the first lap was that jobs
+existed but there was no way to drill down or to get the extra and
+edge-case costs onto them. Now:
+
+- **Cost codes nest** (division › code › sub-code, any depth) with roll-ups
+  at every level, your own numbering, and a CSV import
+  (`code,name,cost_type,parent_code`). **Cost types are yours to edit** —
+  add permits, bonding, warranty, split labor — each with a burden % and
+  the accounts it posts through.
+- **Job Cost Entry**, a new document for costs that aren't a bill:
+  internal labor at an employee's loaded rate, owned-equipment hours from
+  an Equipment list, mileage, small tools, burden, corrections. It debits
+  job cost (tagged to job, code and type) and credits an offset account
+  (payroll clearing, applied equipment, applied overhead) — the applied-
+  cost pattern, so the company P&L is unchanged while every job carries
+  its share. Settings → Cost Types → **Create default offset accounts**
+  sets all of that up in one click. **Allocate a Cost** spreads one amount
+  across jobs by labor hours, revenue, costs, equally, or by weights.
+- **Time entries post to jobs.** Employees get a job cost rate and a burden
+  %; approved time tagged to a job posts as labor cost at that rate
+  (overtime at 1.5×, double-time at 2×) with the burden as its own line,
+  one click from the time list or the job's Time tab.
+- **Budgets and variance.** Each job carries a budget per cost code (or
+  per type, or whole-job), seeded from an estimate — estimate lines gained
+  a cost code and a unit cost, so cost = qty × unit cost and revenue = the
+  line amount — or typed in. The job page shows, at every level, the
+  columns contractors read weekly: Original, Changes, Budget, Committed,
+  Actual, Projected (actual + committed), Variance (budget − projected),
+  % Used, and estimated vs actual revenue.
+- **The job page** replaces the modal: Overview (headline figures and a
+  by-type table), Cost Detail (the expandable tree — type › division ›
+  code › sub-code › posted lines, each line opening its bill, invoice,
+  expense, journal entry or job cost), Budget, Transactions and Time tabs,
+  with a period filter and a job-to-date default. A **Job Budget vs
+  Actual** report lists every job's headline figures.
+- Also fixed on the way: the Time Entry form was sending hours under the
+  wrong field names, so every entry saved with zero hours.
+
 **Cost codes, billable costs and committed cost (milestone 2).** Settings
 gained a **Cost Codes** chart — which part of a job a cost belongs to ("03
 Concrete", "26 Electrical"), each with a cost type (labor, material,

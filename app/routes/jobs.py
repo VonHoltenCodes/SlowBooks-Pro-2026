@@ -15,8 +15,10 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models.contacts import Customer
+from app.models.cost_codes import CostCode
 from app.models.jobs import Job
 from app.models.transactions import Transaction, TransactionLine
+from app.schemas.job_costing import JobBudgetResponse, JobBudgetSave
 from app.schemas.jobs import (
     JobCreate,
     JobDetailResponse,
@@ -24,11 +26,17 @@ from app.schemas.jobs import (
     JobSummary,
     JobUpdate,
 )
+from app.models.estimates import Estimate
+from app.models.job_costing import JobBudget
+from app.services.job_costing import (
+    budget_vs_actual_all_jobs,
+    budgets_from_estimate,
+    cost_type_map,
+    job_cost_tree,
+)
 from app.services.jobs_service import (
-    NO_JOB_LABEL,
     committed_cost,
     find_job,
-    job_cost_by_code,
     job_profitability,
     job_transactions,
 )
@@ -98,6 +106,20 @@ def jobs_profitability(
     return rows
 
 
+@router.get("/budget-vs-actual")
+def jobs_budget_vs_actual(
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    customer_id: Optional[int] = None,
+    include_inactive: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Headline budget / committed / actual / projected / variance per job."""
+    return budget_vs_actual_all_jobs(
+        db, start_date, end_date, customer_id, include_inactive
+    )
+
+
 @router.get("/{job_id}", response_model=JobDetailResponse)
 def get_job(job_id: int, db: Session = Depends(get_db)):
     job = _get(db, job_id)
@@ -121,18 +143,6 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     return JobDetailResponse(**base.model_dump(), summary=JobSummary(**summary))
 
 
-@router.get("/{job_id}/cost-codes")
-def get_job_cost_by_code(
-    job_id: int,
-    start_date: Optional[date] = Query(default=None),
-    end_date: Optional[date] = Query(default=None),
-    db: Session = Depends(get_db),
-):
-    """Job costs grouped by cost code (and cost type)."""
-    _get(db, job_id)
-    return job_cost_by_code(db, job_id, start_date, end_date)
-
-
 @router.get("/{job_id}/transactions")
 def get_job_transactions(
     job_id: int,
@@ -142,6 +152,107 @@ def get_job_transactions(
 ):
     _get(db, job_id)
     return job_transactions(db, job_id, start_date, end_date)
+
+
+@router.get("/{job_id}/cost-tree")
+def get_job_cost_tree(
+    job_id: int,
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """The drill-down: cost types → cost-code tree → posted lines, every
+    level with budget / committed / actual / projected / variance."""
+    _get(db, job_id)
+    return job_cost_tree(db, job_id, start_date, end_date)
+
+
+def _budget_response(row: JobBudget) -> JobBudgetResponse:
+    data = JobBudgetResponse.model_validate(row)
+    data.cost_code_label = row.cost_code.label if row.cost_code else None
+    return data
+
+
+@router.get("/{job_id}/budgets", response_model=list[JobBudgetResponse])
+def get_job_budgets(job_id: int, db: Session = Depends(get_db)):
+    _get(db, job_id)
+    rows = (
+        db.query(JobBudget)
+        .options(joinedload(JobBudget.cost_code))
+        .filter(JobBudget.job_id == job_id)
+        .all()
+    )
+    return [_budget_response(r) for r in rows]
+
+
+@router.put("/{job_id}/budgets", response_model=list[JobBudgetResponse])
+def save_job_budgets(job_id: int, data: JobBudgetSave, db: Session = Depends(get_db)):
+    """Replace the job's MANUAL budget rows with the given set (estimate-
+    seeded rows are kept unless the same key is supplied, which then takes
+    over as manual). Zero-amount rows are dropped."""
+    _get(db, job_id)
+    types = cost_type_map(db)
+    existing = {
+        (r.cost_code_id, r.cost_type): r
+        for r in db.query(JobBudget).filter(JobBudget.job_id == job_id).all()
+    }
+    keep: set = set()
+    for row in data.rows:
+        if row.cost_type and row.cost_type not in types:
+            raise HTTPException(
+                status_code=422, detail=f"Unknown cost type '{row.cost_type}'"
+            )
+        if row.cost_code_id and not db.get(CostCode, row.cost_code_id):
+            raise HTTPException(status_code=404, detail="Cost code not found")
+        key = (row.cost_code_id, row.cost_type)
+        if row.amount == 0 and row.revenue_amount == 0:
+            continue
+        keep.add(key)
+        cur = existing.get(key)
+        if cur:
+            cur.amount, cur.revenue_amount, cur.notes = (
+                row.amount,
+                row.revenue_amount,
+                row.notes,
+            )
+            cur.source = "manual"
+        else:
+            db.add(
+                JobBudget(
+                    job_id=job_id,
+                    cost_code_id=row.cost_code_id,
+                    cost_type=row.cost_type,
+                    amount=row.amount,
+                    revenue_amount=row.revenue_amount,
+                    notes=row.notes,
+                    source="manual",
+                )
+            )
+    for key, cur in existing.items():
+        if key not in keep and cur.source == "manual":
+            db.delete(cur)
+    db.commit()
+    return get_job_budgets(job_id, db)
+
+
+@router.post(
+    "/{job_id}/budgets/from-estimate/{estimate_id}",
+    response_model=list[JobBudgetResponse],
+)
+def seed_budget_from_estimate(
+    job_id: int, estimate_id: int, db: Session = Depends(get_db)
+):
+    job = _get(db, job_id)
+    est = db.get(Estimate, estimate_id)
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    if est.customer_id != job.customer_id:
+        raise HTTPException(
+            status_code=422, detail="Estimate belongs to a different customer"
+        )
+    budgets_from_estimate(db, job, est)
+    db.commit()
+    return get_job_budgets(job_id, db)
 
 
 @router.post("", response_model=JobResponse, status_code=201)
@@ -187,6 +298,3 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     db.delete(job)
     db.commit()
     return {"message": "Job deleted"}
-
-
-__all__ = ["router", "NO_JOB_LABEL"]

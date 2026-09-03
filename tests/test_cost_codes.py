@@ -174,14 +174,14 @@ def test_bill_and_expense_lines_carry_cost_code_and_billable(
     )
     assert exp.status_code in (200, 201), exp.text
 
-    by_code = client.get(f"/api/jobs/{job['id']}/cost-codes").json()
-    rows = {r["label"]: r for r in by_code}
-    assert (
-        rows["06 Wood"]["cost"] == 300.0 and rows["06 Wood"]["cost_type"] == "material"
-    )
-    assert rows["L Labor"]["cost"] == 500.0 and rows["L Labor"]["cost_type"] == "labor"
-    assert rows["No cost code"]["cost"] == 40.0
-    total_by_code = sum(r["cost"] for r in by_code)
+    # The drill-down tree carries the same figures, by cost type and code
+    tree = client.get(f"/api/jobs/{job['id']}/cost-tree").json()
+    by_type = {t["cost_type"]: t for t in tree["types"]}
+    wood = by_type["material"]["codes"][0]
+    assert wood["code"] == "06" and wood["figures"]["actual"] == 300.0
+    assert by_type["labor"]["codes"][0]["figures"]["actual"] == 500.0
+    assert by_type["other"]["uncoded"]["figures"]["actual"] == 40.0
+    total_by_code = tree["totals"]["actual"]
     detail = client.get(f"/api/jobs/{job['id']}").json()
     assert abs(total_by_code - detail["summary"]["total_costs"]) < 0.005
 

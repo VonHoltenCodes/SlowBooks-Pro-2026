@@ -26,7 +26,8 @@ from sqlalchemy.orm import relationship
 
 from app.database import Base
 
-COST_TYPES = ("labor", "material", "subcontract", "equipment", "other")
+# Cost types live in the cost_types table (app/models/job_costing.py); a
+# code's cost_type is that table's `code` key.
 
 
 class CostCode(Base):
@@ -37,6 +38,8 @@ class CostCode(Base):
     name = Column(String(200), nullable=False)
     cost_type = Column(String(20), nullable=False, default="other")
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    # Hierarchy: division > code > sub-code, any depth
+    parent_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
 
@@ -46,6 +49,7 @@ class CostCode(Base):
     )
 
     account = relationship("Account")
+    parent = relationship("CostCode", remote_side="CostCode.id", backref="children")
 
     @property
     def label(self) -> str:

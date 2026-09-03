@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, server-edition, feat/receipt-intake, "claude/**", "se/**"]
+    branches: [main, server-edition, feat/receipt-intake, feat/projects, "claude/**", "se/**"]
   pull_request:
     branches: [main, server-edition, feat/receipt-intake]
 

@@ -84,7 +84,8 @@ rewrite.
 |---|---|---|
 | M1 | line dimensions · `jobs` table + API · posting carries job to every line · job pickers on invoice / bill / expense / card charge / estimate / journal · Jobs page + Customer Center jobs · **Job Profitability** report reconciling to the P&L · IIF + QBO `Customer:Job` split | built 2026-09-03 (301d480) |
 | M2 | cost codes + cost types · job cost detail by code · PO committed cost · billable flags on cost lines (bill lines, expenses; `billed_invoice_line_id` reserved for M3) | built 2026-09-03 |
-| M3 | estimate lines by cost code · change orders · progress invoicing · unbilled time & costs → invoice · retainage | next |
+| M3 | **reshaped after the first lap** ("low customizability, no drill-down, no extra costs, no burden"): cost-code tree + CSV import · editable cost types w/ burden & accounts · Job Cost Entry (labor at loaded rate, equipment hours, mileage, burden, corrections) · allocations · time → job labor cost · employee cost rate/burden · budgets (per code / type / job, seeded from estimate incl. unit cost) · drill-down job page w/ Procore/QB columns · Job Budget vs Actual report | built 2026-09-03 |
+| M3b | change orders (budget "changes" column is ready for them) · progress invoicing · unbilled time & costs → invoice (billable flag + `billed_invoice_line_id` ready) · retainage | next |
 | M4 | time entries → jobs, employee cost rates, payroll burden distribution (needs benefits-engine seam) | |
 | M5 | WIP schedule, over/under billing, estimates vs actuals, job cost by vendor · exporters write jobs/classes | |
 
@@ -143,3 +144,31 @@ lesson: synthetic inputs hide every real fault).
 - **Invoice and estimate lines** accept `cost_code_id` through the API
   (revenue by code for estimates vs actuals); the line UI for them is part
   of M3's estimate rework.
+
+## M3 decisions (2026-09-03)
+
+- **Column vocabulary** follows Procore's standard budget view and QuickBooks
+  Desktop's Estimates vs Actuals (researched 2026-09-03): Original ·
+  Changes · Revised (Budget) · Committed (open POs) · Actual (JTD) ·
+  Projected (= actual + committed) · Variance (= revised − projected,
+  positive = under) · % Used · Est. Revenue · Act. Revenue. "Changes" is
+  the slot change orders fill in M3b (`job_budgets.source = "change"`).
+- **Applied-cost pattern for non-bill costs.** A Job Cost Entry debits the
+  cost account (tagged to the job) and credits an offset that is *not*
+  tagged, so the credit lands in "No job" and Job Profitability still
+  totals to the P&L. Offsets: Payroll Clearing (labor), Applied Labor
+  Burden, Applied Equipment Cost, Applied Overhead; `setup-offsets` creates
+  them (keeping the suggested number only if the chart hasn't used it) and
+  never overrides a choice already made.
+- **Labor cost rate** = employee cost_rate, else pay rate (salary ÷ 2080);
+  OT × 1.5, DT × 2; burden % = employee's, else the labor type's. Only
+  submitted/approved entries post, once each (`time_entries.job_cost_id`).
+- **Budgets have no period** (a budget is a job-to-date number); actuals
+  honour the period filter. Estimate-seeded rows are replaced on re-seed;
+  rows edited by hand become `manual` and survive.
+- **Cost types stay a string key** on cost codes / lines (`cost_types.code`),
+  validated against the table by the routes, so the earlier `cost_type`
+  column needed no migration.
+- **Routes with a parameter**: `App.navigate` now matches `/jobs/:id`, so
+  the job page is a real page (bookmarkable), not a modal.
+

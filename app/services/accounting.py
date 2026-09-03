@@ -74,6 +74,17 @@ def due_date_from_terms(
     return txn_date + timedelta(days=days)
 
 
+def _cost_type_of(db: Session, cost_code_id) -> str | None:
+    """The cost type a coded line belongs to, so job roll-ups by type never
+    have to re-join the code table."""
+    if not cost_code_id:
+        return None
+    from app.models.cost_codes import CostCode
+
+    code = db.get(CostCode, cost_code_id)
+    return code.cost_type if code else None
+
+
 def create_journal_entry(
     db: Session,
     txn_date: date,
@@ -151,6 +162,8 @@ def create_journal_entry(
             job_id=line_data.get("job_id") or job_id,
             class_id=line_data.get("class_id") or class_id,
             cost_code_id=line_data.get("cost_code_id"),
+            cost_type=line_data.get("cost_type")
+            or _cost_type_of(db, line_data.get("cost_code_id")),
             is_billable=bool(line_data.get("is_billable", False)),
         )
         db.add(txn_line)

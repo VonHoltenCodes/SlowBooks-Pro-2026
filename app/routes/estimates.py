@@ -129,6 +129,8 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             amount=_q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))),
             class_name=line_data.class_name,
             job_id=line_data.job_id,
+            cost_code_id=line_data.cost_code_id,
+            unit_cost=line_data.unit_cost,
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -172,6 +174,7 @@ def update_estimate(
                 class_name=line_data.class_name,
                 job_id=line_data.job_id,
                 cost_code_id=line_data.cost_code_id,
+                unit_cost=line_data.unit_cost,
                 line_order=line_data.line_order or i,
             )
             db.add(line)

@@ -594,4 +594,9 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 - Cost codes (Settings → Cost Codes; CSI MasterFormat loader) with cost
   types; per-line on bills, expenses, POs, journal entries; job costs by
   code; billable flag on cost lines; committed cost from open POs.
+- Job cost model: nested cost codes with CSV import, editable cost types with
+  burden and offset accounts, Job Cost Entries (labor, equipment, mileage,
+  burden, allocations), time posted to jobs at loaded cost, budgets per code
+  seeded from estimates, drill-down job page (budget / committed / actual /
+  projected / variance), Job Budget vs Actual report.
 

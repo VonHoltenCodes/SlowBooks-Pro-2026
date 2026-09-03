@@ -38,6 +38,9 @@ class TimeEntryResponse(BaseModel):
     project_id: Optional[int] = None
     job_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    job_name: Optional[str] = None
+    cost_code_label: Optional[str] = None
+    job_cost_id: Optional[int] = None
     notes: Optional[str] = None
     status: str
     approved_by: Optional[str] = None
