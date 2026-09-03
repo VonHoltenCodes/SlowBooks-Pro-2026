@@ -562,14 +562,16 @@ def parse_date(text: str) -> Optional[str]:
             d, y = int(m.group(2)), int(m.group(3))
             if _valid_date(y, mo, d):
                 return f"{y:04d}-{mo:02d}-{d:02d}"
-        # "14 Aug 2026"
-        m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})\b", line)
-        if m and m.group(2).lower() in _MONTH_NAMES:
+        # "14 Aug 2026", "28 Mar 18", "05-JAN-2017", "02/JAN/2017"
+        m = re.search(r"\b(\d{1,2})[\s/-]+([A-Za-z]{3,9})[\s/-]+(\d{2,4})\b", line)
+        if m and m.group(2).lower() in _MONTH_NAMES and len(m.group(3)) in (2, 4):
             d, mo, y = (
                 int(m.group(1)),
                 _MONTH_NAMES[m.group(2).lower()],
                 int(m.group(3)),
             )
+            if y < 100:
+                y += 2000
             if _valid_date(y, mo, d):
                 return f"{y:04d}-{mo:02d}-{d:02d}"
     return None

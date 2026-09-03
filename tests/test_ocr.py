@@ -748,6 +748,10 @@ def test_parse_date_day_first_and_dotted_forms():
     # Both readings valid → US ordering still wins.
     assert parse_date("12/02/17") == "2017-12-02"
     assert parse_date("2018-02-14") == "2018-02-14"
+    # Month names with a two-digit year or dashes/slashes (SROIE lap picks).
+    assert parse_date("Chk 8660 Guest0\n28 Mar 18 18:32:36") == "2018-03-28"
+    assert parse_date("Date: 05-JAN-2017") == "2017-01-05"
+    assert parse_date("02/JAN/2017") == "2017-01-02"
     # Not dates: phone numbers, times, bare digit runs, mixed separators.
     assert parse_date("Tel: 03-2164 1400") is None
     assert parse_date("1-630-423-2040") is None

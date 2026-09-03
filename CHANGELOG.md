@@ -121,7 +121,8 @@ word sits after the number on the same line.
 **Day-first dates parse.** `14-02-2018`, `14/02/2018`, `14.02.18` — any
 numeric date whose US reading is impossible — now resolves day-first
 (US ordering still wins when both readings are valid, so `12/02/17` is
-December 2). A date box that reads something the parser cannot turn into
+December 2), and month-name dates accept a two-digit year or dashes
+(`28 Mar 18`, `05-JAN-2017`). A date box that reads something the parser cannot turn into
 a date no longer reports "applied to the form" while the date input
 stays empty; it says what it read and asks for a redraw or a manual
 entry.
