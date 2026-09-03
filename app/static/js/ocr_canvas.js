@@ -77,7 +77,7 @@ const OcrCanvas = {
             </div>
             <div id="ocr-field-picker" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;">
                 <span id="ocr-picker-hint" style="font-size:11px; min-width:120px;">Drag a box, then tap a field:</span>
-                ${['total', 'tax', 'subtotal', 'date', 'merchant'].map(k => `
+                ${Object.keys(this.FIELD_LABELS).map(k => `
                 <button type="button" class="btn btn-sm ocr-pick" data-key="${k}"
                     style="--pick-stroke:${this.FIELD_COLORS[k].stroke}; --pick-fill:${this.FIELD_COLORS[k].fill}; --pick-ink:${this.FIELD_COLORS[k].ink}; --pick-dark:${this.FIELD_COLORS[k].dark};"
                     onclick="OcrCanvas.pick('${k}')">${this.FIELD_LABELS[k]}</button>`).join('')}

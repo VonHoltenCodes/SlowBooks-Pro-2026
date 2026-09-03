@@ -424,7 +424,9 @@ for _num, _names in enumerate(
 # A currency amount: optional $, thousands separators, exactly two decimals.
 # The (?!\s*%) guard stops a percentage like "(7.25%)" being read as an
 # amount on a tax line.
-_AMOUNT_RE = re.compile(r"\$?\s?\d{1,3}(?:,\d{3})*\.\d{2}(?!\s*%)")
+# Two decimals exactly: "7.000 %" (Walmart's tax-RATE line) must not read
+# as 7.00 — a third decimal or a trailing % marks a rate, not money.
+_AMOUNT_RE = re.compile(r"\$?\s?\d{1,3}(?:,\d{3})*\.\d{2}(?!\d|\s*%)")
 
 # "total" as OCR actually renders it — Tesseract on real thermal receipts
 # gives "Tatal", "Totel", "Tota!" (corpus eval, 2026-09-02).  \b keeps
@@ -547,11 +549,27 @@ def _numeric_date(line: str) -> Optional[str]:
     return None
 
 
+# A date that is not the purchase date: return-policy windows ("purchases
+# made on or after 9/15/2020" — Whole Foods, US corpus), validity/expiry
+# lines, promotions.  Such a line is skipped even when it is the first
+# date on the receipt; the transaction date usually sits near the total or
+# at the very bottom on US register tape.
+_DATE_SKIP_RE = re.compile(
+    r"on\s+or\s+(?:after|before)|\breturns?\b|\brefunds?\b|\bexchanges?\b"
+    r"|valid\s+(?:thru|through|until|till|from)|\bexpir|\bexp\.?\s*date"
+    r"|\boffer\b|\bcoupon|\bsurvey|\bsweepstakes|\bpromotion",
+    re.IGNORECASE,
+)
+
+
 def parse_date(text: str) -> Optional[str]:
     """First parseable date in the text (receipts print the purchase date
-    near the top), US-first ordering, ISO YYYY-MM-DD out."""
+    near the top), US-first ordering, ISO YYYY-MM-DD out.  Lines that
+    talk about a return window, validity or a promotion are skipped."""
     for line in text.splitlines():
         line = line.strip()
+        if _DATE_SKIP_RE.search(line):
+            continue
         iso = _numeric_date(line)
         if iso:
             return iso
@@ -727,12 +745,32 @@ _REF_SKIP_RE = re.compile(
 )
 
 
+# Walmart's transaction code: "TC# 3041 7466 0669 7952 272" — the number
+# printed under the barcode that identifies the receipt (returns, Walmart
+# Pay lookups).  Spaced groups, so it needs its own pattern.
+_TC_RE = re.compile(r"\bTC\s*#?\s*[:.]?\s*((?:\d{3,4}\s+){2,6}\d{2,4}|\d{12,24})\b")
+# The card terminal's own block: "REF # 712400283994" next to "APPR CODE",
+# "NETWORK ID", "TERMINAL #" is the authorization reference, not the
+# receipt number (Walmart, US corpus).
+_CARD_BLOCK_RE = re.compile(
+    r"appr(?:oval)?\.?\s*code|auth(?:orization)?\.?\s*(?:code|no|#)|network\s*id"
+    r"|terminal\s*#|\baid\s*:|\bmid\s*:|\btid\s*:|entry\s+method|chip\s+read",
+    re.I,
+)
+_REF_LABEL_ONLY_RE = re.compile(r"\bref(?:erence)?\b", re.I)
+
+
 def parse_reference(text: str) -> Optional[str]:
     """The vendor's own document number ("Invoice No: 7011", "Receipt #
     A-1187") — what goes in Bill # / Reference so the same receipt can't
     be entered twice. Labeled numbers only: a bare digit run is as likely
     a registration or phone number."""
-    for line in (ln.strip() for ln in text.splitlines()):
+    lines = [ln.strip() for ln in text.splitlines()]
+    for line in lines:
+        m = _TC_RE.search(line)
+        if m:
+            return re.sub(r"\s+", " ", m.group(1))[:40]
+    for i, line in enumerate(lines):
         m = _REF_LABEL_RE.search(line) if line else None
         if not m:
             continue
@@ -740,6 +778,11 @@ def parse_reference(text: str) -> Optional[str]:
         # it introduces — "INV No.: 593101 Pax(s): 2" is still an invoice.
         if _REF_SKIP_RE.search(line[: m.start()]):
             continue
+        if _REF_LABEL_ONLY_RE.match(line[m.start() :]) and any(
+            _CARD_BLOCK_RE.search(lines[j])
+            for j in range(max(0, i - 2), min(len(lines), i + 3))
+        ):
+            continue  # the card terminal's auth reference, not the receipt
         token = m.group(1).rstrip("/-")
         if not re.search(r"\d", token) or len(token) < 2:
             continue

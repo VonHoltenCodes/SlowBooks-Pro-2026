@@ -766,3 +766,57 @@ def test_extract_receipt_carries_reference():
     text = "NEON PULSE TECHSHOP\nInvoice #: NP-2201\nTOTAL 49.13"
     assert extract_receipt(text)["reference"] == "NP-2201"
     assert extract_receipt("SHOP\nTOTAL 1.00")["reference"] is None
+
+
+# ---------------------------------------------------------------------------
+# US register tape (Walmart / Whole Foods, real phone photos, 2026-09-02)
+# ---------------------------------------------------------------------------
+
+WALMART_TEXT = (
+    "Walmart\nSave money. Live better.\n"
+    "ST# 01595 OP# 007573 TE# 07 TR# 08890\n"
+    "SUBTOTAL 25.35\nTAX 1 7.000 % 1.25\nTOTAL 26.60\nDEBIT TEND 26.60\n"
+    "REF # 712400283994\nNETWORK ID. 0069 APPR CODE 868483\n"
+    "TERMINAL # SCO10087\nTC# 3041 7466 0669 7952 272\n05/04/17 14:26:03\n"
+)
+
+
+def test_parse_tax_percent_rate_line_is_not_the_amount():
+    """ "TAX 1 7.000 %" read as tax 7.00 on the build-47 lap: a third
+    decimal or a trailing % is a rate. The amount is the last figure on
+    the line, or the next amount-only line when WinRT splits them."""
+    assert ocr_service.parse_tax(WALMART_TEXT) == ("1.25", "25.35")
+    split = WALMART_TEXT.replace("TAX 1 7.000 % 1.25", "TAX 1 7.000 %\n1.25")
+    assert ocr_service.parse_tax(split) == ("1.25", "25.35")
+    assert ocr_service.parse_tax("SUBTOTAL 25.35\nTAX 1 7.000 %\nTOTAL 26.60\n") == (
+        None,
+        "25.35",
+    )
+    assert ocr_service.parse_total(WALMART_TEXT) == ("26.60", "high")
+
+
+def test_parse_reference_prefers_walmart_tc_over_card_auth_ref():
+    assert ocr_service.parse_reference(WALMART_TEXT) == "3041 7466 0669 7952 272"
+    # No TC# read: the REF # sitting in the card-terminal block is the
+    # authorization reference, not the receipt — leave it blank.
+    no_tc = WALMART_TEXT.replace("TC# 3041 7466 0669 7952 272\n", "")
+    assert ocr_service.parse_reference(no_tc) is None
+    # A plain "Ref #" with no terminal block around it is still a reference.
+    assert ocr_service.parse_reference("SHOP\nRef # 4451\nTOTAL 1.00") == "4451"
+
+
+def test_parse_date_skips_return_policy_and_promo_lines():
+    """Whole Foods prints the return window ("made on or after 9/15/2020")
+    above the transaction date at the bottom of the tape."""
+    text = (
+        "WHOLE FOODS MARKET\nSubtotal : $28.28\nTotal $28.28\n"
+        "Returns will only be accepted on purchases\n"
+        "made on or after 9/15/2020. All returns\n"
+        "908 6387 02/10/2021 07:10 PM\n"
+    )
+    assert ocr_service.parse_date(text) == "2021-02-10"
+    assert (
+        ocr_service.parse_date("Offer valid thru 12/31/2026\nDate 08/14/2026")
+        == "2026-08-14"
+    )
+    assert ocr_service.parse_date("Return by 02/15/2021") is None
