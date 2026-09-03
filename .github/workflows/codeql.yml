@@ -2,7 +2,7 @@ name: "CodeQL"
 
 on:
   push:
-    branches: [main]
+    branches: [main, feat/projects]
   pull_request:
     branches: [main, server-edition, feat/receipt-intake, feat/projects]
   schedule:
