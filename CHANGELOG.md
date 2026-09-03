@@ -7,7 +7,11 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
-### Jobs — QuickBooks-style Customer:Job / Projects (milestone 1)
+### v2.7.0 — Jobs, job costing, and receipt intake
+
+The two most-requested features since Server Edition, each field-tested on
+Windows (SkyTech / VonHolten308) and macOS (Keith's laps on #73 and #86).
+#### Jobs — QuickBooks-style Customer:Job / Projects (milestone 1)
 
 **Every posted line can now carry a job (and a class).** A job is a
 customer's project — "Smith: Kitchen Remodel" — and the unit of job
@@ -100,7 +104,7 @@ rendered. Design and the rest of the plan (cost codes, committed cost,
 change orders, progress billing, time and burden, WIP):
 [docs/design/projects.md](docs/design/projects.md).
 
-### Receipt intake — scan a receipt into the Sales Receipt / Bill form
+#### Receipt intake — scan a receipt into the Sales Receipt / Bill form
 
 A new **Scan Receipt** button on both the Enter Sales Receipt and Enter
 Bill forms uploads a receipt image or PDF, runs it through local OCR

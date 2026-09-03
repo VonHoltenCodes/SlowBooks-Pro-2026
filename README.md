@@ -43,11 +43,17 @@ source code or binaries were available, decompiled, or used.
 
 ## What's New
 
-**Receipt intake — scan a receipt into a form.** A Scan Receipt button on
-the Enter Sales Receipt and Enter Bill forms runs a receipt photo or PDF
-through local OCR (Tesseract, user-installed) and pre-fills the form for
-review before saving; the source image attaches to the document. Zero new
-Python dependencies — the design notes keep Tesseract the user's install.
+**v2.7 — Jobs, job costing, and receipt intake.** QuickBooks-style
+Customer:Job on every form and every posted line, nested cost codes with
+cost types and burden, Job Cost Entries for labor / equipment / mileage /
+overhead, time posted to jobs at loaded rates, budgets seeded from
+estimates, and a job page that drills from cost type to code to the
+posted line with Budget / Committed / Actual / Projected / Variance — the
+columns contractors already read. QuickBooks `Customer:Job` and Online
+sub-customers import as jobs. Plus **receipt intake**: scan a receipt
+photo or PDF into a Bill, Expense or Sales Receipt with a box-to-fix
+canvas, using the OCR engine built into macOS and Windows (Tesseract on
+Linux). Design notes: [docs/design/projects.md](docs/design/projects.md).
 
 **v2.6 — Sales receipts.** Point-of-sale style sales on one screen: the
 sale and its payment recorded together, deposited where you say, posted
