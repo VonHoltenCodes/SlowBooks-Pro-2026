@@ -156,10 +156,17 @@ lesson: synthetic inputs hide every real fault).
 - **Applied-cost pattern for non-bill costs.** A Job Cost Entry debits the
   cost account (tagged to the job) and credits an offset that is *not*
   tagged, so the credit lands in "No job" and Job Profitability still
-  totals to the P&L. Offsets: Payroll Clearing (labor), Applied Labor
-  Burden, Applied Equipment Cost, Applied Overhead; `setup-offsets` creates
-  them (keeping the suggested number only if the chart hasn't used it) and
-  never overrides a choice already made.
+  totals to the P&L. Offsets: Applied Labor Cost, Applied Labor Burden,
+  Applied Equipment Cost, Applied Overhead; `setup-offsets` creates them
+  (keeping the suggested number only if the chart hasn't used it) and
+  never overrides a choice already made. Every offset is a contra-expense
+  on the P&L, never a balance-sheet account: the first Mac lap (2026-09-03)
+  showed a liability offset (Payroll Clearing) leaves labor on the P&L
+  twice once the pay run debits Wages for the same hours, and the clearing
+  balance never clears. A true clearing entry belongs to M4, when pay runs
+  learn to debit it. Default cost accounts follow the seed chart (5100
+  Materials, 5200 Labor, 5300 Subcontractor, else 5000), so a stock
+  company sees its cost categories on the P&L rather than one lump.
 - **Labor cost rate** = employee cost_rate, else pay rate (salary ÷ 2080);
   OT × 1.5, DT × 2; burden % = employee's, else the labor type's. Only
   submitted/approved entries post, once each (`time_entries.job_cost_id`).

@@ -197,6 +197,21 @@ def reject_time_entry(entry_id: int, db: Session = Depends(get_db)):
     entry = db.query(TimeEntry).filter(TimeEntry.id == entry_id).first()
     if not entry:
         raise HTTPException(status_code=404, detail="Time entry not found")
+    # A submitted entry may already be posted to its job; rejecting it has
+    # to take that labor cost back off the job, not leave it behind.
+    if entry.job_cost_id:
+        from app.models.job_costing import JobCost
+        from app.services.closing_date import check_closing_date
+        from app.services.job_costing import void_job_cost
+
+        jc = db.get(JobCost, entry.job_cost_id)
+        if jc is not None and jc.status != "void":
+            check_closing_date(db, jc.date)  # the reversal posts on that date
+            try:
+                void_job_cost(db, jc)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc))
+        entry.job_cost_id = None
     entry.status = TimeEntryStatus.REJECTED
     db.commit()
     db.refresh(entry)

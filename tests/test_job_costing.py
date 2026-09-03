@@ -71,11 +71,26 @@ def test_cost_types_seed_edit_and_offset_setup(client, seed_accounts):
     assert dup.status_code == 409
 
     types = _setup(client)
-    assert types["labor"]["offset_account_name"] == "Payroll Clearing"
+    assert types["labor"]["offset_account_name"] == "Applied Labor Cost"
     assert types["labor"]["burden_offset_account_name"] == "Applied Labor Burden"
     assert types["equipment"]["offset_account_name"] == "Applied Equipment Cost"
     assert types["material"]["offset_account_name"] == "Applied Overhead"
-    assert types["labor"]["default_account_name"] == "Job Costs"
+    # every offset is a P&L contra, never a balance-sheet account
+    accounts = {a["name"]: a for a in client.get("/api/accounts").json()}
+    for name in (
+        "Applied Labor Cost",
+        "Applied Labor Burden",
+        "Applied Equipment Cost",
+        "Applied Overhead",
+    ):
+        assert accounts[name]["account_type"] == "expense", name
+    assert "Payroll Clearing" not in accounts and "Job Costs" not in accounts
+    # cost accounts follow the seed chart's COGS split, not one lump
+    assert types["material"]["default_account_name"] == "Materials Cost"
+    assert types["labor"]["default_account_name"] == "Labor Cost"
+    assert types["subcontract"]["default_account_name"] == "Subcontractor Costs"
+    assert types["equipment"]["default_account_name"] == "Cost of Goods Sold"
+    assert types["other"]["default_account_name"] == "Cost of Goods Sold"
     # idempotent, and it respects a choice already made
     labor_id = types["labor"]["id"]
     other_acct = client.get("/api/accounts").json()[0]["id"]
@@ -391,8 +406,9 @@ def test_budget_from_estimate_and_cost_tree_columns(
         float(rows[fram["id"]]["amount"]) == 2000.0
         and float(rows[fram["id"]]["revenue_amount"]) == 3000.0
     )
-    assert float(rows[trim["id"]]["amount"]) == 1500.0  # no unit cost → amount
-    assert float(rows[None]["amount"]) == 500.0  # uncoded → whole-job row
+    assert float(rows[trim["id"]]["amount"]) == 0.0  # no unit cost → unknown, not price
+    assert float(rows[None]["amount"]) == 0.0  # uncoded, no unit cost → whole-job row
+    assert float(rows[None]["revenue_amount"]) == 500.0
 
     # manual override on trim, plus a type-level budget
     saved = client.put(
@@ -484,18 +500,18 @@ def test_budget_from_estimate_and_cost_tree_columns(
     assert material["figures"]["projected"] == 1400.0
     labor = next(t for t in tree["types"] if t["cost_type"] == "labor")
     assert labor["figures"]["original"] == 4000.0 and labor["figures"]["actual"] == 0.0
-    assert tree["job_level_budget"]["original"] == 500.0
-    assert tree["totals"]["original"] == 3200.0 + 4000.0 + 500.0
+    assert tree["job_level_budget"]["original"] == 0.0
+    assert tree["totals"]["original"] == 3200.0 + 4000.0
 
     # headline report row
     bva = {r["job_id"]: r for r in client.get("/api/jobs/budget-vs-actual").json()}
     row = bva[job["id"]]
     assert (
-        row["revised"] == 7700.0
+        row["revised"] == 7200.0
         and row["actual"] == 800.0
         and row["committed"] == 600.0
     )
-    assert row["variance"] == 7700.0 - 1400.0 and row["act_revenue"] == 1000.0
+    assert row["variance"] == 7200.0 - 1400.0 and row["act_revenue"] == 1000.0
 
     # period filter: actuals honour it, budgets don't
     later = client.get(f"/api/jobs/{job['id']}/cost-tree?start_date=2026-08-01").json()
@@ -518,3 +534,150 @@ def test_estimate_unit_cost_round_trips(client, seed_accounts, seed_customer):
     )
     assert resp.status_code in (200, 201), resp.text
     assert Decimal(str(resp.json()["lines"][0]["unit_cost"])) == Decimal("30.5")
+
+
+# ── Review fixes (first Mac lap, 2026-09-03) ─────────────────────────────
+
+
+def _pl(client, start="2026-07-01", end="2026-07-31"):
+    resp = client.get(
+        "/api/reports/profit-loss", params={"start_date": start, "end_date": end}
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _hourly(client, first="Ray", last="Crew", **extra):
+    resp = client.post(
+        "/api/employees",
+        json={
+            "first_name": first,
+            "last_name": last,
+            "pay_type": "hourly",
+            "pay_rate": 30,
+            **extra,
+        },
+    )
+    assert resp.status_code in (200, 201), resp.text
+    return resp.json()["id"]
+
+
+def _posted_entry(client, job_id, emp_id, day="2026-07-11", hours=8):
+    te = client.post(
+        "/api/time-entries",
+        json={
+            "employee_id": emp_id,
+            "date": day,
+            "hours_regular": hours,
+            "job_id": job_id,
+        },
+    ).json()
+    client.post(f"/api/time-entries/{te['id']}/submit")
+    posted = client.post(f"/api/time-entries/{te['id']}/post-to-job")
+    assert posted.status_code == 200, posted.text
+    return te["id"], posted.json()["job_cost_id"]
+
+
+def test_labor_posting_is_pnl_neutral(client, seed_accounts, seed_customer):
+    """Time → job moves labor into COGS and credits a P&L contra, so net
+    income is unchanged; the pay run is what actually expenses the wages.
+    (A balance-sheet offset would have counted the labor twice.)"""
+    types = _setup(client)
+    client.put(f"/api/cost-types/{types['labor']['id']}", json={"burden_pct": 20})
+    job = _job(client, seed_customer.id)
+    emp_id = _hourly(client)
+    _posted_entry(client, job["id"], emp_id)
+
+    pl = _pl(client)
+    assert pl["net_income"] == 0
+    cogs = {c["account_name"]: c["amount"] for c in pl["cogs"]}
+    expenses = {e["account_name"]: e["amount"] for e in pl["expenses"]}
+    assert cogs["Labor Cost"] == 288.0  # 8h × 30 = 240 base + 20% burden
+    assert expenses["Applied Labor Cost"] == -240.0
+    assert expenses["Applied Labor Burden"] == -48.0
+
+    # the job carries the cost, "No job" carries the offsets, sum = P&L
+    prof = client.get(
+        "/api/jobs/profitability",
+        params={"start_date": "2026-07-01", "end_date": "2026-07-31"},
+    ).json()
+    by_name = {r["job_name"]: r for r in prof}
+    assert by_name["Barn"]["total_costs"] == 288.0
+    assert sum(r["income"] - r["total_costs"] for r in prof) == pl["net_income"]
+
+
+def test_rejecting_a_posted_time_entry_voids_its_job_cost(
+    client, seed_accounts, seed_customer
+):
+    _setup(client)
+    job = _job(client, seed_customer.id)
+    emp_id = _hourly(client, "Ann")
+    te_id, jc_id = _posted_entry(client, job["id"], emp_id)
+    assert (
+        client.get(f"/api/jobs/{job['id']}").json()["summary"]["total_costs"] == 240.0
+    )
+
+    rej = client.post(f"/api/time-entries/{te_id}/reject")
+    assert rej.status_code == 200, rej.text
+    assert rej.json()["status"] == "rejected" and rej.json()["job_cost_id"] is None
+    assert client.get(f"/api/job-costs/{jc_id}").json()["status"] == "void"
+    assert client.get(f"/api/jobs/{job['id']}").json()["summary"]["total_costs"] == 0
+    # an entry that was never posted still rejects cleanly
+    te2 = client.post(
+        "/api/time-entries",
+        json={"employee_id": emp_id, "date": "2026-07-12", "hours_regular": 2},
+    ).json()
+    assert client.post(f"/api/time-entries/{te2['id']}/reject").status_code == 200
+
+
+def test_reseeding_budget_keeps_manual_rows_and_zero_costs_unknown(
+    client, seed_accounts, seed_customer
+):
+    _setup(client)
+    job = _job(client, seed_customer.id)
+    fram = _code(client, "06-100", "Framing", "material")
+    trim = _code(client, "06-200", "Trim", "material")
+    est = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-07-01",
+            "job_id": job["id"],
+            "lines": [
+                {
+                    "description": "Framing",
+                    "quantity": 10,
+                    "rate": 300,
+                    "unit_cost": 200,
+                    "cost_code_id": fram["id"],
+                },
+                {
+                    "description": "Trim",
+                    "quantity": 1,
+                    "rate": 1500,
+                    "cost_code_id": trim["id"],
+                },
+            ],
+        },
+    ).json()
+    seed = f"/api/jobs/{job['id']}/budgets/from-estimate/{est['id']}"
+    rows = {r["cost_code_id"]: r for r in client.post(seed).json()}
+    assert float(rows[fram["id"]]["amount"]) == 2000.0
+    # no unit cost entered: the cost is unknown, not equal to the sale price
+    assert float(rows[trim["id"]]["amount"]) == 0.0
+    assert float(rows[trim["id"]]["revenue_amount"]) == 1500.0
+
+    # hand-edit framing, re-seed: the manual row wins, trim is re-seeded
+    client.put(
+        f"/api/jobs/{job['id']}/budgets",
+        json={"rows": [{"cost_code_id": fram["id"], "amount": 2500}]},
+    )
+    client.post(seed)
+    rows = {
+        r["cost_code_id"]: r
+        for r in client.get(f"/api/jobs/{job['id']}/budgets").json()
+    }
+    assert float(rows[fram["id"]]["amount"]) == 2500.0
+    assert rows[fram["id"]]["source"] == "manual"
+    assert rows[trim["id"]]["source"] == "estimate"
+    assert sum(1 for r in rows.values() if r["cost_code_id"] == fram["id"]) == 1

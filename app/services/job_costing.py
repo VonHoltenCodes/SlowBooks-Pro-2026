@@ -572,49 +572,49 @@ def allocate_cost(
 
 def budgets_from_estimate(db: Session, job: Job, estimate: Estimate) -> list[JobBudget]:
     """One budget row per cost code on the estimate: cost = qty × unit cost
-    (falling back to the line amount when no cost is entered), revenue =
-    the line amount. Lines without a code roll into a whole-job row."""
+    (0 when no cost is entered — budgeting the sale price as cost would
+    hide the margin), revenue = the line amount. Lines without a code roll
+    into a whole-job row. Re-seeding replaces the estimate rows; a row the
+    operator edited by hand (source "manual") wins and is left alone."""
     totals: dict[Optional[int], list[Decimal]] = {}
     for ln in estimate.lines:
         qty = Decimal(str(ln.quantity or 0))
         cost = (
             _q(qty * Decimal(str(ln.unit_cost)))
             if ln.unit_cost is not None
-            else _q(ln.amount or 0)
+            else Decimal("0")
         )
         rev = _q(ln.amount or 0)
         bucket = totals.setdefault(ln.cost_code_id, [Decimal("0"), Decimal("0")])
         bucket[0] += cost
         bucket[1] += rev
-    rows = []
     db.query(JobBudget).filter(
         JobBudget.job_id == job.id, JobBudget.source == "estimate"
     ).delete()
-    for code_id, (cost, rev) in totals.items():
-        existing = (
-            db.query(JobBudget)
-            .filter(
-                JobBudget.job_id == job.id,
-                JobBudget.cost_code_id == code_id,
-                JobBudget.cost_type.is_(None),
-            )
-            .first()
+    manual_codes = {
+        r.cost_code_id
+        for r in db.query(JobBudget)
+        .filter(
+            JobBudget.job_id == job.id,
+            JobBudget.cost_type.is_(None),
+            JobBudget.source == "manual",
         )
-        if existing:
-            existing.amount, existing.revenue_amount = cost, rev
-            existing.source, existing.estimate_id = "estimate", estimate.id
-            rows.append(existing)
-        else:
-            row = JobBudget(
-                job_id=job.id,
-                cost_code_id=code_id,
-                amount=cost,
-                revenue_amount=rev,
-                source="estimate",
-                estimate_id=estimate.id,
-            )
-            db.add(row)
-            rows.append(row)
+        .all()
+    }
+    rows = []
+    for code_id, (cost, rev) in totals.items():
+        if code_id in manual_codes:
+            continue
+        row = JobBudget(
+            job_id=job.id,
+            cost_code_id=code_id,
+            amount=cost,
+            revenue_amount=rev,
+            source="estimate",
+            estimate_id=estimate.id,
+        )
+        db.add(row)
+        rows.append(row)
     db.flush()
     return rows
 

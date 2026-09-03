@@ -129,13 +129,51 @@ _OFFSET_ACCOUNTS = (
     # (key, name, type, number) — the applied-cost pattern: job cost is debited,
     # the applied account is credited, and the real payroll / equipment /
     # overhead expense sits alongside it, so the company P&L is unchanged
-    # while every job carries its share.
-    ("payroll_clearing", "Payroll Clearing", AccountType.LIABILITY, "2150"),
+    # while every job carries its share. Every offset must therefore be a
+    # P&L (contra-expense) account: a balance-sheet offset would leave the
+    # job cost on the P&L a second time once the real expense posts (the
+    # pay run still debits Wages for the same hours).
+    ("applied_labor", "Applied Labor Cost", AccountType.EXPENSE, "6900"),
     ("applied_burden", "Applied Labor Burden", AccountType.EXPENSE, "6910"),
     ("applied_equipment", "Applied Equipment Cost", AccountType.EXPENSE, "6920"),
     ("applied_overhead", "Applied Overhead", AccountType.EXPENSE, "6930"),
-    ("job_cost", "Job Costs", AccountType.COGS, "5100"),
 )
+
+# Default cost (debit) account per cost type, by seed-chart number, so a
+# stock company shows Materials / Labor / Subs on its P&L instead of one
+# lump. Anything unmapped (or a chart without these) falls through to
+# Cost of Goods Sold, then to a "Job Costs" COGS account created on demand.
+_DEFAULT_COST_ACCOUNTS = {
+    "material": "5100",  # Materials Cost
+    "labor": "5200",  # Labor Cost
+    "subcontract": "5300",  # Subcontractor Costs
+}
+_COGS_UMBRELLA = "5000"
+_JOB_COSTS_FALLBACK = ("Job Costs", AccountType.COGS, "5100")
+
+
+def _default_cost_account(db: Session, ct: CostType, cache: dict) -> Account:
+    """Seed-chart COGS account for the cost type, else the COGS umbrella,
+    else one shared 'Job Costs' account (created once)."""
+    for number in (_DEFAULT_COST_ACCOUNTS.get(ct.code), _COGS_UMBRELLA):
+        if number:
+            acct = db.query(Account).filter(Account.account_number == number).first()
+            if acct and acct.account_type == AccountType.COGS:
+                return acct
+    if "job_cost" not in cache:
+        name, atype, number = _JOB_COSTS_FALLBACK
+        acct = db.query(Account).filter(Account.name == name).first()
+        if not acct:
+            taken = (
+                db.query(Account.id).filter(Account.account_number == number).first()
+            )
+            acct = Account(
+                name=name, account_type=atype, account_number=None if taken else number
+            )
+            db.add(acct)
+            db.flush()
+        cache["job_cost"] = acct
+    return cache["job_cost"]
 
 
 @cost_types_router.post("/setup-offsets", response_model=list[CostTypeResponse])
@@ -158,12 +196,13 @@ def setup_offset_accounts(db: Session = Depends(get_db)):
             db.add(acct)
             db.flush()
         found[key] = acct
+    cache: dict = {}
     for ct in db.query(CostType).all():
         if not ct.default_account_id:
-            ct.default_account_id = found["job_cost"].id
+            ct.default_account_id = _default_cost_account(db, ct, cache).id
         if not ct.offset_account_id:
             if ct.is_labor:
-                ct.offset_account_id = found["payroll_clearing"].id
+                ct.offset_account_id = found["applied_labor"].id
             elif ct.code == "equipment":
                 ct.offset_account_id = found["applied_equipment"].id
             else:
