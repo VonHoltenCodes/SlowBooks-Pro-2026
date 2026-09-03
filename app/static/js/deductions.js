@@ -58,11 +58,11 @@ const DeductionsPage = {
                 </div>
                 <div class="table-container"><table>
                     <thead><tr>
-                        <th>Name</th>
-                        <th>Category</th>
-                        <th>Tax Treatment</th>
-                        <th class="amount">Employee %</th>
-                        <th class="amount">Employer %</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Tax Treatment</th>
+                        <th scope="col" class="amount">Employee %</th>
+                        <th scope="col" class="amount">Employer %</th>
                     </tr></thead>
                     <tbody>${typesRows}</tbody>
                 </table></div>
@@ -122,13 +122,13 @@ const DeductionsPage = {
         }
         return `<div class="table-container"><table>
             <thead><tr>
-                <th>Type</th>
-                <th class="amount">Employee Amt</th>
-                <th class="amount">Employer Amt</th>
-                <th>Effective</th>
-                <th>End Date</th>
-                <th>Status</th>
-                <th>Actions</th>
+                <th scope="col">Type</th>
+                <th scope="col" class="amount">Employee Amt</th>
+                <th scope="col" class="amount">Employer Amt</th>
+                <th scope="col">Effective</th>
+                <th scope="col">End Date</th>
+                <th scope="col">Status</th>
+                <th scope="col">Actions</th>
             </tr></thead>
             <tbody>${rows}</tbody>
         </table></div>`;
@@ -154,14 +154,14 @@ const DeductionsPage = {
         }
         return `<div class="table-container"><table>
             <thead><tr>
-                <th>Case #</th>
-                <th>Order Type</th>
-                <th class="amount">Amount</th>
-                <th class="amount">Max % Disposable</th>
-                <th>State</th>
-                <th>Agency</th>
-                <th>Effective</th>
-                <th>Status</th>
+                <th scope="col">Case #</th>
+                <th scope="col">Order Type</th>
+                <th scope="col" class="amount">Amount</th>
+                <th scope="col" class="amount">Max % Disposable</th>
+                <th scope="col">State</th>
+                <th scope="col">Agency</th>
+                <th scope="col">Effective</th>
+                <th scope="col">Status</th>
             </tr></thead>
             <tbody>${rows}</tbody>
         </table></div>`;

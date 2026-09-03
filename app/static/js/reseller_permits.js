@@ -90,13 +90,13 @@ const ResellerPermitsPage = {
             <div class="table-container">
                 <table>
                     <thead><tr>
-                        <th>Held by</th>
-                        <th>State</th>
-                        <th>Permit #</th>
-                        <th>Expires</th>
-                        <th>Status</th>
-                        <th>Last verified</th>
-                        <th>Actions</th>
+                        <th scope="col">Held by</th>
+                        <th scope="col">State</th>
+                        <th scope="col">Permit #</th>
+                        <th scope="col">Expires</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Last verified</th>
+                        <th scope="col">Actions</th>
                     </tr></thead>
                     <tbody>${tableBody}</tbody>
                 </table>

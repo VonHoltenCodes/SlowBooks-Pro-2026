@@ -8,9 +8,9 @@ from datetime import date, timedelta
 
 from app.models.payroll import Employee
 from app.services.pdf_service import (
+    render_pdf,
     _company_logo_data_uri,
     _jinja_env,
-    _safe_url_fetcher,
 )
 
 # Statutory reporting window after the hire date.
@@ -62,7 +62,6 @@ def generate_new_hire_report_pdf(
     it in lets us drop the employer's logo in the report header alongside the
     typed company name. Falls back gracefully when no logo is configured.
     """
-    from weasyprint import HTML
 
     data = compute_new_hire_report(db, employee_id, employer)
     logo_data_uri = _company_logo_data_uri(company_settings or {})
@@ -70,4 +69,4 @@ def generate_new_hire_report_pdf(
     html_str = template.render(
         report=data, today=date.today(), company_logo_data_uri=logo_data_uri
     )
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)

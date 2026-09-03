@@ -44,7 +44,7 @@
     --gray-100:       #181a22;
     --gray-200:       #2e3240;
     --gray-300:       #3a3e48;
-    --gray-400:       #606878;
+    --gray-400:       #8b94a6; /* was #606878 — failed AA on the dark ground */
     --gray-500:       #7a8498;
     --gray-600:       #a0a8b8;
 

@@ -15,7 +15,7 @@ const EmployeesPage = {
             html += '<div class="empty-state"><p>No employees added yet</p></div>';
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>Name</th><th>Pay Type</th><th class="amount">Rate</th><th>Status</th><th>Filing</th><th>Actions</th></tr></thead><tbody>`;
+                <thead><tr><th scope="col">Name</th><th scope="col">Pay Type</th><th scope="col" class="amount">Rate</th><th scope="col">Status</th><th scope="col">Filing</th><th scope="col">Actions</th></tr></thead><tbody>`;
             for (const e of emps) {
                 html += `<tr>
                     <td><strong>${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</strong></td>
@@ -374,7 +374,7 @@ const EmployeesPage = {
                 <details style="margin-top:10px">
                     <summary style="cursor:pointer;font-size:12px;color:#336699">Recent access (${access.length} most recent)</summary>
                     <table class="data-table" style="margin-top:6px;font-size:11px">
-                        <thead><tr><th>When</th><th>IP</th><th>Path</th><th>OK?</th></tr></thead>
+                        <thead><tr><th scope="col">When</th><th scope="col">IP</th><th scope="col">Path</th><th scope="col">OK?</th></tr></thead>
                         <tbody>
                         ${access.map(a => `
                             <tr style="${a.success ? '' : 'color:#c0392b'}">
@@ -442,7 +442,7 @@ const EmployeesPage = {
             const ytd = await API.get(`/employees/${id}/ytd`);
             el.innerHTML = `
                 <table>
-                    <thead><tr><th>Gross</th><th class="amount">Federal</th><th class="amount">State</th><th class="amount">SS</th><th class="amount">Medicare</th><th class="amount">Net</th></tr></thead>
+                    <thead><tr><th scope="col">Gross</th><th scope="col" class="amount">Federal</th><th scope="col" class="amount">State</th><th scope="col" class="amount">SS</th><th scope="col" class="amount">Medicare</th><th scope="col" class="amount">Net</th></tr></thead>
                     <tbody><tr>
                         <td class="amount">${formatCurrency(ytd.gross)}</td>
                         <td class="amount">${formatCurrency(ytd.federal)}</td>
@@ -467,7 +467,7 @@ const EmployeesPage = {
                 html = '<p class="text-muted">No bank accounts on file.</p>';
             } else {
                 html = `<table>
-                    <thead><tr><th>Nickname</th><th>Kind</th><th>Account</th><th>Deposit Type</th><th>Actions</th></tr></thead>
+                    <thead><tr><th scope="col">Nickname</th><th scope="col">Kind</th><th scope="col">Account</th><th scope="col">Deposit Type</th><th scope="col">Actions</th></tr></thead>
                     <tbody>`;
                 for (const acct of accounts) {
                     html += `<tr>
@@ -558,7 +558,7 @@ const EmployeesPage = {
                 html = '<p class="text-muted">No documents on file.</p>';
             } else {
                 html = `<table>
-                    <thead><tr><th>Filename</th><th>Category</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead>
+                    <thead><tr><th scope="col">Filename</th><th scope="col">Category</th><th scope="col">Size</th><th scope="col">Uploaded</th><th scope="col">Actions</th></tr></thead>
                     <tbody>`;
                 for (const doc of docs) {
                     html += `<tr>

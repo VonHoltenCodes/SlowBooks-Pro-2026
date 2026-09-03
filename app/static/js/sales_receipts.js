@@ -52,7 +52,7 @@ const SalesReceiptsPage = {
                 ${payment && payment.reference ? `<strong>Reference:</strong> ${escapeHtml(payment.reference)}<br>` : ''}
             </div>
             <div class="table-container"><table>
-                <thead><tr><th>Description</th><th class="amount">Qty</th><th class="amount">Rate</th><th class="amount">Amount</th></tr></thead>
+                <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
@@ -163,8 +163,8 @@ const SalesReceiptsPage = {
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Line Items</h3>
                 <table class="line-items-table">
                     <thead><tr>
-                        <th>Item</th><th>Description</th><th class="col-qty">Qty</th>
-                        <th class="col-rate">Rate</th><th title="Sales tax applies to this line">Tax</th><th class="col-amount">Amount</th><th class="col-actions"></th>
+                        <th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th>
+                        <th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th>
                     </tr></thead>
                     <tbody id="sr-lines">
                         ${sr.lines.map((l, i) => SalesReceiptsPage.lineRowHtml(i, l, items)).join('')}
@@ -323,7 +323,7 @@ const SalesReceiptsPage = {
             <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="SalesReceiptsPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="SalesReceiptsPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
-            <td><button type="button" class="btn btn-sm btn-danger" onclick="SalesReceiptsPage.removeLine(${idx})">X</button></td>
+            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="SalesReceiptsPage.removeLine(${idx})">X</button></td>
         </tr>`;
     },
 

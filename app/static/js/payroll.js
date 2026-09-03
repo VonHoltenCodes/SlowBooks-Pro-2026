@@ -18,8 +18,8 @@ const PayrollPage = {
             html += '<div class="empty-state"><p>No payroll runs yet</p></div>';
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>Period</th><th>Pay Date</th><th>Status</th>
-                <th class="amount">Gross</th><th class="amount">Taxes</th><th class="amount">Net</th><th>Actions</th></tr></thead><tbody>`;
+                <thead><tr><th scope="col">Period</th><th scope="col">Pay Date</th><th scope="col">Status</th>
+                <th scope="col" class="amount">Gross</th><th scope="col" class="amount">Taxes</th><th scope="col" class="amount">Net</th><th scope="col">Actions</th></tr></thead><tbody>`;
             for (const r of runs) {
                 html += `<tr>
                     <td>${formatDate(r.period_start)} - ${formatDate(r.period_end)}</td>
@@ -72,7 +72,7 @@ const PayrollPage = {
                 </label>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Employee Hours</h3>
                 <div class="table-container"><table>
-                    <thead><tr><th style="width:30px;"></th><th>Employee</th><th>Type</th><th class="amount">Rate</th><th>Hours</th><th>Time Entries</th></tr></thead>
+                    <thead><tr><th scope="col" style="width:30px;"></th><th scope="col">Employee</th><th scope="col">Type</th><th scope="col" class="amount">Rate</th><th scope="col">Hours</th><th scope="col">Time Entries</th></tr></thead>
                     <tbody>${empRows}</tbody>
                 </table></div>
                 <div class="form-actions">
@@ -158,9 +158,9 @@ const PayrollPage = {
 
         openModal(`Pay Run: ${run.period_start} to ${run.period_end}`, `
             <div class="table-container"><table>
-                <thead><tr><th>Employee</th><th class="amount">Hours</th><th class="amount">Gross</th>
-                <th class="amount">Fed</th><th class="amount">State</th><th class="amount">SS</th>
-                <th class="amount">Med</th><th class="amount">Net</th></tr></thead>
+                <thead><tr><th scope="col">Employee</th><th scope="col" class="amount">Hours</th><th scope="col" class="amount">Gross</th>
+                <th scope="col" class="amount">Fed</th><th scope="col" class="amount">State</th><th scope="col" class="amount">SS</th>
+                <th scope="col" class="amount">Med</th><th scope="col" class="amount">Net</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
             <div class="invoice-totals">

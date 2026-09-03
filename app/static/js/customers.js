@@ -25,8 +25,8 @@ const CustomersPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th>Name</th><th>Company</th><th>Phone</th><th>Email</th>
-                    <th class="amount">Balance</th><th>Actions</th>
+                    <th scope="col">Name</th><th scope="col">Company</th><th scope="col">Phone</th><th scope="col">Email</th>
+                    <th scope="col" class="amount">Balance</th><th scope="col">Actions</th>
                 </tr></thead>
                 <tbody id="customer-tbody">`;
             for (const c of customers) {
@@ -181,7 +181,7 @@ const CustomersPage = {
                 <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Jobs (${jobs.length})</h4>
                 ${jobs.length === 0 ? '<p style="color:#888;font-size:13px;margin:0">No jobs. A job is a project for this customer — invoices, bills, expenses and time can be tagged to it.</p>' :
                     `<table class="data-table" style="font-size:12px">
-                        <thead><tr><th>Job</th><th>Status</th><th class="amount">Contract</th><th></th></tr></thead>
+                        <thead><tr><th scope="col">Job</th><th scope="col">Status</th><th scope="col" class="amount">Contract</th><th scope="col"></th></tr></thead>
                         <tbody>${jobs.map(j => `<tr style="cursor:pointer" onclick="closeModal();JobsPage.showDetails(${j.id})">
                             <td>${escapeHtml(j.name)}${j.job_number ? ` <span style="color:#888">#${escapeHtml(j.job_number)}</span>` : ''}</td>
                             <td>${escapeHtml((window.JobsPage && JobsPage.STATUS_LABELS[j.status]) || j.status)}${j.is_active ? '' : ' <span style="color:#888">(inactive)</span>'}</td>
@@ -197,7 +197,7 @@ const CustomersPage = {
                     <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Recent invoices (${invoices.length})</h4>
                     ${invoices.length === 0 ? '<p style="color:#888;font-size:13px;margin:0">No invoices yet</p>' :
                         `<table class="data-table" style="font-size:12px">
-                            <thead><tr><th>#</th><th>Date</th><th class="amount">Total</th><th>Status</th></tr></thead>
+                            <thead><tr><th scope="col">#</th><th scope="col">Date</th><th scope="col" class="amount">Total</th><th scope="col">Status</th></tr></thead>
                             <tbody>${invRows}</tbody>
                         </table>`}
                 </div>
@@ -205,7 +205,7 @@ const CustomersPage = {
                     <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Recent payments (${payments.length})</h4>
                     ${payments.length === 0 ? '<p style="color:#888;font-size:13px;margin:0">No payments yet</p>' :
                         `<table class="data-table" style="font-size:12px">
-                            <thead><tr><th>Date</th><th>Method</th><th>Ref</th><th class="amount">Amount</th></tr></thead>
+                            <thead><tr><th scope="col">Date</th><th scope="col">Method</th><th scope="col">Ref</th><th scope="col" class="amount">Amount</th></tr></thead>
                             <tbody>${payRows}</tbody>
                         </table>`}
                 </div>

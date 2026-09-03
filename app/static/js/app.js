@@ -164,7 +164,7 @@ const App = {
                 <button class="btn btn-primary" onclick="App.showAccountForm()">New Account</button>
             </div>
             <div class="table-container"><table>
-                <thead><tr><th style="width:80px;">Number</th><th>Name</th><th style="width:100px;">Type</th><th class="amount" style="width:100px;">Balance</th><th style="width:60px;">Actions</th></tr></thead>
+                <thead><tr><th scope="col" style="width:80px;">Number</th><th scope="col">Name</th><th scope="col" style="width:100px;">Type</th><th scope="col" class="amount" style="width:100px;">Balance</th><th scope="col" style="width:60px;">Actions</th></tr></thead>
                 <tbody>`;
 
         for (const type of typeOrder) {
@@ -278,6 +278,11 @@ const App = {
                         <a href="/api/csv/export/vendors" class="btn btn-secondary" download>Export Vendors</a>
                         <a href="/api/csv/export/items" class="btn btn-secondary" download>Export Items</a>
                         <a href="/api/csv/export/invoices" class="btn btn-secondary" download>Export Invoices</a>
+                        <a href="/api/csv/export/bills" class="btn btn-secondary" download>Export Bills</a>
+                        <a href="/api/csv/export/sales-receipts" class="btn btn-secondary" download>Export Sales Receipts</a>
+                        <a href="/api/csv/export/deposits" class="btn btn-secondary" download>Export Deposits</a>
+                        <a href="/api/csv/export/classes" class="btn btn-secondary" download>Export Classes</a>
+                        <a href="/api/csv/export/jobs" class="btn btn-secondary" download>Export Jobs</a>
                         <a href="/api/csv/export/accounts" class="btn btn-secondary" download>Export Chart of Accounts</a>
                     </div>
                 </div>
@@ -357,7 +362,7 @@ const App = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="qe-lines">
                         <tr data-qeline="0">
                             <td><select class="line-item" onchange="App.qeItemSelected(0)"><option value="">--</option>${itemOpts}</select></td>

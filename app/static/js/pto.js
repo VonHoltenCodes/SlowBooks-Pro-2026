@@ -66,12 +66,12 @@ const PTOPage = {
             <div class="table-container">
                 <table>
                     <thead><tr>
-                        <th>Name</th>
-                        <th>Type</th>
-                        <th>Accrual Method</th>
-                        <th class="amount">Accrual Rate</th>
-                        <th class="amount">Max Balance</th>
-                        <th>Actions</th>
+                        <th scope="col">Name</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Accrual Method</th>
+                        <th scope="col" class="amount">Accrual Rate</th>
+                        <th scope="col" class="amount">Max Balance</th>
+                        <th scope="col">Actions</th>
                     </tr></thead>
                     <tbody>${policiesBody}</tbody>
                 </table>
@@ -84,12 +84,12 @@ const PTOPage = {
             <div class="table-container">
                 <table>
                     <thead><tr>
-                        <th>Employee</th>
-                        <th>Policy</th>
-                        <th class="amount">Balance</th>
-                        <th class="amount">Accrued YTD</th>
-                        <th class="amount">Used YTD</th>
-                        <th>Actions</th>
+                        <th scope="col">Employee</th>
+                        <th scope="col">Policy</th>
+                        <th scope="col" class="amount">Balance</th>
+                        <th scope="col" class="amount">Accrued YTD</th>
+                        <th scope="col" class="amount">Used YTD</th>
+                        <th scope="col">Actions</th>
                     </tr></thead>
                     <tbody>${accruals.length === 0 ? '<tr><td colspan="6"><em>No employees enrolled in any PTO policy yet</em></td></tr>' : accruals.map(a => `
                         <tr>
@@ -112,13 +112,13 @@ const PTOPage = {
             <div class="table-container">
                 <table>
                     <thead><tr>
-                        <th>Employee</th>
-                        <th>Start</th>
-                        <th>End</th>
-                        <th class="amount">Hours</th>
-                        <th>Type</th>
-                        <th>Status</th>
-                        <th>Actions</th>
+                        <th scope="col">Employee</th>
+                        <th scope="col">Start</th>
+                        <th scope="col">End</th>
+                        <th scope="col" class="amount">Hours</th>
+                        <th scope="col">Type</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Actions</th>
                     </tr></thead>
                     <tbody>${requestsBody}</tbody>
                 </table>

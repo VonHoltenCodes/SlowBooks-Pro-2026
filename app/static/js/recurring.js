@@ -18,7 +18,7 @@ const RecurringPage = {
             html += '<div class="empty-state"><p>No recurring invoices set up</p></div>';
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>Customer</th><th>Frequency</th><th>Next Due</th><th>Active</th><th>Created</th><th>Actions</th></tr></thead><tbody>`;
+                <thead><tr><th scope="col">Customer</th><th scope="col">Frequency</th><th scope="col">Next Due</th><th scope="col">Active</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead><tbody>`;
             for (const r of recs) {
                 html += `<tr>
                     <td><strong>${escapeHtml(r.customer_name || '')}</strong></td>
@@ -94,7 +94,7 @@ const RecurringPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th title="Sales tax applies to this line">Tax</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th></tr></thead>
                     <tbody id="rec-lines">
                         ${rec.lines.map((l, i) => {
                             const opts = items.map(it => `<option value="${it.id}" ${l.item_id==it.id?'selected':''}>${escapeHtml(it.name)}</option>`).join('');

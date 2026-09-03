@@ -33,15 +33,42 @@ function toast(message, type = 'success') {
     setTimeout(() => el.remove(), 3000);
 }
 
+// Modal accessibility: the dialog takes focus when it opens, Tab and
+// Shift+Tab cycle inside it, Escape closes it, and focus returns to
+// whatever opened it. (Audit finding 3: role/aria-modal live on #modal in
+// index.html; this is the behaviour half.)
+let _modalOpener = null;
+const _FOCUSABLE = 'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 function openModal(title, html) {
+    _modalOpener = document.activeElement;
     $('#modal-title').textContent = title;
     $('#modal-body').innerHTML = html;
     $('#modal-overlay').classList.remove('hidden');
+    const modal = $('#modal');
+    const first = modal.querySelector('#modal-body ' + _FOCUSABLE.split(', ').join(', #modal-body ')) || modal;
+    setTimeout(() => { try { first.focus(); } catch (e) { /* nothing focusable */ } }, 0);
 }
 
 function closeModal() {
     $('#modal-overlay').classList.add('hidden');
+    const opener = _modalOpener;
+    _modalOpener = null;
+    if (opener && document.contains(opener)) { try { opener.focus(); } catch (e) { /* gone */ } }
 }
+
+document.addEventListener('keydown', (e) => {
+    const overlay = document.getElementById('modal-overlay');
+    if (!overlay || overlay.classList.contains('hidden')) return;
+    if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+    if (e.key !== 'Tab') return;
+    const modal = document.getElementById('modal');
+    const nodes = Array.from(modal.querySelectorAll(_FOCUSABLE)).filter(n => n.offsetParent !== null);
+    if (!nodes.length) { e.preventDefault(); modal.focus(); return; }
+    const first = nodes[0], last = nodes[nodes.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === modal)) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 
 function statusBadge(status) {
     return `<span class="badge badge-${status}">${status}</span>`;
@@ -116,7 +143,7 @@ function _listTableHtml(state) {
             }
             click = ` onclick="sortListRows('${sort.id}', '${col.key}')"`;
         }
-        return `<th class="${cls.filter(Boolean).join(' ')}"${click}>${col.label}${arrow}</th>`;
+        return `<th scope="col" class="${cls.filter(Boolean).join(' ')}"${click}>${col.label}${arrow}</th>`;
     }).join('');
     return `<table>
         <thead><tr>${ths}</tr></thead><tbody>${rows.map(row).join('')}</tbody></table>`;
@@ -326,7 +353,7 @@ const CostCodes = {
     cellHtml(cls, selectedId) {
         return CostCodes.any() ? `<td><select class="${cls}">${CostCodes.optionsHtml(selectedId)}</select></td>` : '';
     },
-    headHtml(label = 'Cost Code') { return CostCodes.any() ? `<th>${label}</th>` : ''; },
+    headHtml(label = 'Cost Code') { return CostCodes.any() ? `<th scope="col">${label}</th>` : ''; },
     fromRow(row, cls) {
         const v = row.querySelector(`.${cls}`)?.value;
         return v ? parseInt(v) : null;

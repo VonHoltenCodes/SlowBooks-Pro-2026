@@ -42,14 +42,14 @@ const TimeEntriesPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th>Date</th>
-                    <th>Employee</th>
-                    <th>Job</th>
-                    <th class="amount">Regular Hrs</th>
-                    <th class="amount">OT Hrs</th>
-                    <th>Description</th>
-                    <th>Status</th>
-                    <th>Actions</th>
+                    <th scope="col">Date</th>
+                    <th scope="col">Employee</th>
+                    <th scope="col">Job</th>
+                    <th scope="col" class="amount">Regular Hrs</th>
+                    <th scope="col" class="amount">OT Hrs</th>
+                    <th scope="col">Description</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const en of filtered) {
                 const empName = escapeHtml(empMap[en.employee_id] || `Employee ${en.employee_id}`);

@@ -14,8 +14,7 @@ from sqlalchemy.orm import joinedload
 from app.models.payroll import PayRun, PayStub, PayRunStatus
 from app.services.accounting import _q
 from app.services.payroll_service import FUTA_WAGE_BASE
-from app.services.pdf_service import _jinja_env, _safe_url_fetcher
-from weasyprint import HTML
+from app.services.pdf_service import _jinja_env, render_pdf
 
 
 def _year_stubs(db, year: int) -> list[PayStub]:
@@ -92,4 +91,4 @@ def generate_940_pdf(db, year: int, company: dict, audit: dict | None = None) ->
     data = compute_940(db, year)
     template = _jinja_env.get_template("form_940.html")
     html_str = template.render(data=data, company=company or {}, audit=audit or {})
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)

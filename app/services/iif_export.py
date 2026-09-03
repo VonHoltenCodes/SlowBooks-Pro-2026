@@ -59,6 +59,18 @@ def _iif_line(fields: list) -> str:
     return _tab_join(fields) + "\r\n"
 
 
+def _class_name(db: Session, class_id) -> str:
+    """The class a document is tagged with, verbatim (Parent:Child paths
+    round-trip). Empty when untagged — the CLASS column is still emitted so
+    a re-import reads a consistent column set."""
+    if not class_id:
+        return ""
+    from app.models.classes import TxnClass
+
+    row = db.get(TxnClass, class_id)
+    return _iif_clean(row.name) if row else ""
+
+
 def _resolve_account_name(db: Session, account_id: int) -> str:
     """Get account name with parent:child notation for QB2003."""
     if not account_id:
@@ -184,6 +196,10 @@ def export_customers(db: Session) -> str:
             ]
         )
 
+        # QuickBooks "Customer:Job" — every job goes out as a CUST row under
+        # its customer, which is exactly what the importer splits back.
+        for job in sorted(getattr(c, "jobs", None) or [], key=lambda j: j.name):
+            lines += _iif_line(["CUST", _iif_clean(f"{c.name}:{job.name}")] + [""] * 14)
     return lines
 
 
@@ -299,6 +315,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                 "DUEDATE",
                 "TERMS",
                 "MEMO",
+                "CLASS",
             ]
         )
         + _iif_line(
@@ -313,6 +330,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                 "DUEDATE",
                 "TERMS",
                 "MEMO",
+                "CLASS",
             ]
         )
         + _iif_line(["!ENDTRNS"])
@@ -325,6 +343,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
             joinedload(Invoice.lines).joinedload(InvoiceLine.item),
         )
         .filter(Invoice.status != InvoiceStatus.VOID)
+        .filter(Invoice.is_sales_receipt.is_(False))
     )
 
     if date_from:
@@ -336,6 +355,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
 
     lines = header
     for inv in invoices:
+        cls = _class_name(db, getattr(inv, "class_id", None))
         cust_name = inv.customer.name if inv.customer else ""
         inv_date = _iif_date(inv.date)
         due_date = _iif_date(inv.due_date)
@@ -354,6 +374,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                 due_date,
                 inv.terms or "",
                 "",
+                cls,
             ]
         )
 
@@ -380,6 +401,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                     "",
                     "",
                     il.description or "",
+                    cls,
                 ]
             )
 
@@ -398,6 +420,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                     "",
                     "",
                     "Sales Tax",
+                    cls,
                 ]
             )
 
@@ -415,10 +438,30 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
     """
     header = (
         _iif_line(
-            ["!TRNS", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+            [
+                "!TRNS",
+                "TRNSTYPE",
+                "DATE",
+                "ACCNT",
+                "NAME",
+                "AMOUNT",
+                "DOCNUM",
+                "MEMO",
+                "CLASS",
+            ]
         )
         + _iif_line(
-            ["!SPL", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+            [
+                "!SPL",
+                "TRNSTYPE",
+                "DATE",
+                "ACCNT",
+                "NAME",
+                "AMOUNT",
+                "DOCNUM",
+                "MEMO",
+                "CLASS",
+            ]
         )
         + _iif_line(["!ENDTRNS"])
     )
@@ -442,6 +485,7 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
 
     lines = header
     for pmt in payments:
+        cls = _class_name(db, getattr(pmt, "class_id", None))
         cust_name = pmt.customer.name if pmt.customer else ""
         pmt_date = _iif_date(pmt.date)
         amount = Decimal(str(pmt.amount or 0))
@@ -464,6 +508,7 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
                 str(amount),
                 ref,
                 pmt.notes or "",
+                cls,
             ]
         )
 
@@ -484,6 +529,7 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
                         str(-alloc_amt),
                         doc_num,
                         "",
+                        cls,
                     ]
                 )
         else:
@@ -497,6 +543,7 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
                     str(-amount),
                     "",
                     "",
+                    cls,
                 ]
             )
 
@@ -513,10 +560,30 @@ def export_estimates(db: Session) -> str:
     """
     header = (
         _iif_line(
-            ["!TRNS", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+            [
+                "!TRNS",
+                "TRNSTYPE",
+                "DATE",
+                "ACCNT",
+                "NAME",
+                "AMOUNT",
+                "DOCNUM",
+                "MEMO",
+                "CLASS",
+            ]
         )
         + _iif_line(
-            ["!SPL", "TRNSTYPE", "DATE", "ACCNT", "NAME", "AMOUNT", "DOCNUM", "MEMO"]
+            [
+                "!SPL",
+                "TRNSTYPE",
+                "DATE",
+                "ACCNT",
+                "NAME",
+                "AMOUNT",
+                "DOCNUM",
+                "MEMO",
+                "CLASS",
+            ]
         )
         + _iif_line(["!ENDTRNS"])
     )
@@ -533,6 +600,7 @@ def export_estimates(db: Session) -> str:
 
     lines = header
     for est in estimates:
+        cls = _class_name(db, getattr(est, "class_id", None))
         cust_name = est.customer.name if est.customer else ""
         est_date = _iif_date(est.date)
         total = Decimal(str(est.total or 0))
@@ -547,6 +615,7 @@ def export_estimates(db: Session) -> str:
                 str(total),
                 est.estimate_number or "",
                 est.notes or "",
+                cls,
             ]
         )
 
@@ -570,6 +639,7 @@ def export_estimates(db: Session) -> str:
                     str(-amt),
                     est.estimate_number or "",
                     el.description or "",
+                    cls,
                 ]
             )
 
@@ -585,11 +655,290 @@ def export_estimates(db: Session) -> str:
                     str(-tax_amt),
                     est.estimate_number or "",
                     "Sales Tax",
+                    cls,
                 ]
             )
 
         lines += _iif_line(["ENDTRNS"])
 
+    return lines
+
+
+def export_classes(db: Session) -> str:
+    """!CLASS list — names verbatim (Parent:Child paths round-trip), archived
+    classes as HIDDEN=Y. The importer's mirror image."""
+    from app.models.classes import TxnClass
+
+    lines = _iif_line(["!CLASS", "NAME", "HIDDEN"])
+    rows = (
+        db.query(TxnClass)
+        .filter(TxnClass.is_system_default.is_(False))
+        .order_by(TxnClass.name)
+        .all()
+    )
+    for c in rows:
+        lines += _iif_line(["CLASS", _iif_clean(c.name), "Y" if c.is_archived else "N"])
+    return lines
+
+
+_TXN_COLUMNS = [
+    "TRNSTYPE",
+    "DATE",
+    "ACCNT",
+    "NAME",
+    "AMOUNT",
+    "DOCNUM",
+    "DUEDATE",
+    "TERMS",
+    "MEMO",
+    "CLASS",
+]
+
+
+def _txn_header() -> str:
+    return (
+        _iif_line(["!TRNS"] + _TXN_COLUMNS)
+        + _iif_line(["!SPL"] + _TXN_COLUMNS)
+        + _iif_line(["!ENDTRNS"])
+    )
+
+
+def _row(
+    kind, trnstype, d, acct, name, amount, docnum="", due="", terms="", memo="", cls=""
+):
+    return _iif_line(
+        [
+            kind,
+            trnstype,
+            d,
+            acct,
+            _iif_clean(name),
+            str(amount),
+            _iif_clean(docnum),
+            due,
+            terms,
+            _iif_clean(memo),
+            cls,
+        ]
+    )
+
+
+def export_bills(db: Session, date_from: date = None, date_to: date = None) -> str:
+    """Bills as BILL blocks. QB convention: TRNS is the A/P credit (negative),
+    each SPL the expense debit (positive); the importer reads abs() so
+    either sign re-imports."""
+    from app.models.bills import Bill, BillStatus
+    from app.services.accounting import get_ap_account_id
+
+    ap_name = _resolve_account_name(db, get_ap_account_id(db)) or "Accounts Payable"
+    q = (
+        db.query(Bill)
+        .options(joinedload(Bill.vendor), joinedload(Bill.lines))
+        .filter(Bill.status != BillStatus.VOID)
+    )
+    if date_from:
+        q = q.filter(Bill.date >= date_from)
+    if date_to:
+        q = q.filter(Bill.date <= date_to)
+    lines = _txn_header()
+    for bill in q.order_by(Bill.date, Bill.id).all():
+        cls = _class_name(db, bill.class_id)
+        vendor = bill.vendor.name if bill.vendor else ""
+        total = Decimal(str(bill.total or 0))
+        lines += _row(
+            "TRNS",
+            "BILL",
+            _iif_date(bill.date),
+            ap_name,
+            vendor,
+            -total,
+            bill.bill_number or "",
+            _iif_date(bill.due_date),
+            bill.terms or "",
+            bill.notes or "",
+            cls,
+        )
+        for bl in bill.lines:
+            amt = Decimal(str(bl.amount or 0))
+            if amt == 0:
+                continue
+            acct = _resolve_account_name(db, bl.account_id) if bl.account_id else ""
+            if not acct and bl.item and bl.item.expense_account_id:
+                acct = _resolve_account_name(db, bl.item.expense_account_id)
+            lines += _row(
+                "SPL",
+                "BILL",
+                _iif_date(bill.date),
+                acct or "Uncategorized Expenses",
+                vendor,
+                amt,
+                bill.bill_number or "",
+                "",
+                "",
+                bl.description or "",
+                cls,
+            )
+        tax = Decimal(str(bill.tax_amount or 0))
+        if tax > 0:
+            lines += _row(
+                "SPL",
+                "BILL",
+                _iif_date(bill.date),
+                "Sales Tax Payable",
+                vendor,
+                tax,
+                bill.bill_number or "",
+                "",
+                "",
+                "Sales tax",
+                cls,
+            )
+        lines += _iif_line(["ENDTRNS"])
+    return lines
+
+
+def export_deposits(db: Session, date_from: date = None, date_to: date = None) -> str:
+    """Make Deposits entries (journal-only transactions, source_type
+    'deposit') as DEPOSIT blocks: TRNS = the bank debit (positive), SPL =
+    each source credit (negative)."""
+    from app.models.transactions import Transaction
+
+    q = db.query(Transaction).filter(Transaction.source_type == "deposit")
+    if date_from:
+        q = q.filter(Transaction.date >= date_from)
+    if date_to:
+        q = q.filter(Transaction.date <= date_to)
+    lines = _txn_header()
+    for txn in q.order_by(Transaction.date, Transaction.id).all():
+        debits = [ln for ln in txn.lines if ln.debit and ln.debit > 0]
+        credits = [ln for ln in txn.lines if ln.credit and ln.credit > 0]
+        if not debits:
+            continue
+        cls = _class_name(db, txn.class_id)
+        bank = debits[0]
+        lines += _row(
+            "TRNS",
+            "DEPOSIT",
+            _iif_date(txn.date),
+            _resolve_account_name(db, bank.account_id),
+            "",
+            Decimal(str(bank.debit)),
+            txn.reference or "",
+            "",
+            "",
+            txn.description or "",
+            cls,
+        )
+        for ln in credits:
+            lines += _row(
+                "SPL",
+                "DEPOSIT",
+                _iif_date(txn.date),
+                _resolve_account_name(db, ln.account_id),
+                "",
+                -Decimal(str(ln.credit)),
+                txn.reference or "",
+                "",
+                "",
+                ln.description or "",
+                cls,
+            )
+        lines += _iif_line(["ENDTRNS"])
+    return lines
+
+
+def export_sales_receipts(
+    db: Session, date_from: date = None, date_to: date = None
+) -> str:
+    """Sales receipts (invoices flagged is_sales_receipt) as CASH SALE
+    blocks: TRNS = the deposit account (positive), SPL = income per line
+    and the tax line (negative) — the shape the importer creates a paid
+    invoice + same-day payment from."""
+    from app.models.payments import Payment
+    from app.services.accounting import get_undeposited_funds_id
+
+    default_dep = (
+        _resolve_account_name(db, get_undeposited_funds_id(db)) or "Undeposited Funds"
+    )
+    q = (
+        db.query(Invoice)
+        .options(
+            joinedload(Invoice.customer),
+            joinedload(Invoice.lines).joinedload(InvoiceLine.item),
+        )
+        .filter(
+            Invoice.status != InvoiceStatus.VOID, Invoice.is_sales_receipt.is_(True)
+        )
+    )
+    if date_from:
+        q = q.filter(Invoice.date >= date_from)
+    if date_to:
+        q = q.filter(Invoice.date <= date_to)
+    lines = _txn_header()
+    for inv in q.order_by(Invoice.date, Invoice.id).all():
+        cls = _class_name(db, inv.class_id)
+        cust = inv.customer.name if inv.customer else ""
+        pay = (
+            db.query(Payment)
+            .filter(Payment.customer_id == inv.customer_id, Payment.date == inv.date)
+            .order_by(Payment.id.desc())
+            .first()
+        )
+        dep_name = (
+            _resolve_account_name(db, pay.deposit_to_account_id)
+            if pay and pay.deposit_to_account_id
+            else default_dep
+        )
+        d = _iif_date(inv.date)
+        lines += _row(
+            "TRNS",
+            "CASH SALE",
+            d,
+            dep_name,
+            cust,
+            Decimal(str(inv.total or 0)),
+            inv.invoice_number or "",
+            "",
+            "",
+            inv.notes or "",
+            cls,
+        )
+        for il in inv.lines:
+            amt = Decimal(str(il.amount or 0))
+            if amt == 0:
+                continue
+            acct = ""
+            if il.item and il.item.income_account_id:
+                acct = _resolve_account_name(db, il.item.income_account_id)
+            lines += _row(
+                "SPL",
+                "CASH SALE",
+                d,
+                acct or "Service Income",
+                cust,
+                -amt,
+                inv.invoice_number or "",
+                "",
+                "",
+                il.description or "",
+                cls,
+            )
+        tax = Decimal(str(inv.tax_amount or 0))
+        if tax > 0:
+            lines += _row(
+                "SPL",
+                "CASH SALE",
+                d,
+                "Sales Tax Payable",
+                cust,
+                -tax,
+                inv.invoice_number or "",
+                "",
+                "",
+                "Sales Tax",
+                cls,
+            )
+        lines += _iif_line(["ENDTRNS"])
     return lines
 
 
@@ -601,11 +950,15 @@ def export_all(db: Session) -> str:
     """
     sections = [
         export_accounts(db),
+        export_classes(db),
         export_customers(db),
         export_vendors(db),
         export_items(db),
         export_estimates(db),
         export_invoices(db),
+        export_sales_receipts(db),
         export_payments(db),
+        export_bills(db),
+        export_deposits(db),
     ]
     return "\r\n".join(s for s in sections if s.strip())

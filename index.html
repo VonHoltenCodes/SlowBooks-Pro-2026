@@ -198,7 +198,7 @@
     </div>
 
     <div id="modal-overlay" class="modal-overlay hidden">
-        <div id="modal" class="modal">
+        <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
             <div class="modal-header">
                 <h2 id="modal-title"></h2>
                 <button class="modal-close" id="modal-close-btn" aria-label="Close dialog" type="button">&times;</button>
@@ -207,7 +207,7 @@
         </div>
     </div>
 
-    <div id="toast-container"></div>
+    <div id="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
 
     <script src="/static/js/desktop_shim.js"></script>
     <script src="/static/js/api.js"></script>

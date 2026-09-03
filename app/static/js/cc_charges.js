@@ -15,8 +15,8 @@ const CCChargesPage = {
             html += '<div class="empty-state"><p>No credit card charges recorded yet</p></div>';
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>Date</th><th>Payee</th><th>Account</th><th>Reference</th>
-                <th class="amount">Amount</th></tr></thead><tbody>`;
+                <thead><tr><th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Account</th><th scope="col">Reference</th>
+                <th scope="col" class="amount">Amount</th></tr></thead><tbody>`;
             for (const c of charges) {
                 html += `<tr>
                     <td>${formatDate(c.date)}</td>

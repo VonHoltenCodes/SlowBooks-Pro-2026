@@ -41,6 +41,14 @@ source code or binaries were available, decompiled, or used.
 
 ---
 
+## Accessibility
+
+SlowBooks Pro strives to conform to WCAG 2.1 AA: labelled controls,
+real dialogs, live notifications, AA contrast in both themes, and every
+generated PDF tagged (PDF/UA-1) so tax forms read to a screen reader.
+Details, known gaps and how to report a barrier:
+[docs/accessibility.md](docs/accessibility.md).
+
 ## What's New
 
 **v2.7 — Jobs, job costing, and receipt intake.** QuickBooks-style

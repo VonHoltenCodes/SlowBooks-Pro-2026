@@ -11,6 +11,11 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.services.csv_export import (
+    export_bills as csv_export_bills_fn,
+    export_classes as csv_export_classes_fn,
+    export_deposits as csv_export_deposits_fn,
+    export_jobs as csv_export_jobs_fn,
+    export_sales_receipts as csv_export_sales_receipts_fn,
     export_customers,
     export_vendors,
     export_items,
@@ -48,6 +53,33 @@ def _csv_response(csv_data: str, filename: str, request: Request) -> Response:
 def csv_export_customers(request: Request, db: Session = Depends(get_db)):
     csv_data = export_customers(db)
     return _csv_response(csv_data, "customers.csv", request)
+
+
+@router.get("/export/classes")
+def csv_export_classes(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export_classes_fn(db), "classes.csv", request)
+
+
+@router.get("/export/jobs")
+def csv_export_jobs(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export_jobs_fn(db), "jobs.csv", request)
+
+
+@router.get("/export/bills")
+def csv_export_bills(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export_bills_fn(db), "bills.csv", request)
+
+
+@router.get("/export/deposits")
+def csv_export_deposits(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export_deposits_fn(db), "deposits.csv", request)
+
+
+@router.get("/export/sales-receipts")
+def csv_export_sales_receipts(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(
+        csv_export_sales_receipts_fn(db), "sales_receipts.csv", request
+    )
 
 
 @router.get("/export/vendors")

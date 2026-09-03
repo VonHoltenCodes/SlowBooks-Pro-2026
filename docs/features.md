@@ -602,4 +602,10 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 - Customizable overview: show / hide / reorder dashboard cards per user, a
   catalog of cards (P&L this month vs last, cash position + 30-day forecast,
   open POs, receipts to review, jobs budget vs actual), reset to standard.
+- Export parity: IIF export covers classes (list + CLASS column), Customer:Job
+  rows, bills, deposits and sales receipts; CSV export adds bills, deposits,
+  sales receipts, classes and jobs. Full export re-imports cleanly.
+- Accessibility: WCAG 2.1 AA posture ("strive to conform") — header scopes,
+  labelled icon buttons, live-region toasts, dialog focus management, AA
+  contrast, and tagged (PDF/UA-1) PDFs. See docs/accessibility.md.
 

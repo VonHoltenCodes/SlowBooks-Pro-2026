@@ -19,8 +19,8 @@ const VendorsPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th>Name</th><th>Company</th><th>Phone</th><th>Email</th>
-                    <th class="amount">Balance</th><th>Actions</th>
+                    <th scope="col">Name</th><th scope="col">Company</th><th scope="col">Phone</th><th scope="col">Email</th>
+                    <th scope="col" class="amount">Balance</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const v of vendors) {
                 html += `<tr>

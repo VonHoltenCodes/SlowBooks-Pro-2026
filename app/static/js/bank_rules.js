@@ -22,8 +22,8 @@ const BankRulesPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th>Name</th><th>Pattern</th><th>Match Type</th>
-                    <th>Category Account</th><th>Priority</th><th>Active</th><th>Actions</th>
+                    <th scope="col">Name</th><th scope="col">Pattern</th><th scope="col">Match Type</th>
+                    <th scope="col">Category Account</th><th scope="col">Priority</th><th scope="col">Active</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const r of rules) {
                 html += `<tr>

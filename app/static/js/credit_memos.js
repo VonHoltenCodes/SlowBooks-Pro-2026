@@ -54,7 +54,7 @@ const CreditMemosPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Credit Lines</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th></tr></thead>
                     <tbody id="cm-lines">
                         <tr data-cmline="0">
                             <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
@@ -130,7 +130,7 @@ const CreditMemosPage = {
         openModal(`Apply Credit ${cm.memo_number}`, `
             <p style="margin-bottom:8px;">Credit remaining: <strong>${formatCurrency(cm.balance_remaining)}</strong></p>
             <div class="table-container"><table>
-                <thead><tr><th>Invoice</th><th class="amount">Balance</th><th class="amount">Apply</th></tr></thead>
+                <thead><tr><th scope="col">Invoice</th><th scope="col" class="amount">Balance</th><th scope="col" class="amount">Apply</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
             <div class="form-actions">

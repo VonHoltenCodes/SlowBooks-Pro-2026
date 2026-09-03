@@ -19,8 +19,8 @@ const PaymentsPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th>Date</th><th>Customer</th><th>Method</th><th>Reference</th>
-                    <th class="amount">Amount</th><th>Actions</th>
+                    <th scope="col">Date</th><th scope="col">Customer</th><th scope="col">Method</th><th scope="col">Reference</th>
+                    <th scope="col" class="amount">Amount</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const p of payments) {
                 html += `<tr>
@@ -45,7 +45,7 @@ const PaymentsPage = {
         if (p.allocations.length) {
             allocHtml = `<h4 style="margin:12px 0 8px;">Applied to Invoices</h4>
                 <div class="table-container"><table><thead><tr>
-                <th>Invoice</th><th class="amount">Amount</th></tr></thead><tbody>`;
+                <th scope="col">Invoice</th><th scope="col" class="amount">Amount</th></tr></thead><tbody>`;
             for (const a of p.allocations) {
                 allocHtml += `<tr><td>#${a.invoice_id}</td><td class="amount">${formatCurrency(a.amount)}</td></tr>`;
             }
@@ -144,7 +144,7 @@ const PaymentsPage = {
 
         let html = `<h4 style="margin-bottom:8px;">Apply to Invoices</h4>
             <div class="table-container"><table><thead><tr>
-            <th>Invoice</th><th>Date</th><th class="amount">Balance</th><th class="amount">Apply</th>
+            <th scope="col">Invoice</th><th scope="col">Date</th><th scope="col" class="amount">Balance</th><th scope="col" class="amount">Apply</th>
             </tr></thead><tbody>`;
         for (const inv of PaymentsPage._invoices) {
             html += `<tr>

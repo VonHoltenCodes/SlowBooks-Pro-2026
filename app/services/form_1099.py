@@ -22,8 +22,7 @@ from sqlalchemy.orm import Session
 from app.models.contacts import Vendor
 from app.models.bills import BillPayment
 from app.services.accounting import _q
-from app.services.pdf_service import _jinja_env, _safe_url_fetcher
-from weasyprint import HTML
+from app.services.pdf_service import _jinja_env, render_pdf
 
 # IRS 1099-NEC reporting threshold for nonemployee compensation.
 NEC_THRESHOLD = Decimal("600.00")
@@ -123,7 +122,7 @@ def generate_1099_nec_pdf(db: Session, year: int, vendor_id: int, payer: dict) -
 
     template = _jinja_env.get_template("form_1099nec.html")
     html_str = template.render(rec=record, payer=payer, year=year)
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)
 
 
 def generate_1096_pdf(db: Session, year: int, payer: dict) -> bytes:
@@ -138,4 +137,4 @@ def generate_1096_pdf(db: Session, year: int, payer: dict) -> bytes:
         payer=payer,
         year=year,
     )
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)

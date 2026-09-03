@@ -61,7 +61,7 @@ const BillsPage = {
                 <strong>Status:</strong> ${statusBadge(bill.status)}
             </div>
             <div class="table-container"><table>
-                <thead><tr><th>Description</th><th class="amount">Qty</th><th class="amount">Rate</th><th class="amount">Amount</th></tr></thead>
+                <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
@@ -132,7 +132,7 @@ const BillsPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th>${CostCodes.headHtml()}<th title="Billable to the job's customer">Bill?</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th>${CostCodes.headHtml()}<th scope="col" title="Billable to the job's customer">Bill?</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="bill-lines">
                         <tr data-billline="0">
                             <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
@@ -355,8 +355,8 @@ const BillsPage = {
                         <input name="check_number"></div>
                 </div>
                 <div class="table-container" style="margin-top:12px;"><table>
-                    <thead><tr><th style="width:30px;"></th><th>Bill #</th><th>Vendor</th><th>Due</th>
-                    <th class="amount">Balance</th><th class="amount">Payment</th></tr></thead>
+                    <thead><tr><th scope="col" style="width:30px;"></th><th scope="col">Bill #</th><th scope="col">Vendor</th><th scope="col">Due</th>
+                    <th scope="col" class="amount">Balance</th><th scope="col" class="amount">Payment</th></tr></thead>
                     <tbody>${billRows}</tbody>
                 </table></div>
                 <div class="form-actions">
@@ -430,7 +430,7 @@ const BillsPage = {
                     `<div style="display:flex; align-items:center; gap:8px; padding:2px 0;">
                         <a href="/api/attachments/download/${a.id}" target="_blank">${escapeHtml(a.filename)}</a>
                         <span style="color:var(--gray-400);">(${(a.file_size/1024).toFixed(1)} KB)</span>
-                        <button class="btn btn-sm btn-danger" onclick="BillsPage.deleteAttachment(${a.id},${billId})" style="padding:0 4px; font-size:10px;">X</button>
+                        <button aria-label="Delete attachment" class="btn btn-sm btn-danger" onclick="BillsPage.deleteAttachment(${a.id},${billId})" style="padding:0 4px; font-size:10px;">X</button>
                     </div>`
                 ).join('');
             }

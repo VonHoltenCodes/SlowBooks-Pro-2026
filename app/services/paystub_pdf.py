@@ -15,8 +15,7 @@ import json
 from decimal import Decimal
 
 from app.services.accounting import _q
-from app.services.pdf_service import _jinja_env, _safe_url_fetcher
-from weasyprint import HTML
+from app.services.pdf_service import _jinja_env, render_pdf
 
 # detail_json keys that are deductions (withheld from the employee). Anything
 # else in the blob is an employer-side or informational line we skip on the
@@ -161,4 +160,4 @@ def generate_paystub_pdf(stub, employee, pay_run, company: dict, ytd: dict) -> b
     }
     template = _jinja_env.get_template("paystub_pdf.html")
     html_str = template.render(**ctx)
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)

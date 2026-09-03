@@ -23,8 +23,8 @@ const ExpensesPage = {
                 <p style="font-size:12px; color:var(--gray-600);">Enter a receipt you've already paid — by card, cash, or check. Scan it to fill the form.</p></div>`;
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>Date</th><th>Payee</th><th>Expense Account</th><th>Paid From</th><th>Reference</th>
-                <th>Status</th><th class="amount">Amount</th><th></th></tr></thead><tbody>`;
+                <thead><tr><th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Expense Account</th><th scope="col">Paid From</th><th scope="col">Reference</th>
+                <th scope="col">Status</th><th scope="col" class="amount">Amount</th><th scope="col"></th></tr></thead><tbody>`;
             for (const x of expenses) {
                 const isVoid = x.status === 'void';
                 html += `<tr data-status="${x.status}"${isVoid ? ' style="opacity:0.6; text-decoration:line-through;"' : ''}>
@@ -263,7 +263,7 @@ const ExpensesPage = {
                     `<div style="display:flex; align-items:center; gap:8px; padding:2px 0;">
                         <a href="/api/attachments/download/${a.id}" target="_blank">${escapeHtml(a.filename)}</a>
                         <span style="color:var(--gray-400);">(${(a.file_size/1024).toFixed(1)} KB)</span>
-                        <button class="btn btn-sm btn-danger" onclick="ExpensesPage.deleteAttachment(${a.id},${id})" style="padding:0 4px; font-size:10px;">X</button>
+                        <button aria-label="Delete attachment" class="btn btn-sm btn-danger" onclick="ExpensesPage.deleteAttachment(${a.id},${id})" style="padding:0 4px; font-size:10px;">X</button>
                     </div>`
                 ).join('');
             }

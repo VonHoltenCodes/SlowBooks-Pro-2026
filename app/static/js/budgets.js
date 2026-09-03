@@ -49,8 +49,8 @@ const BudgetsPage = {
             <div class="table-container" style="overflow-x:auto;">
                 <table style="font-size:11px;">
                     <thead><tr>
-                        <th style="min-width:180px;">Account</th>
-                        ${months.map(m => `<th class="amount" style="min-width:80px;">${m}</th>`).join('')}
+                        <th scope="col" style="min-width:180px;">Account</th>
+                        ${months.map(m => `<th scope="col" class="amount" style="min-width:80px;">${m}</th>`).join('')}
                     </tr></thead>
                     <tbody>${rows || '<tr><td colspan="13">No budgetable accounts found</td></tr>'}</tbody>
                 </table>
@@ -92,9 +92,9 @@ const BudgetsPage = {
             let html = '<div style="overflow-x:auto;">';
             for (const acct of data.accounts) {
                 html += `<h3 style="margin:12px 0 4px; font-size:12px; color:var(--qb-navy);">${escapeHtml(acct.account_number)} — ${escapeHtml(acct.account_name)}</h3>`;
-                html += `<table style="font-size:10px; margin-bottom:12px;"><thead><tr><th></th>`;
-                html += months.map(m => `<th class="amount">${m}</th>`).join('');
-                html += '<th class="amount" style="font-weight:700;">Total</th></tr></thead><tbody>';
+                html += `<table style="font-size:10px; margin-bottom:12px;"><thead><tr><th scope="col"></th>`;
+                html += months.map(m => `<th scope="col" class="amount">${m}</th>`).join('');
+                html += '<th scope="col" class="amount" style="font-weight:700;">Total</th></tr></thead><tbody>';
                 html += '<tr><td>Budget</td>';
                 html += acct.months.map(m => `<td class="amount">${formatCurrency(m.budget)}</td>`).join('');
                 html += `<td class="amount" style="font-weight:700;">${formatCurrency(acct.total_budget)}</td></tr>`;

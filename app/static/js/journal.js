@@ -14,8 +14,8 @@ const JournalPage = {
             html += '<div class="empty-state"><p>No manual journal entries yet</p></div>';
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>ID</th><th>Date</th><th>Description</th><th>Reference</th>
-                <th class="amount">Debit</th><th class="amount">Credit</th><th>Actions</th></tr></thead><tbody>`;
+                <thead><tr><th scope="col">ID</th><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th>
+                <th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th><th scope="col">Actions</th></tr></thead><tbody>`;
             for (const e of entries) {
                 html += `<tr>
                     <td>${e.id}</td>
@@ -52,7 +52,7 @@ const JournalPage = {
                 <strong>Type:</strong> ${escapeHtml(entry.source_type)}
             </div>
             <div class="table-container"><table>
-                <thead><tr><th>Account</th><th>Description</th>${CostCodes.headHtml()}<th class="amount">Debit</th><th class="amount">Credit</th></tr></thead>
+                <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}<th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
@@ -92,7 +92,7 @@ const JournalPage = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Lines</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Account</th><th>Description</th><th class="col-rate">Debit</th><th class="col-rate">Credit</th><th class="col-actions"></th></tr></thead>
+                    <thead><tr><th scope="col">Account</th><th scope="col">Description</th><th scope="col" class="col-rate">Debit</th><th scope="col" class="col-rate">Credit</th><th scope="col" class="col-actions"></th></tr></thead>
                     <tbody id="je-lines">
                         <tr data-jeline="0">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
@@ -100,7 +100,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}
                             <td><input class="je-debit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                            <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
                         </tr>
                         <tr data-jeline="1">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
@@ -108,7 +108,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}
                             <td><input class="je-debit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                            <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
                         </tr>
                     </tbody>
                 </table>
@@ -138,7 +138,7 @@ const JournalPage = {
                             ${CostCodes.cellHtml('je-cost-code')}
                 <td><input class="je-debit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                 <td><input class="je-credit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
-                <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
+                <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
             </tr>`);
     },
 

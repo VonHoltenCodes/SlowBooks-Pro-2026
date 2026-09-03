@@ -80,7 +80,7 @@
     --gray-100: #f3f4f6;
     --gray-200: #e5e7eb;
     --gray-300: #d1d5db;
-    --gray-400: #9ca3af;
+    --gray-400: #6b7280; /* was #9ca3af — 2.5:1 on white, failed AA for text */
     --gray-500: #6b7280;
     --gray-600: #4b5563;
 
