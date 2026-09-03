@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, server-edition, feat/receipt-intake, feat/projects, "claude/**", "se/**"]
   pull_request:
-    branches: [main, server-edition, feat/receipt-intake]
+    branches: [main, server-edition, feat/receipt-intake, feat/projects]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
