@@ -63,13 +63,17 @@ def test_engine_selection_env_override(monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_OCR_ENGINE", "vision")
     engine = ocr_engines.get_engine()
     assert engine.name == "vision"
-    # On Linux CI the Vision bridge can't import: it must degrade, not raise
+    # Without the pyobjc bridge (Linux CI) it must degrade, not raise; on a
+    # Mac with the bridge installed it is genuinely available.
+    monkeypatch.setattr(engine, "_bridge", lambda: (_ for _ in ()).throw(ImportError()))
     assert engine.available() is False
     assert engine.unavailable_reason()
 
 
 def test_engine_selection_auto_falls_back_to_tesseract(monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_OCR_ENGINE", "auto")
+    # Pretend no native engine exists on this platform (true on Linux CI)
+    monkeypatch.setattr(ocr_engines, "_native_engine_for_platform", lambda: None)
     monkeypatch.setattr(
         ocr_service,
         "tesseract_info",

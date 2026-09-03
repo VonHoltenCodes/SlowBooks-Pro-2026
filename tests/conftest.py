@@ -19,6 +19,10 @@ os.environ["ALLOWED_ORIGINS"] = "http://testserver,http://localhost:3001"
 os.environ["CORS_ALLOW_ORIGINS"] = "http://testserver,http://localhost:3001"
 os.environ["RATE_LIMIT_ENABLED"] = "0"
 os.environ["SESSION_IDLE_TIMEOUT_SECONDS"] = "0"  # Disable idle expiry in tests
+# The suite is written against tesseract; on a Mac/Windows dev box with the
+# native OCR bridge installed, auto-selection would pick Vision/WinRT and
+# bypass the ocr_service monkeypatches. Selection tests override per-test.
+os.environ.setdefault("SLOWBOOKS_OCR_ENGINE", "tesseract")
 # Point the app at an in-memory DB by default; fixtures override per-test.
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 
