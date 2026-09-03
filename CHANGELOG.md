@@ -127,6 +127,16 @@ a date no longer reports "applied to the form" while the date input
 stays empty; it says what it read and asks for a redraw or a manual
 entry.
 
+**US register tape parses (Walmart, Whole Foods, Costco phone photos).**
+`TAX 1 7.000 %` is a tax *rate* line, not a 7.00 tax — a third decimal
+or a trailing % never reads as money. A return-policy or promotion line
+("purchases made on or after 9/15/2020") can no longer supply the
+transaction date. Walmart's `TC#` is the receipt number; the `REF #`
+printed beside APPR CODE / NETWORK ID / TERMINAL # is the card
+authorization and is ignored. The Invoice / Ref # button is present on
+the picker under the receipt (build 47 drew the box but had no button
+to assign it to).
+
 **Desktop launcher:** `--data-dir` (Server Edition scheduled task,
 headless test rigs) now relocates the per-user `.env` along with the
 data directory; it used to write `DATABASE_URL` into the launching
