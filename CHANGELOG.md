@@ -7,6 +7,30 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Customizable overview
+
+**The Company Snapshot is yours to arrange.** A **Customize** button on the
+overview lets you hide any card, move cards up or down, and add cards from
+a catalog; **Save layout** remembers it for your login (each user on a
+Server Edition company gets their own; the single-password operator gets
+one shared layout), and **Reset** brings back the standard overview. The
+classic cards are all there — receivables, overdue invoices, active
+customers, payables, bank balances, A/R aging, monthly revenue, recent
+invoices and payments — and five new ones join the catalog:
+
+- **P&L: This Month vs Last** — income, expenses and net side by side.
+- **Cash Position** — cash on hand plus a 30-day forecast from receivables
+  and payables coming due (assumes customers pay on the due date).
+- **Open Purchase Orders** — committed but not yet billed, with the job.
+- **Receipts to Review** — scanned receipts waiting to become a bill or
+  expense, and how long before they expire.
+- **Jobs: Budget vs Actual** — active jobs ranked by projected variance,
+  each a click from its job page.
+
+Every card loads independently, so one card with a problem shows its
+error in place instead of taking the page down. The overdue-invoices card
+now names who owes what and by how many days.
+
 ### v2.7.0 — Jobs, job costing, and receipt intake
 
 The two most-requested features since Server Edition, each field-tested on

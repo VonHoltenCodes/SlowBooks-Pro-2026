@@ -599,4 +599,7 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
   burden, allocations), time posted to jobs at loaded cost, budgets per code
   seeded from estimates, drill-down job page (budget / committed / actual /
   projected / variance), Job Budget vs Actual report.
+- Customizable overview: show / hide / reorder dashboard cards per user, a
+  catalog of cards (P&L this month vs last, cash position + 30-day forecast,
+  open POs, receipts to review, jobs budget vs actual), reset to standard.
 

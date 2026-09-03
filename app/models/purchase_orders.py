@@ -57,6 +57,7 @@ class PurchaseOrder(Base):
     )
 
     vendor = relationship("Vendor", backref="purchase_orders")
+    job = relationship("Job")
     lines = relationship(
         "PurchaseOrderLine",
         back_populates="purchase_order",

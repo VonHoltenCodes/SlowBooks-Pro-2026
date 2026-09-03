@@ -1935,3 +1935,26 @@ tr.clickable { cursor: pointer; }
     color: var(--pick-ink);
 }
 .btn.ocr-pick:hover { filter: brightness(0.96); }
+
+
+/* Customizable dashboard: stat tiles share a row, panels take half or all */
+.dash-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 16px;
+}
+.dash-card--stat { grid-column: span 1; }
+.dash-card--half { grid-column: span 2; }
+.dash-card--full { grid-column: span 4; }
+.dash-card__body { margin-top: 6px; }
+.dash-card__controls { display: inline-flex; gap: 2px; }
+.dash-card__controls .btn { padding: 0 6px; line-height: 18px; font-size: 10px; }
+@media (max-width: 900px) {
+    .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .dash-card--full { grid-column: span 2; }
+}
+@media (max-width: 560px) {
+    .dash-grid { grid-template-columns: 1fr; }
+    .dash-card--stat, .dash-card--half, .dash-card--full { grid-column: span 1; }
+}
