@@ -10,6 +10,7 @@ class RecurringLineCreate(BaseModel):
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
+    is_taxable: Optional[bool] = None
     line_order: int = 0
 
     @model_validator(mode="after")
@@ -24,6 +25,7 @@ class RecurringLineResponse(BaseModel):
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
+    is_taxable: bool = True
     line_order: int = 0
     model_config = {"from_attributes": True}
 

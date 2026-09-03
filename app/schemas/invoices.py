@@ -18,6 +18,8 @@ class InvoiceLineCreate(BaseModel):
     job_id: Optional[int] = None
     class_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    # None = default from the item (its taxable flag) and the customer
+    is_taxable: Optional[bool] = None
     line_order: int = 0
 
     @model_validator(mode="after")
@@ -37,6 +39,7 @@ class InvoiceLineResponse(BaseModel):
     job_id: Optional[int] = None
     class_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    is_taxable: bool = True
     line_order: int
 
     model_config = {"from_attributes": True}

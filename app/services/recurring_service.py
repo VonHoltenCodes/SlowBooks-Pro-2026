@@ -123,6 +123,7 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
                     description=rline.description,
                     quantity=rline.quantity,
                     rate=rline.rate,
+                    is_taxable=rline.is_taxable,
                     amount=_q(Decimal(str(rline.quantity)) * Decimal(str(rline.rate))),
                     line_order=rline.line_order,
                 )

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
+from app.services.accounting import taxable_subtotal
 from app.models.accounts import Account
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Vendor
@@ -54,7 +55,9 @@ def sales_tax_report(
     for inv in invoices:
         total_sales += inv.subtotal
         if inv.tax_amount and inv.tax_amount > 0:
-            total_taxable += inv.subtotal
+            # Only the taxable lines form the base (a labor line on a
+            # customer-owned device sits beside a taxed part).
+            total_taxable += taxable_subtotal(inv.lines)
             total_tax += inv.tax_amount
         items.append(
             {

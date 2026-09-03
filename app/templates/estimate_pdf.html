@@ -74,7 +74,7 @@
         <tbody>
         {% for line in est.lines %}
             <tr>
-                <td>{{ line.description or '' }}</td>
+                <td>{{ line.description or '' }}{% if est.tax_amount and not line.is_taxable %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity }}</td>
                 <td class="r">{{ line.rate | currency }}</td>
                 <td class="r">{{ line.amount | currency }}</td>

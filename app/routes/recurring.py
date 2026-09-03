@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.routes.invoices.helpers import resolve_line_taxable
 from app.models.recurring import RecurringInvoice, RecurringInvoiceLine
 from app.models.contacts import Customer
 from app.schemas.recurring import RecurringCreate, RecurringUpdate, RecurringResponse
@@ -62,6 +63,7 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     db.add(rec)
     db.flush()
 
+    resolve_line_taxable(db, data.lines, customer)
     for i, line_data in enumerate(data.lines):
         db.add(
             RecurringInvoiceLine(
@@ -70,6 +72,9 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
                 description=line_data.description,
                 quantity=line_data.quantity,
                 rate=line_data.rate,
+                is_taxable=(
+                    line_data.is_taxable if line_data.is_taxable is not None else True
+                ),
                 line_order=line_data.line_order or i,
             )
         )
@@ -94,6 +99,7 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
         db.query(RecurringInvoiceLine).filter(
             RecurringInvoiceLine.recurring_invoice_id == rec_id
         ).delete()
+        resolve_line_taxable(db, data.lines, rec.customer)
         for i, line_data in enumerate(data.lines):
             db.add(
                 RecurringInvoiceLine(
@@ -102,6 +108,11 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
                     description=line_data.description,
                     quantity=line_data.quantity,
                     rate=line_data.rate,
+                    is_taxable=(
+                        line_data.is_taxable
+                        if line_data.is_taxable is not None
+                        else True
+                    ),
                     line_order=line_data.line_order or i,
                 )
             )

@@ -164,7 +164,7 @@ const EstimatesPage = {
                 <table class="line-items-table">
                     <thead><tr>
                         <th>Item</th><th>Description</th>${CostCodes.headHtml()}<th title='Unit cost (budget side)'>Cost</th><th class="col-qty">Qty</th>
-                        <th class="col-rate">Rate</th><th class="col-amount">Amount</th><th class="col-actions"></th>
+                        <th class="col-rate">Rate</th><th title="Sales tax applies to this line">Tax</th><th class="col-amount">Amount</th><th class="col-actions"></th>
                     </tr></thead>
                     <tbody id="est-lines">
                         ${est.lines.map((l, i) => EstimatesPage.lineRowHtml(i, l, items)).join('')}
@@ -196,6 +196,7 @@ const EstimatesPage = {
             ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}
             <td><input class="line-unit-cost" type="number" step="0.01" value="${line.unit_cost ?? ''}" placeholder="cost" title="Unit cost (budget side); rate is what you charge"></td>
             <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="EstimatesPage.recalc()"></td>
+            <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" onclick="EstimatesPage.removeLine(${idx})">X</button></td>
         </tr>`;
@@ -220,17 +221,20 @@ const EstimatesPage = {
         if (item) {
             row.querySelector('.line-desc').value = item.description || item.name;
             row.querySelector('.line-rate').value = item.rate;
+            const tax = row.querySelector('.line-taxable');
+            if (tax) tax.checked = item.is_taxable !== false;
             EstimatesPage.recalc();
         }
     },
 
     recalc() {
-        let subtotal = 0;
+        let subtotal = 0, taxable = 0;
         $$('#est-lines tr').forEach(row => {
             const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
             const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
             const amount = qty * rate;
             subtotal += amount;
+            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
             const amountCell = row.querySelector('.line-amount');
             if (amountCell) amountCell.textContent = formatCurrency(amount);
         });
@@ -252,6 +256,7 @@ const EstimatesPage = {
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 cost_code_id: CostCodes.fromRow(row, 'line-cost-code'),
                 unit_cost: row.querySelector('.line-unit-cost')?.value ? parseFloat(row.querySelector('.line-unit-cost').value) : null,
                 line_order: i,

@@ -47,6 +47,7 @@ def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
     sum (prevents drift between stored invoice.total and DB-rounded journal
     lines).
     """
+    lines = list(lines)
     subtotal = _q(
         sum(
             (
@@ -56,9 +57,26 @@ def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
             Decimal("0"),
         )
     )
-    tax_amount = _q(subtotal * Decimal(str(tax_rate or 0)))
+    tax_amount = _q(taxable_subtotal(lines) * Decimal(str(tax_rate or 0)))
     total = _q(subtotal + tax_amount)
     return subtotal, tax_amount, total
+
+
+def taxable_subtotal(lines) -> Decimal:
+    """Sum of the lines the tax rate applies to. A line without an
+    is_taxable attribute (or with it None) counts as taxable — the pre-
+    per-line behaviour — so every caller that never heard of the flag keeps
+    its numbers."""
+    return _q(
+        sum(
+            (
+                _q(Decimal(str(line.quantity)) * Decimal(str(line.rate)))
+                for line in lines
+                if getattr(line, "is_taxable", None) is not False
+            ),
+            Decimal("0"),
+        )
+    )
 
 
 def due_date_from_terms(

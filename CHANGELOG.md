@@ -7,6 +7,21 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Sales tax per line
+
+**A labor line and a taxed part can share one invoice.** The invoice's tax
+rate used to apply to the whole subtotal, even though items already carried
+a taxable flag. Now every line on an invoice, estimate, sales receipt and
+recurring invoice has a **Tax** checkbox: it starts from the item's flag
+(and turns off for every line when the customer is marked non-taxable), you
+can flip it per line, the totals only tax the checked lines, the flag rides
+from an estimate into the invoice it becomes and from a recurring template
+onto every invoice it generates, the Sales Tax report's taxable base counts
+only taxed lines, and the PDF marks non-taxable lines when the document
+carries tax. Field report from an IT shop that repairs customer-owned
+devices (untaxed labor) and sells the part with install (taxed) on the
+same invoice.
+
 ### Customizable overview
 
 **The Company Snapshot is yours to arrange.** A **Customize** button on the

@@ -12,6 +12,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
+from app.routes.invoices.helpers import resolve_line_taxable
 from app.routes._helpers import clamp_pagination
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
@@ -80,6 +81,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
 
     cust_id = customer.id
     cust_name = customer.name
+    resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
     estimate = None
@@ -131,6 +133,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             job_id=line_data.job_id,
             cost_code_id=line_data.cost_code_id,
             unit_cost=line_data.unit_cost,
+            is_taxable=(
+                line_data.is_taxable if line_data.is_taxable is not None else True
+            ),
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -175,11 +180,15 @@ def update_estimate(
                 job_id=line_data.job_id,
                 cost_code_id=line_data.cost_code_id,
                 unit_cost=line_data.unit_cost,
+                is_taxable=(
+                    line_data.is_taxable if line_data.is_taxable is not None else True
+                ),
                 line_order=line_data.line_order or i,
             )
             db.add(line)
 
         tax_rate = data.tax_rate if data.tax_rate is not None else estimate.tax_rate
+        resolve_line_taxable(db, data.lines, estimate.customer)
         subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
         estimate.subtotal = subtotal
         estimate.tax_amount = tax_amount
@@ -300,6 +309,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
             class_name=eline.class_name,
             job_id=eline.job_id,
             cost_code_id=eline.cost_code_id,
+            is_taxable=eline.is_taxable,
             line_order=eline.line_order,
         )
         db.add(iline)

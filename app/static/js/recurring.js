@@ -94,7 +94,7 @@ const RecurringPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th></tr></thead>
+                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th title="Sales tax applies to this line">Tax</th></tr></thead>
                     <tbody id="rec-lines">
                         ${rec.lines.map((l, i) => {
                             const opts = items.map(it => `<option value="${it.id}" ${l.item_id==it.id?'selected':''}>${escapeHtml(it.name)}</option>`).join('');
@@ -103,6 +103,7 @@ const RecurringPage = {
                                 <td><input class="line-desc" value="${escapeHtml(l.description || '')}"></td>
                                 <td><input class="line-qty" type="number" step="0.01" value="${l.quantity || 1}"></td>
                                 <td><input class="line-rate" type="number" step="0.01" value="${l.rate || 0}"></td>
+                                <td style="text-align:center"><input type="checkbox" class="line-taxable" ${l.is_taxable === false ? '' : 'checked'}></td>
                             </tr>`;
                         }).join('')}
                     </tbody>
@@ -135,6 +136,7 @@ const RecurringPage = {
                 <td><input class="line-desc"></td>
                 <td><input class="line-qty" type="number" step="0.01" value="1"></td>
                 <td><input class="line-rate" type="number" step="0.01" value="0"></td>
+                <td style="text-align:center"><input type="checkbox" class="line-taxable" checked></td>
             </tr>`);
     },
 
@@ -147,6 +149,7 @@ const RecurringPage = {
                 item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
+                is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
                 line_order: i,
             });

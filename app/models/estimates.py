@@ -7,6 +7,7 @@
 import enum
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Integer,
     String,
@@ -96,6 +97,10 @@ class EstimateLine(Base):
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
     unit_cost = Column(Numeric(12, 4), nullable=True)  # cost side; rate is revenue
+    # Per-line sales tax (default: the item's flag, or taxable). A customer-
+    # owned-device repair is labor with no tax; the part on the same invoice
+    # is taxed.
+    is_taxable = Column(Boolean, nullable=False, default=True)
     line_order = Column(Integer, default=0)
 
     estimate = relationship("Estimate", back_populates="lines")

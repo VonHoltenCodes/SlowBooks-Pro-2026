@@ -164,7 +164,7 @@ const SalesReceiptsPage = {
                 <table class="line-items-table">
                     <thead><tr>
                         <th>Item</th><th>Description</th><th class="col-qty">Qty</th>
-                        <th class="col-rate">Rate</th><th class="col-amount">Amount</th><th class="col-actions"></th>
+                        <th class="col-rate">Rate</th><th title="Sales tax applies to this line">Tax</th><th class="col-amount">Amount</th><th class="col-actions"></th>
                     </tr></thead>
                     <tbody id="sr-lines">
                         ${sr.lines.map((l, i) => SalesReceiptsPage.lineRowHtml(i, l, items)).join('')}
@@ -321,6 +321,7 @@ const SalesReceiptsPage = {
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="SalesReceiptsPage.recalc()"></td>
             <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="SalesReceiptsPage.recalc()"></td>
+            <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="SalesReceiptsPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" onclick="SalesReceiptsPage.removeLine(${idx})">X</button></td>
         </tr>`;
@@ -345,22 +346,25 @@ const SalesReceiptsPage = {
         if (item) {
             row.querySelector('.line-desc').value = item.description || item.name;
             row.querySelector('.line-rate').value = item.rate;
+            const tax = row.querySelector('.line-taxable');
+            if (tax) tax.checked = item.is_taxable !== false;
             SalesReceiptsPage.recalc();
         }
     },
 
     recalc() {
-        let subtotal = 0;
+        let subtotal = 0, taxable = 0;
         $$('#sr-lines tr').forEach(row => {
             const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
             const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
             const amount = qty * rate;
             subtotal += amount;
+            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
             const amountCell = row.querySelector('.line-amount');
             if (amountCell) amountCell.textContent = formatCurrency(amount);
         });
         const taxPct = parseFloat($('#sales-receipt-form [name="tax_rate"]')?.value) || 0;
-        const tax = subtotal * (taxPct / 100);
+        const tax = taxable * (taxPct / 100);
         $('#sr-subtotal').textContent = formatCurrency(subtotal);
         $('#sr-tax').textContent = formatCurrency(tax);
         $('#sr-total').textContent = formatCurrency(subtotal + tax);
@@ -376,6 +380,7 @@ const SalesReceiptsPage = {
                 item_id: item_id ? parseInt(item_id) : null,
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
+                is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
                 line_order: i,
             });

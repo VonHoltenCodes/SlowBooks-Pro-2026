@@ -62,7 +62,7 @@ Tax calculations are approximate — verify with a tax professional. Full module
 - **Balance Sheet** — Assets, liabilities, and equity as of any date
 - **A/R Aging** — Outstanding receivables grouped by customer with 30/60/90 day buckets
 - **A/P Aging** — Outstanding payables grouped by vendor with 30/60/90 day buckets
-- **Sales Tax** — Tax collected by invoice with taxable/non-taxable breakdowns. Pay Sales Tax feature records payments to government (DR Sales Tax Payable, CR Bank)
+- **Sales Tax** — Per-line taxable flag (defaults from the item and the customer) so untaxed labor and a taxed part share one invoice; the rate lives on the document. Sales Tax report shows the taxable base and tax collected. Pay Sales Tax feature records payments to government (DR Sales Tax Payable, CR Bank)
 - **General Ledger** — All journal entries grouped by account with debit/credit totals
 - **Income by Customer** — Sales totals per customer with invoice counts
 - **Customer Statements** — PDF statement with invoice/payment history and running balance
