@@ -679,6 +679,7 @@ td.amount, th.amount {
 .badge-sent    { background: #dbeafe; color: #1e40af; border: 1px solid #93c5fd; }
 .badge-partial { background: #fef3c7; color: #92400e; border: 1px solid #fbbf24; }
 .badge-paid    { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+.badge-recorded { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
 .badge-void    { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
 .badge-pending { background: #fef3c7; color: #92400e; border: 1px solid #fbbf24; }
 .badge-accepted{ background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
@@ -1925,3 +1926,12 @@ tr.clickable { cursor: pointer; }
 @keyframes ai-chat-spin {
     to { transform: rotate(360deg); }
 }
+
+/* Scan Receipt canvas — field picker buttons. Each carries its field
+   color as custom properties (set by OcrCanvas.panelHtml). */
+.btn.ocr-pick, .btn.ocr-pick:hover, .btn.ocr-pick:active {
+    border: 2px solid var(--pick-stroke);
+    background: var(--pick-fill);
+    color: var(--pick-ink);
+}
+.btn.ocr-pick:hover { filter: brightness(0.96); }

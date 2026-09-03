@@ -74,6 +74,17 @@ def due_date_from_terms(
     return txn_date + timedelta(days=days)
 
 
+def _cost_type_of(db: Session, cost_code_id) -> str | None:
+    """The cost type a coded line belongs to, so job roll-ups by type never
+    have to re-join the code table."""
+    if not cost_code_id:
+        return None
+    from app.models.cost_codes import CostCode
+
+    code = db.get(CostCode, cost_code_id)
+    return code.cost_type if code else None
+
+
 def create_journal_entry(
     db: Session,
     txn_date: date,
@@ -84,11 +95,14 @@ def create_journal_entry(
     reference: str = None,
     bypass_closing_date: bool = False,
     class_id: int = None,
+    job_id: int = None,
 ) -> Transaction:
     """Create a balanced journal entry.
 
     lines: [{"account_id": int, "debit": Decimal, "credit": Decimal}, ...]
-    Each line must have debit > 0 OR credit > 0, not both.
+    Each line must have debit > 0 OR credit > 0, not both. A line may carry
+    its own "job_id" / "class_id"; otherwise it inherits the header values,
+    so job and class reports can always group on the line.
     Total debits must equal total credits.
 
     Closing-date enforcement runs here so every JE-posting path inherits it
@@ -128,6 +142,7 @@ def create_journal_entry(
         source_id=source_id,
         reference=reference,
         class_id=class_id,
+        job_id=job_id,
     )
     db.add(txn)
     db.flush()
@@ -144,6 +159,12 @@ def create_journal_entry(
             debit=debit,
             credit=credit,
             description=line_data.get("description", ""),
+            job_id=line_data.get("job_id") or job_id,
+            class_id=line_data.get("class_id") or class_id,
+            cost_code_id=line_data.get("cost_code_id"),
+            cost_type=line_data.get("cost_type")
+            or _cost_type_of(db, line_data.get("cost_code_id")),
+            is_billable=bool(line_data.get("is_billable", False)),
         )
         db.add(txn_line)
 

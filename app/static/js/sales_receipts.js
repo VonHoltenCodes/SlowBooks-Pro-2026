@@ -114,6 +114,7 @@ const SalesReceiptsPage = {
             lines: [{ item_id: '', description: '', quantity: 1, rate: 0 }],
         };
         const classGroup = await classFormGroupHtml(null);
+        const jobGroup = await jobFormGroupHtml(null);
 
         SalesReceiptsPage.lineCount = sr.lines.length;
         SalesReceiptsPage._items = items;
@@ -124,6 +125,7 @@ const SalesReceiptsPage = {
 
         openModal('Enter Sales Receipt', `
             <form id="sales-receipt-form" onsubmit="SalesReceiptsPage.save(event)">
+                ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
                     <div class="form-group"><label>Customer *</label>
                         <select name="customer_id" id="sr-customer-select" required onchange="SalesReceiptsPage.customerSelected(this.value)"><option value="">Select...</option><option value="__new__">+ New Customer</option>${custOpts}</select>
@@ -152,7 +154,7 @@ const SalesReceiptsPage = {
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
                             <option value="">Undeposited Funds (default)</option>${bankOpts}</select></div>
-                    ${classGroup}
+                    ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml(null, null)}
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.01" value="${(sr.tax_rate * 100) || 0}"
@@ -177,11 +179,109 @@ const SalesReceiptsPage = {
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="ScanHelper.discard(); closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Record Sales Receipt</button>
                 </div>
             </form>`);
         SalesReceiptsPage.recalc();
+        ScanHelper.wire(SalesReceiptsPage._applyScan, SalesReceiptsPage._applyScanField,
+            SalesReceiptsPage._scanFieldTarget);
+    },
+
+    // Where each canvas field lands — the canvas outlines these inputs in
+    // the field's color so the form doubles as the legend. Mirrors
+    // _applyScanField below.
+    _scanFieldTarget(fieldKey) {
+        const form = $('#sales-receipt-form');
+        if (!form) return null;
+        const row = document.querySelector('#sr-lines tr');
+        if (fieldKey === 'date') return form.querySelector('[name="date"]');
+        if (fieldKey === 'merchant') {
+            const nameInput = $('#sr-new-cust-name');
+            if (nameInput && nameInput.offsetParent) return nameInput;  // new-customer form open
+            return row && row.querySelector('.line-desc');
+        }
+        if (fieldKey === 'total' || fieldKey === 'subtotal') return row && row.querySelector('.line-rate');
+        if (fieldKey === 'tax') return form.querySelector('[name="tax_rate"]');
+        return null;
+    },
+
+    // Box-to-fix canvas: apply one re-read field into the form.
+    // Returns nothing when the value landed, {error} when it was refused, or
+    // {note} when it landed with a remark (the canvas shows either).
+    _applyScanField(fieldKey, value, meta) {
+        const form = $('#sales-receipt-form');
+        if (!form) return;
+        const row = document.querySelector('#sr-lines tr');
+        if (fieldKey === 'date') {
+            form.querySelector('[name="date"]').value = value;
+        } else if (fieldKey === 'merchant') {
+            const nameInput = $('#sr-new-cust-name');
+            if (nameInput) nameInput.value = value;
+            const desc = row && row.querySelector('.line-desc');
+            if (desc) desc.value = value;
+        } else if (fieldKey === 'total' || fieldKey === 'subtotal') {
+            if (row) {
+                const rate = row.querySelector('.line-rate');
+                if (rate) rate.value = parseFloat(value).toFixed(2);
+            }
+        } else if (fieldKey === 'tax') {
+            const rate = row && row.querySelector('.line-rate');
+            const sub = rate ? parseFloat(rate.value) : 0;
+            const taxInput = form.querySelector('[name="tax_rate"]');
+            const r = ScanHelper.taxPercent(value, sub, meta && meta.text);
+            if (r.error) { SalesReceiptsPage.recalc(); return { error: r.error }; }
+            if (taxInput) taxInput.value = r.pct.toFixed(2);
+            SalesReceiptsPage.recalc();
+            return { note: `— tax rate set to ${r.pct.toFixed(2)}%.` };
+        }
+        SalesReceiptsPage.recalc();
+    },
+
+    _applyScan(result) {
+        const form = $('#sales-receipt-form');
+        if (!form) return;
+        if (result.date) form.querySelector('[name="date"]').value = result.date;
+
+        const merchant = result.merchant && result.merchant.value;
+        const sel = $('#sr-customer-select');
+        if (merchant && sel) {
+            const match = SalesReceiptsPage._customers.find(c =>
+                c.name && c.name.toLowerCase() === merchant.toLowerCase());
+            if (match) {
+                sel.value = match.id;
+            } else {
+                const nameInput = $('#sr-new-cust-name');
+                if (nameInput) nameInput.value = merchant;
+                const statusEl = $('#scan-status');
+                if (statusEl) {
+                    statusEl.textContent = `Detected: ${merchant} — select from the list or add new.`;
+                }
+            }
+        }
+
+        const total = parseFloat(result.total || '0');
+        if (total > 0) {
+            const row = document.querySelector('#sr-lines tr');
+            if (row) {
+                const rateInput = row.querySelector('.line-rate');
+                const descInput = row.querySelector('.line-desc');
+                if (rateInput) {
+                    // Tax-split rule (spec §6.4): line = subtotal, tax rate
+                    // populated, so the saved total matches the receipt.
+                    if (result.tax_detected && result.subtotal && parseFloat(result.subtotal) > 0) {
+                        rateInput.value = parseFloat(result.subtotal).toFixed(2);
+                        const taxRate = (parseFloat(result.tax) / parseFloat(result.subtotal)) * 100;
+                        const taxInput = form.querySelector('[name="tax_rate"]');
+                        if (taxInput) taxInput.value = taxRate.toFixed(2);
+                    } else {
+                        rateInput.value = total.toFixed(2);
+                    }
+                }
+                if (descInput && merchant) descInput.value = merchant;
+                SalesReceiptsPage.recalc();
+            }
+        }
     },
 
     customerSelected(customerId) {
@@ -289,6 +389,7 @@ const SalesReceiptsPage = {
             reference: form.reference.value || null,
             deposit_to_account_id: form.deposit_to_account_id.value ? parseInt(form.deposit_to_account_id.value) : null,
             class_id: classIdFromForm(form),
+            job_id: jobIdFromForm(form),
             ...currencyPayloadFromForm(form),
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
             notes: form.notes.value || null,
@@ -297,6 +398,7 @@ const SalesReceiptsPage = {
 
         try {
             const result = await API.post('/sales-receipts', data);
+            await ScanHelper.attachAfterSave('invoice', result.invoice.id);
             toast(`Sales Receipt #${result.invoice.invoice_number} recorded`);
             closeModal();
             App.navigate(location.hash);

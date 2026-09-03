@@ -52,3 +52,52 @@ files under `migrations/versions/`; for model code, see `app/models/`.
 | `portal_accesses` | Audit log for self-service portal hits (success + failure) |
 | `login_attempts` | Authentication-attempt audit log |
 | `reseller_permits` | Per-entity sales-tax reseller permits with expiration + verification trail |
+
+## jobs (Customer:Job / Projects)
+
+| column | notes |
+|---|---|
+| id, customer_id (FK customers) | a job belongs to exactly one customer |
+| name, job_number | name unique per customer, case-insensitive (API-enforced) |
+| status | pending · awarded · in_progress · closed · not_awarded |
+| job_type, description, site_address, notes | free text |
+| start_date, projected_end_date, end_date | |
+| contract_amount | Numeric(12,2), drives billed-vs-contract |
+| is_active | inactive = hidden from pickers, kept on history |
+
+`job_id` (nullable FK) lives on: transactions, transaction_lines, invoices,
+invoice_lines, bills, bill_lines, estimates, estimate_lines, purchase_orders,
+purchase_order_lines, credit_memos, recurring_invoices, time_entries.
+`class_id` was added to transaction_lines, invoice_lines and bill_lines.
+Attribution rule for reports: `coalesce(line.job_id, transaction.job_id)`.
+Migration `e9f0a1b2c3d4_add_jobs`.
+
+## cost_codes (job-costing chart)
+
+| column | notes |
+|---|---|
+| id, code (unique, case-insensitive via API), name | e.g. `03` Concrete |
+| cost_type | labor · material · subcontract · equipment · other |
+| account_id (FK accounts, nullable) | default posting account |
+| notes, is_active | inactive = hidden from pickers |
+
+`cost_code_id` (nullable FK) on transaction_lines, bill_lines, invoice_lines,
+estimate_lines, purchase_order_lines, time_entries. `is_billable` +
+`billed_invoice_line_id` (FK invoice_lines) on transaction_lines and
+bill_lines. `purchase_orders.job_id` / `purchase_order_lines.job_id` feed
+committed cost. Migration `f0a1b2c3d4e5_add_cost_codes`.
+
+## Job cost model (milestone 3)
+
+| table | purpose |
+|---|---|
+| cost_types | code (key), name, is_labor, burden_pct, default_account_id, offset_account_id, burden_offset_account_id, sort_order, is_active — seeded labor/material/subcontract/equipment/other |
+| cost_codes.parent_id | hierarchy (self FK) |
+| equipment | code, name, hourly_rate, cost_code_id, recovery_account_id |
+| job_costs | number (JC-000001), date, job_id (NULL for allocations), memo, source manual/time_entry/allocation, status posted/void, transaction_id, total |
+| job_cost_lines | job_id, cost_code_id, cost_type, qty/rate/amount, debit_account_id, credit_account_id, employee_id, equipment_id, time_entry_id, is_burden, is_billable |
+| job_budgets | job_id × (cost_code_id \| cost_type \| neither), amount, revenue_amount, source manual/estimate/change, estimate_id |
+| employees.cost_rate, burden_pct · estimate_lines.unit_cost · time_entries.job_cost_id · transaction_lines.cost_type | |
+
+Migration `a1b2c3d4e5f6_job_cost_model`.
+

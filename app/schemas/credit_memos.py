@@ -42,6 +42,7 @@ class CreditMemoCreate(BaseModel):
     tax_rate: float = 0
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     lines: list[CreditMemoLineCreate] = []
 
     @field_validator("lines")
@@ -68,6 +69,7 @@ class CreditMemoResponse(BaseModel):
     balance_remaining: Decimal = Decimal("0")
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     lines: list[CreditMemoLineResponse] = []
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}

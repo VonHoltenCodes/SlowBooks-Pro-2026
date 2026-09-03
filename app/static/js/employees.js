@@ -65,6 +65,10 @@ const EmployeesPage = {
                         </select></div>
                     <div class="form-group"><label>Pay Rate</label>
                         <input name="pay_rate" type="number" step="0.01" value="${emp.pay_rate}"></div>
+                    <div class="form-group"><label>Job cost rate ($/hr)</label>
+                        <input name="cost_rate" type="number" step="0.01" value="${emp.cost_rate ?? ''}" placeholder="blank = pay rate (salary ÷ 2080)" title="Loaded hourly cost used when time posts to a job"></div>
+                    <div class="form-group"><label>Burden %</label>
+                        <input name="burden_pct" type="number" step="0.01" value="${emp.burden_pct ?? ''}" placeholder="blank = Labor cost type's" title="Overrides the labor cost type's burden % for this employee"></div>
                     <div class="form-group"><label>Pay Frequency</label>
                         <select name="pay_frequency">
                             <option value="biweekly" ${(emp.pay_frequency||'biweekly')==='biweekly'?'selected':''}>Bi-Weekly</option>
@@ -141,6 +145,8 @@ const EmployeesPage = {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target).entries());
         data.pay_rate = parseFloat(data.pay_rate) || 0;
+        data.cost_rate = data.cost_rate === '' || data.cost_rate === undefined ? null : parseFloat(data.cost_rate);
+        data.burden_pct = data.burden_pct === '' || data.burden_pct === undefined ? null : parseFloat(data.burden_pct);
         data.dependents_amount = parseFloat(data.dependents_amount) || 0;
         data.other_income_annual = parseFloat(data.other_income_annual) || 0;
         data.deductions_annual = parseFloat(data.deductions_annual) || 0;
@@ -170,6 +176,7 @@ const EmployeesPage = {
                     <dt>SSN Last 4</dt><dd>${escapeHtml(emp.ssn_last_four || '—')}</dd>
                     <dt>Pay Type</dt><dd>${emp.pay_type}</dd>
                     <dt>Pay Rate</dt><dd>${formatCurrency(emp.pay_rate)}${emp.pay_type==='hourly'?'/hr':'/yr'}</dd>
+                    <dt>Job cost rate</dt><dd>${emp.cost_rate ? formatCurrency(emp.cost_rate) + '/hr' : 'pay rate'}${emp.burden_pct ? ` + ${emp.burden_pct}% burden` : ''}</dd>
                     <dt>Pay Frequency</dt><dd>${emp.pay_frequency || '—'}</dd>
                     <dt>Filing Status</dt><dd>${emp.filing_status}</dd>
                     <dt>Hire Date</dt><dd>${formatDate(emp.hire_date)}</dd>

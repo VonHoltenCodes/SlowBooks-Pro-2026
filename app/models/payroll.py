@@ -116,6 +116,10 @@ class Employee(Base):
     residence_state = Column(String(2), nullable=True)
     # Workers' comp / WA L&I risk classification code.
     wc_class_code = Column(String(20), nullable=True)
+    # Job costing: loaded hourly cost (blank = pay rate; salary / 2080) and a
+    # burden % that overrides the labor cost type's
+    cost_rate = Column(Numeric(12, 2), nullable=True)
+    burden_pct = Column(Numeric(6, 2), nullable=True)
 
     hire_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)

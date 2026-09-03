@@ -7,6 +7,251 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.7.0 — Jobs, job costing, and receipt intake
+
+The two most-requested features since Server Edition, each field-tested on
+Windows (SkyTech / VonHolten308) and macOS (Keith's laps on #73 and #86).
+#### Jobs — QuickBooks-style Customer:Job / Projects (milestone 1)
+
+**Every posted line can now carry a job (and a class).** A job is a
+customer's project — "Smith: Kitchen Remodel" — and the unit of job
+costing. Invoices, bills, expenses, card charges, journal entries, sales
+receipts and estimates take a Job on the header; invoice, bill and journal
+lines can set their own job and class, and a line without one inherits the
+header's. The ledger line is the source of truth, so the new **Jobs** page
+(Customers & Sales) and the **Job Profitability** report show income,
+costs, net and margin per job straight from posted activity — the "No job"
+row holds everything untagged, so the report's totals equal the Profit &
+Loss for the same period, the same reconciliation promise P&L by Class
+makes. Job detail lists every posted line attributed to it (the job cost
+detail). The Customer Center lists a customer's jobs and can create one.
+
+Jobs carry what a contractor tracks: status (pending, awarded, in progress,
+closed, not awarded), job number, type, dates, site address and contract
+amount, so the detail can show billed-vs-contract. A job with posted
+activity is never deleted — mark it inactive and it leaves the pickers.
+
+**The cost model: drill-down, every kind of cost, burden, budgets and
+variance (milestone 3).** Feedback from the first lap was that jobs
+existed but there was no way to drill down or to get the extra and
+edge-case costs onto them. Now:
+
+- **Cost codes nest** (division › code › sub-code, any depth) with roll-ups
+  at every level, your own numbering, and a CSV import
+  (`code,name,cost_type,parent_code`). **Cost types are yours to edit** —
+  add permits, bonding, warranty, split labor — each with a burden % and
+  the accounts it posts through.
+- **Job Cost Entry**, a new document for costs that aren't a bill:
+  internal labor at an employee's loaded rate, owned-equipment hours from
+  an Equipment list, mileage, small tools, burden, corrections. It debits
+  job cost (tagged to job, code and type) and credits an offset account
+  (applied labor, applied equipment, applied overhead — all contra-expense
+  accounts on the P&L) — the applied-cost pattern, so the company P&L is
+  unchanged while every job carries its share. Settings → Cost Types →
+  **Create default offset accounts** sets all of that up in one click,
+  pointing each cost type at the chart's own COGS account (Materials,
+  Labor, Subcontractor) so the P&L keeps its cost categories. **Allocate a Cost** spreads one amount
+  across jobs by labor hours, revenue, costs, equally, or by weights.
+- **Time entries post to jobs.** Employees get a job cost rate and a burden
+  %; approved time tagged to a job posts as labor cost at that rate
+  (overtime at 1.5×, double-time at 2×) with the burden as its own line,
+  one click from the time list or the job's Time tab.
+- **Budgets and variance.** Each job carries a budget per cost code (or
+  per type, or whole-job), seeded from an estimate — estimate lines gained
+  a cost code and a unit cost, so cost = qty × unit cost and revenue = the
+  line amount — or typed in. The job page shows, at every level, the
+  columns contractors read weekly: Original, Changes, Budget, Committed,
+  Actual, Projected (actual + committed), Variance (budget − projected),
+  % Used, and estimated vs actual revenue.
+- **The job page** replaces the modal: Overview (headline figures and a
+  by-type table), Cost Detail (the expandable tree — type › division ›
+  code › sub-code › posted lines, each line opening its bill, invoice,
+  expense, journal entry or job cost), Budget, Transactions and Time tabs,
+  with a period filter and a job-to-date default. A **Job Budget vs
+  Actual** report lists every job's headline figures.
+- Also fixed on the way: the Time Entry form was sending hours under the
+  wrong field names, so every entry saved with zero hours.
+- From the first macOS lap: the labor offset was a balance-sheet account,
+  so labor landed on the P&L twice once payroll ran — it is a P&L contra
+  now, like the other offsets. Rejecting a time entry that was already
+  posted to a job voids that job cost. Re-seeding a budget from an
+  estimate leaves hand-edited rows alone, and an estimate line with no
+  unit cost budgets zero cost (unknown) rather than the sale price.
+
+**Cost codes, billable costs and committed cost (milestone 2).** Settings
+gained a **Cost Codes** chart — which part of a job a cost belongs to ("03
+Concrete", "26 Electrical"), each with a cost type (labor, material,
+subcontract, equipment, other) and an optional default account — with a
+one-click load of the CSI MasterFormat divisions. Bill lines, journal
+lines, purchase-order lines and expenses take a cost code, and bill lines
+and expenses can be marked **billable** to the job's customer (the
+unbilled-costs-to-invoice step arrives with progress billing). The job
+detail rolls costs up by code and type, and shows **committed cost**: the
+value of sent, partially received and received purchase orders tagged to
+the job that has not yet become a bill. Purchase orders take a Job on the
+header (and per line); converting one to a bill carries job and cost code
+onto every bill line.
+
+**QuickBooks migration keeps the hierarchy.** IIF imports split
+`Customer:Job` names into the customer and a job under it (customer list
+rows and every invoice, sales receipt and estimate); QBO imports turn
+sub-customers ("Projects") into jobs under their parent. A flat customer
+that already carries the colon from an earlier import keeps matching, so
+re-imports are stable.
+
+The estimate form also gained the Class field that was computed but never
+rendered. Design and the rest of the plan (cost codes, committed cost,
+change orders, progress billing, time and burden, WIP):
+[docs/design/projects.md](docs/design/projects.md).
+
+#### Receipt intake — scan a receipt into the Sales Receipt / Bill form
+
+A new **Scan Receipt** button on both the Enter Sales Receipt and Enter
+Bill forms uploads a receipt image or PDF, runs it through local OCR
+(Tesseract), and pre-fills the form: date, merchant/vendor hint, and the
+grand total as a single line (Qty 1 × Rate = total), with detected tax
+split out on the Sales Receipt form (tax rate field) and noted in Bill
+Notes (bills have no tax field). The operator always reviews before
+saving, and the source image/PDF attaches to the saved document so every
+scanned entry keeps its evidence.
+
+Per the design notes, this is **zero new Python dependencies** —
+tesseract and poppler-utils are called directly via subprocess and stay
+the user's install (never bundled into the signed installers); the
+Docker image installs both system packages. When the binary is absent,
+the feature degrades gracefully: the button is disabled and the Settings
+page shows "install Tesseract to enable scanning." Parsing is
+deterministic (regex/anchor extraction for date, total, tax, merchant) —
+no AI, no bundled models. Design + API contract:
+[docs/design/receipt-intake-spec.md](docs/design/receipt-intake-spec.md).
+
+**Expenses — the form most receipts actually belong on.** A receipt for
+something already paid (card, cash, check) is neither a bill (money
+still owed) nor a sales receipt (money taken in); entering one used to
+mean a bill plus a payment, or a journal entry. The new **Expenses**
+page (Vendors & Payables) records it in one step — vendor, expense
+account, the bank or credit-card account it was paid from, amount — as
+a single balanced posting (DR expense, CR paid-from), with the Scan
+Receipt button, box-to-fix canvas, and attachment on save, exactly like
+bills. Paid From lists bank/cash assets and credit-card liabilities,
+defaulting to Checking.
+
+**Vendor quick-add on the Bill and Expense forms.** A scanned merchant
+the books don't know yet no longer dead-ends the form: the vendor
+picker gained "+ New Vendor" with an inline name box; a scan that
+doesn't match an existing vendor pre-fills it, and the vendor is
+created on save (a near-duplicate name resolves to the existing
+record instead of a twin).
+
+**Box-to-fix canvas hardening**, from the first hands-on hardware lap:
+a box dragged over two figures (tax + tip) is refused with the numbers
+it saw rather than silently taking the first; any refused read — no
+value, two values, or a value the form won't accept (a "tax" larger
+than the subtotal) — leaves no box on the scan and no stale value on
+the field buttons, so the next drag starts clean. Field buttons moved
+below the canvas, a drag paints immediately, and a box recolors the
+moment it's labeled instead of after the read comes back.
+
+**Highlights land on the right words.** The colored boxes the scan
+draws over the image are placed by matching the parsed values back to
+the recognized words; a receipt that prints the same figure twice (a
+line-item price and the grand total, or "CASH" repeating the total)
+used to get the box on the first hit, and the Date box went to the
+first thing with a slash or dash in it (an invoice number). The boxes
+now go to the word on the labeled line — lowest one for totals — and
+to the word that actually prints the parsed date in whatever order the
+receipt used. The values on the form were already right; only the
+highlight moved.
+
+**Merchant template memory** no longer anchors a remembered box on a
+word that repeats on the page when a unique label is on the same line
+("Inclusive" over "GST"), records which occurrence it meant when every
+label repeats, and fails closed — canvas takes over — when a rescan
+doesn't repeat the anchor the same way. A remembered amount or date box
+that reads only a bare digit run on a new print (a template that landed
+on a tax-ID number) is discarded instead of filling the form with it.
+
+**Windows: the second scan of a session no longer crashes the app.** On
+Windows the built-in text recognizer was driven from a throwaway thread
+per scan; when that thread exited, Windows tore down the component
+runtime the recognizer had been created in, and the next scan jumped
+through a stale handle — the server process died and the window
+reported "SlowBooks isn't responding (network error)" right after the
+first bill or expense was saved from a receipt. All recognizer work now
+runs on one thread that lives as long as the app does.
+
+**The merchant name gets a highlight box too.** The scan now boxes the
+run of words on the image that spells the parsed merchant name (pink),
+alongside the totals and date, so it can be corrected by tapping like
+the others; a name recalled from a remembered layout that isn't printed
+on the page draws nothing.
+
+**Bill numbers come off the receipt, and never block the entry.** The
+Bill # is the vendor's own invoice number — that is what stops the same
+invoice being entered twice (the check is per vendor, so two vendors
+can both send invoice 111). The scan now reads it from the receipt
+("Invoice No", "Receipt #", "Check", "Trans No" …) into Bill # and the
+expense Reference; a receipt that prints none can be saved with the
+field blank and gets `<date>-<vendor initials>` (suffixed if that vendor
+already has one that day).
+
+**Expenses can be voided.** A recorded expense booked to the wrong
+account (checking instead of the credit card) now has a Void button on
+the list and in its detail; like bills and journal entries it posts the
+mirror-image reversing entry, keeps the original in the ledger, respects
+the closing date, and shows the row as void. Enter it again to correct.
+
+**Scan Receipt field buttons are readable in dark mode.** The Total /
+Tax / Subtotal / Date / Merchant buttons under the receipt used pale
+fills with dark text regardless of theme — near-invisible on the dark
+theme. Dark mode now uses deep opaque fills with light text (8–10:1
+contrast); light mode keeps the pale fills with darker text.
+
+**Invoice / Ref # has its own box on the scan.** The picker under the
+receipt gained an **Invoice / Ref #** button (teal): draw it around the
+vendor's document number and it lands in Bill Number (bills) or
+Reference (expenses); the auto-parse also outlines the number it found,
+and a taught box is remembered per merchant like the others. The
+auto-parse no longer skips an invoice line because a "Pax"/"Table"/"Tel"
+word sits after the number on the same line.
+
+**Day-first dates parse.** `14-02-2018`, `14/02/2018`, `14.02.18` — any
+numeric date whose US reading is impossible — now resolves day-first
+(US ordering still wins when both readings are valid, so `12/02/17` is
+December 2), and month-name dates accept a two-digit year or dashes
+(`28 Mar 18`, `05-JAN-2017`). A date box that reads something the parser cannot turn into
+a date no longer reports "applied to the form" while the date input
+stays empty; it says what it read and asks for a redraw or a manual
+entry.
+
+**US register tape parses (Walmart, Whole Foods, Costco phone photos).**
+`TAX 1 7.000 %` is a tax *rate* line, not a 7.00 tax — a third decimal
+or a trailing % never reads as money. A return-policy or promotion line
+("purchases made on or after 9/15/2020") can no longer supply the
+transaction date. Walmart's `TC#` is the receipt number; the `REF #`
+printed beside APPR CODE / NETWORK ID / TERMINAL # is the card
+authorization and is ignored. The Invoice / Ref # button is present on
+the picker under the receipt (build 47 drew the box but had no button
+to assign it to).
+
+**Tilted photos read the right rows.** On a phone photo taken a couple of
+degrees off square, the amounts down the right edge of a 2000-pixel
+receipt sit a full line below the labels they belong to, and the row
+builder for the native engines put them on the neighbouring row — total
+survived but subtotal and tax silently took the wrong values (found on
+the macOS hardware pass). The engines now report each line's tilt (Apple
+Vision from its corner points, Windows OCR from its line grouping) and
+the rows are straightened before they are read; verified to 8 degrees.
+Also from that pass: the Settings OCR row names the built-in engine
+instead of assuming Tesseract everywhere, Apple Vision lists its
+recognition languages, and the macOS build's smoke test now proves Vision
+survived freezing.
+
+**Desktop launcher:** `--data-dir` (Server Edition scheduled task,
+headless test rigs) now relocates the per-user `.env` along with the
+data directory; it used to write `DATABASE_URL` into the launching
+user's own `%LOCALAPPDATA%` `.env`.
+
 ### v2.6.3 — Classes cross over, and report CSVs read ANSI
 
 **Classes now come across from QuickBooks.** A class list export

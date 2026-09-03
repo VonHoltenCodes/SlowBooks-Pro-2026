@@ -8,6 +8,15 @@ from app.models.payments import Payment, PaymentAllocation
 from app.models.banking import BankAccount, BankTransaction, Reconciliation
 from app.models.settings import Settings
 from app.models.classes import TxnClass  # noqa: F401 — registers the table
+from app.models.jobs import Job  # noqa: F401 — registers the table
+from app.models.cost_codes import CostCode  # noqa: F401 — registers the table
+from app.models.job_costing import (  # noqa: F401 — registers the tables
+    CostType,
+    Equipment,
+    JobBudget,
+    JobCost,
+    JobCostLine,
+)
 from app.models.fixed_assets import FixedAsset, FixedAssetType  # noqa: F401
 
 # Phase 1: Foundation
@@ -137,3 +146,4 @@ __all__ = [
     # Reseller permits — expiry tracking + manual verification trail
     "ResellerPermit",
 ]
+from app.models.ocr_templates import OcrTemplate  # noqa: F401

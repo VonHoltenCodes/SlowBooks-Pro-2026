@@ -22,6 +22,7 @@ class SalesReceiptCreate(BaseModel):
     deposit_to_account_id: Optional[int] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     lines: list[InvoiceLineCreate] = []

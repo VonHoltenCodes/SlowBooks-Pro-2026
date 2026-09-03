@@ -21,4 +21,5 @@ class DepositCreate(BaseModel):
     total: Decimal
     reference: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     line_ids: list[int] = []

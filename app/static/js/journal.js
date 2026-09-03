@@ -52,7 +52,7 @@ const JournalPage = {
                 <strong>Type:</strong> ${escapeHtml(entry.source_type)}
             </div>
             <div class="table-container"><table>
-                <thead><tr><th>Account</th><th>Description</th><th class="amount">Debit</th><th class="amount">Credit</th></tr></thead>
+                <thead><tr><th>Account</th><th>Description</th>${CostCodes.headHtml()}<th class="amount">Debit</th><th class="amount">Credit</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
@@ -70,6 +70,8 @@ const JournalPage = {
     async showForm() {
         const accounts = await API.get('/accounts');
         const classGroup = await classFormGroupHtml();
+        const jobGroup = await jobFormGroupHtml(null);
+        await CostCodes.load();
         JournalPage._accounts = accounts;
         JournalPage._lineCount = 2;
 
@@ -84,7 +86,7 @@ const JournalPage = {
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Reference</label>
                         <input name="reference"></div>
-                    ${classGroup}
+                    ${classGroup}${jobGroup}
                     <div class="form-group full-width"><label>Description *</label>
                         <input name="description" required></div>
                 </div>
@@ -95,6 +97,7 @@ const JournalPage = {
                         <tr data-jeline="0">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
                             <td><input class="je-desc"></td>
+                            ${CostCodes.cellHtml('je-cost-code')}
                             <td><input class="je-debit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
@@ -102,6 +105,7 @@ const JournalPage = {
                         <tr data-jeline="1">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
                             <td><input class="je-desc"></td>
+                            ${CostCodes.cellHtml('je-cost-code')}
                             <td><input class="je-debit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
@@ -131,6 +135,7 @@ const JournalPage = {
             <tr data-jeline="${idx}">
                 <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
                 <td><input class="je-desc"></td>
+                            ${CostCodes.cellHtml('je-cost-code')}
                 <td><input class="je-debit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                 <td><input class="je-credit" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                 <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
@@ -171,6 +176,7 @@ const JournalPage = {
                     account_id: parseInt(account_id),
                     debit, credit,
                     description: row.querySelector('.je-desc')?.value || '',
+                    cost_code_id: CostCodes.fromRow(row, 'je-cost-code'),
                 });
             }
         });
@@ -182,6 +188,7 @@ const JournalPage = {
                 description: form.description.value,
                 reference: form.reference.value || null,
                 class_id: classIdFromForm(form),
+                job_id: jobIdFromForm(form),
                 lines,
             });
             toast('Journal entry created');

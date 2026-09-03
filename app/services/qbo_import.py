@@ -159,17 +159,52 @@ def import_customers(db: Session) -> dict:
         )
         return {"imported": 0, "errors": errors}
 
+    # Sub-customers (QBO "Job": true, the Online "Projects" flavour) become
+    # Jobs under their parent, so parents must land first.
+    qbo_customers = sorted(qbo_customers, key=lambda c: bool(_safe(c, "Job", False)))
+
     for qbo_cust in qbo_customers:
         try:
             qbo_id = _safe(qbo_cust, "Id", "")
             if not qbo_id:
                 continue
 
-            if get_mapping_by_qbo_id(db, "customer", qbo_id):
-                continue
-
             display_name = _safe(qbo_cust, "DisplayName", "")
             if not display_name:
+                continue
+
+            parent_ref = _safe(qbo_cust, "ParentRef")
+            if _safe(qbo_cust, "Job", False) and parent_ref:
+                if get_mapping_by_qbo_id(db, "job", qbo_id):
+                    continue
+                parent_qbo_id = (
+                    _safe(parent_ref, "value", "")
+                    if not isinstance(parent_ref, str)
+                    else parent_ref
+                )
+                parent_map = get_mapping_by_qbo_id(db, "customer", str(parent_qbo_id))
+                parent = (
+                    db.get(Customer, parent_map.slowbooks_id) if parent_map else None
+                )
+                if parent is None:
+                    # Fall back to the qualified name ("Parent:Child")
+                    from app.services.jobs_service import resolve_customer_and_job
+
+                    fq = _safe(qbo_cust, "FullyQualifiedName", "") or display_name
+                    parent, job = resolve_customer_and_job(db, fq)
+                else:
+                    from app.services.jobs_service import get_or_create_job
+
+                    job = get_or_create_job(db, parent.id, display_name)
+                if job is not None:
+                    create_mapping(
+                        db, "job", job.id, qbo_id, _safe(qbo_cust, "SyncToken")
+                    )
+                    db.flush()
+                    imported += 1
+                continue
+
+            if get_mapping_by_qbo_id(db, "customer", qbo_id):
                 continue
 
             # Check by name

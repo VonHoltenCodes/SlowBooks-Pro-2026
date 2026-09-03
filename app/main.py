@@ -61,6 +61,9 @@ from app.routes import bank_import, simplefin, tax, backups
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
 from app.routes import classes as classes_routes
+from app.routes import jobs as jobs_routes
+from app.routes import cost_codes as cost_codes_routes
+from app.routes import job_costing as job_costing_routes
 from app.routes import fx as fx_routes
 from app.routes import fixed_assets as fixed_assets_routes
 from app.routes import migration as migration_routes
@@ -76,7 +79,7 @@ from app.routes import provider_payments, public
 from app.routes import qbo
 
 # Phase 9: Forum Bug Fixes & Missing Features
-from app.routes import journal, deposits, cc_charges, checks
+from app.routes import journal, deposits, cc_charges, checks, expenses
 
 # Phase 10: Quick Wins + Medium Effort Features
 from app.routes import bank_rules, budgets, attachments, email_templates
@@ -103,6 +106,9 @@ from app.routes import deductions
 from app.routes import onboarding, portal
 from app.routes import document_audit as document_audit_routes
 from app.routes import reseller_permits as reseller_permits_routes
+
+# Tier 2: Receipt / document intake — local OCR (docs/design/receipt-intake.md)
+from app.routes import ocr as ocr_routes
 from app.services.auth import get_session_secret
 
 from app import __version__
@@ -497,6 +503,11 @@ app.include_router(auth_routes.router)
 app.include_router(dashboard.router)
 app.include_router(accounts.router)
 app.include_router(classes_routes.router)
+app.include_router(jobs_routes.router)
+app.include_router(cost_codes_routes.router)
+app.include_router(job_costing_routes.cost_types_router)
+app.include_router(job_costing_routes.equipment_router)
+app.include_router(job_costing_routes.job_costs_router)
 app.include_router(fx_routes.router)
 app.include_router(fixed_assets_routes.router)
 app.include_router(migration_routes.router)
@@ -551,6 +562,7 @@ app.include_router(analytics.router)
 app.include_router(journal.router)
 app.include_router(deposits.router)
 app.include_router(cc_charges.router)
+app.include_router(expenses.router)
 app.include_router(checks.router)
 # Phase 10: Quick Wins + Medium Effort Features
 app.include_router(bank_rules.router)
@@ -573,6 +585,7 @@ app.include_router(onboarding.router)
 app.include_router(portal.router)
 app.include_router(document_audit_routes.router)
 app.include_router(reseller_permits_routes.router)
+app.include_router(ocr_routes.router)
 
 # Register audit log hooks
 register_audit_hooks(SessionLocal)

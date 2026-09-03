@@ -28,6 +28,7 @@ from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.bills import Bill, BillLine, BillStatus
 from app.models.transactions import Transaction
 from app.services.iif_common import IIF_TO_ACCOUNT_TYPE, IIF_TO_ITEM_TYPE
+from app.services.jobs_service import resolve_customer_and_job, split_customer_job
 from app.services.accounting import (
     _q,
     create_journal_entry,
@@ -523,6 +524,16 @@ def import_customers(db: Session, rows: list) -> dict:
             existing = db.query(Customer).filter(Customer.name == name).first()
             if existing:
                 sp.rollback()
+                continue
+
+            # A "Customer:Job" list row is a job, not a customer: create the
+            # parent if the list didn't (QuickBooks exports parents first,
+            # but a partial export may not) and the job under it.
+            parent_name, job_name = split_customer_job(name)
+            if job_name:
+                _customer, _job = resolve_customer_and_job(db, name)
+                sp.commit()
+                imported += 1
                 continue
 
             # Parse ADDR4 "City, State ZIP" pattern
@@ -1079,18 +1090,17 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
         # list views and unsearchable — the API refuses blank names since
         # 6c82e9a, so the importer must not sneak them in the back door.
         return None
-    customer = db.query(Customer).filter(Customer.name == cust_name).first()
-    if not customer:
-        # Auto-create customer
-        customer = Customer(name=cust_name, is_active=True)
-        db.add(customer)
-        db.flush()
+    # QuickBooks' NAME is the "Customer:Job" path — the job part becomes a
+    # Job under the customer (created on first sight), and the invoice is
+    # tagged to it so job costing survives the migration.
+    customer, job = resolve_customer_and_job(db, cust_name)
 
     inv_date = _parse_iif_date(trns.get("DATE", ""))
     due_date = _parse_iif_date(trns.get("DUEDATE", ""))
     total = abs(_parse_decimal(trns.get("AMOUNT", "")))
 
     invoice = Invoice(
+        job_id=job.id if job else None,
         invoice_number=doc_num or None,
         customer_id=customer.id,
         date=inv_date or date.today(),
@@ -1199,6 +1209,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
                 f"IIF Import — Invoice {doc_num}",
                 journal_lines,
                 source_type="invoice",
+                job_id=invoice.job_id,
                 source_id=invoice.id,
             )
             invoice.transaction_id = txn.id
@@ -1221,6 +1232,7 @@ def _import_invoice(db: Session, trns: dict, spls: list) -> Invoice:
                     f"IIF Import — Invoice {doc_num}",
                     journal_lines,
                     source_type="invoice",
+                    job_id=invoice.job_id,
                     source_id=invoice.id,
                 )
                 invoice.transaction_id = txn.id
@@ -1258,8 +1270,9 @@ def _import_payment(db: Session, trns: dict, spls: list) -> Payment:
     if existing_q.first():
         return None
 
-    # Resolve customer
-    customer = db.query(Customer).filter(Customer.name == cust_name).first()
+    # Resolve customer ("Customer:Job" resolves to the customer; a payment
+    # is not job-costed — the invoice it pays already is)
+    customer, _job = resolve_customer_and_job(db, cust_name, create=False)
     if not customer:
         return None  # Can't create payment without customer
 
@@ -1475,16 +1488,13 @@ def _import_estimate(db: Session, trns: dict, spls: list) -> Estimate:
         # list views and unsearchable — the API refuses blank names since
         # 6c82e9a, so the importer must not sneak them in the back door.
         return None
-    customer = db.query(Customer).filter(Customer.name == cust_name).first()
-    if not customer:
-        customer = Customer(name=cust_name, is_active=True)
-        db.add(customer)
-        db.flush()
+    customer, job = resolve_customer_and_job(db, cust_name)
 
     est_date = _parse_iif_date(trns.get("DATE", ""))
     total = abs(_parse_decimal(trns.get("AMOUNT", "")))
 
     estimate = Estimate(
+        job_id=job.id if job else None,
         estimate_number=doc_num or None,
         customer_id=customer.id,
         date=est_date or date.today(),

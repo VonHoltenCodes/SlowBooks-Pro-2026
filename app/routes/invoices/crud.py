@@ -133,6 +133,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             balance_due=total,
             notes=data.notes,
             class_id=data.class_id,
+            job_id=data.job_id,
             **cust_fields,
         )
         db.add(invoice)
@@ -161,6 +162,9 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             rate=line_data.rate,
             amount=_q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))),
             class_name=line_data.class_name,
+            job_id=line_data.job_id,
+            class_id=line_data.class_id,
+            cost_code_id=line_data.cost_code_id,
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -206,6 +210,9 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
                     "debit": Decimal("0"),
                     "credit": line_amount,
                     "description": line_data.description or "",
+                    "job_id": line_data.job_id,
+                    "class_id": line_data.class_id,
+                    "cost_code_id": line_data.cost_code_id,
                 }
             )
         # Credit sales tax if any
@@ -227,6 +234,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             source_type="invoice",
             source_id=invoice.id,
             class_id=invoice.class_id,
+            job_id=invoice.job_id,
             reference=invoice_number,
         )
         invoice.transaction_id = txn.id

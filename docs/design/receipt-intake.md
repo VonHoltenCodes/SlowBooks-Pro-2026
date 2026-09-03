@@ -1,0 +1,191 @@
+# Receipt / Document Intake — design notes
+
+Status: DESIGN, revised 2026-08-25. Nothing here is committed product
+behavior yet. Revision: an outside contributor proposed a lightweight
+in-core Tesseract tier, and it fits — the "standalone repo" rule below
+existed to keep heavy vision dependencies out of the frozen installers,
+and Tesseract doesn't carry any.
+
+## Three-tier strategy
+
+- **Tier 1 (this repo)**: vendor order-history importers — big-box
+  vendors (Amazon Business, Home Depot Pro, Lowe's Pro, Grainger,
+  Uline) expose structured CSV/order exports. Use those wherever they
+  exist: 100% reliable vs. OCR's confidence games, SKU-level line
+  items. Reuses the proven dialect pattern (migration engine / bank CSV
+  importer): dedup on order number, line items → bills/cc_charges,
+  match against SimpleFIN bank feed. Start every dialect from a REAL
+  export file (MYOB lesson).
+- **Tier 2 (this repo, NEW)**: lightweight local OCR via the system
+  Tesseract binary. Ground rules that make it mergeable:
+  - **Never bundled — policy, not a phase.** The tesseract binary is
+    the USER'S install, like their PostgreSQL or their browser:
+    Docker/native installs add the system package (`apt install
+    tesseract-ocr`), Windows/macOS users install it themselves if they
+    want the feature. It does not go into the signed installer or the
+    notarized DMG — that would make its CVEs and release cadence ours
+    (owner decision, 2026-08-25; see also the EasyAmp bundled-native-
+    dep signature saga for why). If field demand ever reopens this, it
+    reopens as its own project, not as scope creep on a PR.
+  - **Optional, graceful degrade**: detect the binary at runtime
+    (PATH + well-known install locations on Windows); when absent,
+    the endpoint returns a clear "install Tesseract to enable
+    scanning" message — the app must run exactly as today without it.
+  - **Zero new Python dependencies**: call the binary directly with
+    `subprocess` — pytesseract is only a subprocess wrapper, and
+    requirements.txt is deliberately hard to add to (every pin
+    carries CVE rationale). PDF pages rasterize via the poppler tools
+    the PDF stack already uses. Pillow is already present.
+  - **Deterministic parsing first**: raw OCR text → regex/anchor
+    extraction for date, total, vendor. The existing BYOK AI layer
+    (`app/services/ai_service.py`, 7 providers incl. self-hosted) is
+    the OPTIONAL enhancement for messy documents — never a bundled
+    model, never required, off by default like all AI here.
+  - **One document type first**: receipts → pre-fill the Sales Receipt
+    / Bill form (UI: a "Scan" button that uploads and populates the
+    form; the operator always reviews before saving). Checks, bank
+    statements, and 1099s are follow-ons — statements especially
+    should push people to OFX/CSV/SimpleFIN first, OCR as last resort.
+  - Endpoint shape: `POST /api/ocr/receipt` (multipart), auth'd like
+    everything else; tests must skip cleanly when tesseract is absent
+    and CI installs it (ubuntu: `apt-get install tesseract-ocr`).
+- **Tier 3 (standalone repo, later)**: heavyweight OCR for the long
+  tail — thermal receipts, batch capture. PaddleOCR-class accuracy,
+  anchor-based template extraction (invoice2data-style: field positions
+  relative to anchor text, never absolute pixels), correction UI where
+  operator fixes update the template. Standalone keeps torch/CUDA
+  weight out of this repo's clean footprint. Cloud OCR strictly opt-in.
+
+## Delivery plan (committed 2026-09-01) — integration branch
+
+`feat/receipt-intake` is now an integration branch, same pattern as
+`server-edition`: sub-PRs land here with CI + CodeQL, and ONE final PR
+carries the whole intake feature to `main` when v1–v3 are all on the
+branch and hardware-tested. Nobody waits on anybody: the contributor's
+v1 merges at its own cadence, v2/v3 build on top without a release in
+between, and `main` never sees a half-finished intake feature.
+
+1. **v1 — Scan Receipt (PR #71, Jeremy Patterson).** Full-page OCR,
+   deterministic parse, honest `partial` flag, intake bucket. Merges to
+   this branch after review. One hook requested now: return tesseract's
+   per-word bounding boxes (`tsv` output) alongside the parsed fields —
+   v2 draws them.
+1.5. **Engine seam + platform-native adapters** *(maintainer-built — not on the v1 contributor)* (see "OCR engine
+   strategy" below): refactor the tesseract call site behind an
+   `OcrEngine` interface, add the Vision (macOS) and WinRT (Windows)
+   adapters with frozen-build-only conditional deps. Can proceed in
+   parallel with v2 — the canvas consumes whichever engine is active.
+2. **v2 — Auto-first, box-to-fix canvas.** The image with v1's detected
+   boxes drawn on it; drag to adjust or draw; click a box to assign a
+   field. Per-field OCR on the adjusted box: crop → upscale 3× →
+   Otsu/adaptive threshold (the low-contrast rescue) → single-line
+   `--psm 7` with a per-field character whitelist (digits/`.`/`$` for
+   amounts, digits/`/`/`-` for dates). This is why a known-type region
+   OCRs far better than a whole receipt. Vanilla-JS canvas — no
+   frontend build step, no new deps; cropping uses the Pillow already
+   pulled in by WeasyPrint. Five drags per receipt is worse than
+   typing, so the canvas is a correction tool, never a required step.
+3. **v3 — Merchant template memory.** Corrections persist: box
+   positions stored relative to text anchors (never absolute pixels —
+   receipt length and photo scale vary), keyed by a normalized merchant
+   name (strip store numbers/cities; fuzzy-match; confirm "same as Home
+   Depot?" once). Confidence-gated: when the template's boxes OCR
+   cleanly and subtotal + tax = total, no canvas is shown at all — the
+   form just fills. Hard the first time, drop-in-and-confirm after.
+   Call it "remembers your receipt layouts" — template learning, not
+   ML, per the honesty rule above.
+
+### v2 talk list (carried from the #71 review, 2026-09-01)
+
+Items deliberately NOT blocking v1 — raise them when v2 work starts:
+
+- **entity_type allowlist belongs in the schema, not the route.** The
+  attach endpoint checks `entity_type in ("invoice", "bill")` in route
+  code with a comment saying so; the repo convention since the v2.5.3
+  enum fixes is validate-at-the-edge with types — a
+  `Literal["invoice", "bill"]` on the schema. Worth doing right.
+- The v1 PR-template nits: Database-changes checkboxes (all three
+  checked; should be "no schema changes" only) and the screenshot TODO.
+- `upload_dir.is_relative_to(UPLOAD_BASE)` compares against an
+  unresolved base while every other guard resolves both sides —
+  harmless today, make it consistent when touching the file.
+- The tesseract word-bbox (`tsv`) hook, if it hasn't landed in v1 by
+  then — v2's canvas needs it first.
+
+CodeQL note for future intake PRs: the 10 py/path-injection alerts on
+v1 were dismissed as false positives (guards: fullmatch'd hex ids,
+resolve()+is_relative_to containment, allowlisted entity_type) — the
+scanner cannot model these sanitizers, and adding correct hardening
+INCREASED the alert count. Same class as the dismissed SSRF alert #37.
+Don't chase these with code contortions; dismiss with justification.
+
+Hardware gate: the branch → main PR needs the same Windows + macOS
+installed-app pass every release gets; Docker gets tesseract/poppler in
+the image, installers never do.
+
+## OCR engine strategy (decided 2026-09-02): platform-native engines
+
+Owner decision, superseding the "tesseract everywhere + install
+pointer" experience. The product rule that forced it: **never point a
+user anywhere to make the software work.** Integrators (banks, payment
+processors, BYO-AI) are services — pointing outward is inherent to
+them. OCR is a local capability, so it ships working. "Install
+Tesseract to enable scanning" violated that on Windows and macOS, and
+macOS having no install path at all made it worse.
+
+The engine per platform is the one the OS already ships:
+
+| Platform | Engine | Why |
+|---|---|---|
+| macOS | Apple Vision framework (`VNRecognizeTextRequest`) | Preinstalled on every Mac, best-in-class accuracy, returns word bounding boxes natively. App already requires macOS 14+, well above Vision's floor. |
+| Windows 10/11 | `Windows.Media.Ocr` (WinRT) | Built into the OS. Decent-not-great on low contrast — exactly what the v2 box-select canvas absorbs. |
+| Linux / Docker | Tesseract (system package / in the image) | Already genuinely built-in for self-hosters; the Docker image installs it. |
+
+Tesseract additionally remains a detect-if-present engine on every
+platform (override + fallback), so nothing regresses for anyone who
+has it.
+
+Why this beats the alternatives considered (vendored tesseract build,
+ONNX/RapidOCR-class models, from-scratch): **zero install pointers,
+zero binary custody** — the OS vendors steward their own engines'
+CVEs and updates; nothing new enters the signed bundle beyond Python
+wheels; the never-bundled policy stands untouched; and the macOS
+story flips from worst (no path) to best (Apple's own OCR).
+
+Implementation shape:
+
+- **Engine seam**: `ocr_service` funnels through a single tesseract
+  call site today — replace with an `OcrEngine` interface + per-
+  platform adapters selected at runtime. `/api/ocr/status` reports
+  engine name/version/languages so support conversations stay sane.
+- **Dependencies**: platform-conditional and frozen-build-only —
+  `pyobjc` in the macOS build, `winsdk` (WinRT projection) in the
+  Windows build. Neither enters the server/Docker dependency set;
+  requirements.txt stays clean.
+- **The degrade path stays, permanently.** Engines can still be
+  unavailable (Windows OCR language packs follow OS languages; Linux
+  without tesseract; corrupt installs). v1's honest
+  detect-and-degrade layer is the foundation every engine sits on.
+- **Word boxes come free**: Vision and WinRT both return word/line
+  bounding boxes natively — the v2 canvas's auto-drawn boxes work on
+  native engines without the tesseract `tsv` detour.
+- Recorded trade-off: per-platform engines mean per-platform text
+  quirks. The parser already treats OCR output as untrusted input, and
+  the ground-truth fixture tests should eventually run per-engine (CI
+  covers tesseract; macOS/Windows engine runs are hardware-pass
+  items).
+- Optional future garnish, not committed: a tiny homegrown digits-only
+  recognizer (`0-9.,$`) for v2's typed amount boxes, trained on
+  synthetic WeasyPrint receipts — pure-numpy inference, truly ours.
+
+## Honest framing (unchanged)
+
+Template learning is anchor matching plus operator feedback — say
+that. No "AI-powered" claims for deterministic extraction; the AI
+label belongs only to the BYOK path when the operator turns it on.
+
+## Integration seam (unchanged)
+
+Structured JSON over the local API with a scoped bookkeeper token
+(shipped v2.5.1). Attachments module links the source image/PDF to the
+created document, so every scanned entry keeps its evidence.

@@ -14,6 +14,8 @@ class EmployeeCreate(BaseModel):
     ssn_last_four: Optional[str] = None
     pay_type: PayType = PayType.HOURLY
     pay_rate: float = 0
+    cost_rate: Optional[float] = None
+    burden_pct: Optional[float] = None
     # Typed against the model enums so a bad value is a 422 at the edge
     # instead of a LookupError at flush (an opaque 500).
     pay_frequency: PayFrequency = PayFrequency.BIWEEKLY
@@ -45,6 +47,8 @@ class EmployeeUpdate(BaseModel):
     ssn_last_four: Optional[str] = None
     pay_type: Optional[PayType] = None
     pay_rate: Optional[float] = None
+    cost_rate: Optional[float] = None
+    burden_pct: Optional[float] = None
     pay_frequency: Optional[PayFrequency] = None
     filing_status: Optional[FilingStatus] = None
     multiple_jobs: Optional[bool] = None
@@ -75,6 +79,8 @@ class EmployeeResponse(BaseModel):
     ssn_last_four: Optional[str] = None
     pay_type: PayType
     pay_rate: float = 0
+    cost_rate: Optional[float] = None
+    burden_pct: Optional[float] = None
     pay_frequency: str = "biweekly"
     filing_status: str
     multiple_jobs: bool = False

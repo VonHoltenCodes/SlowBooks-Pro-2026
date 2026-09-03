@@ -234,6 +234,33 @@ def test_bill_create_rejects_duplicate_vendor_bill_number(
     assert "already exists" in r2.text
 
 
+def test_bill_blank_number_is_generated_and_never_collides(
+    client, db_session, seed_accounts
+):
+    """A receipt with no printed number must not block the entry: the
+    server fills date + vendor initials, suffixed for a second one that
+    day. A typed number is still the vendor's and still de-duplicated."""
+    vendor = _vendor(db_session, name="Gin Kee Restaurant")
+    line = {"description": "x", "quantity": 1, "rate": 50, "line_order": 0}
+    body = {
+        "vendor_id": vendor.id,
+        "date": "2026-09-02",
+        "tax_rate": 0,
+        "lines": [line],
+    }
+
+    r1 = client.post("/api/bills", json=body)
+    assert r1.status_code == 201, r1.text
+    assert r1.json()["bill_number"] == "20260902-GKR"
+
+    r2 = client.post("/api/bills", json={**body, "bill_number": "   "})
+    assert r2.status_code == 201, r2.text
+    assert r2.json()["bill_number"] == "20260902-GKR-2"
+
+    r3 = client.post("/api/bills", json={**body, "bill_number": None})
+    assert r3.json()["bill_number"] == "20260902-GKR-3"
+
+
 def test_bill_same_number_different_vendors_is_allowed(
     client, db_session, seed_accounts
 ):

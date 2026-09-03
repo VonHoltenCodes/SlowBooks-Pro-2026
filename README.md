@@ -43,6 +43,18 @@ source code or binaries were available, decompiled, or used.
 
 ## What's New
 
+**v2.7 — Jobs, job costing, and receipt intake.** QuickBooks-style
+Customer:Job on every form and every posted line, nested cost codes with
+cost types and burden, Job Cost Entries for labor / equipment / mileage /
+overhead, time posted to jobs at loaded rates, budgets seeded from
+estimates, and a job page that drills from cost type to code to the
+posted line with Budget / Committed / Actual / Projected / Variance — the
+columns contractors already read. QuickBooks `Customer:Job` and Online
+sub-customers import as jobs. Plus **receipt intake**: scan a receipt
+photo or PDF into a Bill, Expense or Sales Receipt with a box-to-fix
+canvas, using the OCR engine built into macOS and Windows (Tesseract on
+Linux). Design notes: [docs/design/projects.md](docs/design/projects.md).
+
 **v2.6 — Sales receipts.** Point-of-sale style sales on one screen: the
 sale and its payment recorded together, deposited where you say, posted
 atomically — and kept on their own page so they don't clutter your
@@ -189,7 +201,10 @@ docker compose up
 ```
 
 Open **http://localhost:3001** — PostgreSQL, migrations, and seed data
-are automatic.
+are automatic. The image includes `tesseract-ocr` and `poppler-utils` so
+receipt scanning works out of the box; native installs add them with
+`sudo apt install tesseract-ocr poppler-utils` (optional — scanning
+degrades gracefully when they're absent).
 
 Native installs, demo data, troubleshooting: **[INSTALL.md](INSTALL.md)**.
 Backups, restore, key rotation: **[docs/operations.md](docs/operations.md)**.

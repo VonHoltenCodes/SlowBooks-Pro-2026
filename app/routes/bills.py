@@ -4,6 +4,7 @@
 # ============================================================================
 
 from datetime import timedelta
+import re
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -67,6 +68,27 @@ def get_bill(bill_id: int, db: Session = Depends(get_db)):
     return resp
 
 
+def _default_bill_number(db: Session, vendor: Vendor, date) -> str:
+    """'20260902-GK' for Gin Kee on 2026-09-02; '-2', '-3' … when that
+    vendor already has a bill under the same generated number."""
+    initials = "".join(
+        w[0] for w in re.findall(r"[A-Za-z0-9]+", vendor.name or "")
+    ).upper()[:4]
+    base = f"{date:%Y%m%d}-{initials or 'BILL'}"
+    taken = {
+        row[0]
+        for row in db.query(Bill.bill_number)
+        .filter(Bill.vendor_id == vendor.id, Bill.bill_number.like(f"{base}%"))
+        .all()
+    }
+    if base not in taken:
+        return base
+    n = 2
+    while f"{base}-{n}" in taken:
+        n += 1
+    return f"{base}-{n}"
+
+
 @router.post("", response_model=BillResponse, status_code=201)
 def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
@@ -75,19 +97,29 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
 
+    # The bill number is the VENDOR's invoice number (the scan pre-fills it
+    # when the receipt prints one). A receipt with no number shouldn't block
+    # the entry: fall back to date + vendor initials, suffixed if that
+    # vendor already has one for the day.
+    bill_number = (data.bill_number or "").strip()
+    if not bill_number:
+        bill_number = _default_bill_number(db, vendor, data.date)
+    data.bill_number = bill_number
+
     # Reject duplicate vendor + bill_number combos. Vendors typically use a
     # monotonically-increasing invoice number; receiving the same one twice is
     # almost always a re-entry mistake, and accepting it silently produces
-    # duplicate payables and double-counted expenses.
+    # duplicate payables and double-counted expenses. (Scoped to the vendor:
+    # two different vendors can both send invoice 111.)
     dup = (
         db.query(Bill)
-        .filter(Bill.vendor_id == data.vendor_id, Bill.bill_number == data.bill_number)
+        .filter(Bill.vendor_id == data.vendor_id, Bill.bill_number == bill_number)
         .first()
     )
     if dup:
         raise HTTPException(
             status_code=409,
-            detail=f"Bill number {data.bill_number!r} already exists for this vendor (bill #{dup.id})",
+            detail=f"Bill number {bill_number!r} already exists for this vendor (bill #{dup.id})",
         )
 
     due_date = data.due_date
@@ -120,6 +152,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         total=total,
         balance_due=total,
         class_id=data.class_id,
+        job_id=data.job_id,
         notes=data.notes,
     )
     db.add(bill)
@@ -194,6 +227,10 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                 quantity=line_data.quantity,
                 rate=line_data.rate,
                 amount=amt,
+                job_id=line_data.job_id,
+                class_id=line_data.class_id,
+                cost_code_id=line_data.cost_code_id,
+                is_billable=line_data.is_billable,
                 line_order=line_data.line_order or i,
             )
         )
@@ -205,6 +242,10 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                     "debit": amt,
                     "credit": Decimal("0"),
                     "description": line_data.description or "",
+                    "job_id": line_data.job_id,
+                    "class_id": line_data.class_id,
+                    "cost_code_id": line_data.cost_code_id,
+                    "is_billable": line_data.is_billable,
                 }
             )
 
@@ -240,6 +281,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
             source_type="bill",
             source_id=bill.id,
             class_id=bill.class_id,
+            job_id=bill.job_id,
         )
         bill.transaction_id = txn.id
 
@@ -315,6 +357,7 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
                 source_type="bill_void",
                 source_id=bill.id,
                 class_id=bill.class_id,
+                job_id=bill.job_id,
             )
 
     # Phase 11: reverse inventory receipts (the reversing JE already undoes

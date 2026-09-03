@@ -44,6 +44,7 @@ const TimeEntriesPage = {
                 <thead><tr>
                     <th>Date</th>
                     <th>Employee</th>
+                    <th>Job</th>
                     <th class="amount">Regular Hrs</th>
                     <th class="amount">OT Hrs</th>
                     <th>Description</th>
@@ -56,6 +57,7 @@ const TimeEntriesPage = {
                 html += `<tr>
                     <td>${formatDate(en.date)}</td>
                     <td>${empName}</td>
+                    <td>${escapeHtml(en.job_name || '')}${en.cost_code_label ? ` <span style="font-size:10px;color:#888">${escapeHtml(en.cost_code_label)}</span>` : ''}${en.job_cost_id ? ' <span class="badge" style="font-size:9px">posted</span>' : ''}</td>
                     <td class="amount">${(en.regular_hours || 0).toFixed(2)}</td>
                     <td class="amount">${(en.overtime_hours || 0).toFixed(2)}</td>
                     <td>${escapeHtml(en.description || '')}</td>
@@ -73,6 +75,9 @@ const TimeEntriesPage = {
 
     async showForm() {
         const emps = await API.get('/employees?active_only=false');
+        const jobGroup = await jobFormGroupHtml(null);
+        await CostCodes.load();
+        const codeGroup = CostCodes.any() ? `<div class="form-group"><label>Cost Code</label><select name="cost_code_id">${CostCodes.optionsHtml(null)}</select></div>` : '';
         const empOptions = emps.map(e =>
             `<option value="${e.id}">${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</option>`
         ).join('');
@@ -99,6 +104,7 @@ const TimeEntriesPage = {
                         <input name="clock_out" type="time"></div>
                     <div class="form-group"><label>Break (minutes)</label>
                         <input name="break_minutes" type="number" min="0" value="0"></div>
+                    ${jobGroup}${codeGroup}
                 </div>
                 <div class="form-group"><label>Description</label>
                     <textarea name="description" rows="3" style="width:100%;box-sizing:border-box;"></textarea></div>
@@ -134,16 +140,27 @@ const TimeEntriesPage = {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target).entries());
         data.employee_id = parseInt(data.employee_id) || 0;
-        data.regular_hours = parseFloat(data.regular_hours) || 0;
-        data.overtime_hours = parseFloat(data.overtime_hours) || 0;
-        data.doubletime_hours = parseFloat(data.doubletime_hours) || 0;
-        data.break_minutes = parseInt(data.break_minutes) || 0;
-        if (!data.clock_in) delete data.clock_in;
-        if (!data.clock_out) delete data.clock_out;
+        // The API's field names differ from the form's (hours_regular etc.)
+        data.hours_regular = parseFloat(data.regular_hours) || 0;
+        data.hours_overtime = parseFloat(data.overtime_hours) || 0;
+        data.hours_doubletime = parseFloat(data.doubletime_hours) || 0;
+        delete data.regular_hours; delete data.overtime_hours; delete data.doubletime_hours;
+        data.notes = data.description || null; delete data.description;
+        data.job_id = data.job_id ? parseInt(data.job_id) : null;
+        data.cost_code_id = data.cost_code_id ? parseInt(data.cost_code_id) : null;
+        delete data.break_minutes; delete data.clock_in; delete data.clock_out;
         try {
             await API.post('/time-entries', data);
             toast('Time entry logged');
             closeModal();
+            App.navigate('#/time-entries');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async postToJob(id) {
+        try {
+            const r = await API.post(`/time-entries/${id}/post-to-job`, {});
+            toast(`${r.number} posted: ${formatCurrency(r.total)}`);
             App.navigate('#/time-entries');
         } catch (err) { toast(err.message, 'error'); }
     },

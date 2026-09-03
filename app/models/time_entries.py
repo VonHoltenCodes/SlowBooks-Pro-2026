@@ -44,6 +44,11 @@ class TimeEntry(Base):
 
     # Optional job-costing link. Items double as the project list in this app.
     project_id = Column(Integer, ForeignKey("items.id"), nullable=True)
+    # The live job-costing link (project_id above is a dead legacy column).
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
+    # Set once the entry has been posted to its job as labor cost
+    job_cost_id = Column(Integer, ForeignKey("job_costs.id"), nullable=True)
     notes = Column(Text, nullable=True)
 
     status = Column(Enum(TimeEntryStatus), default=TimeEntryStatus.DRAFT)
@@ -57,3 +62,5 @@ class TimeEntry(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     employee = relationship("Employee")
+    job = relationship("Job")
+    cost_code = relationship("CostCode")

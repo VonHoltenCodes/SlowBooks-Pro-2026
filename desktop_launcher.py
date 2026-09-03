@@ -103,8 +103,14 @@ def _purge_stale_webview_cache(storage_dir: Path, current_version: str) -> None:
         pass  # purge again next launch; never block startup on this
 
 
-ENV_FILE = _config_dir() / ".env"
 ENV_EXAMPLE = ROOT / ".env.example"
+
+
+def env_file() -> Path:
+    """Writable per-user .env. Resolved on every call (not at import) so
+    --data-dir / SLOWBOOKS_DATA_DIR, which are applied after this module
+    loads, move the .env along with the rest of the data directory."""
+    return _config_dir() / ".env"
 
 
 def _bootstrap_frozen_runtime() -> None:
@@ -203,9 +209,9 @@ _PLACEHOLDER_PAYROLL_KEY = "slowbooks-dev-payroll-key-change-me"
 
 
 def _read_env_lines() -> list[str]:
-    if not ENV_FILE.exists():
+    if not env_file().exists():
         return []
-    return ENV_FILE.read_text(encoding="utf-8").splitlines()
+    return env_file().read_text(encoding="utf-8").splitlines()
 
 
 def get_env_value(key: str) -> str | None:
@@ -227,31 +233,31 @@ def set_env_value(key: str, value: str) -> None:
             break
     if not replaced:
         lines.append(f"{key}={value}")
-    ENV_FILE.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    env_file().write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def prepare_env() -> None:
     """Idempotent first-run .env preparation."""
-    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
-    if not ENV_FILE.exists():
+    env_file().parent.mkdir(parents=True, exist_ok=True)
+    if not env_file().exists():
         if ENV_EXAMPLE.exists():
-            ENV_FILE.write_text(
+            env_file().write_text(
                 ENV_EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8"
             )
         else:
-            ENV_FILE.write_text("", encoding="utf-8")
+            env_file().write_text("", encoding="utf-8")
         if os.name != "nt":
-            ENV_FILE.chmod(0o600)
-        print(f"Created {ENV_FILE}")
+            env_file().chmod(0o600)
+        print(f"Created {env_file()}")
     elif os.name != "nt":
         try:
-            ENV_FILE.chmod(0o600)
+            env_file().chmod(0o600)
         except OSError:
-            print(f"WARNING: could not restrict permissions on {ENV_FILE}")
+            print(f"WARNING: could not restrict permissions on {env_file()}")
 
     # Any app modules imported after this point must read the writable desktop
     # environment, never a bundled .env.
-    os.environ["SLOWBOOKS_ENV_FILE"] = str(ENV_FILE)
+    os.environ["SLOWBOOKS_ENV_FILE"] = str(env_file())
 
     # APP_DEBUG=true is correct here because this deployment only ever talks
     # to 127.0.0.1: it disables the HTTPS/TLS production gates (which don't
@@ -288,9 +294,9 @@ def prepare_env() -> None:
 
     if os.name != "nt":
         try:
-            ENV_FILE.chmod(0o600)
+            env_file().chmod(0o600)
         except OSError:
-            print(f"WARNING: could not restrict permissions on {ENV_FILE}")
+            print(f"WARNING: could not restrict permissions on {env_file()}")
 
     data_dir = get_data_dir()
     (data_dir / "companies").mkdir(parents=True, exist_ok=True)
@@ -317,7 +323,7 @@ def _server_env(db_url: str, port: int, bind_host: str = "127.0.0.1") -> dict:
             # Where app/config.py loads .env from (the install dir is
             # read-only when frozen), and the flag the frontend uses to
             # enable desktop-only behavior like the update check.
-            "SLOWBOOKS_ENV_FILE": str(ENV_FILE),
+            "SLOWBOOKS_ENV_FILE": str(env_file()),
             "SLOWBOOKS_DESKTOP": "1",
         }
     )
@@ -1154,6 +1160,23 @@ def run_smoke_test(port: int = 3999) -> int:
         print("smoke: FAIL WeasyPrint did not produce a PDF")
         return 1
 
+    # The platform-native OCR engine rides in the frozen bundle as hidden
+    # imports (pyobjc Vision / winrt). Nothing else in this smoke test
+    # touches OCR, so prove the bridge survived freezing here — on macOS
+    # Vision ships with the OS and must be the selected engine; on Windows
+    # the CI runner may lack OCR language packs, so only report.
+    print("smoke: checking the OCR engine...")
+    from app.services import ocr_engines
+
+    status = ocr_engines.engine_status(None)
+    print(
+        f"smoke: ocr engine={status.get('engine')} "
+        f"available={status.get('available')} version={status.get('version')}"
+    )
+    if sys.platform == "darwin" and status.get("engine") != "vision":
+        print("smoke: FAIL Apple Vision is not the selected engine in the bundle")
+        return 1
+
     print("smoke: PASS")
     return 0
 
@@ -1260,7 +1283,7 @@ def main() -> int:
         # alembic), so the app's company_service resolves the same
         # location.
         os.environ["SLOWBOOKS_DATA_DIR"] = str(get_data_dir())
-        os.environ.setdefault("SLOWBOOKS_ENV_FILE", str(ENV_FILE))
+        os.environ.setdefault("SLOWBOOKS_ENV_FILE", str(env_file()))
         if FROZEN:
             # app.config bakes DATABASE_URL into a constant at import time
             # and app.database builds its engine from it. This launcher

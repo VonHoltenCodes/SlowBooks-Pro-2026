@@ -87,7 +87,7 @@ const BillsPage = {
     lineCount: 0,
 
     vendorSelected(vendorId) {
-        if (!vendorId) return;
+        if (!vendorId || vendorId === VendorQuickAdd.NEW) return;
         const vendor = BillsPage._vendors.find(v => v.id == vendorId);
         if (vendor && vendor.default_expense_account_id) {
             // Store for use when adding lines
@@ -106,18 +106,20 @@ const BillsPage = {
         BillsPage._items = items;
         BillsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
+        const jobGroup = await jobFormGroupHtml(null);
+        await CostCodes.load();
 
         BillsPage._vendors = vendors;
-        const vendorOpts = vendors.map(v => `<option value="${v.id}">${escapeHtml(v.name)}</option>`).join('');
         const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
 
         openModal('Enter Bill', `
             <form onsubmit="BillsPage.save(event)">
+                ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
                     <div class="form-group"><label>Vendor *</label>
-                        <select name="vendor_id" required onchange="BillsPage.vendorSelected(this.value)"><option value="">Select...</option>${vendorOpts}</select></div>
-                    <div class="form-group"><label>Bill Number *</label>
-                        <input name="bill_number" required></div>
+                        ${VendorQuickAdd.html(vendors, { id: 'bill-vendor', onchange: 'BillsPage.vendorSelected(this.value)' })}</div>
+                    <div class="form-group"><label>Bill Number</label>
+                        <input name="bill_number" placeholder="from the receipt, or left blank"></div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Terms</label>
@@ -125,19 +127,21 @@ const BillsPage = {
                             ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
                                 `<option ${t==='Net 30'?'selected':''}>${t}</option>`).join('')}
                         </select></div>
-                    ${classGroup}
+                    ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml()}
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th>Item</th><th>Description</th>${CostCodes.headHtml()}<th title="Billable to the job's customer">Bill?</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
                     <tbody id="bill-lines">
                         <tr data-billline="0">
                             <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                             <td><input class="line-desc"></td>
-                            <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                            <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                            <td class="col-amount">$0.00</td>
+                            ${CostCodes.cellHtml('line-cost-code')}
+                            <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"></td>
+                            <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
+                            <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
+                            <td class="col-amount line-amount">$0.00</td>
                         </tr>
                     </tbody>
                 </table>
@@ -145,10 +149,111 @@ const BillsPage = {
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
                 <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="ScanHelper.discard(); closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Bill</button>
                 </div>
             </form>`);
+        ScanHelper.wire(BillsPage._applyScan, BillsPage._applyScanField, BillsPage._scanFieldTarget);
+    },
+
+    // Where each canvas field lands — the canvas outlines these inputs in
+    // the field's color so the form doubles as the legend. Mirrors
+    // _applyScanField below.
+    _scanFieldTarget(fieldKey) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return null;
+        const row = document.querySelector('#bill-lines tr');
+        if (fieldKey === 'date') return form.querySelector('[name="date"]');
+        if (fieldKey === 'merchant') {
+            return VendorQuickAdd.nameInput('bill-vendor') || (row && row.querySelector('.line-desc'));
+        }
+        if (fieldKey === 'total' || fieldKey === 'subtotal') return row && row.querySelector('.line-rate');
+        if (fieldKey === 'tax') return form.querySelector('[name="notes"]');
+        if (fieldKey === 'reference') return form.querySelector('[name="bill_number"]');
+        return null;
+    },
+
+    // Box-to-fix canvas: apply one re-read field into the bill form.
+    _applyScanField(fieldKey, value) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        const row = document.querySelector('#bill-lines tr');
+        if (fieldKey === 'date') {
+            form.querySelector('[name="date"]').value = value;
+        } else if (fieldKey === 'merchant') {
+            VendorQuickAdd.prefill('bill-vendor', value, BillsPage._vendors);
+            const desc = row && row.querySelector('.line-desc');
+            if (desc) desc.value = value;
+        } else if (fieldKey === 'total' || fieldKey === 'subtotal') {
+            const rate = row && row.querySelector('.line-rate');
+            if (rate) rate.value = parseFloat(value).toFixed(2);
+        } else if (fieldKey === 'reference') {
+            const num = form.querySelector('[name="bill_number"]');
+            if (num) num.value = value;
+        } else if (fieldKey === 'tax') {
+            const notes = form.querySelector('[name="notes"]');
+            if (notes) {
+                // Replace an earlier "Tax detected" line rather than stacking
+                // one per re-read.
+                const kept = notes.value.split('\n').filter(l => !/^Tax detected:/.test(l)).join('\n').replace(/\s*$/, '');
+                notes.value = (kept ? kept + '\n' : '') + `Tax detected: $${value}`;
+            }
+        }
+        BillsPage.recalc();
+    },
+
+    _applyScan(result) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        if (result.date) form.querySelector('[name="date"]').value = result.date;
+        // The vendor's invoice number; left blank, the server generates one.
+        const num = form.querySelector('[name="bill_number"]');
+        if (result.reference && num && !num.value) num.value = result.reference;
+
+        const merchant = result.merchant && result.merchant.value;
+        if (merchant) {
+            const match = VendorQuickAdd.prefill('bill-vendor', merchant, BillsPage._vendors);
+            if (match) {
+                BillsPage.vendorSelected(match.id);
+            } else {
+                const statusEl = $('#scan-status');
+                if (statusEl) {
+                    statusEl.textContent = `Detected: ${merchant} — new vendor; it's added when you save (or pick one from the list).`;
+                }
+            }
+        }
+
+        const total = parseFloat(result.total || '0');
+        if (total > 0) {
+            const row = document.querySelector('#bill-lines tr');
+            if (row) {
+                const rateInput = row.querySelector('.line-rate');
+                const descInput = row.querySelector('.line-desc');
+                if (rateInput) {
+                    // Bill rule (spec §6.4): grand total as the line — the
+                    // amount owed includes tax; tax noted in Notes.
+                    rateInput.value = total.toFixed(2);
+                }
+                if (descInput && merchant) descInput.value = merchant;
+                BillsPage.recalc();
+                if (result.tax_detected && result.tax) {
+                    const notes = form.querySelector('[name="notes"]');
+                    if (notes) {
+                        const existing = notes.value ? notes.value.replace(/\s*$/, '') + '\n' : '';
+                        notes.value = existing + `Tax detected: $${result.tax}`;
+                    }
+                }
+            }
+        }
+    },
+
+    recalc() {
+        $$('#bill-lines tr').forEach(row => {
+            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
+            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+            const amountCell = row.querySelector('.line-amount');
+            if (amountCell) amountCell.textContent = formatCurrency(qty * rate);
+        });
     },
 
     addLine() {
@@ -158,9 +263,11 @@ const BillsPage = {
             <tr data-billline="${idx}">
                 <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                 <td><input class="line-desc"></td>
-                <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                <td class="col-amount">$0.00</td>
+                ${CostCodes.cellHtml('line-cost-code')}
+                <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"></td>
+                <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
+                <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
+                <td class="col-amount line-amount">$0.00</td>
             </tr>`);
     },
 
@@ -174,20 +281,25 @@ const BillsPage = {
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                cost_code_id: CostCodes.fromRow(row, 'line-cost-code'),
+                is_billable: !!row.querySelector('.line-billable')?.checked,
                 line_order: i,
             });
         });
         try {
-            await API.post('/bills', {
-                vendor_id: parseInt(form.vendor_id.value),
-                bill_number: form.bill_number.value,
+            const vendorId = await VendorQuickAdd.ensure('bill-vendor');
+            const result = await API.post('/bills', {
+                vendor_id: vendorId,
+                bill_number: form.bill_number.value.trim() || null,
                 date: form.date.value,
                 terms: form.terms.value,
                 notes: form.notes.value || null,
                 class_id: classIdFromForm(form),
+                job_id: jobIdFromForm(form),
                 ...currencyPayloadFromForm(form),
                 lines,
             });
+            await ScanHelper.attachAfterSave('bill', result.id);
             toast('Bill saved');
             closeModal();
             App.navigate('#/bills');

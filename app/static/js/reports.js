@@ -57,6 +57,14 @@ const ReportsPage = {
                     <div class="card-header">P&L by Class</div>
                     <p style="font-size:13px; color:var(--gray-500);">Income vs expenses split by class</p>
                 </div>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.jobBudgetVsActual()">
+                    <div class="card-header">Job Budget vs Actual</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Budget, committed, actual, projected, variance per job</p>
+                </div>
+                <div class="card" style="cursor:pointer" onclick="ReportsPage.jobProfitability()">
+                    <div class="card-header">Job Profitability</div>
+                    <p style="font-size:13px; color:var(--gray-500);">Income, costs and margin per job</p>
+                </div>
                 <div class="card" style="cursor:pointer" onclick="ReportsPage.financialStatementsPdf()">
                     <div class="card-header">Financial Statements Pack (PDF)</div>
                     <p style="font-size:13px; color:var(--gray-500);">P&L + Balance Sheet + Trial Balance, one audit-ready PDF</p>
@@ -862,3 +870,72 @@ ReportsPage.financialStatementsPdf = async function () {
             Settings → Report PDF Paper Size.</div>`;
     });
 };
+
+ReportsPage.jobProfitability = async function () {
+    await ReportsPage.openPeriodModal("Job Profitability", "this_year_to_date", async (_period, range) => {
+        const data = await API.get(`/reports/job-profitability?start_date=${range.start}&end_date=${range.end}`);
+        const pct = v => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
+        const rows = data.jobs.map(j => `<tr ${j.job_id ? `style="cursor:pointer" onclick="closeModal();App.navigate('#/jobs');JobsPage.showDetails(${j.job_id})"` : ''}>
+            <td>${escapeHtml(j.customer_name || '')}</td>
+            <td>${escapeHtml(j.job_name)}</td>
+            <td class="amount">${j.contract_amount !== null && j.contract_amount !== undefined ? formatCurrency(j.contract_amount) : ''}</td>
+            <td class="amount">${formatCurrency(j.income)}</td>
+            <td class="amount">${formatCurrency(j.total_costs)}</td>
+            <td class="amount" style="font-weight:700;">${formatCurrency(j.net_income)}</td>
+            <td class="amount">${pct(j.margin_pct)}</td>
+        </tr>`).join('');
+        return `
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)} · "No job" holds untagged activity <em>and</em> the applied-cost credits behind Job Cost Entries (labor, equipment, overhead applied to jobs), so its costs can be negative and the totals still match the P&L
+            </div>
+            <div class="table-container"><table>
+                <thead><tr><th>Customer</th><th>Job</th><th class="amount">Contract</th><th class="amount">Income</th>
+                <th class="amount">Costs</th><th class="amount">Net</th><th class="amount">Margin</th></tr></thead>
+                <tbody>${rows.length ? rows : '<tr><td colspan="7">No activity in this period</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);">
+                    <td colspan="3">Total</td>
+                    <td class="amount">${formatCurrency(data.total_income)}</td>
+                    <td class="amount">${formatCurrency(data.total_costs)}</td>
+                    <td class="amount">${formatCurrency(data.total_net_income)}</td>
+                    <td></td>
+                </tr></tfoot>
+            </table></div>`;
+    });
+};
+
+ReportsPage.jobBudgetVsActual = async function () {
+    await ReportsPage.openPeriodModal("Job Budget vs Actual", "this_year_to_date", async (_period, range) => {
+        const data = await API.get(`/jobs/budget-vs-actual?start_date=${range.start}&end_date=${range.end}`);
+        const pct = v => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
+        const t = { revised: 0, committed: 0, actual: 0, projected: 0, variance: 0, act_revenue: 0 };
+        const rows = data.map(j => {
+            for (const k of Object.keys(t)) t[k] += j[k] || 0;
+            return `<tr style="cursor:pointer" onclick="closeModal();App.navigate('#/jobs/${j.job_id}')">
+            <td>${escapeHtml(j.customer_name || '')}</td>
+            <td>${escapeHtml(j.job_name)}</td>
+            <td class="amount">${formatCurrency(j.revised)}</td>
+            <td class="amount">${formatCurrency(j.committed)}</td>
+            <td class="amount">${formatCurrency(j.actual)}</td>
+            <td class="amount">${formatCurrency(j.projected)}</td>
+            <td class="amount" style="font-weight:700;color:${j.revised && j.variance < 0 ? '#a4242b' : 'inherit'}">${formatCurrency(j.variance)}</td>
+            <td class="amount">${pct(j.pct_used)}</td>
+            <td class="amount">${formatCurrency(j.act_revenue)}</td>
+        </tr>`; }).join('');
+        return `
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
+                Actuals for ${escapeHtml(range.start)} — ${escapeHtml(range.end)}; budgets and committed cost are job-to-date. Click a job to drill down.
+            </div>
+            <div class="table-container"><table>
+                <thead><tr><th>Customer</th><th>Job</th><th class="amount">Budget</th><th class="amount">Committed</th>
+                <th class="amount">Actual</th><th class="amount">Projected</th><th class="amount">Variance</th><th class="amount">% Used</th><th class="amount">Revenue</th></tr></thead>
+                <tbody>${rows.length ? rows : '<tr><td colspan="9">No jobs</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);">
+                    <td colspan="2">Total</td>
+                    <td class="amount">${formatCurrency(t.revised)}</td><td class="amount">${formatCurrency(t.committed)}</td>
+                    <td class="amount">${formatCurrency(t.actual)}</td><td class="amount">${formatCurrency(t.projected)}</td>
+                    <td class="amount">${formatCurrency(t.variance)}</td><td></td><td class="amount">${formatCurrency(t.act_revenue)}</td>
+                </tr></tfoot>
+            </table></div>`;
+    });
+};
+

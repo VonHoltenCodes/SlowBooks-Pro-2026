@@ -60,13 +60,14 @@ const CustomersPage = {
     // payments. Avoid the "click here to see notes, click here to see
     // invoices" gated-screen pattern.
     async showDetails(id) {
-        let customer, invoices, payments, permits;
+        let customer, invoices, payments, permits, jobs;
         try {
-            [customer, invoices, payments, permits] = await Promise.all([
+            [customer, invoices, payments, permits, jobs] = await Promise.all([
                 API.get(`/customers/${id}`),
                 API.get(`/invoices?customer_id=${id}`).catch(() => []),
                 API.get(`/payments?customer_id=${id}`).catch(() => []),
                 API.get(`/reseller-permits?entity_type=customer&entity_id=${id}`).catch(() => []),
+                API.get(`/jobs?customer_id=${id}&include_inactive=true`).catch(() => []),
             ]);
         } catch (err) {
             toast(err.message, 'error');
@@ -130,6 +131,7 @@ const CustomersPage = {
                     <div style="margin-top:8px">
                         <button class="btn btn-sm btn-primary" onclick="closeModal();InvoicesPage.showForm(null,${id})">New Invoice</button>
                         <button class="btn btn-sm btn-secondary" onclick="closeModal();PaymentsPage.showForm(null,${id})">Receive Payment</button>
+                        <button class="btn btn-sm btn-secondary" onclick="closeModal();JobsPage.showForm(null,${id})">New Job</button>
                         <button class="btn btn-sm btn-secondary" onclick="CustomersPage.showForm(${id})">Edit</button>
                     </div>
                 </div>
@@ -172,6 +174,21 @@ const CustomersPage = {
             <div style="margin-bottom:14px">
                 <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Reseller permits</h4>
                 ${permitsBody}
+            </div>
+
+            <!-- jobs (projects) -->
+            <div style="margin-bottom:14px">
+                <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Jobs (${jobs.length})</h4>
+                ${jobs.length === 0 ? '<p style="color:#888;font-size:13px;margin:0">No jobs. A job is a project for this customer — invoices, bills, expenses and time can be tagged to it.</p>' :
+                    `<table class="data-table" style="font-size:12px">
+                        <thead><tr><th>Job</th><th>Status</th><th class="amount">Contract</th><th></th></tr></thead>
+                        <tbody>${jobs.map(j => `<tr style="cursor:pointer" onclick="closeModal();JobsPage.showDetails(${j.id})">
+                            <td>${escapeHtml(j.name)}${j.job_number ? ` <span style="color:#888">#${escapeHtml(j.job_number)}</span>` : ''}</td>
+                            <td>${escapeHtml((window.JobsPage && JobsPage.STATUS_LABELS[j.status]) || j.status)}${j.is_active ? '' : ' <span style="color:#888">(inactive)</span>'}</td>
+                            <td class="amount">${j.contract_amount ? formatCurrency(j.contract_amount) : ''}</td>
+                            <td><a href="#" onclick="event.preventDefault();event.stopPropagation();closeModal();JobsPage.showForm(${j.id})">Edit</a></td>
+                        </tr>`).join('')}</tbody>
+                    </table>`}
             </div>
 
             <!-- recent invoices + payments side by side -->

@@ -53,6 +53,7 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
             tax_rate=data.tax_rate,
             notes=data.notes,
             class_id=data.class_id,
+            job_id=data.job_id,
             currency=data.currency,
             exchange_rate=data.exchange_rate,
             lines=data.lines,

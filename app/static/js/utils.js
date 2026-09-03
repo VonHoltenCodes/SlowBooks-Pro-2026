@@ -273,6 +273,73 @@ function classIdFromForm(form) {
 }
 
 // ---------------------------------------------------------------------------
+// Job-costing dimension — shared "Customer: Job" dropdown for entry forms.
+// Lists every active job; when the form has a customer select (pass its id),
+// the list narrows to that customer's jobs each time the picker gets focus,
+// so the customer can be changed at any point and the jobs follow. Returns
+// '' when the company has no jobs yet — the field simply doesn't exist.
+// ---------------------------------------------------------------------------
+async function jobFormGroupHtml(selectedId, customerSelectId) {
+    let jobs = [];
+    try { jobs = await API.get('/jobs'); } catch (e) { return ''; }
+    if (!jobs.length) return '';
+    const opts = jobs.map(j =>
+        `<option value="${j.id}" data-customer="${j.customer_id}" ${selectedId === j.id ? 'selected' : ''}>${escapeHtml(j.full_name || j.name)}</option>`
+    ).join('');
+    const bind = customerSelectId ? `data-customer-select="${customerSelectId}" onfocus="JobPicker.sync(this)"` : '';
+    return `<div class="form-group"><label>Job</label>
+        <select name="job_id" ${bind}><option value="">— No job —</option>${opts}</select></div>`;
+}
+
+const JobPicker = {
+    // Hide jobs that belong to other customers than the one selected.
+    sync(select) {
+        const custSel = document.getElementById(select.dataset.customerSelect);
+        const cid = custSel ? custSel.value : '';
+        for (const opt of select.options) {
+            if (!opt.value) continue;
+            const mine = !cid || cid === '__new__' || opt.dataset.customer === cid;
+            opt.hidden = !mine;
+            if (!mine && opt.selected) select.value = '';
+        }
+    },
+};
+
+// ---------------------------------------------------------------------------
+// Cost codes — the job-costing chart, chosen per LINE on cost forms.
+// CostCodes.load() caches the active list for the open form; optionsHtml()
+// renders the <option>s for a line select; a company with no cost codes
+// gets no column at all.
+// ---------------------------------------------------------------------------
+const CostCodes = {
+    _list: null,
+    async load() {
+        try { CostCodes._list = await API.get('/cost-codes'); } catch (e) { CostCodes._list = []; }
+        return CostCodes._list;
+    },
+    any() { return !!(CostCodes._list && CostCodes._list.length); },
+    optionsHtml(selectedId) {
+        return '<option value="">--</option>' + (CostCodes._list || []).map(c =>
+            `<option value="${c.id}" ${selectedId === c.id ? 'selected' : ''}>${'\u00a0\u00a0'.repeat(c.depth || 0)}${escapeHtml(c.label || (c.code + ' ' + c.name))}</option>`).join('');
+    },
+    // <td> for a line row, or '' when the company has no cost codes
+    cellHtml(cls, selectedId) {
+        return CostCodes.any() ? `<td><select class="${cls}">${CostCodes.optionsHtml(selectedId)}</select></td>` : '';
+    },
+    headHtml(label = 'Cost Code') { return CostCodes.any() ? `<th>${label}</th>` : ''; },
+    fromRow(row, cls) {
+        const v = row.querySelector(`.${cls}`)?.value;
+        return v ? parseInt(v) : null;
+    },
+};
+
+// Normalize a form's job_id string to int-or-null for the API payload.
+function jobIdFromForm(form) {
+    const v = form.job_id ? form.job_id.value : '';
+    return v ? parseInt(v) : null;
+}
+
+// ---------------------------------------------------------------------------
 // Multi-currency: currency + exchange-rate inputs for document forms.
 // Selecting a foreign currency prefills the rate from /api/fx/rate
 // (Bank of Canada feed); the operator can always override.

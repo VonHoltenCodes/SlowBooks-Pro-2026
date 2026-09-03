@@ -23,6 +23,11 @@ class Settings(Base):
 
 # Default settings keys
 DEFAULT_SETTINGS = {
+    # Receipt-scanning engine preference: "auto" = platform-native engine
+    # first (Windows OCR / Apple Vision), tesseract fallback; "tesseract"
+    # = prefer tesseract when installed (sharper region reads). The
+    # SLOWBOOKS_OCR_ENGINE env var (support tool) outranks this.
+    "ocr_engine": "auto",
     "company_name": "My Company",
     "company_address1": "",
     "company_address2": "",

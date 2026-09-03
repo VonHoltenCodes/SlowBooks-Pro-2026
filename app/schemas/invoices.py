@@ -15,6 +15,9 @@ class InvoiceLineCreate(BaseModel):
     rate: Decimal = Decimal("0")
     amount: Decimal = Decimal("0")
     class_name: Optional[str] = None
+    job_id: Optional[int] = None
+    class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     line_order: int = 0
 
     @model_validator(mode="after")
@@ -31,6 +34,9 @@ class InvoiceLineResponse(BaseModel):
     rate: Decimal
     amount: Decimal
     class_name: Optional[str]
+    job_id: Optional[int] = None
+    class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     line_order: int
 
     model_config = {"from_attributes": True}
@@ -55,6 +61,7 @@ class InvoiceCreate(BaseModel):
     tax_rate: Decimal = Decimal("0")
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     lines: list[InvoiceLineCreate] = []
@@ -77,6 +84,7 @@ class InvoiceUpdate(BaseModel):
     tax_rate: Optional[Decimal] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     lines: Optional[list[InvoiceLineCreate]] = None
@@ -109,6 +117,7 @@ class InvoiceResponse(BaseModel):
     balance_due: Decimal
     notes: Optional[str]
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     is_sales_receipt: bool = False
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None

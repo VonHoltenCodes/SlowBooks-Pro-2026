@@ -10,6 +10,8 @@ class TimeEntryCreate(BaseModel):
     hours_overtime: float = 0
     hours_doubletime: float = 0
     project_id: Optional[int] = None
+    job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     notes: Optional[str] = None
 
 
@@ -19,6 +21,8 @@ class TimeEntryUpdate(BaseModel):
     hours_overtime: Optional[float] = None
     hours_doubletime: Optional[float] = None
     project_id: Optional[int] = None
+    job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     notes: Optional[str] = None
     status: Optional[str] = None
 
@@ -32,6 +36,11 @@ class TimeEntryResponse(BaseModel):
     hours_overtime: float = 0
     hours_doubletime: float = 0
     project_id: Optional[int] = None
+    job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    job_name: Optional[str] = None
+    cost_code_label: Optional[str] = None
+    job_cost_id: Optional[int] = None
     notes: Optional[str] = None
     status: str
     approved_by: Optional[str] = None

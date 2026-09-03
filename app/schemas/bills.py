@@ -9,6 +9,10 @@ from app.schemas.common import validate_non_negative_line
 class BillLineCreate(BaseModel):
     item_id: Optional[int] = None
     account_id: Optional[int] = None
+    job_id: Optional[int] = None
+    class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    is_billable: bool = False
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
@@ -24,6 +28,10 @@ class BillLineResponse(BaseModel):
     id: int
     item_id: Optional[int] = None
     account_id: Optional[int] = None
+    job_id: Optional[int] = None
+    class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    is_billable: bool = False
     description: Optional[str] = None
     quantity: Decimal = Decimal("0")
     rate: Decimal = Decimal("0")
@@ -34,7 +42,8 @@ class BillLineResponse(BaseModel):
 
 class BillCreate(BaseModel):
     vendor_id: int
-    bill_number: str
+    # The vendor's invoice number; blank → generated (date + vendor initials).
+    bill_number: Optional[str] = None
     date: dt_date
     due_date: Optional[dt_date] = None
     terms: str = "Net 30"
@@ -43,6 +52,7 @@ class BillCreate(BaseModel):
     tax_rate: float = 0
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     lines: list[BillLineCreate] = []
@@ -64,6 +74,7 @@ class BillUpdate(BaseModel):
     tax_rate: Optional[float] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     lines: Optional[list[BillLineCreate]] = None
@@ -88,6 +99,7 @@ class BillResponse(BaseModel):
     balance_due: Decimal = Decimal("0")
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     lines: list[BillLineResponse] = []
@@ -109,6 +121,7 @@ class BillPaymentCreate(BaseModel):
     pay_from_account_id: Optional[int] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     allocations: list[BillPaymentAllocationCreate] = []
@@ -124,6 +137,7 @@ class BillPaymentResponse(BaseModel):
     check_number: Optional[str] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
+    job_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     is_voided: bool = False
