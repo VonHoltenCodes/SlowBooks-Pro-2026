@@ -423,3 +423,107 @@ def test_winrt_calls_all_run_on_one_persistent_thread(monkeypatch):
     assert seen[0] != threading.get_ident()
     assert inits == [seen[0]]
     assert any(t.ident == seen[0] and t.is_alive() for t in threading.enumerate())
+
+
+# ---------------------------------------------------------------------------
+# Skewed photos (Keith's macOS lap on #73, 2026-09-02): row grouping by
+# vertical centre alone put right-edge amounts on the wrong row from 2
+# degrees of tilt — subtotal/tax silently wrong, total right.
+# ---------------------------------------------------------------------------
+
+_RECEIPT_ROWS = [
+    [("NEON", 40), ("PULSE", 200), ("TECHSHOP", 400)],
+    [("1200", 40), ("W", 160), ("MAIN", 220), ("ST", 360)],
+    [("Cassette", 40), ("repair", 260), ("$45.00", 1500)],
+    [("Belt", 40), ("kit", 160), ("$12.50", 1500)],
+    [("Cleaning", 40), ("$14.23", 1500)],
+    [("Subtotal", 40), ("$71.73", 1500)],
+    [("Tax", 40), ("7.25%", 300), ("$5.20", 1500)],
+    [("TOTAL", 40), ("$76.93", 1500)],
+    [("VISA", 40), ("$76.93", 1500)],
+    [("Thank", 40), ("you", 200)],
+]
+
+
+def _rotated_receipt(degrees: float) -> list:
+    """Word boxes for the receipt above, printed at 30 px line height / 45 px
+    pitch on a 2200 px wide page, then rotated like a tilted phone photo."""
+    import math
+
+    rad = math.radians(degrees)
+    cos, sin = math.cos(rad), math.sin(rad)
+    words = []
+    for r, row in enumerate(_RECEIPT_ROWS):
+        row_boxes = []
+        for text, x in row:
+            w = 18 * len(text)
+            h = 30
+            cx, cy = x + w / 2.0, 100 + 45 * r
+            rx = cx * cos - cy * sin
+            ry = cx * sin + cy * cos
+            row_boxes.append(
+                ocr_engines.WordBox(
+                    text=text,
+                    left=int(rx - w / 2.0),
+                    top=int(ry - h / 2.0),
+                    width=w,
+                    height=h,
+                    conf=95.0,
+                )
+            )
+        # Like WinRT's line grouping: a multi-word line reports its tilt.
+        # The amount sits in its own "line" (wide gap), so it carries none.
+        labels = [b for b in row_boxes if not b.text.startswith("$")]
+        if len(labels) >= 2:
+            first, last = labels[0], labels[-1]
+            run = (last.left + last.width / 2.0) - (first.left + first.width / 2.0)
+            if run >= 4 * 30:
+                rise = (last.top + last.height / 2.0) - (first.top + first.height / 2.0)
+                for b in labels:
+                    b.slope = rise / run
+        words.extend(row_boxes)
+    # Region order like a native engine: amounts column first.
+    words.sort(key=lambda b: (-b.left, b.top))
+    return words
+
+
+_EXPECTED_TEXT = "\n".join(" ".join(t for t, _ in row) for row in _RECEIPT_ROWS)
+
+
+@pytest.mark.parametrize("degrees", [0, 1, 2, 3, 5, 8, -3])
+def test_lines_from_words_survives_page_skew(degrees):
+    text = ocr_engines.lines_from_words(_rotated_receipt(degrees))
+    assert text == _EXPECTED_TEXT, f"{degrees} degrees:\n{text}"
+
+
+def test_lines_from_words_skew_feeds_parsers_the_right_amounts():
+    from app.services import ocr_service
+
+    text = ocr_engines.lines_from_words(_rotated_receipt(3))
+    assert ocr_service.parse_total(text)[0] == "76.93"
+    assert ocr_service.parse_tax(text) == ("5.20", "71.73")
+
+
+def test_lines_from_words_skew_from_vision_style_line_boxes():
+    """Vision reports line-ish boxes, each with its own tilt from the
+    observation corners; no multi-word grouping needed."""
+    import math
+
+    words = _rotated_receipt(4)
+    for b in words:
+        b.slope = math.tan(math.radians(4))
+    assert ocr_engines.lines_from_words(words) == _EXPECTED_TEXT
+
+
+def test_page_slope_is_zero_without_evidence():
+    assert ocr_engines._page_slope([]) == 0.0
+    one = [ocr_engines.WordBox("TOTAL", 40, 100, 90, 30, slope=0.05)]
+    assert ocr_engines._page_slope(one) == 0.0
+    wild = [ocr_engines.WordBox("A", 0, 0, 90, 30, slope=0.9)] * 3
+    assert ocr_engines._page_slope(wild) == 0.0
+    # Without engine evidence a tilted photo falls back to plain grouping —
+    # and still fails from ~2 degrees, which is why the engines supply it.
+    bare = _rotated_receipt(3)
+    for b in bare:
+        b.slope = None
+    assert ocr_engines._page_slope(bare) == 0.0

@@ -124,6 +124,10 @@ async def scan_receipt(
         raise HTTPException(status_code=400, detail=str(exc))
 
     try:
+        # Deliberately synchronous inside this async route: Vision takes
+        # ~0.2 s and WinRT must stay on its one apartment thread (it
+        # already hops there itself). A single-user desktop app gains
+        # nothing from a threadpool here, so don't "fix" this into one.
         result = engine.recognize(ocr_input)
     except ocr_engines.EngineUnavailable as exc:
         return OcrReceiptResponse(ocr_available=False, message=str(exc))

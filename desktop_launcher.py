@@ -1160,6 +1160,23 @@ def run_smoke_test(port: int = 3999) -> int:
         print("smoke: FAIL WeasyPrint did not produce a PDF")
         return 1
 
+    # The platform-native OCR engine rides in the frozen bundle as hidden
+    # imports (pyobjc Vision / winrt). Nothing else in this smoke test
+    # touches OCR, so prove the bridge survived freezing here — on macOS
+    # Vision ships with the OS and must be the selected engine; on Windows
+    # the CI runner may lack OCR language packs, so only report.
+    print("smoke: checking the OCR engine...")
+    from app.services import ocr_engines
+
+    status = ocr_engines.engine_status(None)
+    print(
+        f"smoke: ocr engine={status.get('engine')} "
+        f"available={status.get('available')} version={status.get('version')}"
+    )
+    if sys.platform == "darwin" and status.get("engine") != "vision":
+        print("smoke: FAIL Apple Vision is not the selected engine in the bundle")
+        return 1
+
     print("smoke: PASS")
     return 0
 

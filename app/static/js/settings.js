@@ -567,7 +567,8 @@ const SettingsPage = {
                     + (s.version ? ` <span style="color:var(--text-muted);">(${escapeHtml(s.version)})</span>` : '')
                     + ` &middot; languages: ${escapeHtml(langs)}`;
             } else {
-                el.innerHTML = '<strong style="color:#b45309;">Tesseract OCR is not installed — scanning is disabled.</strong>'
+                el.innerHTML = '<strong style="color:#b45309;">No OCR engine is available — scanning is disabled.</strong>'
+                    + '<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">macOS and Windows normally use the engine built into the OS; installing Tesseract enables scanning anywhere.</div>'
                     + '<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">'
                     + 'Ubuntu: <code>sudo apt-get install tesseract-ocr</code> &middot; '
                     + 'macOS: <code>brew install tesseract</code> &middot; '

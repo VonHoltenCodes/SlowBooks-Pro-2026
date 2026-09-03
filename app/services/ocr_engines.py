@@ -37,6 +37,10 @@ class WordBox:
     width: int
     height: int
     conf: float = -1.0
+    # dy/dx of the printed line this box sits on, when the engine knows it
+    # (Vision: the observation's corner points; WinRT: its line grouping).
+    # Positive = right edge lower. None = unknown; see _page_slope.
+    slope: Optional[float] = None
 
 
 @dataclass
@@ -61,21 +65,60 @@ class OcrResult:
 _SPLIT_DECIMAL_RE = re.compile(r"(\d)\s*\.\s*(\d{2})\b")
 
 
+# Page skew. A phone photo of a receipt is rarely square: at 2 degrees the
+# right-hand amounts on a 2200 px receipt sit ~75 px below the labels on
+# the same printed line, and a centre-tolerance row builder puts them on
+# the wrong row — subtotal and tax silently take the wrong values while
+# total survives (Keith's macOS lap on #73, 2026-09-02; measured wrong from
+# 2 degrees, correct at 0 and 1). Pairwise word geometry cannot tell the
+# true angle from "one row down" on a receipt with even line pitch, so the
+# angle comes from what the engines already know about their own lines
+# (WordBox.slope) and the centres are sheared back before grouping.
+_MAX_SKEW_SLOPE = 0.27  # ~15 degrees: beyond that the photo is the problem
+
+
+def _page_slope(words: list[WordBox]) -> float:
+    """dy/dx of the printed lines: the width-weighted median of the slopes
+    the engine reported per line. 0.0 for a square page or no evidence."""
+    samples = sorted(
+        (float(w.slope), float(max(w.width, 1)))
+        for w in words
+        if w.slope is not None and abs(w.slope) <= _MAX_SKEW_SLOPE
+    )
+    if len(samples) < 2:
+        return 0.0
+    total = sum(wg for _, wg in samples)
+    acc = 0.0
+    for sl, wg in samples:
+        acc += wg
+        if acc >= total / 2.0:
+            return sl
+    return samples[-1][0]
+
+
 def lines_from_words(words: list[WordBox]) -> str:
     """Rebuild top-to-bottom, left-to-right text from word boxes.
 
-    A word joins the current row when its vertical centre lies within ~60%
-    of a line height of the row's centre; rows are then read left to
-    right. Tolerant of the small skew a phone photo introduces.
+    The page's skew is estimated first (see _page_slope) and every word's
+    vertical centre is sheared back to a square page. A word then joins the
+    current row when that corrected centre lies within ~60% of a line
+    height of the row's centre; rows are read left to right.
     """
     if not words:
         return ""
-    ordered = sorted(words, key=lambda w: (w.top + w.height / 2.0, w.left))
+    slope = _page_slope(words)
+    ordered = sorted(
+        words,
+        key=lambda w: (
+            w.top + w.height / 2.0 - slope * (w.left + w.width / 2.0),
+            w.left,
+        ),
+    )
     rows: list[list[WordBox]] = []
     centres: list[float] = []
     heights: list[float] = []
     for w in ordered:
-        cy = w.top + w.height / 2.0
+        cy = w.top + w.height / 2.0 - slope * (w.left + w.width / 2.0)
         if rows:
             tol = 0.6 * max(heights[-1], float(w.height), 1.0)
             if abs(cy - centres[-1]) <= tol:
@@ -184,10 +227,18 @@ class VisionEngine:
         if sys.platform != "darwin":
             return {"available": False, "version": None, "languages": None}
         try:
-            self._bridge()
+            _, Vision = self._bridge()
         except Exception:
             return {"available": False, "version": None, "languages": None}
-        return {"available": True, "version": "macOS Vision", "languages": None}
+        languages = None
+        try:
+            req = Vision.VNRecognizeTextRequest.alloc().init()
+            langs, _err = req.supportedRecognitionLanguagesAndReturnError_(None)
+            if langs:
+                languages = [str(code) for code in langs]
+        except Exception:
+            languages = None  # the row says "—"; recognition still works
+        return {"available": True, "version": "macOS Vision", "languages": languages}
 
     def available(self) -> bool:
         return self.info()["available"]
@@ -227,6 +278,17 @@ class VisionEngine:
             w = bb.size.width * width
             h = bb.size.height * height
             top = (1.0 - bb.origin.y - bb.size.height) * height
+            slope = None
+            try:
+                # VNRecognizedTextObservation is a VNRectangleObservation:
+                # its corners give the line's tilt for free (y is up there,
+                # down in pixel space — hence the sign flip).
+                tl, tr = obs.topLeft(), obs.topRight()
+                run = (tr.x - tl.x) * width
+                if run > 0:
+                    slope = -((tr.y - tl.y) * height) / run
+            except Exception:
+                slope = None
             box = WordBox(
                 text=text,
                 left=int(x),
@@ -234,6 +296,7 @@ class VisionEngine:
                 width=int(w),
                 height=int(h),
                 conf=float(cands[0].confidence()) * 100.0,
+                slope=slope,
             )
             lines.append((top, text, box))
         lines.sort(key=lambda item: item[0])
@@ -327,9 +390,10 @@ def _winrt_words(result) -> list[WordBox]:
     """OcrResult lines/words → plain WordBoxes (engine order preserved)."""
     words: list[WordBox] = []
     for line in result.lines:
+        line_words = []
         for word in line.words:
             r = word.bounding_rect
-            words.append(
+            line_words.append(
                 WordBox(
                     text=str(word.text),
                     left=int(r.x),
@@ -338,6 +402,18 @@ def _winrt_words(result) -> list[WordBox]:
                     height=int(r.height),
                 )
             )
+        # The engine's own line grouping is the skew evidence: a line whose
+        # words span a few line heights gives a usable tilt (see _page_slope).
+        if len(line_words) >= 2:
+            first = min(line_words, key=lambda b: b.left)
+            last = max(line_words, key=lambda b: b.left + b.width)
+            run = (last.left + last.width / 2.0) - (first.left + first.width / 2.0)
+            tall = max(first.height, last.height, 1)
+            if run >= 4.0 * tall:
+                rise = (last.top + last.height / 2.0) - (first.top + first.height / 2.0)
+                for b in line_words:
+                    b.slope = rise / run
+        words.extend(line_words)
     return words
 
 

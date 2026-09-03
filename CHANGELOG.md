@@ -137,6 +137,19 @@ authorization and is ignored. The Invoice / Ref # button is present on
 the picker under the receipt (build 47 drew the box but had no button
 to assign it to).
 
+**Tilted photos read the right rows.** On a phone photo taken a couple of
+degrees off square, the amounts down the right edge of a 2000-pixel
+receipt sit a full line below the labels they belong to, and the row
+builder for the native engines put them on the neighbouring row — total
+survived but subtotal and tax silently took the wrong values (found on
+the macOS hardware pass). The engines now report each line's tilt (Apple
+Vision from its corner points, Windows OCR from its line grouping) and
+the rows are straightened before they are read; verified to 8 degrees.
+Also from that pass: the Settings OCR row names the built-in engine
+instead of assuming Tesseract everywhere, Apple Vision lists its
+recognition languages, and the macOS build's smoke test now proves Vision
+survived freezing.
+
 **Desktop launcher:** `--data-dir` (Server Edition scheduled task,
 headless test rigs) now relocates the per-user `.env` along with the
 data directory; it used to write `DATABASE_URL` into the launching
