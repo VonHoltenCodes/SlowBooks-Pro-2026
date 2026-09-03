@@ -164,6 +164,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             class_name=line_data.class_name,
             job_id=line_data.job_id,
             class_id=line_data.class_id,
+            cost_code_id=line_data.cost_code_id,
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -211,6 +212,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
                     "description": line_data.description or "",
                     "job_id": line_data.job_id,
                     "class_id": line_data.class_id,
+                    "cost_code_id": line_data.cost_code_id,
                 }
             )
         # Credit sales tax if any

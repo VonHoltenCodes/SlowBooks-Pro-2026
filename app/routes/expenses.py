@@ -183,6 +183,8 @@ def create_expense(data: ExpenseCreate, db: Session = Depends(get_db)):
             "debit": amount,
             "credit": Decimal("0"),
             "description": line_desc,
+            "cost_code_id": data.cost_code_id,
+            "is_billable": data.is_billable,
         },
         {
             "account_id": paid_from.id,

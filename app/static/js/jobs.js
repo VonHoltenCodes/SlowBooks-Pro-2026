@@ -114,9 +114,9 @@ const JobsPage = {
 
     // -- Job detail: summary + job cost detail ------------------------------
     async showDetails(id) {
-        let job, lines;
+        let job, lines, byCode;
         try {
-            [job, lines] = await Promise.all([API.get(`/jobs/${id}`), API.get(`/jobs/${id}/transactions`)]);
+            [job, lines, byCode] = await Promise.all([API.get(`/jobs/${id}`), API.get(`/jobs/${id}/transactions`), API.get(`/jobs/${id}/cost-codes`).catch(() => [])]);
         } catch (err) { toast(err.message, 'error'); return; }
         const s = job.summary;
         const pct = v => (v === null || v === undefined) ? '—' : `${v.toFixed(1)}%`;
@@ -159,7 +159,13 @@ const JobsPage = {
                 ${stat('Net', formatCurrency(s.net_income), s.net_income < 0 ? '#a4242b' : '#1f7a36')}
                 ${stat('Margin', pct(s.margin_pct))}
                 ${stat('Billed vs contract', billed === null ? '—' : pct(billed))}
+                ${stat('Committed (open POs)', formatCurrency(s.committed_cost || 0))}
             </div>
+            ${byCode.length ? `<h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Costs by cost code</h4>
+            <div class="table-container" style="margin-bottom:12px"><table class="data-table" style="font-size:12px">
+                <thead><tr><th>Code</th><th>Type</th><th class="amount">Lines</th><th class="amount">Cost</th></tr></thead>
+                <tbody>${byCode.map(c => `<tr><td>${escapeHtml(c.label)}</td><td>${escapeHtml(c.cost_type || '')}</td><td class="amount">${c.lines}</td><td class="amount">${formatCurrency(c.cost)}</td></tr>`).join('')}</tbody>
+            </table></div>` : ''}
             ${job.description ? `<p style="font-size:13px;margin:0 0 12px 0">${escapeHtml(job.description)}</p>` : ''}
             <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Job cost detail (${lines.length})</h4>
             ${lines.length === 0 ? '<p style="color:#888;font-size:13px;margin:0">Nothing posted to this job yet. Pick it in the Job field on an invoice, bill or expense.</p>' :

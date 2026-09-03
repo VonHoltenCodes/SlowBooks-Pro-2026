@@ -591,4 +591,7 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 - IIF `Customer:Job` and QBO sub-customers import as jobs under the customer.
 - Roadmap (cost codes, committed cost, change orders, progress billing,
   time/burden, WIP): `docs/design/projects.md`.
+- Cost codes (Settings → Cost Codes; CSI MasterFormat loader) with cost
+  types; per-line on bills, expenses, POs, journal entries; job costs by
+  code; billable flag on cost lines; committed cost from open POs.
 

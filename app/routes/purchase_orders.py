@@ -88,6 +88,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
             tax_amount=tax_amount,
             total=total,
             notes=data.notes,
+            job_id=data.job_id,
         )
         db.add(po)
         try:
@@ -113,6 +114,8 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
             quantity=line_data.quantity,
             rate=line_data.rate,
             amount=_q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))),
+            job_id=line_data.job_id,
+            cost_code_id=line_data.cost_code_id,
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -150,6 +153,8 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
                     quantity=line_data.quantity,
                     rate=line_data.rate,
                     amount=amt,
+                    job_id=line_data.job_id,
+                    cost_code_id=line_data.cost_code_id,
                     line_order=line_data.line_order or i,
                 )
             )
@@ -209,6 +214,7 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
         total=po.total,
         balance_due=po.total,
         notes=f"From {po.po_number}",
+        job_id=po.job_id,
     )
     db.add(bill)
     db.flush()
@@ -261,6 +267,8 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
         db.add(
             BillLine(
                 bill_id=bill.id,
+                job_id=poline.job_id or po.job_id,
+                cost_code_id=poline.cost_code_id,
                 item_id=poline.item_id,
                 account_id=posting_acct,
                 description=poline.description,
@@ -277,6 +285,8 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
                     "debit": amt,
                     "credit": Decimal("0"),
                     "description": poline.description or "",
+                    "job_id": poline.job_id or po.job_id,
+                    "cost_code_id": poline.cost_code_id,
                 }
             )
 
@@ -308,6 +318,7 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
             journal_lines,
             source_type="bill",
             source_id=bill.id,
+            job_id=po.job_id,
         )
         bill.transaction_id = txn.id
 

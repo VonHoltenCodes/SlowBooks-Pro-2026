@@ -27,6 +27,20 @@ closed, not awarded), job number, type, dates, site address and contract
 amount, so the detail can show billed-vs-contract. A job with posted
 activity is never deleted — mark it inactive and it leaves the pickers.
 
+**Cost codes, billable costs and committed cost (milestone 2).** Settings
+gained a **Cost Codes** chart — which part of a job a cost belongs to ("03
+Concrete", "26 Electrical"), each with a cost type (labor, material,
+subcontract, equipment, other) and an optional default account — with a
+one-click load of the CSI MasterFormat divisions. Bill lines, journal
+lines, purchase-order lines and expenses take a cost code, and bill lines
+and expenses can be marked **billable** to the job's customer (the
+unbilled-costs-to-invoice step arrives with progress billing). The job
+detail rolls costs up by code and type, and shows **committed cost**: the
+value of sent, partially received and received purchase orders tagged to
+the job that has not yet become a bill. Purchase orders take a Job on the
+header (and per line); converting one to a bill carries job and cost code
+onto every bill line.
+
 **QuickBooks migration keeps the hierarchy.** IIF imports split
 `Customer:Job` names into the customer and a job under it (customer list
 rows and every invoice, sales receipt and estimate); QBO imports turn

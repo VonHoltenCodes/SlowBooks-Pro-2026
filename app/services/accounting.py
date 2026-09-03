@@ -150,6 +150,8 @@ def create_journal_entry(
             description=line_data.get("description", ""),
             job_id=line_data.get("job_id") or job_id,
             class_id=line_data.get("class_id") or class_id,
+            cost_code_id=line_data.get("cost_code_id"),
+            is_billable=bool(line_data.get("is_billable", False)),
         )
         db.add(txn_line)
 

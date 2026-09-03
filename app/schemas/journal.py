@@ -9,6 +9,8 @@ class JournalLineCreate(BaseModel):
     account_id: int
     job_id: Optional[int] = None
     class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    is_billable: bool = False
     debit: Decimal = Decimal("0")
     credit: Decimal = Decimal("0")
     description: Optional[str] = None
@@ -21,6 +23,8 @@ class JournalLineResponse(BaseModel):
     account_number: str = ""
     job_id: Optional[int] = None
     class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    is_billable: bool = False
     debit: float
     credit: float
     description: str = ""

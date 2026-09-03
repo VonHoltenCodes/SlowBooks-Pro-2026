@@ -229,6 +229,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                 amount=amt,
                 job_id=line_data.job_id,
                 class_id=line_data.class_id,
+                cost_code_id=line_data.cost_code_id,
+                is_billable=line_data.is_billable,
                 line_order=line_data.line_order or i,
             )
         )
@@ -242,6 +244,8 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
                     "description": line_data.description or "",
                     "job_id": line_data.job_id,
                     "class_id": line_data.class_id,
+                    "cost_code_id": line_data.cost_code_id,
+                    "is_billable": line_data.is_billable,
                 }
             )
 

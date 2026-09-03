@@ -14,6 +14,7 @@ class EstimateLineCreate(BaseModel):
     quantity: Decimal = Decimal("1")
     rate: Decimal = Decimal("0")
     amount: Decimal = Decimal("0")
+    cost_code_id: Optional[int] = None
     class_name: Optional[str] = None
     job_id: Optional[int] = None
     line_order: int = 0
@@ -31,6 +32,7 @@ class EstimateLineResponse(BaseModel):
     quantity: Decimal
     rate: Decimal
     amount: Decimal
+    cost_code_id: Optional[int] = None
     class_name: Optional[str]
     job_id: Optional[int] = None
     line_order: int

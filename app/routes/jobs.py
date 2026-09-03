@@ -26,7 +26,9 @@ from app.schemas.jobs import (
 )
 from app.services.jobs_service import (
     NO_JOB_LABEL,
+    committed_cost,
     find_job,
+    job_cost_by_code,
     job_profitability,
     job_transactions,
 )
@@ -87,9 +89,13 @@ def jobs_profitability(
     """One row per job with activity in the period (plus the "No job"
     bucket) — the Jobs page's figures. The report route under /reports
     wraps the same data with totals."""
-    return job_profitability(
+    rows = job_profitability(
         db, start_date, end_date, customer_id=customer_id, include_no_job=True
     )
+    committed = committed_cost(db)
+    for r in rows:
+        r["committed_cost"] = committed.get(r["job_id"], 0.0) if r["job_id"] else 0.0
+    return rows
 
 
 @router.get("/{job_id}", response_model=JobDetailResponse)
@@ -110,8 +116,21 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
             ),
         }
     )
+    summary["committed_cost"] = committed_cost(db, [job_id]).get(job_id, 0.0)
     base = _to_response(job)
     return JobDetailResponse(**base.model_dump(), summary=JobSummary(**summary))
+
+
+@router.get("/{job_id}/cost-codes")
+def get_job_cost_by_code(
+    job_id: int,
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Job costs grouped by cost code (and cost type)."""
+    _get(db, job_id)
+    return job_cost_by_code(db, job_id, start_date, end_date)
 
 
 @router.get("/{job_id}/transactions")

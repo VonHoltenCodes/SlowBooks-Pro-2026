@@ -11,6 +11,8 @@ class BillLineCreate(BaseModel):
     account_id: Optional[int] = None
     job_id: Optional[int] = None
     class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    is_billable: bool = False
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
@@ -28,6 +30,8 @@ class BillLineResponse(BaseModel):
     account_id: Optional[int] = None
     job_id: Optional[int] = None
     class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    is_billable: bool = False
     description: Optional[str] = None
     quantity: Decimal = Decimal("0")
     rate: Decimal = Decimal("0")

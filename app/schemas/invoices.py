@@ -17,6 +17,7 @@ class InvoiceLineCreate(BaseModel):
     class_name: Optional[str] = None
     job_id: Optional[int] = None
     class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     line_order: int = 0
 
     @model_validator(mode="after")
@@ -35,6 +36,7 @@ class InvoiceLineResponse(BaseModel):
     class_name: Optional[str]
     job_id: Optional[int] = None
     class_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     line_order: int
 
     model_config = {"from_attributes": True}

@@ -171,6 +171,7 @@ def update_estimate(
                 ),
                 class_name=line_data.class_name,
                 job_id=line_data.job_id,
+                cost_code_id=line_data.cost_code_id,
                 line_order=line_data.line_order or i,
             )
             db.add(line)
@@ -295,6 +296,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
             amount=eline.amount,
             class_name=eline.class_name,
             job_id=eline.job_id,
+            cost_code_id=eline.cost_code_id,
             line_order=eline.line_order,
         )
         db.add(iline)

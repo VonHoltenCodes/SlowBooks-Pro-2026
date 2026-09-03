@@ -71,6 +71,9 @@ const ExpensesPage = {
         ExpensesPage._accounts = accounts;
         const classGroup = await classFormGroupHtml();
         const jobGroup = await jobFormGroupHtml(null);
+        await CostCodes.load();
+        const costCodeGroup = CostCodes.any() ? `<div class="form-group"><label>Cost Code</label><select name="cost_code_id">${CostCodes.optionsHtml(null)}</select></div>` : '';
+        const billableGroup = `<div class="form-group"><label>Billable</label><label style="font-weight:normal;"><input type="checkbox" name="is_billable"> Bill this cost to the job's customer</label></div>`;
         const expenseAccts = accounts.filter(a => a.account_type === 'expense');
         const paidFrom = ExpensesPage.paidFromAccounts(accounts);
         const acctOpt = a => `<option value="${a.id}">${escapeHtml(a.account_number || '')} - ${escapeHtml(a.name)}</option>`;
@@ -92,7 +95,7 @@ const ExpensesPage = {
                         <input name="amount" type="number" step="0.01" min="0.01" required></div>
                     <div class="form-group"><label>Reference</label>
                         <input name="reference" placeholder="Receipt / check #"></div>
-                    ${classGroup}${jobGroup}
+                    ${classGroup}${jobGroup}${costCodeGroup}${billableGroup}
                     <div class="form-group full-width"><label>Memo</label>
                         <textarea name="memo"></textarea></div>
                 </div>
@@ -198,6 +201,8 @@ const ExpensesPage = {
                 memo: form.memo.value || null,
                 class_id: classIdFromForm(form),
                 job_id: jobIdFromForm(form),
+                cost_code_id: form.cost_code_id ? (form.cost_code_id.value ? parseInt(form.cost_code_id.value) : null) : null,
+                is_billable: !!(form.is_billable && form.is_billable.checked),
             });
             await ScanHelper.attachAfterSave('expense', result.id);
             toast('Expense recorded');

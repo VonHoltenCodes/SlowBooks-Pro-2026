@@ -19,6 +19,8 @@ class ExpenseCreate(BaseModel):
     memo: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
+    is_billable: bool = False
 
 
 class ExpenseResponse(BaseModel):

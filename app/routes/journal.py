@@ -43,6 +43,8 @@ def list_journal_entries(source_type: str = None, db: Session = Depends(get_db))
                     "description": line.description or "",
                     "job_id": line.job_id,
                     "class_id": line.class_id,
+                    "cost_code_id": line.cost_code_id,
+                    "is_billable": bool(line.is_billable),
                 }
             )
         results.append(
@@ -114,6 +116,8 @@ def create_manual_journal_entry(
                 "description": line.description or "",
                 "job_id": line.job_id,
                 "class_id": line.class_id,
+                "cost_code_id": line.cost_code_id,
+                "is_billable": line.is_billable,
             }
         )
 

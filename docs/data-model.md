@@ -72,3 +72,18 @@ purchase_order_lines, credit_memos, recurring_invoices, time_entries.
 Attribution rule for reports: `coalesce(line.job_id, transaction.job_id)`.
 Migration `e9f0a1b2c3d4_add_jobs`.
 
+## cost_codes (job-costing chart)
+
+| column | notes |
+|---|---|
+| id, code (unique, case-insensitive via API), name | e.g. `03` Concrete |
+| cost_type | labor · material · subcontract · equipment · other |
+| account_id (FK accounts, nullable) | default posting account |
+| notes, is_active | inactive = hidden from pickers |
+
+`cost_code_id` (nullable FK) on transaction_lines, bill_lines, invoice_lines,
+estimate_lines, purchase_order_lines, time_entries. `is_billable` +
+`billed_invoice_line_id` (FK invoice_lines) on transaction_lines and
+bill_lines. `purchase_orders.job_id` / `purchase_order_lines.job_id` feed
+committed cost. Migration `f0a1b2c3d4e5_add_cost_codes`.
+

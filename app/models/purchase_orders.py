@@ -80,6 +80,7 @@ class PurchaseOrderLine(Base):
     received_qty = Column(Numeric(10, 2), default=0)
     # Per-line job; NULL falls back to the document header
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
     line_order = Column(Integer, default=0)
 
     purchase_order = relationship("PurchaseOrder", back_populates="lines")

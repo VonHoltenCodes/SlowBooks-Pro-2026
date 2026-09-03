@@ -136,6 +136,7 @@ class InvoiceLine(Base):
     # Per-line job / class; NULL falls back to the transaction header
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
+    cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
     line_order = Column(Integer, default=0)
 
     invoice = relationship("Invoice", back_populates="lines")

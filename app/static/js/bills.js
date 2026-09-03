@@ -107,6 +107,7 @@ const BillsPage = {
         BillsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
         const jobGroup = await jobFormGroupHtml(null);
+        await CostCodes.load();
 
         BillsPage._vendors = vendors;
         const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
@@ -131,11 +132,13 @@ const BillsPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th>Item</th><th>Description</th>${CostCodes.headHtml()}<th title="Billable to the job's customer">Bill?</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
                     <tbody id="bill-lines">
                         <tr data-billline="0">
                             <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                             <td><input class="line-desc"></td>
+                            ${CostCodes.cellHtml('line-cost-code')}
+                            <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"></td>
                             <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
                             <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
                             <td class="col-amount line-amount">$0.00</td>
@@ -260,6 +263,8 @@ const BillsPage = {
             <tr data-billline="${idx}">
                 <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
                 <td><input class="line-desc"></td>
+                ${CostCodes.cellHtml('line-cost-code')}
+                <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"></td>
                 <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
                 <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
                 <td class="col-amount line-amount">$0.00</td>
@@ -276,6 +281,8 @@ const BillsPage = {
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                cost_code_id: CostCodes.fromRow(row, 'line-cost-code'),
+                is_billable: !!row.querySelector('.line-billable')?.checked,
                 line_order: i,
             });
         });

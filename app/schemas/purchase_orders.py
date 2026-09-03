@@ -11,6 +11,8 @@ class POLineCreate(BaseModel):
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
+    job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     line_order: int = 0
 
     @model_validator(mode="after")
@@ -27,6 +29,8 @@ class POLineResponse(BaseModel):
     rate: Decimal = Decimal("0")
     amount: Decimal = Decimal("0")
     received_qty: Decimal = Decimal("0")
+    job_id: Optional[int] = None
+    cost_code_id: Optional[int] = None
     line_order: int = 0
     model_config = {"from_attributes": True}
 
@@ -38,6 +42,7 @@ class POCreate(BaseModel):
     ship_to: Optional[str] = None
     tax_rate: float = 0
     notes: Optional[str] = None
+    job_id: Optional[int] = None
     lines: list[POLineCreate] = []
 
     @field_validator("lines")
@@ -56,6 +61,7 @@ class POUpdate(BaseModel):
     status: Optional[str] = None
     tax_rate: Optional[float] = None
     notes: Optional[str] = None
+    job_id: Optional[int] = None
     lines: Optional[list[POLineCreate]] = None
 
 
@@ -63,6 +69,7 @@ class POResponse(BaseModel):
     id: int
     po_number: str
     vendor_id: int
+    job_id: Optional[int] = None
     vendor_name: Optional[str] = None
     status: str
     date: dt_date

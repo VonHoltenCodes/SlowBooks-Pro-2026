@@ -94,6 +94,7 @@ class EstimateLine(Base):
     class_name = Column(String(100), nullable=True)
     # Per-line job; NULL falls back to the document header
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
     line_order = Column(Integer, default=0)
 
     estimate = relationship("Estimate", back_populates="lines")

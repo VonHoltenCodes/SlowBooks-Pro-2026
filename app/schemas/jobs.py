@@ -105,6 +105,7 @@ class JobSummary(BaseModel):
     gross_profit: float = 0.0
     net_income: float = 0.0
     margin_pct: Optional[float] = None
+    committed_cost: float = 0.0
 
 
 class JobDetailResponse(JobResponse):

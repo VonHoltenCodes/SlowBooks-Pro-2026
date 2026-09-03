@@ -83,8 +83,8 @@ rewrite.
 | Step | Scope | Status |
 |---|---|---|
 | M1 | line dimensions · `jobs` table + API · posting carries job to every line · job pickers on invoice / bill / expense / card charge / estimate / journal · Jobs page + Customer Center jobs · **Job Profitability** report reconciling to the P&L · IIF + QBO `Customer:Job` split | building |
-| M2 | cost codes + cost types · job cost detail by code · PO committed cost · billable flags on cost lines | next |
-| M3 | estimate lines by cost code · change orders · progress invoicing · unbilled time & costs → invoice · retainage | |
+| M2 | cost codes + cost types · job cost detail by code · PO committed cost · billable flags on cost lines (bill lines, expenses; `billed_invoice_line_id` reserved for M3) | built 2026-09-03 |
+| M3 | estimate lines by cost code · change orders · progress invoicing · unbilled time & costs → invoice · retainage | next |
 | M4 | time entries → jobs, employee cost rates, payroll burden distribution (needs benefits-engine seam) | |
 | M5 | WIP schedule, over/under billing, estimates vs actuals, job cost by vendor · exporters write jobs/classes | |
 
@@ -127,3 +127,19 @@ rewrite.
 
 Anonymised is fine. Start each importer and report from a real file (the MYOB
 lesson: synthetic inputs hide every real fault).
+
+## M2 decisions (2026-09-03)
+
+- **Cost codes are line-level only.** No header default: a bill routinely
+  mixes codes, and a header default would silently mis-code the lines
+  nobody touched. Companies without cost codes see no column at all.
+- **Committed cost** = PO lines (job = line's, else header's) on POs in
+  `sent` / `partial` / `received`. Draft POs are intent, not commitment;
+  converting to a bill closes the PO and the cost moves into the ledger.
+- **Billable** lives on the cost line (bill lines, and the expense's debit
+  line as a posted journal line) with `billed_invoice_line_id` for M3 to
+  mark it billed. Card charges and journal lines carry the column too;
+  their forms expose it in M3 with the invoice pull.
+- **Invoice and estimate lines** accept `cost_code_id` through the API
+  (revenue by code for estimates vs actuals); the line UI for them is part
+  of M3's estimate rework.

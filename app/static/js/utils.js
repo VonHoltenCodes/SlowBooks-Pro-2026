@@ -305,6 +305,34 @@ const JobPicker = {
     },
 };
 
+// ---------------------------------------------------------------------------
+// Cost codes — the job-costing chart, chosen per LINE on cost forms.
+// CostCodes.load() caches the active list for the open form; optionsHtml()
+// renders the <option>s for a line select; a company with no cost codes
+// gets no column at all.
+// ---------------------------------------------------------------------------
+const CostCodes = {
+    _list: null,
+    async load() {
+        try { CostCodes._list = await API.get('/cost-codes'); } catch (e) { CostCodes._list = []; }
+        return CostCodes._list;
+    },
+    any() { return !!(CostCodes._list && CostCodes._list.length); },
+    optionsHtml(selectedId) {
+        return '<option value="">--</option>' + (CostCodes._list || []).map(c =>
+            `<option value="${c.id}" ${selectedId === c.id ? 'selected' : ''}>${escapeHtml(c.label || (c.code + ' ' + c.name))}</option>`).join('');
+    },
+    // <td> for a line row, or '' when the company has no cost codes
+    cellHtml(cls, selectedId) {
+        return CostCodes.any() ? `<td><select class="${cls}">${CostCodes.optionsHtml(selectedId)}</select></td>` : '';
+    },
+    headHtml(label = 'Cost Code') { return CostCodes.any() ? `<th>${label}</th>` : ''; },
+    fromRow(row, cls) {
+        const v = row.querySelector(`.${cls}`)?.value;
+        return v ? parseInt(v) : null;
+    },
+};
+
 // Normalize a form's job_id string to int-or-null for the API payload.
 function jobIdFromForm(form) {
     const v = form.job_id ? form.job_id.value : '';

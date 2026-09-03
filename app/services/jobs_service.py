@@ -236,3 +236,86 @@ def job_transactions(
             }
         )
     return out
+
+
+# ---------------------------------------------------------------------------
+# Milestone 2: cost codes and committed cost
+# ---------------------------------------------------------------------------
+
+
+def job_cost_by_code(
+    db: Session,
+    job_id: int,
+    start_date: Optional[date] = None,
+    end_date: Optional[date] = None,
+) -> list[dict]:
+    """Costs (COGS + expense lines) on one job grouped by cost code and
+    cost type. Lines without a code land in "No cost code" so the total
+    equals the job's total costs."""
+    from app.models.cost_codes import CostCode
+
+    cost_types = (AccountType.COGS, AccountType.EXPENSE)
+    q = (
+        db.query(
+            TransactionLine.cost_code_id,
+            sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
+            sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
+            sqlfunc.count(TransactionLine.id),
+        )
+        .select_from(TransactionLine)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(job_attribution() == job_id, Account.account_type.in_(cost_types))
+    )
+    if start_date:
+        q = q.filter(Transaction.date >= start_date)
+    if end_date:
+        q = q.filter(Transaction.date <= end_date)
+    rows = q.group_by(TransactionLine.cost_code_id).all()
+    codes = {c.id: c for c in db.query(CostCode).all()}
+    out = []
+    for code_id, dr, cr, n in rows:
+        code = codes.get(code_id)
+        out.append(
+            {
+                "cost_code_id": code_id,
+                "code": code.code if code else "",
+                "name": code.name if code else "No cost code",
+                "label": code.label if code else "No cost code",
+                "cost_type": code.cost_type if code else None,
+                "lines": int(n),
+                "cost": float(Decimal(str(dr)) - Decimal(str(cr))),
+            }
+        )
+    out.sort(key=lambda r: (r["cost_code_id"] is None, r["code"], r["name"]))
+    return out
+
+
+def committed_cost(
+    db: Session, job_ids: Optional[list[int]] = None
+) -> dict[int, float]:
+    """Open purchase-order value per job: ordered but not yet billed.
+
+    A PO is committed once it has left draft and until it is closed
+    (conversion to a bill closes it, moving the cost into the ledger). A
+    line's job is its own, else the PO header's."""
+    from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
+
+    line_job = sqlfunc.coalesce(PurchaseOrderLine.job_id, PurchaseOrder.job_id)
+    q = (
+        db.query(
+            line_job.label("job"),
+            sqlfunc.coalesce(sqlfunc.sum(PurchaseOrderLine.amount), 0),
+        )
+        .select_from(PurchaseOrderLine)
+        .join(PurchaseOrder, PurchaseOrderLine.purchase_order_id == PurchaseOrder.id)
+        .filter(
+            PurchaseOrder.status.in_(
+                (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
+            ),
+            line_job.isnot(None),
+        )
+    )
+    if job_ids is not None:
+        q = q.filter(line_job.in_(job_ids))
+    return {int(j): float(v) for j, v in q.group_by("job").all()}

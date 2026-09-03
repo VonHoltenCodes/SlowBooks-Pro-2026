@@ -102,6 +102,12 @@ class BillLine(Base):
     # Per-line job / class; NULL falls back to the transaction header
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
+    cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
+    # Cost billable to the job's customer; set when it is pulled onto an invoice
+    is_billable = Column(Boolean, nullable=False, default=False)
+    billed_invoice_line_id = Column(
+        Integer, ForeignKey("invoice_lines.id"), nullable=True
+    )
     line_order = Column(Integer, default=0)
 
     bill = relationship("Bill", back_populates="lines")

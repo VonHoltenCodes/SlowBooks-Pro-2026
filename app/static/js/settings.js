@@ -11,6 +11,7 @@ const SettingsPage = {
             SettingsPage.loadEmailTemplates();
             SettingsPage.loadAiConfig();
             SettingsPage.loadClasses();
+            SettingsPage.loadCostCodes();
             SettingsPage.loadUsers();
             SettingsPage.loadApiTokens();
             SettingsPage.loadOcrStatus();
@@ -301,6 +302,28 @@ const SettingsPage = {
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.addClass()">Add Class</button>
                     </div>
                     <div id="classes-list"></div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Cost Codes</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        The job-costing chart: which part of a job a cost belongs to
+                        ("03 Concrete", "26 Electrical"), independent of the account it posts
+                        to. Picked per line on bills, expenses, purchase orders and journal
+                        entries; the Job detail rolls costs up by code and cost type.
+                    </div>
+                    <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
+                        <input type="text" id="new-cc-code" placeholder="Code" style="width:90px;">
+                        <input type="text" id="new-cc-name" placeholder="Name" style="width:220px;">
+                        <select id="new-cc-type">
+                            <option value="labor">Labor</option><option value="material">Material</option>
+                            <option value="subcontract">Subcontract</option><option value="equipment">Equipment</option>
+                            <option value="other" selected>Other</option>
+                        </select>
+                        <button type="button" class="btn btn-primary" onclick="SettingsPage.addCostCode()">Add Cost Code</button>
+                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.loadStandardCostCodes()" title="CSI MasterFormat divisions + Labor + Equipment Rental">Load standard list</button>
+                    </div>
+                    <div id="cost-codes-list"></div>
                 </div>
 
                 <div class="settings-section">
@@ -953,5 +976,73 @@ SettingsPage.toggleArchiveClass = async function (id, archive) {
         await API.put(`/classes/${id}`, { is_archived: archive });
         toast(archive ? 'Class archived' : 'Class unarchived');
         SettingsPage.loadClasses();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+// --- Cost codes (Settings > Cost Codes) ----------------------------------
+SettingsPage.loadCostCodes = async function () {
+    const el = document.getElementById('cost-codes-list');
+    if (!el) return;
+    try {
+        const codes = await API.get('/cost-codes?include_inactive=true');
+        if (!codes.length) {
+            el.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">No cost codes yet. Add your own, or load the standard CSI list.</div>';
+            return;
+        }
+        el.innerHTML = `<div class="table-container"><table>
+            <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Default account</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody>` + codes.map(c => `<tr>
+                <td><code>${escapeHtml(c.code)}</code></td>
+                <td>${escapeHtml(c.name)}</td>
+                <td>${escapeHtml(c.cost_type)}</td>
+                <td>${escapeHtml(c.account_name || '')}</td>
+                <td>${c.is_active ? 'Active' : 'Inactive'}</td>
+                <td class="actions">
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.renameCostCode(${c.id})">Rename</button>
+                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.toggleCostCode(${c.id}, ${!c.is_active})">${c.is_active ? 'Deactivate' : 'Activate'}</button>
+                </td>
+            </tr>`).join('') + `</tbody></table></div>`;
+    } catch (err) {
+        el.innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
+    }
+};
+
+SettingsPage.addCostCode = async function () {
+    const code = (document.getElementById('new-cc-code')?.value || '').trim();
+    const name = (document.getElementById('new-cc-name')?.value || '').trim();
+    const cost_type = document.getElementById('new-cc-type')?.value || 'other';
+    if (!code || !name) { toast('Enter a code and a name', 'error'); return; }
+    try {
+        await API.post('/cost-codes', { code, name, cost_type });
+        document.getElementById('new-cc-code').value = '';
+        document.getElementById('new-cc-name').value = '';
+        toast('Cost code added');
+        SettingsPage.loadCostCodes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.loadStandardCostCodes = async function () {
+    try {
+        const codes = await API.post('/cost-codes/standard', {});
+        toast(`${codes.length} cost codes active`);
+        SettingsPage.loadCostCodes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.renameCostCode = async function (id) {
+    const name = prompt('New cost code name:');
+    if (!name || !name.trim()) return;
+    try {
+        await API.put(`/cost-codes/${id}`, { name: name.trim() });
+        toast('Cost code renamed');
+        SettingsPage.loadCostCodes();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+SettingsPage.toggleCostCode = async function (id, active) {
+    try {
+        await API.put(`/cost-codes/${id}`, { is_active: active });
+        toast(active ? 'Cost code activated' : 'Cost code deactivated');
+        SettingsPage.loadCostCodes();
     } catch (err) { toast(err.message, 'error'); }
 };
