@@ -366,7 +366,14 @@ def labor_cost_for_entry(
     emp: Employee, entry: TimeEntry
 ) -> tuple[Decimal, Decimal, Decimal]:
     """(cost hours, rate, base cost). Overtime and double-time count at
-    their pay multipliers so the job carries what the hours actually cost."""
+    their pay multipliers so the job carries what the hours actually cost.
+
+    Known simplification (Keith, #86 review): the burden % is then applied
+    to this whole amount, premium included. Workers' comp premiums mostly
+    exclude the overtime premium (FICA/FUTA don't), so a heavy-OT job
+    carries slightly more burden than a class-by-class calculation would.
+    Acceptable as a first cut; the payroll milestone (M4) replaces the flat
+    % with the benefits engine's per-code rules."""
     rate = employee_cost_rate(emp)
     hours = (
         Decimal(str(entry.hours_regular or 0))

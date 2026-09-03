@@ -886,7 +886,7 @@ ReportsPage.jobProfitability = async function () {
         </tr>`).join('');
         return `
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)} · "No job" holds untagged activity so the totals match the P&L
+                ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)} · "No job" holds untagged activity <em>and</em> the applied-cost credits behind Job Cost Entries (labor, equipment, overhead applied to jobs), so its costs can be negative and the totals still match the P&L
             </div>
             <div class="table-container"><table>
                 <thead><tr><th>Customer</th><th>Job</th><th class="amount">Contract</th><th class="amount">Income</th>
