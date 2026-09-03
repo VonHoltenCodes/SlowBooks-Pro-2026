@@ -320,7 +320,7 @@ const SettingsPage = {
                         <input type="text" id="new-ct-name" placeholder="Name" style="width:200px;">
                         <label style="font-weight:normal;font-size:11px;"><input type="checkbox" id="new-ct-labor"> labor-type (burden applies)</label>
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.addCostType()">Add Cost Type</button>
-                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupOffsets()" title="Creates Payroll Clearing, Applied Labor Burden, Applied Equipment Cost, Applied Overhead and Job Costs if missing, and fills in any blank accounts">Create default offset accounts</button>
+                        <button type="button" class="btn btn-secondary" onclick="SettingsPage.setupOffsets()" title="Creates Applied Labor Cost, Applied Labor Burden, Applied Equipment Cost and Applied Overhead if missing, points each cost type at the matching COGS account (Materials, Labor, Subcontractor) and fills in any blank accounts">Create default offset accounts</button>
                     </div>
                     <div id="cost-types-list"></div>
                 </div>

@@ -41,10 +41,12 @@ edge-case costs onto them. Now:
   internal labor at an employee's loaded rate, owned-equipment hours from
   an Equipment list, mileage, small tools, burden, corrections. It debits
   job cost (tagged to job, code and type) and credits an offset account
-  (payroll clearing, applied equipment, applied overhead) — the applied-
-  cost pattern, so the company P&L is unchanged while every job carries
-  its share. Settings → Cost Types → **Create default offset accounts**
-  sets all of that up in one click. **Allocate a Cost** spreads one amount
+  (applied labor, applied equipment, applied overhead — all contra-expense
+  accounts on the P&L) — the applied-cost pattern, so the company P&L is
+  unchanged while every job carries its share. Settings → Cost Types →
+  **Create default offset accounts** sets all of that up in one click,
+  pointing each cost type at the chart's own COGS account (Materials,
+  Labor, Subcontractor) so the P&L keeps its cost categories. **Allocate a Cost** spreads one amount
   across jobs by labor hours, revenue, costs, equally, or by weights.
 - **Time entries post to jobs.** Employees get a job cost rate and a burden
   %; approved time tagged to a job posts as labor cost at that rate
@@ -65,6 +67,12 @@ edge-case costs onto them. Now:
   Actual** report lists every job's headline figures.
 - Also fixed on the way: the Time Entry form was sending hours under the
   wrong field names, so every entry saved with zero hours.
+- From the first macOS lap: the labor offset was a balance-sheet account,
+  so labor landed on the P&L twice once payroll ran — it is a P&L contra
+  now, like the other offsets. Rejecting a time entry that was already
+  posted to a job voids that job cost. Re-seeding a budget from an
+  estimate leaves hand-edited rows alone, and an estimate line with no
+  unit cost budgets zero cost (unknown) rather than the sale price.
 
 **Cost codes, billable costs and committed cost (milestone 2).** Settings
 gained a **Cost Codes** chart — which part of a job a cost belongs to ("03
