@@ -62,6 +62,21 @@
             || navigator.userAgent.includes('WebView2');
     }
 
+    // The employee self-service portal is a separate cookie-based site meant
+    // for the employee's OWN browser. Fetching it here and showing the HTML in
+    // a document window (the path every other same-origin _blank link takes)
+    // rendered a dashboard whose tabs had no origin to navigate against —
+    // "the portal only works on the first tab". Leave those links alone so
+    // pywebview hands them to the system browser, which claims the token and
+    // gets its own portal cookie.
+    function isPortalUrl(url) {
+        try {
+            return new URL(url, window.location.href).pathname.startsWith('/portal/');
+        } catch (e) {
+            return false;
+        }
+    }
+
     function isSameOrigin(url) {
         try {
             const u = new URL(url, window.location.href);
@@ -162,7 +177,7 @@
 
     const realOpen = window.open.bind(window);
     window.open = function (url, target, features) {
-        if (url && inDesktopShell() && isSameOrigin(url)) {
+        if (url && inDesktopShell() && isSameOrigin(url) && !isPortalUrl(url)) {
             openSameOriginUrl(url);
             return null;
         }
@@ -184,6 +199,16 @@
             ? e.target.closest('a[target="_blank"], a[download]')
             : null;
         if (!a || !a.href || !isSameOrigin(a.href)) return;
+        if (isPortalUrl(a.href)) {
+            // system browser via the launcher bridge when it's there;
+            // otherwise fall through to WebView2's new-window handling,
+            // which pywebview also routes to the system browser.
+            if (window.pywebview && window.pywebview.api && window.pywebview.api.open_external) {
+                e.preventDefault();
+                window.pywebview.api.open_external(a.href);
+            }
+            return;
+        }
         e.preventDefault();
 
         const backupFilename = backupFilenameFromUrl(a.href);

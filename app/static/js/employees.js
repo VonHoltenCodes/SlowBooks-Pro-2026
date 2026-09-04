@@ -384,7 +384,8 @@ const EmployeesPage = {
             ? 'style="color:#c0392b;font-weight:600"' : '';
 
         let html = `
-            <p style="margin:0 0 4px 0">Portal URL: <a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></p>
+            <p style="margin:0 0 4px 0">Portal URL: <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
+                <span style="font-size:11px;color:var(--gray-400);">opens in the employee's browser — the address must be reachable from where they are (this machine only for a desktop install; the LAN or your public name for Server Edition)</span></p>
             <p style="font-size:12px;color:#666;margin:0 0 4px 0">
                 <span ${expiryClass}>Expires ${expires ? expires.toISOString().slice(0,10) : 'never'}${daysUntilExpiry !== null ? ` (${daysUntilExpiry} days)` : ''}</span>
                 &nbsp;·&nbsp;

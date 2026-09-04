@@ -108,6 +108,8 @@ All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engi
 
 ---
 
+**Where the portal link works.** The link is absolute and uses the address the request came in on, so it is only as reachable as the server: a desktop install is `127.0.0.1` on that PC only; Server Edition on the LAN gives a LAN address; employees outside the building need the reverse proxy / tunnel setup (`docs/tls-proxy-setup.md`, `cloudflare/`). In the desktop app the link opens in the system browser on purpose — the portal is a separate cookie-based site and must not be rendered in the app's document window.
+
 ## Tier 3 — Tax forms
 
 ### Routes
