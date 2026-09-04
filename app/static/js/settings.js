@@ -1130,7 +1130,7 @@ SettingsPage.loadCostTypes = async function () {
                 <td><input class="ct-name" value="${escapeHtml(t.name)}" style="width:130px"></td>
                 <td style="text-align:center"><input type="checkbox" class="ct-labor" ${t.is_labor ? 'checked' : ''}></td>
                 <td><input type="number" step="0.01" class="ct-burden" value="${t.burden_pct ?? ''}" style="width:70px" placeholder="%" aria-label="Flat burden percent"></td>
-                <td>${t.is_labor ? `<select class="ct-burden-method" aria-label="Burden method" title="Flat: the % above posts with each time entry. Payroll: the pay run distributes actual employer taxes + job-routed benefit codes by hours.">
+                <td>${t.is_labor ? `<select class="ct-burden-method" aria-label="Burden method" title="Flat: the % above posts with each time entry. Payroll: the pay run distributes actual employer taxes + job-routed benefit codes by hours — only for stubs built from time entries (Use approved time entries on the pay run); hours typed on a stub leave that employee's burden in the pool.">
                     <option value="flat" ${t.burden_method !== 'payroll' ? 'selected' : ''}>Flat %</option>
                     <option value="payroll" ${t.burden_method === 'payroll' ? 'selected' : ''}>Actual payroll</option>
                 </select>` : '—'}</td>

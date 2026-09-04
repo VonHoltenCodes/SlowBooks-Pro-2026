@@ -48,6 +48,29 @@ Decisions made while building:
 - **Employer-taxable benefits** (GTL over $50k) are flagged and reported
   in the stub detail; imputed-income withholding is not computed.
 
+## Operational notes (from Keith's macOS lap, 2026-09-04)
+
+- **PTO relief timing.** Relief posts on the request's start date at
+  approval time, while the wages hit on the pay date. Same month in the
+  normal case; approving a December vacation in September posts a
+  December-dated reversal now. There is no path yet to restore a bank when
+  an approved request is cancelled — both are policy choices, and the
+  cancellation path is on the list.
+- **Actual burden needs time-entry stubs.** `burden_method = payroll`
+  distributes only for stubs built from time entries (the entries carry
+  the run id). A stub keyed by hours leaves that employee's burden in the
+  pool even if they have job-tagged time in the period. The Settings help
+  says so.
+- **Seeded 401(k) match.** The standard code carries both a flat match
+  limit and the tiers; `_match` uses the tiers when present, so the flat
+  fields are inert on that code.
+- **Pre-tax codes can take the whole check** before taxes; FICA still
+  applies. Real plans cap elections at 100% of compensation, and a check
+  that goes negative is now refused (422).
+- **No pay-run void exists**, so nothing reverses a burden Job Cost Entry
+  or a BenefitYTD bump. A pre-v2.8 gap that the engine makes bigger; on
+  the list.
+
 Source: field ask from a Sage 50 evaluator (Matt Beebe, @TheMattBeebe)
 who has "been thinking about this for a long time across several
 systems" — the entity design below is substantially his, shared

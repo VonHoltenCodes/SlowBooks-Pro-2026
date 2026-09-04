@@ -61,7 +61,7 @@ they set in their portal, and the screen only exposes what the role allows.
 Parked with a reason: kiosk login by last-4 SSN + name — weak auth; the PIN
 above replaces it.
 
-Also owed from v2.8: **effective-dated state withholding tables** (today the
+Also owed from v2.8: **pay-run void** (reverse the payroll JE, the burden Job Cost Entry and the BenefitYTD bumps — Keith's lap note), **cancel an approved PTO request** (restore the bank + reverse the relief), **effective-dated state withholding tables** (today the
 state table holds one year's figures; the benefit codes already do dated rows)
 and the **January verification pass** on `app/services/state_tax/tables.py`.
 

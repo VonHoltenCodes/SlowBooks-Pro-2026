@@ -148,7 +148,7 @@ _add(
         "none",
         D(7000),
         year="2026",
-        source=f"TN DOL; {SUI} (2026 base expected, not confirmed)",
+        source=f"TN DOL; {SUI} (base is statutory at $7,000)",
     )
 )
 _add(StateSpec("TX", "Texas", "none", D(9000), year="2026", source=f"TWC; {SUI}"))
