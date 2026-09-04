@@ -7,6 +7,10 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+### v2.8.0 — Benefits, all-state payroll, and an overview you can arrange
+
 ### Export parity with import (#70)
 
 **What comes in from QuickBooks can go back out.** IIF export now writes
@@ -73,6 +77,54 @@ invoices and payments — and five new ones join the catalog:
 Every card loads independently, so one card with a problem shows its
 error in place instead of taking the page down. The overdue-invoices card
 now names who owes what and by how many days.
+
+### Benefits engine
+
+**A benefit is a code with a rule.** Payroll evaluates whatever codes are
+attached to an employee: kind (deduction, benefit, both), calculation
+method, which wage bases the pre-tax side reduces, an explicit sequence
+(pre-tax codes apply in order and each changes the taxable base for the
+next), and three separate limits — per period, annual, and a wage-base
+ceiling. Rates are effective-dated and resolve against the pay-period end
+date; processed runs snapshot the rules they used so a later change never
+rewrites history. The employer side has its own rate and method including
+tiered 401(k) matching, an expense and liability account per code, and a
+remittance vendor — the Remittance tab totals what is owed and creates the
+vendor bill. Employee groups are templates; an enrollment overrides them.
+Loan-style codes carry a balance and stop at zero. PTO banks now carry
+dollars and can post the accrued liability. The Deductions page became
+Benefits; garnishments have their own page. Existing deduction types and
+elections migrate onto codes and enrollments.
+
+### Actual labor burden on jobs
+
+Set the Labor cost type's burden method to **payroll** and the pay run
+distributes real employer taxes plus job-routed benefit codes across the
+jobs each employee's time entries hit, by hours, P&L-neutral. Time entries
+then post base labor only. Replaces the flat percent from v2.7.0.
+
+### State withholding for all 50 states and DC
+
+Every state resolves to a payroll engine (Washington, California, New York
+and Oregon keep their dedicated ones). The figures are the 2026 published
+values with the source named per state in `docs/state-withholding.md`.
+Employees gain the state W-4 inputs: allowances, extra state withholding,
+an elected rate (Arizona), and a flat local rate for county and city taxes.
+Verify against your state before filing; the table is re-checked every
+January.
+
+### Employee portal link
+
+On the desktop the link now opens in the employee's browser instead of
+inside SlowBooks, and Copy Link / Email to Employee give a full address.
+The Details view says where that address is reachable from.
+
+### Small things
+
+- `GET /api/sales-receipts` lists receipts for API clients.
+- The Company Snapshot is titled with your company name, which also sits
+  in the toolbar and the window title.
+- The splash shows what's new in the version you're running.
 
 ### Benefits engine — from the first macOS lap
 

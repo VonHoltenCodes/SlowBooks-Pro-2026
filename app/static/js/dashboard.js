@@ -31,16 +31,28 @@ const DashboardPage = {
         return DashboardPage._pageHtml();
     },
 
+    _company: '',
+
     async _load() {
         const ids = DashboardPage._order.join(',');
-        DashboardPage._data = ids ? await API.get(`/dashboard/data?ids=${encodeURIComponent(ids)}`) : {};
+        const [data, settings] = await Promise.all([
+            ids ? API.get(`/dashboard/data?ids=${encodeURIComponent(ids)}`) : Promise.resolve({}),
+            API.get('/settings').catch(() => ({})),
+        ]);
+        DashboardPage._data = data;
+        const name = (settings && settings.company_name) || '';
+        DashboardPage._company = name && name !== 'My Company' ? name : '';
+    },
+
+    _title() {
+        return DashboardPage._company ? `${escapeHtml(DashboardPage._company)} Snapshot` : 'Company Snapshot';
     },
 
     _pageHtml() {
         const editing = DashboardPage._editing;
         return `
             <div class="page-header">
-                <h2>Company Snapshot</h2>
+                <h2>${DashboardPage._title()}</h2>
                 <div style="display:flex; gap:8px; align-items:center;">
                     ${editing ? `
                         <button class="btn btn-sm btn-secondary" onclick="DashboardPage.showAdd()">+ Add a card</button>

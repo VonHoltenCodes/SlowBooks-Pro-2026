@@ -4,6 +4,10 @@ Before exposing SlowBooks Pro 2026 to anyone other than localhost, walk
 this list. Everything here is enforced or documented somewhere in the
 codebase — this file is the index, not the source of truth.
 
+## Before tagging
+
+- Add the release's entry to `app/static/whats-new.json` (version key must equal `app/__init__.py` `__version__`; one line per headline change — the splash and About dialog show it) and move the CHANGELOG `[Unreleased]` items under the version.
+
 ## 1. Secrets — generate fresh, never commit
 
 ```bash

@@ -1,0 +1,23 @@
+{
+  "2.8.0": {
+    "title": "Benefits, all-state payroll, and an overview you can arrange",
+    "items": [
+      "Benefits engine: benefit codes with rules, effective-dated rates, employer matching, employee groups, per-code GL and remittance bills",
+      "State withholding for all 50 states + DC with verified 2026 figures; state W-4 fields on the employee",
+      "PTO banks carry dollars and post a liability; actual payroll burden can flow to jobs by hours",
+      "Company Snapshot: pick, hide and reorder the cards per user, with five new cards",
+      "Sales tax per line: untaxed labor and taxed parts on one invoice",
+      "IIF and CSV export now carry classes, jobs, bills, deposits and sales receipts (#70)",
+      "Accessibility pass: real dialogs, table headers, contrast, tagged PDFs",
+      "Employee portal link opens in the employee's browser with a full address"
+    ]
+  },
+  "2.7.0": {
+    "title": "Jobs, job costing, and receipt intake",
+    "items": [
+      "Jobs under customers with cost codes, budgets and a drill-down cost tree",
+      "Job Cost Entry, time-to-job labor at loaded rates, allocations",
+      "Receipt intake: scan a receipt into a bill or expense"
+    ]
+  }
+}

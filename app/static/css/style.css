@@ -125,6 +125,18 @@ body {
     z-index: 110;
 }
 
+.topbar-company {
+    font-weight: 700;
+    font-size: 12px;
+    padding: 0 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 260px;
+}
+.topbar-company:empty { display: none; }
+.topbar-company:empty + .tb-sep { display: none; }
+
 .topbar-brand {
     font-size: 13px;
     font-weight: 700;
@@ -1004,6 +1016,21 @@ tr.clickable { cursor: pointer; }
 .splash-info strong {
     color: rgba(255,255,255,0.7);
 }
+
+.splash-whatsnew {
+    text-align: left;
+    margin: 10px 0 4px;
+    padding: 8px 10px;
+    border: 1px solid var(--gray-300, #d1d5db);
+    background: rgba(255, 255, 255, 0.55);
+    font-size: 11px;
+    line-height: 1.35;
+    max-height: 170px;
+    overflow-y: auto;
+}
+.splash-whatsnew-title { font-weight: 700; margin-bottom: 4px; }
+.splash-whatsnew ul { margin: 0; padding-left: 16px; }
+.splash-whatsnew li { margin: 2px 0; }
 
 .splash-legal {
     font-size: 8px;
