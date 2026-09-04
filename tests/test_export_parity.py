@@ -212,6 +212,9 @@ def test_section_endpoints_and_csv_exports(
     client, db_session, seed_accounts, seed_customer
 ):
     _seed(client, db_session, seed_customer)
+    receipts = client.get("/api/sales-receipts")
+    assert receipts.status_code == 200 and len(receipts.json()) == 1
+    assert receipts.json()[0]["is_sales_receipt"] is True
     for path in ("classes", "bills", "deposits", "sales-receipts"):
         r = client.get(f"/api/iif/export/{path}")
         assert r.status_code == 200, (path, r.text)

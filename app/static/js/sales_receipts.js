@@ -6,7 +6,7 @@
  */
 const SalesReceiptsPage = {
     async render() {
-        const receipts = await API.get('/invoices?is_sales_receipt=true');
+        const receipts = await API.get('/sales-receipts');
         return renderListPage({
             title: 'Sales Receipts',
             headerHtml: `<button class="btn btn-primary" onclick="SalesReceiptsPage.showForm()">+ New Sales Receipt</button>`,
