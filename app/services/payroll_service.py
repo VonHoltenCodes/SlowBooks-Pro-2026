@@ -304,6 +304,7 @@ def calculate_withholdings(
     hours=Decimal("0"),
     pretax_deductions=Decimal("0"),
     pretax_fica=Decimal("0"),
+    pretax_state=None,
     supplemental: bool = False,
     supplemental_method: str = "flat",
     regular_wages=Decimal("0"),
@@ -313,9 +314,12 @@ def calculate_withholdings(
     """Compute a full set of payroll taxes for one employee for one pay period.
 
     ``pretax_deductions`` is the total of pre-tax deductions that reduce
-    income-tax wages; ``pretax_fica`` is the subset of those that ALSO reduce
-    FICA wages (Section 125 cafeteria plans, HSA) — a traditional 401(k)
-    reduces income tax but not FICA, so it belongs only in pretax_deductions.
+    federal income-tax wages; ``pretax_fica`` is the subset of those that
+    ALSO reduce FICA wages (Section 125 cafeteria plans, HSA) — a
+    traditional 401(k) reduces income tax but not FICA, so it belongs only
+    in pretax_deductions. ``pretax_state`` is the amount that reduces STATE
+    income-tax wages (None = same as federal); the benefits engine tracks
+    the three bases separately because a code can reduce any combination.
 
     Returns employee-side withholding, employer-side taxes, the per-state
     results, and an itemized ``detail`` map for pay-stub / form rendering.
@@ -325,7 +329,8 @@ def calculate_withholdings(
     gross = _q(gross_pay)
     ytd = Decimal(str(ytd_gross))
     pretax = Decimal(str(pretax_deductions))
-    pretax_fica_amt = min(Decimal(str(pretax_fica)), pretax)
+    pretax_fica_amt = Decimal(str(pretax_fica))
+    pretax_state_amt = pretax if pretax_state is None else Decimal(str(pretax_state))
     pay_periods = periods_per_year(pay_frequency)
 
     if gross <= 0:
@@ -351,6 +356,7 @@ def calculate_withholdings(
     # Income-tax wages drop the full pre-tax total; FICA wages drop only the
     # cafeteria-plan / HSA subset.
     fed_taxable = max(Decimal("0"), gross - pretax)
+    state_taxable = max(Decimal("0"), gross - pretax_state_amt)
     fica_wages = max(Decimal("0"), gross - pretax_fica_amt)
 
     # --- Federal income tax ---
@@ -396,7 +402,7 @@ def calculate_withholdings(
     engine = get_engine(work_state)
     state = engine.calculate(
         gross=gross,
-        taxable=fed_taxable,
+        taxable=state_taxable,
         ytd_gross=ytd,
         pay_periods=pay_periods,
         hours=Decimal(str(hours)),
@@ -411,7 +417,7 @@ def calculate_withholdings(
     ):
         wh = get_engine(withholding_state).calculate(
             gross=gross,
-            taxable=fed_taxable,
+            taxable=state_taxable,
             ytd_gross=ytd,
             pay_periods=pay_periods,
             hours=Decimal(str(hours)),

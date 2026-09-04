@@ -47,6 +47,8 @@ const EmployeesPage = {
         };
         if (id) emp = await API.get(`/employees/${id}`);
 
+        const groups = await API.get('/benefits/groups').catch(() => []);
+        const groupOpts = '<option value="">— none —</option>' + groups.map(g => `<option value="${g.id}" ${String(g.id) === String(emp.employee_group_id || '') ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
         openModal(id ? 'Edit Employee' : 'Add Employee', `
             <form onsubmit="EmployeesPage.save(event, ${id})">
                 <div class="form-grid">
@@ -69,6 +71,8 @@ const EmployeesPage = {
                         <input name="cost_rate" type="number" step="0.01" value="${emp.cost_rate ?? ''}" placeholder="blank = pay rate (salary ÷ 2080)" title="Loaded hourly cost used when time posts to a job"></div>
                     <div class="form-group"><label>Burden %</label>
                         <input name="burden_pct" type="number" step="0.01" value="${emp.burden_pct ?? ''}" placeholder="blank = Labor cost type's" title="Overrides the labor cost type's burden % for this employee"></div>
+                    <div class="form-group"><label>Benefit group</label>
+                        <select name="employee_group_id" title="The group's benefit codes apply unless an enrollment overrides them">${groupOpts}</select></div>
                     <div class="form-group"><label>Pay Frequency</label>
                         <select name="pay_frequency">
                             <option value="biweekly" ${(emp.pay_frequency||'biweekly')==='biweekly'?'selected':''}>Bi-Weekly</option>
@@ -147,6 +151,7 @@ const EmployeesPage = {
         data.pay_rate = parseFloat(data.pay_rate) || 0;
         data.cost_rate = data.cost_rate === '' || data.cost_rate === undefined ? null : parseFloat(data.cost_rate);
         data.burden_pct = data.burden_pct === '' || data.burden_pct === undefined ? null : parseFloat(data.burden_pct);
+        data.employee_group_id = data.employee_group_id ? parseInt(data.employee_group_id) : null;
         data.dependents_amount = parseFloat(data.dependents_amount) || 0;
         data.other_income_annual = parseFloat(data.other_income_annual) || 0;
         data.deductions_annual = parseFloat(data.deductions_annual) || 0;

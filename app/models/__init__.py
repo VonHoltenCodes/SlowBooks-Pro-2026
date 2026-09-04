@@ -56,7 +56,16 @@ from app.models.pto import PTOPolicy, PTOAccrual, PTORequest
 from app.models.bank_accounts import EmployeeBankAccount
 
 # Tier 2: deductions and garnishments
-from app.models.deductions import DeductionType, EmployeeDeduction, GarnishmentOrder
+from app.models.deductions import GarnishmentOrder
+from app.models.benefits import (
+    BenefitCode,
+    BenefitRate,
+    EmployeeGroup,
+    EmployeeGroupBenefit,
+    EmployeeBenefit,
+    BenefitYTD,
+    PayStubBenefit,
+)
 
 # Tier 3: HR onboarding
 from app.models.hr import OnboardingTask
@@ -123,8 +132,13 @@ __all__ = [
     "PTORequest",
     "EmployeeBankAccount",
     # Tier 2: deductions and garnishments
-    "DeductionType",
-    "EmployeeDeduction",
+    "BenefitCode",
+    "BenefitRate",
+    "EmployeeGroup",
+    "EmployeeGroupBenefit",
+    "EmployeeBenefit",
+    "BenefitYTD",
+    "PayStubBenefit",
     "GarnishmentOrder",
     # Tier 3: HR onboarding
     "OnboardingTask",

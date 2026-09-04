@@ -44,7 +44,8 @@ const App = {
         '/hr/onboarding':   { page: 'hr-onboarding',   label: 'Onboarding',       render: () => OnboardingPage.render() },
         '/hr/time-entries': { page: 'hr-time-entries', label: 'Time Entries',      render: () => TimeEntriesPage.render() },
         '/hr/pto':          { page: 'hr-pto',           label: 'Time Off',         render: () => PTOPage.render() },
-        '/hr/deductions':   { page: 'hr-deductions',   label: 'Deductions',        render: () => DeductionsPage.render() },
+        '/hr/benefits':     { page: 'hr-benefits',     label: 'Benefits',          render: () => BenefitsPage.render() },
+        '/hr/deductions':   { page: 'hr-deductions',   label: 'Garnishments',      render: () => DeductionsPage.render() },
         '/hr/tax-forms':    { page: 'hr-tax-forms',    label: 'Tax Forms',         render: () => TaxFormsPage.render() },
         '/reseller-permits':{ page: 'reseller-permits',label: 'Reseller Permits', render: () => ResellerPermitsPage.render() },
         // Phase 9: Analytics (real-time business intelligence)

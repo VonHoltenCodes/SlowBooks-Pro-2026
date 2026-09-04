@@ -3,6 +3,7 @@ from typing import Optional
 from pydantic import BaseModel, model_validator
 
 from app.models.payroll import EmployeeRole, FilingStatus, PayFrequency, PayType
+from app.schemas.benefits import PayStubBenefitResponse
 
 
 # ---------------------------------------------------------------------------
@@ -16,6 +17,7 @@ class EmployeeCreate(BaseModel):
     pay_rate: float = 0
     cost_rate: Optional[float] = None
     burden_pct: Optional[float] = None
+    employee_group_id: Optional[int] = None
     # Typed against the model enums so a bad value is a 422 at the edge
     # instead of a LookupError at flush (an opaque 500).
     pay_frequency: PayFrequency = PayFrequency.BIWEEKLY
@@ -49,6 +51,7 @@ class EmployeeUpdate(BaseModel):
     pay_rate: Optional[float] = None
     cost_rate: Optional[float] = None
     burden_pct: Optional[float] = None
+    employee_group_id: Optional[int] = None
     pay_frequency: Optional[PayFrequency] = None
     filing_status: Optional[FilingStatus] = None
     multiple_jobs: Optional[bool] = None
@@ -81,6 +84,7 @@ class EmployeeResponse(BaseModel):
     pay_rate: float = 0
     cost_rate: Optional[float] = None
     burden_pct: Optional[float] = None
+    employee_group_id: Optional[int] = None
     pay_frequency: str = "biweekly"
     filing_status: str
     multiple_jobs: bool = False
@@ -115,7 +119,7 @@ class PayStubInput(BaseModel):
     doubletime_hours: float = 0
     gross_override: Optional[float] = None  # explicit gross (bonuses / off-cycle runs)
     pretax_deductions: float = (
-        0  # ad-hoc; configured EmployeeDeductions are auto-applied
+        0  # ad-hoc; the employee's benefit codes are applied automatically
     )
     posttax_deductions: float = 0
     reimbursements: float = 0  # non-taxable accountable-plan reimbursements
@@ -183,6 +187,8 @@ class PayStubResponse(BaseModel):
     futa_tax: float = 0
     suta_tax: float = 0
     state_other_employer: float = 0
+    employer_benefits: float = 0
+    benefits: list[PayStubBenefitResponse] = []
     model_config = {"from_attributes": True}
 
 
@@ -197,6 +203,8 @@ class PayRunResponse(BaseModel):
     total_net: float = 0
     total_taxes: float = 0
     total_employer_taxes: float = 0
+    total_employer_benefits: float = 0
+    burden_job_cost_id: Optional[int] = None
     stubs: list[PayStubResponse] = []
     model_config = {"from_attributes": True}
 

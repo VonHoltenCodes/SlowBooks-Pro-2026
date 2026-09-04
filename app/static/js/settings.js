@@ -1129,7 +1129,11 @@ SettingsPage.loadCostTypes = async function () {
                 <td><code>${escapeHtml(t.code)}</code></td>
                 <td><input class="ct-name" value="${escapeHtml(t.name)}" style="width:130px"></td>
                 <td style="text-align:center"><input type="checkbox" class="ct-labor" ${t.is_labor ? 'checked' : ''}></td>
-                <td><input type="number" step="0.01" class="ct-burden" value="${t.burden_pct ?? ''}" style="width:70px" placeholder="%"></td>
+                <td><input type="number" step="0.01" class="ct-burden" value="${t.burden_pct ?? ''}" style="width:70px" placeholder="%" aria-label="Flat burden percent"></td>
+                <td>${t.is_labor ? `<select class="ct-burden-method" aria-label="Burden method" title="Flat: the % above posts with each time entry. Payroll: the pay run distributes actual employer taxes + job-routed benefit codes by hours.">
+                    <option value="flat" ${t.burden_method !== 'payroll' ? 'selected' : ''}>Flat %</option>
+                    <option value="payroll" ${t.burden_method === 'payroll' ? 'selected' : ''}>Actual payroll</option>
+                </select>` : '—'}</td>
                 <td><select class="ct-default">${await SettingsPage._accountOptions(t.default_account_id)}</select></td>
                 <td><select class="ct-offset">${await SettingsPage._accountOptions(t.offset_account_id)}</select></td>
                 <td><select class="ct-burden-offset">${await SettingsPage._accountOptions(t.burden_offset_account_id)}</select></td>
@@ -1140,7 +1144,7 @@ SettingsPage.loadCostTypes = async function () {
             </tr>`);
         }
         el.innerHTML = `<div class="table-container"><table style="font-size:12px">
-            <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Labor?</th><th scope="col">Burden %</th><th scope="col">Cost account</th><th scope="col">Offset account</th><th scope="col">Burden offset</th><th scope="col">Actions</th></tr></thead>
+            <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Labor?</th><th scope="col">Burden %</th><th scope="col">Burden method</th><th scope="col">Cost account</th><th scope="col">Offset account</th><th scope="col">Burden offset</th><th scope="col">Actions</th></tr></thead>
             <tbody>${rows.join('')}</tbody></table></div>`;
     } catch (err) {
         el.innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
@@ -1157,6 +1161,7 @@ SettingsPage.saveCostType = async function (id) {
             name: tr.querySelector('.ct-name').value.trim(),
             is_labor: tr.querySelector('.ct-labor').checked,
             burden_pct: burden === '' ? null : parseFloat(burden),
+            burden_method: tr.querySelector('.ct-burden-method')?.value || undefined,
             default_account_id: sel('.ct-default'),
             offset_account_id: sel('.ct-offset'),
             burden_offset_account_id: sel('.ct-burden-offset'),

@@ -58,6 +58,12 @@ class CostType(Base):
     # base cost as its own line (employer taxes, benefits, insurance).
     is_labor = Column(Boolean, nullable=False, default=False)
     burden_pct = Column(Numeric(6, 2), nullable=True)
+    # How labor burden reaches the job:
+    #   flat     the burden_pct above, posted with each time entry
+    #   payroll  actual employer taxes + job-routed benefit codes, distributed
+    #            by hours when the pay run is processed (time entries post
+    #            base labor only)
+    burden_method = Column(String(10), nullable=False, default="flat")
     # Where a job-cost line of this type lands when the code has no account
     default_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     # The credit side of a job-cost entry of this type (payroll clearing,

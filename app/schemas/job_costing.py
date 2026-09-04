@@ -25,6 +25,7 @@ class CostTypeCreate(BaseModel):
     name: str
     is_labor: bool = False
     burden_pct: Optional[Decimal] = None
+    burden_method: str = "flat"
     default_account_id: Optional[int] = None
     offset_account_id: Optional[int] = None
     burden_offset_account_id: Optional[int] = None
@@ -45,6 +46,7 @@ class CostTypeUpdate(BaseModel):
     name: Optional[str] = None
     is_labor: Optional[bool] = None
     burden_pct: Optional[Decimal] = None
+    burden_method: Optional[str] = None
     default_account_id: Optional[int] = None
     offset_account_id: Optional[int] = None
     burden_offset_account_id: Optional[int] = None
@@ -58,6 +60,7 @@ class CostTypeResponse(BaseModel):
     name: str
     is_labor: bool
     burden_pct: Optional[Decimal] = None
+    burden_method: str = "flat"
     default_account_id: Optional[int] = None
     default_account_name: Optional[str] = None
     offset_account_id: Optional[int] = None

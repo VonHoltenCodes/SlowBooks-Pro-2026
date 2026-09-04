@@ -60,6 +60,16 @@ CHART_OF_ACCOUNTS = [
         "name": "Other Payroll Deductions Payable",
         "account_type": "liability",
     },
+    {
+        "account_number": "2380",
+        "name": "Employee Benefits Payable",
+        "account_type": "liability",
+    },
+    {
+        "account_number": "2390",
+        "name": "Accrued PTO Liability",
+        "account_type": "liability",
+    },
     {"account_number": "2400", "name": "Loan Payable", "account_type": "liability"},
     {
         "account_number": "2500",
@@ -106,6 +116,16 @@ CHART_OF_ACCOUNTS = [
     {
         "account_number": "6140",
         "name": "Employee Expense Reimbursements",
+        "account_type": "expense",
+    },
+    {
+        "account_number": "6150",
+        "name": "Employee Benefits Expense",
+        "account_type": "expense",
+    },
+    {
+        "account_number": "6160",
+        "name": "Paid Time Off Expense",
         "account_type": "expense",
     },
     {

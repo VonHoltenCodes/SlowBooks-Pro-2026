@@ -17,7 +17,7 @@ const PTOPage = {
         // --- Policies section ---
         let policiesBody = '';
         if (policies.length === 0) {
-            policiesBody = '<tr><td colspan="6"><em>No policies defined yet</em></td></tr>';
+            policiesBody = '<tr><td colspan="7"><em>No policies defined yet</em></td></tr>';
         } else {
             for (const p of policies) {
                 policiesBody += `<tr>
@@ -26,6 +26,7 @@ const PTOPage = {
                     <td>${escapeHtml(p.accrual_method)}</td>
                     <td class="amount">${p.accrual_rate}</td>
                     <td class="amount">${p.max_balance}</td>
+                    <td>${p.accrue_liability ? `books $ · ${p.valuation === 'average_rate' ? 'avg rate' : 'current rate'}` : 'hours only'}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PTOPage.showPolicyForm(${p.id})">Edit</button>
                     </td>
@@ -71,6 +72,7 @@ const PTOPage = {
                         <th scope="col">Accrual Method</th>
                         <th scope="col" class="amount">Accrual Rate</th>
                         <th scope="col" class="amount">Max Balance</th>
+                        <th scope="col">Liability</th>
                         <th scope="col">Actions</th>
                     </tr></thead>
                     <tbody>${policiesBody}</tbody>
@@ -86,20 +88,23 @@ const PTOPage = {
                     <thead><tr>
                         <th scope="col">Employee</th>
                         <th scope="col">Policy</th>
-                        <th scope="col" class="amount">Balance</th>
+                        <th scope="col" class="amount">Balance (hrs)</th>
+                        <th scope="col" class="amount">Liability ($)</th>
                         <th scope="col" class="amount">Accrued YTD</th>
                         <th scope="col" class="amount">Used YTD</th>
                         <th scope="col">Actions</th>
                     </tr></thead>
-                    <tbody>${accruals.length === 0 ? '<tr><td colspan="6"><em>No employees enrolled in any PTO policy yet</em></td></tr>' : accruals.map(a => `
+                    <tbody>${accruals.length === 0 ? '<tr><td colspan="7"><em>No employees enrolled in any PTO policy yet</em></td></tr>' : accruals.map(a => `
                         <tr>
                             <td>${escapeHtml(empById[a.employee_id] || `Employee ${a.employee_id}`)}</td>
                             <td>${escapeHtml(polById[a.policy_id] || `Policy ${a.policy_id}`)}</td>
                             <td class="amount">${a.balance}</td>
+                            <td class="amount">${formatCurrency(a.dollar_balance || 0)}</td>
                             <td class="amount">${a.accrued_ytd}</td>
                             <td class="amount">${a.used_ytd}</td>
                             <td class="actions">
                                 <button class="btn btn-sm btn-secondary" onclick="PTOPage.runAccrual(${a.id})">Run Accrual</button>
+                                <button class="btn btn-sm btn-secondary" onclick="PTOPage.revalue(${a.id})" title="Restate the dollar balance at the employee's current rate">Revalue</button>
                             </td>
                         </tr>`).join('')}</tbody>
                 </table>
@@ -126,8 +131,11 @@ const PTOPage = {
     },
 
     async showPolicyForm(id = null) {
-        let p = { name: '', pto_type: 'vacation', accrual_method: 'per_pay_period', accrual_rate: 0, max_balance: 0 };
+        let p = { name: '', pto_type: 'vacation', accrual_method: 'per_pay_period', accrual_rate: 0, max_balance: 0, max_carryover: null,
+                  accrue_liability: false, valuation: 'current_rate', expense_account_id: '', liability_account_id: '', pays_out_on_termination: false };
         if (id) p = await API.get(`/pto/policies/${id}`);
+        const accounts = await API.get('/accounts');
+        const acctOpts = (types, sel) => '<option value="">— default (6160 / 2390) —</option>' + accounts.filter(a => types.includes(a.account_type)).map(a => `<option value="${a.id}" ${String(a.id) === String(sel || '') ? 'selected' : ''}>${escapeHtml(a.account_number || '')} ${escapeHtml(a.name)}</option>`).join('');
 
         openModal(id ? 'Edit PTO Policy' : 'Add PTO Policy', `
             <form onsubmit="PTOPage.savePolicy(event, ${id})">
@@ -144,12 +152,30 @@ const PTOPage = {
                         <select name="accrual_method">
                             <option value="per_pay_period"    ${p.accrual_method === 'per_pay_period'    ? 'selected' : ''}>Per Pay Period</option>
                             <option value="per_hour_worked"   ${p.accrual_method === 'per_hour_worked'   ? 'selected' : ''}>Per Hour Worked</option>
-                            <option value="annual_lump_sum"   ${p.accrual_method === 'annual_lump_sum'   ? 'selected' : ''}>Annual Lump Sum</option>
+                            <option value="annual_grant"      ${p.accrual_method === 'annual_grant'      ? 'selected' : ''}>Annual Grant</option>
                         </select></div>
                     <div class="form-group"><label>Accrual Rate</label>
                         <input name="accrual_rate" type="number" step="0.01" value="${p.accrual_rate}"></div>
                     <div class="form-group"><label>Max Balance</label>
                         <input name="max_balance" type="number" step="0.01" value="${p.max_balance}"></div>
+                    <div class="form-group"><label>Max Carryover (hrs, blank = unlimited)</label>
+                        <input name="max_carryover" type="number" step="0.01" value="${p.max_carryover ?? ''}"></div>
+                </div>
+                <h3 style="margin:12px 0 6px;font-size:14px;">Dollar liability</h3>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px;">
+                    <label><input type="checkbox" name="accrue_liability" ${p.accrue_liability ? 'checked' : ''}> Book a liability as hours accrue (DR PTO expense / CR accrued PTO)</label>
+                    <label><input type="checkbox" name="pays_out_on_termination" ${p.pays_out_on_termination ? 'checked' : ''}> Pays out on termination</label>
+                </div>
+                <div class="form-grid">
+                    <div class="form-group"><label>Valuation</label>
+                        <select name="valuation">
+                            <option value="current_rate" ${p.valuation !== 'average_rate' ? 'selected' : ''}>Current rate (liability revalues on raises)</option>
+                            <option value="average_rate" ${p.valuation === 'average_rate' ? 'selected' : ''}>Average rate (historical cost of the bank)</option>
+                        </select></div>
+                    <div class="form-group"><label>PTO expense account</label>
+                        <select name="expense_account_id">${acctOpts(['expense', 'cogs'], p.expense_account_id)}</select></div>
+                    <div class="form-group"><label>Accrued PTO liability account</label>
+                        <select name="liability_account_id">${acctOpts(['liability'], p.liability_account_id)}</select></div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -160,9 +186,15 @@ const PTOPage = {
 
     async savePolicy(e, id) {
         e.preventDefault();
-        const data = Object.fromEntries(new FormData(e.target).entries());
+        const f = e.target;
+        const data = Object.fromEntries(new FormData(f).entries());
         data.accrual_rate = parseFloat(data.accrual_rate) || 0;
         data.max_balance  = parseFloat(data.max_balance)  || 0;
+        data.max_carryover = data.max_carryover === '' ? null : parseFloat(data.max_carryover);
+        data.accrue_liability = f.accrue_liability.checked;
+        data.pays_out_on_termination = f.pays_out_on_termination.checked;
+        data.expense_account_id = data.expense_account_id ? parseInt(data.expense_account_id) : null;
+        data.liability_account_id = data.liability_account_id ? parseInt(data.liability_account_id) : null;
         try {
             if (id) { await API.put(`/pto/policies/${id}`, data); toast('Policy updated'); }
             else    { await API.post('/pto/policies', data);      toast('Policy added'); }
@@ -282,6 +314,15 @@ const PTOPage = {
             await API.post('/pto/accruals', body);
             toast('Employee enrolled');
             closeModal();
+            App.navigate('#/hr/pto');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async revalue(id) {
+        if (!confirm("Restate this bank's dollars at the employee's current rate?")) return;
+        try {
+            await API.post(`/pto/accruals/${id}/revalue`, {});
+            toast('Balance revalued');
             App.navigate('#/hr/pto');
         } catch (err) { toast(err.message, 'error'); }
     },
