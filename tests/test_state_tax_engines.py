@@ -147,7 +147,7 @@ def test_wa_employee_other_is_sum_of_employee_lines():
 
 
 def test_wa_suta_wage_base():
-    assert WAEngine.suta_wage_base == Decimal("72800")
+    assert WAEngine.suta_wage_base == Decimal("78200")
 
 
 # ---------------------------------------------------------------------------
