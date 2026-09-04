@@ -310,6 +310,10 @@ def calculate_withholdings(
     regular_wages=Decimal("0"),
     ytd_supplemental=Decimal("0"),
     suta_rate: Decimal = None,
+    state_allowances: int = 0,
+    state_extra_withholding=Decimal("0"),
+    state_rate_override=None,
+    local_tax_rate=None,
 ) -> dict:
     """Compute a full set of payroll taxes for one employee for one pay period.
 
@@ -399,6 +403,12 @@ def calculate_withholdings(
     # The work-state engine drives SUTA situs and state disability/leave
     # premiums; income tax may instead follow the residence state under a
     # reciprocity agreement (see state_tax.reciprocity).
+    state_kw = dict(
+        state_allowances=state_allowances,
+        state_extra_withholding=state_extra_withholding,
+        state_rate_override=state_rate_override,
+        local_tax_rate=local_tax_rate,
+    )
     engine = get_engine(work_state)
     state = engine.calculate(
         gross=gross,
@@ -408,6 +418,7 @@ def calculate_withholdings(
         hours=Decimal(str(hours)),
         filing_status=filing_status,
         wc_class_code=wc_class_code,
+        **state_kw,
     )
 
     state_income = state.income_tax
@@ -423,8 +434,17 @@ def calculate_withholdings(
             hours=Decimal(str(hours)),
             filing_status=filing_status,
             wc_class_code=wc_class_code,
+            **state_kw,
         )
         state_income = wh.income_tax
+        # the reciprocity state's income tax replaces the work state's, and
+        # its detail line should say so on the stub
+        for k in list(state.detail):
+            if k.endswith("income tax") and not k.endswith("local income tax"):
+                state.detail.pop(k)
+        for k, v in wh.detail.items():
+            if k.endswith("income tax") and not k.endswith("local income tax"):
+                state.detail[k] = v
 
     rate = Decimal(str(suta_rate)) if suta_rate is not None else Decimal(str(SUTA_RATE))
     suta_tax = suta(fica_wages, ytd, rate, engine.suta_wage_base)

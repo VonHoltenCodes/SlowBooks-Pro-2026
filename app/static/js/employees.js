@@ -3,6 +3,8 @@
  * Feature 17: Payroll basics
  */
 const EmployeesPage = {
+    _states: [],
+    _stateHint(code) { const st = EmployeesPage._states.find(x => x.code === (code || '').toUpperCase()); return st ? `${st.name}: ${st.summary}${st.uses_local_rate ? ' · needs a local rate' : ''}${st.uses_rate_election ? ' · elected rate' : ''}` : 'Type a 2-letter code; every state + DC is supported'; },
     async render() {
         const emps = await API.get('/employees');
         let html = `
@@ -39,6 +41,7 @@ const EmployeesPage = {
             first_name: '', last_name: '', pay_type: 'hourly', pay_rate: 0,
             filing_status: 'single', hire_date: todayISO(),
             email: '', pay_frequency: 'biweekly', work_state: '', residence_state: '',
+            state_allowances: 0, state_extra_withholding: 0, state_rate_override: '', local_tax_rate: '',
             role: 'employee', manager_id: '',
             multiple_jobs: false, dependents_amount: 0, other_income_annual: 0,
             deductions_annual: 0, extra_withholding: 0,
@@ -48,6 +51,10 @@ const EmployeesPage = {
         if (id) emp = await API.get(`/employees/${id}`);
 
         const groups = await API.get('/benefits/groups').catch(() => []);
+        const states = await API.get('/payroll/states').catch(() => []);
+        EmployeesPage._states = states;
+        const stateHint = (code) => { const st = states.find(x => x.code === (code || '').toUpperCase()); return st ? `${st.name}: ${st.summary}${st.uses_local_rate ? ' · needs a local rate' : ''}${st.uses_rate_election ? ' · elected rate' : ''}` : 'Type a 2-letter code; every state + DC is supported'; };
+        const stateList = '<datalist id="state-codes">' + states.map(x => `<option value="${x.code}">${escapeHtml(x.name)} — ${escapeHtml(x.summary)}</option>`).join('') + '</datalist>';
         const groupOpts = '<option value="">— none —</option>' + groups.map(g => `<option value="${g.id}" ${String(g.id) === String(emp.employee_group_id || '') ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
         openModal(id ? 'Edit Employee' : 'Add Employee', `
             <form onsubmit="EmployeesPage.save(event, ${id})">
@@ -89,9 +96,19 @@ const EmployeesPage = {
                     <div class="form-group"><label>Hire Date</label>
                         <input name="hire_date" type="date" value="${emp.hire_date || ''}"></div>
                     <div class="form-group"><label>Work State</label>
-                        <input name="work_state" maxlength="2" placeholder="e.g. WA" value="${escapeHtml(emp.work_state || '')}"></div>
+                        <input name="work_state" maxlength="2" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.work_state || '')}" oninput="const h=document.getElementById('state-hint'); if(h) h.textContent=EmployeesPage._stateHint(this.value);">
+                        <small id="state-hint" style="color:var(--gray-400);">${escapeHtml(stateHint(emp.work_state))}</small></div>
                     <div class="form-group"><label>Residence State</label>
-                        <input name="residence_state" maxlength="2" placeholder="e.g. WA" value="${escapeHtml(emp.residence_state || '')}"></div>
+                        <input name="residence_state" maxlength="2" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.residence_state || '')}"></div>
+                    <div class="form-group"><label>State W-4 allowances</label>
+                        <input name="state_allowances" type="number" min="0" step="1" value="${emp.state_allowances ?? 0}" title="Exemptions claimed on the state certificate (IL-W-4 line 1, MI-W4, VA-4 …)"></div>
+                    <div class="form-group"><label>Extra state withholding ($/period)</label>
+                        <input name="state_extra_withholding" type="number" step="0.01" value="${emp.state_extra_withholding ?? 0}"></div>
+                    <div class="form-group"><label>Elected state rate (%)</label>
+                        <input name="state_rate_override" type="number" step="0.1" value="${emp.state_rate_override ?? ''}" placeholder="Arizona A-4 only" title="Percentage-election states (Arizona): the rate the employee chose"></div>
+                    <div class="form-group"><label>Local tax rate (%)</label>
+                        <input name="local_tax_rate" type="number" step="0.01" value="${emp.local_tax_rate ?? ''}" placeholder="county / city / school" title="Flat local income tax where the state requires one: Indiana and Maryland counties, Ohio cities, PA municipalities, Michigan cities"></div>
+                    ${stateList}
                     <div class="form-group"><label>Role</label>
                         <select name="role">
                             <option value="employee" ${(emp.role||'employee')==='employee'?'selected':''}>Employee</option>
@@ -152,6 +169,10 @@ const EmployeesPage = {
         data.cost_rate = data.cost_rate === '' || data.cost_rate === undefined ? null : parseFloat(data.cost_rate);
         data.burden_pct = data.burden_pct === '' || data.burden_pct === undefined ? null : parseFloat(data.burden_pct);
         data.employee_group_id = data.employee_group_id ? parseInt(data.employee_group_id) : null;
+        data.state_allowances = parseInt(data.state_allowances) || 0;
+        data.state_extra_withholding = parseFloat(data.state_extra_withholding) || 0;
+        data.state_rate_override = data.state_rate_override === '' || data.state_rate_override === undefined ? null : parseFloat(data.state_rate_override);
+        data.local_tax_rate = data.local_tax_rate === '' || data.local_tax_rate === undefined ? null : parseFloat(data.local_tax_rate);
         data.dependents_amount = parseFloat(data.dependents_amount) || 0;
         data.other_income_annual = parseFloat(data.other_income_annual) || 0;
         data.deductions_annual = parseFloat(data.deductions_annual) || 0;
@@ -187,6 +208,7 @@ const EmployeesPage = {
                     <dt>Hire Date</dt><dd>${formatDate(emp.hire_date)}</dd>
                     <dt>Work State</dt><dd>${escapeHtml(emp.work_state || '—')}</dd>
                     <dt>Residence State</dt><dd>${escapeHtml(emp.residence_state || '—')}</dd>
+                    <dt>State W-4</dt><dd>${emp.state_allowances || 0} allowance(s)${emp.state_extra_withholding ? ` + ${formatCurrency(emp.state_extra_withholding)}/period extra` : ''}${emp.state_rate_override ? ` · elected ${emp.state_rate_override}%` : ''}${emp.local_tax_rate ? ` · local ${emp.local_tax_rate}%` : ''}</dd>
                     <dt>Role</dt><dd>${emp.role || '—'}</dd>
                     <dt>Manager ID</dt><dd>${emp.manager_id ?? '—'}</dd>
                     <dt>WC Class Code</dt><dd>${escapeHtml(emp.wc_class_code || '—')}</dd>

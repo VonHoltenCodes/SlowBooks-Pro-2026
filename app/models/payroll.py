@@ -116,6 +116,15 @@ class Employee(Base):
     residence_state = Column(String(2), nullable=True)
     # Workers' comp / WA L&I risk classification code.
     wc_class_code = Column(String(20), nullable=True)
+    # State W-4: allowances / exemptions claimed on the state certificate
+    # (IL-W-4 line 1, MI-W4, VA-4 ...), extra per-period state withholding,
+    # an elected rate for percentage states (Arizona A-4), and a flat local
+    # (county / city / school district) rate in percent where the state
+    # requires one (IN, MD, OH, PA, MI cities ...).
+    state_allowances = Column(Integer, nullable=False, default=0)
+    state_extra_withholding = Column(Numeric(12, 2), nullable=False, default=0)
+    state_rate_override = Column(Numeric(6, 3), nullable=True)
+    local_tax_rate = Column(Numeric(6, 3), nullable=True)
     # Job costing: loaded hourly cost (blank = pay rate; salary / 2080) and a
     # burden % that overrides the labor cost type's
     cost_rate = Column(Numeric(12, 2), nullable=True)

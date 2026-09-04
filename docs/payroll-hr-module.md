@@ -23,6 +23,10 @@ what's in each tier, where each piece lives, and what's still pending.
 
 ---
 
+## State withholding
+
+All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engine for the rest (`app/services/state_tax/tables.py`). Parameters, sources and the employee inputs (allowances, extra withholding, elected rate, local rate) are in [state-withholding.md](state-withholding.md). Reciprocity in `state_tax/reciprocity.py`.
+
 ## Tier 1 — Onboarding, time, PTO
 
 ### Models

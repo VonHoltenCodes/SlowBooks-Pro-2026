@@ -36,6 +36,10 @@ class EmployeeCreate(BaseModel):
     work_state: Optional[str] = None
     residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
+    state_allowances: int = 0
+    state_extra_withholding: float = 0
+    state_rate_override: Optional[float] = None
+    local_tax_rate: Optional[float] = None
     email: Optional[str] = None
     role: EmployeeRole = EmployeeRole.EMPLOYEE
     manager_id: Optional[int] = None
@@ -67,6 +71,10 @@ class EmployeeUpdate(BaseModel):
     work_state: Optional[str] = None
     residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
+    state_allowances: Optional[int] = None
+    state_extra_withholding: Optional[float] = None
+    state_rate_override: Optional[float] = None
+    local_tax_rate: Optional[float] = None
     email: Optional[str] = None
     role: Optional[EmployeeRole] = None
     manager_id: Optional[int] = None
@@ -100,6 +108,10 @@ class EmployeeResponse(BaseModel):
     work_state: Optional[str] = None
     residence_state: Optional[str] = None
     wc_class_code: Optional[str] = None
+    state_allowances: int = 0
+    state_extra_withholding: float = 0
+    state_rate_override: Optional[float] = None
+    local_tax_rate: Optional[float] = None
     email: Optional[str] = None
     role: EmployeeRole = EmployeeRole.EMPLOYEE
     manager_id: Optional[int] = None
