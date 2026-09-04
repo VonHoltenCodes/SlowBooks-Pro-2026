@@ -7,6 +7,10 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+_Nothing yet._
+
+### v2.8.0 — Benefits, all-state payroll, and an overview you can arrange
+
 ### Export parity with import (#70)
 
 **What comes in from QuickBooks can go back out.** IIF export now writes
