@@ -136,3 +136,29 @@ After owner-approved merge, rebuild from the exact release-tag commit. Never
 publish a development-branch artifact under an existing tag. Upload only the
 signed, notarized, stapled DMG, then independently re-download it and repeat
 the checksum, Gatekeeper, mount, and launch checks.
+
+## In-fleet local signing on Macbase1 (VonHolten fleet)
+
+The VonHolten fleet has a dedicated macOS signer, **Macbase1** (M1 Mac mini,
+`ssh macbase1`), that signs + notarizes under the owner's Developer ID —
+the in-fleet stand-in for the maintainer's Mac. Proven for SlowBooks v2.8.0 on
+2026-09-04 (.app + .dmg notarized + stapled, `spctl` = "Notarized Developer ID").
+
+Full operational runbook: **`devbase1:~/CLAUDE.md`** → "Local macOS build → sign →
+notarize on Macbase1", and `/Users/macbase1/CLAUDE.md` on the box. In brief: run
+this repo's `.github/workflows/macos.yml` build steps locally (venv off brew
+`python3`, `export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"`, install the
+three requirements files, `pyinstaller … SlowBooksPro-mac.spec`), then Developer-ID
+sign inside-out and notarize with the shared `fleet-signing.keychain-db` identity.
+
+Fleet-specific gotchas that differ from a normal dev Mac:
+- **Pass `--keychain ~/Library/Keychains/fleet-signing.keychain-db` to every
+  `notarytool` call** — over SSH the default *login* keychain is locked.
+- **`create-dmg` hangs headless** (its Finder AppleScript needs a GUI). Build the
+  DMG with `hdiutil create -format UDZO`, then codesign it.
+- The `--smoke-test` writes to `SLOWBOOKS_DATA_DIR`; keep that OUTSIDE the `.app`
+  and sign **after** any launch — anything written into the bundle post-signing
+  breaks the seal and Apple rejects notarization.
+
+These are proof-of-pipeline builds; a real release still follows the tag-commit
+rebuild + installed-app acceptance gates documented above.
