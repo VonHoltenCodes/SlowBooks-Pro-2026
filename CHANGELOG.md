@@ -74,6 +74,15 @@ Every card loads independently, so one card with a problem shows its
 error in place instead of taking the page down. The overdue-invoices card
 now names who owes what and by how many days.
 
+### Benefits engine — from the first macOS lap
+
+- A post-tax deduction larger than the check used to leave a negative net
+  pay on the stub and an unbalanced payroll entry on processing. Post-tax
+  codes now take what is left after taxes and garnishments, in sequence,
+  with the shortfall noted on the stub; net pay never goes below zero.
+- The remittance report and bill follow a code's current vendor when the
+  run was processed before the vendor was assigned.
+
 ### v2.7.0 — Jobs, job costing, and receipt intake
 
 The two most-requested features since Server Edition, each field-tested on

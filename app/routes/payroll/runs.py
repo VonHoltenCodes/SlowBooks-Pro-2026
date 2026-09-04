@@ -259,6 +259,30 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         )
         garnish_total = total_garnished(garn_results)
 
+        # Post-tax deductions come out of what is left after pre-tax codes,
+        # taxes and garnishments (court orders outrank voluntary codes).
+        # The first pass could not know the taxes; when the post-tax total
+        # would overdraw the check, evaluate the codes again with the real
+        # room and trim the ad-hoc amount to whatever remains. Pre-tax
+        # amounts are identical on both passes, so the withholdings stand.
+        available = _q(gross - pretax - result["total_employee_tax"] - garnish_total)
+        if posttax > available:
+            ben = benefits_engine.compute(
+                db,
+                emp,
+                gross,
+                total_hours,
+                data.period_start,
+                data.period_end,
+                year,
+                ytd_gross_before=ytd["gross"],
+                posttax_available=available,
+            )
+            adhoc_posttax = _q(
+                max(Decimal("0"), min(adhoc_posttax, available - ben.posttax_total))
+            )
+            posttax = ben.posttax_total + adhoc_posttax
+
         # Net: gross less every tax, every employee-side benefit amount
         # (pre- and post-tax, engine and ad-hoc), garnishments; plus
         # non-taxable reimbursements. Computed here rather than from the
@@ -286,6 +310,18 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
                 detail[f"benefit:{ln.code.code}"] = str(ln.employee_amount)
             if ln.employer_amount:
                 detail[f"employer_benefit:{ln.code.code}"] = str(ln.employer_amount)
+            if ln.note:
+                detail[f"benefit:{ln.code.code}:note"] = ln.note
+        if net < 0:
+            # Only a garnishment stack beyond disposable earnings can get
+            # here now; refuse rather than post an unbalanced payroll entry.
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{emp.full_name}: deductions and garnishments exceed pay "
+                    f"(net would be {net}). Reduce them before running payroll."
+                ),
+            )
         if adhoc_pretax:
             detail["other_pretax_deductions"] = str(adhoc_pretax)
         if adhoc_posttax:
