@@ -1,6 +1,7 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <title>Estimate</title>
 <style>
     @page { size: letter; margin: 0.6in 0.75in; }
     body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
@@ -74,7 +75,7 @@
         <tbody>
         {% for line in est.lines %}
             <tr>
-                <td>{{ line.description or '' }}</td>
+                <td>{{ line.description or '' }}{% if est.tax_amount and not line.is_taxable %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity }}</td>
                 <td class="r">{{ line.rate | currency }}</td>
                 <td class="r">{{ line.amount | currency }}</td>

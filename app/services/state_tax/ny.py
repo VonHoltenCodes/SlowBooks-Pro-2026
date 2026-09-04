@@ -79,7 +79,7 @@ def _tax_from_brackets(wage: Decimal, brackets) -> Decimal:
 
 class NYEngine(StateEngine):
     state_code: str = "NY"
-    suta_wage_base: Decimal = Decimal("12800")
+    suta_wage_base: Decimal = Decimal("13000")
 
     def calculate(
         self,
@@ -90,7 +90,8 @@ class NYEngine(StateEngine):
         pay_periods: int,
         hours: Decimal,
         filing_status: str,
-        wc_class_code: str | None
+        wc_class_code: str | None,
+        **_extra,
     ) -> StateTaxResult:
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()

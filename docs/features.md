@@ -62,7 +62,7 @@ Tax calculations are approximate — verify with a tax professional. Full module
 - **Balance Sheet** — Assets, liabilities, and equity as of any date
 - **A/R Aging** — Outstanding receivables grouped by customer with 30/60/90 day buckets
 - **A/P Aging** — Outstanding payables grouped by vendor with 30/60/90 day buckets
-- **Sales Tax** — Tax collected by invoice with taxable/non-taxable breakdowns. Pay Sales Tax feature records payments to government (DR Sales Tax Payable, CR Bank)
+- **Sales Tax** — Per-line taxable flag (defaults from the item and the customer) so untaxed labor and a taxed part share one invoice; the rate lives on the document. Sales Tax report shows the taxable base and tax collected. Pay Sales Tax feature records payments to government (DR Sales Tax Payable, CR Bank)
 - **General Ledger** — All journal entries grouped by account with debit/credit totals
 - **Income by Customer** — Sales totals per customer with invoice counts
 - **Customer Statements** — PDF statement with invoice/payment history and running balance
@@ -599,4 +599,13 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
   burden, allocations), time posted to jobs at loaded cost, budgets per code
   seeded from estimates, drill-down job page (budget / committed / actual /
   projected / variance), Job Budget vs Actual report.
+- Customizable overview: show / hide / reorder dashboard cards per user, a
+  catalog of cards (P&L this month vs last, cash position + 30-day forecast,
+  open POs, receipts to review, jobs budget vs actual), reset to standard.
+- Export parity: IIF export covers classes (list + CLASS column), Customer:Job
+  rows, bills, deposits and sales receipts; CSV export adds bills, deposits,
+  sales receipts, classes and jobs. Full export re-imports cleanly.
+- Accessibility: WCAG 2.1 AA posture ("strive to conform") — header scopes,
+  labelled icon buttons, live-region toasts, dialog focus management, AA
+  contrast, and tagged (PDF/UA-1) PDFs. See docs/accessibility.md.
 

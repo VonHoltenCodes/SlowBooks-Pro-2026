@@ -62,6 +62,7 @@ from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
 from app.routes import classes as classes_routes
 from app.routes import jobs as jobs_routes
+from app.routes import preferences as preferences_routes
 from app.routes import cost_codes as cost_codes_routes
 from app.routes import job_costing as job_costing_routes
 from app.routes import fx as fx_routes
@@ -99,8 +100,8 @@ from app.routes import saved_reports
 # Tier 1: Full payroll / HR system (onboarding, time entries, PTO)
 from app.routes import time_entries, pto, tax_forms
 
-# Tier 2: Advanced payroll (deductions and garnishments)
-from app.routes import deductions
+# Tier 2: garnishments + the benefits engine
+from app.routes import deductions, benefits
 
 # Tier 3: HR admin + employee self-service portal
 from app.routes import onboarding, portal
@@ -504,6 +505,7 @@ app.include_router(dashboard.router)
 app.include_router(accounts.router)
 app.include_router(classes_routes.router)
 app.include_router(jobs_routes.router)
+app.include_router(preferences_routes.router)
 app.include_router(cost_codes_routes.router)
 app.include_router(job_costing_routes.cost_types_router)
 app.include_router(job_costing_routes.equipment_router)
@@ -578,6 +580,7 @@ app.include_router(pto.router)
 
 # Tier 2: Advanced deductions, garnishments, and tax forms UI
 app.include_router(deductions.router)
+app.include_router(benefits.router)
 app.include_router(tax_forms.router)
 
 # Tier 3: Employee onboarding workflows + self-service portal

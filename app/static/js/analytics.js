@@ -176,7 +176,7 @@ const AnalyticsPage = {
     return `
             <div class="table-container">
                 <table>
-                    <thead><tr><th>Customer</th><th class="amount">Revenue</th></tr></thead>
+                    <thead><tr><th scope="col">Customer</th><th scope="col" class="amount">Revenue</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
             </div>
@@ -200,7 +200,7 @@ const AnalyticsPage = {
     return `
             <div class="table-container">
                 <table>
-                    <thead><tr><th>Category</th><th class="amount">Expense</th></tr></thead>
+                    <thead><tr><th scope="col">Category</th><th scope="col" class="amount">Expense</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
             </div>
@@ -269,12 +269,12 @@ const AnalyticsPage = {
                 <table>
                     <thead>
                         <tr>
-                            <th>${escapeHtml(nameHeader)}</th>
-                            <th class="amount">Current</th>
-                            <th class="amount">30+</th>
-                            <th class="amount">60+</th>
-                            <th class="amount">90+</th>
-                            <th class="amount">Total</th>
+                            <th scope="col">${escapeHtml(nameHeader)}</th>
+                            <th scope="col" class="amount">Current</th>
+                            <th scope="col" class="amount">30+</th>
+                            <th scope="col" class="amount">60+</th>
+                            <th scope="col" class="amount">90+</th>
+                            <th scope="col" class="amount">Total</th>
                         </tr>
                     </thead>
                     <tbody>${bodyRows}${totalsRow}</tbody>
@@ -307,10 +307,10 @@ const AnalyticsPage = {
                 <table>
                     <thead>
                         <tr>
-                            <th>Due by</th>
-                            <th class="amount">Expected Collections</th>
-                            <th class="amount">Expected Payments</th>
-                            <th class="amount">Net</th>
+                            <th scope="col">Due by</th>
+                            <th scope="col" class="amount">Expected Collections</th>
+                            <th scope="col" class="amount">Expected Payments</th>
+                            <th scope="col" class="amount">Net</th>
                         </tr>
                     </thead>
                     <tbody>${bodyRows}</tbody>

@@ -35,7 +35,7 @@ const TaxPage = {
         const container = $('#tax-results');
 
         let html = `<div class="table-container"><table>
-            <thead><tr><th>Tax Line</th><th>Account</th><th class="amount">Amount</th></tr></thead><tbody>`;
+            <thead><tr><th scope="col">Tax Line</th><th scope="col">Account</th><th scope="col" class="amount">Amount</th></tr></thead><tbody>`;
 
         for (const line of data.lines) {
             html += `<tr style="background:var(--toolbar-bg);"><td colspan="2" style="font-weight:700;font-size:11px;">${escapeHtml(line.line)}</td><td class="amount" style="font-weight:700;">${formatCurrency(line.total)}</td></tr>`;

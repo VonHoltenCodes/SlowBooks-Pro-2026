@@ -461,7 +461,7 @@ const SettingsPage = {
                 </td>
             </tr>`).join('');
             $('#users-list').innerHTML = `<div class="table-container"><table>
-                <thead><tr><th>Username</th><th>Name</th><th>Role</th><th>Last login</th><th></th></tr></thead>
+                <thead><tr><th scope="col">Username</th><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Last login</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
     },
@@ -493,7 +493,7 @@ const SettingsPage = {
                 </td>
             </tr>`).join('');
             $('#api-token-list').innerHTML = `<div class="table-container"><table>
-                <thead><tr><th>Label</th><th>Token</th><th>Role</th><th>Last used</th><th></th></tr></thead>
+                <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
     },
@@ -662,7 +662,7 @@ const SettingsPage = {
                 return;
             }
             el.innerHTML = `<div class="table-container"><table>
-                <thead><tr><th>Filename</th><th>Size</th><th>Created</th><th>Actions</th></tr></thead>
+                <thead><tr><th scope="col">Filename</th><th scope="col">Size</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead>
                 <tbody>${backups.map(b => `<tr>
                     <td>${escapeHtml(b.filename)}</td>
                     <td>${(b.file_size / 1024).toFixed(1)} KB</td>
@@ -693,7 +693,7 @@ const SettingsPage = {
                 return;
             }
             el.innerHTML = `<div class="table-container"><table>
-                <thead><tr><th>Name</th><th>Type</th><th>Subject</th><th>Actions</th></tr></thead>
+                <thead><tr><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Subject</th><th scope="col">Actions</th></tr></thead>
                 <tbody>${templates.map(t => `<tr>
                     <td><strong>${escapeHtml(t.name)}</strong></td>
                     <td>${escapeHtml(t.template_type)}</td>
@@ -972,7 +972,7 @@ SettingsPage.loadClasses = async function () {
     try {
         const classes = await API.get('/classes?include_archived=true');
         el.innerHTML = `<div class="table-container"><table>
-            <thead><tr><th>Name</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th scope="col">Name</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
             <tbody>` + classes.map(c => `<tr>
                 <td>${escapeHtml(c.name)}${c.is_system_default ? ' <span style="font-size:9px;color:var(--text-muted);">(default)</span>' : ''}</td>
                 <td>${c.is_archived ? 'Archived' : 'Active'}</td>
@@ -1030,7 +1030,7 @@ SettingsPage.loadCostCodes = async function () {
         const parentSel = document.getElementById('new-cc-parent');
         if (parentSel) parentSel.innerHTML = '<option value="">(top level)</option>' + codes.filter(c => c.is_active).map(c => `<option value="${c.id}">${'\u00a0\u00a0'.repeat(c.depth || 0)}${escapeHtml(c.label)}</option>`).join('');
         el.innerHTML = `<div class="table-container"><table>
-            <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Default account</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Default account</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
             <tbody>` + codes.map(c => `<tr>
                 <td style="padding-left:${8 + (c.depth || 0) * 16}px">${c.depth ? '<span style="color:#aaa">└ </span>' : ''}<code>${escapeHtml(c.code)}</code></td>
                 <td>${escapeHtml(c.name)}</td>
@@ -1129,7 +1129,11 @@ SettingsPage.loadCostTypes = async function () {
                 <td><code>${escapeHtml(t.code)}</code></td>
                 <td><input class="ct-name" value="${escapeHtml(t.name)}" style="width:130px"></td>
                 <td style="text-align:center"><input type="checkbox" class="ct-labor" ${t.is_labor ? 'checked' : ''}></td>
-                <td><input type="number" step="0.01" class="ct-burden" value="${t.burden_pct ?? ''}" style="width:70px" placeholder="%"></td>
+                <td><input type="number" step="0.01" class="ct-burden" value="${t.burden_pct ?? ''}" style="width:70px" placeholder="%" aria-label="Flat burden percent"></td>
+                <td>${t.is_labor ? `<select class="ct-burden-method" aria-label="Burden method" title="Flat: the % above posts with each time entry. Payroll: the pay run distributes actual employer taxes + job-routed benefit codes by hours — only for stubs built from time entries (Use approved time entries on the pay run); hours typed on a stub leave that employee's burden in the pool.">
+                    <option value="flat" ${t.burden_method !== 'payroll' ? 'selected' : ''}>Flat %</option>
+                    <option value="payroll" ${t.burden_method === 'payroll' ? 'selected' : ''}>Actual payroll</option>
+                </select>` : '—'}</td>
                 <td><select class="ct-default">${await SettingsPage._accountOptions(t.default_account_id)}</select></td>
                 <td><select class="ct-offset">${await SettingsPage._accountOptions(t.offset_account_id)}</select></td>
                 <td><select class="ct-burden-offset">${await SettingsPage._accountOptions(t.burden_offset_account_id)}</select></td>
@@ -1140,7 +1144,7 @@ SettingsPage.loadCostTypes = async function () {
             </tr>`);
         }
         el.innerHTML = `<div class="table-container"><table style="font-size:12px">
-            <thead><tr><th>Code</th><th>Name</th><th>Labor?</th><th>Burden %</th><th>Cost account</th><th>Offset account</th><th>Burden offset</th><th>Actions</th></tr></thead>
+            <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col">Labor?</th><th scope="col">Burden %</th><th scope="col">Burden method</th><th scope="col">Cost account</th><th scope="col">Offset account</th><th scope="col">Burden offset</th><th scope="col">Actions</th></tr></thead>
             <tbody>${rows.join('')}</tbody></table></div>`;
     } catch (err) {
         el.innerHTML = `<div style="color:var(--danger); font-size:11px;">${escapeHtml(err.message)}</div>`;
@@ -1157,6 +1161,7 @@ SettingsPage.saveCostType = async function (id) {
             name: tr.querySelector('.ct-name').value.trim(),
             is_labor: tr.querySelector('.ct-labor').checked,
             burden_pct: burden === '' ? null : parseFloat(burden),
+            burden_method: tr.querySelector('.ct-burden-method')?.value || undefined,
             default_account_id: sel('.ct-default'),
             offset_account_id: sel('.ct-offset'),
             burden_offset_account_id: sel('.ct-burden-offset'),
@@ -1204,7 +1209,7 @@ SettingsPage.loadEquipment = async function () {
         const list = await API.get('/equipment?include_inactive=true');
         if (!list.length) { el.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">No equipment yet.</div>'; return; }
         el.innerHTML = `<div class="table-container"><table>
-            <thead><tr><th>Code</th><th>Name</th><th class="amount">$/hr</th><th>Cost code</th><th>Status</th><th>Actions</th></tr></thead>
+            <thead><tr><th scope="col">Code</th><th scope="col">Name</th><th scope="col" class="amount">$/hr</th><th scope="col">Cost code</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
             <tbody>` + list.map(q => `<tr>
                 <td><code>${escapeHtml(q.code || '')}</code></td>
                 <td>${escapeHtml(q.name)}</td>

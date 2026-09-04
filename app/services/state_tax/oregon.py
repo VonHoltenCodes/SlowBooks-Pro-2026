@@ -63,7 +63,7 @@ def _tax_from_brackets(wage: Decimal, brackets) -> Decimal:
 
 class OregonEngine(StateEngine):
     state_code: str = "OR"
-    suta_wage_base: Decimal = Decimal("54300")
+    suta_wage_base: Decimal = Decimal("56700")
 
     def calculate(
         self,
@@ -74,7 +74,8 @@ class OregonEngine(StateEngine):
         pay_periods: int,
         hours: Decimal,
         filing_status: str,
-        wc_class_code: str | None
+        wc_class_code: str | None,
+        **_extra,
     ) -> StateTaxResult:
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()

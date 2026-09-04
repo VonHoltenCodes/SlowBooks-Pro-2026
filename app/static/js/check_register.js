@@ -40,8 +40,8 @@ const CheckRegisterPage = {
             <div style="margin-bottom:8px; font-weight:700;">${escapeHtml(data.account_name)} (${escapeHtml(data.account_number)})</div>
             <div class="table-container"><table>
                 <thead><tr>
-                    <th>Date</th><th>Description</th><th>Reference</th><th>Type</th>
-                    <th class="amount">Payment</th><th class="amount">Deposit</th><th class="amount">Balance</th>
+                    <th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th><th scope="col">Type</th>
+                    <th scope="col" class="amount">Payment</th><th scope="col" class="amount">Deposit</th><th scope="col" class="amount">Balance</th>
                 </tr></thead><tbody>`;
 
         for (const e of data.entries) {

@@ -7,6 +7,73 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### Export parity with import (#70)
+
+**What comes in from QuickBooks can go back out.** IIF export now writes
+everything the importer reads: the `!CLASS` list (names verbatim, archived
+as HIDDEN=Y), a `CLASS` column on every transaction block so a tag never
+falls off on the way out, jobs as `Customer:Job` rows, and three block
+types that were import-only since they were added — **bills**, **deposits**
+and **sales receipts** (`CASH SALE`). A full export re-imports into the same
+books with no errors and no duplicates. CSV export gained bills, deposits,
+sales receipts, classes and jobs, with class, job and cost code on every
+line. The IIF and Import/Export pages carry buttons for all of it.
+
+### Accessibility
+
+**Striving toward WCAG 2.1 AA.** The audit's six app findings are fixed:
+every table header declares its scope, icon-only remove and close buttons
+carry labels, toast notifications announce through a live region, modals
+are real dialogs (focus moves in, Tab stays inside, Escape closes, focus
+returns to what opened them), the reconciliation difference says
+"Balanced" or "Out of balance" in words rather than colour alone, and the
+muted text colour now clears the AA contrast ratio in both themes. The
+bigger gap was PDFs: every PDF the app produces — invoices, statements,
+pay stubs, W-2s, 1099s, 940/941, reports — is now **tagged (PDF/UA-1)** with
+a declared language and title, so a screen reader gets headings, tables
+and reading order instead of a picture of text. See
+[docs/accessibility.md](docs/accessibility.md) for the statement and the
+contact path; this is a commitment, not a compliance claim.
+
+### Sales tax per line
+
+**A labor line and a taxed part can share one invoice.** The invoice's tax
+rate used to apply to the whole subtotal, even though items already carried
+a taxable flag. Now every line on an invoice, estimate, sales receipt and
+recurring invoice has a **Tax** checkbox: it starts from the item's flag
+(and turns off for every line when the customer is marked non-taxable), you
+can flip it per line, the totals only tax the checked lines, the flag rides
+from an estimate into the invoice it becomes and from a recurring template
+onto every invoice it generates, the Sales Tax report's taxable base counts
+only taxed lines, and the PDF marks non-taxable lines when the document
+carries tax. Field report from an IT shop that repairs customer-owned
+devices (untaxed labor) and sells the part with install (taxed) on the
+same invoice.
+
+### Customizable overview
+
+**The Company Snapshot is yours to arrange.** A **Customize** button on the
+overview lets you hide any card, move cards up or down, and add cards from
+a catalog; **Save layout** remembers it for your login (each user on a
+Server Edition company gets their own; the single-password operator gets
+one shared layout), and **Reset** brings back the standard overview. The
+classic cards are all there — receivables, overdue invoices, active
+customers, payables, bank balances, A/R aging, monthly revenue, recent
+invoices and payments — and five new ones join the catalog:
+
+- **P&L: This Month vs Last** — income, expenses and net side by side.
+- **Cash Position** — cash on hand plus a 30-day forecast from receivables
+  and payables coming due (assumes customers pay on the due date).
+- **Open Purchase Orders** — committed but not yet billed, with the job.
+- **Receipts to Review** — scanned receipts waiting to become a bill or
+  expense, and how long before they expire.
+- **Jobs: Budget vs Actual** — active jobs ranked by projected variance,
+  each a click from its job page.
+
+Every card loads independently, so one card with a problem shows its
+error in place instead of taking the page down. The overdue-invoices card
+now names who owes what and by how many days.
+
 ### v2.7.0 — Jobs, job costing, and receipt intake
 
 The two most-requested features since Server Edition, each field-tested on

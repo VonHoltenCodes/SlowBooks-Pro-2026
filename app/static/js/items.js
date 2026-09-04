@@ -19,9 +19,9 @@ const ItemsPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th>Name</th><th>Type</th><th>Description</th>
-                    <th class="amount">Rate</th><th class="amount">Cost</th>
-                    <th class="amount">Qty on Hand</th><th>Actions</th>
+                    <th scope="col">Name</th><th scope="col">Type</th><th scope="col">Description</th>
+                    <th scope="col" class="amount">Rate</th><th scope="col" class="amount">Cost</th>
+                    <th scope="col" class="amount">Qty on Hand</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const item of items) {
                 const qtyCell = item.track_inventory
@@ -251,8 +251,8 @@ const ItemsPage = {
             </div>
             <div class="table-container" style="max-height:60vh;overflow:auto;"><table>
                 <thead><tr>
-                    <th>Date</th><th>Type</th><th class="amount">Qty</th><th class="amount">Unit Cost</th>
-                    <th class="amount">Bal Qty</th><th class="amount">Bal Avg</th><th>Source</th>
+                    <th scope="col">Date</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Unit Cost</th>
+                    <th scope="col" class="amount">Bal Qty</th><th scope="col" class="amount">Bal Avg</th><th scope="col">Source</th>
                 </tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>

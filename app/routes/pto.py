@@ -2,7 +2,9 @@
 # Paid time off — policies, per-employee accrual balances, time-off requests
 # ============================================================================
 
+from datetime import date
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -32,6 +34,23 @@ from app.services.pto_accrual import (
     compute_period_accrual,
     run_year_end_carryover,
 )
+from app.services import pto_liability
+
+_POLICY_FIELDS = (
+    "accrue_liability",
+    "valuation",
+    "expense_account_id",
+    "liability_account_id",
+    "pays_out_on_termination",
+)
+
+
+def _check_valuation(v: str):
+    if v not in ("current_rate", "average_rate"):
+        raise HTTPException(
+            status_code=400, detail="valuation must be current_rate or average_rate"
+        )
+
 
 router = APIRouter(prefix="/api/pto", tags=["pto"])
 
@@ -64,6 +83,9 @@ def update_policy(policy_id: int, data: PTOPolicyCreate, db: Session = Depends(g
     policy.accrual_rate = data.accrual_rate
     policy.max_carryover = data.max_carryover
     policy.max_balance = data.max_balance
+    _check_valuation(data.valuation)
+    for f in _POLICY_FIELDS:
+        setattr(policy, f, getattr(data, f))
     db.commit()
     db.refresh(policy)
     return policy
@@ -76,6 +98,7 @@ def create_policy(data: PTOPolicyCreate, db: Session = Depends(get_db)):
         method = AccrualMethod(data.accrual_method)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"Invalid value: {e}")
+    _check_valuation(data.valuation)
     policy = PTOPolicy(
         name=data.name,
         pto_type=pto_type,
@@ -83,6 +106,7 @@ def create_policy(data: PTOPolicyCreate, db: Session = Depends(get_db)):
         accrual_rate=data.accrual_rate,
         max_carryover=data.max_carryover,
         max_balance=data.max_balance,
+        **{f: getattr(data, f) for f in _POLICY_FIELDS},
     )
     db.add(policy)
     db.commit()
@@ -132,11 +156,15 @@ def create_accrual(data: PTOAccrualCreate, db: Session = Depends(get_db)):
 
 class AccrueRequest(BaseModel):
     hours_worked: float = 0  # required for per-hour-worked policies (e.g. WA sick)
+    as_of: Optional[date] = None  # posting date for the liability entry
 
 
 @router.post("/accruals/{accrual_id}/accrue", response_model=PTOAccrualResponse)
 def run_accrual(accrual_id: int, data: AccrueRequest, db: Session = Depends(get_db)):
-    """Apply one accrual cycle (a pay period, or an annual grant) to a balance."""
+    """Apply one accrual cycle (a pay period, or an annual grant) to a balance.
+    Hours actually added (after the max-balance cap) are valued at the
+    employee's current rate and, when the policy books a liability, posted
+    DR PTO expense / CR accrued PTO liability."""
     accrual = db.query(PTOAccrual).filter(PTOAccrual.id == accrual_id).first()
     if not accrual:
         raise HTTPException(status_code=404, detail="Accrual record not found")
@@ -145,14 +173,54 @@ def run_accrual(accrual_id: int, data: AccrueRequest, db: Session = Depends(get_
         raise HTTPException(status_code=404, detail="Policy not found")
 
     earned = compute_period_accrual(policy, Decimal(str(data.hours_worked or 0)))
+    old_balance = Decimal(str(accrual.balance or 0))
     new_balance = apply_accrual(
-        Decimal(str(accrual.balance or 0)),
+        old_balance,
         earned,
         Decimal("0"),
         Decimal(str(policy.max_balance)) if policy.max_balance is not None else None,
     )
     accrual.accrued_ytd = (accrual.accrued_ytd or 0) + earned
     accrual.balance = new_balance
+    emp = db.query(Employee).filter(Employee.id == accrual.employee_id).first()
+    try:
+        pto_liability.accrue_dollars(
+            db,
+            policy,
+            accrual,
+            emp,
+            new_balance - old_balance,
+            data.as_of or date.today(),
+        )
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    db.commit()
+    db.refresh(accrual)
+    return accrual
+
+
+class RevalueRequest(BaseModel):
+    as_of: Optional[date] = None
+
+
+@router.post("/accruals/{accrual_id}/revalue", response_model=PTOAccrualResponse)
+def revalue_accrual(
+    accrual_id: int, data: RevalueRequest = None, db: Session = Depends(get_db)
+):
+    """Restate the bank's dollars at hours × the employee's current rate
+    (after a raise). Posts the difference to the PTO liability."""
+    accrual = db.query(PTOAccrual).filter(PTOAccrual.id == accrual_id).first()
+    if not accrual:
+        raise HTTPException(status_code=404, detail="Accrual record not found")
+    policy = db.query(PTOPolicy).filter(PTOPolicy.id == accrual.policy_id).first()
+    emp = db.query(Employee).filter(Employee.id == accrual.employee_id).first()
+    when = (data.as_of if data else None) or date.today()
+    try:
+        pto_liability.revalue(db, policy, accrual, emp, when)
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
     db.commit()
     db.refresh(accrual)
     return accrual
@@ -236,9 +304,21 @@ def decide_request(
         )
         if accrual:
             hours = Decimal(str(req.hours or 0))
-            accrual.balance = max(
-                Decimal("0"), Decimal(str(accrual.balance or 0)) - hours
+            before = Decimal(str(accrual.balance or 0))
+            policy = (
+                db.query(PTOPolicy).filter(PTOPolicy.id == accrual.policy_id).first()
             )
+            emp = db.query(Employee).filter(Employee.id == req.employee_id).first()
+            try:
+                # dollars leave the bank for the hours that were actually in
+                # it, valued while the hours are still in the bank
+                pto_liability.relieve_dollars(
+                    db, policy, accrual, emp, min(hours, before), req.start_date
+                )
+            except ValueError as e:
+                db.rollback()
+                raise HTTPException(status_code=400, detail=str(e))
+            accrual.balance = max(Decimal("0"), before - hours)
             accrual.used_ytd = (accrual.used_ytd or 0) + hours
 
     db.commit()

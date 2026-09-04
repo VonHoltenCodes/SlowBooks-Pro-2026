@@ -659,6 +659,21 @@ class PickerApi:
             return {"success": False, "error": str(exc)}
         return {"success": True}
 
+    def open_external(self, url: str) -> dict:
+        """Open a URL in the user's default browser (employee portal links —
+        a separate cookie-based site that must NOT be rendered in a
+        document window, where its own links have no origin to resolve
+        against). http(s) only."""
+        try:
+            import webbrowser
+
+            if not re.match(r"^https?://", str(url or ""), re.IGNORECASE):
+                return {"success": False, "error": "Only http(s) URLs can be opened"}
+            webbrowser.open(str(url))
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True}
+
     def open_document_pdf(self, title: str, base64_data: str) -> dict:
         """Show an already-fetched PDF (base64-encoded by the caller) in a
         new native window, via a local temp file. Chromium's built-in PDF

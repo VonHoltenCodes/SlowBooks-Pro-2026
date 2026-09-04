@@ -78,7 +78,7 @@ const BankingPage = {
                     ${feed.last_sync ? `Last sync: ${escapeHtml(feed.last_sync.replace('T', ' '))}` : 'Not synced yet.'}
                 </p>
                 <div class="table-container"><table>
-                    <thead><tr><th>Bank feed</th><th class="amount">Balance</th><th>Imports into</th></tr></thead>
+                    <thead><tr><th scope="col">Bank feed</th><th scope="col" class="amount">Balance</th><th scope="col">Imports into</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>
                 <div class="form-actions" style="margin-top:12px;">
@@ -154,8 +154,8 @@ const BankingPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th>Date</th><th>Payee</th><th>Description</th><th>Check #</th>
-                    <th class="amount">Amount</th><th>Reconciled</th>
+                    <th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Description</th><th scope="col">Check #</th>
+                    <th scope="col" class="amount">Amount</th><th scope="col">Reconciled</th>
                 </tr></thead><tbody>`;
             for (const t of txns) {
                 const cls = t.amount >= 0 ? 'color:var(--success)' : 'color:var(--danger)';
@@ -332,10 +332,11 @@ const BankingPage = {
                 <div class="card"><div class="card-header">Cleared Balance</div>
                     <div class="card-value" id="recon-cleared">${formatCurrency(data.cleared_total)}</div></div>
                 <div class="card"><div class="card-header">Difference</div>
-                    <div class="card-value" id="recon-diff" style="color:${diffColor}">${formatCurrency(data.difference)}</div></div>
+                    <div class="card-value" id="recon-diff" style="color:${diffColor}">${formatCurrency(data.difference)}</div>
+                    <div style="font-size:11px; font-weight:600;" role="status">${Math.abs(data.difference) < 0.01 ? '\u2713 Balanced' : '\u26a0 Out of balance'}</div></div>
             </div>
             <div class="table-container"><table>
-                <thead><tr><th style="width:30px;"></th><th>Date</th><th>Payee / Description</th><th>Check #</th><th class="amount">Amount</th></tr></thead>
+                <thead><tr><th scope="col" style="width:30px;"></th><th scope="col">Date</th><th scope="col">Payee / Description</th><th scope="col">Check #</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${rows || '<tr><td colspan="5" style="text-align:center;">No transactions</td></tr>'}</tbody>
             </table></div>`;
     },
@@ -407,7 +408,7 @@ const BankingPage = {
                     ${data.account_id ? `Account: ${escapeHtml(data.account_id)}` : ''}
                 </div>
                 <div class="table-container" style="max-height:300px; overflow-y:auto;"><table>
-                    <thead><tr><th>Date</th><th>Payee</th><th class="amount">Amount</th><th>${isCsv ? 'Description' : 'FITID'}</th></tr></thead>
+                    <thead><tr><th scope="col">Date</th><th scope="col">Payee</th><th scope="col" class="amount">Amount</th><th scope="col">${isCsv ? 'Description' : 'FITID'}</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>
                 <div class="form-actions" style="margin-top:12px;">

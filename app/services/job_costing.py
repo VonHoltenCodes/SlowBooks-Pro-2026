@@ -429,6 +429,11 @@ def post_time_entry_to_job(db: Session, entry: TimeEntry) -> JobCost:
         if emp.burden_pct is not None
         else (labor.burden_pct if labor else None)
     )
+    # burden_method "payroll": the pay run distributes the ACTUAL employer
+    # taxes and job-routed benefit costs by hours (distribute_payroll_burden),
+    # so the flat percent is skipped here or the job would carry both.
+    if labor is not None and (labor.burden_method or "flat") == "payroll":
+        pct = None
     if pct and Decimal(str(pct)) > 0:
         burden = _q(base * Decimal(str(pct)) / Decimal("100"))
         if burden > 0:
@@ -455,6 +460,153 @@ def post_time_entry_to_job(db: Session, entry: TimeEntry) -> JobCost:
     db.flush()
     post_job_cost(db, jc)
     entry.job_cost_id = jc.id
+    return jc
+
+
+# ---------------------------------------------------------------------------
+# Payroll → actual labor burden on jobs (benefits engine seam)
+# ---------------------------------------------------------------------------
+
+
+def _cost_hours(te: TimeEntry) -> Decimal:
+    return (
+        Decimal(str(te.hours_regular or 0))
+        + Decimal(str(te.hours_overtime or 0)) * OT_MULT
+        + Decimal(str(te.hours_doubletime or 0)) * DT_MULT
+    )
+
+
+def _spread(total: Decimal, weights: dict) -> dict:
+    """Split `total` over weights (key → Decimal), cents-exact: the largest
+    weight absorbs the rounding remainder."""
+    denom = sum(weights.values(), Decimal("0"))
+    if denom <= 0 or total == 0:
+        return {}
+    out = {k: _q(total * w / denom) for k, w in weights.items()}
+    diff = _q(total - sum(out.values(), Decimal("0")))
+    if diff:
+        top = max(weights, key=lambda k: weights[k])
+        out[top] = _q(out[top] + diff)
+    return out
+
+
+def distribute_payroll_burden(db: Session, run) -> Optional[JobCost]:
+    """When the labor cost type's burden_method is "payroll", post one Job
+    Cost Entry that moves this run's actual labor burden onto jobs:
+
+      employer payroll taxes (SS, Medicare, FUTA, SUTA, state employer)
+      + employer-paid benefit codes routed "job_burden"
+
+    per employee, spread over the jobs their time entries in this run hit,
+    weighted by cost hours (OT 1.5×, DT 2×). Hours with no job keep their
+    share in the pool. Each line is DR job labor burden (tagged job + the
+    entry's cost code) / CR the account the payroll entry expensed it to
+    (payroll tax expense, or the code's expense account), so the P&L is
+    unchanged and the job carries the real cost. Returns None when the
+    method is "flat" or nothing distributes."""
+    types = cost_type_map(db)
+    labor = types.get("labor")
+    if labor is None or (labor.burden_method or "flat") != "payroll":
+        return None
+    from app.models.accounts import Account
+
+    tax_expense = (
+        db.query(Account).filter(Account.account_number == "6120").first()
+        or db.query(Account).filter(Account.account_number == "6000").first()
+    )
+    benefit_expense_fallback = (
+        db.query(Account).filter(Account.account_number == "6150").first()
+        or tax_expense
+    )
+    if tax_expense is None:
+        raise ValueError(
+            "No payroll tax expense account (6120) to distribute burden from"
+        )
+
+    jc = JobCost(
+        number=next_job_cost_number(db),
+        date=run.pay_date,
+        job_id=None,
+        memo=f"Payroll burden — pay run {run.id} ({run.period_start} to {run.period_end})",
+        source="payroll",
+    )
+    order = 0
+    any_line = False
+    for stub in run.stubs:
+        entries = (
+            db.query(TimeEntry)
+            .filter(
+                TimeEntry.pay_run_id == run.id,
+                TimeEntry.employee_id == stub.employee_id,
+            )
+            .all()
+        )
+        if not entries:
+            continue
+        weights: dict = {}
+        for te in entries:
+            h = _cost_hours(te)
+            if h <= 0:
+                continue
+            key = (te.job_id, te.cost_code_id)
+            weights[key] = weights.get(key, Decimal("0")) + h
+        if not weights:
+            continue
+        emp = stub.employee or db.get(Employee, stub.employee_id)
+        sources = []
+        taxes = (
+            Decimal(str(stub.employer_ss_tax or 0))
+            + Decimal(str(stub.employer_medicare_tax or 0))
+            + Decimal(str(stub.futa_tax or 0))
+            + Decimal(str(stub.suta_tax or 0))
+            + Decimal(str(stub.state_other_employer or 0))
+        )
+        if taxes > 0:
+            sources.append(("Employer payroll taxes", tax_expense.id, _q(taxes)))
+        for b in stub.benefits:
+            if (b.burden_routing or "fringe_pool") != "job_burden":
+                continue
+            amt = _q(Decimal(str(b.employer_amount or 0)))
+            if amt <= 0:
+                continue
+            sources.append(
+                (
+                    f"{b.name} ({b.code})",
+                    b.expense_account_id or benefit_expense_fallback.id,
+                    amt,
+                )
+            )
+        for label, credit_acct, amount in sources:
+            for (job_id, code_id), share in _spread(amount, weights).items():
+                if job_id is None or share == 0:
+                    continue  # the no-job share stays in the pool
+                code = db.get(CostCode, code_id) if code_id else None
+                debit, _credit = resolve_line_accounts(
+                    db, types, code, "labor", None, credit_acct, is_burden=True
+                )
+                jc.lines.append(
+                    JobCostLine(
+                        job_id=job_id,
+                        cost_code_id=code_id,
+                        cost_type="labor",
+                        description=f"{label} — {emp.full_name if emp else stub.employee_id}",
+                        quantity=1,
+                        rate=share,
+                        amount=share,
+                        debit_account_id=debit,
+                        credit_account_id=credit_acct,
+                        employee_id=stub.employee_id,
+                        is_burden=True,
+                        line_order=order,
+                    )
+                )
+                order += 1
+                any_line = True
+    if not any_line:
+        return None
+    db.add(jc)
+    db.flush()
+    post_job_cost(db, jc)
     return jc
 
 

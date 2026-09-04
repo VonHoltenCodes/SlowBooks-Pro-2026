@@ -11,6 +11,12 @@ class PTOPolicyCreate(BaseModel):
     accrual_rate: float = 0
     max_carryover: Optional[float] = None
     max_balance: Optional[float] = None
+    # Dollar liability
+    accrue_liability: bool = False
+    valuation: str = "current_rate"  # current_rate | average_rate
+    expense_account_id: Optional[int] = None
+    liability_account_id: Optional[int] = None
+    pays_out_on_termination: bool = False
 
 
 class PTOPolicyResponse(BaseModel):
@@ -21,6 +27,11 @@ class PTOPolicyResponse(BaseModel):
     accrual_rate: float = 0
     max_carryover: Optional[float] = None
     max_balance: Optional[float] = None
+    accrue_liability: bool = False
+    valuation: str = "current_rate"
+    expense_account_id: Optional[int] = None
+    liability_account_id: Optional[int] = None
+    pays_out_on_termination: bool = False
     is_active: bool = True
     model_config = {"from_attributes": True}
 
@@ -39,6 +50,7 @@ class PTOAccrualResponse(BaseModel):
     balance: float = 0
     accrued_ytd: float = 0
     used_ytd: float = 0
+    dollar_balance: float = 0
     model_config = {"from_attributes": True}
 
 

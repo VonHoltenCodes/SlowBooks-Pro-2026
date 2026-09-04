@@ -18,12 +18,7 @@ from app.models.payroll import (
     periods_per_year,
 )
 from app.models.time_entries import TimeEntry, TimeEntryStatus
-from app.models.deductions import (
-    EmployeeDeduction,
-    GarnishmentOrder,
-    DeductionCategory,
-    CalcMethod,
-)
+from app.models.deductions import GarnishmentOrder
 from app.models.accounts import Account
 from app.schemas.payroll import PayRunCreate, PayRunResponse
 from app.schemas.deductions import GrossUpRequest, GrossUpResponse
@@ -37,6 +32,7 @@ from app.services.garnishment import (
 )
 from app.services.gross_up import gross_up
 from app.services.state_tax.reciprocity import withholding_state
+from app.services import benefits_engine
 
 
 def _with_employee_names(run: PayRun) -> PayRunResponse:
@@ -72,41 +68,6 @@ def get_pay_run(run_id: int, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Pay run not found")
     return _with_employee_names(run)
-
-
-def _employee_deductions(db: Session, employee_id: int, gross: Decimal) -> tuple:
-    """Resolve an employee's configured recurring deductions for one period.
-
-    Returns (pretax_total, pretax_fica_total, posttax_total). pretax_total
-    reduces income-tax wages; pretax_fica_total is the cafeteria-plan / HSA
-    subset that also reduces FICA wages.
-    """
-    pretax = pretax_fica = posttax = Decimal("0")
-    rows = (
-        db.query(EmployeeDeduction)
-        .options(joinedload(EmployeeDeduction.deduction_type))
-        .filter(
-            EmployeeDeduction.employee_id == employee_id,
-            EmployeeDeduction.is_active,
-        )  # noqa: E712
-        .all()
-    )
-    for d in rows:
-        dt = d.deduction_type
-        if not dt or not dt.is_active:
-            continue
-        if d.calc_method == CalcMethod.PERCENT:
-            amt = gross * Decimal(str(d.amount or 0)) / Decimal("100")
-        else:
-            amt = Decimal(str(d.amount or 0))
-        amt = _q(amt)
-        if dt.category == DeductionCategory.PRETAX:
-            pretax += amt
-            if dt.reduces_fica:
-                pretax_fica += amt
-        else:
-            posttax += amt
-    return pretax, pretax_fica, posttax
 
 
 def _garnishment_specs(db: Session, employee_id: int) -> list:
@@ -171,6 +132,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
 
     year = data.pay_date.year
     total_gross = total_taxes = total_net = total_employer = Decimal("0")
+    total_employer_benefits = Decimal("0")
 
     for stub_input in data.stubs:
         emp = db.query(Employee).filter(Employee.id == stub_input.employee_id).first()
@@ -224,13 +186,6 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
 
         total_hours = reg + ot + dt
 
-        # Pre-tax / post-tax deductions: configured recurring ones plus any
-        # ad-hoc amounts passed on the request.
-        ded_pretax, ded_pretax_fica, ded_posttax = _employee_deductions(
-            db, emp.id, gross
-        )
-        pretax = ded_pretax + Decimal(str(stub_input.pretax_deductions or 0))
-        posttax = ded_posttax + Decimal(str(stub_input.posttax_deductions or 0))
         reimbursements = _q(Decimal(str(stub_input.reimbursements or 0)))
 
         # Multi-state: per-stub work location, with reciprocity deciding which
@@ -249,6 +204,25 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             else Decimal("0")
         )
 
+        # Benefits engine: every code attached to the employee (assignments,
+        # then the group), in sequence, at the rate in force on the period
+        # end date. Ad-hoc amounts on the request are added on top and
+        # treated as reducing income-tax wages (pre-tax) or nothing (post).
+        ben = benefits_engine.compute(
+            db,
+            emp,
+            gross,
+            total_hours,
+            data.period_start,
+            data.period_end,
+            year,
+            ytd_gross_before=ytd["gross"],
+        )
+        adhoc_pretax = _q(Decimal(str(stub_input.pretax_deductions or 0)))
+        adhoc_posttax = _q(Decimal(str(stub_input.posttax_deductions or 0)))
+        pretax = ben.pretax_total + adhoc_pretax
+        posttax = ben.posttax_total + adhoc_posttax
+
         result = calculate_withholdings(
             gross,
             pay_frequency=emp.pay_frequency.value if emp.pay_frequency else "biweekly",
@@ -262,9 +236,14 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             work_state=work_state,
             withholding_state=wh_state,
             wc_class_code=emp.wc_class_code,
+            state_allowances=emp.state_allowances or 0,
+            state_extra_withholding=emp.state_extra_withholding or 0,
+            state_rate_override=emp.state_rate_override,
+            local_tax_rate=emp.local_tax_rate,
             hours=total_hours,
-            pretax_deductions=pretax,
-            pretax_fica=ded_pretax_fica,
+            pretax_deductions=ben.pretax_federal + adhoc_pretax,
+            pretax_state=ben.pretax_state + adhoc_pretax,
+            pretax_fica=ben.pretax_fica,
             supplemental=bool(stub_input.supplemental),
             supplemental_method=stub_input.supplemental_method or "flat",
             regular_wages=regular_wages,
@@ -280,15 +259,37 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         )
         garnish_total = total_garnished(garn_results)
 
-        net = _q(result["net"] - posttax - garnish_total + reimbursements)
+        # Net: gross less every tax, every employee-side benefit amount
+        # (pre- and post-tax, engine and ad-hoc), garnishments; plus
+        # non-taxable reimbursements. Computed here rather than from the
+        # calculator's `net` because a pre-tax code that reduces only FICA
+        # still comes out of the check.
+        net = _q(
+            gross
+            - result["total_employee_tax"]
+            - pretax
+            - posttax
+            - garnish_total
+            + reimbursements
+        )
 
         detail = {k: str(v) for k, v in result["detail"].items()}
+        detail["pretax_deductions"] = str(pretax)
         for gr in garn_results:
             detail[f"garnishment:{gr.garnishment_type}:{gr.order_id}"] = str(gr.amount)
         if posttax:
             detail["posttax_deductions"] = str(posttax)
         if reimbursements:
             detail["reimbursements"] = str(reimbursements)
+        for ln in ben.lines:
+            if ln.employee_amount:
+                detail[f"benefit:{ln.code.code}"] = str(ln.employee_amount)
+            if ln.employer_amount:
+                detail[f"employer_benefit:{ln.code.code}"] = str(ln.employer_amount)
+        if adhoc_pretax:
+            detail["other_pretax_deductions"] = str(adhoc_pretax)
+        if adhoc_posttax:
+            detail["other_posttax_deductions"] = str(adhoc_posttax)
 
         stub = PayStub(
             pay_run_id=run.id,
@@ -314,10 +315,15 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             futa_tax=result["futa"],
             suta_tax=result["suta"],
             state_other_employer=result["state_other_employer"],
+            employer_benefits=ben.employer_total,
             detail_json=json.dumps(detail),
         )
         db.add(stub)
         db.flush()
+        # Snapshot the resolved rules + amounts on the stub and bump the
+        # YTD accumulators / loan balances.
+        benefits_engine.record_on_stub(db, stub, ben, year)
+        total_employer_benefits += ben.employer_total
 
         # Mark the consumed time entries so they cannot be paid twice.
         for te_id in time_entry_ids:
@@ -333,6 +339,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     run.total_gross = total_gross
     run.total_taxes = total_taxes
     run.total_employer_taxes = total_employer
+    run.total_employer_benefits = total_employer_benefits
     run.total_net = total_net
 
     db.commit()
@@ -347,7 +354,7 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
 
     run = (
         db.query(PayRun)
-        .options(joinedload(PayRun.stubs))
+        .options(joinedload(PayRun.stubs).joinedload(PayStub.benefits))
         .filter(PayRun.id == run_id)
         .first()
     )
@@ -384,6 +391,7 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
     futa_acct = _acct("2350", "2300")
     suta_acct = _acct("2360", "2300")
     other_acct = _acct("2370", "2300")
+    benefits_expense = _acct("6150", "6120") or payroll_tax_expense
 
     if not wage_expense or not bank:
         raise HTTPException(
@@ -401,13 +409,21 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
     total_medicare = _s("medicare_tax") + _s("employer_medicare_tax")
     total_futa = _s("futa_tax")
     total_suta = _s("suta_tax")
+    # Benefit codes post to their own liability (and expense) accounts; the
+    # ad-hoc pre/post-tax amounts typed on the stub have no code and stay in
+    # the umbrella "other deductions" payable with garnishments.
+    groups = benefits_engine.gl_groups(run)
+    adhoc_deductions = (
+        _s("pretax_deductions") + _s("posttax_deductions") - groups.employee_total
+    )
     total_other = (
         _s("state_other_employee")
         + _s("state_other_employer")
-        + _s("pretax_deductions")
-        + _s("posttax_deductions")
+        + adhoc_deductions
         + _s("garnishments")
+        + groups.unmapped_liability
     )
+    total_benefit_expense_unmapped = groups.unmapped_expense
     total_employer = (
         _s("employer_ss_tax")
         + _s("employer_medicare_tax")
@@ -446,6 +462,37 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
                 "description": "Employee reimbursements",
             }
         )
+    # Employer-paid benefits: DR each code's expense account (fringe pool)
+    for acct_id, amount in groups.expenses.items():
+        if amount > 0:
+            lines.append(
+                {
+                    "account_id": acct_id,
+                    "debit": amount,
+                    "credit": Decimal("0"),
+                    "description": "Employer benefit contributions",
+                }
+            )
+    if total_benefit_expense_unmapped > 0 and benefits_expense:
+        lines.append(
+            {
+                "account_id": benefits_expense,
+                "debit": total_benefit_expense_unmapped,
+                "credit": Decimal("0"),
+                "description": "Employer benefit contributions",
+            }
+        )
+    # Withheld + employer benefit amounts: CR each code's liability account
+    for acct_id, amount in groups.liabilities.items():
+        if amount > 0:
+            lines.append(
+                {
+                    "account_id": acct_id,
+                    "debit": Decimal("0"),
+                    "credit": amount,
+                    "description": "Benefit deductions & contributions payable",
+                }
+            )
 
     for amount, acct, desc in [
         (total_fed, fed, "Federal income tax withheld"),
@@ -478,12 +525,25 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
         )
         run.transaction_id = txn.id
 
+    # Job costing seam: when the labor cost type distributes actual burden,
+    # spread this run's employer taxes + job-routed benefit costs across the
+    # jobs the employees' time entries hit, by hours.
+    from app.services.job_costing import distribute_payroll_burden
+
+    try:
+        jc = distribute_payroll_burden(db, run)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if jc is not None:
+        run.burden_job_cost_id = jc.id
+
     run.status = PayRunStatus.PROCESSED
     db.commit()
     return {
         "status": "processed",
         "pay_run_id": run.id,
         "transaction_id": run.transaction_id,
+        "burden_job_cost_id": run.burden_job_cost_id,
     }
 
 
@@ -518,6 +578,10 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
             work_state=work_state,
             withholding_state=wh_state,
             wc_class_code=emp.wc_class_code,
+            state_allowances=emp.state_allowances or 0,
+            state_extra_withholding=emp.state_extra_withholding or 0,
+            state_rate_override=emp.state_rate_override,
+            local_tax_rate=emp.local_tax_rate,
             supplemental=bool(data.supplemental),
             ytd_supplemental=ytd_suppl,
         )["net"]

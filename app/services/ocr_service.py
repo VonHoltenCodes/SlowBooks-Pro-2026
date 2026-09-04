@@ -924,6 +924,34 @@ def delete_intake(intake_id: str) -> None:
             pass
 
 
+def list_intake() -> list[dict]:
+    """Unexpired intake entries (newest first): {intake_id, original_filename,
+    created_at, age_hours}. The dashboard's "Receipts to Review" card."""
+    base = _intake_dir()
+    now = datetime.now()
+    out = []
+    for meta_path in sorted(
+        base.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    ):
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            created = datetime.fromisoformat(meta["created_at"])
+        except (OSError, ValueError, KeyError, json.JSONDecodeError):
+            continue
+        age_h = (now - created).total_seconds() / 3600
+        if age_h > INTAKE_TTL_HOURS:
+            continue
+        out.append(
+            {
+                "intake_id": meta.get("intake_id"),
+                "original_filename": meta.get("original_filename", ""),
+                "created_at": meta["created_at"],
+                "age_hours": age_h,
+            }
+        )
+    return out
+
+
 def sweep_intake() -> int:
     """Expire >24h-old intakes, then enforce the file-count / byte caps.
     Returns how many were removed. Opportunistic: called on each save."""

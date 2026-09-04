@@ -9,6 +9,7 @@ from app.models.banking import BankAccount, BankTransaction, Reconciliation
 from app.models.settings import Settings
 from app.models.classes import TxnClass  # noqa: F401 — registers the table
 from app.models.jobs import Job  # noqa: F401 — registers the table
+from app.models.preferences import UserPreference  # noqa: F401 — registers the table
 from app.models.cost_codes import CostCode  # noqa: F401 — registers the table
 from app.models.job_costing import (  # noqa: F401 — registers the tables
     CostType,
@@ -55,7 +56,16 @@ from app.models.pto import PTOPolicy, PTOAccrual, PTORequest
 from app.models.bank_accounts import EmployeeBankAccount
 
 # Tier 2: deductions and garnishments
-from app.models.deductions import DeductionType, EmployeeDeduction, GarnishmentOrder
+from app.models.deductions import GarnishmentOrder
+from app.models.benefits import (
+    BenefitCode,
+    BenefitRate,
+    EmployeeGroup,
+    EmployeeGroupBenefit,
+    EmployeeBenefit,
+    BenefitYTD,
+    PayStubBenefit,
+)
 
 # Tier 3: HR onboarding
 from app.models.hr import OnboardingTask
@@ -122,8 +132,13 @@ __all__ = [
     "PTORequest",
     "EmployeeBankAccount",
     # Tier 2: deductions and garnishments
-    "DeductionType",
-    "EmployeeDeduction",
+    "BenefitCode",
+    "BenefitRate",
+    "EmployeeGroup",
+    "EmployeeGroupBenefit",
+    "EmployeeBenefit",
+    "BenefitYTD",
+    "PayStubBenefit",
     "GarnishmentOrder",
     # Tier 3: HR onboarding
     "OnboardingTask",

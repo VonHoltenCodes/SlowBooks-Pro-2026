@@ -44,7 +44,7 @@ const OpeningBalancesPage = {
                         <input type="text" id="ob-reference" placeholder="e.g. OB-2026"></div>
                 </div>
                 <div class="table-container" style="margin-top:8px;"><table>
-                    <thead><tr><th>Account</th><th class="amount">Opening Balance</th></tr></thead>
+                    <thead><tr><th scope="col">Account</th><th scope="col" class="amount">Opening Balance</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>
                 <div style="margin-top:12px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">

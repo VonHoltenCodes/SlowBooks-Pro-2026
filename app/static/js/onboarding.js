@@ -35,11 +35,11 @@ const OnboardingPage = {
 
         html += `<div class="table-container"><table>
             <thead><tr>
-                <th>Name</th>
-                <th class="amount">Complete</th>
-                <th class="amount">Total</th>
-                <th class="amount">%</th>
-                <th>Actions</th>
+                <th scope="col">Name</th>
+                <th scope="col" class="amount">Complete</th>
+                <th scope="col" class="amount">Total</th>
+                <th scope="col" class="amount">%</th>
+                <th scope="col">Actions</th>
             </tr></thead><tbody>`;
 
         for (let i = 0; i < emps.length; i++) {
@@ -116,7 +116,7 @@ const OnboardingPage = {
             <div class="table-container">
                 <table>
                     <thead><tr>
-                        <th>Task</th><th>Status</th><th>Signed</th><th>Actions</th>
+                        <th scope="col">Task</th><th scope="col">Status</th><th scope="col">Signed</th><th scope="col">Actions</th>
                     </tr></thead>
                     <tbody>${rows}</tbody>
                 </table>

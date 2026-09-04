@@ -116,10 +116,24 @@ class Employee(Base):
     residence_state = Column(String(2), nullable=True)
     # Workers' comp / WA L&I risk classification code.
     wc_class_code = Column(String(20), nullable=True)
+    # State W-4: allowances / exemptions claimed on the state certificate
+    # (IL-W-4 line 1, MI-W4, VA-4 ...), extra per-period state withholding,
+    # an elected rate for percentage states (Arizona A-4), and a flat local
+    # (county / city / school district) rate in percent where the state
+    # requires one (IN, MD, OH, PA, MI cities ...).
+    state_allowances = Column(Integer, nullable=False, default=0)
+    state_extra_withholding = Column(Numeric(12, 2), nullable=False, default=0)
+    state_rate_override = Column(Numeric(6, 3), nullable=True)
+    local_tax_rate = Column(Numeric(6, 3), nullable=True)
     # Job costing: loaded hourly cost (blank = pay rate; salary / 2080) and a
     # burden % that overrides the labor cost type's
     cost_rate = Column(Numeric(12, 2), nullable=True)
     burden_pct = Column(Numeric(6, 2), nullable=True)
+    # Benefits engine: the group (template) whose benefit codes apply to
+    # this employee unless an EmployeeBenefit assignment overrides them.
+    employee_group_id = Column(
+        Integer, ForeignKey("employee_groups.id"), nullable=True, index=True
+    )
 
     hire_date = Column(Date, nullable=True)
     is_active = Column(Boolean, default=True)
@@ -164,6 +178,7 @@ class Employee(Base):
         back_populates="employee",
         cascade="all, delete-orphan",
     )
+    employee_group = relationship("EmployeeGroup")
 
     @property
     def full_name(self) -> str:
@@ -184,7 +199,12 @@ class PayRun(Base):
     total_net = Column(Numeric(12, 2), default=0)
     total_taxes = Column(Numeric(12, 2), default=0)
     total_employer_taxes = Column(Numeric(12, 2), default=0)
+    # Employer-paid benefits (company cost, not withheld from anyone)
+    total_employer_benefits = Column(Numeric(12, 2), default=0)
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    # The Job Cost Entry that distributed this run's actual labor burden
+    # to jobs (labor cost type burden_method = "payroll")
+    burden_job_cost_id = Column(Integer, ForeignKey("job_costs.id"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -240,6 +260,9 @@ class PayStub(Base):
     futa_tax = Column(Numeric(12, 2), default=0)
     suta_tax = Column(Numeric(12, 2), default=0)
     state_other_employer = Column(Numeric(12, 2), default=0)  # WA PFML employer, L&I...
+    # Employer-paid benefit contributions for this stub (sum of the
+    # PayStubBenefit employer amounts)
+    employer_benefits = Column(Numeric(12, 2), default=0)
 
     # JSON blob with the fully itemized line-by-line breakdown, used to render
     # pay stubs and tax forms without re-running the calculator.
@@ -247,3 +270,10 @@ class PayStub(Base):
 
     pay_run = relationship("PayRun", back_populates="stubs")
     employee = relationship("Employee", back_populates="pay_stubs")
+    # Posted-run snapshot of every benefit code resolved for this stub
+    benefits = relationship(
+        "PayStubBenefit",
+        back_populates="pay_stub",
+        cascade="all, delete-orphan",
+        order_by="PayStubBenefit.sequence",
+    )

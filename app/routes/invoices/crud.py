@@ -23,6 +23,7 @@ from app.services.closing_date import check_closing_date
 
 from app.routes.invoices._router import router
 from app.routes.invoices.helpers import (
+    resolve_line_taxable,
     _due_date_from_terms,
     _compute_totals,
     _build_invoice_journal_lines,
@@ -84,6 +85,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
 
     # Parse terms for due date (explicit due_date wins; else derive from terms)
     due_date = data.due_date or _due_date_from_terms(data.date, data.terms)
+    resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
 
     # Capture every customer field we need post-flush, because we may have to
@@ -165,6 +167,9 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             job_id=line_data.job_id,
             class_id=line_data.class_id,
             cost_code_id=line_data.cost_code_id,
+            is_taxable=(
+                line_data.is_taxable if line_data.is_taxable is not None else True
+            ),
             line_order=line_data.line_order or i,
         )
         db.add(line)
@@ -305,6 +310,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         )
 
         if data.lines is not None:
+            resolve_line_taxable(db, data.lines, invoice.customer)
             db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).delete()
             db.flush()
             for i, line_data in enumerate(data.lines):
@@ -320,6 +326,11 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                             * Decimal(str(line_data.rate))
                         ),
                         class_name=line_data.class_name,
+                        is_taxable=(
+                            line_data.is_taxable
+                            if line_data.is_taxable is not None
+                            else True
+                        ),
                         line_order=line_data.line_order or i,
                     )
                 )

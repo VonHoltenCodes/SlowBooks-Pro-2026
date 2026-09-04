@@ -28,7 +28,7 @@ WA_CARES_RATE = Decimal("0.0058")  # employee-only, fraction of gross
 
 class WAEngine(StateEngine):
     state_code: str = "WA"
-    suta_wage_base: Decimal = Decimal("72800")
+    suta_wage_base: Decimal = Decimal("78200")
 
     def calculate(
         self,
@@ -39,7 +39,8 @@ class WAEngine(StateEngine):
         pay_periods: int,
         hours: Decimal,
         filing_status: str,
-        wc_class_code: str | None
+        wc_class_code: str | None,
+        **_extra,
     ) -> StateTaxResult:
         if gross <= 0 or taxable <= 0:
             return StateTaxResult()

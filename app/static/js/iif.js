@@ -44,6 +44,7 @@ const IIFPage = {
                         <button class="btn btn-secondary" onclick="IIFPage.exportSection('vendors')">Vendors</button>
                         <button class="btn btn-secondary" onclick="IIFPage.exportSection('items')">Items</button>
                         <button class="btn btn-secondary" onclick="IIFPage.exportSection('estimates')">Estimates</button>
+                        <button class="btn btn-secondary" onclick="IIFPage.exportSection('classes')">Classes</button>
                     </div>
 
                     <div style="margin-top:12px; padding-top:10px; border-top:1px solid var(--panel-border);">
@@ -59,6 +60,9 @@ const IIFPage = {
                         <div style="display:flex; gap:6px;">
                             <button class="btn btn-secondary" style="flex:1;" onclick="IIFPage.exportSection('invoices')">Invoices</button>
                             <button class="btn btn-secondary" style="flex:1;" onclick="IIFPage.exportSection('payments')">Payments</button>
+                            <button class="btn btn-secondary" style="flex:1;" onclick="IIFPage.exportSection('sales-receipts')">Sales Receipts</button>
+                            <button class="btn btn-secondary" style="flex:1;" onclick="IIFPage.exportSection('bills')">Bills</button>
+                            <button class="btn btn-secondary" style="flex:1;" onclick="IIFPage.exportSection('deposits')">Deposits</button>
                         </div>
                     </div>
                 </div>
@@ -171,7 +175,7 @@ const IIFPage = {
     exportSection(section) {
         let url = `/api/iif/export/${section}`;
         // Add date range for invoices/payments
-        if (section === 'invoices' || section === 'payments') {
+        if (['invoices', 'payments', 'sales-receipts', 'bills', 'deposits'].includes(section)) {
             const from = $('#iif-date-from')?.value;
             const to = $('#iif-date-to')?.value;
             const params = [];

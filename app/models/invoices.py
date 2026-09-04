@@ -137,6 +137,10 @@ class InvoiceLine(Base):
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
     cost_code_id = Column(Integer, ForeignKey("cost_codes.id"), nullable=True)
+    # Per-line sales tax (default: the item's flag, or taxable). A customer-
+    # owned-device repair is labor with no tax; the part on the same invoice
+    # is taxed.
+    is_taxable = Column(Boolean, nullable=False, default=True)
     line_order = Column(Integer, default=0)
 
     invoice = relationship("Invoice", back_populates="lines")

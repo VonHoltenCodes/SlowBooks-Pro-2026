@@ -3,6 +3,8 @@
  * Feature 17: Payroll basics
  */
 const EmployeesPage = {
+    _states: [],
+    _stateHint(code) { const st = EmployeesPage._states.find(x => x.code === (code || '').toUpperCase()); return st ? `${st.name}: ${st.summary}${st.uses_local_rate ? ' · needs a local rate' : ''}${st.uses_rate_election ? ' · elected rate' : ''}` : 'Type a 2-letter code; every state + DC is supported'; },
     async render() {
         const emps = await API.get('/employees');
         let html = `
@@ -15,7 +17,7 @@ const EmployeesPage = {
             html += '<div class="empty-state"><p>No employees added yet</p></div>';
         } else {
             html += `<div class="table-container"><table>
-                <thead><tr><th>Name</th><th>Pay Type</th><th class="amount">Rate</th><th>Status</th><th>Filing</th><th>Actions</th></tr></thead><tbody>`;
+                <thead><tr><th scope="col">Name</th><th scope="col">Pay Type</th><th scope="col" class="amount">Rate</th><th scope="col">Status</th><th scope="col">Filing</th><th scope="col">Actions</th></tr></thead><tbody>`;
             for (const e of emps) {
                 html += `<tr>
                     <td><strong>${escapeHtml(e.first_name)} ${escapeHtml(e.last_name)}</strong></td>
@@ -39,6 +41,7 @@ const EmployeesPage = {
             first_name: '', last_name: '', pay_type: 'hourly', pay_rate: 0,
             filing_status: 'single', hire_date: todayISO(),
             email: '', pay_frequency: 'biweekly', work_state: '', residence_state: '',
+            state_allowances: 0, state_extra_withholding: 0, state_rate_override: '', local_tax_rate: '',
             role: 'employee', manager_id: '',
             multiple_jobs: false, dependents_amount: 0, other_income_annual: 0,
             deductions_annual: 0, extra_withholding: 0,
@@ -47,6 +50,12 @@ const EmployeesPage = {
         };
         if (id) emp = await API.get(`/employees/${id}`);
 
+        const groups = await API.get('/benefits/groups').catch(() => []);
+        const states = await API.get('/payroll/states').catch(() => []);
+        EmployeesPage._states = states;
+        const stateHint = (code) => { const st = states.find(x => x.code === (code || '').toUpperCase()); return st ? `${st.name}: ${st.summary}${st.uses_local_rate ? ' · needs a local rate' : ''}${st.uses_rate_election ? ' · elected rate' : ''}` : 'Type a 2-letter code; every state + DC is supported'; };
+        const stateList = '<datalist id="state-codes">' + states.map(x => `<option value="${x.code}">${escapeHtml(x.name)} — ${escapeHtml(x.summary)}</option>`).join('') + '</datalist>';
+        const groupOpts = '<option value="">— none —</option>' + groups.map(g => `<option value="${g.id}" ${String(g.id) === String(emp.employee_group_id || '') ? 'selected' : ''}>${escapeHtml(g.name)}</option>`).join('');
         openModal(id ? 'Edit Employee' : 'Add Employee', `
             <form onsubmit="EmployeesPage.save(event, ${id})">
                 <div class="form-grid">
@@ -69,6 +78,8 @@ const EmployeesPage = {
                         <input name="cost_rate" type="number" step="0.01" value="${emp.cost_rate ?? ''}" placeholder="blank = pay rate (salary ÷ 2080)" title="Loaded hourly cost used when time posts to a job"></div>
                     <div class="form-group"><label>Burden %</label>
                         <input name="burden_pct" type="number" step="0.01" value="${emp.burden_pct ?? ''}" placeholder="blank = Labor cost type's" title="Overrides the labor cost type's burden % for this employee"></div>
+                    <div class="form-group"><label>Benefit group</label>
+                        <select name="employee_group_id" title="The group's benefit codes apply unless an enrollment overrides them">${groupOpts}</select></div>
                     <div class="form-group"><label>Pay Frequency</label>
                         <select name="pay_frequency">
                             <option value="biweekly" ${(emp.pay_frequency||'biweekly')==='biweekly'?'selected':''}>Bi-Weekly</option>
@@ -85,9 +96,19 @@ const EmployeesPage = {
                     <div class="form-group"><label>Hire Date</label>
                         <input name="hire_date" type="date" value="${emp.hire_date || ''}"></div>
                     <div class="form-group"><label>Work State</label>
-                        <input name="work_state" maxlength="2" placeholder="e.g. WA" value="${escapeHtml(emp.work_state || '')}"></div>
+                        <input name="work_state" maxlength="2" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.work_state || '')}" oninput="const h=document.getElementById('state-hint'); if(h) h.textContent=EmployeesPage._stateHint(this.value);">
+                        <small id="state-hint" style="color:var(--gray-400);">${escapeHtml(stateHint(emp.work_state))}</small></div>
                     <div class="form-group"><label>Residence State</label>
-                        <input name="residence_state" maxlength="2" placeholder="e.g. WA" value="${escapeHtml(emp.residence_state || '')}"></div>
+                        <input name="residence_state" maxlength="2" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.residence_state || '')}"></div>
+                    <div class="form-group"><label>State W-4 allowances</label>
+                        <input name="state_allowances" type="number" min="0" step="1" value="${emp.state_allowances ?? 0}" title="Exemptions claimed on the state certificate (IL-W-4 line 1, MI-W4, VA-4 …)"></div>
+                    <div class="form-group"><label>Extra state withholding ($/period)</label>
+                        <input name="state_extra_withholding" type="number" step="0.01" value="${emp.state_extra_withholding ?? 0}"></div>
+                    <div class="form-group"><label>Elected state rate (%)</label>
+                        <input name="state_rate_override" type="number" step="0.1" value="${emp.state_rate_override ?? ''}" placeholder="Arizona A-4 only" title="Percentage-election states (Arizona): the rate the employee chose"></div>
+                    <div class="form-group"><label>Local tax rate (%)</label>
+                        <input name="local_tax_rate" type="number" step="0.01" value="${emp.local_tax_rate ?? ''}" placeholder="county / city / school" title="Flat local income tax where the state requires one: Indiana and Maryland counties, Ohio cities, PA municipalities, Michigan cities"></div>
+                    ${stateList}
                     <div class="form-group"><label>Role</label>
                         <select name="role">
                             <option value="employee" ${(emp.role||'employee')==='employee'?'selected':''}>Employee</option>
@@ -147,6 +168,11 @@ const EmployeesPage = {
         data.pay_rate = parseFloat(data.pay_rate) || 0;
         data.cost_rate = data.cost_rate === '' || data.cost_rate === undefined ? null : parseFloat(data.cost_rate);
         data.burden_pct = data.burden_pct === '' || data.burden_pct === undefined ? null : parseFloat(data.burden_pct);
+        data.employee_group_id = data.employee_group_id ? parseInt(data.employee_group_id) : null;
+        data.state_allowances = parseInt(data.state_allowances) || 0;
+        data.state_extra_withholding = parseFloat(data.state_extra_withholding) || 0;
+        data.state_rate_override = data.state_rate_override === '' || data.state_rate_override === undefined ? null : parseFloat(data.state_rate_override);
+        data.local_tax_rate = data.local_tax_rate === '' || data.local_tax_rate === undefined ? null : parseFloat(data.local_tax_rate);
         data.dependents_amount = parseFloat(data.dependents_amount) || 0;
         data.other_income_annual = parseFloat(data.other_income_annual) || 0;
         data.deductions_annual = parseFloat(data.deductions_annual) || 0;
@@ -182,6 +208,7 @@ const EmployeesPage = {
                     <dt>Hire Date</dt><dd>${formatDate(emp.hire_date)}</dd>
                     <dt>Work State</dt><dd>${escapeHtml(emp.work_state || '—')}</dd>
                     <dt>Residence State</dt><dd>${escapeHtml(emp.residence_state || '—')}</dd>
+                    <dt>State W-4</dt><dd>${emp.state_allowances || 0} allowance(s)${emp.state_extra_withholding ? ` + ${formatCurrency(emp.state_extra_withholding)}/period extra` : ''}${emp.state_rate_override ? ` · elected ${emp.state_rate_override}%` : ''}${emp.local_tax_rate ? ` · local ${emp.local_tax_rate}%` : ''}</dd>
                     <dt>Role</dt><dd>${emp.role || '—'}</dd>
                     <dt>Manager ID</dt><dd>${emp.manager_id ?? '—'}</dd>
                     <dt>WC Class Code</dt><dd>${escapeHtml(emp.wc_class_code || '—')}</dd>
@@ -357,7 +384,8 @@ const EmployeesPage = {
             ? 'style="color:#c0392b;font-weight:600"' : '';
 
         let html = `
-            <p style="margin:0 0 4px 0">Portal URL: <a href="${escapeHtml(url)}" target="_blank">${escapeHtml(url)}</a></p>
+            <p style="margin:0 0 4px 0">Portal URL: <a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>
+                <span style="font-size:11px;color:var(--gray-400);">opens in the employee's browser — the address must be reachable from where they are (this machine only for a desktop install; the LAN or your public name for Server Edition)</span></p>
             <p style="font-size:12px;color:#666;margin:0 0 4px 0">
                 <span ${expiryClass}>Expires ${expires ? expires.toISOString().slice(0,10) : 'never'}${daysUntilExpiry !== null ? ` (${daysUntilExpiry} days)` : ''}</span>
                 &nbsp;·&nbsp;
@@ -374,7 +402,7 @@ const EmployeesPage = {
                 <details style="margin-top:10px">
                     <summary style="cursor:pointer;font-size:12px;color:#336699">Recent access (${access.length} most recent)</summary>
                     <table class="data-table" style="margin-top:6px;font-size:11px">
-                        <thead><tr><th>When</th><th>IP</th><th>Path</th><th>OK?</th></tr></thead>
+                        <thead><tr><th scope="col">When</th><th scope="col">IP</th><th scope="col">Path</th><th scope="col">OK?</th></tr></thead>
                         <tbody>
                         ${access.map(a => `
                             <tr style="${a.success ? '' : 'color:#c0392b'}">
@@ -442,7 +470,7 @@ const EmployeesPage = {
             const ytd = await API.get(`/employees/${id}/ytd`);
             el.innerHTML = `
                 <table>
-                    <thead><tr><th>Gross</th><th class="amount">Federal</th><th class="amount">State</th><th class="amount">SS</th><th class="amount">Medicare</th><th class="amount">Net</th></tr></thead>
+                    <thead><tr><th scope="col">Gross</th><th scope="col" class="amount">Federal</th><th scope="col" class="amount">State</th><th scope="col" class="amount">SS</th><th scope="col" class="amount">Medicare</th><th scope="col" class="amount">Net</th></tr></thead>
                     <tbody><tr>
                         <td class="amount">${formatCurrency(ytd.gross)}</td>
                         <td class="amount">${formatCurrency(ytd.federal)}</td>
@@ -467,7 +495,7 @@ const EmployeesPage = {
                 html = '<p class="text-muted">No bank accounts on file.</p>';
             } else {
                 html = `<table>
-                    <thead><tr><th>Nickname</th><th>Kind</th><th>Account</th><th>Deposit Type</th><th>Actions</th></tr></thead>
+                    <thead><tr><th scope="col">Nickname</th><th scope="col">Kind</th><th scope="col">Account</th><th scope="col">Deposit Type</th><th scope="col">Actions</th></tr></thead>
                     <tbody>`;
                 for (const acct of accounts) {
                     html += `<tr>
@@ -558,7 +586,7 @@ const EmployeesPage = {
                 html = '<p class="text-muted">No documents on file.</p>';
             } else {
                 html = `<table>
-                    <thead><tr><th>Filename</th><th>Category</th><th>Size</th><th>Uploaded</th><th>Actions</th></tr></thead>
+                    <thead><tr><th scope="col">Filename</th><th scope="col">Category</th><th scope="col">Size</th><th scope="col">Uploaded</th><th scope="col">Actions</th></tr></thead>
                     <tbody>`;
                 for (const doc of docs) {
                     html += `<tr>

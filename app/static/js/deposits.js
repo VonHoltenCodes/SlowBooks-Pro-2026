@@ -39,9 +39,9 @@ const DepositsPage = {
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr>
-                    <th style="width:30px;"><input type="checkbox" id="dep-select-all" onchange="DepositsPage.toggleAll()"></th>
-                    <th>Date</th><th>Description</th><th>Reference</th><th>Source</th>
-                    <th class="amount">Amount</th>
+                    <th scope="col" style="width:30px;"><input type="checkbox" id="dep-select-all" onchange="DepositsPage.toggleAll()"></th>
+                    <th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th><th scope="col">Source</th>
+                    <th scope="col" class="amount">Amount</th>
                 </tr></thead><tbody>`;
             for (const p of pending) {
                 html += `<tr>

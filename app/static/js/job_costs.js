@@ -40,7 +40,7 @@ const JobCostsPage = {
             </div>
             ${entries.length === 0 ? `<div class="empty-state"><p>No job cost entries yet.</p></div>` : `
             <div class="table-container"><table>
-                <thead><tr><th>#</th><th>Date</th><th>Job</th><th>Source</th><th>Memo</th><th class="amount">Total</th><th>Status</th></tr></thead>
+                <thead><tr><th scope="col">#</th><th scope="col">Date</th><th scope="col">Job</th><th scope="col">Source</th><th scope="col">Memo</th><th scope="col" class="amount">Total</th><th scope="col">Status</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>`}`;
     },
@@ -78,7 +78,7 @@ const JobCostsPage = {
                     Pick equipment to charge its hourly rate; pick an employee for internal labor (enter the hours and loaded rate). Leave the accounts blank to use the cost code's / cost type's defaults.
                 </div>
                 <div class="table-container"><table class="line-items-table">
-                    <thead><tr><th>Cost code</th><th>Type</th><th>Description</th><th>Employee / Equipment</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th><th>Cost acct</th><th>Offset acct</th><th title="Billable">Bill?</th><th></th></tr></thead>
+                    <thead><tr><th scope="col">Cost code</th><th scope="col">Type</th><th scope="col">Description</th><th scope="col">Employee / Equipment</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col">Cost acct</th><th scope="col">Offset acct</th><th scope="col" title="Billable">Bill?</th><th scope="col"></th></tr></thead>
                     <tbody id="jc-lines">${JobCostsPage.lineHtml(0)}</tbody>
                 </table></div>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="JobCostsPage.addLine()">+ Add Line</button>
@@ -109,7 +109,7 @@ const JobCostsPage = {
             <td><select class="jc-debit" style="max-width:150px">${acctOpts}</select></td>
             <td><select class="jc-credit" style="max-width:150px">${acctOpts}</select></td>
             <td style="text-align:center"><input type="checkbox" class="jc-billable"></td>
-            <td><button type="button" class="btn btn-sm btn-danger" onclick="this.closest('tr').remove();JobCostsPage.recalc()">X</button></td>
+            <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JobCostsPage.recalc()">X</button></td>
         </tr>`;
     },
 
@@ -263,7 +263,7 @@ const JobCostsPage = {
                 </div>
             </div>
             <div class="table-container"><table class="data-table" style="font-size:12px">
-                <thead><tr><th>Job</th><th>Cost code</th><th>Type</th><th>Description</th><th class="amount">Qty</th><th class="amount">Rate</th><th class="amount">Amount</th><th>Cost / offset</th></tr></thead>
+                <thead><tr><th scope="col">Job</th><th scope="col">Cost code</th><th scope="col">Type</th><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th><th scope="col">Cost / offset</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>`);
     },

@@ -4,7 +4,7 @@
  */
 const App = {
     routes: {
-        '/':              { page: 'dashboard',       label: 'Dashboard',          render: () => App.renderDashboard() },
+        '/':              { page: 'dashboard',       label: 'Dashboard',          render: () => DashboardPage.render() },
         '/customers':     { page: 'customers',       label: 'Customer Center',    render: () => CustomersPage.render() },
         '/jobs':          { page: 'jobs',            label: 'Jobs',               render: () => JobsPage.render() },
         '/jobs/:id':      { page: 'jobs',            label: 'Job',                render: (id) => JobsPage.renderDetail(id) },
@@ -44,7 +44,8 @@ const App = {
         '/hr/onboarding':   { page: 'hr-onboarding',   label: 'Onboarding',       render: () => OnboardingPage.render() },
         '/hr/time-entries': { page: 'hr-time-entries', label: 'Time Entries',      render: () => TimeEntriesPage.render() },
         '/hr/pto':          { page: 'hr-pto',           label: 'Time Off',         render: () => PTOPage.render() },
-        '/hr/deductions':   { page: 'hr-deductions',   label: 'Deductions',        render: () => DeductionsPage.render() },
+        '/hr/benefits':     { page: 'hr-benefits',     label: 'Benefits',          render: () => BenefitsPage.render() },
+        '/hr/deductions':   { page: 'hr-deductions',   label: 'Garnishments',      render: () => DeductionsPage.render() },
         '/hr/tax-forms':    { page: 'hr-tax-forms',    label: 'Tax Forms',         render: () => TaxFormsPage.render() },
         '/reseller-permits':{ page: 'reseller-permits',label: 'Reseller Permits', render: () => ResellerPermitsPage.render() },
         // Phase 9: Analytics (real-time business intelligence)
@@ -146,145 +147,6 @@ const App = {
         }
     },
 
-    async renderDashboard() {
-        const data = await API.get('/dashboard');
-
-        let recentInv = data.recent_invoices.map(inv =>
-            `<tr>
-                <td><strong>${escapeHtml(inv.invoice_number)}</strong></td>
-                <td>${formatDate(inv.date)}</td>
-                <td>${statusBadge(inv.status)}</td>
-                <td class="amount">${formatCurrency(inv.total)}</td>
-            </tr>`
-        ).join('') || '<tr><td colspan="4" style="color:var(--text-muted); font-size:11px;">No invoices yet &mdash; use Create Invoice to get started</td></tr>';
-
-        let recentPay = data.recent_payments.map(p =>
-            `<tr>
-                <td>${formatDate(p.date)}</td>
-                <td>${escapeHtml(p.method || '')}</td>
-                <td class="amount">${formatCurrency(p.amount)}</td>
-            </tr>`
-        ).join('') || '<tr><td colspan="3" style="color:var(--text-muted); font-size:11px;">No payments recorded yet</td></tr>';
-
-        let bankCards = data.bank_balances.map(ba =>
-            `<div class="card" style="cursor:pointer" onclick="App.navigate('#/banking')">
-                <div class="card-header">${escapeHtml(ba.name)}</div>
-                <div class="card-value">${formatCurrency(ba.balance)}</div>
-            </div>`
-        ).join('');
-
-        if (!bankCards) {
-            bankCards = `<div class="card">
-                <div class="card-header">No Bank Accounts</div>
-                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-                    Go to Banking to set up an account</div>
-            </div>`;
-        }
-
-        // Feature 3: Dashboard Charts
-        let chartsHtml = '';
-        try {
-            const charts = await API.get('/dashboard/charts');
-            // AR Aging Bar Chart
-            const agingTotal = (charts.aging_current || 0) + (charts.aging_30 || 0) + (charts.aging_60 || 0) + (charts.aging_90 || 0);
-            if (agingTotal > 0) {
-                const pctCurrent = ((charts.aging_current / agingTotal) * 100).toFixed(1);
-                const pct30 = ((charts.aging_30 / agingTotal) * 100).toFixed(1);
-                const pct60 = ((charts.aging_60 / agingTotal) * 100).toFixed(1);
-                const pct90 = ((charts.aging_90 / agingTotal) * 100).toFixed(1);
-                chartsHtml += `
-                    <div class="dashboard-section">
-                        <h3>AR Aging</h3>
-                        <div class="chart-bar-container">
-                            <div class="chart-bar" style="display:flex; height:28px; border-radius:4px; overflow:hidden;">
-                                ${pctCurrent > 0 ? `<div style="width:${pctCurrent}%; background:var(--success);" title="Current: ${formatCurrency(charts.aging_current)}"></div>` : ''}
-                                ${pct30 > 0 ? `<div style="width:${pct30}%; background:var(--qb-gold);" title="1-30 days: ${formatCurrency(charts.aging_30)}"></div>` : ''}
-                                ${pct60 > 0 ? `<div style="width:${pct60}%; background:#f97316;" title="31-60 days: ${formatCurrency(charts.aging_60)}"></div>` : ''}
-                                ${pct90 > 0 ? `<div style="width:${pct90}%; background:var(--danger);" title="61+ days: ${formatCurrency(charts.aging_90)}"></div>` : ''}
-                            </div>
-                            <div class="chart-legend" style="display:flex; gap:12px; margin-top:6px; font-size:10px;">
-                                <span><span style="color:var(--success);">&#9632;</span> Current ${formatCurrency(charts.aging_current)}</span>
-                                <span><span style="color:var(--qb-gold);">&#9632;</span> 1-30 ${formatCurrency(charts.aging_30)}</span>
-                                <span><span style="color:#f97316;">&#9632;</span> 31-60 ${formatCurrency(charts.aging_60)}</span>
-                                <span><span style="color:var(--danger);">&#9632;</span> 61+ ${formatCurrency(charts.aging_90)}</span>
-                            </div>
-                        </div>
-                    </div>`;
-            }
-
-            // Monthly Revenue Trend
-            if (charts.monthly_revenue && charts.monthly_revenue.length > 0) {
-                const maxRev = Math.max(...charts.monthly_revenue.map(m => m.amount), 1);
-                const bars = charts.monthly_revenue.map(m => {
-                    const pct = Math.max((m.amount / maxRev) * 100, 2);
-                    return `<div class="chart-bar-col" style="flex:1; text-align:center;">
-                        <div style="height:100px; display:flex; align-items:flex-end; justify-content:center;">
-                            <div style="width:80%; background:var(--qb-blue); height:${pct}%; border-radius:2px 2px 0 0;"
-                                 title="${m.month}: ${formatCurrency(m.amount)}"></div>
-                        </div>
-                        <div style="font-size:9px; color:var(--text-muted); margin-top:4px;">${m.month}</div>
-                    </div>`;
-                }).join('');
-                chartsHtml += `
-                    <div class="dashboard-section">
-                        <h3>Monthly Revenue (Last 12 Months)</h3>
-                        <div style="display:flex; gap:2px; align-items:flex-end;">${bars}</div>
-                    </div>`;
-            }
-        } catch (e) { /* charts endpoint not available yet — that's fine */ }
-
-        return `
-            <div class="page-header">
-                <h2>Company Snapshot</h2>
-                <div style="font-size:10px; color:var(--text-muted);">
-                    Slowbooks Pro 2026
-                </div>
-            </div>
-
-            <div class="card-grid">
-                <div class="card">
-                    <div class="card-header">Total Receivables</div>
-                    <div class="card-value">${formatCurrency(data.total_receivables)}</div>
-                </div>
-                <div class="card">
-                    <div class="card-header">Overdue Invoices</div>
-                    <div class="card-value" ${data.overdue_count > 0 ? 'style="color:var(--qb-red)"' : ''}>${data.overdue_count}</div>
-                </div>
-                <div class="card">
-                    <div class="card-header">Active Customers</div>
-                    <div class="card-value">${data.customer_count}</div>
-                </div>
-                ${data.total_payables !== undefined ? `<div class="card">
-                    <div class="card-header">Total Payables</div>
-                    <div class="card-value">${formatCurrency(data.total_payables)}</div>
-                </div>` : ''}
-            </div>
-
-            <div class="dashboard-section">
-                <h3>Bank Balances</h3>
-                <div class="card-grid">${bankCards}</div>
-            </div>
-
-            ${chartsHtml}
-
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:16px;">
-                <div class="dashboard-section">
-                    <h3>Recent Invoices</h3>
-                    <div class="table-container"><table>
-                        <thead><tr><th>#</th><th>Date</th><th>Status</th><th class="amount">Total</th></tr></thead>
-                        <tbody>${recentInv}</tbody>
-                    </table></div>
-                </div>
-                <div class="dashboard-section">
-                    <h3>Recent Payments</h3>
-                    <div class="table-container"><table>
-                        <thead><tr><th>Date</th><th>Method</th><th class="amount">Amount</th></tr></thead>
-                        <tbody>${recentPay}</tbody>
-                    </table></div>
-                </div>
-            </div>`;
-    },
-
     async renderAccounts() {
         const accounts = await API.get('/accounts');
         const grouped = {};
@@ -303,7 +165,7 @@ const App = {
                 <button class="btn btn-primary" onclick="App.showAccountForm()">New Account</button>
             </div>
             <div class="table-container"><table>
-                <thead><tr><th style="width:80px;">Number</th><th>Name</th><th style="width:100px;">Type</th><th class="amount" style="width:100px;">Balance</th><th style="width:60px;">Actions</th></tr></thead>
+                <thead><tr><th scope="col" style="width:80px;">Number</th><th scope="col">Name</th><th scope="col" style="width:100px;">Type</th><th scope="col" class="amount" style="width:100px;">Balance</th><th scope="col" style="width:60px;">Actions</th></tr></thead>
                 <tbody>`;
 
         for (const type of typeOrder) {
@@ -417,6 +279,11 @@ const App = {
                         <a href="/api/csv/export/vendors" class="btn btn-secondary" download>Export Vendors</a>
                         <a href="/api/csv/export/items" class="btn btn-secondary" download>Export Items</a>
                         <a href="/api/csv/export/invoices" class="btn btn-secondary" download>Export Invoices</a>
+                        <a href="/api/csv/export/bills" class="btn btn-secondary" download>Export Bills</a>
+                        <a href="/api/csv/export/sales-receipts" class="btn btn-secondary" download>Export Sales Receipts</a>
+                        <a href="/api/csv/export/deposits" class="btn btn-secondary" download>Export Deposits</a>
+                        <a href="/api/csv/export/classes" class="btn btn-secondary" download>Export Classes</a>
+                        <a href="/api/csv/export/jobs" class="btn btn-secondary" download>Export Jobs</a>
                         <a href="/api/csv/export/accounts" class="btn btn-secondary" download>Export Chart of Accounts</a>
                     </div>
                 </div>
@@ -496,7 +363,7 @@ const App = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th><th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="qe-lines">
                         <tr data-qeline="0">
                             <td><select class="line-item" onchange="App.qeItemSelected(0)"><option value="">--</option>${itemOpts}</select></td>

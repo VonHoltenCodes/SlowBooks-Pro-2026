@@ -13,15 +13,30 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.accounts import Account
 from app.models.invoices import Invoice
-from app.routes.invoices.crud import create_invoice, get_invoice
+from app.routes.invoices.crud import create_invoice, get_invoice, list_invoices
 from app.routes.invoices.helpers import _compute_totals
 from app.routes.invoices.lifecycle import void_invoice
 from app.routes.payments import create_payment
-from app.schemas.invoices import InvoiceCreate
+from app.schemas.invoices import InvoiceCreate, InvoiceResponse
 from app.schemas.payments import PaymentAllocationCreate, PaymentCreate
 from app.schemas.sales_receipts import SalesReceiptCreate, SalesReceiptResponse
 
 router = APIRouter(prefix="/api/sales-receipts", tags=["sales-receipts"])
+
+
+@router.get("", response_model=list[InvoiceResponse])
+def list_sales_receipts(
+    customer_id: int = None,
+    skip: int = 0,
+    limit: int = 500,
+    db: Session = Depends(get_db),
+):
+    """Sales receipts are invoices paid on the spot; this is the invoice
+    list filtered to them, so an API client (or agent) can enumerate
+    receipts without knowing the flag. Found missing by the BYO-AI seed."""
+    return list_invoices(
+        customer_id=customer_id, is_sales_receipt=True, skip=skip, limit=limit, db=db
+    )
 
 
 @router.post("", response_model=SalesReceiptResponse, status_code=201)

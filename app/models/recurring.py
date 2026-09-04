@@ -66,6 +66,10 @@ class RecurringInvoiceLine(Base):
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)
     rate = Column(Numeric(12, 2), default=0)
+    # Per-line sales tax (default: the item's flag, or taxable). A customer-
+    # owned-device repair is labor with no tax; the part on the same invoice
+    # is taxed.
+    is_taxable = Column(Boolean, nullable=False, default=True)
     line_order = Column(Integer, default=0)
 
     recurring_invoice = relationship("RecurringInvoice", back_populates="lines")

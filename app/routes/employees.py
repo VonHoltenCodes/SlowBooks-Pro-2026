@@ -7,7 +7,16 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+    File,
+    Form,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -112,8 +121,17 @@ def update_employee(emp_id: int, data: EmployeeUpdate, db: Session = Depends(get
 
 
 # --- Self-service portal access -------------------------------------------
+def _portal_url(request: Request, token: str) -> str:
+    """Absolute portal link. The employee opens this in THEIR browser (or
+    their phone), so it must carry the host the server is reachable on —
+    127.0.0.1 on a desktop install, the LAN address on Server Edition, the
+    public name behind a reverse proxy (X-Forwarded-* is honoured through
+    request.base_url when the proxy is trusted)."""
+    return f"{str(request.base_url).rstrip('/')}/portal/{token}"
+
+
 @router.get("/{emp_id}/portal-token")
-def get_portal_token(emp_id: int, db: Session = Depends(get_db)):
+def get_portal_token(request: Request, emp_id: int, db: Session = Depends(get_db)):
     """Return the employee's self-service portal token, minting one if absent."""
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
@@ -124,7 +142,7 @@ def get_portal_token(emp_id: int, db: Session = Depends(get_db)):
     return {
         "employee_id": emp.id,
         "portal_token": emp.portal_token,
-        "portal_url": f"/portal/{emp.portal_token}",
+        "portal_url": _portal_url(request, emp.portal_token),
         "expires_at": _iso_utc(emp.portal_token_expires_at),
         "last_used_at": _iso_utc(emp.portal_token_last_used),
     }
@@ -239,7 +257,9 @@ def list_portal_access(
 
 
 @router.post("/{emp_id}/portal-token")
-def regenerate_portal_token(emp_id: int, db: Session = Depends(get_db)):
+def regenerate_portal_token(
+    request: Request, emp_id: int, db: Session = Depends(get_db)
+):
     """Rotate the portal token (invalidates the previous self-service link)."""
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
@@ -249,7 +269,7 @@ def regenerate_portal_token(emp_id: int, db: Session = Depends(get_db)):
     return {
         "employee_id": emp.id,
         "portal_token": emp.portal_token,
-        "portal_url": f"/portal/{emp.portal_token}",
+        "portal_url": _portal_url(request, emp.portal_token),
         "expires_at": _iso_utc(emp.portal_token_expires_at),
     }
 

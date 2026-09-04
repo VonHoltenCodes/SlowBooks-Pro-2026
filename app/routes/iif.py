@@ -11,6 +11,7 @@
 # ============================================================================
 
 from datetime import date, datetime
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from fastapi.responses import Response
@@ -19,14 +20,18 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.schemas.iif import IIFImportResult, IIFValidationReport
 from app.services.iif_export import (
-    export_all,
     export_accounts,
+    export_all,
+    export_bills,
+    export_classes,
     export_customers,
-    export_vendors,
-    export_items,
-    export_invoices,
-    export_payments,
+    export_deposits,
     export_estimates,
+    export_invoices,
+    export_items,
+    export_payments,
+    export_sales_receipts,
+    export_vendors,
 )
 from app.services.iif_import import import_all, validate_iif
 from app.services.upload_limits import read_limited
@@ -68,6 +73,42 @@ def export_all_iif(db: Session = Depends(get_db)):
 def export_accounts_iif(db: Session = Depends(get_db)):
     content = export_accounts(db)
     return _iif_response(content, "accounts.iif")
+
+
+@router.get("/export/classes")
+def export_classes_iif(db: Session = Depends(get_db)):
+    content = export_classes(db)
+    return _iif_response(content, "classes.iif")
+
+
+@router.get("/export/bills")
+def export_bills_iif(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: Session = Depends(get_db),
+):
+    content = export_bills(db, date_from, date_to)
+    return _iif_response(content, "bills.iif")
+
+
+@router.get("/export/deposits")
+def export_deposits_iif(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: Session = Depends(get_db),
+):
+    content = export_deposits(db, date_from, date_to)
+    return _iif_response(content, "deposits.iif")
+
+
+@router.get("/export/sales-receipts")
+def export_sales_receipts_iif(
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+    db: Session = Depends(get_db),
+):
+    content = export_sales_receipts(db, date_from, date_to)
+    return _iif_response(content, "sales_receipts.iif")
 
 
 @router.get("/export/customers")

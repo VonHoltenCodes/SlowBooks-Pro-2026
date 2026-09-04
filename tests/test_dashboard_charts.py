@@ -1,4 +1,4 @@
-"""Regression tests for /api/dashboard/charts.
+"""Regression tests for the monthly_revenue dashboard widget (/api/dashboard/data).
 
 Covers the monthly_revenue fix: previously summed Invoice.total, which
 made non-invoice income (W-2 deposits, paychecks, journal-entered
@@ -85,12 +85,12 @@ def test_monthly_revenue_picks_up_journal_credits_to_income(
         contra_account_id=asset_id,
     )
 
-    resp = client.get("/api/dashboard/charts")
+    resp = client.get("/api/dashboard/data?ids=monthly_revenue")
     assert resp.status_code == 200, resp.text
     payload = resp.json()
 
     assert "monthly_revenue" in payload
-    months = payload["monthly_revenue"]
+    months = payload["monthly_revenue"]["months"]
     assert len(months) == 12, "monthly_revenue must always have 12 entries"
     # Current month is the LAST slot in the response, per the back-counting
     # loop in the route handler.
@@ -128,9 +128,9 @@ def test_monthly_revenue_ignores_invoice_balance_due(
     )
     db_session.commit()
 
-    resp = client.get("/api/dashboard/charts")
+    resp = client.get("/api/dashboard/data?ids=monthly_revenue")
     assert resp.status_code == 200
-    months = resp.json()["monthly_revenue"]
+    months = resp.json()["monthly_revenue"]["months"]
     current = months[-1]
     assert current["amount"] == 0.0, (
         "Draft invoice should not contribute to monthly_revenue — "
@@ -143,9 +143,9 @@ def test_monthly_revenue_zero_fills_missing_months(
     seed_accounts,
 ):
     """With no journal activity, every month is present with amount=0."""
-    resp = client.get("/api/dashboard/charts")
+    resp = client.get("/api/dashboard/data?ids=monthly_revenue")
     assert resp.status_code == 200
-    months = resp.json()["monthly_revenue"]
+    months = resp.json()["monthly_revenue"]["months"]
     assert len(months) == 12
     for entry in months:
         assert "month" in entry and "amount" in entry
@@ -179,7 +179,7 @@ def test_monthly_revenue_excludes_credits_to_non_income_accounts(
         contra_account_id=asset.id,
     )
 
-    resp = client.get("/api/dashboard/charts")
+    resp = client.get("/api/dashboard/data?ids=monthly_revenue")
     assert resp.status_code == 200
-    months = resp.json()["monthly_revenue"]
+    months = resp.json()["monthly_revenue"]["months"]
     assert months[-1]["amount"] == 0.0

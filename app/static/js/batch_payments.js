@@ -43,7 +43,7 @@ const BatchPaymentsPage = {
         if (Object.keys(byCustomer).length === 0) {
             html += '<div class="empty-state"><p>No open invoices to pay</p></div>';
         } else {
-            html += '<div class="table-container"><table><thead><tr><th></th><th>Invoice</th><th>Customer</th><th>Due</th><th class="amount">Balance</th><th class="amount">Payment</th></tr></thead><tbody>';
+            html += '<div class="table-container"><table><thead><tr><th scope="col"></th><th scope="col">Invoice</th><th scope="col">Customer</th><th scope="col">Due</th><th scope="col" class="amount">Balance</th><th scope="col" class="amount">Payment</th></tr></thead><tbody>';
             for (const [cname, invs] of Object.entries(byCustomer)) {
                 html += `<tr style="background:var(--toolbar-bg);"><td colspan="6" style="font-weight:700;font-size:11px;padding:3px 10px;">${escapeHtml(cname)}</td></tr>`;
                 for (const inv of invs) {

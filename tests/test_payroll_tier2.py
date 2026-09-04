@@ -168,8 +168,8 @@ def _run_and_process(client, emp_id, **stub_extra):
 # ---------------------------------------------------------------------------
 # Integration — deduction types and employee deductions
 # ---------------------------------------------------------------------------
-def test_seed_standard_deduction_types(client):
-    r = client.post("/api/deductions/types/seed-standard")
+def test_seed_standard_benefit_codes(client, seed_accounts):
+    r = client.post("/api/benefits/codes/seed-standard")
     assert r.status_code == 200, r.text
     codes = {t["code"] for t in r.json()}
     assert {"401K", "HSA", "SEC125", "ROTH401K"} <= codes
@@ -177,17 +177,22 @@ def test_seed_standard_deduction_types(client):
 
 def test_employee_401k_deduction_applied_to_pay_run(client, db_session, seed_accounts):
     emp = _create_employee(client)
-    types = client.post("/api/deductions/types/seed-standard").json()
+    types = client.post("/api/benefits/codes/seed-standard").json()
     k401 = next(t for t in types if t["code"] == "401K")
-    client.post(
-        "/api/deductions/employee",
+    # the standard 401(k) is percent-of-gross; a fixed election is a code
+    # of its own (calc method lives on the code, the rate on the enrollment)
+    client.put(
+        f"/api/benefits/codes/{k401['id']}", json={"calc_method": "fixed_amount"}
+    )
+    r = client.post(
+        "/api/benefits/enrollments",
         json={
             "employee_id": emp["id"],
-            "deduction_type_id": k401["id"],
-            "calc_method": "fixed",
-            "amount": 300,
+            "benefit_code_id": k401["id"],
+            "employee_rate": 300,
         },
     )
+    assert r.status_code == 201, r.text
     run, _ = _run_and_process(client, emp["id"])
     stub = run["stubs"][0]
     assert stub["pretax_deductions"] == 300.0
@@ -273,15 +278,17 @@ def test_pay_run_with_deduction_garnishment_reimbursement_balances(
     client, db_session, seed_accounts
 ):
     emp = _create_employee(client)
-    types = client.post("/api/deductions/types/seed-standard").json()
+    types = client.post("/api/benefits/codes/seed-standard").json()
     k401 = next(t for t in types if t["code"] == "401K")
+    client.put(
+        f"/api/benefits/codes/{k401['id']}", json={"calc_method": "fixed_amount"}
+    )
     client.post(
-        "/api/deductions/employee",
+        "/api/benefits/enrollments",
         json={
             "employee_id": emp["id"],
-            "deduction_type_id": k401["id"],
-            "calc_method": "fixed",
-            "amount": 200,
+            "benefit_code_id": k401["id"],
+            "employee_rate": 200,
         },
     )
     client.post(

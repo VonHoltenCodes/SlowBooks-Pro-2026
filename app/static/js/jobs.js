@@ -122,13 +122,13 @@ const JobsPage = {
             </tr>`;
         }).join('');
         return `<div class="table-container"><table>
-            <thead><tr><th>Customer</th><th>Job</th><th>Status</th>
-            <th class="amount" title="Original budget + changes">Budget</th>
-            <th class="amount" title="Open purchase orders not yet billed">Committed</th>
-            <th class="amount" title="Posted job-to-date cost">Actual</th>
-            <th class="amount" title="Actual + committed">Projected</th>
-            <th class="amount" title="Budget − projected (positive = under)">Variance</th>
-            <th class="amount">% Used</th><th class="amount">Revenue</th><th></th></tr></thead>
+            <thead><tr><th scope="col">Customer</th><th scope="col">Job</th><th scope="col">Status</th>
+            <th scope="col" class="amount" title="Original budget + changes">Budget</th>
+            <th scope="col" class="amount" title="Open purchase orders not yet billed">Committed</th>
+            <th scope="col" class="amount" title="Posted job-to-date cost">Actual</th>
+            <th scope="col" class="amount" title="Actual + committed">Projected</th>
+            <th scope="col" class="amount" title="Budget − projected (positive = under)">Variance</th>
+            <th scope="col" class="amount">% Used</th><th scope="col" class="amount">Revenue</th><th scope="col"></th></tr></thead>
             <tbody>${rows}</tbody>
             <tfoot><tr style="font-weight:700; background:var(--gray-50);">
                 <td colspan="3">Total (${jobs.length})</td>
@@ -274,7 +274,7 @@ const JobsPage = {
                 <div>
                     <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">By cost type — click a row to drill down</h4>
                     <div class="table-container"><table class="data-table" style="font-size:12px">
-                        <thead><tr><th>Type</th><th class="amount">Budget</th><th class="amount">Committed</th><th class="amount">Actual</th><th class="amount">Projected</th><th class="amount">Variance</th><th class="amount">% Used</th></tr></thead>
+                        <thead><tr><th scope="col">Type</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th><th scope="col" class="amount">Actual</th><th scope="col" class="amount">Projected</th><th scope="col" class="amount">Variance</th><th scope="col" class="amount">% Used</th></tr></thead>
                         <tbody>${typeRows || '<tr><td colspan="7" style="color:#888">Nothing budgeted or posted yet.</td></tr>'}</tbody>
                     </table></div>
                 </div>
@@ -304,17 +304,17 @@ const JobsPage = {
                 <p style="font-size:12px;color:#888">Tag a bill, expense, time entry or job cost entry to it, or set a budget on the Budget tab.</p></div>`;
         }
         const head = `<thead><tr>
-            <th style="min-width:260px">Cost type › code</th>
-            <th class="amount" title="Original budget">Original</th>
-            <th class="amount" title="Budget changes">Changes</th>
-            <th class="amount" title="Original + changes">Budget</th>
-            <th class="amount" title="Open POs">Committed</th>
-            <th class="amount" title="Posted cost">Actual</th>
-            <th class="amount" title="Actual + committed">Projected</th>
-            <th class="amount" title="Budget − projected">Variance</th>
-            <th class="amount">% Used</th>
-            <th class="amount" title="Estimated revenue (from the estimate / budget)">Est. Rev</th>
-            <th class="amount" title="Invoiced revenue on this code">Act. Rev</th>
+            <th scope="col" style="min-width:260px">Cost type › code</th>
+            <th scope="col" class="amount" title="Original budget">Original</th>
+            <th scope="col" class="amount" title="Budget changes">Changes</th>
+            <th scope="col" class="amount" title="Original + changes">Budget</th>
+            <th scope="col" class="amount" title="Open POs">Committed</th>
+            <th scope="col" class="amount" title="Posted cost">Actual</th>
+            <th scope="col" class="amount" title="Actual + committed">Projected</th>
+            <th scope="col" class="amount" title="Budget − projected">Variance</th>
+            <th scope="col" class="amount">% Used</th>
+            <th scope="col" class="amount" title="Estimated revenue (from the estimate / budget)">Est. Rev</th>
+            <th scope="col" class="amount" title="Invoiced revenue on this code">Act. Rev</th>
         </tr></thead>`;
         let body = '';
         for (const ty of tree.types) {
@@ -473,7 +473,7 @@ const JobsPage = {
                 <span style="color:#888;font-size:11px">Cost = qty × unit cost (or the line amount when no cost is entered); revenue = the line amount. Rows you edit here become manual and survive re-seeding.</span>
             </div>
             <div class="table-container"><table class="data-table" style="font-size:12px">
-                <thead><tr><th>Cost code</th><th>Budget cost</th><th>Est. revenue</th><th>Source</th></tr></thead>
+                <thead><tr><th scope="col">Cost code</th><th scope="col">Budget cost</th><th scope="col">Est. revenue</th><th scope="col">Source</th></tr></thead>
                 <tbody>
                     ${codeRows || '<tr><td colspan="4" style="color:#888">No cost codes yet — add them under Settings → Cost Codes, or budget by type below.</td></tr>'}
                     <tr><td colspan="4" style="background:var(--gray-50);font-weight:600;font-size:11px">By cost type</td></tr>
@@ -526,7 +526,7 @@ const JobsPage = {
             <td class="amount">${l.kind === 'cost' ? formatCurrency(l.amount) : ''}</td>
         </tr>`).join('');
         return `<div class="table-container"><table class="data-table" style="font-size:12px">
-            <thead><tr><th>Date</th><th>Source</th><th>Account</th><th>Memo</th><th class="amount">Income</th><th class="amount">Cost</th></tr></thead>
+            <thead><tr><th scope="col">Date</th><th scope="col">Source</th><th scope="col">Account</th><th scope="col">Memo</th><th scope="col" class="amount">Income</th><th scope="col" class="amount">Cost</th></tr></thead>
             <tbody>${rows}</tbody></table></div>`;
     },
 
@@ -547,7 +547,7 @@ const JobsPage = {
             ${unposted.length ? `<div style="margin-bottom:8px"><button class="btn btn-sm btn-primary" onclick="JobsPage.postTime([${unposted.map(e => e.id).join(',')}])">Post ${unposted.length} approved entr${unposted.length === 1 ? 'y' : 'ies'} to this job</button>
                 <span style="font-size:11px;color:#888">Labor posts at the employee's loaded cost rate with burden as its own line.</span></div>` : ''}
             <div class="table-container"><table class="data-table" style="font-size:12px">
-                <thead><tr><th>Date</th><th>Employee</th><th>Cost code</th><th class="amount">Reg</th><th class="amount">OT</th><th class="amount">DT</th><th>Status</th><th>Job cost</th></tr></thead>
+                <thead><tr><th scope="col">Date</th><th scope="col">Employee</th><th scope="col">Cost code</th><th scope="col" class="amount">Reg</th><th scope="col" class="amount">OT</th><th scope="col" class="amount">DT</th><th scope="col">Status</th><th scope="col">Job cost</th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
     },
 

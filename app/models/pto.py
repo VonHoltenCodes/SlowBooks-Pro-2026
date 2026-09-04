@@ -61,9 +61,24 @@ class PTOPolicy(Base):
     max_balance = Column(Numeric(10, 2), nullable=True)
     is_active = Column(Boolean, default=True)
 
+    # Dollar liability. Accrual books DR PTO expense / CR accrued PTO
+    # liability as hours are earned and relieves it when they are taken, so
+    # a bank carries an hours balance AND a dollar balance (they diverge
+    # when wage rates change). valuation decides how the relief and the
+    # optional revaluation are priced:
+    #   current_rate  the employee's rate today (liability revalues on raises)
+    #   average_rate  the bank's own dollars ÷ hours (historical cost)
+    accrue_liability = Column(Boolean, nullable=False, default=False)
+    valuation = Column(String(20), nullable=False, default="current_rate")
+    expense_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    liability_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
+    pays_out_on_termination = Column(Boolean, nullable=False, default=False)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     accruals = relationship("PTOAccrual", back_populates="policy")
+    expense_account = relationship("Account", foreign_keys=[expense_account_id])
+    liability_account = relationship("Account", foreign_keys=[liability_account_id])
 
 
 class PTOAccrual(Base):
@@ -78,6 +93,8 @@ class PTOAccrual(Base):
     balance = Column(Numeric(10, 2), default=0)
     accrued_ytd = Column(Numeric(10, 2), default=0)
     used_ytd = Column(Numeric(10, 2), default=0)
+    # Dollar value of `balance` under the policy's valuation
+    dollar_balance = Column(Numeric(12, 2), nullable=False, default=0)
 
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

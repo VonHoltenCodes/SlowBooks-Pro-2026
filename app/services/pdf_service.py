@@ -79,6 +79,20 @@ def _safe_url_fetcher(url, timeout=10, ssl_context=None):
     raise ValueError(f"URL scheme not allowed in PDF templates: {url!r}")
 
 
+def render_pdf(html_str: str) -> bytes:
+    """Every PDF the app produces goes through here. PDF/UA-1 makes the
+    output *tagged* — headings, tables and reading order are exposed to
+    screen readers instead of a flat picture of text — which is what makes
+    a W-2 or an invoice readable to a blind user. Falls back to a plain PDF
+    if the installed WeasyPrint can't do the variant, so a render never
+    fails on an environment quirk."""
+    doc = HTML(string=html_str, url_fetcher=_safe_url_fetcher)
+    try:
+        return doc.write_pdf(pdf_variant="pdf/ua-1")
+    except Exception:  # pragma: no cover - older WeasyPrint / font edge cases
+        return doc.write_pdf()
+
+
 def _format_currency(value):
     try:
         v = float(value or 0)
@@ -102,13 +116,13 @@ _jinja_env.filters["fdate"] = _format_date
 def generate_invoice_pdf(invoice, company_settings: dict) -> bytes:
     template = _jinja_env.get_template("invoice_pdf.html")
     html_str = template.render(inv=invoice, company=company_settings)
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)
 
 
 def generate_estimate_pdf(estimate, company_settings: dict) -> bytes:
     template = _jinja_env.get_template("estimate_pdf.html")
     html_str = template.render(est=estimate, company=company_settings)
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)
 
 
 def generate_statement_pdf(
@@ -122,7 +136,7 @@ def generate_statement_pdf(
         company=company_settings,
         as_of_date=as_of_date,
     )
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)
 
 
 def generate_analytics_pdf(
@@ -136,7 +150,7 @@ def generate_analytics_pdf(
         company=company_settings,
         company_logo_data_uri=_company_logo_data_uri(company_settings),
     )
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)
 
 
 def _amount_to_words(amount) -> str:
@@ -220,14 +234,14 @@ def generate_collection_letter_pdf(
         total_due=total_due,
         today=_date.today(),
     )
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)
 
 
 def generate_check_pdf(check_data: dict, company_settings: dict) -> bytes:
     template = _jinja_env.get_template("check_pdf.html")
     check_data["amount_words"] = _amount_to_words(check_data.get("amount", 0))
     html_str = template.render(check=check_data, company=company_settings)
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)
 
 
 def generate_report_pdf(sections: list, company_settings: dict) -> bytes:
@@ -246,4 +260,4 @@ def generate_report_pdf(sections: list, company_settings: dict) -> bytes:
         paper_size=(company_settings.get("pdf_paper_size") or "letter").lower(),
         generated_on=date.today().isoformat(),
     )
-    return HTML(string=html_str, url_fetcher=_safe_url_fetcher).write_pdf()
+    return render_pdf(html_str)

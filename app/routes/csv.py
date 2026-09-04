@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services import csv_export
 from app.services.csv_export import (
     export_customers,
     export_vendors,
@@ -48,6 +49,33 @@ def _csv_response(csv_data: str, filename: str, request: Request) -> Response:
 def csv_export_customers(request: Request, db: Session = Depends(get_db)):
     csv_data = export_customers(db)
     return _csv_response(csv_data, "customers.csv", request)
+
+
+@router.get("/export/classes")
+def csv_export_classes(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export.export_classes(db), "classes.csv", request)
+
+
+@router.get("/export/jobs")
+def csv_export_jobs(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export.export_jobs(db), "jobs.csv", request)
+
+
+@router.get("/export/bills")
+def csv_export_bills(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export.export_bills(db), "bills.csv", request)
+
+
+@router.get("/export/deposits")
+def csv_export_deposits(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(csv_export.export_deposits(db), "deposits.csv", request)
+
+
+@router.get("/export/sales-receipts")
+def csv_export_sales_receipts(request: Request, db: Session = Depends(get_db)):
+    return _csv_response(
+        csv_export.export_sales_receipts(db), "sales_receipts.csv", request
+    )
 
 
 @router.get("/export/vendors")

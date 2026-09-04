@@ -57,7 +57,7 @@ const AuditPage = {
 
         let html = `<div class="table-container"><table>
             <thead><tr>
-                <th>Time</th><th>User</th><th>Table</th><th>ID</th><th>Action</th><th>Changes</th>
+                <th scope="col">Time</th><th scope="col">User</th><th scope="col">Table</th><th scope="col">ID</th><th scope="col">Action</th><th scope="col">Changes</th>
             </tr></thead><tbody>`;
 
         for (const log of logs) {

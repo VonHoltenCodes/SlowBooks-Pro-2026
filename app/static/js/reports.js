@@ -32,7 +32,7 @@ const ReportsPage = {
                             ${escapeHtml(s.report_type.replace(/_/g, ' '))}
                             ${s.parameters && s.parameters.start_date ? '· ' + escapeHtml(s.parameters.start_date) + ' → ' + escapeHtml(s.parameters.end_date || '') : ''}
                         </p>
-                        <button class="btn btn-sm btn-secondary"
+                        <button aria-label="Delete saved report" class="btn btn-sm btn-secondary"
                                 style="position:absolute; top:8px; right:8px;"
                                 onclick="event.stopPropagation(); ReportsPage.deleteSaved(${s.id})"
                                 title="Delete saved report">×</button>
@@ -204,8 +204,8 @@ const ReportsPage = {
                 </p>
                 <div class="table-container"><table>
                     <thead><tr>
-                        <th>Date</th><th>Ref</th><th>Description</th><th>Source</th>
-                        <th class="amount">Debit</th><th class="amount">Credit</th><th class="amount">Running</th>
+                        <th scope="col">Date</th><th scope="col">Ref</th><th scope="col">Description</th><th scope="col">Source</th>
+                        <th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th><th scope="col" class="amount">Running</th>
                     </tr></thead>
                     <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No entries in range</td></tr>'}</tbody>
                 </table></div>`;
@@ -424,7 +424,7 @@ const ReportsPage = {
             return `${pdfBtn}
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th>Account</th><th class="amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Account</th><th scope="col" class="amount">Amount</th></tr></thead>
                     <tbody>
                         <tr><td><strong>Income</strong></td><td></td></tr>
                         ${section(data.income)}
@@ -457,7 +457,7 @@ const ReportsPage = {
             return `${pdfBtn}
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th>Account</th><th class="amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Account</th><th scope="col" class="amount">Amount</th></tr></thead>
                     <tbody>
                         <tr><td><strong>Assets</strong></td><td></td></tr>
                         ${section(data.assets)}
@@ -489,7 +489,7 @@ const ReportsPage = {
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th>Date</th><th>Invoice</th><th>Customer</th><th class="amount">Sales</th><th class="amount">Rate</th><th class="amount">Tax</th></tr></thead>
+                    <thead><tr><th scope="col">Date</th><th scope="col">Invoice</th><th scope="col">Customer</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No taxable sales</td></tr>'}</tbody>
                 </table></div>
                 <div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
@@ -513,7 +513,7 @@ const ReportsPage = {
                 for (const acct of data.accounts) {
                     html += `<h3 style="margin:12px 0 4px; font-size:12px; color:var(--qb-navy);">${escapeHtml(acct.account_number)} &mdash; ${escapeHtml(acct.account_name)}</h3>`;
                     html += `<div class="table-container"><table>
-                        <thead><tr><th>Date</th><th>Description</th><th>Reference</th><th class="amount">Debit</th><th class="amount">Credit</th></tr></thead><tbody>`;
+                        <thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th></tr></thead><tbody>`;
                     for (const e of acct.entries) {
                         html += `<tr>
                             <td>${formatDate(e.date)}</td>
@@ -556,7 +556,7 @@ const ReportsPage = {
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th>Customer</th><th class="amount">Invoices</th><th class="amount">Sales</th><th class="amount">Paid</th><th class="amount">Balance</th></tr></thead>
+                    <thead><tr><th scope="col">Customer</th><th scope="col" class="amount">Invoices</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'income_by_customer', prefill });
@@ -625,8 +625,8 @@ const ReportsPage = {
                 </div>
                 <div class="table-container"><table>
                     <thead><tr>
-                        <th>Customer</th><th class="amount">Current</th><th class="amount">1-30</th>
-                        <th class="amount">31-60</th><th class="amount">61-90+</th><th class="amount">Total</th>
+                        <th scope="col">Customer</th><th scope="col" class="amount">Current</th><th scope="col" class="amount">1-30</th>
+                        <th scope="col" class="amount">31-60</th><th scope="col" class="amount">61-90+</th><th scope="col" class="amount">Total</th>
                     </tr></thead>
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
                 </table></div>`;
@@ -659,8 +659,8 @@ const ReportsPage = {
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div class="table-container"><table>
                     <thead><tr>
-                        <th>Vendor</th><th class="amount">Current</th><th class="amount">1-30</th>
-                        <th class="amount">31-60</th><th class="amount">61-90+</th><th class="amount">Total</th>
+                        <th scope="col">Vendor</th><th scope="col" class="amount">Current</th><th scope="col" class="amount">1-30</th>
+                        <th scope="col" class="amount">31-60</th><th scope="col" class="amount">61-90+</th><th scope="col" class="amount">Total</th>
                     </tr></thead>
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding payables</td></tr>'}</tbody>
                 </table></div>`;
@@ -690,7 +690,7 @@ const ReportsPage = {
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th>Number</th><th>Account</th><th>Type</th><th class="amount">Debit</th><th class="amount">Credit</th><th class="amount">Net</th></tr></thead>
+                    <thead><tr><th scope="col">Number</th><th scope="col">Account</th><th scope="col">Type</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th><th scope="col" class="amount">Net</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>`;
         });
@@ -714,7 +714,7 @@ const ReportsPage = {
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th>Account</th><th class="amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Account</th><th scope="col" class="amount">Amount</th></tr></thead>
                     <tbody>
                         ${section('Operating Activities', data.operating, data.total_operating)}
                         ${section('Investing Activities', data.investing, data.total_investing)}
@@ -764,7 +764,7 @@ const ReportsPage = {
                 <td>${data.vendors_above_threshold} vendor(s) above $${data.threshold}</td></tr>`;
             content.innerHTML = `
                 <div class="table-container"><table>
-                    <thead><tr><th>Vendor</th><th>Tax ID</th><th>Type</th><th class="amount">Total Paid</th><th>Status</th></tr></thead>
+                    <thead><tr><th scope="col">Vendor</th><th scope="col">Tax ID</th><th scope="col">Type</th><th scope="col" class="amount">Total Paid</th><th scope="col">Status</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>`;
         } catch (err) { content.innerHTML = `<div style="color:var(--danger);">${escapeHtml(err.message)}</div>`; }
@@ -818,8 +818,8 @@ ReportsPage.profitLossByClass = async function () {
                 ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)}
             </div>
             <div class="table-container"><table>
-                <thead><tr><th>Class</th><th class="amount">Income</th><th class="amount">COGS</th>
-                <th class="amount">Gross Profit</th><th class="amount">Expenses</th><th class="amount">Net Income</th></tr></thead>
+                <thead><tr><th scope="col">Class</th><th scope="col" class="amount">Income</th><th scope="col" class="amount">COGS</th>
+                <th scope="col" class="amount">Gross Profit</th><th scope="col" class="amount">Expenses</th><th scope="col" class="amount">Net Income</th></tr></thead>
                 <tbody>${rows.length ? rows : '<tr><td colspan="6">No activity in this period</td></tr>'}</tbody>
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);">
                     <td>Total</td>
@@ -844,8 +844,8 @@ ReportsPage.fixedAssetReconciliation = async function () {
     </tr>`).join('');
     openModal('Fixed Asset Reconciliation', `
         <div class="table-container"><table>
-            <thead><tr><th>Asset Type</th><th class="amount">Assets</th><th class="amount">Cost</th>
-            <th class="amount">Accum. Depr.</th><th class="amount">Book Value</th></tr></thead>
+            <thead><tr><th scope="col">Asset Type</th><th scope="col" class="amount">Assets</th><th scope="col" class="amount">Cost</th>
+            <th scope="col" class="amount">Accum. Depr.</th><th scope="col" class="amount">Book Value</th></tr></thead>
             <tbody>${rows.length ? rows : '<tr><td colspan="5">No registered assets</td></tr>'}</tbody>
             <tfoot><tr style="font-weight:700; background:var(--gray-50);">
                 <td>Total</td><td></td>
@@ -889,8 +889,8 @@ ReportsPage.jobProfitability = async function () {
                 ${escapeHtml(data.start_date)} — ${escapeHtml(data.end_date)} · "No job" holds untagged activity <em>and</em> the applied-cost credits behind Job Cost Entries (labor, equipment, overhead applied to jobs), so its costs can be negative and the totals still match the P&L
             </div>
             <div class="table-container"><table>
-                <thead><tr><th>Customer</th><th>Job</th><th class="amount">Contract</th><th class="amount">Income</th>
-                <th class="amount">Costs</th><th class="amount">Net</th><th class="amount">Margin</th></tr></thead>
+                <thead><tr><th scope="col">Customer</th><th scope="col">Job</th><th scope="col" class="amount">Contract</th><th scope="col" class="amount">Income</th>
+                <th scope="col" class="amount">Costs</th><th scope="col" class="amount">Net</th><th scope="col" class="amount">Margin</th></tr></thead>
                 <tbody>${rows.length ? rows : '<tr><td colspan="7">No activity in this period</td></tr>'}</tbody>
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);">
                     <td colspan="3">Total</td>
@@ -926,8 +926,8 @@ ReportsPage.jobBudgetVsActual = async function () {
                 Actuals for ${escapeHtml(range.start)} — ${escapeHtml(range.end)}; budgets and committed cost are job-to-date. Click a job to drill down.
             </div>
             <div class="table-container"><table>
-                <thead><tr><th>Customer</th><th>Job</th><th class="amount">Budget</th><th class="amount">Committed</th>
-                <th class="amount">Actual</th><th class="amount">Projected</th><th class="amount">Variance</th><th class="amount">% Used</th><th class="amount">Revenue</th></tr></thead>
+                <thead><tr><th scope="col">Customer</th><th scope="col">Job</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th>
+                <th scope="col" class="amount">Actual</th><th scope="col" class="amount">Projected</th><th scope="col" class="amount">Variance</th><th scope="col" class="amount">% Used</th><th scope="col" class="amount">Revenue</th></tr></thead>
                 <tbody>${rows.length ? rows : '<tr><td colspan="9">No jobs</td></tr>'}</tbody>
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);">
                     <td colspan="2">Total</td>

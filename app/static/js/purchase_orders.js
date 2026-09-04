@@ -68,7 +68,7 @@ const PurchaseOrdersPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th>Item</th><th>Description</th>${CostCodes.headHtml()}<th class="col-qty">Qty</th><th class="col-rate">Rate</th><th class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th>${CostCodes.headHtml()}<th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="po-lines">
                         ${po.lines.map((l, i) => PurchaseOrdersPage.lineHtml(i, l, items)).join('')}
                     </tbody>

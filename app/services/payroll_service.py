@@ -304,18 +304,26 @@ def calculate_withholdings(
     hours=Decimal("0"),
     pretax_deductions=Decimal("0"),
     pretax_fica=Decimal("0"),
+    pretax_state=None,
     supplemental: bool = False,
     supplemental_method: str = "flat",
     regular_wages=Decimal("0"),
     ytd_supplemental=Decimal("0"),
     suta_rate: Decimal = None,
+    state_allowances: int = 0,
+    state_extra_withholding=Decimal("0"),
+    state_rate_override=None,
+    local_tax_rate=None,
 ) -> dict:
     """Compute a full set of payroll taxes for one employee for one pay period.
 
     ``pretax_deductions`` is the total of pre-tax deductions that reduce
-    income-tax wages; ``pretax_fica`` is the subset of those that ALSO reduce
-    FICA wages (Section 125 cafeteria plans, HSA) — a traditional 401(k)
-    reduces income tax but not FICA, so it belongs only in pretax_deductions.
+    federal income-tax wages; ``pretax_fica`` is the subset of those that
+    ALSO reduce FICA wages (Section 125 cafeteria plans, HSA) — a
+    traditional 401(k) reduces income tax but not FICA, so it belongs only
+    in pretax_deductions. ``pretax_state`` is the amount that reduces STATE
+    income-tax wages (None = same as federal); the benefits engine tracks
+    the three bases separately because a code can reduce any combination.
 
     Returns employee-side withholding, employer-side taxes, the per-state
     results, and an itemized ``detail`` map for pay-stub / form rendering.
@@ -325,7 +333,8 @@ def calculate_withholdings(
     gross = _q(gross_pay)
     ytd = Decimal(str(ytd_gross))
     pretax = Decimal(str(pretax_deductions))
-    pretax_fica_amt = min(Decimal(str(pretax_fica)), pretax)
+    pretax_fica_amt = Decimal(str(pretax_fica))
+    pretax_state_amt = pretax if pretax_state is None else Decimal(str(pretax_state))
     pay_periods = periods_per_year(pay_frequency)
 
     if gross <= 0:
@@ -351,6 +360,7 @@ def calculate_withholdings(
     # Income-tax wages drop the full pre-tax total; FICA wages drop only the
     # cafeteria-plan / HSA subset.
     fed_taxable = max(Decimal("0"), gross - pretax)
+    state_taxable = max(Decimal("0"), gross - pretax_state_amt)
     fica_wages = max(Decimal("0"), gross - pretax_fica_amt)
 
     # --- Federal income tax ---
@@ -393,15 +403,22 @@ def calculate_withholdings(
     # The work-state engine drives SUTA situs and state disability/leave
     # premiums; income tax may instead follow the residence state under a
     # reciprocity agreement (see state_tax.reciprocity).
+    state_kw = dict(
+        state_allowances=state_allowances,
+        state_extra_withholding=state_extra_withholding,
+        state_rate_override=state_rate_override,
+        local_tax_rate=local_tax_rate,
+    )
     engine = get_engine(work_state)
     state = engine.calculate(
         gross=gross,
-        taxable=fed_taxable,
+        taxable=state_taxable,
         ytd_gross=ytd,
         pay_periods=pay_periods,
         hours=Decimal(str(hours)),
         filing_status=filing_status,
         wc_class_code=wc_class_code,
+        **state_kw,
     )
 
     state_income = state.income_tax
@@ -411,14 +428,23 @@ def calculate_withholdings(
     ):
         wh = get_engine(withholding_state).calculate(
             gross=gross,
-            taxable=fed_taxable,
+            taxable=state_taxable,
             ytd_gross=ytd,
             pay_periods=pay_periods,
             hours=Decimal(str(hours)),
             filing_status=filing_status,
             wc_class_code=wc_class_code,
+            **state_kw,
         )
         state_income = wh.income_tax
+        # the reciprocity state's income tax replaces the work state's, and
+        # its detail line should say so on the stub
+        for k in list(state.detail):
+            if k.endswith("income tax") and not k.endswith("local income tax"):
+                state.detail.pop(k)
+        for k, v in wh.detail.items():
+            if k.endswith("income tax") and not k.endswith("local income tax"):
+                state.detail[k] = v
 
     rate = Decimal(str(suta_rate)) if suta_rate is not None else Decimal(str(SUTA_RATE))
     suta_tax = suta(fica_wages, ytd, rate, engine.suta_wage_base)

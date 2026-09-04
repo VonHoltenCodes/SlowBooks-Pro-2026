@@ -23,6 +23,10 @@ what's in each tier, where each piece lives, and what's still pending.
 
 ---
 
+## State withholding
+
+All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engine for the rest (`app/services/state_tax/tables.py`). Parameters, sources and the employee inputs (allowances, extra withholding, elected rate, local rate) are in [state-withholding.md](state-withholding.md). Reciprocity in `state_tax/reciprocity.py`.
+
 ## Tier 1 — Onboarding, time, PTO
 
 ### Models
@@ -73,30 +77,38 @@ what's in each tier, where each piece lives, and what's still pending.
 
 | File | Class | Purpose |
 |------|-------|---------|
-| `app/models/deductions.py` | `DeductionType` | Catalog: 401k, health insurance, HSA, union dues |
-| | `EmployeeDeduction` | Per-employee election with amount + effective dates |
+| `app/models/benefits.py` | `BenefitCode`, `BenefitRate` | The rule + its effective-dated rates/limits (replaces `DeductionType`) |
+| | `EmployeeGroup`, `EmployeeGroupBenefit` | Templates: a set of codes applied to everyone in the group |
+| | `EmployeeBenefit` | Per-employee assignment with overrides, caps, loan balance (replaces `EmployeeDeduction`) |
+| | `BenefitYTD`, `PayStubBenefit` | YTD accumulators; posted-run snapshots |
 | | `Garnishment` | Court-ordered wage garnishment with priority |
 
 ### Routes
 
 | Method + Path | Purpose |
 |---------------|---------|
-| `GET /api/deductions/types` | List deduction-type catalog |
-| `POST /api/deductions/types` | Create custom deduction type |
-| `POST /api/deductions/types/seed-standard` | One-shot seed for fresh installs |
-| `GET /api/deductions/employee/{emp_id}` | All deductions for an employee |
-| `POST /api/deductions/employee` | Enroll an employee in a deduction |
-| `DELETE /api/deductions/employee/{deduction_id}` | Remove an enrollment |
+| `GET/POST /api/benefits/codes`, `PUT/DELETE …/{id}` | Benefit code catalog (retire, never delete) |
+| `POST /api/benefits/codes/seed-standard` | Section 125, HSA, 401(k) w/ tiered match, Roth, union, loan, employer health, GTL |
+| `GET/POST /api/benefits/codes/{id}/rates` | Effective-dated rates + limits (previous row closes itself) |
+| `GET/POST/PUT/DELETE /api/benefits/groups…` | Employee groups, their code sets and members |
+| `GET/POST/PUT/DELETE /api/benefits/enrollments` | Per-employee assignments (end-date keeps history) |
+| `GET /api/benefits/employee/{id}/resolved` | What the next run applies, in sequence |
+| `GET /api/benefits/ytd`, `POST …/ytd/rebuild` | Accumulators, repair from snapshots |
+| `GET /api/benefits/remittance`, `POST …/remittance/bill` | Per-vendor withheld + employer totals; vendor bill relieving the liability |
+| `POST /api/pto/accruals/{id}/revalue` | Restate a PTO bank's dollars at the current rate |
 | `GET /api/deductions/garnishments` | List, filterable by `?employee_id=...` |
 | `POST /api/deductions/garnishments` | Create a garnishment order |
 | `DELETE /api/deductions/garnishments/{order_id}` | Cancel an order |
 
 ### Frontend
 
-- `app/static/js/deductions.js` (365 lines) — three-section page (types,
+- `app/static/js/benefits.js` — codes / groups / enrollments / remittance tabs
+- `app/static/js/deductions.js` — garnishments page (was three sections: types,
   per-employee, garnishments) with add/remove forms
 
 ---
+
+**Where the portal link works.** The link is absolute and uses the address the request came in on, so it is only as reachable as the server: a desktop install is `127.0.0.1` on that PC only; Server Edition on the LAN gives a LAN address; employees outside the building need the reverse proxy / tunnel setup (`docs/tls-proxy-setup.md`, `cloudflare/`). In the desktop app the link opens in the system browser on purpose — the portal is a separate cookie-based site and must not be rendered in the app's document window.
 
 ## Tier 3 — Tax forms
 
@@ -181,7 +193,8 @@ All return `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
 | `#/hr/onboarding` | Employee list with completion % | `onboarding.js` |
 | `#/hr/time-entries` | Time entries with approve/reject | `time_entries.js` |
 | `#/hr/pto` | Policies + pending requests | `pto.js` |
-| `#/hr/deductions` | Types, per-employee, garnishments | `deductions.js` |
+| `#/hr/benefits` | Benefit codes, groups, enrollments, remittance | `benefits.js` |
+| `#/hr/deductions` | Garnishments | `deductions.js` |
 | `#/hr/tax-forms` | W-2/W-3/940/941 generation | `tax_forms.js` |
 | `#/employees/{id}` | Details modal with portal/YTD/bank/docs tabs | `employees.js` |
 
@@ -216,14 +229,16 @@ app/
 │   ├── hr.py                  # onboarding, employee documents
 │   ├── pto.py                 # policies, accruals, requests
 │   ├── time_entries.py        # daily hours tracking
-│   ├── deductions.py          # types, enrollments, garnishments
+│   ├── deductions.py          # garnishments
+│   ├── benefits.py            # benefits engine (codes, groups, enrollments)
 │   ├── bank_accounts.py       # encrypted direct-deposit
 │   └── payroll.py             # Employee, PayRun, PayStub
 ├── routes/
 │   ├── onboarding.py          # Tier 1
 │   ├── time_entries.py        # Tier 1
 │   ├── pto.py                 # Tier 1
-│   ├── deductions.py          # Tier 2
+│   ├── deductions.py          # Tier 2 (garnishments)
+│   ├── benefits.py            # Tier 2 (benefits engine)
 │   ├── tax_forms.py           # Tier 3 (UI placeholder routes)
 │   ├── payroll.py             # Tier 3 — forms endpoints + core payroll
 │   ├── portal.py              # Tier 3 — self-service portal

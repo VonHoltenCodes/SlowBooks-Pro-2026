@@ -116,8 +116,10 @@
                         <span class="nav-icon">&#9201;</span> Time Entries</a></li>
                     <li><a href="#/hr/pto" class="nav-link" data-page="hr-pto">
                         <span class="nav-icon">&#9788;</span> Time Off</a></li>
+                    <li><a href="#/hr/benefits" class="nav-link" data-page="hr-benefits">
+                        <span class="nav-icon">&#8722;</span> Benefits</a></li>
                     <li><a href="#/hr/deductions" class="nav-link" data-page="hr-deductions">
-                        <span class="nav-icon">&#8722;</span> Deductions</a></li>
+                        <span class="nav-icon">&#8722;</span> Garnishments</a></li>
                     <li><a href="#/hr/tax-forms" class="nav-link" data-page="hr-tax-forms">
                         <span class="nav-icon">&#9783;</span> Tax Forms</a></li>
                     <li><a href="#/reseller-permits" class="nav-link" data-page="reseller-permits">
@@ -198,7 +200,7 @@
     </div>
 
     <div id="modal-overlay" class="modal-overlay hidden">
-        <div id="modal" class="modal">
+        <div id="modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title" tabindex="-1">
             <div class="modal-header">
                 <h2 id="modal-title"></h2>
                 <button class="modal-close" id="modal-close-btn" aria-label="Close dialog" type="button">&times;</button>
@@ -207,7 +209,7 @@
         </div>
     </div>
 
-    <div id="toast-container"></div>
+    <div id="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
 
     <script src="/static/js/desktop_shim.js"></script>
     <script src="/static/js/api.js"></script>
@@ -215,6 +217,7 @@
     <script src="/static/js/ocr_canvas.js"></script>
     <script src="/static/js/ocr.js"></script>
     <script src="/static/js/customers.js"></script>
+    <script src="/static/js/dashboard.js"></script>
     <script src="/static/js/jobs.js"></script>
     <script src="/static/js/job_costs.js"></script>
     <script src="/static/js/vendors.js"></script>
@@ -249,6 +252,7 @@
     <script src="/static/js/time_entries.js"></script>
     <script src="/static/js/pto.js"></script>
     <script src="/static/js/deductions.js"></script>
+    <script src="/static/js/benefits.js"></script>
     <script src="/static/js/tax_forms.js"></script>
     <script src="/static/js/reseller_permits.js"></script>
     <!-- Phase 9: Analytics (Chart.js is self-hosted, no CDN) -->
