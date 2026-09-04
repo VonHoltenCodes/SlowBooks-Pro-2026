@@ -468,13 +468,22 @@ def compute(
     year: int,
     ytd_gross_before: Decimal = ZERO,
     resolved: Optional[list[Resolved]] = None,
+    posttax_available: Optional[Decimal] = None,
 ) -> CalcResult:
+    """Evaluate every code in sequence. `posttax_available` is what is left
+    of the check after pre-tax codes, taxes and garnishments; when the run
+    passes it (second pass), post-tax codes take at most that much, in
+    sequence, and a line that came up short says so in `note`. Voluntary
+    post-tax deductions never drive net pay negative."""
     gross = _q(_d(gross))
     hours = _d(hours)
     if resolved is None:
         resolved = resolve_for_employee(db, emp, period_start, period_end)
     fed_base = state_base = fica_base = gross
     remaining_pay = gross
+    posttax_left = (
+        max(ZERO, _q(_d(posttax_available))) if posttax_available is not None else None
+    )
     lines: list[Line] = []
     for r in resolved:
         code = r.code
@@ -508,6 +517,14 @@ def compute(
                 if bal is not None:
                     emp_amt = min(emp_amt, max(ZERO, _d(bal)))
             emp_amt = _q(max(ZERO, min(emp_amt, remaining_pay)))
+            if code.category != "pretax" and posttax_left is not None:
+                if emp_amt > posttax_left:
+                    line.note = (
+                        f"reduced from {emp_amt} to {_q(posttax_left)}: "
+                        "not enough net pay"
+                    )
+                    emp_amt = _q(posttax_left)
+                posttax_left -= emp_amt
             remaining_pay -= emp_amt
             if code.category == "pretax":
                 if code.reduces_federal:
@@ -708,12 +725,22 @@ def remittance_rows(db: Session, start: date, end: date) -> list[dict]:
     from app.models.contacts import Vendor
 
     vendors = {v.id: v.name for v in db.query(Vendor).all()}
+    # The vendor is snapshotted on the stub with the rule, but assigning a
+    # remittance vendor after the fact changes who gets paid, not what was
+    # withheld — so a snapshot with no vendor follows the code's current one.
+    code_vendor = {
+        c.id: c.remittance_vendor_id
+        for c in db.query(BenefitCode).filter(
+            BenefitCode.remittance_vendor_id.isnot(None)
+        )
+    }
     out = []
     for vid, cid, code, name, liab, ea, ra, n in rows:
         ea = _q(_d(ea))
         ra = _q(_d(ra))
         if ea == 0 and ra == 0:
             continue
+        vid = vid or code_vendor.get(cid)
         out.append(
             {
                 "vendor_id": vid,

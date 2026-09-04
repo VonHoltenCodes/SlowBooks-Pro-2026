@@ -47,6 +47,16 @@ Decisions made while building:
   P&L is unchanged and the job carries the real cost.
 - **Employer-taxable benefits** (GTL over $50k) are flagged and reported
   in the stub detail; imputed-income withholding is not computed.
+- **Post-tax codes take what is left** (first macOS lap, 2026-09-04): the
+  engine runs once for the pre-tax codes and the wage bases, taxes and
+  garnishments are computed, and if the post-tax total would overdraw the
+  check the engine runs again with the real room (`posttax_available`).
+  Post-tax codes are trimmed in sequence, the shortfall is noted on the
+  stub, and net pay never goes negative; a garnishment stack that still
+  exceeds pay is refused with a 422 instead of posting an unbalanced entry.
+- **Remittance vendor follows the code** when the stub snapshot has none:
+  the vendor changes who gets paid, not what was withheld, so assigning
+  one after a run still lets the report and the bill find that run.
 
 Source: field ask from a Sage 50 evaluator (Matt Beebe, @TheMattBeebe)
 who has "been thinking about this for a long time across several

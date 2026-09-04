@@ -857,3 +857,79 @@ def test_flat_burden_method_leaves_the_pay_run_alone(
     )  # 400 + 20%
     run = _run(client, emp["id"], use_time_entries=True, process=True)
     assert run["burden_job_cost_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Review fixes (macOS lap of the v2.8 stage, 2026-09-04)
+# ---------------------------------------------------------------------------
+
+
+def test_posttax_deduction_takes_what_is_left_never_a_negative_check(
+    client, db_session, seed_accounts
+):
+    """A post-tax code bigger than the check used to produce a negative net
+    and an unbalanced payroll entry (500 on process). It now takes what is
+    left after taxes, says so on the stub, and the run posts."""
+    emp = _emp(client, rate=20)
+    dues = _code(
+        client,
+        "DUES",
+        category="posttax",
+        reduces_federal=False,
+        reduces_state=False,
+        rate={"employee_rate": 5000},
+    )
+    _enroll(client, emp["id"], dues["id"])
+    run = _run(client, emp["id"], hours=10, process=True)
+    stub = run["stubs"][0]
+    gross = Decimal(str(stub["gross_pay"]))
+    taxes = (
+        gross - Decimal(str(stub["net_pay"])) - Decimal(str(stub["posttax_deductions"]))
+    )
+    assert gross == Decimal("200")
+    assert taxes > 0
+    assert Decimal(str(stub["net_pay"])) == Decimal("0")
+    assert Decimal(str(stub["posttax_deductions"])) == gross - taxes
+    assert _benefit(stub, "DUES")["employee_amount"] == float(gross - taxes)
+    import json
+
+    from app.models.payroll import PayStub
+
+    detail = json.loads(db_session.get(PayStub, stub["id"]).detail_json or "{}")
+    assert "not enough net pay" in detail["benefit:DUES:note"]
+    lines = _je_lines(db_session, run["_process"]["transaction_id"])
+    assert sum(Decimal(str(ln.debit)) for ln in lines) == sum(
+        Decimal(str(ln.credit)) for ln in lines
+    )
+
+
+def test_remittance_follows_the_codes_vendor_when_the_snapshot_has_none(
+    client, seed_accounts
+):
+    """Assigning a remittance vendor after a run was processed changes who
+    gets paid, not what was withheld, so the report and the bill pick it up."""
+    emp = _emp(client)
+    plan = _code(client, "PLAN", rate={"employee_rate": 50})
+    _enroll(client, emp["id"], plan["id"])
+    _run(client, emp["id"], process=True)
+    vendor = client.post("/api/vendors", json={"name": "Plan Admin"}).json()
+    r = client.put(
+        f"/api/benefits/codes/{plan['id']}", json={"remittance_vendor_id": vendor["id"]}
+    )
+    assert r.status_code == 200, r.text
+    rows = client.get(
+        "/api/benefits/remittance",
+        params={"start_date": "2026-07-17", "end_date": "2026-07-17"},
+    ).json()["rows"]
+    row = next(x for x in rows if x["code"] == "PLAN")
+    assert row["vendor_id"] == vendor["id"] and row["total"] == 50.0
+    bill = client.post(
+        "/api/benefits/remittance/bill",
+        json={
+            "vendor_id": vendor["id"],
+            "start_date": "2026-07-17",
+            "end_date": "2026-07-17",
+        },
+    )
+    assert bill.status_code == 201, bill.text
+    assert bill.json()["total"] == 50.0
