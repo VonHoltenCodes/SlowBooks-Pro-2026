@@ -43,6 +43,28 @@ item, asserting (a) construction with required fields, (b) defaults,
 
 ---
 
+## v2.9 list (set 2026-09-03)
+
+Two faces of one **kiosk mode** for Server Edition — a shop-owned device the admin
+logs in once under a restricted `kiosk` role; people identify with a short PIN
+they set in their portal, and the screen only exposes what the role allows.
+
+1. **Employee kiosk** (small — mostly reuses what exists): time clock (clock in /
+   out with a job + cost-code picker so job costing gets fed without typing),
+   "my pay stubs", "request time off" via the portal pages. PIN per employee.
+   Testable on the boxes.
+2. **Point of sale** (big — its own stage): keyed-only first (item grid /
+   barcode entry, per-item tax, cash or "card taken outside", receipt print,
+   refunds / voids, end-of-day Z report) on top of the existing sales receipts
+   + Square / Stripe providers; card terminals and cash drawer hardware after.
+
+Parked with a reason: kiosk login by last-4 SSN + name — weak auth; the PIN
+above replaces it.
+
+Also owed from v2.8: **effective-dated state withholding tables** (today the
+state table holds one year's figures; the benefit codes already do dated rows)
+and the **January verification pass** on `app/services/state_tax/tables.py`.
+
 ## Payroll / HR — still open
 
 - **State unemployment filings (SUI)** — `app/services/tax_forms/state_sui.py`

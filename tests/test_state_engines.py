@@ -84,9 +84,9 @@ def test_bracket_states_are_monotonic_and_honour_status_and_allowances(code):
 
 # --- exact spot checks (annualized percentage method, biweekly) --------------
 def test_illinois_flat_with_allowances():
-    # 2000 × 26 = 52,000 − 2 × 2,850 = 46,300 × 4.95% = 2,291.85 / 26 = 88.15
+    # 2000 × 26 = 52,000 − 2 × 2,925 = 46,150 × 4.95% = 2,284.43 / 26 = 87.86
     r = calc("IL", gross=2000, state_allowances=2)
-    assert r.income_tax == Decimal("88.15")
+    assert r.income_tax == Decimal("87.86")
     assert calc("IL", gross=2000).income_tax == Decimal("99.00")
     assert calc("IL", gross=2000, state_extra_withholding=25).income_tax == Decimal(
         "124.00"
@@ -101,9 +101,9 @@ def test_pennsylvania_flat_no_deductions_plus_employee_ui():
 
 
 def test_virginia_brackets_and_deductions():
-    # 52,000 − 8,500 std − 930 × 1 = 42,570 → 60 + 60 + 600 + (42,570 − 17,000) × 5.75% = 2,190.28 / 26
+    # 52,000 − 8,750 std − 930 × 1 = 42,320 → 60 + 60 + 600 + (42,320 − 17,000) × 5.75% = 2,175.90 / 26
     r = calc("VA", gross=2000, state_allowances=1)
-    assert r.income_tax == Decimal("84.24")
+    assert r.income_tax == Decimal("83.69")
 
 
 def test_maryland_needs_a_county_rate():
@@ -123,17 +123,19 @@ def test_arizona_uses_the_elected_rate():
 
 def test_new_jersey_other_items_cap_at_the_wage_base():
     r = calc("NJ", gross=2000)
-    # UI 0.3825% + DI 0.23% + FLI 0.33% = 0.9425% of 2,000
-    assert r.employee_other == Decimal("18.85")
-    capped = calc("NJ", gross=2000, ytd=43000)  # only $300 left under the base
-    assert capped.employee_other == Decimal("2.83")
+    # UI/WF 0.425% + DI 0.19% + FLI 0.23% = 0.845% of 2,000
+    assert r.employee_other == Decimal("16.90")
+    capped = calc(
+        "NJ", gross=2000, ytd=43000
+    )  # $1,800 left under the UI base; DI/FLI base is $171,100
+    assert capped.employee_other == Decimal("16.05")
     assert r.income_tax > 0
 
 
 def test_pfml_states_split_employee_and_employer():
     for code, ee, er in (
         ("MA", "0.0046", "0.0042"),
-        ("CO", "0.0045", "0.0045"),
+        ("CO", "0.0044", "0.0044"),
         ("MN", "0.0044", "0.0044"),
     ):
         r = calc(code, gross=2000)
@@ -152,8 +154,8 @@ def test_pfml_states_split_employee_and_employer():
 
 
 def test_mississippi_first_10k_exempt():
-    # 1,000 × 26 = 26,000 − 2,300 − 6,000 = 17,700 → 4.4% on the part over 10,000 = 338.80 / 26
-    assert calc("MS", gross=1000).income_tax == Decimal("13.03")
+    # 1,000 × 26 = 26,000 − 2,300 − 6,000 = 17,700 → 4.0% on the part over 10,000 = 308 / 26
+    assert calc("MS", gross=1000).income_tax == Decimal("11.85")
 
 
 def test_unknown_code_is_still_a_zero_generic_engine():
@@ -192,8 +194,8 @@ def test_employee_state_fields_flow_into_the_stub(client, seed_accounts):
     )
     assert run.status_code == 201, run.text
     stub = run.json()["stubs"][0]
-    # 2,000 × 26 = 52,000 − 2 × 1,000 = 50,000 × 3% = 1,500 / 26 = 57.69 + 10 extra
-    assert stub["state_tax"] == 67.69
+    # 2,000 × 26 = 52,000 − 2 × 1,000 = 50,000 × 2.95% = 1,475 / 26 = 56.73 + 10 extra
+    assert stub["state_tax"] == 66.73
     assert stub["state_other_employee"] == 30.0  # 1.5% county on 2,000
     assert stub["work_state"] == "IN"
 

@@ -79,7 +79,7 @@ def _tax_from_brackets(wage: Decimal, brackets) -> Decimal:
 
 class NYEngine(StateEngine):
     state_code: str = "NY"
-    suta_wage_base: Decimal = Decimal("12800")
+    suta_wage_base: Decimal = Decimal("13000")
 
     def calculate(
         self,
