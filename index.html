@@ -23,6 +23,10 @@
                 Born as a clean-room replacement for QuickBooks&nbsp;Pro&nbsp;2003<br>
                 after Intuit&rsquo;s activation servers died.
             </div>
+            <div class="splash-whatsnew" id="splash-whatsnew" hidden>
+                <div class="splash-whatsnew-title" id="splash-whatsnew-title"></div>
+                <ul id="splash-whatsnew-list"></ul>
+            </div>
             <div class="splash-legal">
                 Independent reimplementation built from published SDK<br>
                 documentation (QBFC 5.0) and 14 years as a paying customer.<br>
@@ -39,6 +43,9 @@
         <!-- Toolbar -->
         <div id="topbar">
             <div class="topbar-brand">Slowbooks Pro <span>2026</span></div>
+            <div class="tb-sep"></div>
+            <!-- whose books: filled from Settings → company name (app.js loadCompanyName) -->
+            <div class="topbar-company" id="topbar-company" title="Company file in use"></div>
             <div class="tb-sep"></div>
             <button class="tb-btn" data-nav="#/">Home</button>
             <button class="tb-btn" data-action="CustomersPage.showForm">New Customer</button>

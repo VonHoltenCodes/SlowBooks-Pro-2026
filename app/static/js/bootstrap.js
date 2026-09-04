@@ -21,6 +21,37 @@
         });
     }
 
+    // --- What's new on the splash ------------------------------------------
+    // /static/whats-new.json ships with the build (edited at release time,
+    // see docs/release-checklist.md); /health gives the running version.
+    // Both are public, so this works before login and in the About dialog.
+    (async () => {
+        try {
+            const [notesRes, healthRes] = await Promise.all([
+                fetch('/static/whats-new.json', { credentials: 'same-origin' }),
+                fetch('/health', { credentials: 'same-origin' }),
+            ]);
+            if (!notesRes.ok) return;
+            const notes = await notesRes.json();
+            const version = healthRes.ok ? (await healthRes.json()).version : null;
+            const key = (version && notes[version]) ? version : Object.keys(notes)[0];
+            const entry = notes[key];
+            if (!entry || !entry.items || !entry.items.length) return;
+            const box = document.getElementById('splash-whatsnew');
+            const title = document.getElementById('splash-whatsnew-title');
+            const list = document.getElementById('splash-whatsnew-list');
+            if (!box || !title || !list) return;
+            title.textContent = `What's new in ${key}${entry.title ? ' — ' + entry.title : ''}`;
+            list.innerHTML = '';
+            entry.items.forEach(text => {
+                const li = document.createElement('li');
+                li.textContent = text;
+                list.appendChild(li);
+            });
+            box.hidden = false;
+        } catch (e) { /* splash stays as shipped */ }
+    })();
+
     // --- About / theme / modal close --------------------------------------
     const about = document.getElementById('about-btn');
     if (about) about.addEventListener('click', () => window.App && App.showAbout && App.showAbout());

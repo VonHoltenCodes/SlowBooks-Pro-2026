@@ -481,6 +481,10 @@ const App = {
             const companyEl = $('#status-company');
             if (companyEl && s.company_name && s.company_name !== 'My Company') {
                 companyEl.textContent = `Company: ${s.company_name}`;
+                // the window / tab title and the topbar brand say whose books these are
+                document.title = `${s.company_name} — Slowbooks Pro 2026`;
+                const brand = $('#topbar-company');
+                if (brand) brand.textContent = s.company_name;
             }
         } catch (e) { /* ignore on load */ }
     },
