@@ -58,6 +58,13 @@ they set in their portal, and the screen only exposes what the role allows.
    refunds / voids, end-of-day Z report) on top of the existing sales receipts
    + Square / Stripe providers; card terminals and cash drawer hardware after.
 
+3. **Nonprofit mode** (medium — design in `docs/design/nonprofit.md`, branch
+   `feat/nonprofit`): net assets by restriction with a release-from-restriction
+   document and the three statements; a program / management / fundraising
+   function on posted lines with shared-cost allocation and the Statement of
+   Functional Expenses; donor acknowledgments, giving statements, pledges,
+   in-kind; a terminology switch. Classes and jobs already carry the data.
+
 Parked with a reason: kiosk login by last-4 SSN + name — weak auth; the PIN
 above replaces it.
 
