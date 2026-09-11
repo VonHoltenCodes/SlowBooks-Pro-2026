@@ -39,6 +39,24 @@ ENCRYPTED_SETTINGS_KEYS = frozenset(
 )
 
 
+SECRET_PLACEHOLDER = "********"
+
+
+def redact_secrets(settings: dict) -> dict:
+    """Copy of `settings` with every encrypted value replaced by a placeholder.
+
+    get_all_settings() decrypts secrets because the server needs the real
+    values to send mail and call payment providers. Anywhere that dict can
+    reach a user — an API response, or a user-authored Jinja template —
+    has to go through this first. Keyed off ENCRYPTED_SETTINGS_KEYS so a
+    newly added credential is redacted by the same act that encrypts it.
+    """
+    return {
+        key: (SECRET_PLACEHOLDER if key in ENCRYPTED_SETTINGS_KEYS and value else value)
+        for key, value in settings.items()
+    }
+
+
 def _maybe_decrypt(key: str, value):
     if key in ENCRYPTED_SETTINGS_KEYS and value:
         return decrypt_value(value)

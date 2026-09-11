@@ -6,7 +6,6 @@
 const InvoicesPage = {
     // The document's literal face, as the PDF prints it: a flagged pledge is a
     // PLEDGE, everything else an INVOICE regardless of company vocabulary.
-    docLabel(inv) { return inv.is_pledge ? 'Pledge' : 'Invoice'; }, // literal face
 
     async render() {
         // Sales receipts are invoices under the hood; they get their own
@@ -177,23 +176,29 @@ const InvoicesPage = {
     },
 
     async emailInvoice(id) {
-        const inv = await API.get(`/invoices/${id}`);
-        const email = inv.customer_email || '';
-        openModal(Terms.text('Email Invoice'), `
-            <form onsubmit="InvoicesPage.sendEmail(event, ${id})">
-                <div class="form-grid">
-                    <div class="form-group full-width"><label>Recipient Email *</label>
-                        <input name="recipient" type="email" required value="${escapeHtml(email)}"></div>
-                    <div class="form-group full-width"><label>Subject</label>
-                        <input name="subject" value="${InvoicesPage.docLabel(inv)} #${escapeHtml(inv.invoice_number)} from ${escapeHtml(inv.customer_name || 'us')}"></div>
-                    <div class="form-group full-width"><label>Message</label>
-                        <textarea name="message">Please find attached Invoice #${escapeHtml(inv.invoice_number)}.</textarea></div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">Send Email</button>
-                </div>
-            </form>`);
+        try {
+            const preview = await API.post(`/invoices/${id}/email-preview`, {});
+            openModal(Terms.text('Email Invoice'), `
+                <form onsubmit="InvoicesPage.sendEmail(event, ${id})">
+                    <div class="form-grid">
+                        <div class="form-group full-width"><label>Recipient Email *</label>
+                            <input name="recipient" type="email" required value="${escapeHtml(preview.recipient || '')}"></div>
+                        <div class="form-group full-width"><label>Subject</label>
+                            <input name="subject" value="${escapeHtml(preview.subject)}"></div>
+                    </div>
+                    <div class="form-group full-width"><label>${Terms.text('Message (optional)')}</label>
+                        <textarea name="message" rows="3" placeholder="${Terms.text('Added as the first paragraph of the email.')}"></textarea></div>
+                    <p>${Terms.text('Below is your saved invoice email template, which follows the message above.')}</p>
+                    <iframe id="invoice-email-preview" sandbox="" title="${T('Invoice')} email preview" style="width:100%;height:330px;border:1px solid #ddd;background:white;"></iframe>
+                    <p><a href="${escapeHtml(preview.pdf_url)}" target="_blank" rel="noopener">${Terms.text('Preview attached invoice PDF')}</a></p>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Send Email</button>
+                    </div>
+                </form>`);
+            const frame = $('#invoice-email-preview');
+            if (frame) frame.srcdoc = preview.html_body;
+        } catch (err) { toast(`Could not build the email preview: ${err.message}`, 'error'); }
     },
 
     async sendEmail(e, id) {

@@ -85,6 +85,32 @@ def get_template(template_id: int, db: Session = Depends(get_db)):
     return template
 
 
+def _validate_template_fields(data):
+    """Reject unparseable template text at save time.
+
+    Without this a typo like "{% if %}" saves fine and only surfaces later
+    as a failed send, with the invoice already marked sent. Compile-only —
+    rendering (and the sandbox check that comes with it) happens on
+    preview and send.
+    """
+    from jinja2 import TemplateSyntaxError
+
+    from app.services.email_service import template_env
+
+    env = template_env(autoescape=True)
+    for name in ("subject_template", "body_template"):
+        value = getattr(data, name, None)
+        if value is None:
+            continue
+        try:
+            env.from_string(value)
+        except TemplateSyntaxError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid {name} syntax on line {exc.lineno}.",
+            ) from exc
+
+
 @router.post("", response_model=EmailTemplateResponse, status_code=201)
 def create_template(data: EmailTemplateCreate, db: Session = Depends(get_db)):
     existing = db.query(EmailTemplate).filter(EmailTemplate.name == data.name).first()
@@ -92,6 +118,7 @@ def create_template(data: EmailTemplateCreate, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=400, detail="Template with this name already exists"
         )
+    _validate_template_fields(data)
     template = EmailTemplate(**data.model_dump())
     db.add(template)
     db.commit()
@@ -106,6 +133,7 @@ def update_template(
     template = db.query(EmailTemplate).filter(EmailTemplate.id == template_id).first()
     if not template:
         raise HTTPException(status_code=404, detail="Template not found")
+    _validate_template_fields(data)
     for key, val in data.model_dump(exclude_unset=True).items():
         setattr(template, key, val)
     db.commit()

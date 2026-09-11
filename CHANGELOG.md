@@ -64,6 +64,26 @@ email. The rest of @mdornich's report — the saved template being ignored,
 and template selection keyed off a document label — is his branch to open,
 and it is the better fix.
 
+**The invoice email template you saved is the one that gets sent.** Editing
+`invoice_email` under Settings -> Email Templates had no effect on the email
+a customer received: `/invoices/{id}/email` rendered a hardcoded body and
+never read the template. The send dialog also posted a `message` field the
+route did not accept, so the request failed validation before it got that
+far.
+
+Both the send dialog and the template editor now render through the same
+code path, so a preview is exactly what will be sent. The editor previews
+unsaved edits against a real invoice without emailing anyone or touching
+accounting records, and a template with a syntax error is rejected when you
+save it rather than failing silently at send time.
+
+Sales receipts, donation receipts and pledges use their saved template too —
+the document's label no longer decides whether your template is honored.
+
+Templates render against a redacted view of your settings, so the values the
+Settings page shows as `********` — SMTP password, payment provider keys — stay
+redacted there too. Non-secret company fields are unchanged.
+
 ### v2.11.1 — Wave imports work, and you can copy an API token
 
 Both fixes in this release came from @rchanks, and both were found the way

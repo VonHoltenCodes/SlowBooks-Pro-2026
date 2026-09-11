@@ -116,6 +116,25 @@ def test_the_dialog_and_the_route_agree_on_their_fields():
         f"_EmailInvoiceRequest is a StrictModel so this is a 422, not an ignore"
     )
 
+    # The subset relation above only catches the direction that broke us: the
+    # page posting a field the route refuses. It says nothing about the page
+    # quietly *dropping* a field the route supports, which is the likelier
+    # mistake now that the box works — a branch that deleted the Message
+    # textarea outright passed everything above this line. Name the field.
+    assert "message" in sent, (
+        "the Email Invoice dialog no longer posts `message`; the Message box "
+        "is part of the contract now (#140) and an operator's text must reach "
+        "the email rather than being dropped on the page"
+    )
+    assert 'name="message"' in js, (
+        "the Message textarea is gone from the dialog; `message` is still in "
+        "the POST body, so every send would now throw on form.message.value"
+    )
+    assert "message" in accepted, (
+        "_EmailInvoiceRequest no longer accepts `message`; the dialog posts it "
+        "and this is a StrictModel, so every send from the interface is a 422"
+    )
+
 
 def test_the_operators_message_reaches_the_email_body(
     client, db_session, seed_accounts, invoice

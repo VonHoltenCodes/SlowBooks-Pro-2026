@@ -759,9 +759,17 @@ const SettingsPage = {
     },
 
     async editTemplate(id) {
-        const t = await API.get(`/email-templates/${id}`);
+        let t, invoiceRows;
+        try {
+            t = await API.get(`/email-templates/${id}`);
+            // Just enough to pick a representative invoice to preview against;
+            // the endpoint would otherwise return up to 500 with their lines.
+            invoiceRows = t.template_type === 'invoice'
+                ? await API.get('/invoices?is_sales_receipt=false&limit=50')
+                : [];
+        } catch (err) { toast(err.message, 'error'); return; }
         openModal('Edit Email Template', `
-            <form onsubmit="SettingsPage.saveTemplate(event, ${id})">
+            <form id="email-template-editor" onsubmit="SettingsPage.saveTemplate(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Name</label>
                         <input name="name" value="${escapeHtml(t.name)}" readonly style="background:var(--gray-100);"></div>
@@ -776,11 +784,36 @@ const SettingsPage = {
                     Variables: {{ invoice.invoice_number }}, {{ invoice.total }}, {{ invoice.due_date }}, {{ customer_name }},
                     {{ company.company_name }}, {{ pay_url }}, {{ amount }}. Filters: | currency, | fdate
                 </div>
+                ${t.template_type === 'invoice' ? `<div style="margin-top:16px;">
+                    <label>${Terms.text('Preview with invoice')} <select id="email-template-invoice">${invoiceRows.map(inv => `<option value="${inv.id}">#${escapeHtml(inv.invoice_number)} — ${escapeHtml(inv.customer_name || '')}</option>`).join('')}</select></label>
+                    <button type="button" class="btn btn-secondary" onclick="SettingsPage.previewInvoiceTemplate()" ${invoiceRows.length ? '' : 'disabled'}>Preview Email</button>
+                    <p style="font-size:12px;">${Terms.text('Preview uses your current edits without sending an email. Save Template to use them for future sends.')}</p>
+                    <div id="email-template-preview-result"></div>
+                </div>` : ''}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Save Template</button>
                 </div>
             </form>`);
+    },
+
+    async previewInvoiceTemplate() {
+        const form = document.getElementById('email-template-editor');
+        const id = document.getElementById('email-template-invoice').value;
+        if (!id) return;
+        const out = document.getElementById('email-template-preview-result');
+        if (out) out.innerHTML = '';
+        try {
+            const preview = await API.post(`/invoices/${id}/email-preview`, {
+                subject_template: form.elements.subject_template.value,
+                body_template: form.elements.body_template.value,
+            });
+            if (out) out.innerHTML = `<p><strong>Subject:</strong> ${escapeHtml(preview.subject)}</p>
+                <iframe id="template-rendered-email" sandbox="" title="Template preview" style="width:100%;height:350px;border:1px solid #ddd;background:white;"></iframe>
+                <p><a target="_blank" rel="noopener" href="${escapeHtml(preview.pdf_url)}">${Terms.text('Preview invoice PDF attachment')}</a></p>`;
+            const frame = document.getElementById('template-rendered-email');
+            if (frame) frame.srcdoc = preview.html_body;
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async saveTemplate(e, id) {
