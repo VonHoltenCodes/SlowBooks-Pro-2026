@@ -58,6 +58,10 @@ Customize: **P&L: Year to Date** with cumulative net by month, and a
 every point and agrees with the report. Contributed by @jarvis4openclaw
 (#166). The chart of accounts import offers a CSV template.
 
+![The two opt-in overview cards in light and dark theme: Balance Sheet Trend, three lines for assets, liabilities and equity over the last twelve month-ends with the latest figures above the chart, and P&L Year to Date, net for the year with income, expenses and a bar per month of cumulative net](screenshots/overview-cards.png)
+
+*The two new overview cards, light and dark, on the stress-test company the release gate runs against. Turn them on under Customize.*
+
 **v2.15 — Your chart, from your file.** Import a chart of accounts from a
 CSV in the export's own columns, any spreadsheet with Number / Name / Type,
 or hledger's account list — tested against files hledger itself wrote. A
