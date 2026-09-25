@@ -200,7 +200,25 @@ def validate_worker_url(url: str) -> str:
 
 DEFAULT_TIMEOUT = 60.0  # seconds
 MAX_TOKENS = 1024
+# OpenAI's reasoning models spend hidden reasoning tokens out of the same
+# max_completion_tokens budget as the answer, so 1024 can run out before a
+# word of the answer is written. It is a ceiling, billed only as used.
+REASONING_MAX_TOKENS = 8192
 TEMPERATURE = 0.3  # low — we want grounded analysis, not creative writing
+
+_OPENAI_REASONING_PREFIXES = ("gpt-5", "gpt-6", "o1", "o3", "o4")
+
+
+def _is_openai_reasoning_model(model: str) -> bool:
+    return (model or "").startswith(_OPENAI_REASONING_PREFIXES)
+
+
+def _ran_out_of_tokens(body: Dict[str, Any]) -> bool:
+    """True when an OpenAI-style reply stopped at the token limit."""
+    try:
+        return body["choices"][0].get("finish_reason") == "length"
+    except (KeyError, IndexError, TypeError, AttributeError):
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -512,17 +530,20 @@ def _openai_style_request(
 
     Shared by OpenAI, Grok, Groq, and Cloudflare (all OpenAI-compat endpoints).
     """
+    reasoning = openai_native and _is_openai_reasoning_model(model)
     body = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "max_completion_tokens" if openai_native else "max_tokens": MAX_TOKENS,
+        "max_completion_tokens" if openai_native else "max_tokens": (
+            REASONING_MAX_TOKENS if reasoning else MAX_TOKENS
+        ),
     }
     # Reasoning models can reject temperature; omitting it uses the model's
     # default and keeps the request valid if its reasoning effort changes.
-    if not (openai_native and model.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))):
+    if not reasoning:
         body["temperature"] = TEMPERATURE
 
     return {
@@ -855,6 +876,11 @@ def call_provider(
         raise AIProviderError(f"{provider_key}: non-JSON response") from e
 
     text = parse_response(provider_key, body)
+    if not text and _ran_out_of_tokens(body):
+        raise AIProviderError(
+            f"{provider_key}: the model reached its output limit before writing an "
+            "answer. Try again, or pick a smaller or non-reasoning model."
+        )
     if not text:
         raise AIProviderError(f"{provider_key}: empty response (body shape unexpected)")
     return text
