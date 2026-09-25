@@ -6,16 +6,11 @@ from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.routes._helpers import clamp_pagination
-from app.models.accounts import Account
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.items import Item
 from app.models.contacts import Customer
 from app.schemas.invoices import InvoiceCreate, InvoiceUpdate, InvoiceResponse
 from app.services.accounting import (
-    create_journal_entry,
-    get_ar_account_id,
-    get_default_income_account_id,
-    get_sales_tax_account_id,
     _q,
 )
 from app.services.numbering import next_invoice_number
@@ -26,7 +21,7 @@ from app.routes.invoices.helpers import (
     resolve_line_taxable,
     _due_date_from_terms,
     _compute_totals,
-    _build_invoice_journal_lines,
+    _post_invoice_journal,
     _reverse_and_delete_journal,
 )
 from app.services.donor_documents import document_label
@@ -129,7 +124,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     # MAX+1 (no row-level lock), so two concurrent creates can both compute
     # the same number and one will hit the invoices.invoice_number UNIQUE
     # constraint at flush. The constraint is the safety net; this is the UX.
-    from app.services.currency import convert_lines, resolve_rate
+    from app.services.currency import resolve_rate
 
     doc_currency, doc_rate = resolve_rate(db, data.currency, data.exchange_rate)
 
@@ -194,75 +189,8 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         )
         db.add(line)
 
-    # ================================================================
-    # Journal Entry
-    # DR  Accounts Receivable (1100)     total
-    # CR  Income per line item           line amount
-    # CR  Sales Tax Payable (2200)       tax amount (if any)
-    # ================================================================
-    ar_id = get_ar_account_id(db)
-    default_income_id = get_default_income_account_id(db)
-    tax_account_id = get_sales_tax_account_id(db)
-
-    if ar_id and default_income_id:
-        journal_lines = []
-        # Debit A/R for total
-        journal_lines.append(
-            {
-                "account_id": ar_id,
-                "debit": Decimal(str(total)),
-                "credit": Decimal("0"),
-                "description": document_reference(face, invoice_number),
-            }
-        )
-        # Credit income for each line (use item's income account or default).
-        # Round per line to match the rounded A/R debit (see helper above) —
-        # otherwise sub-cent rates produce an unbalanced JE and a 500.
-        for line_data in data.lines:
-            line_amount = _q(
-                Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate))
-            )
-            if line_amount == 0:
-                continue
-            income_id = default_income_id
-            if line_data.item_id:
-                item = db.query(Item).filter(Item.id == line_data.item_id).first()
-                if item and item.income_account_id:
-                    income_id = item.income_account_id
-            journal_lines.append(
-                {
-                    "account_id": income_id,
-                    "debit": Decimal("0"),
-                    "credit": line_amount,
-                    "description": line_data.description or "",
-                    "job_id": line_data.job_id,
-                    "class_id": line_data.class_id,
-                    "cost_code_id": line_data.cost_code_id,
-                }
-            )
-        # Credit sales tax if any
-        if tax_amount > 0 and tax_account_id:
-            journal_lines.append(
-                {
-                    "account_id": tax_account_id,
-                    "debit": Decimal("0"),
-                    "credit": Decimal(str(tax_amount)),
-                    "description": "Sales tax",
-                }
-            )
-
-        txn = create_journal_entry(
-            db,
-            data.date,
-            document_reference(face, invoice_number, cust_name),
-            convert_lines(journal_lines, doc_rate),
-            source_type="invoice",
-            source_id=invoice.id,
-            class_id=invoice.class_id,
-            job_id=invoice.job_id,
-            reference=invoice_number,
-        )
-        invoice.transaction_id = txn.id
+    txn = _post_invoice_journal(db, invoice, data.lines, cust_name)
+    invoice.transaction_id = txn.id
 
     # ---- Phase 11: inventory/COGS posting ----
     # For each line with an inventory-tracked item, decrement qty and post
@@ -302,7 +230,80 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     check_closing_date(db, invoice.date)
 
     update_data = data.model_dump(exclude_unset=True, exclude={"lines"})
-    tax_rate_changed = "tax_rate" in update_data
+    status_requested = "status" in update_data
+    requested_status = update_data.pop("status", None)
+    if status_requested and requested_status in (None, InvoiceStatus.VOID):
+        raise HTTPException(
+            status_code=400,
+            detail="Use the invoice void action to void an invoice; status cannot be null",
+        )
+    date_changed = data.date is not None and data.date != invoice.date
+
+    if "currency" in update_data or "exchange_rate" in update_data:
+        from app.services.currency import resolve_rate
+
+        currency = update_data.get("currency", invoice.currency)
+        # A new currency cannot inherit the previous currency's rate. Reuse
+        # CREATE's resolution, including rate 1 for the home currency.
+        rate = update_data.get(
+            "exchange_rate",
+            invoice.exchange_rate if currency == invoice.currency else None,
+        )
+        update_data["currency"], update_data["exchange_rate"] = resolve_rate(
+            db, currency, rate
+        )
+
+    repost_fields = {"tax_rate", "currency", "exchange_rate", "class_id", "job_id"}
+    needs_recompute = data.lines is not None or any(
+        key in update_data and update_data[key] != getattr(invoice, key)
+        for key in repost_fields
+    )
+    if needs_recompute:
+        # Validate the proposed total before changing headers, lines or journals.
+        if data.lines is not None:
+            customer = db.get(
+                Customer, update_data.get("customer_id", invoice.customer_id)
+            )
+            resolve_line_taxable(db, data.lines, customer)
+            effective_lines = data.lines
+        else:
+            effective_lines = list(invoice.lines)
+        tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
+        subtotal, tax_amount, total = _compute_totals(effective_lines, tax_rate)
+        if total < invoice.amount_paid:
+            raise HTTPException(
+                status_code=400,
+                detail="Invoice total cannot be less than the amount already paid",
+            )
+
+    if needs_recompute or date_changed:
+        from sqlalchemy import and_, or_
+        from app.models.transactions import Transaction
+        from app.services.bank_posting import assert_not_reconciled
+
+        postings = (
+            db.query(Transaction)
+            .filter(
+                or_(
+                    Transaction.id == invoice.transaction_id,
+                    and_(
+                        Transaction.source_type.in_(("invoice", "invoice_edit")),
+                        Transaction.source_id == invoice.id,
+                    ),
+                )
+            )
+            .all()
+        )
+        # Check every affected posting before mutating any invoice/journal state.
+        for posting in postings:
+            assert_not_reconciled(posting)
+        if date_changed:
+            check_closing_date(db, data.date)
+            for posting in postings:
+                check_closing_date(db, posting.date)
+            for posting in postings:
+                posting.date = data.date
+
     for key, val in update_data.items():
         if key == "is_pledge" and val is None:
             continue
@@ -315,10 +316,8 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     if "due_date" in update_data and invoice.due_date is None:
         invoice.due_date = _due_date_from_terms(invoice.date, invoice.terms)
 
-    # Recompute totals + journal whenever anything that affects them changes
-    # (line list, tax rate, or both). Previously only lines triggered recompute,
-    # which left totals stale after a tax-rate-only edit.
-    needs_recompute = data.lines is not None or tax_rate_changed
+    # Date changes synchronize owned headers above without replacing splits.
+    # Other accounting changes reuse the shared invoice posting authority.
     if needs_recompute:
         # Phase 11 (audit fix): snapshot the OLD lines before we rebuild so
         # we can post compensating inventory movements for the delta.
@@ -332,7 +331,6 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         )
 
         if data.lines is not None:
-            resolve_line_taxable(db, data.lines, invoice.customer)
             db.query(InvoiceLine).filter(InvoiceLine.invoice_id == invoice_id).delete()
             db.flush()
             for i, line_data in enumerate(data.lines):
@@ -348,6 +346,9 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                             * Decimal(str(line_data.rate))
                         ),
                         class_name=line_data.class_name,
+                        class_id=line_data.class_id,
+                        job_id=line_data.job_id,
+                        cost_code_id=line_data.cost_code_id,
                         is_taxable=(
                             line_data.is_taxable
                             if line_data.is_taxable is not None
@@ -359,75 +360,25 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             db.flush()
             # Reload so invoice.lines reflects the new rows
             db.refresh(invoice)
-            effective_lines = data.lines
-        else:
-            # Tax-rate-only edit: keep existing lines but recompute amounts.
-            effective_lines = list(invoice.lines)
-
-        tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
-        subtotal, tax_amount, total = _compute_totals(effective_lines, tax_rate)
         invoice.subtotal = subtotal
         invoice.tax_amount = tax_amount
         invoice.total = total
-        # Clamp at 0: if an invoice is edited to a smaller total than the amount
-        # already paid, don't let balance_due go negative.
-        invoice.balance_due = max(total - invoice.amount_paid, Decimal("0"))
+        invoice.balance_due = total - invoice.amount_paid
 
-        # Sync journal entry
+        # Keep the existing journal identity while reusing create's posting path.
         if invoice.transaction_id:
-            ar_id = get_ar_account_id(db)
-            default_income_id = get_default_income_account_id(db)
-            tax_account_id = get_sales_tax_account_id(db)
+            from app.models.transactions import Transaction
 
-            if ar_id and default_income_id:
-                _reverse_and_delete_journal(db, invoice.transaction_id)
-                new_journal_lines = _build_invoice_journal_lines(
+            txn = db.get(Transaction, invoice.transaction_id)
+            if txn:
+                _reverse_and_delete_journal(db, txn.id)
+                _post_invoice_journal(
                     db,
-                    total,
-                    tax_amount,
-                    tax_account_id,
-                    ar_id,
-                    default_income_id,
+                    invoice,
                     effective_lines,
-                    invoice.invoice_number,
-                    face=document_label(invoice, terms_from_db(db)),
+                    invoice.customer.name if invoice.customer else "",
+                    existing_transaction=txn,
                 )
-                # Rebuild txn lines under the same transaction_id
-                from app.models.transactions import Transaction, TransactionLine
-
-                txn = (
-                    db.query(Transaction)
-                    .filter(Transaction.id == invoice.transaction_id)
-                    .first()
-                )
-                if txn:
-                    txn.description = document_reference(
-                        document_label(invoice, terms_from_db(db)),
-                        invoice.invoice_number,
-                        invoice.customer.name if invoice.customer else "",
-                    )
-                for jl in new_journal_lines:
-                    debit = Decimal(str(jl.get("debit", 0)))
-                    credit = Decimal(str(jl.get("credit", 0)))
-                    if debit == 0 and credit == 0:
-                        continue
-                    db.add(
-                        TransactionLine(
-                            transaction_id=invoice.transaction_id,
-                            account_id=jl["account_id"],
-                            debit=debit,
-                            credit=credit,
-                            description=jl.get("description", ""),
-                        )
-                    )
-                    account = (
-                        db.query(Account).filter(Account.id == jl["account_id"]).first()
-                    )
-                    if account:
-                        if account.account_type.value in ("asset", "expense", "cogs"):
-                            account.balance += debit - credit
-                        else:
-                            account.balance += credit - debit
 
         # Phase 11 (audit fix): post compensating inventory movements for
         # lines that changed. No-op if nothing was inventory-tracked.
@@ -438,6 +389,18 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 old_line_snapshot,
                 txn_date=invoice.date,
             )
+
+    # One payment-derived decision for total edits and status-only requests.
+    # Unpaid invoices retain the explicitly supported draft/sent lifecycle.
+    if needs_recompute or status_requested:
+        if invoice.balance_due == 0 and invoice.amount_paid >= invoice.total:
+            invoice.status = InvoiceStatus.PAID
+        elif invoice.amount_paid > 0:
+            invoice.status = InvoiceStatus.PARTIAL
+        elif requested_status in (InvoiceStatus.DRAFT, InvoiceStatus.SENT):
+            invoice.status = requested_status
+        elif invoice.status not in (InvoiceStatus.DRAFT, InvoiceStatus.SENT):
+            invoice.status = InvoiceStatus.SENT
 
     _check_fair_value(invoice.fair_value_amount, invoice.total)
     db.commit()

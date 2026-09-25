@@ -159,6 +159,8 @@ def create_journal_entry(
     bypass_closing_date: bool = False,
     class_id: int = None,
     job_id: int = None,
+    *,
+    existing_transaction: Transaction = None,
 ) -> Transaction:
     """Create a balanced journal entry.
 
@@ -201,7 +203,17 @@ def create_journal_entry(
             f"Journal entry not balanced: debits={total_debit}, credits={total_credit}"
         )
 
-    txn = Transaction(
+    # Invoice edits retain their header identity after removing old splits.
+    # Reject nonempty journals so this path cannot double-post their balances.
+    if existing_transaction is not None and (
+        db.query(TransactionLine)
+        .filter(TransactionLine.transaction_id == existing_transaction.id)
+        .first()
+        is not None
+    ):
+        raise DataProblem("Replacement journal must have its old splits removed")
+
+    header = dict(
         date=txn_date,
         description=description,
         source_type=source_type,
@@ -210,7 +222,13 @@ def create_journal_entry(
         class_id=class_id,
         job_id=job_id,
     )
-    db.add(txn)
+    txn = existing_transaction
+    if txn is None:
+        txn = Transaction(**header)
+        db.add(txn)
+    else:
+        for key, value in header.items():
+            setattr(txn, key, value)
     db.flush()
 
     from app.services.classes_service import default_function_of

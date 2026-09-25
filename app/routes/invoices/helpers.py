@@ -114,6 +114,9 @@ def _build_invoice_journal_lines(
                 "debit": Decimal("0"),
                 "credit": line_amount,
                 "description": (getattr(ld, "description", "") or ""),
+                "class_id": getattr(ld, "class_id", None),
+                "job_id": getattr(ld, "job_id", None),
+                "cost_code_id": getattr(ld, "cost_code_id", None),
             }
         )
     if tax_amount and tax_amount > 0 and tax_account_id:
@@ -126,6 +129,46 @@ def _build_invoice_journal_lines(
             }
         )
     return journal_lines
+
+
+def _post_invoice_journal(
+    db: Session, invoice, lines, customer_name, *, existing_transaction=None
+):
+    """One construction/conversion/posting path for invoice create and edit."""
+    from app.services.accounting import (
+        create_journal_entry,
+        get_ar_account_id,
+        get_default_income_account_id,
+        get_sales_tax_account_id,
+    )
+    from app.services.currency import convert_lines
+    from app.services.donor_documents import document_label
+    from app.services.terminology import terms_from_db
+
+    face = document_label(invoice, terms_from_db(db))
+    journal_lines = _build_invoice_journal_lines(
+        db,
+        invoice.total,
+        invoice.tax_amount,
+        get_sales_tax_account_id(db),
+        get_ar_account_id(db),
+        get_default_income_account_id(db),
+        lines,
+        invoice.invoice_number,
+        face=face,
+    )
+    return create_journal_entry(
+        db,
+        invoice.date,
+        document_reference(face, invoice.invoice_number, customer_name),
+        convert_lines(journal_lines, Decimal(str(invoice.exchange_rate or 1))),
+        source_type="invoice",
+        source_id=invoice.id,
+        reference=invoice.invoice_number,
+        class_id=invoice.class_id,
+        job_id=invoice.job_id,
+        existing_transaction=existing_transaction,
+    )
 
 
 def _reverse_and_delete_journal(db: Session, transaction_id: int):
