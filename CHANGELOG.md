@@ -7,6 +7,33 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.17.2 — Editing an invoice keeps its job costing
+
+**Saving an invoice from the edit screen stripped its job costing.** An edit
+rebuilt the invoice's ledger entry by a separate route from creating one,
+and that route dropped the job, class and cost code from every line of the
+entry; the invoice form, which has no cells for them, never sent the
+per-line values back either. Revenue quietly left the job-cost reports each
+time an invoice was saved. On the QA company, re-saving all 960 invoices
+unchanged took their ledger lines from 565 job and 875 cost-code tags to
+none. Both halves are fixed: an edit now posts through the same code as a
+new invoice (#187, @Bit-Sage), and the form sends each line's job, class
+and cost code back. The same 960 re-saves now keep all 565 and 875, and the
+trial balance does not move.
+
+**An edited invoice posts the way a new one does** (#187). A foreign-currency
+invoice's edit posts at its exchange rate — it posted document-currency
+amounts to the home ledger before; changing the invoice date moves its
+ledger entry with it, subject to the closing date; and a total can no
+longer be edited below what has already been paid. Paid and partly-paid
+follow the payments.
+
+**API.** `PUT /api/invoices/{id}` with `status: "void"` is refused — use
+`POST /api/invoices/{id}/void`; a requested `paid` or `partial` on an
+invoice whose payments say otherwise is not applied.
+
+No schema change.
+
 ### v2.17.1 — OpenAI works again
 
 **AI analysis with OpenAI failed on current models** (#185, @Sciumo). OpenAI's
