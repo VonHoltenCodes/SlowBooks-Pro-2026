@@ -848,3 +848,31 @@ def test_status_only_edit_respects_payment_state(
     assert invoice.total == Decimal("100")
     assert invoice.amount_paid == Decimal(payment_amount)
     assert invoice.balance_due == Decimal(expected_due)
+
+
+def test_the_invoice_form_sends_each_lines_dimensions_back():
+    # The form has no job / class / cost-code cells, so a line's values ride
+    # on its row and go back on save. Before 2.17.2 they were never sent, and
+    # re-saving an invoice from the screen stripped them from the line and
+    # its posting (875 cost-code tags on the QA company's invoices became 0).
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "app/static/js/invoices.js").read_text(
+        encoding="utf-8"
+    )
+    row = js[js.index("lineRowHtml(idx, line, items)") :]
+    row = row[: row.index("</tr>")]
+    for attr, field in (
+        ("data-job-id", "job_id"),
+        ("data-class-id", "class_id"),
+        ("data-cost-code-id", "cost_code_id"),
+    ):
+        assert f'{attr}="${{dim(line.{field})}}"' in row, attr
+    save = js[js.index("async save(e, id)") :]
+    save = save[: save.index("const data = {")]
+    for field, key in (
+        ("job_id", "jobId"),
+        ("class_id", "classId"),
+        ("cost_code_id", "costCodeId"),
+    ):
+        assert f"{field}: row.dataset.{key}" in save, field
