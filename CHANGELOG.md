@@ -21,6 +21,13 @@ new invoice (#187, @Bit-Sage), and the form sends each line's job, class
 and cost code back. The same 960 re-saves now keep all 565 and 875, and the
 trial balance does not move.
 
+Where it showed: **Job Cost Detail**, which splits a job's revenue by cost
+code — one of the QA company's jobs went from seven cost codes to a single
+*uncoded* line on 2.17.1. Job Profitability, which files a line under the
+invoice's own job when the line has none, kept reading correctly for
+invoices that carry their job on the header, which is why the loss was easy
+to miss.
+
 **An edited invoice posts the way a new one does** (#187). A foreign-currency
 invoice's edit posts at its exchange rate — it posted document-currency
 amounts to the home ledger before; changing the invoice date moves its
@@ -28,9 +35,10 @@ ledger entry with it, subject to the closing date; and a total can no
 longer be edited below what has already been paid. Paid and partly-paid
 follow the payments.
 
-**API.** `PUT /api/invoices/{id}` with `status: "void"` is refused — use
-`POST /api/invoices/{id}/void`; a requested `paid` or `partial` on an
-invoice whose payments say otherwise is not applied.
+**API.** `PUT /api/invoices/{id}` with `status: "void"` is refused with a
+message naming `POST /api/invoices/{id}/void`; an empty `status` is refused;
+a requested `paid` or `partial` on an invoice whose payments say otherwise
+is not applied.
 
 No schema change.
 

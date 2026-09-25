@@ -876,3 +876,77 @@ def test_the_invoice_form_sends_each_lines_dimensions_back():
         ("cost_code_id", "costCodeId"),
     ):
         assert f"{field}: row.dataset.{key}" in save, field
+
+
+def test_a_job_keeps_its_revenue_by_cost_code_through_an_edit(
+    client, db_session, seed_accounts, seed_customer
+):
+    # 2.17.1 stripped cost codes on every edit: Job Profitability, which files a
+    # line under the invoice's job when the line has none, still read right,
+    # but Job Cost Detail's revenue by cost code collapsed into "uncoded".
+    from app.models.cost_codes import CostCode
+    from app.models.jobs import Job
+
+    job = Job(customer_id=seed_customer.id, name="Kitchen")
+    a = CostCode(code="DEMO", name="Demolition", cost_type="labor")
+    b = CostCode(code="TILE", name="Tile", cost_type="material")
+    db_session.add_all([job, a, b])
+    db_session.commit()
+    lines = [
+        {"description": "Demo", "quantity": "1", "rate": "400", "cost_code_id": a.id},
+        {"description": "Tile", "quantity": "1", "rate": "250", "cost_code_id": b.id},
+    ]
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-01",
+            "job_id": job.id,
+            "lines": lines,
+        },
+    )
+    assert r.status_code == 201, r.text
+    invoice_id = r.json()["id"]
+
+    def revenue_by_code():
+        tree = client.get(f"/api/jobs/{job.id}/cost-tree").json()
+        found = {}
+
+        def walk(node):
+            if isinstance(node, dict):
+                if node.get("id") in (a.id, b.id) and "own" in node:
+                    found[node["id"]] = node["own"]["act_revenue"]
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+
+        walk(tree)
+        return found
+
+    before = revenue_by_code()
+    assert before == {a.id: 400.0, b.id: 250.0}
+    r = client.put(f"/api/invoices/{invoice_id}", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    assert revenue_by_code() == before
+    profit = client.get("/api/jobs/profitability").json()
+    row = next(
+        x
+        for x in (profit if isinstance(profit, list) else profit["jobs"])
+        if x["job_id"] == job.id
+    )
+    assert row["income"] == 650.0
+
+
+def test_editing_an_invoice_to_void_points_to_the_void_action(
+    client, seed_accounts, seed_customer
+):
+    inv = _create_invoice(client, seed_customer.id)
+    r = client.put(f"/api/invoices/{inv['id']}", json={"status": "void"})
+    assert r.status_code == 400
+    assert f"POST /api/invoices/{inv['id']}/void" in r.json()["detail"]
+    assert "null" not in r.json()["detail"]
+    r = client.put(f"/api/invoices/{inv['id']}", json={"status": None})
+    assert r.status_code == 400 and "empty" in r.json()["detail"]
+    assert client.get(f"/api/invoices/{inv['id']}").json()["status"] != "void"

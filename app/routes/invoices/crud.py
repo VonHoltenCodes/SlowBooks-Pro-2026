@@ -232,10 +232,18 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     update_data = data.model_dump(exclude_unset=True, exclude={"lines"})
     status_requested = "status" in update_data
     requested_status = update_data.pop("status", None)
-    if status_requested and requested_status in (None, InvoiceStatus.VOID):
+    if status_requested and requested_status == InvoiceStatus.VOID:
         raise HTTPException(
             status_code=400,
-            detail="Use the invoice void action to void an invoice; status cannot be null",
+            detail=(
+                "An invoice is voided with its void action, not by editing its "
+                f"status: use POST /api/invoices/{invoice_id}/void"
+            ),
+        )
+    if status_requested and requested_status is None:
+        raise HTTPException(
+            status_code=400,
+            detail="status cannot be empty; leave it out to keep the invoice's status",
         )
     date_changed = data.date is not None and data.date != invoice.date
 
