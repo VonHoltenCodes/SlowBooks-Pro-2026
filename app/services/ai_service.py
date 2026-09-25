@@ -505,11 +505,26 @@ def _openai_style_request(
     model: str,
     system: str,
     user: str,
+    *,
+    openai_native: bool = False,
 ) -> Dict[str, Any]:
     """Build an OpenAI-compatible chat-completions request.
 
     Shared by OpenAI, Grok, Groq, and Cloudflare (all OpenAI-compat endpoints).
     """
+    body = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "max_completion_tokens" if openai_native else "max_tokens": MAX_TOKENS,
+    }
+    # Reasoning models can reject temperature; omitting it uses the model's
+    # default and keeps the request valid if its reasoning effort changes.
+    if not (openai_native and model.startswith(("gpt-5", "gpt-6", "o1", "o3", "o4"))):
+        body["temperature"] = TEMPERATURE
+
     return {
         "method": "POST",
         "url": url,
@@ -517,15 +532,7 @@ def _openai_style_request(
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
-        "json": {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-            "temperature": TEMPERATURE,
-            "max_tokens": MAX_TOKENS,
-        },
+        "json": body,
     }
 
 
@@ -624,6 +631,7 @@ def build_request(
             model,
             system,
             user,
+            openai_native=True,
         )
 
     if provider_key == "cloudflare":
