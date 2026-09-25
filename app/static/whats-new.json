@@ -1,4 +1,11 @@
 {
+  "2.17.1": {
+    "title": "OpenAI works again",
+    "items": [
+      "AI analysis with OpenAI: the current models, including the default gpt-5.4-mini, refused the request; they are sent the settings they accept",
+      "Reasoning models get room to think before answering, and a reply cut off at the limit now says so instead of reporting an unexpected response"
+    ]
+  },
   "2.17.0": {
     "title": "Your ledger, in a spreadsheet",
     "items": [

@@ -7,6 +7,25 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.17.1 — OpenAI works again
+
+**AI analysis with OpenAI failed on current models** (#185, @Sciumo). OpenAI's
+reasoning models — the gpt-5 line, including SlowBooks' default
+`gpt-5.4-mini`, and the o-series — refuse `max_tokens` and any temperature
+but their default, so the request was rejected before it ran, the Test button
+included. OpenAI is now sent `max_completion_tokens`, and no temperature for
+its reasoning models. Grok, Groq, Cloudflare and custom endpoints send what
+they always sent.
+
+**Room to think.** A reasoning model spends hidden reasoning out of the same
+token budget as its answer, so the 1,024 tokens that suit every other
+provider could run out before the answer began. OpenAI's reasoning models get
+a ceiling of 8,192 — billed only as used — and a reply that stops at the limit
+with nothing written now says so, instead of "empty response (body shape
+unexpected)".
+
+No schema change.
+
 ### v2.17.0 — Your ledger, in a spreadsheet
 
 **Trial Balance and General Ledger save as a spreadsheet and a printable
