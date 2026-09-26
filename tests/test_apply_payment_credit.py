@@ -257,3 +257,14 @@ def test_credits_list_payments_and_credit_memos(client, seed_accounts, salt):
         ("credit_memo", 18.40, r.json()["memo_number"]),
     ]
     assert body["credits"][0]["id"] == pay["id"]
+
+
+def test_an_amount_that_rounds_to_nothing_is_refused(
+    client, TestSession, seed_accounts, salt
+):
+    inv = _invoice(client, salt, 100)
+    pay = _payment(client, salt, 50)
+    before = _snapshot(TestSession)
+    r = _apply(client, pay["id"], (inv["id"], 0.001))
+    assert r.status_code == 400, r.text
+    assert _snapshot(TestSession) == before

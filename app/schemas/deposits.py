@@ -28,7 +28,7 @@ class PendingDepositResponse(BaseModel):
 class DepositResponse(BaseModel):
     """A deposit made: its journal entry id, the bank account and amount,
     how many payments it took (None for a deposit that named none — made
-    before 2.17.4, imported, or posted by hand), and whether it is void or
+    before deposits kept their list, imported, or posted by hand), and whether it is void or
     on a reconciled bank statement."""
 
     id: int

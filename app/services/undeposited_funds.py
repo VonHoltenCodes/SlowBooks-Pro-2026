@@ -2,8 +2,8 @@
 
 A payment received into Undeposited Funds (1200) debits it; Make Deposits
 moves a batch of those to a bank account with one entry (DR bank, CR
-1200), as QuickBooks does. Until 2.17.4 the deposit forgot which payments
-it took. Nothing then stopped a deposited payment — even one whose deposit
+1200), as QuickBooks does. The deposit used to forget which payments it
+took. Nothing then stopped a deposited payment — even one whose deposit
 had been reconciled with a bank statement — from being voided: the void
 credited 1200 a second time and drove it negative while the deposit still
 claimed the money (explore 2.17.3, W-H4). The Make Deposits list, rebuilt
@@ -17,9 +17,9 @@ Now:
 - a deposit made from the list stamps each item's line with its journal
   entry (``TransactionLine.deposit_transaction_id``); voiding the deposit
   clears the stamp, and the payments are waiting again;
-- a deposit that names no items — made before 2.17.4, imported from
-  QuickBooks, or posted by hand — is netted against the OLDEST waiting
-  items, which is how a person deposits.
+- a deposit that names no items — made before deposits kept their list,
+  imported from QuickBooks, or posted by hand — is netted against the
+  OLDEST waiting items, which is how a person deposits.
 """
 
 from __future__ import annotations

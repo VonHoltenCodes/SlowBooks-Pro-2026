@@ -286,7 +286,7 @@ def apply_payment(payment_id: int, data: PaymentApply, db: Session = Depends(get
         raise HTTPException(
             status_code=400, detail="This payment is void, so it has nothing to apply."
         )
-    if any(a.amount <= 0 for a in data.allocations):
+    if any(_q(a.amount) <= 0 for a in data.allocations):
         raise HTTPException(
             status_code=400, detail="Allocation amounts must be positive"
         )

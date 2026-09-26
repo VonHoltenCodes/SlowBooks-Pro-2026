@@ -250,8 +250,9 @@ def test_a_sales_receipt_in_a_deposit_is_guarded_the_same_way(
 def test_a_payment_in_a_deposit_that_named_no_payments_is_still_guarded(
     client, db_session, seed_accounts, acme
 ):
-    """Deposits made before 2.17.4 (and ones imported from QuickBooks) are
-    one amount with no list; the payment they used up is still deposited."""
+    """Deposits made before deposits kept their list (and ones imported from
+    QuickBooks) are one amount with no list; the payment they used up is
+    still deposited."""
     pay = _receive(client, acme, 200, check="77")
     r = client.post(
         "/api/deposits",
