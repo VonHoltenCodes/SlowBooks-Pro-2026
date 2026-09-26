@@ -532,6 +532,8 @@ const ReportsPage = {
                             ? '— agrees with this report.'
                             : `— <span style="color:var(--danger); font-weight:700;">differs from this report by ${formatCurrency(ledger.difference)}</span>. Something other than a sale or credit memo posted to the account in these dates (tax on a bill, a journal entry, a void of an earlier sale).`}
                         <div>Paid this period: ${formatCurrency(ledger.payments)} · Owed at ${formatDate(data.end_date)}: <strong>${formatCurrency(ledger.balance)}</strong></div>
+                        ${Math.abs(ledger.purchase_tax_to_date || 0) >= 0.005 ? `<div style="margin-top:6px;">
+                            Of that, <strong>${formatCurrency(ledger.purchase_tax)}</strong> this period is sales tax paid to suppliers on bills entered before SlowBooks Pro 2.18, which posted it to ${escapeHtml(ledger.account_name)}; since 2.18 that tax is part of what the purchase cost. To correct it, post one journal entry: debit the expense or cost-of-goods account those purchases used, and credit ${escapeHtml(ledger.account_number)} ${escapeHtml(ledger.account_name)} <strong>${formatCurrency(ledger.purchase_tax_to_date)}</strong> (the total to ${formatDate(data.end_date)}).</div>` : ''}
                     </div>` : '';
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>

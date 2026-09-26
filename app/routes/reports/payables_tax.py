@@ -157,6 +157,12 @@ def _sales_tax_ledger(db: Session, start_date, end_date, total_tax: Decimal):
     in_period = (Transaction.date >= start_date, Transaction.date <= end_date)
     payment = Transaction.source_type == "sales_tax_payment"
     posted = owed(*in_period, or_(Transaction.source_type.is_(None), ~payment))
+    # Tax paid to suppliers that bills and vendor credits posted here before
+    # 2.18 (it is part of a purchase's cost now, never Sales Tax Payable).
+    # Named so the difference it causes is explained, with the correction.
+    purchase = Transaction.source_type.in_(
+        ("bill", "bill_void", "vendor_credit", "vendor_credit_void")
+    )
     return {
         "account_number": account.account_number,
         "account_name": account.name,
@@ -164,6 +170,8 @@ def _sales_tax_ledger(db: Session, start_date, end_date, total_tax: Decimal):
         "payments": float(-owed(*in_period, payment)),
         "balance": float(owed(Transaction.date <= end_date)),
         "difference": float(_q(total_tax - posted)),
+        "purchase_tax": float(-owed(*in_period, purchase)),
+        "purchase_tax_to_date": float(-owed(Transaction.date <= end_date, purchase)),
     }
 
 
