@@ -147,6 +147,9 @@ _WHOLE_NUMBER_SETTINGS = {
     "late_fee_grace_days": ("Grace days", 0, None),
     "smtp_port": ("SMTP port", 1, 65535),
 }
+# Document counters keep the zeros typed in front: "0001" numbers invoices
+# 0001, 0002 ... ("INV-0001" style), where "1" numbers them 1, 2 ...
+_KEEP_TYPED_DIGITS = {"invoice_next_number", "estimate_next_number"}
 # A closing date that does not parse used to be stored as typed, and then
 # read as "no closing date" — the lock silently off.
 _DATE_SETTINGS = {"closing_date": "Closing date"}
@@ -186,7 +189,7 @@ def clean_setting_value(key: str, value) -> str:
             else:
                 wanted = f"a whole number, {low} or more"
             raise SettingValueError(f"{label} must be {wanted}.")
-        return str(number)
+        return text if key in _KEEP_TYPED_DIGITS else str(number)
     if key in _DATE_SETTINGS:
         if text == "":
             return ""

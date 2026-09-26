@@ -63,7 +63,8 @@ def test_a_next_number_saves_as_the_number_it_is(client):
     )
     assert r.status_code == 200, r.text
     s = _settings(client)
-    assert s["invoice_next_number"] == "42"
+    # the typed zeros stay: they set how invoice numbers are padded
+    assert s["invoice_next_number"] == "0042"
     assert s["estimate_next_number"] == "5001"
 
 

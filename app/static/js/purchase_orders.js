@@ -219,7 +219,8 @@ const PurchaseOrdersPage = {
             po = await API.get(`/purchase-orders/${id}`);
             [vendor, items, accounts] = await Promise.all([
                 API.get(`/vendors/${po.vendor_id}`),
-                API.get('/items'),
+                // every item, inactive ones too: a line on the order may use one
+                API.get('/items?active_only=false'),
                 API.get('/accounts?active_only=true'),
             ]);
         } catch (err) { toast(err.message, 'error'); return; }
