@@ -240,126 +240,115 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     return {"status": "ok", "transaction_id": txn.id, "amount": float(amount)}
 
 
+def ap_aging_report(db: Session, as_of_date: date) -> dict:
+    """The A/P Aging report's figures, in home currency, netted of the credits
+    a vendor holds for us (unapplied vendor credits and the part of a bill
+    payment not yet applied to a bill), so the total equals account 2000 and
+    each vendor's row equals the vendor balance. The analytics page and the
+    assistant read these too, so no two views of payables disagree (found
+    integrating the 2.17.3 exploratory fixes: the A/R side had been made to
+    tie; this side still summed raw document-currency balances)."""
+    from app.models.bills import (
+        Bill,
+        BillPayment,
+        BillPaymentAllocation,
+        BillStatus,
+    )
+    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
+    from app.services.contact_balances import home_amount
+
+    vendor_names = {v.id: v.name for v in db.query(Vendor.id, Vendor.name).all()}
+    aging: dict = {}
+
+    def row(vid):
+        if vid not in aging:
+            aging[vid] = {
+                "vendor_name": vendor_names.get(vid, "Unknown"),
+                "vendor_id": vid,
+                "current": Decimal(0),
+                "over_30": Decimal(0),
+                "over_60": Decimal(0),
+                "over_90": Decimal(0),
+                "total": Decimal(0),
+                "unapplied_credits": Decimal(0),
+            }
+        return aging[vid]
+
+    bills = (
+        db.query(Bill)
+        .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
+        .filter(Bill.balance_due > 0)
+        .all()
+    )
+    for bill in bills:
+        r = row(bill.vendor_id)
+        # A bill with no due date (bills made from a PO before 2.18
+        # never got one) ages from its date and terms, not as current.
+        due = bill.due_date or _due_date_from_terms(bill.date, bill.terms)
+        days = (as_of_date - due).days
+        bal = home_amount(bill.balance_due, bill.exchange_rate)
+        if days <= 0:
+            r["current"] += bal
+        elif days <= 30:
+            r["over_30"] += bal
+        elif days <= 60:
+            r["over_60"] += bal
+        else:
+            r["over_90"] += bal
+        r["total"] += bal
+
+    def credit(vid, amount):
+        # A credit has no due date, so it reduces the newest bucket — it is
+        # money available now, not money aged — and shows on its own line,
+        # because "you owe 700" and "you owe 1,000 and hold a 300 credit" are
+        # different facts to a person about to pay a vendor (issue #129).
+        r = row(vid)
+        r["unapplied_credits"] += amount
+        r["current"] -= amount
+        r["total"] -= amount
+
+    for vc in (
+        db.query(VendorCredit)
+        .filter(VendorCredit.status != VendorCreditStatus.VOID)
+        .filter(VendorCredit.date <= as_of_date)
+        .filter(VendorCredit.balance_remaining > 0)
+        .all()
+    ):
+        credit(vc.vendor_id, Decimal(str(vc.balance_remaining)))
+
+    applied = dict(
+        db.query(
+            BillPaymentAllocation.bill_payment_id,
+            sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
+        )
+        .group_by(BillPaymentAllocation.bill_payment_id)
+        .all()
+    )
+    for bp in (
+        db.query(BillPayment)
+        .filter(BillPayment.date <= as_of_date)
+        .filter(BillPayment.is_voided.isnot(True))
+        .all()
+    ):
+        left = _q(Decimal(str(bp.amount or 0)) - Decimal(str(applied.get(bp.id, 0))))
+        if left > 0:
+            credit(bp.vendor_id, home_amount(left, bp.exchange_rate))
+
+    _COLS = ("current", "over_30", "over_60", "over_90", "total", "unapplied_credits")
+    items = sorted(aging.values(), key=lambda i: (i["vendor_name"] or "").lower())
+    totals = {"vendor_name": "TOTAL", "vendor_id": 0}
+    for k in _COLS:
+        totals[k] = float(sum((i[k] for i in items), Decimal(0)))
+    for item in items:
+        for k in _COLS:
+            item[k] = float(item[k])
+    return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
+
+
 @router.get("/ap-aging")
 def ap_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
     """AP Aging report — mirrors AR aging but for bills."""
-    if not as_of_date:
-        as_of_date = date.today()
-
-    try:
-        from app.models.bills import Bill, BillStatus
-        from app.models.contacts import Vendor
-        from app.models.vendor_credits import VendorCredit, VendorCreditStatus
-
-        bills = (
-            db.query(Bill)
-            .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
-            .filter(Bill.balance_due > 0)
-            .all()
-        )
-
-        vendor_names = {v.id: v.name for v in db.query(Vendor.id, Vendor.name).all()}
-
-        aging = {}
-        for bill in bills:
-            vid = bill.vendor_id
-            if vid not in aging:
-                aging[vid] = {
-                    "vendor_name": vendor_names.get(vid, "Unknown"),
-                    "vendor_id": vid,
-                    "current": Decimal(0),
-                    "over_30": Decimal(0),
-                    "over_60": Decimal(0),
-                    "over_90": Decimal(0),
-                    "total": Decimal(0),
-                    "unapplied_credits": Decimal(0),
-                }
-
-            # A bill with no due date (bills made from a PO before 2.18
-            # never got one) ages from its date and terms, not as current.
-            due = bill.due_date or _due_date_from_terms(bill.date, bill.terms)
-            days = (as_of_date - due).days
-            bal = bill.balance_due
-            if days <= 0:
-                aging[vid]["current"] += bal
-            elif days <= 30:
-                aging[vid]["over_30"] += bal
-            elif days <= 60:
-                aging[vid]["over_60"] += bal
-            else:
-                aging[vid]["over_90"] += bal
-            aging[vid]["total"] += bal
-
-        # Unapplied vendor credits (issue #129). A credit debits A/P the
-        # moment it is issued, so a report that only sums bill balances
-        # reads HIGHER than account 2000 by every credit not yet applied —
-        # the sub-ledger and the control account stop agreeing, which is
-        # the objection that made this a document instead of a journal
-        # entry. Shown on its own line as well as netted, because "you owe
-        # 700" and "you owe 1,000 and hold a 300 credit" are different
-        # facts to a person about to pay a vendor.
-        credits = (
-            db.query(VendorCredit)
-            .filter(VendorCredit.status != VendorCreditStatus.VOID)
-            .filter(VendorCredit.date <= as_of_date)
-            .filter(VendorCredit.balance_remaining > 0)
-            .all()
-        )
-        for vc in credits:
-            vid = vc.vendor_id
-            if vid not in aging:
-                aging[vid] = {
-                    "vendor_name": vendor_names.get(vid, "Unknown"),
-                    "vendor_id": vid,
-                    "current": Decimal(0),
-                    "over_30": Decimal(0),
-                    "over_60": Decimal(0),
-                    "over_90": Decimal(0),
-                    "total": Decimal(0),
-                    "unapplied_credits": Decimal(0),
-                }
-            amt = Decimal(str(vc.balance_remaining))
-            aging[vid]["unapplied_credits"] += amt
-            # A credit has no due date, so it reduces the newest bucket —
-            # it is money available now, not money aged.
-            aging[vid]["current"] -= amt
-            aging[vid]["total"] -= amt
-
-        _COLS = (
-            "current",
-            "over_30",
-            "over_60",
-            "over_90",
-            "total",
-            "unapplied_credits",
-        )
-        items = list(aging.values())
-        for item in items:
-            item.setdefault("unapplied_credits", Decimal(0))
-        totals = {"vendor_name": "TOTAL", "vendor_id": 0}
-        for k in _COLS:
-            totals[k] = sum(i[k] for i in items)
-        for item in items:
-            for k in _COLS:
-                item[k] = float(item[k])
-        for k in _COLS:
-            totals[k] = float(totals[k])
-
-        return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
-    except ImportError:
-        return {
-            "as_of_date": as_of_date.isoformat(),
-            "items": [],
-            "totals": {
-                "vendor_name": "TOTAL",
-                "vendor_id": 0,
-                "current": 0,
-                "over_30": 0,
-                "over_60": 0,
-                "over_90": 0,
-                "total": 0,
-            },
-        }
+    return ap_aging_report(db, as_of_date or date.today())
 
 
 @router.get("/1099-summary")

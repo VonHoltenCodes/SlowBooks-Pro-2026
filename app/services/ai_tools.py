@@ -494,41 +494,34 @@ def get_expenses_by_category(
 def get_aging_report(
     db: Session,
 ) -> Dict[str, Any]:
-    """Get A/R and A/P aging report: outstanding balances by age bucket."""
-    # AR aging: open invoices
-    invoices = db.query(Invoice).filter(Invoice.balance_due > 0).all()
-    ar_by_age = {"current": 0, "30": 0, "60": 0, "90": 0}
+    """Get A/R and A/P aging: outstanding balances by days past due, from the
+    A/R and A/P Aging reports themselves (home currency, credits netted), so
+    the assistant quotes the figures the reports and the ledger show. It
+    used to age raw balances by document date, with no credits and no
+    currency conversion (found integrating the 2.17.3 exploratory fixes)."""
+    from app.routes.reports.payables_tax import ap_aging_report
+    from app.routes.reports.receivables import ar_aging_report
+
     today = date.today()
-    for inv in invoices:
-        days_old = (today - inv.date).days if inv.date else 0
-        if days_old <= 30:
-            ar_by_age["current"] += float(inv.balance_due or 0)
-        elif days_old <= 60:
-            ar_by_age["30"] += float(inv.balance_due or 0)
-        elif days_old <= 90:
-            ar_by_age["60"] += float(inv.balance_due or 0)
-        else:
-            ar_by_age["90"] += float(inv.balance_due or 0)
 
-    # AP aging: open bills
-    bills = db.query(Bill).filter(Bill.balance_due > 0).all()
-    ap_by_age = {"current": 0, "30": 0, "60": 0, "90": 0}
-    for bill in bills:
-        days_old = (today - bill.date).days if bill.date else 0
-        if days_old <= 30:
-            ap_by_age["current"] += float(bill.balance_due or 0)
-        elif days_old <= 60:
-            ap_by_age["30"] += float(bill.balance_due or 0)
-        elif days_old <= 90:
-            ap_by_age["60"] += float(bill.balance_due or 0)
-        else:
-            ap_by_age["90"] += float(bill.balance_due or 0)
+    def buckets(totals):
+        return {
+            "current": totals["current"],
+            "30": totals["over_30"],
+            "60": totals["over_60"],
+            "90": totals["over_90"],
+        }
 
+    ar = ar_aging_report(db, today)["totals"]
+    ap = ap_aging_report(db, today)["totals"]
     return {
-        "ar_aging": ar_by_age,
-        "ap_aging": ap_by_age,
-        "total_ar_outstanding": sum(ar_by_age.values()),
-        "total_ap_outstanding": sum(ap_by_age.values()),
+        "ar_aging": buckets(ar),
+        "ap_aging": buckets(ap),
+        "ar_unapplied_credits": ar.get("unapplied_credits", 0),
+        "ap_unapplied_credits": ap.get("unapplied_credits", 0),
+        "total_ar_outstanding": ar["total"],
+        "total_ap_outstanding": ap["total"],
+        "basis": "days past due; home currency; credits netted into current",
     }
 
 
