@@ -10,6 +10,16 @@ function formatCurrency(amount) {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
 }
 
+// A file's size for a person: "18 bytes", "4.2 KB", "1.3 MB". Everything
+// was shown in KB to one decimal, so an 18-byte attachment read "0.0 KB"
+// (2.17.3 exploratory test, W-L7).
+function formatFileSize(bytes) {
+    const n = Math.max(0, Number(bytes) || 0);
+    if (n < 1024) return `${n} ${n === 1 ? 'byte' : 'bytes'}`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatDate(dateStr) {
     if (!dateStr) return '';
     const d = dateStr.includes('T')

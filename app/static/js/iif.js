@@ -257,9 +257,7 @@ const IIFPage = {
         IIFPage._selectedFile = file;
         IIFPage._validated = false;
 
-        const size = file.size < 1024 ? `${file.size} B` :
-                     file.size < 1048576 ? `${(file.size / 1024).toFixed(1)} KB` :
-                     `${(file.size / 1048576).toFixed(1)} MB`;
+        const size = formatFileSize(file.size);
 
         const info = $('#iif-file-info');
         info.style.display = '';
