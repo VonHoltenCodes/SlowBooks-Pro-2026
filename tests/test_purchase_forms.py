@@ -69,6 +69,11 @@ def test_to_bill_asks_for_an_account_on_every_line_that_needs_one():
     assert "/convert-to-bill`, { lines }" in send
 
 
+def test_the_po_vendor_picker_hides_inactive_vendors_but_keeps_the_pos_own():
+    form = _method(_js("purchase_orders.js"), "async showForm(id = null)")
+    assert "v.is_active !== false || v.id == po.vendor_id" in form
+
+
 # ── A6 / B1 / B23: Enter Bill ────────────────────────────────────────────
 
 
@@ -166,3 +171,27 @@ def test_purchase_account_pickers_offer_cost_of_goods_sold():
     card_form = _method(_js("cc_charges.js"), "async showForm()")
     assert "account_type=expense" not in card_form
     assert "PurchaseAccounts.filter(allAccounts)" in card_form
+
+
+# ── B16: a vendor can be made inactive ───────────────────────────────────
+
+
+def test_the_vendor_form_can_make_a_vendor_inactive():
+    js = _js("vendors.js")
+    form = _method(js, "async showForm(id = null)")
+    assert 'name="is_active"' in form
+    save = _method(js, "async save(e, id, force)")
+    assert "data.is_active = data.is_active === 'true'" in save
+    assert "inactive</span>" in _method(js, "async render()")
+
+
+def test_an_inactive_vendor_leaves_the_pickers(client):
+    r = client.post("/api/vendors", json={"name": "Old Supplier"})
+    vid = r.json()["id"]
+    assert (
+        client.put(f"/api/vendors/{vid}", json={"is_active": False}).status_code == 200
+    )
+    active = client.get("/api/vendors?active_only=true").json()
+    assert vid not in [v["id"] for v in active]
+    for page in ("bills.js", "expenses.js", "vendor_credits.js"):
+        assert "/vendors?active_only=true" in _js(page), page

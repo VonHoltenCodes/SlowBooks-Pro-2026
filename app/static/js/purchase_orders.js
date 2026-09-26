@@ -65,7 +65,7 @@ const PurchaseOrdersPage = {
 
     async showForm(id = null) {
         const [vendors, items] = await Promise.all([
-            API.get('/vendors?active_only=true'),
+            API.get('/vendors'),
             API.get('/items?active_only=true'),
         ]);
         PurchaseOrdersPage._items = items;
@@ -88,7 +88,10 @@ const PurchaseOrdersPage = {
 
         const jobGroup = await jobFormGroupHtml(po.job_id || null);
         await CostCodes.load();
-        const vendorOpts = vendors.map(v => `<option value="${v.id}" ${po.vendor_id==v.id?'selected':''}>${escapeHtml(v.name)}</option>`).join('');
+        // Inactive vendors stay off the picker, except the one this PO names.
+        const vendorOpts = vendors
+            .filter(v => v.is_active !== false || v.id == po.vendor_id)
+            .map(v => `<option value="${v.id}" ${po.vendor_id==v.id?'selected':''}>${escapeHtml(v.name)}</option>`).join('');
 
         openModal(id ? 'Edit Purchase Order' : 'New Purchase Order', `
             <form id="po-form" onsubmit="PurchaseOrdersPage.save(event, ${id})">

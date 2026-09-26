@@ -23,8 +23,9 @@ const VendorsPage = {
                     <th scope="col" class="amount">Balance</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const v of vendors) {
-                html += `<tr>
-                    <td><strong>${escapeHtml(v.name)}</strong></td>
+                const inactive = v.is_active === false;
+                html += `<tr${inactive ? ' style="opacity:.55;"' : ''}>
+                    <td><strong>${escapeHtml(v.name)}</strong>${inactive ? ' <span class="badge badge-draft">inactive</span>' : ''}</td>
                     <td>${escapeHtml(v.company) || ''}</td>
                     <td>${escapeHtml(v.phone) || ''}</td>
                     <td>${escapeHtml(v.email) || ''}</td>
@@ -95,6 +96,11 @@ const VendorsPage = {
                         <input name="account_number" value="${escapeHtml(v.account_number || '')}"></div>
                     <div class="form-group"><label>Default Expense Account</label>
                         <select name="default_expense_account_id"><option value="">-- None --</option>${acctOpts}</select></div>
+                    ${id ? `<div class="form-group"><label>Status</label>
+                        <select name="is_active" title="An inactive vendor keeps its history but leaves the pickers on bills, expenses and orders">
+                            <option value="true" ${v.is_active !== false ? 'selected' : ''}>Active</option>
+                            <option value="false" ${v.is_active === false ? 'selected' : ''}>Inactive</option>
+                        </select></div>` : ''}
                     <div class="form-group"><label>1099 Vendor</label>
                         <select name="is_1099_vendor">
                             <option value="false" ${!v.is_1099_vendor ? 'selected' : ''}>No</option>
@@ -124,6 +130,7 @@ const VendorsPage = {
         data.default_expense_account_id = data.default_expense_account_id ? parseInt(data.default_expense_account_id) : null;
         data.is_1099_vendor = data.is_1099_vendor === 'true';
         data.vendor_1099_type = data.vendor_1099_type || null;
+        if ('is_active' in data) data.is_active = data.is_active === 'true';
         try {
             if (id) {
                 await API.put(`/vendors/${id}`, data);
