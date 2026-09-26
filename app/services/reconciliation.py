@@ -15,7 +15,12 @@ from app.models.accounts import Account
 from app.models.banking import BankTransaction, Reconciliation, ReconciliationStatus
 from app.models.transactions import Transaction, TransactionLine
 from app.services.bank_posting import require_bank_account
-from app.services.bank_register import is_debit_normal, payees_for, source_link
+from app.services.bank_register import (
+    is_debit_normal,
+    payees_for,
+    references_for,
+    source_link,
+)
 
 TOLERANCE = Decimal("0.005")
 
@@ -96,6 +101,7 @@ def session(db: Session, recon: Reconciliation) -> dict:
         .all()
     }
     payees = payees_for(db, [txn for _, txn in rows])
+    refs = references_for(db, list({txn.id: txn for _, txn in rows}.values()))
     cleared_total = Decimal("0")
     uncleared_total = Decimal("0")
     out_rows = []
@@ -114,8 +120,8 @@ def session(db: Session, recon: Reconciliation) -> dict:
                 "date": txn.date.isoformat(),
                 "payee": payees.get(txn.id, ""),
                 "description": txn.description or tl.description or "",
-                "reference": txn.reference or "",
-                "check_number": txn.reference or None,
+                "reference": refs.get(txn.id, ""),
+                "check_number": refs.get(txn.id) or None,
                 "amount": float(amount),
                 "reconciled": bool(tl.cleared),
                 "matched": tl.id in matched_lines,

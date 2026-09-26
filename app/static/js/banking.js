@@ -12,6 +12,16 @@
  */
 const BankingPage = {
     _kindLabel(kind) { return kind === 'credit_card' ? 'Credit card' : 'Bank'; },
+
+    // Every banking page is a route of its own: #/banking, and a register
+    // at #/banking/<account id>. App.navigate renders without touching the
+    // address bar, so the register used to keep #/banking and a refresh
+    // lost it (exploratory 2.17.3, W-L6). Moving the hash renders through
+    // the hashchange listener; the same hash re-renders in place.
+    go(hash) {
+        if (location.hash === hash) App.navigate(hash);
+        else location.hash = hash;
+    },
     _cols(kind) { return kind === 'credit_card' ? ['Charge', 'Payment'] : ['Payment', 'Deposit']; },
 
     // ------------------------------------------------------------------
@@ -39,7 +49,7 @@ const BankingPage = {
             html += `<div class="card-grid">`;
             for (const a of rows) {
                 const owed = a.bank_kind === 'credit_card';
-                html += `<div class="card" style="cursor:pointer" onclick="App.navigate('#/banking/${a.account_id}')">
+                html += `<div class="card" style="cursor:pointer" onclick="BankingPage.go('#/banking/${a.account_id}')">
                     <div class="card-header">${escapeHtml(a.name)} <span style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.account_number || '')} · ${BankingPage._kindLabel(a.bank_kind)}</span></div>
                     <div class="card-value">${formatCurrency(a.balance)}${owed ? ' <span style="font-size:11px; color:var(--gray-500);">owed</span>' : ''}</div>
                     <div style="font-size:12px; color:var(--gray-400); margin-top:4px;">
@@ -75,7 +85,7 @@ const BankingPage = {
         try {
             await API.post(`/banking/accounts/${feedId}/post-legacy-balance`, { date: d });
             toast('Opening balance posted');
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -83,7 +93,7 @@ const BankingPage = {
         if (!confirm('Dismiss the pre-2.10 balance? It will not be posted.')) return;
         try {
             await API.put(`/banking/accounts/${feedId}`, { legacy_balance: null });
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -153,7 +163,7 @@ const BankingPage = {
         try {
             const data = await API.post('/simplefin/claim', { setup_token: token });
             toast(`Connected — found ${data.accounts.length} account(s). Now map them below.`);
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -171,7 +181,7 @@ const BankingPage = {
             const r = await API.post('/simplefin/sync');
             toast(`Synced: ${r.imported} new, ${r.skipped} duplicates skipped`);
             if (r.warnings && r.warnings.length) toast(r.warnings[0], 'error');
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -180,7 +190,7 @@ const BankingPage = {
         try {
             await API.post('/simplefin/disconnect');
             toast('Bank feed disconnected');
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -298,7 +308,7 @@ const BankingPage = {
             }
             toast('Bank account created');
             closeModal();
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -323,7 +333,7 @@ const BankingPage = {
             <div class="page-header">
                 <h2>${escapeHtml(reg.account_name)} <span style="font-size:11px; color:var(--gray-400);">${escapeHtml(reg.account_number || '')} · ${BankingPage._kindLabel(kind)}</span></h2>
                 <div class="btn-group">
-                    <button class="btn btn-secondary" onclick="App.navigate('#/banking')">Back</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.go('#/banking')">Back</button>
                     <button class="btn btn-primary" onclick="BankingPage.showEntryForm(${id})">+ Entry</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showTransferForm(${id})">Transfer</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showOFXImport(${id})">Import file</button>
@@ -416,28 +426,28 @@ const BankingPage = {
         try {
             await API.post(`/banking/transactions/${lineId}/add`, body);
             toast('Added to the books');
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async excludeLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/exclude`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async restoreLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/restore`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async unmatchLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/unmatch`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -464,7 +474,7 @@ const BankingPage = {
             await Promise.allSettled([...BankingPage._pendingCategories]);
             const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`);
             toast(`Added ${r.added}${r.skipped.length ? `, skipped ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -472,7 +482,7 @@ const BankingPage = {
         try {
             const r = await API.post(`/banking/accounts/${feedId}/feed/auto-match`);
             toast(`Matched ${r.matched} statement line${r.matched === 1 ? '' : 's'}`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -497,7 +507,7 @@ const BankingPage = {
             await API.post(`/banking/transactions/${lineId}/match`, { line_id: ledgerLineId });
             toast('Matched');
             closeModal();
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -509,7 +519,7 @@ const BankingPage = {
         try {
             await API.post(path);
             toast('Voided');
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -566,7 +576,7 @@ const BankingPage = {
             await API.post('/banking/transactions', data);
             toast('Entry posted');
             closeModal();
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -608,7 +618,7 @@ const BankingPage = {
             });
             toast('Transfer posted');
             closeModal();
-            App.navigate(`#/banking/${t.from_account_id}`);
+            BankingPage.go(`#/banking/${t.from_account_id}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -630,7 +640,7 @@ const BankingPage = {
             await API.post(`/transfers/${id}/void`);
             toast('Transfer voided');
             closeModal();
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -694,7 +704,7 @@ const BankingPage = {
             <div class="page-header">
                 <h2>Reconcile — statement of ${formatDate(data.statement_date)}</h2>
                 <div class="btn-group">
-                    <button class="btn btn-secondary" onclick="App.navigate('#/banking/${data.account_id}')">Later</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.go('#/banking/${data.account_id}')">Later</button>
                     <button class="btn btn-secondary" onclick="BankingPage.abandonReconcile(${reconId}, ${data.account_id})">Abandon</button>
                     <button class="btn btn-primary" id="recon-finish-btn" onclick="BankingPage.finishReconcile(${reconId}, ${data.account_id})" ${balanced ? '' : 'disabled'}>Finish Reconciliation</button>
                 </div>
@@ -731,7 +741,7 @@ const BankingPage = {
         try {
             await API.post(`/banking/reconciliations/${reconId}/complete`);
             toast('Reconciliation completed');
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -739,7 +749,7 @@ const BankingPage = {
         if (!confirm('Abandon this reconciliation? Ticks are kept.')) return;
         try {
             await API.del(`/banking/reconciliations/${reconId}`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -840,7 +850,7 @@ const BankingPage = {
             if (!resp.ok) throw new Error(data.detail || 'Import failed');
             toast(`Imported ${data.imported} (${data.skipped} duplicates skipped, ${data.matched || 0} matched to the books)`);
             closeModal();
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) {
             toast(err.message, 'error');
         } finally {

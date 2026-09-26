@@ -186,6 +186,32 @@ def payees_for(db: Session, txns) -> dict[int, str]:
     return out
 
 
+def references_for(db: Session, txns) -> dict[int, str]:
+    """The reference number to show per transaction id: the posting's own,
+    else the check number its document carries.
+
+    A bill payment keeps its check number on the payment, not on the
+    journal entry, so check 1050 was missing from the register's REF #
+    (exploratory 2.17.3, W-L6). Its void shows the same number."""
+    out = {t.id: (t.reference or "") for t in txns}
+    bp_ids = {
+        t.source_id
+        for t in txns
+        if not out[t.id]
+        and t.source_type in ("bill_payment", "bill_payment_void")
+        and t.source_id
+    }
+    if bp_ids:
+        checks = {
+            bp.id: bp.check_number or ""
+            for bp in db.query(BillPayment).filter(BillPayment.id.in_(bp_ids)).all()
+        }
+        for t in txns:
+            if not out[t.id] and t.source_type in ("bill_payment", "bill_payment_void"):
+                out[t.id] = checks.get(t.source_id, "")
+    return out
+
+
 def account_register(
     db: Session,
     account: Account,
@@ -226,6 +252,7 @@ def account_register(
     txns = {txn.id: txn for _, txn in rows}
     voided = voided_transaction_ids(db, txns.keys())
     payees = payees_for(db, txns.values())
+    refs = references_for(db, list(txns.values()))
 
     running = opening
     period_debit = ZERO
@@ -245,7 +272,7 @@ def account_register(
                 "date": txn.date.isoformat(),
                 "description": txn.description or tl.description or "",
                 "payee": payees.get(txn.id, ""),
-                "reference": txn.reference or "",
+                "reference": refs.get(txn.id, ""),
                 "debit": float(dr),
                 "credit": float(cr),
                 "amount": float(delta),

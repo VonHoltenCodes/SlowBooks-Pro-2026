@@ -18,7 +18,12 @@ from app.models.banking import BankAccount, BankTransaction
 from app.models.transactions import Transaction, TransactionLine
 from app.services.accounting import _q
 from app.services.bank_posting import post_bank_entry
-from app.services.bank_register import payees_for, source_link, voided_transaction_ids
+from app.services.bank_register import (
+    payees_for,
+    references_for,
+    source_link,
+    voided_transaction_ids,
+)
 from app.services.closing_date import check_closing_date
 
 AUTO_WINDOW_DAYS = 5
@@ -71,6 +76,7 @@ def candidate_lines(
     voided = voided_transaction_ids(db, {txn.id for _, txn in rows})
     rows = [(tl, txn) for tl, txn in rows if txn.id not in voided]
     payees = payees_for(db, [txn for _, txn in rows])
+    refs = references_for(db, list({txn.id: txn for _, txn in rows}.values()))
     rows.sort(key=lambda r: (abs((r[1].date - on_date).days), r[1].id, r[0].id))
     return [
         {
@@ -80,7 +86,7 @@ def candidate_lines(
             "days_off": abs((txn.date - on_date).days),
             "description": txn.description or tl.description or "",
             "payee": payees.get(txn.id, ""),
-            "reference": txn.reference or "",
+            "reference": refs.get(txn.id, ""),
             "source_type": txn.source_type,
             "source_link": source_link(txn),
             "amount": float(amount),
