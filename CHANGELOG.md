@@ -7,6 +7,31 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.17.3 — Payments land on the right account
+
+**Pay Bills paid one vendor's bills with another vendor's payment.** The
+screen lists every vendor's open bills, and sent all the ticked bills as one
+payment to the first bill's vendor. On the QA company, ticking a CPA's bill
+and a supplier's recorded one 5,638.26 payment to the CPA that also marked
+the supplier's bill paid; the vendor balances, the check register and the
+1099 figures were all wrong from then on. Pay Bills now makes one payment
+per vendor, and asks you to pay one vendor at a time when you enter a check
+number, since one check cannot pay two vendors.
+
+**A payment pays down its own customer's or vendor's documents only.** A
+customer payment could be applied to another customer's invoice (#189,
+@Bit-Sage), and the same was true of applying a credit memo, a batch payment
+line, and a bill payment to another vendor's bill. Each returned success and
+reduced the other party's balance. All four now refuse with a message naming
+the document and write nothing; a batch with one wrong line is refused whole.
+Vendor credits already checked this.
+
+If you paid several vendors at once from Pay Bills in an earlier version,
+check Vendor Balances: a payment may be recorded against the first vendor
+for bills that belonged to others. Void it and pay each vendor separately.
+
+No schema change.
+
 ### v2.17.2 — Editing an invoice keeps its job costing
 
 **Saving an invoice from the edit screen stripped its job costing.** An edit
