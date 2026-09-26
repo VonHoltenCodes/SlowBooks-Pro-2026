@@ -261,3 +261,27 @@ def test_settings_offers_restore_with_a_strong_confirmation():
     # another company's backup asks a second time before it is sent again
     assert "err.detail.code === 'other_company'" in restore
     assert restore.index("confirm(") < restore.index("result = await send(true)")
+
+
+def test_a_restore_that_fails_part_way_puts_the_books_back(books, client, monkeypatch):
+    import app.routes.backups as routes
+
+    real = routes.restore_backup
+    calls = []
+
+    def failing_once(db, filename):
+        calls.append(filename)
+        if len(calls) == 1:  # the restore itself: a half-written copy, then an error
+            _change(books.live, "half-copied")
+            return {"success": False, "error": "SQLite restore failed. Check logs."}
+        return real(db, filename)  # the safety copy going back
+
+    monkeypatch.setattr(routes, "restore_backup", failing_once)
+    name = _backup(client)
+    _change(books.live, "today's books")
+    r = client.post("/api/backups/restore", json={"filename": name})
+    assert r.status_code == 500, r.text
+    detail = r.json()["detail"]
+    assert "Your books as they were are in the safety backup" in detail
+    assert calls[0] == name and "before-restore" in calls[1]
+    assert _value(books.live) == "today's books"

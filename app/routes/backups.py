@@ -157,6 +157,13 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
             status_code = 404
         else:
             status_code = 500
+            # A copy that failed part-way must not be left in place: put the
+            # books back from the safety copy, and say where it is either way.
+            restore_backup(db, safety["filename"])
+            err = (
+                f"{err} Your books as they were are in the safety backup "
+                f"{safety['filename']}."
+            )
         raise HTTPException(status_code=status_code, detail=err)
 
     upgraded = backup_service.bring_restored_books_up_to_date()
