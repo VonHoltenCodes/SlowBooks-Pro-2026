@@ -192,6 +192,16 @@ def update_estimate(
         setattr(estimate, key, val)
 
     if data.lines is not None:
+        # Each line's tax is settled before it is stored, the way create does
+        # it: a non-taxable customer's lines are never taxable, and a line
+        # sent without a flag takes its item's. The flags used to be stored
+        # as sent (a missing one as taxable) and settled only for the
+        # totals, so an edit stored taxable lines on an exempt customer's
+        # estimate, and a non-taxable item's line stored as taxable was
+        # taxed on the invoice the estimate became (found integrating the
+        # 2.17.3 exploratory fixes). The customer is the one the estimate
+        # has after this edit.
+        resolve_line_taxable(db, data.lines, db.get(Customer, estimate.customer_id))
         db.query(EstimateLine).filter(EstimateLine.estimate_id == estimate_id).delete()
         for i, line_data in enumerate(data.lines):
             line = EstimateLine(
@@ -215,7 +225,6 @@ def update_estimate(
             db.add(line)
 
         tax_rate = data.tax_rate if data.tax_rate is not None else estimate.tax_rate
-        resolve_line_taxable(db, data.lines, estimate.customer)
         subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
         estimate.subtotal = subtotal
         estimate.tax_amount = tax_amount
