@@ -3,7 +3,8 @@
 * W-M16 — a second active item of the same name is refused, and an item
   can be made inactive from its form; every item picker lists active items.
 * W-L13 — the item form's Income account lists income accounts only, and a
-  business does not see the nonprofit-only 4400 In-Kind Contributions.
+  business does not see the nonprofit-only 4400 In-Kind Contributions; the
+  nonprofit pages answer a business company with a sentence.
 """
 
 from pathlib import Path
@@ -97,3 +98,12 @@ def test_the_item_income_picker_offers_income_accounts_only():
     utils = (JS / "utils.js").read_text(encoding="utf-8")
     assert "function pickerAccounts(" in utils
     assert "a.nonprofit_only && !nonprofit" in utils
+
+
+def test_the_nonprofit_pages_answer_a_business_with_a_sentence():
+    js = (JS / "app.js").read_text(encoding="utf-8")
+    for route in ("'/releases'", "'/functional-allocations'", "'/in-kind-gifts'"):
+        line = next(ln for ln in js.splitlines() if ln.strip().startswith(route))
+        assert "nonprofit: true" in line, route
+    assert "route.nonprofit && !Terms.isNonprofit()" in js
+    assert "is for nonprofit companies" in js

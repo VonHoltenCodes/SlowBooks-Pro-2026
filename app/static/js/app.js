@@ -9,13 +9,13 @@ const App = {
         '/jobs':          { page: 'jobs',            label: 'Jobs',               render: () => JobsPage.render() },
         '/jobs/:id':      { page: 'jobs',            label: 'Job',                render: (id) => JobsPage.renderDetail(id) },
         '/job-costs':     { page: 'job-costs',       label: 'Job Cost Entries',   render: () => JobCostsPage.render() },
-        '/releases':      { page: 'releases',        label: 'Releases from Restriction', render: () => ReleasesPage.render() },
-        '/functional-allocations': { page: 'functional-allocations', label: 'Functional Allocations', render: () => AllocationsPage.render() },
+        '/releases':      { page: 'releases',        label: 'Releases from Restriction', nonprofit: true, render: () => ReleasesPage.render() },
+        '/functional-allocations': { page: 'functional-allocations', label: 'Functional Allocations', nonprofit: true, render: () => AllocationsPage.render() },
         '/vendors':       { page: 'vendors',         label: 'Vendor Center',      render: () => VendorsPage.render() },
         '/items':         { page: 'items',           label: 'Item List',          render: () => ItemsPage.render() },
         '/invoices':      { page: 'invoices',        label: 'Create Invoices',    render: () => InvoicesPage.render() },
         '/sales-receipts': { page: 'sales-receipts', label: 'Enter Sales Receipts', render: () => SalesReceiptsPage.render() },
-        '/in-kind-gifts': { page: 'in-kind-gifts',   label: 'In-Kind Gifts',      render: () => InKindPage.render() },
+        '/in-kind-gifts': { page: 'in-kind-gifts',   label: 'In-Kind Gifts',      nonprofit: true, render: () => InKindPage.render() },
         '/estimates':     { page: 'estimates',       label: 'Create Estimates',   render: () => EstimatesPage.render() },
         '/payments':      { page: 'payments',        label: 'Receive Payments',   render: () => PaymentsPage.render() },
         '/banking':       { page: 'banking',         label: 'Banking',            render: () => BankingPage.render() },
@@ -96,6 +96,15 @@ const App = {
         // Status bar
         App.setStatus(`Loading ${route.label}...`);
 
+        // The nonprofit pages are in the sidebar only in nonprofit mode, but
+        // a bookmark or a typed URL reached them in a business company too
+        // (W-L13) — and posted to net-asset accounts a business never has.
+        if (route.nonprofit && !Terms.isNonprofit()) {
+            $('#page-content').innerHTML = App._nonprofitOnlyHtml(route.label);
+            App.setStatus(`${route.label} — nonprofit companies only`);
+            return;
+        }
+
         try {
             const html = await route.render(param);
             $('#page-content').innerHTML = html;
@@ -115,6 +124,18 @@ const App = {
             </div>`;
             App.setStatus('Error loading page');
         }
+    },
+
+    _nonprofitOnlyHtml(label) {
+        return `<div class="empty-state">
+            <h3>${escapeHtml(label)} is for nonprofit companies</h3>
+            <p>This company is set up as a business, so there is nothing to record here.
+               If it is a nonprofit, change its Company Type in Settings first.</p>
+            <p style="margin-top:12px;">
+                <a href="#/" class="btn btn-secondary">Return to Dashboard</a>
+                <a href="#/settings" class="btn btn-secondary">Open Settings</a>
+            </p>
+        </div>`;
     },
 
     setStatus(text) {
