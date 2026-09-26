@@ -207,6 +207,7 @@ def get_profitability(db: Session = Depends(get_db)):
 
 @router.get("/export.csv")
 def export_csv(
+    request: Request,
     period: Optional[str] = Query("month"),
     start_date: Optional[date] = Query(None),
     end_date: Optional[date] = Query(None),
@@ -286,11 +287,11 @@ def export_csv(
         )
 
     filename = f"slowbooks-analytics-{date.today().isoformat()}.csv"
-    return Response(
-        content=buf.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    # The shared CSV helper: the byte-order mark Excel needs, and "inline"
+    # for the desktop shell, which saves the file itself.
+    from app.routes.csv import _csv_response
+
+    return _csv_response(buf.getvalue(), filename, request)
 
 
 @router.get("/export.pdf")

@@ -6,7 +6,6 @@
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -43,13 +42,9 @@ def schedule_c_csv(
         end_date = date(date.today().year, 12, 31)
     data = get_schedule_c_data(db, start_date, end_date)
     csv_text = export_schedule_c_csv(data)
-    return Response(
-        content=csv_text,
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f"attachment; filename=schedule_c_{start_date}_{end_date}.csv"
-        },
-    )
+    from app.routes.csv import _csv_response
+
+    return _csv_response(csv_text, f"schedule_c_{start_date}_{end_date}.csv")
 
 
 @router.get("/mappings", response_model=list[TaxMappingResponse])

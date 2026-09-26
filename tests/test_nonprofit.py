@@ -1009,7 +1009,10 @@ def test_nonprofit_statement_pdfs_and_csvs_render(client, db_session, seed_accou
                 assert (
                     not cell or cell[0] not in "=+@" or cell.startswith("'")
                 ), f"{path}: unsafe cell {cell!r}"
-    sfe_csv = client.get(f"/api/reports/functional-expenses/csv?{qs}").text
+    # utf-8-sig: every CSV opens with the byte-order mark Excel needs
+    sfe_csv = client.get(f"/api/reports/functional-expenses/csv?{qs}").content.decode(
+        "utf-8-sig"
+    )
     assert sfe_csv.startswith(
         "Expense,Total (A),Program services (B),Management and general (C),Fundraising (D),Unassigned"
     )
