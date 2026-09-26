@@ -6,7 +6,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models.bills import Bill, BillStatus, BillPayment, BillPaymentAllocation
@@ -20,11 +20,25 @@ router = APIRouter(prefix="/api/bill-payments", tags=["bill_payments"])
 
 
 @router.get("", response_model=list[BillPaymentResponse])
-def list_bill_payments(vendor_id: int = None, db: Session = Depends(get_db)):
-    q = db.query(BillPayment)
+def list_bill_payments(
+    vendor_id: int = None, bill_id: int = None, db: Session = Depends(get_db)
+):
+    """`?bill_id=` lists the payments applied to one bill (its view offers
+    Void on each — a paid bill's payment could not be voided on screen)."""
+    q = db.query(BillPayment).options(
+        joinedload(BillPayment.vendor), selectinload(BillPayment.allocations)
+    )
     if vendor_id:
         q = q.filter(BillPayment.vendor_id == vendor_id)
-    payments = q.order_by(BillPayment.date.desc()).all()
+    if bill_id:
+        q = q.filter(
+            BillPayment.id.in_(
+                db.query(BillPaymentAllocation.bill_payment_id).filter(
+                    BillPaymentAllocation.bill_id == bill_id
+                )
+            )
+        )
+    payments = q.order_by(BillPayment.date.desc(), BillPayment.id.desc()).all()
     results = []
     for p in payments:
         resp = BillPaymentResponse.model_validate(p)
@@ -213,6 +227,12 @@ def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
     if payment.is_voided:
         raise HTTPException(status_code=400, detail="Bill payment already voided")
     check_closing_date(db, payment.date)
+    # The bill's view offers Void on each payment now. A check that cleared
+    # in a completed reconciliation stays put, as every other void refuses.
+    if payment.transaction is not None:
+        from app.services.bank_posting import assert_not_reconciled
+
+        assert_not_reconciled(payment.transaction)
 
     if payment.transaction_id:
         from app.models.transactions import TransactionLine
@@ -242,6 +262,11 @@ def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
                 source_type="bill_payment_void",
                 source_id=payment.id,
             )
+        if payment.transaction is not None:
+            from app.services.bank_posting import release_statement_links
+
+            # A statement line matched to this check goes back to review.
+            release_statement_links(db, payment.transaction)
 
     # Reverse allocations. Lock each bill row so a concurrent create or
     # second void can't race the read-modify-write of amount_paid /

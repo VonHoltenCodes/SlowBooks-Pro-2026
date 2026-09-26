@@ -47,9 +47,14 @@ const BillsPage = {
     },
 
     async view(id) {
-        const bill = await API.get(`/bills/${id}`);
+        const [bill, accounts, payments] = await Promise.all([
+            API.get(`/bills/${id}`),
+            API.get('/accounts'),
+            API.get(`/bill-payments?bill_id=${id}`),
+        ]);
+        const acctName = Object.fromEntries(accounts.map(a => [a.id, `${a.account_number || ''} ${a.name}`.trim()]));
         let linesHtml = bill.lines.map(l =>
-            `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
+            `<tr><td>${escapeHtml(l.description || '')}</td><td>${escapeHtml(acctName[l.account_id] || '')}</td><td class="amount">${l.quantity}</td>
              <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
         ).join('');
 
@@ -57,18 +62,22 @@ const BillsPage = {
             <div style="margin-bottom:12px;">
                 <strong>Vendor:</strong> ${escapeHtml(bill.vendor_name || '')}<br>
                 <strong>Date:</strong> ${formatDate(bill.date)}<br>
+                <strong>Terms:</strong> ${escapeHtml(bill.terms || '')}<br>
                 <strong>Due:</strong> ${formatDate(bill.due_date)}<br>
                 <strong>Status:</strong> ${statusBadge(bill.status)}
             </div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <thead><tr><th scope="col">Description</th><th scope="col">Account</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
+                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(bill.subtotal)}</span></div>
+                ${Number(bill.tax_amount) ? `<div class="total-row" title="Part of what the goods cost: it posts with the lines, not to Sales Tax Payable"><span class="label">Tax</span><span class="value">${formatCurrency(bill.tax_amount)}</span></div>` : ''}
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${formatCurrency(bill.total)}</span></div>
                 <div class="total-row"><span class="label">Paid</span><span class="value">${formatCurrency(bill.amount_paid)}</span></div>
                 <div class="total-row grand-total"><span class="label">Balance</span><span class="value">${formatCurrency(bill.balance_due)}</span></div>
             </div>
+            ${BillsPage._paymentsHtml(bill, payments)}
             <div style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
                 <h3 style="font-size:13px; margin-bottom:8px;">Attachments</h3>
                 <div id="bill-attachments-list" style="margin-bottom:8px; font-size:11px;">Loading...</div>
@@ -76,24 +85,61 @@ const BillsPage = {
                 <button class="btn btn-sm btn-secondary" onclick="BillsPage.uploadAttachment(${bill.id})" style="margin-left:4px;">Upload</button>
             </div>
             <div class="form-actions">
-                ${bill.status === 'paid' ? `<button class="btn btn-secondary" onclick="window.open('/api/bills/${bill.id}/pdf','_blank')">Save PDF</button>` : ''}
+                <button class="btn btn-secondary" onclick="window.open('/api/bills/${bill.id}/pdf','_blank')">Save PDF</button>
+                <button class="btn btn-secondary" onclick="window.open('/api/bills/${bill.id}/print-preview','_blank')">Print</button>
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
         BillsPage.loadAttachments(bill.id);
     },
 
+    // The payments that paid this bill, each with its own Void — a paid
+    // bill's payment could not be voided anywhere on screen (W-L19).
+    _paymentsHtml(bill, payments) {
+        if (!payments.length) return '';
+        const rows = payments.map(p => {
+            const applied = (p.allocations || []).filter(a => a.bill_id === bill.id)
+                .reduce((sum, a) => sum + Number(a.amount), 0);
+            const how = [p.method ? p.method.replace('_', ' ') : '', p.check_number ? `#${p.check_number}` : ''].filter(Boolean).join(' ');
+            return `<tr${p.is_voided ? ' style="opacity:.6;"' : ''}>
+                <td>${formatDate(p.date)}</td>
+                <td>${escapeHtml(how)}</td>
+                <td class="amount">${formatCurrency(applied)}</td>
+                <td class="actions">${p.is_voided ? statusBadge('void') : `<button class="btn btn-sm btn-danger" onclick="BillsPage.voidBillPayment(${p.id}, ${bill.id})">Void</button>`}</td>
+            </tr>`;
+        }).join('');
+        return `<div style="margin-top:16px;">
+                <h3 style="font-size:13px; margin-bottom:8px;">Payments</h3>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Date</th><th scope="col">Paid by</th><th scope="col" class="amount">Applied</th><th scope="col"></th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>
+            </div>`;
+    },
+
     _items: [],
     _vendors: [],
+    _accounts: [],
+    _defaultExpenseAccountId: null,
     lineCount: 0,
 
+    // A vendor brings its terms (Enter Bill always said Net 30, so a Net 15
+    // supplier's bill fell due two weeks late — F11) and its default
+    // expense account, which fills every line not already pointed somewhere.
     vendorSelected(vendorId) {
         if (!vendorId || vendorId === VendorQuickAdd.NEW) return;
         const vendor = BillsPage._vendors.find(v => v.id == vendorId);
-        if (vendor && vendor.default_expense_account_id) {
-            // Store for use when adding lines
-            BillsPage._defaultExpenseAccountId = vendor.default_expense_account_id;
-        } else {
-            BillsPage._defaultExpenseAccountId = null;
+        BillsPage._defaultExpenseAccountId = (vendor && vendor.default_expense_account_id) || null;
+        const terms = document.querySelector('#bill-form [name="terms"]');
+        if (vendor && vendor.terms && terms) {
+            if (![...terms.options].some(o => o.value === vendor.terms)) {
+                terms.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(vendor.terms)}">${escapeHtml(vendor.terms)}</option>`);
+            }
+            terms.value = vendor.terms;
+        }
+        if (BillsPage._defaultExpenseAccountId) {
+            $$('#bill-lines .line-account').forEach(sel => {
+                if (!sel.disabled && !sel.value) sel.value = BillsPage._defaultExpenseAccountId;
+            });
         }
     },
 
@@ -101,9 +147,11 @@ const BillsPage = {
         const [vendors, items, accounts] = await Promise.all([
             API.get('/vendors?active_only=true'),
             API.get('/items?active_only=true'),
-            API.get('/accounts?account_type=expense'),
+            API.get('/accounts'),
         ]);
         BillsPage._items = items;
+        BillsPage._accounts = PurchaseAccounts.filter(accounts);
+        BillsPage._defaultExpenseAccountId = null;
         BillsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
         const jobGroup = await jobFormGroupHtml(null);
@@ -111,10 +159,9 @@ const BillsPage = {
         await Nonprofit.loadFunds();
 
         BillsPage._vendors = vendors;
-        const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
 
         openModal('Enter Bill', `
-            <form onsubmit="BillsPage.save(event)">
+            <form id="bill-form" onsubmit="BillsPage.save(event)">
                 ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
                     <div class="form-group"><label>Vendor *</label>
@@ -124,7 +171,7 @@ const BillsPage = {
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Terms</label>
-                        <select name="terms">
+                        <select name="terms" title="The vendor's terms; the due date follows from them">
                             ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
                                 `<option ${t==='Net 30'?'selected':''}>${t}</option>`).join('')}
                         </select></div>
@@ -133,20 +180,13 @@ const BillsPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th>${CostCodes.headHtml()}${Nonprofit.headHtml()}<th scope="col" title="Billable to the job's customer">Bill?</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
-                    <tbody id="bill-lines">
-                        <tr data-billline="0">
-                            <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
-                            <td><input class="line-desc"></td>
-                            ${CostCodes.cellHtml('line-cost-code')}${Nonprofit.cellHtml('line-function')}
-                            <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"></td>
-                            <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
-                            <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
-                            <td class="col-amount line-amount">$0.00</td>
-                        </tr>
-                    </tbody>
+                    <thead><tr><th scope="col">Item</th><th scope="col" title="Where the line is recorded">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${Nonprofit.headHtml()}<th scope="col" title="Billable to the job's customer">Bill?</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
+                    <tbody id="bill-lines">${BillsPage.lineHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="BillsPage.addLine()">+ Add Line</button>
+                <div class="invoice-totals">
+                    <div class="total-row grand-total"><span class="label">Total</span><span class="value" id="bill-total">$0.00</span></div>
+                </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
                 <div class="form-actions">
@@ -155,6 +195,45 @@ const BillsPage = {
                 </div>
             </form>`);
         ScanHelper.wire(BillsPage._applyScan, BillsPage._applyScanField, BillsPage._scanFieldTarget);
+    },
+
+    // One line of Enter Bill. The Account cell says where the line is
+    // recorded — the item's expense account or the vendor's default fill it
+    // in; with neither, it waits to be chosen (a line with no account used
+    // to land on 6000, Advertising & Marketing — W-H5, F8).
+    lineHtml(idx) {
+        const itemOpts = BillsPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
+        const acctOpts = PurchaseAccounts.options(BillsPage._accounts, BillsPage._defaultExpenseAccountId);
+        return `<tr data-billline="${idx}">
+                <td><select class="line-item" onchange="BillsPage.itemSelected(this)"><option value="">--</option>${itemOpts}</select></td>
+                <td><select class="line-account" aria-label="Account"><option value="">Choose...</option>${acctOpts}</select></td>
+                <td><input class="line-desc"></td>
+                ${CostCodes.cellHtml('line-cost-code')}${Nonprofit.cellHtml('line-function')}
+                <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"></td>
+                <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
+                <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
+                <td class="col-amount line-amount">$0.00</td>
+            </tr>`;
+    },
+
+    // Picking an item fills what it costs and where it is recorded; a stock
+    // item is recorded in Inventory, so its account is not a choice.
+    itemSelected(select) {
+        const row = select.closest('tr');
+        const item = BillsPage._items.find(i => i.id == select.value);
+        const acct = row.querySelector('.line-account');
+        if (acct) {
+            acct.disabled = !!(item && item.track_inventory);
+            acct.title = acct.disabled ? 'Stock items are recorded in Inventory' : '';
+            if (acct.disabled) acct.value = '';
+            else if (item && item.expense_account_id) acct.value = item.expense_account_id;
+            else if (!acct.value && BillsPage._defaultExpenseAccountId) acct.value = BillsPage._defaultExpenseAccountId;
+        }
+        if (item) {
+            row.querySelector('.line-desc').value = item.description || item.name;
+            row.querySelector('.line-rate').value = PurchaseLines.price(item);
+        }
+        BillsPage.recalc();
     },
 
     // Where each canvas field lands — the canvas outlines these inputs in
@@ -182,7 +261,8 @@ const BillsPage = {
         if (fieldKey === 'date') {
             form.querySelector('[name="date"]').value = value;
         } else if (fieldKey === 'merchant') {
-            VendorQuickAdd.prefill('bill-vendor', value, BillsPage._vendors);
+            const match = VendorQuickAdd.prefill('bill-vendor', value, BillsPage._vendors);
+            if (match) BillsPage.vendorSelected(match.id);
             const desc = row && row.querySelector('.line-desc');
             if (desc) desc.value = value;
         } else if (fieldKey === 'total' || fieldKey === 'subtotal') {
@@ -249,12 +329,16 @@ const BillsPage = {
     },
 
     recalc() {
+        let total = 0;
         $$('#bill-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+            const amount = PurchaseLines.lineAmount(row);
+            total += amount;
             const amountCell = row.querySelector('.line-amount');
-            if (amountCell) amountCell.textContent = formatCurrency(qty * rate);
+            if (amountCell) amountCell.textContent = formatCurrency(amount);
         });
+        const totalEl = $('#bill-total');
+        if (totalEl) totalEl.textContent = formatCurrency(total);
+        return PurchaseLines.cents(total);
     },
 
     // Split support (nonprofit): one line becomes the rule's shares, each
@@ -283,26 +367,23 @@ const BillsPage = {
 
     addLine() {
         const idx = BillsPage.lineCount++;
-        const itemOpts = BillsPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
-        $('#bill-lines').insertAdjacentHTML('beforeend', `
-            <tr data-billline="${idx}">
-                <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
-                <td><input class="line-desc"></td>
-                ${CostCodes.cellHtml('line-cost-code')}${Nonprofit.cellHtml('line-function')}
-                <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"></td>
-                <td><input class="line-qty" type="number" step="0.01" value="1" oninput="BillsPage.recalc()"></td>
-                <td><input class="line-rate" type="number" step="0.01" value="0" oninput="BillsPage.recalc()"></td>
-                <td class="col-amount line-amount">$0.00</td>
-            </tr>`);
+        $('#bill-lines').insertAdjacentHTML('beforeend', BillsPage.lineHtml(idx));
     },
 
     async save(e) {
         e.preventDefault();
         const form = e.target;
         const lines = [];
+        let missing = null;
         $$('#bill-lines tr').forEach((row, i) => {
+            const acct = row.querySelector('.line-account');
+            const accountId = acct && !acct.disabled && acct.value ? parseInt(acct.value) : null;
+            if (!missing && acct && !acct.disabled && !accountId && PurchaseLines.lineAmount(row) > 0) {
+                missing = { n: i + 1, sel: acct };
+            }
             lines.push({
                 item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
+                account_id: accountId,
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
@@ -313,6 +394,17 @@ const BillsPage = {
                 line_order: i,
             });
         });
+        // A bill for $0.00 is refused (item picks used to leave the rate at
+        // 0 and save one silently — W-M1).
+        if (BillsPage.recalc() <= 0) {
+            toast('Enter what the vendor charged: a quantity and rate on at least one line.', 'error');
+            return;
+        }
+        if (missing) {
+            toast(`Choose an account for line ${missing.n}: where should it be recorded?`, 'error');
+            missing.sel.focus();
+            return;
+        }
         try {
             const vendorId = await VendorQuickAdd.ensure('bill-vendor');
             const result = await API.post('/bills', {
@@ -424,6 +516,8 @@ const BillsPage = {
             toast('One check number cannot pay several vendors. Pay one vendor at a time, or leave Check # blank.', 'error');
             return;
         }
+        // Blank Pay From pays from 1000 Checking (the server's default).
+        const fromId = form.pay_from_account_id.value ? parseInt(form.pay_from_account_id.value) : null;
 
         const paid = [];
         try {
@@ -434,7 +528,7 @@ const BillsPage = {
                     amount: Math.round(v.total * 100) / 100,
                     method: form.method.value,
                     check_number: checkNumber,
-                    pay_from_account_id: form.pay_from_account_id.value ? parseInt(form.pay_from_account_id.value) : null,
+                    pay_from_account_id: fromId,
                     allocations: v.allocations,
                 });
                 paid.push(v.name);
@@ -454,13 +548,16 @@ const BillsPage = {
         }
     },
 
-    async voidBillPayment(id) {
-        if (!confirm('Void this bill payment? Bill balances will be restored.')) return;
+    // From the bill's view: the payment is reversed and every bill it paid
+    // is open again; the view comes back showing the new balance.
+    async voidBillPayment(id, billId) {
+        if (!confirm('Void this bill payment? A reversing entry is posted, and every bill it paid is open again.')) return;
         try {
             await API.post(`/bill-payments/${id}/void`);
             toast('Bill payment voided');
             closeModal();
-            App.navigate(location.hash);
+            await App.navigate('#/bills');
+            if (billId) BillsPage.view(billId);
         } catch (err) { toast(err.message, 'error'); }
     },
 

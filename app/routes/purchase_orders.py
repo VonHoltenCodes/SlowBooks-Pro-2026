@@ -7,6 +7,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
@@ -181,6 +182,44 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
     if po.vendor:
         resp.vendor_name = po.vendor.name
     return resp
+
+
+def _po_html(db: Session, po_id: int) -> tuple[PurchaseOrder, str]:
+    from app.services.pdf_service import _render
+    from app.services.settings_service import get_all_settings
+
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    return po, _render("purchase_order_pdf.html", get_all_settings(db), po=po)
+
+
+@router.get("/{po_id}/pdf")
+def po_pdf(po_id: int, db: Session = Depends(get_db)):
+    """The purchase order as a PDF, to send to the vendor. A PO could be
+    created and turned into a bill, but never seen or sent (skytech W-L19)."""
+    from app.services.pdf_service import render_pdf
+
+    po, html_str = _po_html(db, po_id)
+    return Response(
+        content=render_pdf(html_str),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=PurchaseOrder_{po.po_number}.pdf"
+        },
+    )
+
+
+@router.get("/{po_id}/print-preview")
+def po_print_preview(po_id: int, db: Session = Depends(get_db)):
+    """The purchase order as a page that opens the print dialog."""
+    _, html_str = _po_html(db, po_id)
+    return HTMLResponse(
+        content=html_str.replace(
+            "</body>",
+            "<script>window.onload=function(){window.print();}</script></body>",
+        )
+    )
 
 
 @router.post("/{po_id}/convert-to-bill")

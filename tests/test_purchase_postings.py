@@ -10,13 +10,21 @@ From the 2.17.3 exploratory tests (skytech W-*, macbase1 F*):
   (F8, W-H5). Items with no expense account landed there too.
 * A bill made from a PO had no due date and never aged; bills ignored the
   vendor's terms (F10, F11).
+* Bill → Save PDF opened a route that didn't exist (W-M8); a PO couldn't be
+  seen or sent, and a paid bill's payment couldn't be voided on screen
+  (W-L19).
 * A $0.00 bill was accepted (W-M1).
 """
 
+from datetime import date
 from decimal import Decimal
+
+import pytest
 
 from app.models.bills import Bill
 from app.models.transactions import Transaction, TransactionLine
+
+PDF_MAGIC = b"%PDF"
 
 
 def _gl(db, account_id):
@@ -410,3 +418,138 @@ def test_a_po_for_nothing_does_not_become_a_bill(client, db_session, seed_accoun
     assert r.status_code == 400, r.text
     assert "$0.00" in r.json()["detail"]
     assert db_session.query(Bill).count() == 0
+
+
+# ── B8, C17: documents to keep and send; voiding a payment on screen ────
+
+
+@pytest.fixture
+def a_bill(client, seed_accounts):
+    shop = _vendor(
+        client,
+        "Sign Supply & Co",
+        address1="12 Dock Rd",
+        city="Port Alder",
+        default_expense_account_id=seed_accounts["5100"].id,
+    )
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": shop["id"],
+            "bill_number": "INV/77 #3",
+            "date": "2026-09-26",
+            "lines": [{"description": "panels", "quantity": 20, "rate": 22.50}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_a_bill_has_a_pdf_and_a_print_page(client, a_bill):
+    r = client.get(f"/api/bills/{a_bill['id']}/pdf")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content.startswith(PDF_MAGIC)
+    disposition = r.headers["content-disposition"]
+    assert disposition.startswith("inline;") and "Bill_INV_77_3.pdf" in disposition
+
+    page = client.get(f"/api/bills/{a_bill['id']}/print-preview")
+    assert page.status_code == 200
+    assert "INV/77 #3" in page.text and "Sign Supply &amp; Co" in page.text
+    assert "Port Alder" in page.text and "Port Alder," not in page.text
+    assert "window.print()" in page.text
+    assert client.get("/api/bills/999999/pdf").status_code == 404
+
+
+def test_a_po_has_a_pdf_and_a_print_page(client, db_session, seed_accounts):
+    shop = _vendor(client, "Sign Supply", terms="Net 15")
+    po = _po(client, shop["id"], FLOUR, tax_rate=0.0825)
+    r = client.get(f"/api/purchase-orders/{po['id']}/pdf")
+    assert r.status_code == 200, r.text
+    assert r.content.startswith(PDF_MAGIC)
+    assert f"PurchaseOrder_{po['po_number']}.pdf" in r.headers["content-disposition"]
+
+    page = client.get(f"/api/purchase-orders/{po['id']}/print-preview").text
+    assert "PURCHASE ORDER" in page and po["po_number"] in page
+    assert "Bread flour 50 lb" in page and "$777.24" in page
+    assert "window.print()" in page
+    assert client.get("/api/purchase-orders/999999/pdf").status_code == 404
+
+
+def _pay(client, vendor_id, allocations, amount=None, day="2026-09-27"):
+    r = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": vendor_id,
+            "date": day,
+            "amount": amount or sum(a["amount"] for a in allocations),
+            "method": "check",
+            "check_number": "1050",
+            "allocations": allocations,
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_a_bills_payments_are_listed_with_it_and_one_can_be_voided(
+    client, db_session, seed_accounts, a_bill
+):
+    other = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": a_bill["vendor_id"],
+            "bill_number": "INV-78",
+            "date": "2026-09-26",
+            "lines": [{"description": "vinyl", "quantity": 1, "rate": 80}],
+        },
+    ).json()
+    paid = _pay(
+        client, a_bill["vendor_id"], [{"bill_id": a_bill["id"], "amount": 450.0}]
+    )
+    _pay(client, a_bill["vendor_id"], [{"bill_id": other["id"], "amount": 80.0}])
+
+    listed = client.get(f"/api/bill-payments?bill_id={a_bill['id']}").json()
+    assert [p["id"] for p in listed] == [paid["id"]]
+    assert listed[0]["allocations"] == [{"bill_id": a_bill["id"], "amount": "450.00"}]
+    assert client.get(f"/api/bills/{a_bill['id']}").json()["status"] == "paid"
+
+    r = client.post(f"/api/bill-payments/{paid['id']}/void")
+    assert r.status_code == 200, r.text
+    bill = client.get(f"/api/bills/{a_bill['id']}").json()
+    assert bill["status"] == "unpaid" and Decimal(bill["balance_due"]) == Decimal(
+        "450.00"
+    )
+    assert client.get(f"/api/bill-payments?bill_id={a_bill['id']}").json()[0][
+        "is_voided"
+    ]
+
+
+def test_a_bill_payment_in_a_completed_reconciliation_cannot_be_voided(
+    client, db_session, seed_accounts, a_bill
+):
+    from app.models.banking import Reconciliation, ReconciliationStatus
+    from app.models.bills import BillPayment
+
+    paid = _pay(
+        client, a_bill["vendor_id"], [{"bill_id": a_bill["id"], "amount": 450.0}]
+    )
+    rec = Reconciliation(
+        account_id=seed_accounts["1000"].id,
+        statement_date=date(2026, 9, 30),
+        statement_balance=Decimal("-450.00"),
+        status=ReconciliationStatus.COMPLETED,
+    )
+    db_session.add(rec)
+    db_session.flush()
+    payment = db_session.get(BillPayment, paid["id"])
+    for ln in payment.transaction.lines:
+        if ln.account_id == seed_accounts["1000"].id:
+            ln.reconciliation_id = rec.id
+            ln.cleared = True
+    db_session.commit()
+
+    r = client.post(f"/api/bill-payments/{paid['id']}/void")
+    assert r.status_code == 400, r.text
+    assert "reconciliation" in r.json()["detail"]
+    assert client.get(f"/api/bills/{a_bill['id']}").json()["status"] == "paid"

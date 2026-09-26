@@ -129,6 +129,12 @@ class BillPaymentCreate(StrictModel):
     allocations: list[BillPaymentAllocationCreate] = []
 
 
+class BillPaymentAllocationResponse(BaseModel):
+    bill_id: int
+    amount: Decimal = Decimal("0")
+    model_config = {"from_attributes": True}
+
+
 class BillPaymentResponse(BaseModel):
     id: int
     vendor_id: int
@@ -144,4 +150,7 @@ class BillPaymentResponse(BaseModel):
     exchange_rate: Optional[Decimal] = None
     is_voided: bool = False
     created_at: Optional[datetime] = None
+    # Which bills this payment paid, and how much of each — the bill's view
+    # lists its payments from here so one can be voided on screen.
+    allocations: list[BillPaymentAllocationResponse] = []
     model_config = {"from_attributes": True}

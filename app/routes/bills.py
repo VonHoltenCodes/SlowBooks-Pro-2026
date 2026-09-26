@@ -7,6 +7,7 @@ import re
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
@@ -71,6 +72,52 @@ def get_bill(bill_id: int, db: Session = Depends(get_db)):
     if bill.vendor:
         resp.vendor_name = bill.vendor.name
     return resp
+
+
+def _bill_html(db: Session, bill_id: int) -> tuple[Bill, str]:
+    from app.services.pdf_service import _render
+    from app.services.settings_service import get_all_settings
+
+    bill = db.query(Bill).filter(Bill.id == bill_id).first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    return bill, _render("bill_pdf.html", get_all_settings(db), bill=bill)
+
+
+def _file_safe(text: str) -> str:
+    # The bill number is the vendor's own invoice number — anything can be
+    # in it, and it lands in a header.
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", text or "").strip("_") or "bill"
+
+
+@router.get("/{bill_id}/pdf")
+def bill_pdf(bill_id: int, db: Session = Depends(get_db)):
+    """The bill as a PDF. Save PDF on the bill's view opened this URL long
+    before it existed, and got a JSON "Not Found" (skytech W-M8)."""
+    from app.services.pdf_service import render_pdf
+
+    bill, html_str = _bill_html(db, bill_id)
+    return Response(
+        content=render_pdf(html_str),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f"inline; filename=Bill_{_file_safe(bill.bill_number)}.pdf"
+            )
+        },
+    )
+
+
+@router.get("/{bill_id}/print-preview")
+def bill_print_preview(bill_id: int, db: Session = Depends(get_db)):
+    """The bill as a page that opens the print dialog."""
+    _, html_str = _bill_html(db, bill_id)
+    return HTMLResponse(
+        content=html_str.replace(
+            "</body>",
+            "<script>window.onload=function(){window.print();}</script></body>",
+        )
+    )
 
 
 def _default_bill_number(db: Session, vendor: Vendor, date) -> str:

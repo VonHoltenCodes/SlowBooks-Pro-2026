@@ -64,7 +64,9 @@ const ExpensesPage = {
         await CostCodes.load();
         const costCodeGroup = CostCodes.any() ? `<div class="form-group"><label>Cost Code</label><select name="cost_code_id">${CostCodes.optionsHtml(null)}</select></div>` : '';
         const billableGroup = `<div class="form-group"><label>Billable</label><label style="font-weight:normal;"><input type="checkbox" name="is_billable"> Bill this cost to the job's customer</label></div>`;
-        const expenseAccts = accounts.filter(a => a.account_type === 'expense');
+        // Expense and cost-of-goods accounts: materials are bought against
+        // 5100 Materials Cost as often as against an expense (W-L18).
+        const expenseAccts = PurchaseAccounts.filter(accounts);
         const paidFrom = ExpensesPage.paidFromAccounts(accounts);
         const acctOpt = a => `<option value="${a.id}">${escapeHtml(a.account_number || '')} - ${escapeHtml(a.name)}</option>`;
         const checking = paidFrom.find(a => /checking/i.test(a.name || '')) || paidFrom[0];
