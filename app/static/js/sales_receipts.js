@@ -125,15 +125,21 @@ const SalesReceiptsPage = {
         SalesReceiptsPage._items = items;
         SalesReceiptsPage._customers = customers;
 
-        const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+        // A counter sale needs no customer: left on the first choice it is
+        // recorded against the built-in walk-in customer (S-c), which is
+        // listed once, as that choice.
+        const walkInId = String(settings.walk_in_customer_id || '');
+        const walkInLabel = Terms.isNonprofit() ? 'Anonymous Donor' : 'Walk-in Customer';
+        const custOpts = customers.filter(c => String(c.id) !== walkInId)
+            .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
         const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
 
         openModal(Terms.text('Enter Sales Receipt'), `
             <form id="sales-receipt-form" onsubmit="SalesReceiptsPage.save(event)">
                 ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
-                    <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" id="sr-customer-select" required onchange="SalesReceiptsPage.customerSelected(this.value)"><option value="">Select...</option><option value="__new__">+ ${T('New Customer')}</option>${custOpts}</select>
+                    <div class="form-group"><label>${T('Customer')}</label>
+                        <select name="customer_id" id="sr-customer-select" onchange="SalesReceiptsPage.customerSelected(this.value)"><option value="">${walkInLabel}</option><option value="__new__">+ ${T('New Customer')}</option>${custOpts}</select>
                         <div id="sr-new-customer-form" style="display:none; margin-top:8px; padding:8px; border:1px solid var(--gray-300); border-radius:4px; background:var(--primary-light);">
                             <div style="font-weight:700; font-size:11px; margin-bottom:6px;">Quick Add ${T('Customer')}</div>
                             <input id="sr-new-cust-name" placeholder="Name *" style="width:100%; margin-bottom:4px; padding:4px 8px; border:1px solid var(--gray-300); border-radius:4px;">
@@ -373,6 +379,10 @@ const SalesReceiptsPage = {
     async save(e) {
         e.preventDefault();
         const form = e.target;
+        if (form.customer_id.value === '__new__') {
+            toast(`Save the new ${T('customer')} first, or pick one from the list`, 'error');
+            return;
+        }
         const lines = [];
         $$('#sr-lines tr').forEach((row, i) => {
             const item_id = row.querySelector('.line-item')?.value;
@@ -387,7 +397,8 @@ const SalesReceiptsPage = {
         });
 
         const data = {
-            customer_id: parseInt(form.customer_id.value),
+            // blank = the walk-in customer, chosen by the server
+            customer_id: form.customer_id.value ? parseInt(form.customer_id.value) : null,
             date: form.date.value,
             method: form.method.value || null,
             check_number: form.check_number.value || null,
