@@ -146,16 +146,56 @@ def describe_deposit(db: Session, txn: Transaction) -> str:
     return f"the deposit of {txn.date.isoformat()}{where} ({extra})"
 
 
-def refuse_void_if_deposited(db: Session, payment: Payment) -> None:
-    """A payment whose money has gone to the bank can't simply be voided:
-    the reversal would take it out of Undeposited Funds a second time.
-    Raise a 400 that says what to do instead; return when it may go."""
+def _where_is(db: Session, payment: Payment):
+    """Where a payment's money is: ("bank_reconciled", None) received
+    straight into a bank account and on a reconciled statement;
+    ("deposit", txn) in a deposit that named it; ("deposited", None) used up
+    by a deposit that named no payments; (None, None) still waiting, or in
+    a bank account not yet reconciled."""
     txn = payment.transaction or (
         db.get(Transaction, payment.transaction_id) if payment.transaction_id else None
     )
     if txn is None:
-        return
+        return None, None
     if reconciled(txn):
+        return "bank_reconciled", None
+    uf_id = uf_account_id(db)
+    lines = [
+        ln for ln in txn.lines if uf_id and ln.account_id == uf_id and ln.debit > 0
+    ]
+    if not lines:
+        return None, None
+    deposits = {ln.deposit_transaction_id for ln in lines if ln.deposit_transaction_id}
+    if deposits:
+        deps = [db.get(Transaction, i) for i in sorted(deposits)]
+        deps = [d for d in deps if d is not None]
+        dead = dead_transaction_ids(db, deps)
+        live = [d for d in deps if d.id not in dead]
+        if live:
+            return "deposit", live[0]
+    waiting = {ln.id for ln, _ in waiting_items(db, uf_id)}
+    if any(ln.id not in waiting for ln in lines):
+        return "deposited", None
+    return None, None
+
+
+def deposit_holding(db: Session, payment: Payment) -> Optional[str]:
+    """For the payment's page: "the deposit of … to Checking (…)", or
+    "an earlier deposit", or None while it waits in Undeposited Funds."""
+    kind, dep = _where_is(db, payment)
+    if kind == "deposit":
+        return describe_deposit(db, dep)
+    if kind == "deposited":
+        return "an earlier deposit"
+    return None
+
+
+def refuse_void_if_deposited(db: Session, payment: Payment) -> None:
+    """A payment whose money has gone to the bank can't simply be voided:
+    the reversal would take it out of Undeposited Funds a second time.
+    Raise a 400 that says what to do instead; return when it may go."""
+    kind, dep = _where_is(db, payment)
+    if kind == "bank_reconciled":
         # Received straight into the bank, and that line is on a closed
         # bank statement.
         raise HTTPException(
@@ -166,41 +206,27 @@ def refuse_void_if_deposited(db: Session, payment: Payment) -> None:
                 "customer again with a new invoice."
             ),
         )
-    uf_id = uf_account_id(db)
-    lines = [
-        ln for ln in txn.lines if uf_id and ln.account_id == uf_id and ln.debit > 0
-    ]
-    if not lines:
-        return
-    deposits = {ln.deposit_transaction_id for ln in lines if ln.deposit_transaction_id}
-    if deposits:
-        deps = [db.get(Transaction, i) for i in sorted(deposits)]
-        deps = [d for d in deps if d is not None]
-        live = [d for d in deps if d.id not in dead_transaction_ids(db, deps)]
-        for dep in live:
-            if reconciled(dep):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        f"This payment is in {describe_deposit(db, dep)}, which "
-                        "has been reconciled with a bank statement, so it can't "
-                        "be voided. If the check bounced, charge the customer "
-                        "again with a new invoice."
-                    ),
-                )
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"This payment is in {describe_deposit(db, dep)}. Void that "
-                    "deposit on the Make Deposits page first (its other payments "
-                    "go back on the list to deposit again), then void this "
-                    "payment."
-                ),
-            )
-    # A deposit made before deposits kept their list: the payment is
-    # deposited when the netting has used it up.
-    waiting = {ln.id for ln, _ in waiting_items(db, uf_id)}
-    if any(ln.id not in waiting for ln in lines):
+    if kind == "deposit" and reconciled(dep):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This payment is in {describe_deposit(db, dep)}, which has been "
+                "reconciled with a bank statement, so it can't be voided. If "
+                "the check bounced, charge the customer again with a new "
+                "invoice."
+            ),
+        )
+    if kind == "deposit":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This payment is in {describe_deposit(db, dep)}. Void that "
+                "deposit on the Make Deposits page first (its other payments "
+                "go back on the list to deposit again), then void this payment."
+            ),
+        )
+    if kind == "deposited":
+        # A deposit made before deposits kept their list used it up.
         raise HTTPException(
             status_code=400,
             detail=(

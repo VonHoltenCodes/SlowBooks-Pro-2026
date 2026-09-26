@@ -154,6 +154,10 @@ def test_a_deposited_payment_cannot_be_voided_until_its_deposit_is(
     )
     assert _pending(client) == []
 
+    # the payment's page says where its money is
+    shown = client.get(f"/api/payments/{first['id']}").json()
+    assert shown["deposited_in"].startswith("the deposit of 2026-09-12 to Checking")
+
     r = client.post(f"/api/payments/{first['id']}/void")
     assert r.status_code == 400, r.text
     detail = r.json()["detail"]

@@ -55,6 +55,81 @@ def get_customer(customer_id: int, db: Session = Depends(get_db)):
     return _response(db, get_or_404(db, Customer, customer_id))
 
 
+@router.get("/{customer_id}/credits")
+def customer_credits(customer_id: int, db: Session = Depends(get_db)):
+    """Money the customer has with us that is not on an invoice yet — the
+    unapplied part of their payments and credit memos not yet applied —
+    each with what can still be applied, so Receive Payment and the
+    customer page can offer to apply it (explore 2.17.3, F12 / W-H9: an
+    overpayment or an unapplied payment could never be used afterwards).
+    `total` is in home currency; each credit is in its own currency."""
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.models.payments import Payment
+    from app.services.contact_balances import unapplied_payments
+    from app.services.currency import home_currency
+
+    customer = get_or_404(db, Customer, customer_id)
+    home = home_currency(db)
+    rows = unapplied_payments(db, [customer_id])
+    payments = (
+        {
+            p.id: p
+            for p in db.query(Payment).filter(
+                Payment.id.in_([r.payment_id for r in rows])
+            )
+        }
+        if rows
+        else {}
+    )
+    credits = []
+    total = ZERO
+    for r in rows:
+        p = payments[r.payment_id]
+        credits.append(
+            {
+                "kind": "payment",
+                "id": r.payment_id,
+                "date": r.date.isoformat(),
+                "number": p.check_number or p.reference or "",
+                "method": p.method or "",
+                "currency": (r.currency or home).upper(),
+                "amount": float(r.amount),
+                "available": float(r.unapplied),
+            }
+        )
+        total += r.unapplied_home
+    memos = (
+        db.query(CreditMemo)
+        .filter(
+            CreditMemo.customer_id == customer_id,
+            CreditMemo.status != CreditMemoStatus.VOID,
+            CreditMemo.balance_remaining > 0,
+        )
+        .all()
+    )
+    for m in memos:
+        credits.append(
+            {
+                "kind": "credit_memo",
+                "id": m.id,
+                "date": m.date.isoformat(),
+                "number": m.memo_number,
+                "method": "",
+                "currency": home,
+                "amount": float(m.total),
+                "available": float(m.balance_remaining),
+            }
+        )
+        total += m.balance_remaining
+    credits.sort(key=lambda c: (c["date"], c["kind"], c["id"]))
+    return {
+        "customer_id": customer.id,
+        "customer_name": customer.name,
+        "total": float(total),
+        "credits": credits,
+    }
+
+
 @router.post("", response_model=CustomerResponse, status_code=201)
 def create_customer(
     data: CustomerCreate,
