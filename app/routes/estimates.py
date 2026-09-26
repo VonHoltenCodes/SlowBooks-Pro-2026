@@ -229,6 +229,17 @@ def update_estimate(
         estimate.subtotal = subtotal
         estimate.tax_amount = tax_amount
         estimate.total = total
+    elif "tax_rate" in changes or "customer_id" in changes:
+        # A new rate or a new customer without resending the lines: the
+        # stored lines are re-totalled (a rate-only edit left the old tax and
+        # total in place), and a non-taxable customer's exemption covers them.
+        stored = list(estimate.lines)
+        if "customer_id" in changes:
+            resolve_line_taxable(db, stored, db.get(Customer, estimate.customer_id))
+        subtotal, tax_amount, total = compute_line_totals(stored, estimate.tax_rate)
+        estimate.subtotal = subtotal
+        estimate.tax_amount = tax_amount
+        estimate.total = total
 
     db.commit()
     db.refresh(estimate)

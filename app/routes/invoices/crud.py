@@ -280,7 +280,14 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             db, currency, rate
         )
 
-    repost_fields = {"tax_rate", "currency", "exchange_rate", "class_id", "job_id"}
+    repost_fields = {
+        "tax_rate",
+        "currency",
+        "exchange_rate",
+        "class_id",
+        "job_id",
+        "customer_id",
+    }
     needs_recompute = data.lines is not None or any(
         key in update_data and update_data[key] != getattr(invoice, key)
         for key in repost_fields
@@ -295,6 +302,14 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             effective_lines = data.lines
         else:
             effective_lines = list(invoice.lines)
+            new_customer_id = update_data.get("customer_id")
+            if new_customer_id not in (None, invoice.customer_id):
+                # A new customer without resending the lines: a non-taxable
+                # customer's exemption covers the stored lines too, as it
+                # does on create (found integrating the 2.17.3 fixes).
+                resolve_line_taxable(
+                    db, effective_lines, db.get(Customer, new_customer_id)
+                )
         tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
         subtotal, tax_amount, total = _compute_totals(effective_lines, tax_rate)
         confirm_zero_total(
