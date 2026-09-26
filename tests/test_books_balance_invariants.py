@@ -42,6 +42,18 @@ def _build_scenario(client, customer_id, vendor_id):
     """
     ids = {}
 
+    # A bill line posts where someone said it should: this vendor's default
+    # expense account. (Lines used to fall back to account 6000 unasked.)
+    expense = next(
+        a["id"]
+        for a in client.get("/api/accounts").json()
+        if a["account_number"] == "6000"
+    )
+    r = client.put(
+        f"/api/vendors/{vendor_id}", json={"default_expense_account_id": expense}
+    )
+    assert r.status_code == 200, r.text
+
     # Two invoices — one paid in full, one partial.
     r = client.post(
         "/api/invoices",

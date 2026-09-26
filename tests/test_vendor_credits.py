@@ -110,9 +110,12 @@ def test_a_bill_and_a_credit_that_reverses_it_net_to_nothing(
     assert _gl(db_session, seed_accounts["6000"].id) == Decimal("0")
 
 
-def test_the_tax_charged_on_the_bill_comes_back(
+def test_the_tax_on_a_credit_comes_off_the_lines_not_sales_tax_payable(
     client, db_session, seed_accounts, vendor
 ):
+    # The mirror of a bill: tax paid on a purchase is part of what the goods
+    # cost, so the tax coming back reduces the same account. Crediting 2200
+    # would add to the sales tax the business owes the state.
     vc = _credit(client, vendor, seed_accounts, "100.00", tax_rate=0.10)
     assert Decimal(vc["tax_amount"]) == Decimal("10.00")
     assert Decimal(vc["total"]) == Decimal("110.00")
@@ -123,17 +126,25 @@ def test_the_tax_charged_on_the_bill_comes_back(
         .one()
     )
     by_acct = {ln.account_id: ln for ln in txn.lines}
-    assert by_acct[seed_accounts["2200"].id].credit == Decimal("10.00")
+    assert seed_accounts["2200"].id not in by_acct
+    assert by_acct[seed_accounts["6000"].id].credit == Decimal("110.00")
     assert by_acct[seed_accounts["2000"].id].debit == Decimal("110.00")
 
 
-def test_a_line_with_no_account_falls_back_to_the_vendors_default_then_6000(
-    client, db_session, seed_accounts, vendor
+def test_a_line_with_no_account_takes_the_vendors_default(
+    client, db_session, seed_accounts
 ):
+    flour = client.post(
+        "/api/vendors",
+        json={
+            "name": "Cascade Flour Mill",
+            "default_expense_account_id": seed_accounts["5100"].id,
+        },
+    ).json()
     r = client.post(
         "/api/vendor-credits",
         json={
-            "vendor_id": vendor["id"],
+            "vendor_id": flour["id"],
             "date": "2026-04-05",
             "lines": [{"description": "credit", "quantity": 1, "rate": "50.00"}],
         },
@@ -146,7 +157,36 @@ def test_a_line_with_no_account_falls_back_to_the_vendors_default_then_6000(
         .one()
     )
     by_acct = {ln.account_id: ln for ln in txn.lines}
-    assert by_acct[seed_accounts["6000"].id].credit == Decimal("50.00")
+    assert by_acct[seed_accounts["5100"].id].credit == Decimal("50.00")
+    assert seed_accounts["6000"].id not in by_acct
+
+
+def test_a_line_nothing_names_an_account_for_is_refused_not_booked_to_6000(
+    client, db_session, seed_accounts, vendor
+):
+    # 6000 is Advertising & Marketing in the seeded chart; a credit for
+    # returned flour landed there (2.17.3 exploratory, F8 / W-H5).
+    from app.models.vendor_credits import VendorCredit
+
+    r = client.post(
+        "/api/vendor-credits",
+        json={
+            "vendor_id": vendor["id"],
+            "date": "2026-04-05",
+            "lines": [{"description": "credit", "quantity": 1, "rate": "50.00"}],
+        },
+    )
+    assert r.status_code == 400, r.text
+    detail = r.json()["detail"]
+    assert "Line 1 (credit)" in detail and "Acme Supply" in detail
+    assert "default expense account" in detail
+    assert db_session.query(VendorCredit).count() == 0
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.source_type == "vendor_credit")
+        .count()
+        == 0
+    )
 
 
 def test_a_zero_credit_is_refused(client, seed_accounts, vendor):

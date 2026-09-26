@@ -65,6 +65,19 @@ class POUpdate(StrictModel):
     lines: Optional[list[POLineCreate]] = None
 
 
+class POConvertLineAccount(StrictModel):
+    line_id: int  # a line of the purchase order being converted
+    account_id: int  # where that line posts on the bill
+
+
+class POConvertToBill(StrictModel):
+    """The To Bill dialog's choices: an account for each line that needs
+    one. Lines left out post to their item's expense account, else the
+    vendor's default expense account."""
+
+    lines: list[POConvertLineAccount] = []
+
+
 class POResponse(BaseModel):
     id: int
     po_number: str
