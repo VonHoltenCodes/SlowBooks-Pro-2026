@@ -26,7 +26,8 @@ td { padding: 8px; border-bottom: 1px solid #eee; }
         <tr><th>Terms</th><td>{{ inv.terms or 'Net 30' }}</td></tr>
     </table>
 
-    <p class="amount">Amount Due: ${{ "%.2f"|format(inv.balance_due|float) }}</p>
+    {% set cur = (inv.currency or '')|upper %}
+    <p class="amount">Amount Due: {% if cur and cur != (company.get('home_currency') or 'USD')|upper %}{{ cur }} {% else %}${% endif %}{{ "%.2f"|format(inv.balance_due|float) }}</p>
 
     {% if pay_url %}
     <p style="margin: 20px 0; text-align: center;">

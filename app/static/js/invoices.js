@@ -68,7 +68,17 @@ const SalesLines = {
         put(ids[0], t.subtotal); put(ids[1], t.tax); put(ids[2], t.total);
     },
 
-    money(amount) { return formatCurrency(amount); },
+    // Money as the document prints it: dollars in the home currency; a
+    // foreign document carries its ISO code ("EUR 850.00"), so a euro
+    // invoice never reads as $850.00 (W-M2). Matches the PDF's filter.
+    money(amount, currency) {
+        const home = ((typeof App !== 'undefined' && App.settings && App.settings.home_currency) || 'USD').toUpperCase();
+        const code = String(currency || '').trim().toUpperCase();
+        if (!code || code === home) return formatCurrency(amount);
+        const n = Number(amount) || 0;
+        const digits = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return `${code} ${digits}`;
+    },
 };
 window.SalesLines = SalesLines;
 
@@ -100,8 +110,8 @@ const InvoicesPage = {
                     <td>${formatDate(inv.date)}</td>
                     <td>${formatDate(inv.due_date)}</td>
                     <td>${statusBadge(inv.status)}</td>
-                    <td class="amount">${formatCurrency(inv.total)}</td>
-                    <td class="amount">${formatCurrency(inv.balance_due)}</td>
+                    <td class="amount">${SalesLines.money(inv.total, inv.currency)}</td>
+                    <td class="amount">${SalesLines.money(inv.balance_due, inv.currency)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.view(${inv.id})">View</button>
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showForm(${inv.id})">Edit</button>
@@ -145,9 +155,10 @@ const InvoicesPage = {
 
     async view(id) {
         const inv = await API.get(`/invoices/${id}`);
+        const money = (v) => SalesLines.money(v, inv.currency);
         let linesHtml = inv.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
-             <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
+             <td class="amount">${money(l.rate)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
 
         openModal(`${T('Invoice')} #${inv.invoice_number}`, `
@@ -163,11 +174,11 @@ const InvoicesPage = {
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
-                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(inv.subtotal)}</span></div>
-                <div class="total-row"><span class="label">Tax</span><span class="value">${formatCurrency(inv.tax_amount)}</span></div>
-                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${formatCurrency(inv.total)}</span></div>
-                <div class="total-row"><span class="label">Paid</span><span class="value">${formatCurrency(inv.amount_paid)}</span></div>
-                <div class="total-row grand-total"><span class="label">Balance Due</span><span class="value">${formatCurrency(inv.balance_due)}</span></div>
+                <div class="total-row"><span class="label">Subtotal</span><span class="value">${money(inv.subtotal)}</span></div>
+                <div class="total-row"><span class="label">Tax</span><span class="value">${money(inv.tax_amount)}</span></div>
+                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(inv.total)}</span></div>
+                <div class="total-row"><span class="label">Paid</span><span class="value">${money(inv.amount_paid)}</span></div>
+                <div class="total-row grand-total"><span class="label">Balance Due</span><span class="value">${money(inv.balance_due)}</span></div>
             </div>
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
             <div style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
@@ -409,6 +420,8 @@ const InvoicesPage = {
                 </div>
             </form>`);
         if (!id && inv.customer_id) InvoicesPage.customerSelected(inv.customer_id);
+        // the totals carry the document's currency; follow a change of it
+        $('#invoice-form [name="currency"]')?.addEventListener('change', () => InvoicesPage.recalc());
         InvoicesPage.recalc();
         // Populate due_date for fresh invoices that don't already have one.
         if (!inv.due_date) InvoicesPage._recomputeDueDate();
@@ -495,8 +508,9 @@ const InvoicesPage = {
 
     recalc() {
         TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'));
-        const t = SalesLines.totals($('#inv-lines'), $('#invoice-form [name="tax_rate"]')?.value);
-        SalesLines.show(t, ['inv-subtotal', 'inv-tax', 'inv-total']);
+        const cur = $('#invoice-form [name="currency"]')?.value;
+        const t = SalesLines.totals($('#inv-lines'), $('#invoice-form [name="tax_rate"]')?.value, cur);
+        SalesLines.show(t, ['inv-subtotal', 'inv-tax', 'inv-total'], cur);
         return t;
     },
 

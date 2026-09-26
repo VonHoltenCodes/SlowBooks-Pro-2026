@@ -3,6 +3,8 @@
 <head>
     {% set kind = doc_kind if doc_kind is defined else ('SalesReceipt' if inv.is_sales_receipt else 'Invoice') %}
     {% set nonprofit = kind in ('DonationReceipt', 'Pledge') %}
+    {# A foreign-currency document prints its ISO code on every amount ("EUR 850.00"). #}
+    {% set cur = document_currency_code(inv, company) %}
     {# The printed face is literal — the screen vocabulary (Invoice -> Pledge) must not leak onto a program-fee invoice. #}
     <title>{% if kind == 'DonationReceipt' %}Donation Receipt{% elif kind == 'Pledge' %}Pledge{% elif kind == 'SalesReceipt' %}Sales Receipt{% else %}Invoice{% endif %}</title>
 <style>
@@ -98,8 +100,8 @@
             <tr>
                 <td>{{ line.description or '' }}{% if inv.tax_amount and not line.is_taxable and not nonprofit %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity }}</td>
-                <td class="r">{{ line.rate | currency }}</td>
-                <td class="r">{{ line.amount | currency }}</td>
+                <td class="r">{{ line.rate | currency(cur) }}</td>
+                <td class="r">{{ line.amount | currency(cur) }}</td>
             </tr>
         {% endfor %}
         </tbody>
@@ -107,17 +109,17 @@
 
     <div class="totals">
         <table>
-            <tr><td class="label">Subtotal</td><td class="r">{{ inv.subtotal | currency }}</td></tr>
+            <tr><td class="label">Subtotal</td><td class="r">{{ inv.subtotal | currency(cur) }}</td></tr>
             {% if inv.tax_amount and inv.tax_amount != 0 %}
-            <tr><td class="label">Tax ({{ "%.2f" | format(inv.tax_rate * 100) }}%)</td><td class="r">{{ inv.tax_amount | currency }}</td></tr>
+            <tr><td class="label">Tax ({{ "%.2f" | format(inv.tax_rate * 100) }}%)</td><td class="r">{{ inv.tax_amount | currency(cur) }}</td></tr>
             {% endif %}
-            <tr><td class="label grand">{% if kind == 'DonationReceipt' %}Contribution{% elif kind == 'Pledge' %}Pledge Amount{% else %}Total{% endif %}</td><td class="r grand">{{ inv.total | currency }}</td></tr>
+            <tr><td class="label grand">{% if kind == 'DonationReceipt' %}Contribution{% elif kind == 'Pledge' %}Pledge Amount{% else %}Total{% endif %}</td><td class="r grand">{{ inv.total | currency(cur) }}</td></tr>
             {% if inv.is_sales_receipt %}
             {# Paid at the time of sale — no balance line on a receipt. #}
-            <tr><td class="label">{% if nonprofit %}Received{% else %}Paid{% endif %}</td><td class="r">{{ inv.amount_paid | currency }}</td></tr>
+            <tr><td class="label">{% if nonprofit %}Received{% else %}Paid{% endif %}</td><td class="r">{{ inv.amount_paid | currency(cur) }}</td></tr>
             {% elif inv.amount_paid and inv.amount_paid != 0 %}
-            <tr><td class="label">{% if nonprofit %}Received{% else %}Paid{% endif %}</td><td class="r">{{ inv.amount_paid | currency }}</td></tr>
-            <tr><td class="label grand">{% if kind == 'Pledge' %}Balance{% else %}Balance Due{% endif %}</td><td class="r grand">{{ inv.balance_due | currency }}</td></tr>
+            <tr><td class="label">{% if nonprofit %}Received{% else %}Paid{% endif %}</td><td class="r">{{ inv.amount_paid | currency(cur) }}</td></tr>
+            <tr><td class="label grand">{% if kind == 'Pledge' %}Balance{% else %}Balance Due{% endif %}</td><td class="r grand">{{ inv.balance_due | currency(cur) }}</td></tr>
             {% endif %}
         </table>
     </div>
@@ -128,10 +130,10 @@
         <div style="font-weight:700; margin-bottom:4px;">Acknowledgment of contribution</div>
         <table style="font-size:10px; margin-bottom:6px;">
             <tr><td style="padding-right:12px;">Date of contribution</td><td>{{ inv.date | fdate }}</td></tr>
-            <tr><td style="padding-right:12px;">Amount</td><td>{{ inv.total | currency }}</td></tr>
+            <tr><td style="padding-right:12px;">Amount</td><td>{{ inv.total | currency(cur) }}</td></tr>
             {% if inv.fair_value_amount %}
-            <tr><td style="padding-right:12px;">Fair value of goods or services</td><td>{{ inv.fair_value_amount | currency }}{% if inv.fair_value_description %} — {{ inv.fair_value_description }}{% endif %}</td></tr>
-            <tr><td style="padding-right:12px;">Deductible portion</td><td>{{ irs.deductible_amount | currency }}</td></tr>
+            <tr><td style="padding-right:12px;">Fair value of goods or services</td><td>{{ inv.fair_value_amount | currency(cur) }}{% if inv.fair_value_description %} — {{ inv.fair_value_description }}{% endif %}</td></tr>
+            <tr><td style="padding-right:12px;">Deductible portion</td><td>{{ irs.deductible_amount | currency(cur) }}</td></tr>
             {% endif %}
         </table>
         <div>{{ irs.text }}</div>

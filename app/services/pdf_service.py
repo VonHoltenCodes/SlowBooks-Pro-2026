@@ -145,12 +145,23 @@ def render_pdf(html_str: str) -> bytes:
         return doc.write_pdf()
 
 
-def _format_currency(value):
+def _format_currency(value, code=None):
+    """Dollars ("$1,234.50"), or with an ISO `code` "EUR 1,234.50". A
+    document in a foreign currency passes its code, so a euro invoice never
+    prints as dollars (2.17.3 exploratory W-M2)."""
     try:
         v = float(value or 0)
-        return f"${v:,.2f}"
     except (TypeError, ValueError):
-        return "$0.00"
+        v = 0.0
+    return f"{code} {v:,.2f}" if code else f"${v:,.2f}"
+
+
+def document_currency_code(doc, company_settings: dict) -> str:
+    """The ISO code to print on a document's amounts: its own currency when
+    that is not the home currency, else "" (plain dollars)."""
+    code = (getattr(doc, "currency", None) or "").strip().upper()
+    home = ((company_settings or {}).get("home_currency") or "USD").strip().upper()
+    return code if code and code != home else ""
 
 
 def _format_date(value):
@@ -163,6 +174,7 @@ def _format_date(value):
 
 _jinja_env.filters["currency"] = _format_currency
 _jinja_env.filters["fdate"] = _format_date
+_jinja_env.globals["document_currency_code"] = document_currency_code
 
 # Templates may call terms('Invoice'); a direct render without company
 # settings gets the business words. _render() overrides this per call.

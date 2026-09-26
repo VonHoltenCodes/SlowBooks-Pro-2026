@@ -49,4 +49,10 @@ out.picked = {
 };
 out.none = S.fillFromItem(row(1, 0, true, null), []) === null;
 
+// A foreign document carries its ISO code; the home currency stays dollars.
+out.money = [S.money(850, 'EUR'), S.money(850, 'usd'), S.money(850, null), S.money(10824891.75, 'CAD')];
+const eur = [row(10, 85, true)];
+S.totals(tbody(eur), '0', 'EUR');
+out.eurLine = eur[0].els['.line-amount'].textContent;
+
 console.log(JSON.stringify(out));

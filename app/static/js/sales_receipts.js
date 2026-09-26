@@ -25,7 +25,7 @@ const SalesReceiptsPage = {
                     <td>${escapeHtml(sr.customer_name || '')}</td>
                     <td>${formatDate(sr.date)}</td>
                     <td>${statusBadge(sr.status)}</td>
-                    <td class="amount">${formatCurrency(sr.total)}</td>
+                    <td class="amount">${SalesLines.money(sr.total, sr.currency)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="SalesReceiptsPage.view(${sr.id})">View</button>
                     </td>
@@ -35,9 +35,10 @@ const SalesReceiptsPage = {
 
     async view(id) {
         const sr = await API.get(`/invoices/${id}`);
+        const money = (v) => SalesLines.money(v, sr.currency);
         const linesHtml = sr.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
-             <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
+             <td class="amount">${money(l.rate)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
 
         const payment = await SalesReceiptsPage._findPayment(sr);
@@ -56,11 +57,11 @@ const SalesReceiptsPage = {
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
-                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(sr.subtotal)}</span></div>
-                <div class="total-row"><span class="label">Tax</span><span class="value">${formatCurrency(sr.tax_amount)}</span></div>
-                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${formatCurrency(sr.total)}</span></div>
-                ${sr.fair_value_amount ? `<div class="total-row"><span class="label">Fair value of goods/services${sr.fair_value_description ? ` (${escapeHtml(sr.fair_value_description)})` : ''}</span><span class="value">${formatCurrency(sr.fair_value_amount)}</span></div>
-                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${formatCurrency(sr.total - sr.fair_value_amount)}</span></div>` : ''}
+                <div class="total-row"><span class="label">Subtotal</span><span class="value">${money(sr.subtotal)}</span></div>
+                <div class="total-row"><span class="label">Tax</span><span class="value">${money(sr.tax_amount)}</span></div>
+                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(sr.total)}</span></div>
+                ${sr.fair_value_amount ? `<div class="total-row"><span class="label">Fair value of goods/services${sr.fair_value_description ? ` (${escapeHtml(sr.fair_value_description)})` : ''}</span><span class="value">${money(sr.fair_value_amount)}</span></div>
+                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${money(sr.total - sr.fair_value_amount)}</span></div>` : ''}
             </div>
             ${sr.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(sr.notes)}</p>` : ''}
             <div class="form-actions">
@@ -196,6 +197,8 @@ const SalesReceiptsPage = {
                     <button type="submit" class="btn btn-primary">Record ${T('Sales Receipt')}</button>
                 </div>
             </form>`);
+        // the totals carry the receipt's currency; follow a change of it
+        $('#sales-receipt-form [name="currency"]')?.addEventListener('change', () => SalesReceiptsPage.recalc());
         SalesReceiptsPage.recalc();
         ScanHelper.wire(SalesReceiptsPage._applyScan, SalesReceiptsPage._applyScanField,
             SalesReceiptsPage._scanFieldTarget);
@@ -361,8 +364,9 @@ const SalesReceiptsPage = {
 
     recalc() {
         TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'));
-        const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value);
-        SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total']);
+        const cur = $('#sales-receipt-form [name="currency"]')?.value;
+        const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value, cur);
+        SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total'], cur);
         return t;
     },
 
