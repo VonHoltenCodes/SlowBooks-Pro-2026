@@ -168,6 +168,11 @@ const PayrollPage = {
             if (!b.length) return '—';
             return b.map(x => `${escapeHtml(x.code)} ${formatCurrency(x.employee_amount)}${x.employer_amount ? ` <span style="color:var(--gray-400)">(+${formatCurrency(x.employer_amount)} ER)</span>` : ''}`).join('<br>');
         };
+        // Every amount between Gross and Net has a column, so a row adds up:
+        // "Other" is what is withheld besides income tax, SS and Medicare
+        // (Oregon's transit tax, disability and family-leave premiums) plus
+        // garnishments; reimbursements get a column when the run has any.
+        const anyReimb = run.stubs.some(s => s.reimbursements);
         let rows = run.stubs.map(s => `
             <tr>
                 <td>${escapeHtml(s.employee_name || `Employee ${s.employee_id}`)}</td>
@@ -177,8 +182,10 @@ const PayrollPage = {
                 <td class="amount">${formatCurrency(s.state_tax)}</td>
                 <td class="amount">${formatCurrency(s.ss_tax)}</td>
                 <td class="amount">${formatCurrency(s.medicare_tax)}</td>
+                <td class="amount" title="${escapeHtml(`State taxes besides income tax ${formatCurrency(s.state_other_employee || 0)} · Garnishments ${formatCurrency(s.garnishments || 0)}`)}">${formatCurrency((s.state_other_employee || 0) + (s.garnishments || 0))}</td>
                 <td style="font-size:12px;">${benefitCell(s)}</td>
                 <td class="amount">${formatCurrency((s.pretax_deductions || 0) + (s.posttax_deductions || 0))}</td>
+                ${anyReimb ? `<td class="amount">${formatCurrency(s.reimbursements || 0)}</td>` : ''}
                 <td class="amount" style="font-weight:700;">${formatCurrency(s.net_pay)}</td>
                 <td class="actions"><button class="btn btn-sm btn-secondary" title="Printable pay stub (PDF)" onclick="window.open('/api/payroll/${run.id}/paystub/${s.id}','_blank')">Stub PDF</button></td>
             </tr>`).join('');
@@ -187,9 +194,10 @@ const PayrollPage = {
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Employee</th><th scope="col" class="amount">Hours</th><th scope="col" class="amount">Gross</th>
                 <th scope="col" class="amount">Fed</th><th scope="col" class="amount">State</th><th scope="col" class="amount">SS</th>
-                <th scope="col" class="amount">Med</th><th scope="col">Benefits (EE, +ER)</th><th scope="col" class="amount">Deductions</th><th scope="col" class="amount">Net</th><th scope="col">Stub</th></tr></thead>
+                <th scope="col" class="amount">Med</th><th scope="col" class="amount">Other</th><th scope="col">Benefits (EE, +ER)</th><th scope="col" class="amount">Deductions</th>${anyReimb ? '<th scope="col" class="amount">+ Reimb.</th>' : ''}<th scope="col" class="amount">Net</th><th scope="col">Stub</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
+            <p style="font-size:11px;color:var(--gray-500);margin:4px 0 8px;">Other: state taxes withheld besides income tax (disability, family leave, transit) and garnishments. Gross − Fed − State − SS − Med − Other − Deductions${anyReimb ? ' + Reimb.' : ''} = Net.</p>
             <div class="invoice-totals">
                 <div class="total-row"><span class="label">Total Gross</span><span class="value">${formatCurrency(run.total_gross)}</span></div>
                 <div class="total-row"><span class="label">Total Taxes</span><span class="value">${formatCurrency(run.total_taxes)}</span></div>
