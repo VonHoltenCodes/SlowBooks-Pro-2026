@@ -108,14 +108,24 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section">
+                <div class="settings-section" id="settings-closing-date">
                     <h3>Closing Date</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Prevent modifications to transactions before this date.
                     </div>
                     <div class="form-grid">
-                        <div class="form-group"><label>Closing Date</label>
-                            <input name="closing_date" type="date" value="${escapeHtml(s.closing_date || '')}"></div>
+                        <div class="form-group"><label for="closing-date">Closing Date</label>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <input id="closing-date" name="closing_date" type="date" value="${escapeHtml(s.closing_date || '')}"
+                                    aria-describedby="closing-date-state"
+                                    oninput="SettingsPage.showClosingState()" onchange="SettingsPage.showClosingState()">
+                                <button type="button" class="btn btn-sm btn-secondary" id="closing-date-clear"
+                                    onclick="SettingsPage.clearClosingDate()" ${s.closing_date ? '' : 'disabled'}>Clear</button>
+                            </div>
+                            <!-- An empty date field shows today's date in grey on macOS, which
+                                 read as "closed through today" (explore 2.17.3, macbase1 S-i). -->
+                            <div id="closing-date-state" role="status" aria-live="polite"
+                                style="font-size:11px; margin-top:4px;">${escapeHtml(SettingsPage._closingStateText(s.closing_date))}</div></div>
                         <div class="form-group"><label>Password (optional)</label>
                             <input name="closing_date_password" type="password" value="${escapeHtml(s.closing_date_password || '')}"
                                 placeholder="Leave blank for no password" autocomplete="new-password">
@@ -683,6 +693,32 @@ const SettingsPage = {
         } finally {
             if (btn) btn.disabled = false;
         }
+    },
+
+    // Closing date: say plainly whether one is set, and clear it in one
+    // click — clearing used to mean emptying three date segments by hand,
+    // which WebKit could leave half-empty and silently invalid.
+    _closingStateText(value) {
+        return value
+            ? `Closed through ${formatDate(value)}: changes dated on or before it are refused.`
+            : 'No closing date: every period is open.';
+    },
+
+    showClosingState() {
+        const input = document.getElementById('closing-date');
+        const value = input ? input.value : '';
+        const state = document.getElementById('closing-date-state');
+        if (state) state.textContent = SettingsPage._closingStateText(value);
+        const clear = document.getElementById('closing-date-clear');
+        if (clear) clear.disabled = !value;
+    },
+
+    clearClosingDate() {
+        const input = document.getElementById('closing-date');
+        if (!input) return;
+        input.value = '';
+        SettingsPage.showClosingState();
+        SettingsPage._updateDirty();
     },
 
     async uploadLogo(input) {
