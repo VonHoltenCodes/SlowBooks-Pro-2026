@@ -129,6 +129,14 @@ class StatementAdd(StrictModel):
     job_id: Optional[int] = None
 
 
+class StatementCategory(StrictModel):
+    """The category picked for a statement line in the review list (null
+    clears it). Kept on the line, so Add all posts it and a reload shows
+    it."""
+
+    category_account_id: Optional[int] = None
+
+
 class ReconciliationCreate(StrictModel):
     """`account_id` is the ledger account; `bank_account_id` (a feed) is
     accepted for older callers."""

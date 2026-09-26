@@ -29,6 +29,7 @@ from app.schemas.banking import (
     LegacyBalancePost,
     ReconciliationCreate,
     StatementAdd,
+    StatementCategory,
     StatementMatch,
     ReconciliationResponse,
 )
@@ -388,6 +389,19 @@ def statement_add(
         class_id=data.class_id,
         job_id=data.job_id,
     )
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
+@router.patch("/transactions/{txn_id}", response_model=BankTransactionResponse)
+def statement_set_category(
+    txn_id: int, data: StatementCategory, db: Session = Depends(get_db)
+):
+    """Save the category picked for a statement line in the review list."""
+    from app.services import bank_matching as m
+
+    bt = m.set_category(db, _statement_line(db, txn_id), data.category_account_id)
     db.commit()
     db.refresh(bt)
     return _statement_out([bt], db)[0]

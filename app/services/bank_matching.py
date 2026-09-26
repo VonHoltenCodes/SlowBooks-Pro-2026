@@ -235,6 +235,36 @@ def add(
     return bt
 
 
+def set_category(
+    db: Session, bt: BankTransaction, category_account_id: int | None
+) -> BankTransaction:
+    """Keep the category picked for a statement line in the review list.
+
+    Picks used to live only in the page's dropdown until that line's own
+    Add was pressed: Add all posted just the rule-categorised lines and a
+    reload lost the rest (exploratory 2.17.3, W-M12). A pick is saved as it
+    is made, so Add all and the next visit both see it."""
+    if bt.transaction_line_id or bt.match_status == "added":
+        raise HTTPException(
+            status_code=400,
+            detail="This statement line is already in the books; its category can't change here",
+        )
+    if category_account_id is None:
+        bt.category_account_id = None
+        return bt
+    category = db.query(Account).filter(Account.id == category_account_id).first()
+    if not category:
+        raise HTTPException(status_code=404, detail="Category account not found")
+    ba = bt.bank_account or db.query(BankAccount).get(bt.bank_account_id)
+    if ba and ba.account_id == category.id:
+        raise HTTPException(
+            status_code=400,
+            detail="Pick a category other than the account the statement is for",
+        )
+    bt.category_account_id = category.id
+    return bt
+
+
 def exclude(bt: BankTransaction) -> BankTransaction:
     if bt.transaction_line_id:
         raise HTTPException(status_code=400, detail="Unmatch it first")

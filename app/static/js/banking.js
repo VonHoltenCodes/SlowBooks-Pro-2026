@@ -374,7 +374,7 @@ const BankingPage = {
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(t.description || '')}</div></td>
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--success)' : 'color:var(--danger)'}">${formatCurrency(t.amount)}</td>
-                <td><select id="cat-${t.id}" class="review-cat" data-current="${t.category_account_id || ''}"><option value="">${t.category_name ? escapeHtml(t.category_name) : 'Pick a category…'}</option></select></td>
+                <td><select id="cat-${t.id}" class="review-cat" data-current="${t.category_account_id || ''}" aria-label="Category" onchange="BankingPage.setCategory(${t.id}, this)"><option value="">${t.category_name ? escapeHtml(t.category_name) : 'Pick a category…'}</option></select></td>
                 <td style="white-space:nowrap;">
                     <button class="btn btn-sm btn-primary" onclick="BankingPage.addLine(${t.id}, ${accountId})">Add</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.showMatch(${t.id}, ${accountId})">Match</button>
@@ -392,7 +392,8 @@ const BankingPage = {
                 <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                <strong>Add</strong> posts the line with the category. <strong>Match</strong> links it to something you already entered.
+                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category; <strong>Add all categorised</strong> posts every line that has one.
+                <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
         </div>`;
@@ -440,8 +441,27 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // A category picked in a line's dropdown is saved as it is picked, so
+    // "Add all categorised" posts it and a reload still shows it. Before,
+    // a pick lived only in the dropdown until that line's own Add: Add all
+    // posted just the rule-categorised lines, and reloading lost the rest
+    // (exploratory 2.17.3, W-M12).
+    _pendingCategories: new Set(),
+
+    setCategory(lineId, sel) {
+        const value = sel.value ? parseInt(sel.value, 10) : null;
+        const saving = API.request('PATCH', `/banking/transactions/${lineId}`, { category_account_id: value })
+            .then(() => { sel.dataset.current = value ? String(value) : ''; })
+            .catch(err => { sel.value = sel.dataset.current || ''; toast(err.message, 'error'); });
+        BankingPage._pendingCategories.add(saving);
+        saving.finally(() => BankingPage._pendingCategories.delete(saving));
+        return saving;
+    },
+
     async addAll(feedId, accountId) {
         try {
+            // A pick made a moment ago may still be on its way.
+            await Promise.allSettled([...BankingPage._pendingCategories]);
             const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`);
             toast(`Added ${r.added}${r.skipped.length ? `, skipped ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`);
             App.navigate(`#/banking/${accountId}`);
