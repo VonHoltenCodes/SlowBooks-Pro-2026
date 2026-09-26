@@ -8,11 +8,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.routes.invoices.helpers import resolve_line_taxable
+from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
 from app.models.recurring import RecurringInvoice, RecurringInvoiceLine
 from app.models.contacts import Customer
 from app.schemas.recurring import RecurringCreate, RecurringUpdate, RecurringResponse
+from app.services.accounting import compute_line_totals
 from app.services.recurring_service import generate_due_invoices
+from app.services.terminology import terms_from_db
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
 
@@ -43,11 +45,24 @@ def get_recurring(rec_id: int, db: Session = Depends(get_db)):
     return resp
 
 
+def _schedule_noun(db: Session) -> str:
+    """The schedule as the company's vocabulary names it: "recurring
+    invoice", or "recurring pledge" for a nonprofit."""
+    return "recurring " + terms_from_db(db)("invoice")
+
+
 @router.post("", response_model=RecurringResponse, status_code=201)
 def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+
+    # Refused here rather than skipped at every run: a template that adds up
+    # to nothing generated $0.00 invoices that then showed as overdue.
+    resolve_line_taxable(db, data.lines, customer)
+    refuse_zero_total(
+        compute_line_totals(data.lines, data.tax_rate)[2], _schedule_noun(db)
+    )
 
     rec = RecurringInvoice(
         customer_id=data.customer_id,
@@ -64,7 +79,6 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
     db.add(rec)
     db.flush()
 
-    resolve_line_taxable(db, data.lines, customer)
     for i, line_data in enumerate(data.lines):
         db.add(
             RecurringInvoiceLine(
@@ -93,6 +107,13 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
     if not rec:
         raise HTTPException(status_code=404, detail="Recurring invoice not found")
 
+    if data.lines is not None:
+        resolve_line_taxable(db, data.lines, rec.customer)
+        tax_rate = data.tax_rate if data.tax_rate is not None else rec.tax_rate
+        refuse_zero_total(
+            compute_line_totals(data.lines, tax_rate)[2], _schedule_noun(db)
+        )
+
     for key, val in data.model_dump(exclude_unset=True, exclude={"lines"}).items():
         setattr(rec, key, val)
 
@@ -100,7 +121,6 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
         db.query(RecurringInvoiceLine).filter(
             RecurringInvoiceLine.recurring_invoice_id == rec_id
         ).delete()
-        resolve_line_taxable(db, data.lines, rec.customer)
         for i, line_data in enumerate(data.lines):
             db.add(
                 RecurringInvoiceLine(
@@ -141,5 +161,10 @@ def generate_now(as_of: date = Query(default=None), db: Session = Depends(get_db
     """Manually trigger generation of all due recurring invoices — one
     installment per template per call. `as_of` (default today) lets a
     catch-up or a test run generate a past installment deterministically."""
-    created_ids = generate_due_invoices(db, as_of)
-    return {"invoices_created": len(created_ids), "invoice_ids": created_ids}
+    skipped: list = []
+    created_ids = generate_due_invoices(db, as_of, skipped=skipped)
+    return {
+        "invoices_created": len(created_ids),
+        "invoice_ids": created_ids,
+        "skipped": skipped,
+    }

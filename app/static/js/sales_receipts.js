@@ -356,34 +356,14 @@ const SalesReceiptsPage = {
 
     itemSelected(idx) {
         const row = $(`[data-line="${idx}"]`);
-        const itemId = row.querySelector('.line-item').value;
-        const item = SalesReceiptsPage._items.find(i => i.id == itemId);
-        if (item) {
-            row.querySelector('.line-desc').value = item.description || item.name;
-            row.querySelector('.line-rate').value = item.rate;
-            const tax = row.querySelector('.line-taxable');
-            if (tax) tax.checked = item.is_taxable !== false;
-            SalesReceiptsPage.recalc();
-        }
+        if (row && SalesLines.fillFromItem(row, SalesReceiptsPage._items)) SalesReceiptsPage.recalc();
     },
 
     recalc() {
         TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'));
-        let subtotal = 0, taxable = 0;
-        $$('#sr-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
-            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
-            const amountCell = row.querySelector('.line-amount');
-            if (amountCell) amountCell.textContent = formatCurrency(amount);
-        });
-        const taxPct = parseFloat($('#sales-receipt-form [name="tax_rate"]')?.value) || 0;
-        const tax = taxable * (taxPct / 100);
-        $('#sr-subtotal').textContent = formatCurrency(subtotal);
-        $('#sr-tax').textContent = formatCurrency(tax);
-        $('#sr-total').textContent = formatCurrency(subtotal + tax);
+        const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value);
+        SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total']);
+        return t;
     },
 
     async save(e) {

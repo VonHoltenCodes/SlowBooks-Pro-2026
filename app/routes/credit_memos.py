@@ -34,6 +34,7 @@ from app.services.accounting import (
     compute_line_totals,
     _q,
 )
+from app.routes.invoices.helpers import refuse_zero_total
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_credit_memo_number
 
@@ -88,6 +89,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Customer not found")
 
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    refuse_zero_total(total, "credit memo")
 
     cm = None
     # Retry the number assignment a few times — next_credit_memo_number is just

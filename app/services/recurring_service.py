@@ -37,9 +37,17 @@ def _advance_next_due(current: date, frequency: str) -> date:
     return current + relativedelta(months=1)
 
 
-def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
+def generate_due_invoices(
+    db: Session, as_of: date = None, skipped: list | None = None
+) -> list[int]:
     """Generate all invoices that are due on or before as_of date.
-    Returns list of created invoice IDs."""
+    Returns list of created invoice IDs.
+
+    A template whose lines add up to $0.00 (one saved before the routes
+    refused them) generates nothing and keeps its date, so it catches up
+    once a rate is entered; pass a list as `skipped` to hear which ones and
+    why. Two such $0.00 invoices were generated on the 2.17.3 exploratory
+    run and then showed on the dashboard as overdue."""
     from app.services.donor_documents import document_label
     from app.services.terminology import terms_from_db
 
@@ -79,6 +87,21 @@ def generate_due_invoices(db: Session, as_of: date = None) -> list[int]:
         # the customer's CURRENT tax treatment, not the template's saved flags
         copied = taxed_copy_lines(rec.lines, rec.customer)
         subtotal, tax_amount, total = compute_line_totals(copied, tax_rate)
+        if total <= 0:
+            if skipped is not None:
+                who = rec.customer.name if rec.customer else f"schedule {rec.id}"
+                skipped.append(
+                    {
+                        "recurring_id": rec.id,
+                        "customer_name": rec.customer.name if rec.customer else None,
+                        "message": (
+                            f"The schedule for {who} adds up to $0.00, so "
+                            "nothing was created. Open it and enter a rate "
+                            "on at least one line."
+                        ),
+                    }
+                )
+            continue
 
         # Parse terms for due date
         due_date = rec.next_due + timedelta(days=30)

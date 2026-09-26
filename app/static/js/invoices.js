@@ -3,6 +3,75 @@
  * texture and all. We use an HTML table instead of a custom grid;
  * auto-fill on item selection lives in itemSelected() below.
  */
+
+/**
+ * Line arithmetic shared by every sales form — invoice, sales receipt,
+ * estimate, credit memo and recurring schedule. A line rounds to the cent
+ * the way the server stores it (accounting._q, half up), tax is taken on
+ * the rounded taxable lines, and the total is their sum, so the figure a
+ * form shows is the figure that posts. The credit memo and recurring forms
+ * had no arithmetic at all: picking an item filled no price, nothing showed
+ * a total, and $0.00 documents were saved (2.17.3 exploratory, W-M1 / F14).
+ */
+const SalesLines = {
+    // Half up to the cent. Shifting by exponent avoids binary drift:
+    // 1.005 * 100 is 100.49999... in floating point, Number('1.005e2') is 100.5.
+    cents(x) {
+        const n = Number(x) || 0;
+        const a = Math.abs(n);
+        const shifted = Number(`${a}e2`);
+        const r = Number.isFinite(shifted) ? Math.round(shifted) : Math.round(a * 100);
+        return (n < 0 ? -1 : 1) * Number(`${r}e-2`);
+    },
+
+    // Fill a line from the item picked in its .line-item select: description,
+    // price and the item's tax flag. Returns the item, or null for "--".
+    fillFromItem(row, items) {
+        const itemId = row.querySelector('.line-item')?.value;
+        const item = (items || []).find(i => i.id == itemId);
+        if (!item) return null;
+        const desc = row.querySelector('.line-desc');
+        if (desc) desc.value = item.description || item.name;
+        const rate = row.querySelector('.line-rate');
+        if (rate) rate.value = item.rate;
+        const tax = row.querySelector('.line-taxable');
+        if (tax) {
+            // An exempt customer's boxes are held off (TaxExempt); remember
+            // the item's flag for when the form switches back.
+            if (tax.disabled) tax.dataset.was = item.is_taxable !== false ? '1' : '0';
+            else tax.checked = item.is_taxable !== false;
+        }
+        return item;
+    },
+
+    // Recompute every row of `tbody` and return {subtotal, tax, total}. A
+    // row without a Tax box counts as taxable, as it does on the server.
+    totals(tbody, taxPct, currency) {
+        let subtotal = 0, taxable = 0;
+        (tbody ? [...tbody.querySelectorAll('tr')] : []).forEach(row => {
+            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
+            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+            const amount = SalesLines.cents(qty * rate);
+            subtotal += amount;
+            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
+            const cell = row.querySelector('.line-amount');
+            if (cell) cell.textContent = SalesLines.money(amount, currency);
+        });
+        subtotal = SalesLines.cents(subtotal);
+        const tax = SalesLines.cents(SalesLines.cents(taxable) * (parseFloat(taxPct) || 0) / 100);
+        return { subtotal, tax, total: SalesLines.cents(subtotal + tax) };
+    },
+
+    // Write totals into the form's Subtotal / Tax / Total cells (by id).
+    show(t, ids, currency) {
+        const put = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = SalesLines.money(v, currency); };
+        put(ids[0], t.subtotal); put(ids[1], t.tax); put(ids[2], t.total);
+    },
+
+    money(amount) { return formatCurrency(amount); },
+};
+window.SalesLines = SalesLines;
+
 const InvoicesPage = {
     // The document's literal face, as the PDF prints it: a flagged pledge is a
     // PLEDGE, everything else an INVOICE regardless of company vocabulary.
@@ -421,34 +490,14 @@ const InvoicesPage = {
 
     itemSelected(idx) {
         const row = $(`[data-line="${idx}"]`);
-        const itemId = row.querySelector('.line-item').value;
-        const item = InvoicesPage._items.find(i => i.id == itemId);
-        if (item) {
-            row.querySelector('.line-desc').value = item.description || item.name;
-            row.querySelector('.line-rate').value = item.rate;
-            const tax = row.querySelector('.line-taxable');
-            if (tax) tax.checked = item.is_taxable !== false;
-            InvoicesPage.recalc();
-        }
+        if (row && SalesLines.fillFromItem(row, InvoicesPage._items)) InvoicesPage.recalc();
     },
 
     recalc() {
         TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'));
-        let subtotal = 0, taxable = 0;
-        $$('#inv-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
-            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
-            const amountCell = row.querySelector('.line-amount');
-            if (amountCell) amountCell.textContent = formatCurrency(amount);
-        });
-        const taxPct = parseFloat($('[name="tax_rate"]')?.value) || 0;
-        const tax = taxable * (taxPct / 100);
-        $('#inv-subtotal').textContent = formatCurrency(subtotal);
-        $('#inv-tax').textContent = formatCurrency(tax);
-        $('#inv-total').textContent = formatCurrency(subtotal + tax);
+        const t = SalesLines.totals($('#inv-lines'), $('#invoice-form [name="tax_rate"]')?.value);
+        SalesLines.show(t, ['inv-subtotal', 'inv-tax', 'inv-total']);
+        return t;
     },
 
     // Auto-fill due_date from date + terms when either changes. Backend

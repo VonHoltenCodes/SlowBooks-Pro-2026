@@ -218,38 +218,21 @@ const EstimatesPage = {
 
     itemSelected(idx) {
         const row = $(`[data-eline="${idx}"]`);
-        const itemId = row.querySelector('.line-item').value;
-        const item = EstimatesPage._items.find(i => i.id == itemId);
+        const item = row && SalesLines.fillFromItem(row, EstimatesPage._items);
         if (item) {
-            row.querySelector('.line-desc').value = item.description || item.name;
-            row.querySelector('.line-rate').value = item.rate;
             // the item's standard cost is the budget side of the line; blank
             // when the item carries none, and the user can overwrite it
             const cost = row.querySelector('.line-unit-cost');
             if (cost) cost.value = item.cost && Number(item.cost) !== 0 ? item.cost : '';
-            const tax = row.querySelector('.line-taxable');
-            if (tax) tax.checked = item.is_taxable !== false;
             EstimatesPage.recalc();
         }
     },
 
     recalc() {
         TaxExempt.enforce(EstimatesPage._customers, $('#est-customer-select')?.value, $('#est-lines'));
-        let subtotal = 0, taxable = 0;
-        $$('#est-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
-            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
-            const amountCell = row.querySelector('.line-amount');
-            if (amountCell) amountCell.textContent = formatCurrency(amount);
-        });
-        const taxPct = parseFloat($('[name="tax_rate"]')?.value) || 0;
-        const tax = taxable * (taxPct / 100);
-        if ($('#est-subtotal')) $('#est-subtotal').textContent = formatCurrency(subtotal);
-        if ($('#est-tax')) $('#est-tax').textContent = formatCurrency(tax);
-        if ($('#est-total')) $('#est-total').textContent = formatCurrency(subtotal + tax);
+        const t = SalesLines.totals($('#est-lines'), $('#est-form [name="tax_rate"]')?.value);
+        SalesLines.show(t, ['est-subtotal', 'est-tax', 'est-total']);
+        return t;
     },
 
     async save(e, id) {

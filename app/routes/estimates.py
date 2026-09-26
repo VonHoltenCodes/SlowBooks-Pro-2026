@@ -12,7 +12,7 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
-from app.routes.invoices.helpers import resolve_line_taxable
+from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
 from app.routes._helpers import clamp_pagination
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
@@ -283,6 +283,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
 
     copied = taxed_copy_lines(estimate.lines, estimate.customer)
     subtotal, tax_amount, total = compute_line_totals(copied, estimate.tax_rate)
+    refuse_zero_total(total, "estimate", "converting it")
 
     invoice = Invoice(
         invoice_number=invoice_number,

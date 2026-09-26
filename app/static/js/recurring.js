@@ -67,20 +67,22 @@ const RecurringPage = {
         RecurringPage.lineCount = rec.lines.length;
 
         const custOpts = customers.map(c => `<option value="${c.id}" ${rec.customer_id==c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
-        const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
+        // A saved schedule keeps its customer and start date (the API edits
+        // neither); sending them made every Update a 422.
+        const locked = id ? 'disabled title="A saved schedule keeps its customer and start date"' : '';
 
         openModal(id ? `Edit ${T('Recurring Invoices').replace(/s$/, '')}` : `New ${T('Recurring Invoices').replace(/s$/, '')}`, `
-            <form onsubmit="RecurringPage.save(event, ${id})">
+            <form id="rec-form" onsubmit="RecurringPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" required onchange="RecurringPage.customerSelected(this.value)"><option value="">Select...</option>${custOpts}</select></div>
+                        <select name="customer_id" id="rec-customer-select" required ${locked} onchange="RecurringPage.customerSelected(this.value)"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>Frequency *</label>
                         <select name="frequency">
                             ${['weekly','monthly','quarterly','yearly'].map(f =>
                                 `<option ${rec.frequency===f?'selected':''}>${f}</option>`).join('')}
                         </select></div>
                     <div class="form-group"><label>Start Date *</label>
-                        <input name="start_date" type="date" required value="${rec.start_date}"></div>
+                        <input name="start_date" type="date" required ${locked} value="${rec.start_date}"></div>
                     <div class="form-group"><label>End Date</label>
                         <input name="end_date" type="date" value="${rec.end_date || ''}"></div>
                     <div class="form-group"><label>Terms</label>
@@ -89,26 +91,22 @@ const RecurringPage = {
                                 `<option value="${t}" ${rec.terms===t?'selected':''}>${t}</option>`).join('')}
                         </select></div>
                     <div class="form-group"><label>Tax Rate (%)</label>
-                        <input name="tax_rate" type="number" step="0.01" value="${(rec.tax_rate * 100) || 0}"></div>
+                        <input name="tax_rate" type="number" step="0.01" value="${(rec.tax_rate * 100) || 0}" oninput="RecurringPage.recalc()"></div>
                     ${classGroup}
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th></tr></thead>
                     <tbody id="rec-lines">
-                        ${rec.lines.map((l, i) => {
-                            const opts = items.map(it => `<option value="${it.id}" ${l.item_id==it.id?'selected':''}>${escapeHtml(it.name)}</option>`).join('');
-                            return `<tr data-recline="${i}">
-                                <td><select class="line-item"><option value="">--</option>${opts}</select></td>
-                                <td><input class="line-desc" value="${escapeHtml(l.description || '')}"></td>
-                                <td><input class="line-qty" type="number" step="0.01" value="${l.quantity || 1}"></td>
-                                <td><input class="line-rate" type="number" step="0.01" value="${l.rate || 0}"></td>
-                                <td style="text-align:center"><input type="checkbox" class="line-taxable" ${l.is_taxable === false ? '' : 'checked'}></td>
-                            </tr>`;
-                        }).join('')}
+                        ${rec.lines.map((l, i) => RecurringPage.lineRowHtml(i, l)).join('')}
                     </tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="RecurringPage.addLine()">+ Add Line</button>
+                <div class="invoice-totals" id="rec-totals">
+                    <div class="total-row"><span class="label">Subtotal</span><span class="value" id="rec-subtotal">$0.00</span></div>
+                    <div class="total-row"><span class="label">Tax</span><span class="value" id="rec-tax">$0.00</span></div>
+                    <div class="total-row grand-total"><span class="label">Each ${T('Invoice')}</span><span class="value" id="rec-total">$0.00</span></div>
+                </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes">${escapeHtml(rec.notes || '')}</textarea></div>
                 <div class="form-actions">
@@ -117,6 +115,21 @@ const RecurringPage = {
                 </div>
             </form>`);
         if (!id && rec.customer_id) RecurringPage.customerSelected(rec.customer_id);
+        RecurringPage.recalc();
+    },
+
+    // One schedule line, priced from the item the way an invoice line is.
+    lineRowHtml(idx, line) {
+        const opts = RecurringPage._items.map(it => `<option value="${it.id}" ${line.item_id==it.id?'selected':''}>${escapeHtml(it.name)}</option>`).join('');
+        return `<tr data-recline="${idx}">
+                <td><select class="line-item" onchange="RecurringPage.itemSelected(${idx})"><option value="">--</option>${opts}</select></td>
+                <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
+                <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="RecurringPage.recalc()"></td>
+                <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="RecurringPage.recalc()"></td>
+                <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="RecurringPage.recalc()"></td>
+                <td class="col-amount line-amount">$0.00</td>
+                <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="RecurringPage.removeLine(${idx})">X</button></td>
+            </tr>`;
     },
 
     customerSelected(customerId) {
@@ -125,19 +138,31 @@ const RecurringPage = {
         if (customer && termsField && customer.terms) {
             termsField.value = customer.terms;
         }
+        RecurringPage.recalc();
     },
 
     addLine() {
         const idx = RecurringPage.lineCount++;
-        const itemOpts = RecurringPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
-        $('#rec-lines').insertAdjacentHTML('beforeend', `
-            <tr data-recline="${idx}">
-                <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
-                <td><input class="line-desc"></td>
-                <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                <td style="text-align:center"><input type="checkbox" class="line-taxable" checked></td>
-            </tr>`);
+        $('#rec-lines').insertAdjacentHTML('beforeend', RecurringPage.lineRowHtml(idx, {}));
+        RecurringPage.recalc();
+    },
+
+    removeLine(idx) {
+        const row = $(`[data-recline="${idx}"]`);
+        if (row) row.remove();
+        RecurringPage.recalc();
+    },
+
+    itemSelected(idx) {
+        const row = $(`[data-recline="${idx}"]`);
+        if (row && SalesLines.fillFromItem(row, RecurringPage._items)) RecurringPage.recalc();
+    },
+
+    recalc() {
+        TaxExempt.enforce(RecurringPage._customers, $('#rec-customer-select')?.value, $('#rec-lines'));
+        const t = SalesLines.totals($('#rec-lines'), $('#rec-form [name="tax_rate"]')?.value);
+        SalesLines.show(t, ['rec-subtotal', 'rec-tax', 'rec-total']);
+        return t;
     },
 
     async save(e, id) {
@@ -155,9 +180,7 @@ const RecurringPage = {
             });
         });
         const data = {
-            customer_id: parseInt(form.customer_id.value),
             frequency: form.frequency.value,
-            start_date: form.start_date.value,
             end_date: form.end_date.value || null,
             terms: form.terms.value,
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
@@ -165,6 +188,10 @@ const RecurringPage = {
             class_id: classIdFromForm(form),
             lines,
         };
+        if (!id) {
+            data.customer_id = parseInt(form.customer_id.value);
+            data.start_date = form.start_date.value;
+        }
         try {
             if (id) { await API.put(`/recurring/${id}`, data); toast('Recurring updated'); }
             else { await API.post('/recurring', data); toast('Recurring created'); }
@@ -185,7 +212,9 @@ const RecurringPage = {
     async generateNow() {
         try {
             const result = await API.post('/recurring/generate');
-            toast(`Generated ${result.invoices_created} invoice(s)`);
+            toast(`Generated ${result.invoices_created} ${T('invoice')}(s)`);
+            // A schedule that adds up to $0.00 creates nothing; say which.
+            (result.skipped || []).forEach(s => toast(s.message, 'error'));
             App.navigate('#/recurring');
         } catch (err) { toast(err.message, 'error'); }
     },

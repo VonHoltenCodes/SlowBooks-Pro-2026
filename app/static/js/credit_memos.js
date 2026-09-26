@@ -37,6 +37,7 @@ const CreditMemosPage = {
     },
 
     _items: [],
+    _customers: [],
     lineCount: 0,
 
     async showForm() {
@@ -45,36 +46,34 @@ const CreditMemosPage = {
             API.get('/items?active_only=true'),
         ]);
         CreditMemosPage._items = items;
+        CreditMemosPage._customers = customers;
         CreditMemosPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
 
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-        const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
 
         openModal('New Credit Memo', `
-            <form onsubmit="CreditMemosPage.save(event)">
+            <form id="cm-form" onsubmit="CreditMemosPage.save(event)">
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+                        <select name="customer_id" id="cm-customer-select" required onchange="CreditMemosPage.recalc()"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Tax Rate (%)</label>
-                        <input name="tax_rate" type="number" step="0.01" value="0"></div>
+                        <input name="tax_rate" type="number" step="0.01" value="0" oninput="CreditMemosPage.recalc()"></div>
                     ${classGroup}
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Credit Lines</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th></tr></thead>
-                    <tbody id="cm-lines">
-                        <tr data-cmline="0">
-                            <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
-                            <td><input class="line-desc"></td>
-                            <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                            <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-                        </tr>
-                    </tbody>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th></tr></thead>
+                    <tbody id="cm-lines">${CreditMemosPage.lineRowHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="CreditMemosPage.addLine()">+ Add Line</button>
+                <div class="invoice-totals" id="cm-totals">
+                    <div class="total-row"><span class="label">Subtotal</span><span class="value" id="cm-subtotal">$0.00</span></div>
+                    <div class="total-row"><span class="label">Tax</span><span class="value" id="cm-tax">$0.00</span></div>
+                    <div class="total-row grand-total"><span class="label">Total Credit</span><span class="value" id="cm-total">$0.00</span></div>
+                </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes"></textarea></div>
                 <div class="form-actions">
@@ -82,18 +81,43 @@ const CreditMemosPage = {
                     <button type="submit" class="btn btn-primary">Create Credit Memo</button>
                 </div>
             </form>`);
+        CreditMemosPage.recalc();
+    },
+
+    // One credit line, priced from the item the way an invoice line is.
+    lineRowHtml(idx) {
+        const itemOpts = CreditMemosPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
+        return `<tr data-cmline="${idx}">
+                <td><select class="line-item" onchange="CreditMemosPage.itemSelected(${idx})"><option value="">--</option>${itemOpts}</select></td>
+                <td><input class="line-desc"></td>
+                <td><input class="line-qty" type="number" step="0.01" value="1" oninput="CreditMemosPage.recalc()"></td>
+                <td><input class="line-rate" type="number" step="0.01" value="0" oninput="CreditMemosPage.recalc()"></td>
+                <td class="col-amount line-amount">$0.00</td>
+                <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="CreditMemosPage.removeLine(${idx})">X</button></td>
+            </tr>`;
     },
 
     addLine() {
         const idx = CreditMemosPage.lineCount++;
-        const itemOpts = CreditMemosPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
-        $('#cm-lines').insertAdjacentHTML('beforeend', `
-            <tr data-cmline="${idx}">
-                <td><select class="line-item"><option value="">--</option>${itemOpts}</select></td>
-                <td><input class="line-desc"></td>
-                <td><input class="line-qty" type="number" step="0.01" value="1"></td>
-                <td><input class="line-rate" type="number" step="0.01" value="0"></td>
-            </tr>`);
+        $('#cm-lines').insertAdjacentHTML('beforeend', CreditMemosPage.lineRowHtml(idx));
+        CreditMemosPage.recalc();
+    },
+
+    removeLine(idx) {
+        const row = $(`[data-cmline="${idx}"]`);
+        if (row) row.remove();
+        CreditMemosPage.recalc();
+    },
+
+    itemSelected(idx) {
+        const row = $(`[data-cmline="${idx}"]`);
+        if (row && SalesLines.fillFromItem(row, CreditMemosPage._items)) CreditMemosPage.recalc();
+    },
+
+    recalc() {
+        const t = SalesLines.totals($('#cm-lines'), $('#cm-form [name="tax_rate"]')?.value);
+        SalesLines.show(t, ['cm-subtotal', 'cm-tax', 'cm-total']);
+        return t;
     },
 
     async save(e) {
