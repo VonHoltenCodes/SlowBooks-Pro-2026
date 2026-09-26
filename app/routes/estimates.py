@@ -5,6 +5,7 @@
 
 from datetime import date
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
@@ -14,18 +15,20 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.database import get_db
 from app.routes.invoices.helpers import (
     _due_date_from_terms,
-    refuse_zero_total,
+    confirm_zero_total,
+    opening_status,
     resolve_line_taxable,
 )
 from app.routes._helpers import clamp_pagination
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
-from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
+from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
 from app.schemas.estimates import EstimateCreate, EstimateUpdate, EstimateResponse
-from app.schemas.invoices import InvoiceResponse
+from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.numbering import next_estimate_number, next_invoice_number
 from app.services.settings_service import get_all_settings as get_settings, set_setting
+from app.services.request_utils import content_disposition
 from app.services.accounting import (
     _q,
     compute_line_totals,
@@ -189,6 +192,16 @@ def update_estimate(
         setattr(estimate, key, val)
 
     if data.lines is not None:
+        # Each line's tax is settled before it is stored, the way create does
+        # it: a non-taxable customer's lines are never taxable, and a line
+        # sent without a flag takes its item's. The flags used to be stored
+        # as sent (a missing one as taxable) and settled only for the
+        # totals, so an edit stored taxable lines on an exempt customer's
+        # estimate, and a non-taxable item's line stored as taxable was
+        # taxed on the invoice the estimate became (found integrating the
+        # 2.17.3 exploratory fixes). The customer is the one the estimate
+        # has after this edit.
+        resolve_line_taxable(db, data.lines, db.get(Customer, estimate.customer_id))
         db.query(EstimateLine).filter(EstimateLine.estimate_id == estimate_id).delete()
         for i, line_data in enumerate(data.lines):
             line = EstimateLine(
@@ -212,7 +225,6 @@ def update_estimate(
             db.add(line)
 
         tax_rate = data.tax_rate if data.tax_rate is not None else estimate.tax_rate
-        resolve_line_taxable(db, data.lines, estimate.customer)
         subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
         estimate.subtotal = subtotal
         estimate.tax_amount = tax_amount
@@ -238,7 +250,9 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=Estimate_{est.estimate_number}.pdf"
+            "Content-Disposition": content_disposition(
+                f"Estimate_{est.estimate_number}.pdf"
+            )
         },
     )
 
@@ -263,7 +277,11 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)
-def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
+def convert_to_invoice(
+    estimate_id: int,
+    data: Optional[ZeroTotalConfirmation] = None,
+    db: Session = Depends(get_db),
+):
     """Convert to invoice — deep-copies all fields and lines."""
     words = terms_from_db(db)
     from app.services.closing_date import check_closing_date
@@ -286,7 +304,13 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
 
     copied = taxed_copy_lines(estimate.lines, estimate.customer)
     subtotal, tax_amount, total = compute_line_totals(copied, estimate.tax_rate)
-    refuse_zero_total(total, "estimate", "converting it")
+    confirm_zero_total(
+        total,
+        bool(data and data.allow_zero_total),
+        "estimate",
+        "converting it",
+        question="This estimate adds up to $0.00. Convert it to an invoice anyway?",
+    )
 
     invoice_number = next_invoice_number(db)
 
@@ -314,7 +338,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
     invoice = Invoice(
         invoice_number=invoice_number,
         customer_id=estimate.customer_id,
-        status=InvoiceStatus.DRAFT,
+        status=opening_status(total),
         date=today,
         due_date=due_date,
         terms=terms,

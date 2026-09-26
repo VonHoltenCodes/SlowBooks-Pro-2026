@@ -155,7 +155,9 @@ def test_export_all_carries_classes_jobs_bills_deposits_and_sales_receipts(
     assert bill_blk["trns"]["DOCNUM"] == "L-100"
     assert bill_blk["trns"]["CLASS"] == "Field:North"
     spl_amounts = sorted(float(s["AMOUNT"]) for s in bill_blk["spl"])
-    assert spl_amounts == [8.25, 40.0, 125.0]  # two lines + 5% tax
+    # two lines, each carrying its share of the 5% tax as the ledger books it
+    # (tax on a purchase is part of its cost, not a Sales Tax Payable split)
+    assert spl_amounts == [42.0, 131.25]
     assert abs(float(bill_blk["trns"]["AMOUNT"])) == 173.25
     assert (
         sum(float(s["AMOUNT"]) for s in bill_blk["spl"])

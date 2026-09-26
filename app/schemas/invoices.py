@@ -88,6 +88,9 @@ class InvoiceCreate(StrictModel):
     is_pledge: bool = False
     fair_value_amount: Optional[Decimal] = None
     fair_value_description: Optional[str] = Field(None, max_length=200)
+    # An invoice that adds up to $0.00 (no-charge warranty work) is saved
+    # only when this says so; otherwise it is refused with 409 "zero_total".
+    allow_zero_total: bool = False
 
     @field_validator("lines")
     @classmethod
@@ -114,6 +117,15 @@ class InvoiceUpdate(StrictModel):
     fair_value_amount: Optional[Decimal] = None
     fair_value_description: Optional[str] = Field(None, max_length=200)
     lines: Optional[list[InvoiceLineCreate]] = None
+    # As on create: an edit that leaves the invoice at $0.00 needs this.
+    allow_zero_total: bool = False
+
+
+class ZeroTotalConfirmation(StrictModel):
+    """The optional body of Duplicate and of an estimate's Convert: a copy
+    that adds up to $0.00 is made only with ``allow_zero_total: true``."""
+
+    allow_zero_total: bool = False
 
 
 class InvoiceResponse(BaseModel):

@@ -35,10 +35,11 @@ from app.services.accounting import (
     compute_line_totals,
     _q,
 )
-from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
+from app.routes.invoices.helpers import confirm_zero_total, resolve_line_taxable
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_credit_memo_number
 from app.services.settings_service import get_all_settings as get_settings
+from app.services.request_utils import content_disposition
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -100,7 +101,9 @@ def credit_memo_pdf(cm_id: int, db: Session = Depends(get_db)):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=CreditMemo_{cm.memo_number}.pdf"
+            "Content-Disposition": content_disposition(
+                f"CreditMemo_{cm.memo_number}.pdf"
+            )
         },
     )
 
@@ -152,7 +155,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     # and nothing at all for a non-taxable customer.
     resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
-    refuse_zero_total(total, "credit memo")
+    confirm_zero_total(total, data.allow_zero_total, "credit memo")
 
     cm = None
     # Retry the number assignment a few times — next_credit_memo_number is just
@@ -309,6 +312,28 @@ def apply_credit(
             ),
         )
 
+    # A credit memo is in the home currency (it has no currency of its
+    # own), so it can pay a home-currency invoice only — the payment-side
+    # rule. Applying $50 of credit to a EUR invoice took EUR 50 off it.
+    # And an amount must be more than zero: a negative one put credit back
+    # on the memo and the balance back on the invoice, past what they were.
+    from app.services.currency import document_currency, home_currency
+
+    home = home_currency(db)
+    if document_currency(invoice, db) != home:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invoice {invoice.invoice_number} is in "
+                f"{document_currency(invoice, db)}, and credit memo "
+                f"{cm.memo_number} is in {home}. A credit pays an invoice in "
+                "its own currency only."
+            ),
+        )
+    if Decimal(str(data.amount)) <= 0:
+        raise HTTPException(
+            status_code=400, detail="Enter an amount more than zero to apply."
+        )
     if Decimal(str(data.amount)) > cm.balance_remaining:
         raise HTTPException(status_code=400, detail="Amount exceeds credit balance")
     if Decimal(str(data.amount)) > invoice.balance_due:

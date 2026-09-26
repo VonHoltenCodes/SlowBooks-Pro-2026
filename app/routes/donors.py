@@ -28,6 +28,7 @@ from app.services.pdf_service import (
     generate_giving_statement_pdf,
 )
 from app.services.settings_service import get_all_settings
+from app.services.request_utils import content_disposition
 
 router = APIRouter(prefix="/api/donors", tags=["donors"])
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ def acknowledgment_pdf(kind: str, gift_id: int, db: Session = Depends(get_db)):
         content=pdf,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=Acknowledgment_{number}.pdf"
+            "Content-Disposition": content_disposition(f"Acknowledgment_{number}.pdf")
         },
     )
 
@@ -183,12 +184,13 @@ def giving_statement_pdf(customer_id: int, year: int, db: Session = Depends(get_
     pdf = generate_giving_statement_pdf(
         [_statement(db, company, customer, year)], company, year
     )
-    safe = customer.name.replace("/", "-")
     return Response(
         content=pdf,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=GivingStatement_{year}_{safe}.pdf"
+            "Content-Disposition": content_disposition(
+                f"GivingStatement_{year}_{customer.name}.pdf"
+            )
         },
     )
 

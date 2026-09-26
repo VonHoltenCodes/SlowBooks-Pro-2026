@@ -214,16 +214,20 @@ const CreditMemosPage = {
                 line_order: i,
             });
         });
+        const data = {
+            customer_id: parseInt(form.customer_id.value),
+            original_invoice_id: form.original_invoice_id.value ? parseInt(form.original_invoice_id.value) : null,
+            date: form.date.value,
+            tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
+            notes: form.notes.value || null,
+            class_id: classIdFromForm(form),
+            lines,
+        };
         try {
-            await API.post('/credit-memos', {
-                customer_id: parseInt(form.customer_id.value),
-                original_invoice_id: form.original_invoice_id.value ? parseInt(form.original_invoice_id.value) : null,
-                date: form.date.value,
-                tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
-                notes: form.notes.value || null,
-                class_id: classIdFromForm(form),
-                lines,
-            });
+            // $0.00 asks "Save it anyway?" first (SalesLines.sendAllowingZero)
+            const saved = await SalesLines.sendAllowingZero(allow =>
+                API.post('/credit-memos', allow ? { ...data, allow_zero_total: true } : data));
+            if (!saved) return;
             toast('Credit memo created');
             closeModal();
             App.navigate('#/credit-memos');

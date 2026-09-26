@@ -67,9 +67,12 @@
     </div>
 
     <table class="activity">
+        {# Amounts are in home currency; a line in another currency names its
+           own amount in Description ("EUR 850.00"). #}
+        {% set in_home = (' (' ~ activity.home_currency ~ ')') if activity.has_foreign else '' %}
         <thead><tr>
             <th>Date</th><th>Type</th><th>Number</th><th>Description</th>
-            <th class="r">Amount</th><th class="r">Balance</th>
+            <th class="r">Amount{{ in_home }}</th><th class="r">Balance{{ in_home }}</th>
         </tr></thead>
         <tbody>
         {# One chronological list — invoices, payments and credit memos

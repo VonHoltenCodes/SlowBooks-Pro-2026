@@ -25,6 +25,7 @@ from app.services.accounting import (
     reversing_lines,
 )
 from app.services.closing_date import check_closing_date
+from app.services.request_utils import content_disposition
 from app.services.purchase_posting import (
     expense_account_for,
     spread,
@@ -84,12 +85,6 @@ def _bill_html(db: Session, bill_id: int) -> tuple[Bill, str]:
     return bill, _render("bill_pdf.html", get_all_settings(db), bill=bill)
 
 
-def _file_safe(text: str) -> str:
-    # The bill number is the vendor's own invoice number — anything can be
-    # in it, and it lands in a header.
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", text or "").strip("_") or "bill"
-
-
 @router.get("/{bill_id}/pdf")
 def bill_pdf(bill_id: int, db: Session = Depends(get_db)):
     """The bill as a PDF. Save PDF on the bill's view opened this URL long
@@ -101,8 +96,10 @@ def bill_pdf(bill_id: int, db: Session = Depends(get_db)):
         content=render_pdf(html_str),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": (
-                f"inline; filename=Bill_{_file_safe(bill.bill_number)}.pdf"
+            # The bill number is the vendor's own invoice number — anything
+            # can be in it, and it lands in a header.
+            "Content-Disposition": content_disposition(
+                f"Bill_{bill.bill_number or 'bill'}.pdf"
             )
         },
     )

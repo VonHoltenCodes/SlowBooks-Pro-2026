@@ -13,6 +13,7 @@ from app.models.payments import Payment
 from app.models.bills import BillPayment, Bill
 from app.models.contacts import Vendor
 from app.services.pdf_service import generate_check_pdf
+from app.services.request_utils import content_disposition
 from app.routes.settings import _get_all as get_settings
 
 router = APIRouter(prefix="/api/checks", tags=["checks"])
@@ -84,6 +85,8 @@ def print_check(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=Check_{check_data['check_number']}.pdf"
+            "Content-Disposition": content_disposition(
+                f"Check_{check_data['check_number']}.pdf"
+            )
         },
     )
