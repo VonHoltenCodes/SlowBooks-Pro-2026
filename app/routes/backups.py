@@ -11,11 +11,11 @@ from app.schemas.common import StrictModel
 from typing import Optional
 
 from app.database import get_db
-from app.models.backups import Backup
+from app.services import backup_service
 from app.services.backup_service import (
+    PRE_RESTORE_TAG,
     create_backup,
     restore_backup,
-    BACKUP_DIR,
 )
 
 router = APIRouter(prefix="/api/backups", tags=["backups"])
@@ -27,24 +27,17 @@ class BackupCreate(StrictModel):
 
 class RestoreRequest(StrictModel):
     filename: str
+    # A backup that belongs to another company is refused (409, code
+    # "other_company") unless the person has confirmed it a second time.
+    allow_other_company: bool = False
 
 
 @router.get("")
 def list_backups(db: Session = Depends(get_db)):
-    """List only backups whose files still exist on disk."""
-    db_backups = db.query(Backup).order_by(Backup.created_at.desc()).all()
-    return [
-        {
-            "id": b.id,
-            "filename": b.filename,
-            "file_size": b.file_size,
-            "backup_type": b.backup_type,
-            "notes": b.notes,
-            "created_at": b.created_at.isoformat() if b.created_at else None,
-        }
-        for b in db_backups
-        if (BACKUP_DIR / b.filename).exists()
-    ]
+    """This company's backups whose files still exist on disk. The folder is
+    shared by every company on the machine; another company's backups are
+    not listed (explore 2.17.3, macbase1 F25)."""
+    return backup_service.list_company_backups(db)
 
 
 @router.post("")
@@ -57,21 +50,23 @@ def make_backup(data: BackupCreate = BackupCreate(), db: Session = Depends(get_d
     return result
 
 
+def _company_backup_path(db: Session, filename: str):
+    """A path for one of THIS company's listed backups, else a 404. The
+    listing is the system of record for what may be served;
+    backup_path() (basename + allow-list + normpath containment) is the
+    sanitizer static analyzers recognise (CodeQL py/path-injection)."""
+    filepath = backup_service.backup_path(filename)
+    if filepath is None:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    listed = {b["filename"] for b in backup_service.list_company_backups(db)}
+    if filepath.name not in listed or not filepath.exists():
+        raise HTTPException(status_code=404, detail="Backup file not found")
+    return filepath
+
+
 @router.get("/download/{filename}")
 def download_backup(filename: str, db: Session = Depends(get_db)):
-    # Resolve the filename through the backups table first. The DB row is
-    # the system-of-record for what's a legitimate backup; a path derived
-    # from a DB read is also a clear sanitizer for static analyzers
-    # (CodeQL: py/path-injection) that don't recognize is_relative_to() as
-    # one. is_relative_to() below remains as defense-in-depth.
-    backup_row = db.query(Backup).filter(Backup.filename == filename).first()
-    if not backup_row:
-        raise HTTPException(status_code=404, detail="Backup file not found")
-    filepath = (BACKUP_DIR / backup_row.filename).resolve()
-    if not filepath.is_relative_to(BACKUP_DIR.resolve()):
-        raise HTTPException(status_code=400, detail="Invalid filename")
-    if not filepath.exists():
-        raise HTTPException(status_code=404, detail="Backup file not found")
+    filepath = _company_backup_path(db, filename)
     return FileResponse(
         str(filepath), filename=filepath.name, media_type="application/octet-stream"
     )
@@ -79,16 +74,50 @@ def download_backup(filename: str, db: Session = Depends(get_db)):
 
 @router.post("/restore")
 def restore(data: RestoreRequest, db: Session = Depends(get_db)):
-    # Validate filename to prevent path traversal
-    filepath = (BACKUP_DIR / data.filename).resolve()
-    if not filepath.is_relative_to(BACKUP_DIR.resolve()):
+    """Replace this company's books with a backup.
+
+    Refused, with nothing changed: a name that is not a backup file (400),
+    a file that is not there (404), another company's backup unless
+    confirmed again (409 "other_company" — every company's backups share
+    one folder, and this used to copy any of them over the open company),
+    and a copy made by a newer version this one cannot open (409
+    "newer_version"). Otherwise a safety backup of the books as they are is
+    taken first, and named in the answer, so a restore can be undone."""
+    filepath = backup_service.backup_path(data.filename)
+    if filepath is None:
         raise HTTPException(status_code=400, detail="Invalid filename")
+    if not filepath.exists():
+        raise HTTPException(
+            status_code=404, detail=f"Backup file not found: {filepath.name}"
+        )
+
+    other = backup_service.other_company(db, filepath.name)
+    if other and not data.allow_other_company:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "other_company",
+                "message": (
+                    f"This backup holds the books of {other['backup_company']}, "
+                    f"not {other['current_company']}. Restoring it would replace "
+                    f"{other['current_company']}'s books with it. (If you renamed "
+                    "this company since the backup was made, it is yours.)"
+                ),
+                **other,
+            },
+        )
+    newer = backup_service.backup_revision_problem(filepath.name)
+    if newer:
+        raise HTTPException(
+            status_code=409, detail={"code": "newer_version", "message": newer}
+        )
 
     # Restore overwrites the entire database — leave a breadcrumb BEFORE the
     # operation. The audit_log itself may be replaced by the restore, so this
     # row records intent in the CURRENT (pre-restore) DB; pair it with the
     # backup-file's own contents for the full picture. Committed immediately
-    # so it survives even if the restore process aborts mid-way.
+    # so it survives even if the restore process aborts mid-way — and so the
+    # safety backup below carries it.
     from app.services.audit import log_event
 
     log_event(
@@ -100,6 +129,21 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
         source="admin",
     )
     db.commit()
+
+    safety = create_backup(
+        db,
+        notes=f"Taken automatically just before restoring {filepath.name}",
+        backup_type="pre-restore",
+        tag=PRE_RESTORE_TAG,
+    )
+    if not safety.get("success"):
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Nothing was restored: a safety backup of the books as they are "
+                "could not be made first. " + str(safety.get("error") or "")
+            ).strip(),
+        )
 
     result = restore_backup(db, filepath.name)
     if not result.get("success"):
@@ -114,4 +158,17 @@ def restore(data: RestoreRequest, db: Session = Depends(get_db)):
         else:
             status_code = 500
         raise HTTPException(status_code=status_code, detail=err)
-    return result
+
+    upgraded = backup_service.bring_restored_books_up_to_date()
+    if not upgraded.get("success"):
+        # Put the books back as they were rather than leave a file this
+        # version cannot use.
+        restore_backup(db, safety["filename"])
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"{upgraded.get('error')} Your books are as they were before the "
+                f"restore (safety backup {safety['filename']})."
+            ),
+        )
+    return {**result, "safety_backup": safety["filename"]}

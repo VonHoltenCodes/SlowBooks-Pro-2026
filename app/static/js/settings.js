@@ -380,8 +380,13 @@ const SettingsPage = {
                     <div id="equipment-list"></div>
                 </div>
 
-                <div class="settings-section">
+                <div class="settings-section" id="settings-backups">
                     <h3>Backup / Restore</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Backups of this company only, named for it. Restore replaces everything in this
+                        company with the backup; a safety backup of the books as they are is taken first,
+                        so a restore can be undone by restoring that one.
+                    </div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;">
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.createBackup()">Create Backup</button>
                     </div>
@@ -708,6 +713,7 @@ const SettingsPage = {
     async loadBackups() {
         try {
             const backups = await API.get('/backups');
+            SettingsPage._backups = backups;
             const el = $('#backup-list');
             if (!el) return;
             if (backups.length === 0) {
@@ -717,15 +723,86 @@ const SettingsPage = {
             el.innerHTML = `<div class="table-container"><table>
                 <thead><tr><th scope="col">Filename</th><th scope="col">Size</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead>
                 <tbody>${backups.map(b => `<tr>
-                    <td>${escapeHtml(b.filename)}</td>
+                    <td>${escapeHtml(b.filename)}${b.backup_type === 'pre-restore'
+                        ? ' <span style="font-size:10px; color:var(--text-muted);">(taken before a restore)</span>' : ''}</td>
                     <td>${(b.file_size / 1024).toFixed(1)} KB</td>
-                    <td>${formatDate(b.created_at)}</td>
+                    <td>${escapeHtml(SettingsPage._when(b.created_at))}</td>
                     <td class="actions">
                         <a href="/api/backups/download/${encodeURIComponent(b.filename)}" class="btn btn-sm btn-secondary" download>Download</a>
+                        <button type="button" class="btn btn-sm btn-secondary" data-filename="${escapeHtml(b.filename)}"
+                            onclick="SettingsPage.confirmRestore(this.dataset.filename)">Restore…</button>
                     </td>
                 </tr>`).join('')}</tbody>
             </table></div>`;
         } catch (e) { /* ignore */ }
+    },
+
+    // Date and time: a company often has several backups on one day.
+    _when(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+        });
+    },
+
+    // Restore had an endpoint and no button (explore 2.17.3, macbase1 F25).
+    // It replaces the whole company, so it asks plainly and needs a tick.
+    confirmRestore(filename) {
+        const b = (SettingsPage._backups || []).find(x => x.filename === filename) || { filename };
+        const when = b.created_at ? SettingsPage._when(b.created_at) : 'when it was made';
+        const company = (App.settings && App.settings.company_name) || 'this company';
+        openModal('Restore a backup', `
+            <form id="restore-form" onsubmit="SettingsPage.restoreBackup(event)">
+                <input type="hidden" name="filename" value="${escapeHtml(filename)}">
+                <p style="margin:0 0 8px;"><strong>This replaces everything in ${escapeHtml(company)} with the books
+                    as they were in ${escapeHtml(filename)} (${escapeHtml(when)}).</strong></p>
+                <p style="margin:0 0 8px;">Anything entered or changed since then (${T('invoices')}, payments, bills,
+                    settings, users) is replaced. A safety backup of the books as they are now is taken first;
+                    restore that one to undo this.</p>
+                <label style="display:flex; gap:6px; align-items:flex-start; font-weight:normal;">
+                    <input type="checkbox" name="understood" required
+                        onchange="this.form.querySelector('button[type=submit]').disabled = !this.checked">
+                    <span>I understand that everything since ${escapeHtml(when)} will be replaced.</span></label>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-danger" disabled>Replace my books with this backup</button>
+                </div>
+            </form>`);
+    },
+
+    async restoreBackup(e) {
+        e.preventDefault();
+        const form = e.target;
+        const filename = form.filename.value;
+        const btn = form.querySelector('button[type=submit]');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Restoring…';
+        const send = allowOther => API.post('/backups/restore',
+            allowOther ? { filename, allow_other_company: true } : { filename });
+        try {
+            let result;
+            try {
+                result = await send(false);
+            } catch (err) {
+                // Another company's backup: say whose, and ask a second time.
+                if (!(err.status === 409 && err.detail && err.detail.code === 'other_company')) throw err;
+                if (!confirm(`${err.message}\n\nRestore it over this company anyway?`)) {
+                    btn.disabled = false;
+                    btn.textContent = label;
+                    return;
+                }
+                result = await send(true);
+            }
+            closeModal();
+            toast(`Restored from ${filename}. The books as they were are kept in ${result.safety_backup}. Reloading…`);
+            setTimeout(() => location.reload(), 1500);
+        } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = label;
+        }
     },
 
     async seedTemplates() {

@@ -311,9 +311,6 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     # Singular paystub fetch — SPA renders paystubs via the bulk list +
     # PDF endpoints. This route exists for direct linking / API consumers.
     ("GET", "/api/payroll/{run_id}/paystub/{stub_id}"),
-    # Backup restore — dangerous; deliberately not exposed in the SPA.
-    # Run via CLI: `python -m app.services.backup restore <file>`.
-    ("POST", "/api/backups/restore"),
     # Employee self-service "submit timecard" — meant to be called from
     # the employee portal, not the admin TimeEntriesPage (which uses
     # /approve and /reject). Portal time-entry UI is future work.
