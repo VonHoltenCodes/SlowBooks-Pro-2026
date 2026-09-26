@@ -64,7 +64,7 @@ const EmployeesPage = {
                     <div class="form-group"><label>Last Name *</label>
                         <input name="last_name" required value="${escapeHtml(emp.last_name)}"></div>
                     <div class="form-group"><label>SSN Last 4</label>
-                        <input name="ssn_last_four" maxlength="4" value="${escapeHtml(emp.ssn_last_four || '')}"></div>
+                        <input name="ssn_last_four" maxlength="4" pattern="[0-9]{4}" inputmode="numeric" title="The last four digits of the Social Security number" value="${escapeHtml(emp.ssn_last_four || '')}"></div>
                     <div class="form-group"><label>Email</label>
                         <input name="email" type="email" value="${escapeHtml(emp.email || '')}"></div>
                     <div class="form-group"><label>Pay Type</label>
@@ -73,7 +73,7 @@ const EmployeesPage = {
                             <option value="salary" ${emp.pay_type==='salary'?'selected':''}>Salary</option>
                         </select></div>
                     <div class="form-group"><label>Pay Rate</label>
-                        <input name="pay_rate" type="number" step="0.01" value="${emp.pay_rate}"></div>
+                        <input name="pay_rate" type="number" step="0.01" min="0" value="${emp.pay_rate}"></div>
                     <div class="form-group"><label>Job cost rate ($/hr)</label>
                         <input name="cost_rate" type="number" step="0.01" value="${emp.cost_rate ?? ''}" placeholder="blank = pay rate (salary ÷ 2080)" title="Loaded hourly cost used when time posts to a job"></div>
                     <div class="form-group"><label>Burden %</label>
@@ -96,10 +96,10 @@ const EmployeesPage = {
                     <div class="form-group"><label>Hire Date</label>
                         <input name="hire_date" type="date" value="${emp.hire_date || ''}"></div>
                     <div class="form-group"><label>Work State</label>
-                        <input name="work_state" maxlength="2" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.work_state || '')}" oninput="const h=document.getElementById('state-hint'); if(h) h.textContent=EmployeesPage._stateHint(this.value);">
+                        <input name="work_state" maxlength="2" pattern="[A-Za-z]{2}" title="Two-letter state code, like IL" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.work_state || '')}" oninput="const h=document.getElementById('state-hint'); if(h) h.textContent=EmployeesPage._stateHint(this.value);">
                         <small id="state-hint" style="color:var(--gray-400);">${escapeHtml(stateHint(emp.work_state))}</small></div>
                     <div class="form-group"><label>Residence State</label>
-                        <input name="residence_state" maxlength="2" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.residence_state || '')}"></div>
+                        <input name="residence_state" maxlength="2" pattern="[A-Za-z]{2}" title="Two-letter state code, like IL" list="state-codes" placeholder="e.g. IL" value="${escapeHtml(emp.residence_state || '')}"></div>
                     <div class="form-group"><label>State W-4 allowances</label>
                         <input name="state_allowances" type="number" min="0" step="1" value="${emp.state_allowances ?? 0}" title="Exemptions claimed on the state certificate (IL-W-4 line 1, MI-W4, VA-4 …)"></div>
                     <div class="form-group"><label>Extra state withholding ($/period)</label>
