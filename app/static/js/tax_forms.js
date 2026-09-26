@@ -84,9 +84,69 @@ const TaxFormsPage = {
                 </div>
             </div>
 
+            <div class="card" style="margin-bottom:16px;padding:16px">
+                <h3>1099-NEC / 1096 (Contractors)</h3>
+                <p style="font-size:12px;color:var(--gray-500);margin:0 0 8px;">Vendors marked "1099 Vendor: Yes" with type NEC on the Vendors page. A 1099-NEC is required for anyone paid $600 or more in the year; the 1096 sends them to the IRS.</p>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Year</label>
+                        <input id="f1099-year" type="number" value="${currentYear}" min="2000" max="2099" style="width:100px" onchange="TaxFormsPage.load1099Vendors()">
+                    </div>
+                    <div class="form-group">
+                        <label>Vendor (for 1099-NEC)</label>
+                        <select id="f1099-vendor">${await TaxFormsPage._vendorOptions(currentYear)}</select>
+                    </div>
+                </div>
+                <div class="form-actions" style="margin-top:8px">
+                    <button class="btn btn-primary" onclick="TaxFormsPage.generate1099()">Generate 1099-NEC</button>
+                    <button class="btn btn-secondary" onclick="TaxFormsPage.generate1096()">Generate 1096 (Transmittal)</button>
+                </div>
+            </div>
+
             <div class="card" style="padding:16px;background:#fffbe6;border-left:4px solid #f5a623">
                 <p style="margin:0"><strong>Note:</strong> Tax forms are for reference. Verify calculations with a licensed tax professional before filing.</p>
             </div>`;
+    },
+
+    // The 1099-NEC vendors for a year, with what each was paid.
+    async _vendorOptions(year) {
+        let html = '<option value="">— Select Vendor —</option>';
+        try {
+            const data = await API.get(`/tax-forms/1099?year=${year}`);
+            if (!data.vendors.length) {
+                return '<option value="">No 1099-NEC vendors: mark vendors "1099 Vendor: Yes" on the Vendors page</option>';
+            }
+            for (const v of data.vendors) {
+                html += `<option value="${v.vendor_id}">${escapeHtml(v.name)} — ${formatCurrency(v.total_paid)}${v.reportable ? '' : ' (under $600)'}</option>`;
+            }
+        } catch (_) {
+            html += '<option value="" disabled>Could not load vendors</option>';
+        }
+        return html;
+    },
+
+    async load1099Vendors() {
+        const yearEl = document.getElementById('f1099-year');
+        const sel = document.getElementById('f1099-vendor');
+        if (!yearEl || !yearEl.value || !sel) return;
+        sel.innerHTML = await TaxFormsPage._vendorOptions(yearEl.value);
+    },
+
+    generate1099() {
+        const yearEl = document.getElementById('f1099-year');
+        const vendorEl = document.getElementById('f1099-vendor');
+        const year = yearEl ? yearEl.value : '';
+        const vendorId = vendorEl ? vendorEl.value : '';
+        if (!year) { toast('Please enter a year', 'error'); return; }
+        if (!vendorId) { toast('Please select a vendor', 'error'); return; }
+        _openForm(`/api/tax-forms/1099/${vendorId}/pdf?year=${year}`);
+    },
+
+    generate1096() {
+        const yearEl = document.getElementById('f1099-year');
+        const year = yearEl ? yearEl.value : '';
+        if (!year) { toast('Please enter a year', 'error'); return; }
+        _openForm(`/api/tax-forms/1096/pdf?year=${year}`);
     },
 
     async generateW2() {

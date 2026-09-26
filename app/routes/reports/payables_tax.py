@@ -361,7 +361,11 @@ def report_1099_summary(
 
     from app.models.bills import BillPayment, BillPaymentAllocation
 
-    vendors_1099 = db.query(Vendor).filter(Vendor.is_1099_vendor).all()
+    from app.services.form_1099 import is_1099_vendor
+
+    # The same rule as the 1099-NEC / 1096, so a vendor on this summary is
+    # on those forms too (NEC type).
+    vendors_1099 = db.query(Vendor).filter(is_1099_vendor()).all()
     if not vendors_1099:
         return {"year": year, "items": [], "total": 0, "vendors_above_threshold": 0}
 
