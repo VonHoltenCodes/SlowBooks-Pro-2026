@@ -13,14 +13,33 @@ from app.models.items import Item
 from app.models.invoices import Invoice
 from app.models.accounts import Account
 
+_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
 
 def _csv_safe(value: str) -> str:
     """Neutralize spreadsheet formula injection. A cell beginning with
     =, +, -, @, TAB, or CR is treated as a formula by Excel/Sheets; prefixing
     with an apostrophe forces plain text without changing the displayed value.
     A customer named `=HYPERLINK(...)` otherwise executes on open."""
-    if value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
+    if value and value[0] in _FORMULA_LEADS:
         return "'" + value
+    return value
+
+
+def strip_formula_guard(value):
+    """The importers' half of _csv_safe: take off the apostrophe the export
+    put in front of a formula-shaped value, so re-importing our own file
+    gives back `=HYPERLINK(...)` rather than a second customer named
+    `'=HYPERLINK(...)` (2.17.3 exploratory test, W-M15). Only an apostrophe
+    followed by one of the guarded characters is removed; any other value,
+    and anything that is not text, passes through untouched."""
+    if (
+        isinstance(value, str)
+        and len(value) > 1
+        and value[0] == "'"
+        and value[1] in _FORMULA_LEADS
+    ):
+        return value[1:]
     return value
 
 

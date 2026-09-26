@@ -27,6 +27,7 @@ from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.bills import Bill, BillLine, BillStatus
 from app.models.transactions import Transaction
+from app.services.csv_export import strip_formula_guard
 from app.services.iif_common import IIF_TO_ACCOUNT_TYPE, IIF_TO_ITEM_TYPE
 from app.services.jobs_service import resolve_customer_and_job, split_customer_job
 from app.services.accounting import (
@@ -133,7 +134,7 @@ def _fields_to_dict(header: list, fields: list) -> dict:
         if name.startswith("!"):
             name = name[1:]  # strip ! from first field if present
         if i < len(fields):
-            d[name] = fields[i].strip()
+            d[name] = strip_formula_guard(fields[i].strip())
         else:
             d[name] = ""
     return d
