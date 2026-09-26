@@ -54,10 +54,13 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
     amount (EUR 850) instead of what it was booked at (USD 935), and money
     a customer paid that was not applied to an invoice was left out
     entirely (unapplied_credits read 0 for everyone)."""
-    from app.services.contact_balances import home_amount, unapplied_payments
+    return ar_aging_report(db, as_of_date or date.today())
 
-    if not as_of_date:
-        as_of_date = date.today()
+
+def ar_aging_report(db: Session, as_of_date: date) -> dict:
+    """The A/R Aging report's figures (see ar_aging). The analytics page's
+    aging chart reads these too, so the two cannot disagree."""
+    from app.services.contact_balances import home_amount, unapplied_payments
 
     invoices = (
         db.query(Invoice)
