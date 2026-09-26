@@ -170,3 +170,34 @@ def test_the_csv_carries_the_same_totals(client, year_of_books):
     assert rows["GROSS INCOME (LINE 7)"] == f"{RECEIPTS - RETURNS:.2f}"
     assert rows["TOTAL EXPENSES (LINE 28)"] == f"{sum(year_of_books.values()):.2f}"
     assert rows["Line 18 - Office expense"] == f"{year_of_books['6400']:.2f}"
+
+
+def test_a_seeded_number_on_an_account_of_another_kind_follows_its_kind(
+    client, db_session
+):
+    """An imported chart can use 5000 for an expense and 6400 for income;
+    the seeded chart's line applies only to an account of the seeded kind."""
+    from app.models.accounts import Account, AccountType
+
+    accts = {
+        "1000": Account(
+            account_number="1000", name="Bank", account_type=AccountType.ASSET
+        ),
+        "5000": Account(
+            account_number="5000", name="Advertising", account_type=AccountType.EXPENSE
+        ),
+        "6400": Account(
+            account_number="6400", name="Rental Income", account_type=AccountType.INCOME
+        ),
+    }
+    db_session.add_all(accts.values())
+    db_session.flush()
+    _post(db_session, accts, date(2026, 5, 1), "5000", "1000", Decimal("40.00"))
+    _post(db_session, accts, date(2026, 5, 1), "1000", "6400", Decimal("300.00"))
+    db_session.commit()
+    data = _schedule(client)
+    assert _line_of(data, "5000")["line_id"] == "27a"
+    assert _line_of(data, "6400")["line_id"] == "1"
+    assert Decimal(str(data["cost_of_goods_sold"])) == Decimal("0")
+    assert Decimal(str(data["total_expenses"])) == Decimal("40.00")
+    assert Decimal(str(data["gross_income"])) == Decimal("300.00")

@@ -157,6 +157,11 @@ def get_schedule_c_data(db: Session, start_date: date, end_date: date) -> dict:
         line_id = schedule_c_line_id(custom)
         if line_id is None and not custom:
             line_id = DEFAULT_MAPPINGS.get(acct.account_number or "")
+            # The seeded chart's line, only for an account of the seeded
+            # kind: an imported chart's 5000 may be Advertising, not COGS.
+            type_part = _LINES[_TYPE_DEFAULT[acct.account_type]][1]
+            if line_id is not None and _LINES[line_id][1] != type_part:
+                line_id = None
         if line_id is None and not custom:
             line_id = _TYPE_DEFAULT[acct.account_type]
 
