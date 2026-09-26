@@ -1,3 +1,4 @@
+import html
 import logging
 from datetime import date, timedelta
 from decimal import Decimal
@@ -230,7 +231,13 @@ def customer_statement_pdf(
 
 @router.post("/batch-email-statements")
 def batch_email_statements(db: Session = Depends(get_db)):
-    """Email statements to all customers with overdue invoices."""
+    """Email a statement to every customer with an overdue invoice.
+
+    Reports what actually went out. send_email() returns False rather than
+    raising when SMTP is not set up or the server refuses; this counted
+    every attempt as sent, so with no mail server at all A/R Aging said
+    "Sent 2 statements" (explore 2.17.3, W-H7). A draft was never sent to
+    the customer, so it is not overdue and does not trigger a statement."""
     from app.services.email_service import send_email
 
     settings = get_settings(db)
@@ -238,34 +245,38 @@ def batch_email_statements(db: Session = Depends(get_db)):
 
     overdue_invoices = (
         db.query(Invoice)
-        .filter(
-            Invoice.status.in_(
-                [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
-            )
-        )
+        .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
         .filter(Invoice.balance_due > 0)
         .filter(Invoice.due_date < as_of_date)
         .all()
     )
-
-    # Group by customer
-    by_customer = {}
-    for inv in overdue_invoices:
-        by_customer.setdefault(inv.customer_id, []).append(inv)
+    customer_ids = sorted({inv.customer_id for inv in overdue_invoices})
+    if not customer_ids:
+        return {"sent": 0, "failed": 0, "errors": []}
+    if not (settings.get("smtp_host") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Email isn't set up yet, so no statements were sent. Enter your "
+                "mail server under Settings, Email, then try again."
+            ),
+        )
 
     sent = 0
     failed = 0
     errors = []
+    company_name = settings.get("company_name", "") or ""
 
-    for cid, invs in by_customer.items():
+    for cid in customer_ids:
         customer = db.query(Customer).filter(Customer.id == cid).first()
         if not customer or not customer.email:
             errors.append(
-                f"Customer {customer.name if customer else cid}: no email address"
+                f"{customer.name if customer else cid}: no email address on file"
             )
             failed += 1
             continue
 
+        ok = False
         try:
             payments = (
                 db.query(Payment)
@@ -287,21 +298,30 @@ def batch_email_statements(db: Session = Depends(get_db)):
                 customer, all_invoices, payments, settings, as_of_date
             )
 
-            send_email(
+            ok = send_email(
                 db=db,
                 to_email=customer.email,
-                subject=f"Account Statement — {settings.get('company_name', 'Our Company')}",
-                html_body=f"<p>Dear {customer.name},</p><p>Please find your account statement attached.</p><p>{settings.get('company_name', '')}</p>",
+                subject=f"Account Statement — {company_name or 'Our Company'}",
+                html_body=(
+                    f"<p>Dear {html.escape(customer.name)},</p>"
+                    "<p>Please find your account statement attached.</p>"
+                    f"<p>{html.escape(company_name)}</p>"
+                ),
                 attachment_bytes=pdf_bytes,
                 attachment_name=f"Statement_{customer.name}.pdf",
                 entity_type="statement",
                 entity_id=cid,
             )
-            sent += 1
         except Exception:
             logger.exception("Failed to send statement to customer %s", customer.id)
-            errors.append(f"Customer {customer.name}: unable to send statement")
+        if ok:
+            sent += 1
+        else:
             failed += 1
+            errors.append(
+                f"{customer.name}: the statement could not be sent (the email "
+                "log has the reason)"
+            )
 
     return {"sent": sent, "failed": failed, "errors": errors}
 
@@ -320,13 +340,10 @@ def collection_letters(data: CollectionLetterRequest, db: Session = Depends(get_
     # Map letter type to minimum days overdue
     min_days = {"30": 30, "60": 60, "90": 90}.get(letter_type, 30)
 
+    # A draft was never sent, so it can't be overdue (as for statements).
     q = (
         db.query(Invoice)
-        .filter(
-            Invoice.status.in_(
-                [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
-            )
-        )
+        .filter(Invoice.status.in_([InvoiceStatus.SENT, InvoiceStatus.PARTIAL]))
         .filter(Invoice.balance_due > 0)
         .filter(Invoice.due_date <= today - timedelta(days=min_days))
     )
@@ -361,23 +378,32 @@ def collection_letters(data: CollectionLetterRequest, db: Session = Depends(get_
             )
             generated += 1
 
-            if send_email_flag and customer.email:
+            if send_email_flag and not customer.email:
+                errors.append(f"{customer.name}: no email address on file")
+            elif send_email_flag:
                 type_labels = {
                     "30": "Payment Reminder",
                     "60": "Second Notice",
                     "90": "Final Notice",
                 }
-                send_email(
+                # send_email() returns False instead of raising; only a
+                # letter that went out counts as emailed.
+                if send_email(
                     db=db,
                     to_email=customer.email,
                     subject=f"{type_labels.get(letter_type, 'Collection Notice')} — {settings.get('company_name', '')}",
-                    html_body=f"<p>Dear {customer.name},</p><p>Please see the attached collection notice regarding your outstanding balance of ${total_due:,.2f}.</p>",
+                    html_body=f"<p>Dear {html.escape(customer.name)},</p><p>Please see the attached collection notice regarding your outstanding balance of ${total_due:,.2f}.</p>",
                     attachment_bytes=pdf_bytes,
                     attachment_name=f"Collection_{letter_type}day_{customer.name}.pdf",
                     entity_type="collection",
                     entity_id=cid,
-                )
-                emailed += 1
+                ):
+                    emailed += 1
+                else:
+                    errors.append(
+                        f"{customer.name}: the letter could not be emailed (the "
+                        "email log has the reason)"
+                    )
         except Exception:
             logger.exception(
                 "Failed to generate collection letter for customer %s", customer.id

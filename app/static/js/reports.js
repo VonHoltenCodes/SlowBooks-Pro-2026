@@ -821,10 +821,23 @@ const ReportsPage = {
         if (!confirm('Email statements to all customers with overdue invoices?')) return;
         try {
             const result = await API.post('/reports/batch-email-statements');
-            let msg = `Sent ${result.sent} statements`;
-            if (result.failed > 0) msg += `, ${result.failed} failed`;
-            toast(msg);
+            if (!result.sent && !result.failed) {
+                toast(Terms.text('No customer has an overdue invoice, so there was nothing to send.'));
+                return;
+            }
+            // Only what actually went out is "sent"; a customer who didn't
+            // get one is named, with the reason (explore 2.17.3, W-H7).
+            ReportsPage._sendResult('Statements',
+                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || []);
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    _sendResult(title, headline, errors) {
+        if (!errors.length) { toast(headline); return; }
+        openModal(title, `
+            <p>${escapeHtml(headline)} ${errors.length} could not be sent:</p>
+            <ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
     },
 
     async sendCollectionLetters() {
@@ -835,7 +848,8 @@ const ReportsPage = {
                 letter_type: letterType,
                 send_email: true,
             });
-            toast(`Generated ${result.generated} letters, emailed ${result.emailed}`);
+            ReportsPage._sendResult('Collection Letters',
+                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 };
