@@ -585,7 +585,7 @@ const EmployeesPage = {
                     html += `<tr>
                         <td>${escapeHtml(doc.filename || doc.file_name || '')}</td>
                         <td>${escapeHtml(doc.category || doc.doc_category || '')}</td>
-                        <td>${doc.size ? (doc.size / 1024).toFixed(1) + ' KB' : '—'}</td>
+                        <td>${doc.size ? formatFileSize(doc.size) : '—'}</td>
                         <td>${formatDate(doc.uploaded_at || doc.uploaded || doc.created_at)}</td>
                         <td class="actions">
                             <a class="btn btn-sm btn-secondary" href="/api/employees/${id}/documents/${doc.id}" target="_blank">Download</a>

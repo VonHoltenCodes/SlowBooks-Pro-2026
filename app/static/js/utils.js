@@ -10,6 +10,16 @@ function formatCurrency(amount) {
     return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount || 0);
 }
 
+// A file's size for a person: "18 bytes", "4.2 KB", "1.3 MB". Everything
+// was shown in KB to one decimal, so an 18-byte attachment read "0.0 KB"
+// (2.17.3 exploratory test, W-L7).
+function formatFileSize(bytes) {
+    const n = Math.max(0, Number(bytes) || 0);
+    if (n < 1024) return `${n} ${n === 1 ? 'byte' : 'bytes'}`;
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function formatDate(dateStr) {
     if (!dateStr) return '';
     const d = dateStr.includes('T')
@@ -70,6 +80,9 @@ function openModal(title, html, opts) {
     _modalOpener = document.activeElement;
     $('#modal-title').textContent = title;
     $('#modal-body').innerHTML = html;
+    // A read-only sign-in sees the form locked, not a 403 after filling it
+    // in (app.js App.lockForms).
+    if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms($('#modal-body'));
     $('#modal-overlay').classList.remove('hidden');
     const modal = $('#modal');
     modal.classList.toggle('modal--wide', !!(opts && opts.wide));
@@ -112,6 +125,19 @@ function disableSubmitButtons() {
 }
 function enableSubmitButtons() {
     document.querySelectorAll('#modal .btn-primary').forEach(b => { b.disabled = false; if(b.dataset.origText) b.textContent = b.dataset.origText; });
+}
+
+// The accounts an account picker offers for a new entry: active ones of the
+// given types, and — for a business — not the nonprofit-only ones (net
+// assets, 4400 In-Kind Contributions; the API marks them nonprofit_only).
+// keepId: the account the record already uses, listed whatever it is so a
+// save never silently drops it.
+function pickerAccounts(accounts, types, keepId) {
+    const nonprofit = typeof Terms !== 'undefined' && Terms.isNonprofit();
+    return (accounts || []).filter(a => (keepId && a.id == keepId) || (
+        types.includes(a.account_type)
+        && a.is_active !== false
+        && !(a.nonprofit_only && !nonprofit)));
 }
 
 function closeSearchDropdown() {

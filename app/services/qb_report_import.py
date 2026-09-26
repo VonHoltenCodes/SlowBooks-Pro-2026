@@ -38,8 +38,19 @@ from app.services.accounting import (
     get_default_income_account_id,
     get_undeposited_funds_id,
 )
+from app.services.csv_export import strip_formula_guard
 from app.services.iif_import import _find_account
 from app.services.safe_errors import DataProblem, safe_message
+
+
+def _csv_rows(csv_text: str) -> list[list[str]]:
+    """The report's rows, with a spreadsheet's formula guard ("'=Name")
+    taken off each cell (csv_export.strip_formula_guard)."""
+    return [
+        [strip_formula_guard(c) for c in row]
+        for row in csv.reader(io.StringIO(csv_text))
+    ]
+
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +206,7 @@ def import_sales_receipt_report(db: Session, csv_text: str) -> dict:
         "errors": [],
         "warnings": [],
     }
-    rows = list(csv.reader(io.StringIO(csv_text)))
+    rows = _csv_rows(csv_text)
     header_idx, cols = _find_header(rows)
     if header_idx is None:
         result["errors"].append(
@@ -472,7 +483,7 @@ def _group_blocks(rows, cols, start, header_type, skipped=None):
 def import_deposit_report(db: Session, csv_text: str) -> dict:
     """Import a QB Deposit Detail report CSV as deposit journal entries."""
     result = {"deposits": 0, "duplicates_skipped": 0, "errors": [], "warnings": []}
-    rows = list(csv.reader(io.StringIO(csv_text)))
+    rows = _csv_rows(csv_text)
     header_idx, cols = _find_header_for(rows, DEPOSIT_COLUMNS)
     if header_idx is None:
         result["errors"].append("Could not find the Deposit Detail header row.")
@@ -592,7 +603,7 @@ def import_deposit_report(db: Session, csv_text: str) -> dict:
 def import_check_report(db: Session, csv_text: str) -> dict:
     """Import a QB Check Detail report CSV as check journal entries."""
     result = {"checks": 0, "duplicates_skipped": 0, "errors": [], "warnings": []}
-    rows = list(csv.reader(io.StringIO(csv_text)))
+    rows = _csv_rows(csv_text)
     header_idx, cols = _find_header_for(rows, CHECK_COLUMNS)
     if header_idx is None:
         result["errors"].append("Could not find the Check Detail header row.")
@@ -720,7 +731,7 @@ def import_check_report(db: Session, csv_text: str) -> dict:
 
 def detect_report_type(csv_text: str) -> str | None:
     """Identify which QB report a CSV is, by column signature."""
-    rows = list(csv.reader(io.StringIO(csv_text)))
+    rows = _csv_rows(csv_text)
     if _find_header_for(rows, REQUIRED_COLUMNS)[0] is not None:
         return "sales_receipts"
     if _find_header_for(rows, CHECK_COLUMNS)[0] is not None:

@@ -4,7 +4,6 @@ from datetime import date
 from typing import Optional
 
 from fastapi import Depends, Query
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -114,10 +113,6 @@ def pledges_csv(
                 + [f"{p[c]:.2f}" for c in _COLS]
             )
     w.writerow(["Total", "", ""] + [f"{data['totals'][c]:.2f}" for c in _COLS])
-    return Response(
-        content=buf.getvalue(),
-        media_type="text/csv",
-        headers={
-            "Content-Disposition": f"attachment; filename=pledge-report_{start_date}_{end_date}.csv"
-        },
-    )
+    from app.routes.csv import _csv_response
+
+    return _csv_response(buf.getvalue(), f"pledge-report_{start_date}_{end_date}.csv")

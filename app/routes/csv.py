@@ -36,9 +36,22 @@ router = APIRouter(prefix="/api/csv", tags=["csv"])
 # complete normally; the shim's own JS handles the actual save from there.
 _DESKTOP_HEADER = "X-Slowbooks-Desktop"
 
+# Excel on Windows reads a CSV in the machine's ANSI code page unless the
+# file opens with a UTF-8 byte-order mark: "Bäckerei Müller & Söhne" came
+# out as "BÃ¤ckerei MÃ¼ller & SÃ¶hne" (2.17.3 exploratory test, W-M14).
+# Every CSV the app hands out — lists, ledger reports, nonprofit statements,
+# analytics — goes through this one helper, so the mark is added here once.
+# Our own importers read utf-8-sig, so a file exported here re-imports as is.
+UTF8_BOM = "\ufeff"
 
-def _csv_response(csv_data: str, filename: str, request: Request) -> Response:
-    disposition = "inline" if request.headers.get(_DESKTOP_HEADER) else "attachment"
+
+def _csv_response(
+    csv_data: str, filename: str, request: Request | None = None
+) -> Response:
+    desktop = request is not None and request.headers.get(_DESKTOP_HEADER)
+    disposition = "inline" if desktop else "attachment"
+    if not csv_data.startswith(UTF8_BOM):
+        csv_data = UTF8_BOM + csv_data
     return Response(
         content=csv_data,
         media_type="text/csv",

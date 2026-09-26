@@ -654,11 +654,44 @@ def _documents_dir() -> Path:
     return docs if docs.is_dir() else Path.home()
 
 
-def _fallback_reports_dir() -> Path:
+def _fallback_reports_dir(folder: str = "Reports") -> Path:
     """Where Save PDF lands when the Documents folder refuses the write:
     the app's own data directory, which no folder-protection feature
     guards (Application Support on macOS, LOCALAPPDATA on Windows)."""
-    return get_data_dir() / "Reports"
+    return get_data_dir() / folder
+
+
+# What a customer, vendor or donor is sent — as against a report about the
+# books — known by the name the server gives the PDF ("Invoice_1002.pdf",
+# "Statement_Acme Diner.pdf"). Invoices and statements used to land in
+# .../Reports beside the P&L (macbase1, F24); they go to a Documents folder
+# beside it.
+_DOCUMENT_KINDS = frozenset(
+    {
+        "invoice",
+        "salesreceipt",
+        "estimate",
+        "statement",
+        "creditmemo",
+        "pledge",
+        "donationreceipt",
+        "acknowledgment",
+        "givingstatement",
+        "givingstatements",
+        "check",
+        "purchaseorder",
+        "po",
+        "bill",
+        "vendorcredit",
+    }
+)
+
+
+def _folder_for(filename: str) -> str:
+    """The folder for a PDF: Documents for a document someone is sent,
+    Reports for everything else."""
+    kind = str(filename or "").split("_", 1)[0].replace("-", "").lower()
+    return "Documents" if kind in _DOCUMENT_KINDS else "Reports"
 
 
 def _write_unique(folder: Path, name: str, data: bytes) -> Path:
@@ -693,10 +726,13 @@ def _folder_permission_remedy(folder: Path) -> str:
     return f"Check the permissions on {folder}."
 
 
-def _save_report(name: str, data: bytes) -> tuple[Path, str | None]:
+def _save_report(
+    name: str, data: bytes, folder: str = "Reports"
+) -> tuple[Path, str | None]:
     """Save a report PDF where the user can find it.
 
-    Documents/SlowBooks Pro/Reports first. Existence of the Documents
+    Documents/SlowBooks Pro/<folder> first — Reports, or Documents for an
+    invoice or statement (_folder_for). Existence of the Documents
     folder says nothing about permission -- on macOS the system decides
     per application (a consent prompt on first use; a denial is
     remembered), on Windows Controlled Folder Access can block it -- so
@@ -705,11 +741,11 @@ def _save_report(name: str, data: bytes) -> tuple[Path, str | None]:
     the user saying so, naming both folders and the remedy. Any other
     failure propagates.
     """
-    preferred = _documents_dir() / "SlowBooks Pro" / "Reports"
+    preferred = _documents_dir() / "SlowBooks Pro" / folder
     try:
         return _write_unique(preferred, name, data), None
     except PermissionError:
-        dest = _write_unique(_fallback_reports_dir(), name, data)
+        dest = _write_unique(_fallback_reports_dir(folder), name, data)
         note = (
             f"SlowBooks Pro was not allowed to write to {preferred}, so the "
             f"file was saved to {dest.parent} instead. "
@@ -801,7 +837,9 @@ class PickerApi:
 
     def open_document_pdf(self, title: str, base64_data: str) -> dict:
         """Save an already-fetched PDF (base64-encoded by the caller) under
-        Documents/SlowBooks Pro/Reports and show it in a new native window.
+        Documents/SlowBooks Pro/Reports — or .../Documents for an invoice,
+        estimate, statement or other document someone is sent — and show it
+        in a new native window.
         The platform web view renders a file:// PDF with its own viewer
         (WebView2/Chromium on Windows, WKWebView on macOS, WebKitGTK on
         Linux), and a local file needs no authentication at all --
@@ -823,7 +861,12 @@ class PickerApi:
             import webview
 
             data = base64.b64decode(base64_data)
-            dest, note = _save_report(_safe_temp_filename(title, ".pdf"), data)
+            # The title is the server's filename, "Invoice_1002.pdf": take
+            # the extension off before the name is made safe, or the dot
+            # became a dash and the file was "Invoice_1002-pdf.pdf" (F24).
+            stem = re.sub(r"\.pdf$", "", str(title or ""), flags=re.IGNORECASE)
+            name = _safe_temp_filename(stem, ".pdf")
+            dest, note = _save_report(name, data, _folder_for(name))
             webview.create_window(title or "SlowBooks Pro 2026", dest.as_uri())
         except Exception as exc:
             return {"success": False, "error": str(exc)}
@@ -864,6 +907,7 @@ class PickerApi:
             allowed = (
                 (_documents_dir() / "SlowBooks Pro").resolve(),
                 _fallback_reports_dir().resolve(),
+                _fallback_reports_dir("Documents").resolve(),
                 (Path.home() / "Downloads").resolve(),
             )
             if not any(target.is_relative_to(base) for base in allowed):

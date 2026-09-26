@@ -214,11 +214,11 @@
     <h2 class="section">Key Metrics</h2>
     <div class="kpi-row">
         <div class="kpi">
-            <div class="kpi-label">Revenue</div>
+            <div class="kpi-label">{{ terms.text("Revenue (paid invoices)") }}</div>
             <div class="kpi-value kpi-green">{{ total_revenue | currency }}</div>
         </div>
         <div class="kpi">
-            <div class="kpi-label">Expenses</div>
+            <div class="kpi-label">Expenses (paid bills)</div>
             <div class="kpi-value kpi-red">{{ total_expenses | currency }}</div>
         </div>
         <div class="kpi">
@@ -230,6 +230,10 @@
             <div class="kpi-value kpi-purple">{{ "%.1f"|format(margin) }}%</div>
         </div>
     </div>
+
+    {# The basis, as the screen says it (W-L12): these are paid documents,
+       not the Profit & Loss's accrual figures. #}
+    <p style="font-size:7.5pt; color:#7a7a9a; margin:4pt 0 0;">{{ terms.text("Revenue and expenses here count paid invoices and paid bills dated in the period — a paid basis. The Profit & Loss report counts every invoice and bill when it is dated (accrual), so the two can differ.") }}</p>
 
     <h2 class="section">Revenue Trend — Last 12 Months</h2>
     <table class="data">

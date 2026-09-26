@@ -9,13 +9,13 @@ const App = {
         '/jobs':          { page: 'jobs',            label: 'Jobs',               render: () => JobsPage.render() },
         '/jobs/:id':      { page: 'jobs',            label: 'Job',                render: (id) => JobsPage.renderDetail(id) },
         '/job-costs':     { page: 'job-costs',       label: 'Job Cost Entries',   render: () => JobCostsPage.render() },
-        '/releases':      { page: 'releases',        label: 'Releases from Restriction', render: () => ReleasesPage.render() },
-        '/functional-allocations': { page: 'functional-allocations', label: 'Functional Allocations', render: () => AllocationsPage.render() },
+        '/releases':      { page: 'releases',        label: 'Releases from Restriction', nonprofit: true, render: () => ReleasesPage.render() },
+        '/functional-allocations': { page: 'functional-allocations', label: 'Functional Allocations', nonprofit: true, render: () => AllocationsPage.render() },
         '/vendors':       { page: 'vendors',         label: 'Vendor Center',      render: () => VendorsPage.render() },
         '/items':         { page: 'items',           label: 'Item List',          render: () => ItemsPage.render() },
         '/invoices':      { page: 'invoices',        label: 'Create Invoices',    render: () => InvoicesPage.render() },
         '/sales-receipts': { page: 'sales-receipts', label: 'Enter Sales Receipts', render: () => SalesReceiptsPage.render() },
-        '/in-kind-gifts': { page: 'in-kind-gifts',   label: 'In-Kind Gifts',      render: () => InKindPage.render() },
+        '/in-kind-gifts': { page: 'in-kind-gifts',   label: 'In-Kind Gifts',      nonprofit: true, render: () => InKindPage.render() },
         '/estimates':     { page: 'estimates',       label: 'Create Estimates',   render: () => EstimatesPage.render() },
         '/payments':      { page: 'payments',        label: 'Receive Payments',   render: () => PaymentsPage.render() },
         '/banking':       { page: 'banking',         label: 'Banking',            render: () => BankingPage.render() },
@@ -96,6 +96,15 @@ const App = {
         // Status bar
         App.setStatus(`Loading ${route.label}...`);
 
+        // The nonprofit pages are in the sidebar only in nonprofit mode, but
+        // a bookmark or a typed URL reached them in a business company too
+        // (W-L13) — and posted to net-asset accounts a business never has.
+        if (route.nonprofit && !Terms.isNonprofit()) {
+            $('#page-content').innerHTML = App._nonprofitOnlyHtml(route.label);
+            App.setStatus(`${route.label} — nonprofit companies only`);
+            return;
+        }
+
         try {
             const html = await route.render(param);
             $('#page-content').innerHTML = html;
@@ -115,6 +124,78 @@ const App = {
             </div>`;
             App.setStatus('Error loading page');
         }
+    },
+
+    _nonprofitOnlyHtml(label) {
+        return `<div class="empty-state">
+            <h3>${escapeHtml(label)} is for nonprofit companies</h3>
+            <p>This company is set up as a business, so there is nothing to record here.
+               If it is a nonprofit, change its Company Type in Settings first.</p>
+            <p style="margin-top:12px;">
+                <a href="#/" class="btn btn-secondary">Return to Dashboard</a>
+                <a href="#/settings" class="btn btn-secondary">Open Settings</a>
+            </p>
+        </div>`;
+    },
+
+    // ---- Read-only sign-ins (Server Edition) -------------------------------
+    // The server refuses every write from the readonly role with a 403 —
+    // that stays the enforcement. But every page offered "+ New", and a
+    // whole form could be filled in before the refusal arrived (2.17.3
+    // exploratory test, W-L17). Once /api/auth/status names the role, the
+    // create buttons are hidden and every form a dialog opens is shown
+    // locked, with a sentence saying why.
+    role: 'admin',
+    READ_ONLY_MESSAGE: 'Your sign-in is read-only: you can look, but not save changes. '
+        + 'An administrator can change your role under Settings → Users.',
+
+    isReadOnly() { return App.role === 'readonly'; },
+
+    setRole(role) {
+        App.role = role || 'admin';
+        document.body.classList.toggle('role-readonly', App.isReadOnly());
+        const page = document.getElementById('page-content');
+        if (!App.isReadOnly() || !page) return;
+        // the toolbar's shortcuts to new documents, and batch entry
+        document.querySelectorAll('#topbar .tb-btn[data-action], #topbar .tb-btn[data-nav="#/quick-entry"]')
+            .forEach(b => b.classList.add('hidden'));
+        App.hideWriteControls(page);
+        if (!App._roObserver) {
+            // pages re-render in place (tabs, filters): keep them clean
+            App._roObserver = new MutationObserver(() => App.hideWriteControls(page));
+            App._roObserver.observe(page, { childList: true, subtree: true });
+        }
+    },
+
+    // "+ New Invoice", "+ Record Payment", "New Account": a create button is
+    // labelled "+ …", or is the page header's primary action.
+    hideWriteControls(root) {
+        if (!root || !App.isReadOnly()) return;
+        root.querySelectorAll('button, a.btn').forEach(el => {
+            const label = (el.textContent || '').trim();
+            const headerAction = el.classList.contains('btn-primary') && el.closest('.page-header');
+            if (label.startsWith('+') || headerAction) el.classList.add('hidden');
+        });
+    },
+
+    // Called by openModal(). A form that only opens a document (the
+    // customer statement) carries data-readonly-ok and stays usable.
+    lockForms(root) {
+        if (!root || !App.isReadOnly()) return;
+        root.querySelectorAll('form:not([data-readonly-ok])').forEach(form => {
+            form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = true; });
+            form.querySelectorAll('button').forEach(b => {
+                if (/closeModal\(/.test(b.getAttribute('onclick') || '')) return;
+                b.disabled = true;
+                b.style.opacity = '0.5';
+                b.style.cursor = 'not-allowed';
+            });
+            form.onsubmit = (e) => { e.preventDefault(); toast(App.READ_ONLY_MESSAGE, 'error'); return false; };
+            if (!form.querySelector('.readonly-note')) {
+                form.insertAdjacentHTML('afterbegin',
+                    `<div class="hint hint--locked readonly-note" style="margin-bottom:10px;">${escapeHtml(App.READ_ONLY_MESSAGE)}</div>`);
+            }
+        });
     },
 
     setStatus(text) {
@@ -231,6 +312,10 @@ const App = {
         // number and the type are fixed and the API refuses to change them (400).
         // Renaming is allowed and is the point — say so instead of hiding the form.
         const locked = !!acct.is_control;
+        // A number is required (digits; 6150.1 or 6150-01 for a sub-account),
+        // except on an account an importer brought in without one, which can
+        // still be renamed.
+        const numberRequired = !locked && (!id || !!acct.account_number);
         const lockNote = locked
             ? `<div class="form-group full-width"><div class="hint hint--locked">
                    <strong>${escapeHtml(acct.account_number || '')} ${escapeHtml(acct.name)} is a control account.</strong>
@@ -243,8 +328,10 @@ const App = {
             <form onsubmit="App.saveAccount(event, ${id})">
                 <div class="form-grid">
                     ${lockNote}
-                    <div class="form-group"><label>Account Number</label>
-                        <input name="account_number" value="${escapeHtml(acct.account_number || '')}"${locked ? ' readonly disabled' : ''}></div>
+                    <div class="form-group"><label>Account Number${numberRequired ? ' *' : ''}</label>
+                        <input name="account_number" value="${escapeHtml(acct.account_number || '')}"${locked ? ' readonly disabled' : ''}
+                            ${numberRequired ? 'required' : ''} pattern="\\d+([.\\-]\\d+)*" maxlength="20" placeholder="e.g. 6150"
+                            title="Digits, like 6150. A sub-account can use 6150.1 or 6150-01."></div>
                     <div class="form-group"><label>Name *</label>
                         <input name="name" required value="${escapeHtml(acct.name)}"></div>
                     <div class="form-group"><label>Type *</label>
@@ -414,20 +501,32 @@ const App = {
             try {
                 const results = await API.get(`/search?q=${encodeURIComponent(query)}`);
                 let html = '';
+                // A document reads "number · who · amount", so a search for an
+                // amount (612.30) shows which document matched.
+                const doc = (num, who, amt) => [num, who, formatCurrency(amt)].filter(Boolean).join(' · ');
                 const sections = [
                     { key: 'customers', label: T('Customers'), onClick: (item) => `App.navigate('#/customers');closeSearchDropdown();` },
                     { key: 'vendors', label: 'Vendors', onClick: (item) => `App.navigate('#/vendors');closeSearchDropdown();` },
                     { key: 'items', label: 'Items', onClick: (item) => `App.navigate('#/items');closeSearchDropdown();` },
-                    { key: 'invoices', label: T('Invoices'), onClick: (item) => `InvoicesPage.view(${item.id});closeSearchDropdown();` },
-                    { key: 'estimates', label: 'Estimates', onClick: (item) => `App.navigate('#/estimates');closeSearchDropdown();` },
-                    { key: 'payments', label: 'Payments', onClick: (item) => `App.navigate('#/payments');closeSearchDropdown();` },
+                    { key: 'invoices', label: T('Invoices'), onClick: (item) => `InvoicesPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(i.invoice_number, i.customer_name, i.total) },
+                    { key: 'sales_receipts', label: T('Sales Receipts'), onClick: (item) => `SalesReceiptsPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(i.invoice_number, i.customer_name, i.total) },
+                    { key: 'estimates', label: 'Estimates', onClick: (item) => `App.navigate('#/estimates');closeSearchDropdown();`,
+                      text: (i) => doc(i.estimate_number, i.customer_name, i.total) },
+                    { key: 'credit_memos', label: 'Credit Memos', onClick: (item) => `App.navigate('#/credit-memos');closeSearchDropdown();`,
+                      text: (i) => doc(i.memo_number, i.customer_name, i.total) },
+                    { key: 'bills', label: 'Bills', onClick: (item) => `BillsPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(i.bill_number, i.vendor_name, i.total) },
+                    { key: 'payments', label: 'Payments', onClick: (item) => `PaymentsPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(formatDate(i.date), i.customer_name, i.amount) },
                 ];
                 for (const sec of sections) {
                     const items = results[sec.key];
                     if (items && items.length > 0) {
                         html += `<div class="search-section">${sec.label}</div>`;
                         items.forEach(item => {
-                            const label = item.display || item.name || item.invoice_number || `#${item.id}`;
+                            const label = sec.text ? sec.text(item) : (item.display || item.name || item.invoice_number || `#${item.id}`);
                             html += `<div class="search-item" onclick="${sec.onClick(item)}">${escapeHtml(label)}</div>`;
                         });
                     }
@@ -792,6 +891,7 @@ const App = {
             const auth = await fetch('/api/auth/status', { credentials: 'same-origin' });
             if (auth.ok) {
                 const a = await auth.json();
+                if (a.user) App.setRole(a.user.role);
                 if (a.multi_user && a.user && a.user.role !== 'admin') {
                     // HR and payroll are admin functions; the server refuses
                     // them for other roles, so do not offer the pages.

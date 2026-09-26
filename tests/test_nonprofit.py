@@ -1009,7 +1009,10 @@ def test_nonprofit_statement_pdfs_and_csvs_render(client, db_session, seed_accou
                 assert (
                     not cell or cell[0] not in "=+@" or cell.startswith("'")
                 ), f"{path}: unsafe cell {cell!r}"
-    sfe_csv = client.get(f"/api/reports/functional-expenses/csv?{qs}").text
+    # utf-8-sig: every CSV opens with the byte-order mark Excel needs
+    sfe_csv = client.get(f"/api/reports/functional-expenses/csv?{qs}").content.decode(
+        "utf-8-sig"
+    )
     assert sfe_csv.startswith(
         "Expense,Total (A),Program services (B),Management and general (C),Fundraising (D),Unassigned"
     )
@@ -1185,7 +1188,10 @@ def test_report_pdfs_are_named_by_their_period_and_land_in_documents():
 
     root = Path(__file__).resolve().parent.parent
     launcher = (root / "desktop_launcher.py").read_text(encoding="utf-8")
-    assert '"SlowBooks Pro" / "Reports"' in launcher
+    # Reports by default; an invoice or statement goes to a Documents folder
+    # beside it (F24, tests/test_desktop_pdf_names.py saves both for real)
+    assert '"SlowBooks Pro" / folder' in launcher
+    assert 'folder: str = "Reports"' in launcher
     assert "def reveal_path" in launcher
     assert 'return {"success": True, "path": str(dest)}' in launcher
     shim = (root / "app/static/js/desktop_shim.js").read_text(encoding="utf-8")

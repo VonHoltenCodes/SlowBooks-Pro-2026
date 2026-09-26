@@ -624,10 +624,14 @@ const ReportsPage = {
         const customers = await API.get("/customers?active_only=true");
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
         openModal(T("Customer Statement"), `
-            <form onsubmit="ReportsPage.openStatement(event)">
-                <div class="form-grid">
-                    <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+            <form onsubmit="ReportsPage.openStatement(event)" data-readonly-ok>
+                <!-- minmax(0, …) and width:100%: a select sizes itself to its
+                     longest option, and a 120-character customer name pushed
+                     As of past the dialog's edge (macbase1, F22). The picked
+                     name still shows in full in the open list. -->
+                <div class="form-grid" style="grid-template-columns:minmax(0, 2fr) minmax(0, 1fr);">
+                    <div class="form-group" style="min-width:0;"><label>${T('Customer')} *</label>
+                        <select name="customer_id" required style="width:100%; min-width:0; max-width:100%;"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>As of Date</label>
                         <input name="as_of_date" type="date" value="${todayISO()}"></div>
                 </div>
@@ -939,7 +943,9 @@ ReportsPage.fixedAssetReconciliation = async function () {
 ReportsPage.financialStatementsPdf = async function () {
     await ReportsPage.openPeriodModal("Financial Statements Pack", "this_year_to_date", async (_period, range) => {
         window.open(`/api/reports/financial-statements/pdf?start_date=${range.start}&end_date=${range.end}`, '_blank');
-        return `<div style="font-size:12px;">The statements pack opened in a new tab —
+        // Said for both: a browser opens a tab, the desktop app saves the PDF,
+        // opens it in a window of its own and says where it saved it (F24).
+        return `<div style="font-size:12px;">The statements pack has opened as a PDF —
             ${T('P&L')} and Trial Balance for ${escapeHtml(range.start)} — ${escapeHtml(range.end)},
             ${T('Balance Sheet')} as of ${escapeHtml(range.end)}. Paper size follows
             Settings → Report PDF Paper Size.</div>`;

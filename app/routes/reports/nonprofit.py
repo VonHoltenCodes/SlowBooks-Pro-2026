@@ -24,11 +24,11 @@ def _period(start_date, end_date):
 
 
 def _csv_response(text: str, filename: str) -> Response:
-    return Response(
-        content=text,
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename={filename}"},
-    )
+    # The shared CSV helper: it adds the byte-order mark Excel needs to read
+    # the file as UTF-8.
+    from app.routes.csv import _csv_response as csv_download
+
+    return csv_download(text, filename)
 
 
 # ── Statement of Financial Position ──────────────────────────────────────

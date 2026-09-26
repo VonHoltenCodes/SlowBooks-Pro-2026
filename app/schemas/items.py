@@ -3,13 +3,15 @@ from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel
-from app.schemas.common import StrictModel
+from app.schemas.common import NonBlankName, StrictModel
 
 from app.models.items import ItemType, MovementType
 
 
 class ItemCreate(StrictModel):
-    name: str
+    # Trimmed and never blank, as a customer's or vendor's name is: the
+    # duplicate check compares trimmed names.
+    name: NonBlankName
     item_type: ItemType
     description: Optional[str] = None
     rate: Decimal = Decimal("0")
@@ -25,7 +27,7 @@ class ItemCreate(StrictModel):
 
 
 class ItemUpdate(StrictModel):
-    name: Optional[str] = None
+    name: Optional[NonBlankName] = None
     item_type: Optional[ItemType] = None
     description: Optional[str] = None
     rate: Optional[Decimal] = None

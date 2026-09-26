@@ -22,6 +22,16 @@
  */
 
 const AnalyticsPage = {
+  // What the figures count. Revenue here is invoices dated in the period
+  // and paid in full, not the Profit & Loss's accrual income: September's
+  // "Revenue $742.20" sat beside a $10.0M P&L for the same month with
+  // nothing to say why (2.17.3 exploratory test, W-L12). Say it on screen.
+  REVENUE_BASIS:
+    "Invoices and sales receipts dated in this period and paid in full. The Profit & Loss counts every invoice when it is issued, paid or not.",
+  EXPENSE_BASIS: "Bills dated in this period and paid in full.",
+  BASIS_NOTE:
+    "Revenue and expenses here count paid invoices and paid bills dated in the period — a paid basis. The Profit & Loss report counts every invoice and bill when it is dated (accrual), so the two can differ.",
+
   // Persistent state — survives route navigation so users return to their
   // last-selected period.
   state: {
@@ -115,11 +125,13 @@ const AnalyticsPage = {
             ${this._aiActionsHtml()}
 
             <div class="analytics-kpi-grid">
-                <div class="analytics-kpi"><div class="analytics-kpi-label">Revenue</div><div class="analytics-kpi-value kpi-green">${formatCurrency(totalRevenue)}</div></div>
-                <div class="analytics-kpi"><div class="analytics-kpi-label">Expenses</div><div class="analytics-kpi-value kpi-red">${formatCurrency(totalExpenses)}</div></div>
+                <div class="analytics-kpi" title="${escapeHtml(Terms.text(this.REVENUE_BASIS))}"><div class="analytics-kpi-label">${Terms.text('Revenue (paid invoices)')}</div><div class="analytics-kpi-value kpi-green">${formatCurrency(totalRevenue)}</div></div>
+                <div class="analytics-kpi" title="${escapeHtml(this.EXPENSE_BASIS)}"><div class="analytics-kpi-label">Expenses (paid bills)</div><div class="analytics-kpi-value kpi-red">${formatCurrency(totalExpenses)}</div></div>
                 <div class="analytics-kpi" title="${Terms.text('Days Sales Outstanding — average number of days between invoicing a customer and collecting the payment.')} Lower is better. Computed as (open A/R balance ÷ last-30-day paid revenue) × 30."><div class="analytics-kpi-label">DSO (Days)</div><div class="analytics-kpi-value kpi-blue">${dso.toFixed(1)}</div></div>
                 <div class="analytics-kpi"><div class="analytics-kpi-label">Margin %</div><div class="analytics-kpi-value kpi-purple">${margin.toFixed(1)}%</div></div>
             </div>
+
+            <div class="analytics-meta">${escapeHtml(Terms.text(this.BASIS_NOTE))}</div>
 
             <div class="analytics-section-title">Revenue Trend &mdash; Last 12 Months</div>
             <div class="analytics-card"><div class="chart-wrap"><canvas id="chart-revenue-trend"></canvas></div></div>

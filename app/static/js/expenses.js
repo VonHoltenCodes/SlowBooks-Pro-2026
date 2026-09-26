@@ -257,7 +257,7 @@ const ExpensesPage = {
                 el.innerHTML = attachments.map(a =>
                     `<div style="display:flex; align-items:center; gap:8px; padding:2px 0;">
                         <a href="/api/attachments/download/${a.id}" target="_blank">${escapeHtml(a.filename)}</a>
-                        <span style="color:var(--gray-400);">(${(a.file_size/1024).toFixed(1)} KB)</span>
+                        <span style="color:var(--gray-400);">(${formatFileSize(a.file_size)})</span>
                         <button aria-label="Delete attachment" class="btn btn-sm btn-danger" onclick="ExpensesPage.deleteAttachment(${a.id},${id})" style="padding:0 4px; font-size:10px;">X</button>
                     </div>`
                 ).join('');
