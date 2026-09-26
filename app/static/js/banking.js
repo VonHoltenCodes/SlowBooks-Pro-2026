@@ -839,9 +839,14 @@ const BankingPage = {
     },
 
     // ------------------------------------------------------------------
-    // File import (OFX/QFX, CSV: Chase checking/credit, PayPal) — needs a
-    // feed on the account; offers to create one.
+    // File import (OFX/QFX; CSV: Bank of America, Chase checking/credit,
+    // PayPal, or any file whose header names a date, a description and an
+    // amount — and, for one that doesn't, a step that asks which column is
+    // which) — needs a feed on the account; offers to create one.
     // ------------------------------------------------------------------
+    _csvMapping: null,   // the mapping step's answer, sent with preview and import
+    _csvLayout: null,    // the columns and sample rows the step shows
+
     async showOFXImport(accountId) {
         const feeds = await API.get('/banking/accounts');
         const feed = feeds.find(f => f.account_id === accountId);
@@ -850,11 +855,13 @@ const BankingPage = {
             return;
         }
         const feedId = feed.id;
+        BankingPage._csvMapping = null;
+        BankingPage._csvLayout = null;
         openModal('Import Bank File', `
-            <form onsubmit="BankingPage.previewOFX(event, ${feedId}, ${accountId})">
+            <form id="ofx-form" onsubmit="BankingPage.previewOFX(event, ${feedId}, ${accountId})">
                 <div class="form-group">
-                    <label>Select an OFX/QFX file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal)</label>
-                    <input type="file" name="file" accept=".ofx,.qfx,.csv" required id="ofx-file">
+                    <label>Select an OFX/QFX file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal, or any file with date, description and amount columns)</label>
+                    <input type="file" name="file" accept=".ofx,.qfx,.csv" required id="ofx-file" onchange="BankingPage._csvMapping = null">
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -875,6 +882,7 @@ const BankingPage = {
         const isCsv = BankingPage._isCsvFile(file);
         const formData = new FormData();
         formData.append('file', file);
+        if (isCsv && BankingPage._csvMapping) formData.append('mapping', JSON.stringify(BankingPage._csvMapping));
         // The pane stayed empty for the whole round trip and the button
         // stayed live, so a second click put a second parse in flight
         // (2.13.0 gate, owner + skytech). Say something first, and take
@@ -887,7 +895,17 @@ const BankingPage = {
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
             const data = await resp.json();
             if (!resp.ok) throw new Error(data.detail || 'Parse failed');
+            if (isCsv && data.error && data.header_row) {
+                // A layout detection missed ("Unknown CSV format" with no
+                // way forward — exploratory 2.17.3, W-L15): ask which
+                // column is which, then preview again with the answer.
+                $('#ofx-preview').innerHTML = BankingPage._mappingStep(data, data.has_header !== false);
+                return;
+            }
             if (isCsv && data.error) throw new Error(data.error);
+            const layout = data.format === 'generic'
+                ? (BankingPage._csvMapping ? 'the columns you chose' : 'date, description and amount columns')
+                : data.format;
             const rows = data.transactions.map(t => `<tr>
                 <td>${escapeHtml(t.date || '')}</td>
                 <td>${escapeHtml(t.payee || '')}</td>
@@ -897,7 +915,8 @@ const BankingPage = {
             $('#ofx-preview').innerHTML = `
                 <div style="margin-bottom:8px; font-size:11px;">
                     <strong>${data.transactions.length}</strong> transactions found.
-                    ${isCsv && data.format ? `Format: ${escapeHtml(data.format)}` : ''}
+                    ${isCsv && data.format ? `Format: ${escapeHtml(layout)}.` : ''}
+                    ${isCsv && data.unread ? `${data.unread} row${data.unread === 1 ? '' : 's'} could not be read and will be skipped.` : ''}
                     ${data.account_id ? `Account: ${escapeHtml(data.account_id)}` : ''}
                 </div>
                 <div class="table-container" style="max-height:300px; overflow-y:auto;"><table>
@@ -914,6 +933,69 @@ const BankingPage = {
         }
     },
 
+    _mappingStep(layout, hasHeader) {
+        BankingPage._csvLayout = layout;
+        const head = layout.header_row || [];
+        const sample = hasHeader ? (layout.sample || []) : [head].concat(layout.sample || []).slice(0, 5);
+        const names = head.map((c, i) => (hasHeader && c) ? `${i + 1}: ${c}` : `Column ${i + 1}`);
+        const chosen = BankingPage._csvMapping || {};
+        const guess = layout.suggested || {};
+        const pick = (role, required) => {
+            const current = chosen[role] !== undefined && chosen[role] !== null ? chosen[role] : guess[role];
+            return `<select id="csv-map-${role}">
+                <option value="">${required ? 'Choose…' : '— none —'}</option>
+                ${names.map((n, i) => `<option value="${i}" ${current === i ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+            </select>`;
+        };
+        const fmt = chosen.date_format || 'auto';
+        const fmtOpt = (value, text) => `<option value="${value}" ${fmt === value ? 'selected' : ''}>${text}</option>`;
+        return `
+            <div style="font-size:11px; margin-bottom:8px;" role="status">${escapeHtml(layout.error || '')}</div>
+            <div class="form-grid">
+                <div class="form-group full-width"><label><input type="checkbox" id="csv-map-header" ${hasHeader ? 'checked' : ''}
+                    onchange="BankingPage._redrawMapping(this.checked)"> The first row holds column names</label></div>
+                <div class="form-group"><label for="csv-map-date">Date *</label>${pick('date', true)}</div>
+                <div class="form-group"><label for="csv-map-date_format">Date format</label>
+                    <select id="csv-map-date_format">${fmtOpt('auto', 'Work it out')}${fmtOpt('MM/DD/YYYY', 'MM/DD/YYYY')}${fmtOpt('DD/MM/YYYY', 'DD/MM/YYYY')}${fmtOpt('YYYY-MM-DD', 'YYYY-MM-DD')}</select></div>
+                <div class="form-group"><label for="csv-map-description">Description *</label>${pick('description', true)}</div>
+                <div class="form-group"><label for="csv-map-payee">Payee</label>${pick('payee')}</div>
+                <div class="form-group"><label for="csv-map-amount">Amount (one column; money out is negative)</label>${pick('amount')}</div>
+                <div class="form-group"><label for="csv-map-check_number">Check #</label>${pick('check_number')}</div>
+                <div class="form-group"><label for="csv-map-debit">…or money out (debit)</label>${pick('debit')}</div>
+                <div class="form-group"><label for="csv-map-credit">…and money in (credit)</label>${pick('credit')}</div>
+            </div>
+            <div class="table-container" style="max-height:180px; overflow:auto;"><table>
+                <thead><tr>${names.map(n => `<th scope="col">${escapeHtml(n)}</th>`).join('')}</tr></thead>
+                <tbody>${sample.map(r => `<tr>${names.map((_, i) => `<td>${escapeHtml(r[i] || '')}</td>`).join('')}</tr>`).join('')}</tbody>
+            </table></div>
+            <div class="form-actions" style="margin-top:12px;">
+                <button type="button" class="btn btn-primary" onclick="BankingPage.previewMapped()">Preview with these columns</button>
+            </div>`;
+    },
+
+    _redrawMapping(hasHeader) {
+        if (BankingPage._csvLayout) $('#ofx-preview').innerHTML = BankingPage._mappingStep(BankingPage._csvLayout, hasHeader);
+    },
+
+    previewMapped() {
+        const col = role => {
+            const el = $(`#csv-map-${role}`);
+            return el && el.value !== '' ? parseInt(el.value, 10) : null;
+        };
+        BankingPage._csvMapping = {
+            date: col('date'),
+            description: col('description'),
+            payee: col('payee'),
+            amount: col('amount'),
+            debit: col('debit'),
+            credit: col('credit'),
+            check_number: col('check_number'),
+            date_format: $('#csv-map-date_format').value,
+            has_header: $('#csv-map-header').checked,
+        };
+        $('#ofx-form').requestSubmit();
+    },
+
     async confirmOFXImport(feedId, accountId, importBtn) {
         // Same guard on the import itself: one click, one import. The
         // button comes in from its own onclick (`this`) — the first cut
@@ -927,6 +1009,7 @@ const BankingPage = {
             const isCsv = BankingPage._isCsvFile(file);
             const formData = new FormData();
             formData.append('file', file);
+            if (isCsv && BankingPage._csvMapping) formData.append('mapping', JSON.stringify(BankingPage._csvMapping));
             const endpoint = isCsv
                 ? `/api/bank-import/import-csv/${feedId}`
                 : `/api/bank-import/import/${feedId}`;
