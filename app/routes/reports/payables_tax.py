@@ -14,6 +14,7 @@ from app.models.accounts import Account
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Vendor
 from app.routes.reports._router import router
+from app.routes.invoices.helpers import _due_date_from_terms
 
 
 class SalesTaxPaymentRequest(StrictModel):
@@ -266,7 +267,10 @@ def ap_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
                     "unapplied_credits": Decimal(0),
                 }
 
-            days = (as_of_date - bill.due_date).days if bill.due_date else 0
+            # A bill with no due date (bills made from a PO before 2.18
+            # never got one) ages from its date and terms, not as current.
+            due = bill.due_date or _due_date_from_terms(bill.date, bill.terms)
+            days = (as_of_date - due).days
             bal = bill.balance_due
             if days <= 0:
                 aging[vid]["current"] += bal
