@@ -5,9 +5,27 @@ from app.database import get_db
 from app.models.contacts import Customer
 from app.schemas.contacts import CustomerCreate, CustomerUpdate, CustomerResponse
 from app.routes._helpers import get_or_404
+from app.services.contact_balances import ZERO, customer_balances
 from app.services.duplicate_detection import find_duplicates
 
 router = APIRouter(prefix="/api/customers", tags=["customers"])
+
+
+def _responses(db: Session, customers: list[Customer]) -> list[CustomerResponse]:
+    """The customers with what each one owes, summed from the open documents
+    (the stored Customer.balance column is never written; see
+    services/contact_balances). One set of grouped queries for the page."""
+    balances = customer_balances(db, [c.id for c in customers])
+    out = []
+    for c in customers:
+        resp = CustomerResponse.model_validate(c)
+        resp.balance = balances.get(c.id, ZERO)
+        out.append(resp)
+    return out
+
+
+def _response(db: Session, customer: Customer) -> CustomerResponse:
+    return _responses(db, [customer])[0]
 
 
 @router.get("", response_model=list[CustomerResponse])
@@ -19,7 +37,7 @@ def list_customers(
         q = q.filter(Customer.is_active)
     if search:
         q = q.filter(Customer.name.ilike(f"%{search}%"))
-    return q.order_by(Customer.name).all()
+    return _responses(db, q.order_by(Customer.name).all())
 
 
 @router.get("/check-duplicate")
@@ -34,7 +52,7 @@ def check_duplicate(
 
 @router.get("/{customer_id}", response_model=CustomerResponse)
 def get_customer(customer_id: int, db: Session = Depends(get_db)):
-    return get_or_404(db, Customer, customer_id)
+    return _response(db, get_or_404(db, Customer, customer_id))
 
 
 @router.post("", response_model=CustomerResponse, status_code=201)
@@ -61,7 +79,7 @@ def create_customer(
     db.add(customer)
     db.commit()
     db.refresh(customer)
-    return customer
+    return _response(db, customer)
 
 
 @router.put("/{customer_id}", response_model=CustomerResponse)
@@ -73,7 +91,7 @@ def update_customer(
         setattr(customer, key, val)
     db.commit()
     db.refresh(customer)
-    return customer
+    return _response(db, customer)
 
 
 @router.delete("/{customer_id}")
