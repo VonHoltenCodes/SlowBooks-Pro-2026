@@ -20,7 +20,9 @@ from app.services.inventory_service import record_adjustment, current_valuation
 router = APIRouter(prefix="/api/items", tags=["items"])
 
 
-def _name_key(name) -> str:
+def item_name_key(name) -> str:
+    """An item name as the duplicate check compares it: trimmed, runs of
+    spaces as one, capitals ignored ("design  hour" is "Design Hour")."""
     return " ".join(str(name or "").split()).casefold()
 
 
@@ -29,13 +31,13 @@ def find_active_item_named(db: Session, name, exclude_id=None):
     and without regard to capitals — or None. Compared in Python rather
     than SQL: SQLite's lower() folds only ASCII, so "Übergröße" and
     "ÜBERGRÖSSE" would have passed as different names."""
-    key = _name_key(name)
+    key = item_name_key(name)
     if not key:
         return None
     q = db.query(Item).filter(Item.is_active.is_(True))
     if exclude_id is not None:
         q = q.filter(Item.id != exclude_id)
-    return next((it for it in q.all() if _name_key(it.name) == key), None)
+    return next((it for it in q.all() if item_name_key(it.name) == key), None)
 
 
 def _refuse_duplicate_name(db: Session, name, exclude_id=None) -> None:
@@ -201,12 +203,11 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db)):
     # active item of the same name. An edit that leaves the name alone is
     # not refused, so two duplicates made before this check can still be
     # edited — and one of them made inactive.
-    renaming = "name" in update_data and _name_key(update_data["name"]) != _name_key(
-        item.name
-    )
+    new_name = update_data.get("name", item.name)
+    renaming = item_name_key(new_name) != item_name_key(item.name)
     reactivating = update_data.get("is_active") is True and not item.is_active
     if update_data.get("is_active", item.is_active) and (renaming or reactivating):
-        _refuse_duplicate_name(db, update_data.get("name", item.name), item.id)
+        _refuse_duplicate_name(db, new_name, item.id)
     for key, val in update_data.items():
         setattr(item, key, val)
     db.commit()

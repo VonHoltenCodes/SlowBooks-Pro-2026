@@ -179,14 +179,19 @@ def _amount(row: dict, key: str) -> Decimal | None:
     if not raw:
         return Decimal("0")
     try:
-        return Decimal(raw)
+        value = Decimal(raw)
     except InvalidOperation:
         return None
+    return value if value.is_finite() else None
 
 
 def import_items(db: Session, csv_text: str) -> dict:
-    from app.routes.items import find_active_item_named
+    from app.routes.items import item_name_key
 
+    # Names already taken by an active item — the same name in other
+    # capitals included, as the item form refuses it (W-M16) — plus the
+    # rows this file adds, so a name twice in the file imports once.
+    taken = {item_name_key(n) for (n,) in db.query(Item.name).filter(Item.is_active)}
     reader = UnguardedDictReader(io.StringIO(csv_text))
     created = 0
     skipped = 0
@@ -206,10 +211,8 @@ def import_items(db: Session, csv_text: str) -> dict:
                 errors.append(f"Row {i}: Missing name")
                 continue
 
-            # An item of that name already there — the same name in other
-            # capitals included, as the item form now refuses it (W-M16).
             existing = db.query(Item).filter(Item.name == name).first()
-            if existing or find_active_item_named(db, name):
+            if existing or item_name_key(name) in taken:
                 skipped += 1
                 continue
 
@@ -233,6 +236,7 @@ def import_items(db: Session, csv_text: str) -> dict:
                     cost=cost,
                 )
             )
+            taken.add(item_name_key(name))
             created += 1
         except Exception:
             logger.exception("Failed to import item row %d", i)

@@ -145,8 +145,19 @@ def test_the_csv_import_skips_an_item_it_would_duplicate(client):
     assert out["created"] == 0 and out["skipped"] == 1
 
 
+def test_an_item_named_twice_in_one_file_imports_once(client):
+    out = _upload(client, "items", "Name,Rate\nDesign Hour,85\ndesign  hour,90\n")
+    assert out["created"] == 1 and out["skipped"] == 1, out
+    assert [i["name"] for i in client.get("/api/items").json()] == ["Design Hour"]
+
+
 def test_an_item_row_with_a_rate_that_is_not_a_number_says_so(client):
-    out = _upload(client, "items", 'Name,Rate\nWidget,abc\nGadget,"$1,250.50"\n')
-    assert out["errors"] == ['Row 2: Rate "abc" is not a number.']
+    out = _upload(
+        client, "items", 'Name,Rate\nWidget,abc\nGadget,"$1,250.50"\nOdd,nan\n'
+    )
+    assert out["errors"] == [
+        'Row 2: Rate "abc" is not a number.',
+        'Row 4: Rate "nan" is not a number.',
+    ]
     gadget = client.get("/api/items").json()[0]
     assert gadget["name"] == "Gadget" and gadget["rate"] == "1250.50"
