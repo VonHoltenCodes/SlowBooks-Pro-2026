@@ -122,6 +122,9 @@ from app.routes import reseller_permits as reseller_permits_routes
 # Tier 2: Receipt / document intake — local OCR (docs/design/receipt-intake.md)
 from app.routes import ocr as ocr_routes
 from app.services.auth import get_session_secret
+from app.services.auth import (
+    signed_in_before_this_start as _signed_in_before_this_start,
+)
 
 from app import __version__
 from app.config import (
@@ -820,6 +823,17 @@ async def require_session(request: Request, call_next):
         return await call_next(request)
     token_principal = None
     if request.session.get("authenticated") is True:
+        if _signed_in_before_this_start(request.session):
+            # Settings -> "Ask for the password each time SlowBooks Pro
+            # starts": this session dates from before the app last started.
+            request.session.clear()
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": "SlowBooks Pro was restarted. Enter the password "
+                    "to continue."
+                },
+            )
         role = request.session.get("role") or "admin"
     else:
         # Scoped API tokens: non-human principals (agents, integrations)

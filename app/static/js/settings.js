@@ -16,6 +16,7 @@ const SettingsPage = {
             SettingsPage.loadEquipment();
             SettingsPage.loadUsers();
             SettingsPage.loadApiTokens();
+            SettingsPage.loadSignInPref();
             SettingsPage.loadOcrStatus();
             SettingsPage.loadOcrEnginePref();
             SettingsPage.scrollToFocus();
@@ -105,6 +106,25 @@ const SettingsPage = {
                                 <option value="letter" ${s.pdf_paper_size !== 'a4' ? 'selected' : ''}>US Letter</option>
                                 <option value="a4" ${s.pdf_paper_size === 'a4' ? 'selected' : ''}>A4</option>
                             </select></div>
+                    </div>
+                </div>
+
+                <!-- Desktop app only (shown by loadSignInPref); the session used
+                     to outlive the app, so a relaunch reopened the company
+                     without its password (explore 2.17.3, macbase1 S-j). -->
+                <div class="settings-section" id="settings-sign-in" hidden>
+                    <h3>Sign-in</h3>
+                    <div class="form-grid">
+                        <div class="form-group full-width">
+                            <label for="ask-password-on-start">Ask for the password each time SlowBooks Pro starts</label>
+                            <select id="ask-password-on-start" name="ask_password_on_start">
+                                <option value="false" ${s.ask_password_on_start !== 'true' ? 'selected' : ''}>No: stay signed in until you sign out</option>
+                                <option value="true" ${s.ask_password_on_start === 'true' ? 'selected' : ''}>Yes: quitting the app signs this company out</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                                With Yes, the next start asks for the password even if you did not sign out.
+                                On Server Edition, a restart of the server signs everyone out.</div>
+                        </div>
                     </div>
                 </div>
 
@@ -580,6 +600,17 @@ const SettingsPage = {
                 <thead><tr><th scope="col">Username</th><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Last login</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
+    },
+
+    // The start-up password choice applies to the desktop app (and its
+    // Server Edition), where one server process serves the company.
+    async loadSignInPref() {
+        const section = $('#settings-sign-in');
+        if (!section) return;
+        try {
+            const sys = await API.get('/system');
+            if (sys && sys.desktop) section.hidden = false;
+        } catch (e) { /* stays hidden */ }
     },
 
     // ------------------------------------------------------------------
