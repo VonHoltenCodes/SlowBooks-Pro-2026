@@ -62,7 +62,8 @@ const API = {
                 // password set, no header comes back and nothing is asked.
                 const override = res.status === 403 && res.headers && typeof res.headers.get === 'function'
                     ? res.headers.get('X-Closing-Date-Override') : null;
-                if (override) {
+                // "locked": too many wrong passwords — show the refusal, don't ask again
+                if (override === 'password' || override === 'wrong-password') {
                     const typed = await API.askClosingDatePassword(message, override === 'wrong-password');
                     if (typed) { closingPassword = typed; continue; }
                 }

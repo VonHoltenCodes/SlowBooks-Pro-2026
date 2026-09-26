@@ -284,6 +284,19 @@ def db_engine(_suite_engine, request):
 
 
 @pytest.fixture(autouse=True)
+def _forget_closing_date_override_attempts():
+    """Wrong closing-date passwords are counted per company file in the
+    process; every test's in-memory file has the same URL, so start each test
+    with no count and no lock."""
+    import app.services.closing_date as closing_date
+
+    reset = getattr(closing_date, "reset_override_attempts", None)
+    if reset is not None:
+        reset()
+    yield
+
+
+@pytest.fixture(autouse=True)
 def _release_closed_event_loops():
     """anyio 4.12 keeps a registry of per-run variables keyed weakly by
     event loop — and one of the values is the run's root Task, which holds

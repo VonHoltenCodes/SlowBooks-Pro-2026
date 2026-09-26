@@ -292,3 +292,58 @@ def test_the_password_prompt_is_a_masked_input_that_is_never_kept():
     assert "input.type = 'password'" in body
     assert "localStorage.setItem" not in api and "sessionStorage" not in api
     assert "console." not in api
+
+
+def test_wrong_passwords_lock_the_override_for_a_while(
+    client, seed_accounts, monkeypatch
+):
+    # After five wrong passwords the override is refused for ten minutes,
+    # the right password included, so the lock can't be guessed open.
+    import app.services.closing_date as cd
+
+    clock = [1000.0]
+    monkeypatch.setattr(cd.time, "monotonic", lambda: clock[0])
+    _close(client, password=OVERRIDE_PW)
+    cid = _customer(client)
+    for _ in range(cd.WRONG_LIMIT):
+        r = client.post(
+            "/api/invoices", json=_invoice(cid), headers=_with_password(WRONG_PW)
+        )
+        assert r.status_code == 403
+        assert r.headers.get("X-Closing-Date-Override") == "wrong-password"
+    r = client.post(
+        "/api/invoices", json=_invoice(cid), headers=_with_password(OVERRIDE_PW)
+    )
+    assert r.status_code == 403
+    assert r.headers.get("X-Closing-Date-Override") == "locked"
+    assert "Too many wrong closing-date passwords" in r.json()["detail"]
+    assert OVERRIDE_PW not in r.text
+    clock[0] += cd.LOCK_SECONDS + 1
+    r = client.post(
+        "/api/invoices", json=_invoice(cid), headers=_with_password(OVERRIDE_PW)
+    )
+    assert r.status_code == 201, r.text
+
+
+def test_a_right_password_clears_the_wrong_count(client, seed_accounts):
+    import app.services.closing_date as cd
+
+    _close(client, password=OVERRIDE_PW)
+    cid = _customer(client)
+    for _ in range(cd.WRONG_LIMIT - 1):
+        client.post(
+            "/api/invoices", json=_invoice(cid), headers=_with_password(WRONG_PW)
+        )
+    r = client.post(
+        "/api/invoices", json=_invoice(cid), headers=_with_password(OVERRIDE_PW)
+    )
+    assert r.status_code == 201, r.text
+    r = client.post(
+        "/api/invoices", json=_invoice(cid), headers=_with_password(WRONG_PW)
+    )
+    assert r.headers.get("X-Closing-Date-Override") == "wrong-password"
+
+
+def test_a_locked_override_is_not_asked_for_again():
+    js = (ROOT / "app/static/js/api.js").read_text(encoding="utf-8")
+    assert "override === 'password' || override === 'wrong-password'" in js

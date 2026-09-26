@@ -5,6 +5,8 @@
 
 import hmac
 import logging
+import threading
+import time
 from datetime import date
 from urllib.parse import unquote
 
@@ -29,6 +31,58 @@ OVERRIDE_HEADER = "X-Closing-Date-Override"
 SESSION_INFO_KEY = "closing_date_password"
 
 _MAX_PASSWORD_LEN = 1024
+
+# Wrong override passwords are limited, so a signed-in person can't try one
+# guess after another until the lock opens: after WRONG_LIMIT wrong
+# passwords within WRONG_WINDOW seconds the override is refused for
+# LOCK_SECONDS, the right password included. Kept per company file, in this
+# process (the desktop app and Server Edition run one); a right password
+# clears the count.
+WRONG_LIMIT = 5
+WRONG_WINDOW = 600
+LOCK_SECONDS = 600
+_wrong: dict[str, list[float]] = {}
+_locked_until: dict[str, float] = {}
+_guard = threading.Lock()
+
+
+def _company_key(db: Session) -> str:
+    try:
+        return str(db.get_bind().url)
+    except Exception:
+        return "default"
+
+
+def _lock_remaining(key: str, now: float) -> float:
+    with _guard:
+        until = _locked_until.get(key, 0.0)
+        if until <= now:
+            _locked_until.pop(key, None)
+            return 0.0
+        return until - now
+
+
+def _note_wrong(key: str, now: float) -> None:
+    with _guard:
+        recent = [t for t in _wrong.get(key, []) if now - t < WRONG_WINDOW]
+        recent.append(now)
+        if len(recent) >= WRONG_LIMIT:
+            _locked_until[key] = now + LOCK_SECONDS
+            recent = []
+        _wrong[key] = recent
+
+
+def _clear_wrong(key: str) -> None:
+    with _guard:
+        _wrong.pop(key, None)
+        _locked_until.pop(key, None)
+
+
+def reset_override_attempts() -> None:
+    """Forget every count and lock (tests; a restart does the same)."""
+    with _guard:
+        _wrong.clear()
+        _locked_until.clear()
 
 
 def password_from_header(raw: str | None) -> str | None:
@@ -83,21 +137,38 @@ def check_closing_date(db: Session, txn_date: date, password: str = None):
                 stored = ""
         if password is None:
             password = _supplied_password(db)
+        detail = (
+            f"Transaction date {txn_date} is on or before the closing date "
+            f"({closing}). Modifications to closed periods are not allowed."
+        )
+        key = _company_key(db)
+        now = time.monotonic()
+        if stored and password:
+            remaining = _lock_remaining(key, now)
+            if remaining:
+                minutes = max(1, int(-(-remaining // 60)))
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"{detail} Too many wrong closing-date passwords were "
+                        f"entered; try again in {minutes} minute"
+                        f"{'' if minutes == 1 else 's'}."
+                    ),
+                    headers={OVERRIDE_HEADER: "locked"},
+                )
         # compare bytes: compare_digest refuses a str with non-ASCII characters
         if (
             stored
             and password
             and hmac.compare_digest(password.encode("utf-8"), stored.encode("utf-8"))
         ):
+            _clear_wrong(key)
             _record_override(db, closing, txn_date)
             return  # Password override accepted
-        detail = (
-            f"Transaction date {txn_date} is on or before the closing date "
-            f"({closing}). Modifications to closed periods are not allowed."
-        )
         headers = None
         if stored:
             if password:
+                _note_wrong(key, now)
                 # Never log or echo the value, only that it did not match.
                 logger.warning("closing-date override refused: wrong password")
                 detail += " The closing-date password you entered is not correct."
