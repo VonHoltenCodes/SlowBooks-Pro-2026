@@ -7,7 +7,8 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Query
 from fastapi.responses import Response
 from app.schemas.common import StrictModel
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
 from app.models.invoices import Invoice, InvoiceStatus
@@ -215,6 +216,139 @@ def income_by_customer(
     }
 
 
+def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dict:
+    """A customer statement's lines: invoices, payments and credit memos
+    dated up to `as_of_date`, interleaved in date order with the balance
+    after each one, and the totals.
+
+    The statement used to list every invoice, then every payment, so the
+    running balance followed no order a customer could check against their
+    own records, and its Description column printed the invoice's notes —
+    internal text, or the "Thank you for your business" footer (explore
+    2.17.3, W-L9). A voided payment was also subtracted, and credit memos
+    were left out, so Balance Due could disagree with the customer's
+    balance. Each line now describes the document itself: when an invoice
+    is due and its PO number; how a payment was made and which invoices it
+    paid; what a credit memo was applied to."""
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.models.payments import PaymentAllocation
+    from app.services.donor_documents import document_label
+    from app.services.terminology import terms_from_db
+
+    words = terms_from_db(db)
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.customer_id == customer.id)
+        .filter(Invoice.status != InvoiceStatus.VOID)
+        .filter(Invoice.date <= as_of_date)
+        .all()
+    )
+    payments = (
+        db.query(Payment)
+        .options(
+            selectinload(Payment.allocations).joinedload(PaymentAllocation.invoice)
+        )
+        .filter(Payment.customer_id == customer.id)
+        .filter(or_(Payment.is_voided.is_(False), Payment.is_voided.is_(None)))
+        .filter(Payment.date <= as_of_date)
+        .all()
+    )
+    memos = (
+        db.query(CreditMemo)
+        .filter(CreditMemo.customer_id == customer.id)
+        .filter(CreditMemo.status != CreditMemoStatus.VOID)
+        .filter(CreditMemo.date <= as_of_date)
+        .all()
+    )
+
+    def numbers(docs):
+        return ", ".join(f"#{d.invoice_number}" for d in docs if d is not None)
+
+    events = []
+    for inv in invoices:
+        parts = []
+        if inv.po_number:
+            parts.append(f"PO {inv.po_number}")
+        if inv.due_date:
+            parts.append(f"Due {inv.due_date.strftime('%b %d, %Y')}")
+        events.append(
+            (
+                inv.date,
+                0,
+                inv.id,
+                {
+                    "date": inv.date,
+                    "type": document_label(inv, words),
+                    "number": inv.invoice_number,
+                    "description": " · ".join(parts),
+                    "amount": Decimal(str(inv.total or 0)),
+                },
+            )
+        )
+    for p in payments:
+        applied = sum((Decimal(str(a.amount)) for a in p.allocations), Decimal(0))
+        left = Decimal(str(p.amount)) - applied
+        parts = [p.method] if p.method else []
+        paid = numbers(a.invoice for a in p.allocations)
+        if paid:
+            parts.append(f"applied to {paid}")
+        if left > 0:
+            parts.append(
+                words.text(f"${left:,.2f} not applied to an invoice yet")
+                if paid
+                else words.text("not applied to an invoice yet")
+            )
+        events.append(
+            (
+                p.date,
+                1,
+                p.id,
+                {
+                    "date": p.date,
+                    "type": "Payment",
+                    "number": p.check_number or p.reference or "",
+                    "description": " · ".join(parts),
+                    "amount": -Decimal(str(p.amount)),
+                },
+            )
+        )
+    for cm in memos:
+        applied_to = numbers(a.invoice for a in cm.applications)
+        events.append(
+            (
+                cm.date,
+                2,
+                cm.id,
+                {
+                    "date": cm.date,
+                    "type": "Credit Memo",
+                    "number": cm.memo_number,
+                    "description": (
+                        f"applied to {applied_to}" if applied_to else "credit"
+                    ),
+                    "amount": -Decimal(str(cm.total or 0)),
+                },
+            )
+        )
+
+    events.sort(key=lambda e: e[:3])
+    running = Decimal(0)
+    lines = []
+    for *_, line in events:
+        running += line["amount"]
+        line["balance"] = running
+        lines.append(line)
+    return {
+        "lines": lines,
+        "total_invoiced": sum(
+            (Decimal(str(i.total or 0)) for i in invoices), Decimal(0)
+        ),
+        "total_payments": sum((Decimal(str(p.amount)) for p in payments), Decimal(0)),
+        "total_credits": sum((Decimal(str(m.total or 0)) for m in memos), Decimal(0)),
+        "balance_due": running,
+    }
+
+
 @router.get("/customer-statement/{customer_id}/pdf")
 def customer_statement_pdf(
     customer_id: int,
@@ -229,26 +363,9 @@ def customer_statement_pdf(
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    invoices = (
-        db.query(Invoice)
-        .filter(Invoice.customer_id == customer_id)
-        .filter(Invoice.status != InvoiceStatus.VOID)
-        .filter(Invoice.date <= as_of_date)
-        .order_by(Invoice.date)
-        .all()
-    )
-
-    payments = (
-        db.query(Payment)
-        .filter(Payment.customer_id == customer_id)
-        .filter(Payment.date <= as_of_date)
-        .order_by(Payment.date)
-        .all()
-    )
-
     company = get_settings(db)
     pdf_bytes = generate_statement_pdf(
-        customer, invoices, payments, company, as_of_date
+        customer, statement_activity(db, customer, as_of_date), company, as_of_date
     )
     return Response(
         content=pdf_bytes,
@@ -308,24 +425,11 @@ def batch_email_statements(db: Session = Depends(get_db)):
 
         ok = False
         try:
-            payments = (
-                db.query(Payment)
-                .filter(Payment.customer_id == cid)
-                .filter(Payment.date <= as_of_date)
-                .order_by(Payment.date)
-                .all()
-            )
-            all_invoices = (
-                db.query(Invoice)
-                .filter(Invoice.customer_id == cid)
-                .filter(Invoice.status != InvoiceStatus.VOID)
-                .filter(Invoice.date <= as_of_date)
-                .order_by(Invoice.date)
-                .all()
-            )
-
             pdf_bytes = generate_statement_pdf(
-                customer, all_invoices, payments, settings, as_of_date
+                customer,
+                statement_activity(db, customer, as_of_date),
+                settings,
+                as_of_date,
             )
 
             ok = send_email(

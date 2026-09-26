@@ -69,31 +69,18 @@
             <th class="r">Amount</th><th class="r">Balance</th>
         </tr></thead>
         <tbody>
-        {# NOTE: Invoices and payments are listed separately rather than in a single
-           chronological sequence. To display a true chronological activity list,
-           the backend should merge and sort both lists by date before passing
-           them to this template. #}
-        {% set ns = namespace(running=0) %}
-        {% for inv in invoices %}
-            {% set ns.running = ns.running + (inv.total | float) %}
+        {# One chronological list — invoices, payments and credit memos
+           interleaved by date — with the running balance after each line
+           (routes/reports/receivables.statement_activity). #}
+        {% macro money(v) %}{% if v < 0 %}-{{ (-v) | currency }}{% else %}{{ v | currency }}{% endif %}{% endmacro %}
+        {% for line in activity.lines %}
             <tr>
-                <td>{{ inv.date | fdate }}</td>
-                <td>{{ terms('Invoice') }}</td>
-                <td>{{ inv.invoice_number }}</td>
-                <td>{{ inv.notes or '' }}</td>
-                <td class="r">{{ inv.total | currency }}</td>
-                <td class="r">{{ ns.running | currency }}</td>
-            </tr>
-        {% endfor %}
-        {% for pmt in payments %}
-            {% set ns.running = ns.running - (pmt.amount | float) %}
-            <tr>
-                <td>{{ pmt.date | fdate }}</td>
-                <td>Payment</td>
-                <td>{{ pmt.reference or pmt.check_number or '' }}</td>
-                <td>{{ pmt.method or '' }}</td>
-                <td class="r" style="color: #006600;">-{{ pmt.amount | currency }}</td>
-                <td class="r">{{ ns.running | currency }}</td>
+                <td>{{ line.date | fdate }}</td>
+                <td>{{ line.type }}</td>
+                <td>{{ line.number }}</td>
+                <td>{{ line.description }}</td>
+                <td class="r"{% if line.amount < 0 %} style="color: #006600;"{% endif %}>{{ money(line.amount) }}</td>
+                <td class="r">{{ money(line.balance) }}</td>
             </tr>
         {% endfor %}
         </tbody>
@@ -101,9 +88,10 @@
 
     <div class="summary">
         <table>
-            <tr><td class="label">{{ terms('Total Invoiced') }}</td><td class="r">{{ invoices | sum(attribute='total') | currency }}</td></tr>
-            <tr><td class="label">Total Payments</td><td class="r">{{ payments | sum(attribute='amount') | currency }}</td></tr>
-            <tr><td class="label grand">Balance Due</td><td class="r grand">{{ ((invoices | sum(attribute='total')) - (payments | sum(attribute='amount'))) | currency }}</td></tr>
+            <tr><td class="label">{{ terms('Total Invoiced') }}</td><td class="r">{{ activity.total_invoiced | currency }}</td></tr>
+            <tr><td class="label">Total Payments</td><td class="r">{{ activity.total_payments | currency }}</td></tr>
+            {% if activity.total_credits %}<tr><td class="label">Total Credits</td><td class="r">{{ activity.total_credits | currency }}</td></tr>{% endif %}
+            <tr><td class="label grand">Balance Due</td><td class="r grand">{{ money(activity.balance_due) }}</td></tr>
         </table>
     </div>
 
