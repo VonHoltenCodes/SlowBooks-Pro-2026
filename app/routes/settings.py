@@ -16,6 +16,8 @@ from app.models.settings import DEFAULT_SETTINGS
 from app.services.settings_service import (
     ENCRYPTED_SETTINGS_KEYS,
     SECRET_PLACEHOLDER,
+    SettingValueError,
+    clean_setting_value,
     get_all_settings,
     redact_secrets,
     set_setting,
@@ -162,6 +164,10 @@ def update_settings(
                     "tells the two apart."
                 ),
             )
+    # Check every value before writing any: one refused field must not leave
+    # the others half-saved, and the person sees every problem at once.
+    cleaned = {}
+    problems = []
     for key, value in data.model_dump().items():
         if key not in DEFAULT_SETTINGS:
             continue
@@ -173,7 +179,17 @@ def update_settings(
             )
         if key in SECRET_KEYS and value == SECRET_PLACEHOLDER:
             continue
-        set_setting(db, key, str(value) if value is not None else "")
+        try:
+            cleaned[key] = clean_setting_value(key, value)
+        except SettingValueError as exc:
+            problems.append(str(exc))
+    if problems:
+        raise HTTPException(
+            status_code=422,
+            detail=" ".join(problems) + " Nothing was saved.",
+        )
+    for key, value in cleaned.items():
+        set_setting(db, key, value)
     db.commit()
     if "company_name" in incoming:
         from app.services.company_service import sync_manifest_name

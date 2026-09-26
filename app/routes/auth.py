@@ -28,7 +28,11 @@ from app.services.auth import (
 )
 from app.services.rate_limit import limiter
 from app.services.request_utils import client_ip as _client_ip
-from app.services.settings_service import set_setting
+from app.services.settings_service import (
+    SettingValueError,
+    clean_setting_value,
+    set_setting,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -183,12 +187,20 @@ def setup(
             )
 
     # Persist any non-blank settings the user provided. set_password() will
-    # commit at the end, so all writes land in a single transaction.
+    # commit at the end, so all writes land in a single transaction. The
+    # values Settings checks (a default tax rate from 0 to 100) are checked
+    # here too, before anything is written.
     payload_dict = payload.model_dump()
+    to_store = {}
     for key in _SETUP_SETTINGS_KEYS:
         value = payload_dict.get(key)
         if value is not None and value != "":
-            set_setting(db, key, value)
+            try:
+                to_store[key] = clean_setting_value(key, value)
+            except SettingValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+    for key, value in to_store.items():
+        set_setting(db, key, value)
 
     set_password(db, payload.password)
     # Materialize the operator as the admin user row right away (Server

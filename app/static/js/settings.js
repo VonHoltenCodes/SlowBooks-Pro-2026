@@ -78,15 +78,21 @@ const SettingsPage = {
                                     `<option ${s.default_terms===t?'selected':''}>${t}</option>`).join('')}
                             </select></div>
                         <div class="form-group"><label>Default Tax Rate (%)</label>
-                            <input name="default_tax_rate" type="number" step="0.01" value="${s.default_tax_rate || '0.0'}"></div>
+                            <input name="default_tax_rate" type="number" min="0" max="100" step="0.01"
+                                title="A percent from 0 to 100: 8.25 means 8.25%"
+                                value="${escapeHtml(s.default_tax_rate || '0.0')}"></div>
                         <div class="form-group"><label>${`${T('Invoice')} Prefix`}</label>
                             <input name="invoice_prefix" value="${escapeHtml(s.invoice_prefix || '')}" placeholder="e.g. INV-"></div>
                         <div class="form-group"><label>${`Next ${T('Invoice')} #`}</label>
-                            <input name="invoice_next_number" value="${escapeHtml(s.invoice_next_number || '1001')}"></div>
+                            <input name="invoice_next_number" inputmode="numeric" pattern="[0-9]*[1-9][0-9]*" required
+                                title="A whole number, 1 or more"
+                                value="${escapeHtml(s.invoice_next_number || '1001')}"></div>
                         <div class="form-group"><label>Estimate Prefix</label>
                             <input name="estimate_prefix" value="${escapeHtml(s.estimate_prefix || '')}" placeholder="e.g. E-"></div>
                         <div class="form-group"><label>Next Estimate #</label>
-                            <input name="estimate_next_number" value="${escapeHtml(s.estimate_next_number || '1001')}"></div>
+                            <input name="estimate_next_number" inputmode="numeric" pattern="[0-9]*[1-9][0-9]*" required
+                                title="A whole number, 1 or more"
+                                value="${escapeHtml(s.estimate_next_number || '1001')}"></div>
                         <div class="form-group full-width"><label>${`Default ${T('Invoice')} Notes`}</label>
                             <textarea name="invoice_notes">${escapeHtml(s.invoice_notes || '')}</textarea></div>
                         <div class="form-group full-width"><label>${`${T('Invoice')} Footer`}</label>
@@ -122,7 +128,7 @@ const SettingsPage = {
                         <div class="form-group"><label>SMTP Host</label>
                             <input name="smtp_host" value="${escapeHtml(s.smtp_host || '')}" placeholder="smtp.gmail.com"></div>
                         <div class="form-group"><label>SMTP Port</label>
-                            <input name="smtp_port" type="number" value="${escapeHtml(s.smtp_port || '587')}"></div>
+                            <input name="smtp_port" type="number" min="1" max="65535" step="1" value="${escapeHtml(s.smtp_port || '587')}"></div>
                         <div class="form-group"><label>Username</label>
                             <input name="smtp_user" value="${escapeHtml(s.smtp_user || '')}"></div>
                         <div class="form-group"><label>Password</label>
@@ -282,9 +288,9 @@ const SettingsPage = {
                                 <option value="true" ${s.late_fee_enabled === 'true' ? 'selected' : ''}>Enabled</option>
                             </select></div>
                         <div class="form-group"><label>Late Fee Rate (%)</label>
-                            <input name="late_fee_rate" type="number" step="0.1" value="${escapeHtml(s.late_fee_rate || '1.5')}"></div>
+                            <input name="late_fee_rate" type="number" min="0" max="100" step="0.01" value="${escapeHtml(s.late_fee_rate || '1.5')}"></div>
                         <div class="form-group"><label>Grace Days</label>
-                            <input name="late_fee_grace_days" type="number" value="${escapeHtml(s.late_fee_grace_days || '15')}"></div>
+                            <input name="late_fee_grace_days" type="number" min="0" step="1" value="${escapeHtml(s.late_fee_grace_days || '15')}"></div>
                     </div>
                 </div>
 
