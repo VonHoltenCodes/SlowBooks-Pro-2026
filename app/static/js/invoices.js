@@ -261,7 +261,11 @@ const InvoicesPage = {
 
     async emailInvoice(id) {
         const inv = await API.get(`/invoices/${id}`);
-        const email = inv.customer_email || '';
+        // The invoice has no address of its own; send to the customer's. It
+        // read a field the invoice never had, so the box was always empty (W-L3).
+        let email = '';
+        try { email = (await API.get(`/customers/${inv.customer_id}`)).email || ''; }
+        catch (e) { /* the user types it */ }
         openModal(Terms.text('Email Invoice'), `
             <form onsubmit="InvoicesPage.sendEmail(event, ${id})">
                 <div class="form-grid">
