@@ -5,9 +5,10 @@
 
 from datetime import date
 from decimal import Decimal
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from pydantic import Field
 from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
@@ -19,12 +20,17 @@ from app.models.fixed_assets import (
     FixedAssetType,
 )
 from app.services.fixed_assets import (
+    acquisition_transactions,
     book_value,
+    books_cover,
+    check_amounts,
     dispose_asset,
     import_assets_csv,
     next_asset_number,
+    post_acquisition,
     run_depreciation,
 )
+from app.services.bank_register import money_text
 from app.services.upload_limits import read_limited
 
 router = APIRouter(prefix="/api/fixed-assets", tags=["fixed_assets"])
@@ -50,6 +56,22 @@ class AssetTypeUpdate(AssetTypeCreate):
     depreciation_method: Optional[DepreciationMethod] = None
 
 
+class AssetAcquisition(StrictModel):
+    """How the purchase reaches the books (services/fixed_assets.py):
+    paid_from a bank or card `account_id` (with a check or `reference`);
+    opening_balance for an asset owned before the books began (`as_of` the
+    day they began, `accumulated_depreciation` taken by then); a `bill_id`
+    or `expense_id` already entered; or in_books (nothing posts)."""
+
+    method: Literal["paid_from", "opening_balance", "bill", "expense", "in_books"]
+    account_id: Optional[int] = None
+    reference: Optional[str] = Field(None, max_length=100)
+    as_of: Optional[date] = None
+    accumulated_depreciation: Decimal = Decimal("0")
+    bill_id: Optional[int] = None
+    expense_id: Optional[int] = None
+
+
 class AssetCreate(StrictModel):
     name: str
     asset_type_id: int
@@ -57,6 +79,9 @@ class AssetCreate(StrictModel):
     purchase_price: Decimal
     salvage_value: Decimal = Decimal("0")
     description: Optional[str] = None
+    # The register form always says; an API caller that doesn't gets the
+    # old behaviour (nothing posted), as the CSV import does.
+    acquisition: Optional[AssetAcquisition] = None
 
 
 class AssetUpdate(StrictModel):
@@ -95,7 +120,7 @@ def _type_payload(t: FixedAssetType) -> dict:
     }
 
 
-def _asset_payload(a: FixedAsset) -> dict:
+def _asset_payload(a: FixedAsset, posted: dict | None = None) -> dict:
     return {
         "id": a.id,
         "asset_number": a.asset_number,
@@ -116,7 +141,14 @@ def _asset_payload(a: FixedAsset) -> dict:
             float(a.disposal_proceeds) if a.disposal_proceeds is not None else None
         ),
         "description": a.description,
+        # the purchase is in the books (a posting made for this asset)
+        "posted": a.id in (posted if posted is not None else {}),
     }
+
+
+def _payloads(db: Session, assets: list) -> list[dict]:
+    posted = acquisition_transactions(db, [a.id for a in assets])
+    return [_asset_payload(a, posted) for a in assets]
 
 
 # ── Asset types ──────────────────────────────────────────────────────────
@@ -168,7 +200,7 @@ def list_assets(include_disposed: bool = True, db: Session = Depends(get_db)):
     q = db.query(FixedAsset)
     if not include_disposed:
         q = q.filter(FixedAsset.status == FixedAssetStatus.REGISTERED)
-    return [_asset_payload(a) for a in q.order_by(FixedAsset.asset_number).all()]
+    return _payloads(db, q.order_by(FixedAsset.asset_number).all())
 
 
 @router.get("/{asset_id}")
@@ -176,18 +208,59 @@ def get_asset(asset_id: int, db: Session = Depends(get_db)):
     asset = db.get(FixedAsset, asset_id)
     if not asset:
         raise HTTPException(status_code=404, detail="Asset not found")
-    return _asset_payload(asset)
+    return _payloads(db, [asset])[0]
 
 
 @router.post("", status_code=201)
 def create_asset(data: AssetCreate, db: Session = Depends(get_db)):
     if not db.get(FixedAssetType, data.asset_type_id):
         raise HTTPException(status_code=404, detail="Asset type not found")
-    asset = FixedAsset(asset_number=next_asset_number(db), **data.model_dump())
+    check_amounts(data.purchase_price, data.salvage_value)
+    asset = FixedAsset(
+        asset_number=next_asset_number(db),
+        **data.model_dump(exclude={"acquisition"}),
+    )
     db.add(asset)
+    db.flush()
+    if data.acquisition is not None:
+        # A refusal here leaves nothing behind: the asset row goes with it.
+        post_acquisition(db, asset, data.acquisition)
     db.commit()
     db.refresh(asset)
-    return _asset_payload(asset)
+    return _payloads(db, [asset])[0]
+
+
+@router.post("/{asset_id}/post-purchase")
+def post_purchase(asset_id: int, data: AssetAcquisition, db: Session = Depends(get_db)):
+    """Put the purchase of an asset registered before it was asked for —
+    or registered as already in the books when it wasn't — in the books."""
+    asset = db.get(FixedAsset, asset_id)
+    if not asset:
+        raise HTTPException(status_code=404, detail="Asset not found")
+    if asset.status == FixedAssetStatus.DISPOSED:
+        raise HTTPException(status_code=400, detail="Disposed assets are read-only")
+    if asset.id in acquisition_transactions(db, [asset.id]):
+        raise HTTPException(
+            status_code=400, detail="This asset's purchase is already in the books."
+        )
+    if data.method == "in_books":
+        raise HTTPException(status_code=400, detail="Choose how it was paid for.")
+    atype = asset.asset_type
+    if atype and atype.asset_account_id:
+        covered, held, _ = books_cover(db, atype.asset_account_id)
+        if covered:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"The asset account already holds {money_text(held)}, enough for "
+                    "every asset registered to it. Posting this purchase would count "
+                    "it twice."
+                ),
+            )
+    post_acquisition(db, asset, data)
+    db.commit()
+    db.refresh(asset)
+    return _payloads(db, [asset])[0]
 
 
 @router.put("/{asset_id}")
@@ -197,11 +270,31 @@ def update_asset(asset_id: int, data: AssetUpdate, db: Session = Depends(get_db)
         raise HTTPException(status_code=404, detail="Asset not found")
     if asset.status == FixedAssetStatus.DISPOSED:
         raise HTTPException(status_code=400, detail="Disposed assets are read-only")
-    for key, value in data.model_dump(exclude_unset=True).items():
+    fields = data.model_dump(exclude_unset=True)
+    if "purchase_price" in fields or "salvage_value" in fields:
+        check_amounts(
+            fields.get("purchase_price", asset.purchase_price),
+            fields.get("salvage_value", asset.salvage_value),
+        )
+    posted_fields = {
+        key
+        for key in ("purchase_price", "purchase_date", "asset_type_id")
+        if key in fields and fields[key] != getattr(asset, key)
+    }
+    if posted_fields and asset.id in acquisition_transactions(db, [asset.id]):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This asset's purchase is posted to the books, so its price, "
+                "purchase date and type can't change here. Post a correcting "
+                "journal entry, or dispose of it and register it again."
+            ),
+        )
+    for key, value in fields.items():
         setattr(asset, key, value)
     db.commit()
     db.refresh(asset)
-    return _asset_payload(asset)
+    return _payloads(db, [asset])[0]
 
 
 # ── Operations ───────────────────────────────────────────────────────────

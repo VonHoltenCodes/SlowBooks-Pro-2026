@@ -753,29 +753,34 @@ const ReportsPage = {
     async cashFlow(prefill) {
         await ReportsPage.openPeriodModal("Cash Flow Statement", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/cash-flow?start_date=${range.start}&end_date=${range.end}`);
-            const section = (title, items, total) => {
-                let html = `<tr><td><strong>${title}</strong></td><td></td></tr>`;
-                if (items.length === 0) {
-                    html += `<tr><td style="padding-left:24px; color:var(--gray-400);">None</td><td></td></tr>`;
-                } else {
-                    html += items.map(i =>
-                        `<tr><td style="padding-left:24px;">${escapeHtml(i.account_name)}</td><td class="amount">${formatCurrency(i.amount)}</td></tr>`
-                    ).join('');
-                }
-                html += `<tr style="font-weight:600; background:var(--gray-50);"><td>Total ${title}</td><td class="amount">${formatCurrency(total)}</td></tr>`;
-                return html;
-            };
+            // Indirect method (banking, exploratory 2.17.3 W-M6/F18): net
+            // income, what moved no cash, the change in working capital;
+            // then investing and financing; the net change is the bank's.
+            const rows = (items, indent) => items.length
+                ? items.map(i => `<tr><td style="padding-left:${indent}px;">${escapeHtml(i.account_name)}</td><td class="amount">${formatCurrency(i.amount)}</td></tr>`).join('')
+                : `<tr><td style="padding-left:${indent}px; color:var(--gray-400);">None</td><td></td></tr>`;
+            const head = (title, indent = 0) => `<tr><td style="padding-left:${indent}px;"><strong>${title}</strong></td><td></td></tr>`;
+            const total = (title, amount) => `<tr style="font-weight:600; background:var(--gray-50);"><td>Total ${title}</td><td class="amount">${formatCurrency(amount)}</td></tr>`;
+            const adjustments = data.adjustments || [];
+            const workingCapital = data.working_capital || [];
+            const operating = `${head('Operating Activities')}
+                <tr><td style="padding-left:24px;">${T('Net Income')}</td><td class="amount">${formatCurrency(data.net_income)}</td></tr>
+                ${adjustments.length ? head('Adjustments for non-cash items', 24) + rows(adjustments, 48) : ''}
+                ${workingCapital.length ? head('Changes in working capital', 24) + rows(workingCapital, 48) : ''}
+                ${total('Operating Activities', data.total_operating)}`;
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Account</th><th scope="col" class="amount">Amount</th></tr></thead>
                     <tbody>
-                        ${section('Operating Activities', data.operating, data.total_operating)}
-                        ${section('Investing Activities', data.investing, data.total_investing)}
-                        ${section('Financing Activities', data.financing, data.total_financing)}
+                        ${operating}
+                        ${head('Investing Activities')}${rows(data.investing, 24)}${total('Investing Activities', data.total_investing)}
+                        ${head('Financing Activities')}${rows(data.financing, 24)}${total('Financing Activities', data.total_financing)}
                         <tr style="font-weight:700; font-size:15px; background:var(--primary-light);">
                             <td>Net Change in Cash</td><td class="amount">${formatCurrency(data.net_change)}</td>
                         </tr>
+                        <tr><td>Cash at beginning of period</td><td class="amount">${formatCurrency(data.beginning_cash)}</td></tr>
+                        <tr style="font-weight:700;"><td>Cash at end of period</td><td class="amount">${formatCurrency(data.ending_cash)}</td></tr>
                     </tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'cash_flow', prefill });

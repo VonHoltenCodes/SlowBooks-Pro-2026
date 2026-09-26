@@ -3,6 +3,7 @@
 # their sum matches the statement balance.
 # ============================================================================
 
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -29,6 +30,7 @@ from app.schemas.banking import (
     LegacyBalancePost,
     ReconciliationCreate,
     StatementAdd,
+    StatementCategory,
     StatementMatch,
     ReconciliationResponse,
 )
@@ -36,11 +38,13 @@ from app.models.transactions import Transaction
 from app.services.bank_posting import (
     post_bank_entry,
     post_opening_balance,
+    post_statement_balance,
     require_bank_account,
     void_document,
 )
 from app.services.bank_register import (
     account_register,
+    balance_as_of,
     gl_balance,
     gl_balances,
     voided_transaction_ids,
@@ -180,6 +184,22 @@ def _reject_second_feed(db: Session, account_id: int, exclude_id: int | None = N
         )
 
 
+@router.get("/ledger-balance")
+def ledger_balance(account_id: int, as_of: date = None, db: Session = Depends(get_db)):
+    """What the books already say about a bank or card account on a date —
+    the New Bank Account form shows it beside the statement balance."""
+    acct = require_bank_account(db, account_id)
+    as_of = as_of or date.today()
+    balance, lines = balance_as_of(db, acct, as_of)
+    return {
+        "account_id": acct.id,
+        "account_name": acct.name,
+        "as_of": as_of.isoformat(),
+        "balance": float(balance),
+        "has_postings": lines > 0,
+    }
+
+
 @router.post("/accounts", response_model=BankAccountResponse, status_code=201)
 def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
     acct = require_bank_account(db, data.account_id)
@@ -187,7 +207,9 @@ def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
     if data.opening_balance:
         opening_date = data.opening_date or date.today()
         check_closing_date(db, opening_date)
-        post_opening_balance(db, acct, opening_date, data.opening_balance)
+        post_statement_balance(
+            db, acct, opening_date, data.opening_balance, data.post_difference
+        )
     ba = BankAccount(
         name=data.name,
         account_id=acct.id,
@@ -368,6 +390,19 @@ def statement_add(
         class_id=data.class_id,
         job_id=data.job_id,
     )
+    db.commit()
+    db.refresh(bt)
+    return _statement_out([bt], db)[0]
+
+
+@router.patch("/transactions/{txn_id}", response_model=BankTransactionResponse)
+def statement_set_category(
+    txn_id: int, data: StatementCategory, db: Session = Depends(get_db)
+):
+    """Save the category picked for a statement line in the review list."""
+    from app.services import bank_matching as m
+
+    bt = m.set_category(db, _statement_line(db, txn_id), data.category_account_id)
     db.commit()
     db.refresh(bt)
     return _statement_out([bt], db)[0]
@@ -574,6 +609,39 @@ def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
     out = rc.complete(db, _recon(db, recon_id))
     db.commit()
     return out
+
+
+@router.get("/reconciliations/{recon_id}/report")
+def reconciliation_report(recon_id: int, db: Session = Depends(get_db)):
+    """A completed reconciliation's report: beginning and ending balances,
+    the items it cleared, what was outstanding on the statement date."""
+    from app.services import reconciliation as rc
+
+    return rc.report(db, _recon(db, recon_id))
+
+
+@router.get("/reconciliations/{recon_id}/pdf")
+def reconciliation_report_pdf(recon_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.services import reconciliation as rc
+    from app.services.pdf_service import generate_report_pdf
+    from app.services.settings_service import get_all_settings
+
+    data = rc.report(db, _recon(db, recon_id))
+    pdf = generate_report_pdf(rc.report_sections(data), get_all_settings(db))
+    label = re.sub(r"[^A-Za-z0-9_-]", "", data["account_number"] or "") or str(
+        data["account_id"]
+    )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="reconciliation_{label}_{data["statement_date"]}.pdf"'
+            )
+        },
+    )
 
 
 @router.delete("/reconciliations/{recon_id}")

@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import func as sqlfunc, select
+from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
 from app.models.accounts import Account, AccountType
@@ -339,82 +339,19 @@ def cash_flow(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Cash flow from the non-cash side of journals that move linked cash."""
+    """Statement of cash flows, indirect method: net income, non-cash
+    adjustments (depreciation), changes in working capital, then investing
+    and financing; the net change is the change in the bank accounts
+    (app/services/cash_flow.py)."""
+    from app.services.cash_flow import statement_of_cash_flows
+
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:
         end_date = date.today()
-
-    # Map account types to cash flow sections
-    section_map = {
-        AccountType.INCOME: "operating",
-        AccountType.EXPENSE: "operating",
-        AccountType.COGS: "operating",
-        AccountType.ASSET: "investing",
-        AccountType.LIABILITY: "financing",
-        AccountType.EQUITY: "financing",
-    }
-
-    # Cash = the chart's bank accounts (2.10: Account.bank_kind), whether or
-    # not a feed is linked; a card is a liability, not cash.
-    cash_account_ids = select(Account.id).where(Account.bank_kind == "bank")
-    cash_transaction_ids = select(TransactionLine.transaction_id).where(
-        TransactionLine.account_id.in_(cash_account_ids)
+    return statement_of_cash_flows(
+        db, start_date, end_date, terms_from_db(db)("Net Income")
     )
-
-    results = (
-        db.query(
-            Account.name,
-            Account.account_number,
-            Account.account_type,
-            sqlfunc.coalesce(
-                sqlfunc.sum(TransactionLine.credit - TransactionLine.debit), 0
-            ),
-        )
-        .join(TransactionLine, TransactionLine.account_id == Account.id)
-        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
-        .filter(
-            Transaction.date >= start_date,
-            Transaction.date <= end_date,
-            Transaction.id.in_(cash_transaction_ids),
-            ~TransactionLine.account_id.in_(cash_account_ids),
-            sqlfunc.coalesce(Transaction.source_type, "") != "opening_balance",
-        )
-        .group_by(
-            Account.id, Account.name, Account.account_number, Account.account_type
-        )
-        .order_by(Account.account_number)
-        .all()
-    )
-
-    sections = {"operating": [], "investing": [], "financing": []}
-    totals = {"operating": Decimal(0), "investing": Decimal(0), "financing": Decimal(0)}
-
-    for acct_name, acct_num, acct_type, net_change in results:
-        section = section_map.get(acct_type, "operating")
-        amount = float(net_change)
-        sections[section].append(
-            {
-                "account_name": acct_name,
-                "account_number": acct_num or "",
-                "amount": amount,
-            }
-        )
-        totals[section] += Decimal(str(amount))
-
-    net_change = totals["operating"] + totals["investing"] + totals["financing"]
-
-    return {
-        "start_date": start_date.isoformat(),
-        "end_date": end_date.isoformat(),
-        "operating": sections["operating"],
-        "investing": sections["investing"],
-        "financing": sections["financing"],
-        "total_operating": float(totals["operating"]),
-        "total_investing": float(totals["investing"]),
-        "total_financing": float(totals["financing"]),
-        "net_change": float(net_change),
-    }
 
 
 @router.get("/profit-loss-by-class")

@@ -28,6 +28,17 @@ def is_debit_normal(account: Account) -> bool:
     return account.account_type in DEBIT_NORMAL
 
 
+def money_text(value) -> str:
+    """$1,234.56 / -$1,234.56 — money as a sentence shows it."""
+    amount = Decimal(str(value or 0))
+    return f"{'-' if amount < 0 else ''}${abs(amount):,.2f}"
+
+
+def date_text(value: date) -> str:
+    """Sep 26, 2026 — a date as a sentence shows it."""
+    return f"{value:%b} {value.day}, {value.year}"
+
+
 def gl_balances(db: Session, account_ids) -> dict[int, Decimal]:
     """Natural-signed balance per account from the ledger lines, in one
     grouped query. Missing ids balance to zero."""
@@ -57,6 +68,26 @@ def gl_balances(db: Session, account_ids) -> dict[int, Decimal]:
 
 def gl_balance(db: Session, account_id: int) -> Decimal:
     return gl_balances(db, [account_id]).get(account_id, ZERO)
+
+
+def balance_as_of(db: Session, account: Account, as_of: date) -> tuple[Decimal, int]:
+    """The account's natural-signed balance from every line dated on or
+    before `as_of`, and how many lines that is — "does the ledger already
+    carry this account on that date, and with what?"."""
+    dr, cr, n = (
+        db.query(
+            func.coalesce(func.sum(TransactionLine.debit), 0),
+            func.coalesce(func.sum(TransactionLine.credit), 0),
+            func.count(TransactionLine.id),
+        )
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(TransactionLine.account_id == account.id)
+        .filter(Transaction.date <= as_of)
+        .one()
+    )
+    dr, cr = Decimal(str(dr)), Decimal(str(cr))
+    balance = (dr - cr) if is_debit_normal(account) else (cr - dr)
+    return balance, int(n or 0)
 
 
 def voided_transaction_ids(db: Session, txn_ids) -> set[int]:
@@ -155,6 +186,32 @@ def payees_for(db: Session, txns) -> dict[int, str]:
     return out
 
 
+def references_for(db: Session, txns) -> dict[int, str]:
+    """The reference number to show per transaction id: the posting's own,
+    else the check number its document carries.
+
+    A bill payment keeps its check number on the payment, not on the
+    journal entry, so check 1050 was missing from the register's REF #
+    (exploratory 2.17.3, W-L6). Its void shows the same number."""
+    out = {t.id: (t.reference or "") for t in txns}
+    bp_ids = {
+        t.source_id
+        for t in txns
+        if not out[t.id]
+        and t.source_type in ("bill_payment", "bill_payment_void")
+        and t.source_id
+    }
+    if bp_ids:
+        checks = {
+            bp.id: bp.check_number or ""
+            for bp in db.query(BillPayment).filter(BillPayment.id.in_(bp_ids)).all()
+        }
+        for t in txns:
+            if not out[t.id] and t.source_type in ("bill_payment", "bill_payment_void"):
+                out[t.id] = checks.get(t.source_id, "")
+    return out
+
+
 def account_register(
     db: Session,
     account: Account,
@@ -195,6 +252,7 @@ def account_register(
     txns = {txn.id: txn for _, txn in rows}
     voided = voided_transaction_ids(db, txns.keys())
     payees = payees_for(db, txns.values())
+    refs = references_for(db, list(txns.values()))
 
     running = opening
     period_debit = ZERO
@@ -214,7 +272,7 @@ def account_register(
                 "date": txn.date.isoformat(),
                 "description": txn.description or tl.description or "",
                 "payee": payees.get(txn.id, ""),
-                "reference": txn.reference or "",
+                "reference": refs.get(txn.id, ""),
                 "debit": float(dr),
                 "credit": float(cr),
                 "amount": float(delta),

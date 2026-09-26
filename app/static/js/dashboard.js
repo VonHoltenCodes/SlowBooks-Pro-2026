@@ -185,7 +185,7 @@ const DashboardPage = {
         },
         bank_balances(d) {
             if (!d.accounts.length) return '<div style="color:var(--gray-500);font-size:12px">No bank accounts yet. <a href="#/banking">Add one</a>.</div>';
-            return `<div class="card-grid" style="margin:0">${d.accounts.map(b => `<div class="card" style="cursor:pointer" onclick="App.navigate('#/banking/${b.id}')">
+            return `<div class="card-grid" style="margin:0">${d.accounts.map(b => `<div class="card" style="cursor:pointer" onclick="BankingPage.go('#/banking/${b.id}')">
                 <div class="card-header">${escapeHtml(b.name)}${b.kind === 'credit_card' ? ' <span style="font-size:10px;color:var(--gray-400)">owed</span>' : ''}</div><div class="card-value">${formatCurrency(b.balance)}</div></div>`).join('')}</div>`;
         },
         ar_aging(d) {
