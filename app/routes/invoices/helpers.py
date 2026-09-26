@@ -37,6 +37,23 @@ def refuse_zero_total(total, noun: str = "invoice", action: str = "saving it") -
         )
 
 
+def _day(d: date) -> str:
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def refuse_due_before_date(doc_date: date | None, due_date: date | None) -> None:
+    """A due date before the invoice's own date was accepted and saved
+    (2.17.3 exploratory W-L4). An invoice cannot fall due before it exists."""
+    if doc_date and due_date and due_date < doc_date:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The due date ({_day(due_date)}) is before the invoice date "
+                f"({_day(doc_date)}). Pick a due date on or after the invoice date."
+            ),
+        )
+
+
 def _due_date_from_terms(base_date: date, terms: str | None) -> date:
     """Compute a due date from a base date + a terms string.
 
