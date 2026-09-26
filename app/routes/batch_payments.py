@@ -93,6 +93,17 @@ def create_batch_payment(data: BatchPaymentCreate, db: Session = Depends(get_db)
                 raise HTTPException(
                     status_code=404, detail=f"Invoice {alloc.invoice_id} not found"
                 )
+            # Each line's payment is recorded for its customer_id, so the
+            # invoice must be that customer's (#189). The batch is one commit:
+            # a refused line writes nothing for any customer.
+            if invoice.customer_id != customer_id:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Invoice {invoice.invoice_number} does not belong to "
+                        f"customer {customer.name}."
+                    ),
+                )
             if Decimal(str(alloc.amount)) > invoice.balance_due:
                 raise HTTPException(
                     status_code=400,

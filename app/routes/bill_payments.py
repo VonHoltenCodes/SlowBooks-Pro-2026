@@ -85,6 +85,13 @@ def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
             raise HTTPException(
                 status_code=404, detail=f"Bill {alloc_data.bill_id} not found"
             )
+        # A payment to one vendor pays that vendor's bills only (the
+        # customer-side rule, #189; vendor credits already check this).
+        if bill.vendor_id != data.vendor_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Bill {bill.bill_number} belongs to a different vendor.",
+            )
         if alloc_data.amount > float(bill.balance_due):
             raise HTTPException(
                 status_code=400, detail="Allocation exceeds bill balance"
