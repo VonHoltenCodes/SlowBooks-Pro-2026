@@ -1,4 +1,26 @@
 {
+  "2.17.3": {
+    "title": "Payments land on the right account",
+    "items": [
+      "Pay Bills: paying bills from more than one vendor at once now makes one payment per vendor; it used to record a single payment to the first vendor that also paid the others' bills",
+      "A payment, credit memo or batch payment can no longer be applied to a different customer's invoice, and a bill payment to a different vendor's bill"
+    ]
+  },
+  "2.17.2": {
+    "title": "Editing an invoice keeps its job costing",
+    "items": [
+      "Saving an invoice from the edit screen no longer strips each line's job and cost code, so its revenue stays on the job-cost reports",
+      "An edited invoice posts the way a new one does: foreign-currency invoices at their exchange rate, and a changed invoice date moves its ledger entry",
+      "An invoice's total cannot be edited below what has already been paid, and paid / partly paid follows the payments"
+    ]
+  },
+  "2.17.1": {
+    "title": "OpenAI works again",
+    "items": [
+      "AI analysis with OpenAI: the current models, including the default gpt-5.4-mini, refused the request; they are sent the settings they accept",
+      "Reasoning models get room to think before answering, and a reply cut off at the limit now says so instead of reporting an unexpected response"
+    ]
+  },
   "2.17.0": {
     "title": "Your ledger, in a spreadsheet",
     "items": [

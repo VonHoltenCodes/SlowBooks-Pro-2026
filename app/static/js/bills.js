@@ -356,12 +356,12 @@ const BillsPage = {
 
         let billRows = openBills.map(b => `
             <tr>
-                <td><input type="checkbox" class="pay-check" data-bill="${b.id}" data-balance="${b.balance_due}"></td>
+                <td><input type="checkbox" class="pay-check" data-bill="${b.id}" data-balance="${b.balance_due}" aria-label="Pay bill ${escapeHtml(b.bill_number)}"></td>
                 <td>${escapeHtml(b.bill_number)}</td>
                 <td>${escapeHtml(b.vendor_name || '')}</td>
                 <td>${formatDate(b.due_date)}</td>
                 <td class="amount">${formatCurrency(b.balance_due)}</td>
-                <td><input type="number" step="0.01" class="pay-amount" data-bill="${b.id}" value="0" style="width:80px;"></td>
+                <td><input type="number" step="0.01" class="pay-amount" data-bill="${b.id}" data-vendor="${b.vendor_id}" data-vendor-name="${escapeHtml(b.vendor_name || '')}" value="0" style="width:80px;"></td>
             </tr>`).join('');
 
         if (!billRows) billRows = '<tr><td colspan="6" style="color:var(--text-muted);">No open bills</td></tr>';
@@ -405,34 +405,53 @@ const BillsPage = {
     async savePay(e) {
         e.preventDefault();
         const form = e.target;
-        const allocations = [];
-        let total = 0;
+        // One payment per vendor, as one check per vendor: a payment to one
+        // vendor cannot pay another vendor's bill (the server refuses it).
+        const byVendor = new Map();
         $$('.pay-amount').forEach(input => {
             const amt = parseFloat(input.value) || 0;
             if (amt > 0) {
-                allocations.push({ bill_id: parseInt(input.dataset.bill), amount: amt });
-                total += amt;
+                const vid = parseInt(input.dataset.vendor);
+                if (!byVendor.has(vid)) byVendor.set(vid, { name: input.dataset.vendorName, total: 0, allocations: [] });
+                const v = byVendor.get(vid);
+                v.allocations.push({ bill_id: parseInt(input.dataset.bill), amount: amt });
+                v.total += amt;
             }
         });
-        if (allocations.length === 0) { toast('Select bills to pay', 'error'); return; }
+        if (byVendor.size === 0) { toast('Select bills to pay', 'error'); return; }
+        const checkNumber = form.check_number.value || null;
+        if (checkNumber && byVendor.size > 1) {
+            toast('One check number cannot pay several vendors. Pay one vendor at a time, or leave Check # blank.', 'error');
+            return;
+        }
 
-        // Get vendor from first bill
-        const firstBill = await API.get(`/bills/${allocations[0].bill_id}`);
-
+        const paid = [];
         try {
-            await API.post('/bill-payments', {
-                vendor_id: firstBill.vendor_id,
-                date: form.date.value,
-                amount: total,
-                method: form.method.value,
-                check_number: form.check_number.value || null,
-                pay_from_account_id: form.pay_from_account_id.value ? parseInt(form.pay_from_account_id.value) : null,
-                allocations,
-            });
-            toast('Bills paid');
+            for (const [vendorId, v] of byVendor) {
+                await API.post('/bill-payments', {
+                    vendor_id: vendorId,
+                    date: form.date.value,
+                    amount: Math.round(v.total * 100) / 100,
+                    method: form.method.value,
+                    check_number: checkNumber,
+                    pay_from_account_id: form.pay_from_account_id.value ? parseInt(form.pay_from_account_id.value) : null,
+                    allocations: v.allocations,
+                });
+                paid.push(v.name);
+            }
+            toast(byVendor.size > 1 ? `Bills paid: ${byVendor.size} payments, one per vendor` : 'Bills paid');
             closeModal();
             App.navigate('#/bills');
-        } catch (err) { toast(err.message, 'error'); }
+        } catch (err) {
+            // Each vendor's payment is its own record: say which went through.
+            if (paid.length) {
+                toast(`Paid ${paid.join(', ')}; the next payment was refused: ${err.message}`, 'error');
+                closeModal();
+                App.navigate('#/bills');
+            } else {
+                toast(err.message, 'error');
+            }
+        }
     },
 
     async voidBillPayment(id) {

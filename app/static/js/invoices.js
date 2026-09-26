@@ -438,7 +438,11 @@ const InvoicesPage = {
 
     lineRowHtml(idx, line, items) {
         const itemOpts = items.map(i => `<option value="${i.id}" ${line.item_id==i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
-        return `<tr data-line="${idx}">
+        // The form has no job / class / cost-code cells, but a line may carry
+        // them (job costing, the API). Keep them on the row so an edit sends
+        // them back instead of stripping them from the line and its posting.
+        const dim = (v) => (v == null ? '' : escapeHtml(String(v)));
+        return `<tr data-line="${idx}" data-job-id="${dim(line.job_id)}" data-class-id="${dim(line.class_id)}" data-cost-code-id="${dim(line.cost_code_id)}">
             <td><select class="line-item" onchange="InvoicesPage.itemSelected(${idx})">
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
@@ -535,6 +539,9 @@ const InvoicesPage = {
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                job_id: row.dataset.jobId ? parseInt(row.dataset.jobId) : null,
+                class_id: row.dataset.classId ? parseInt(row.dataset.classId) : null,
+                cost_code_id: row.dataset.costCodeId ? parseInt(row.dataset.costCodeId) : null,
                 line_order: i,
             });
         });

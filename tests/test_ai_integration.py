@@ -13,7 +13,11 @@ import pytest
 from app.services.ai_service import (
     _extract_tool_calls,
     _parse_json_args,
+    MAX_TOKENS,
+    REASONING_MAX_TOKENS,
+    TEMPERATURE,
     build_request,
+    call_provider,
     call_with_tools,
     parse_response,
     validate_worker_url,
@@ -612,3 +616,58 @@ def test_call_with_tools_custom_roundtrip():
     # The client should have been hit with the /chat/completions URL.
     req_url = client.request.call_args_list[0].args[1]
     assert req_url == "https://api.commandcode.ai/provider/v1/chat/completions"
+
+
+# ---------------------------------------------------------------------------
+# OpenAI request shape (#185): its reasoning models refuse max_tokens and a
+# non-default temperature, and spend reasoning out of the answer's budget
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "model", ["gpt-5.4-mini", "gpt-6-sol", "o3-mini", "o4-mini", "o1"]
+)
+def test_openai_reasoning_models_get_completion_tokens_and_no_temperature(model):
+    body = build_request("openai", "sk-fake", model, "s", "u")["json"]
+    assert "max_tokens" not in body and "temperature" not in body
+    assert body["max_completion_tokens"] == REASONING_MAX_TOKENS
+
+
+def test_openai_non_reasoning_model_keeps_temperature():
+    body = build_request("openai", "sk-fake", "gpt-4o-mini", "s", "u")["json"]
+    assert "max_tokens" not in body
+    assert body["max_completion_tokens"] == MAX_TOKENS
+    assert body["temperature"] == TEMPERATURE
+
+
+@pytest.mark.parametrize("provider", ["grok", "groq"])
+def test_other_openai_compatible_providers_are_unchanged(provider):
+    # a model named like OpenAI's on another provider is not OpenAI's API
+    body = build_request(provider, "k", "gpt-5-lookalike", "s", "u")["json"]
+    assert body["max_tokens"] == MAX_TOKENS and body["temperature"] == TEMPERATURE
+    assert "max_completion_tokens" not in body
+
+
+def test_the_tool_loop_sends_the_same_openai_shape():
+    client = _fake_client(
+        [_mock_response({"choices": [{"message": {"content": "done"}}]})]
+    )
+    call_with_tools(
+        provider_key="openai",
+        api_key="sk-fake",
+        model="gpt-5.4-mini",
+        user_question="hi",
+        tools=_FAKE_TOOLS,
+        tool_executor=MagicMock(),
+        client=client,
+    )
+    sent = client.request.call_args.kwargs["json"]
+    assert "temperature" not in sent and "max_tokens" not in sent
+    assert sent["max_completion_tokens"] == REASONING_MAX_TOKENS and sent["tools"]
+
+
+def test_a_reply_cut_off_at_the_limit_says_so():
+    truncated = {"choices": [{"message": {"content": ""}, "finish_reason": "length"}]}
+    client = _fake_client([_mock_response(truncated)])
+    with pytest.raises(AIProviderError, match="output limit"):
+        call_provider("openai", "sk-fake", "gpt-5.4-mini", "s", "u", client=client)

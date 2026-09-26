@@ -233,6 +233,16 @@ def apply_credit(
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    # A credit belongs to one customer: it pays down that customer's invoices
+    # only (the payment-side rule, #189).
+    if invoice.customer_id != cm.customer_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invoice {invoice.invoice_number} belongs to a different "
+                "customer than this credit memo."
+            ),
+        )
 
     if Decimal(str(data.amount)) > cm.balance_remaining:
         raise HTTPException(status_code=400, detail="Amount exceeds credit balance")

@@ -7,6 +7,85 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.17.3 — Payments land on the right account
+
+**Pay Bills paid one vendor's bills with another vendor's payment.** The
+screen lists every vendor's open bills, and sent all the ticked bills as one
+payment to the first bill's vendor. On the QA company, ticking a CPA's bill
+and a supplier's recorded one 5,638.26 payment to the CPA that also marked
+the supplier's bill paid; the vendor balances, the check register and the
+1099 figures were all wrong from then on. Pay Bills now makes one payment
+per vendor, and asks you to pay one vendor at a time when you enter a check
+number, since one check cannot pay two vendors.
+
+**A payment pays down its own customer's or vendor's documents only.** A
+customer payment could be applied to another customer's invoice (#189,
+@Bit-Sage), and the same was true of applying a credit memo, a batch payment
+line, and a bill payment to another vendor's bill. Each returned success and
+reduced the other party's balance. All four now refuse with a message naming
+the document and write nothing; a batch with one wrong line is refused whole.
+Vendor credits already checked this.
+
+If you paid several vendors at once from Pay Bills in an earlier version,
+check Vendor Balances: a payment may be recorded against the first vendor
+for bills that belonged to others. Void it and pay each vendor separately.
+
+No schema change.
+
+### v2.17.2 — Editing an invoice keeps its job costing
+
+**Saving an invoice from the edit screen stripped its job costing.** An edit
+rebuilt the invoice's ledger entry by a separate route from creating one,
+and that route dropped the job, class and cost code from every line of the
+entry; the invoice form, which has no cells for them, never sent the
+per-line values back either. Revenue quietly left the job-cost reports each
+time an invoice was saved. On the QA company, re-saving all 960 invoices
+unchanged took their ledger lines from 565 job and 875 cost-code tags to
+none. Both halves are fixed: an edit now posts through the same code as a
+new invoice (#187, @Bit-Sage), and the form sends each line's job, class
+and cost code back. The same 960 re-saves now keep all 565 and 875, and the
+trial balance does not move.
+
+Where it showed: **Job Cost Detail**, which splits a job's revenue by cost
+code — one of the QA company's jobs went from seven cost codes to a single
+*uncoded* line on 2.17.1. Job Profitability, which files a line under the
+invoice's own job when the line has none, kept reading correctly for
+invoices that carry their job on the header, which is why the loss was easy
+to miss.
+
+**An edited invoice posts the way a new one does** (#187). A foreign-currency
+invoice's edit posts at its exchange rate — it posted document-currency
+amounts to the home ledger before; changing the invoice date moves its
+ledger entry with it, subject to the closing date; and a total can no
+longer be edited below what has already been paid. Paid and partly-paid
+follow the payments.
+
+**API.** `PUT /api/invoices/{id}` with `status: "void"` is refused with a
+message naming `POST /api/invoices/{id}/void`; an empty `status` is refused;
+a requested `paid` or `partial` on an invoice whose payments say otherwise
+is not applied.
+
+No schema change.
+
+### v2.17.1 — OpenAI works again
+
+**AI analysis with OpenAI failed on current models** (#185, @Sciumo). OpenAI's
+reasoning models — the gpt-5 line, including SlowBooks' default
+`gpt-5.4-mini`, and the o-series — refuse `max_tokens` and any temperature
+but their default, so the request was rejected before it ran, the Test button
+included. OpenAI is now sent `max_completion_tokens`, and no temperature for
+its reasoning models. Grok, Groq, Cloudflare and custom endpoints send what
+they always sent.
+
+**Room to think.** A reasoning model spends hidden reasoning out of the same
+token budget as its answer, so the 1,024 tokens that suit every other
+provider could run out before the answer began. OpenAI's reasoning models get
+a ceiling of 8,192 — billed only as used — and a reply that stops at the limit
+with nothing written now says so, instead of "empty response (body shape
+unexpected)".
+
+No schema change.
+
 ### v2.17.0 — Your ledger, in a spreadsheet
 
 **Trial Balance and General Ledger save as a spreadsheet and a printable

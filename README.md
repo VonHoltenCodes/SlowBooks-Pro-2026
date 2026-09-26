@@ -57,7 +57,11 @@ save as a CSV and a printable PDF, and Profit & Loss and Balance Sheet gain
 the CSV — amounts as plain numbers, ready to sum. The general ledger carries
 a balance brought forward, a running balance and a period total that ties to
 the trial balance. Bank feeds accept a setup token from any SimpleFIN
-provider. Asked for by @cnbarry1 (#179, #181).
+provider. Asked for by @cnbarry1 (#179, #181). 2.17.1 makes AI analysis
+work again with OpenAI's current models (#185, @Sciumo); 2.17.2 stops an
+invoice edit from stripping its job costing (#187, @Bit-Sage); 2.17.3 makes
+Pay Bills pay each vendor separately and keeps every payment on its own
+customer's or vendor's documents (#189, @Bit-Sage).
 
 **v2.16 — The year at a glance.** Two new overview cards, both opt-in under
 Customize: **P&L: Year to Date** with cumulative net by month, and a
