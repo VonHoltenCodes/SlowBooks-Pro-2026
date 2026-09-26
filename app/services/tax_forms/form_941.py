@@ -64,9 +64,11 @@ def compute_941(db, year: int, quarter: int) -> dict:
     medicare_employer = Decimal("0")
 
     for s in stubs:
-        if s.employee_id is not None:
+        gross = Decimal(str(s.gross_pay or 0))
+        # Line 1 counts employees who received wages; a $0.00 stub pays no one.
+        if s.employee_id is not None and gross > 0:
             employee_ids.add(s.employee_id)
-        total_wages += Decimal(str(s.gross_pay or 0))
+        total_wages += gross
         federal_withheld += Decimal(str(s.federal_tax or 0))
         ss_employee += Decimal(str(s.ss_tax or 0))
         ss_employer += Decimal(str(s.employer_ss_tax or 0))

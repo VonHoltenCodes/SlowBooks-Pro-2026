@@ -133,10 +133,30 @@ def compute_all_w2(db, year: int) -> list[dict]:
         if s.employee_id not in employees and s.employee is not None:
             employees[s.employee_id] = s.employee
 
-    return [
+    w2s = [
         _build_w2(year, emp_id, employees.get(emp_id), by_employee[emp_id])
         for emp_id in sorted(by_employee)
     ]
+    # No wages, no W-2: a $0.00 stub is not a wage statement, and the W-3
+    # counts the W-2s it transmits (2.17.3: "2" for one paid employee).
+    return [w2 for w2 in w2s if _has_wages(w2)]
+
+
+_AMOUNT_KEYS = (
+    "gross_pay",
+    "box1_federal_wages",
+    "box2_federal_tax_withheld",
+    "box3_ss_wages",
+    "box4_ss_tax_withheld",
+    "box5_medicare_wages",
+    "box6_medicare_tax_withheld",
+    "box16_state_wages",
+    "box17_state_income_tax",
+)
+
+
+def _has_wages(w2: dict) -> bool:
+    return any(w2.get(k) for k in _AMOUNT_KEYS)
 
 
 def compute_w3(db, year: int) -> dict:
