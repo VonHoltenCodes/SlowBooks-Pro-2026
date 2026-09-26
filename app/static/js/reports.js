@@ -576,11 +576,14 @@ const ReportsPage = {
     async incomeByCustomer(prefill) {
         await ReportsPage.openPeriodModal(T("Income by Customer"), "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}`);
+            // Sales before tax, the tax beside it; Paid includes money not
+            // yet applied to an invoice, and Balance is net of it.
             let rows = data.items.map(i =>
                 `<tr>
                     <td>${escapeHtml(i.customer_name)}</td>
                     <td class="amount">${i.invoice_count}</td>
                     <td class="amount">${formatCurrency(i.total_sales)}</td>
+                    <td class="amount">${formatCurrency(i.total_tax || 0)}</td>
                     <td class="amount">${formatCurrency(i.total_paid)}</td>
                     <td class="amount">${formatCurrency(i.total_balance)}</td>
                 </tr>`
@@ -589,14 +592,15 @@ const ReportsPage = {
                 <td>TOTAL</td>
                 <td class="amount">${data.items.reduce((sum, item) => sum + item.invoice_count, 0)}</td>
                 <td class="amount">${formatCurrency(data.total_sales)}</td>
+                <td class="amount">${formatCurrency(data.total_tax || 0)}</td>
                 <td class="amount">${formatCurrency(data.total_paid)}</td>
                 <td class="amount">${formatCurrency(data.total_balance)}</td>
             </tr>`;
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'income_by_customer', prefill });
     },
@@ -631,25 +635,23 @@ const ReportsPage = {
     async arAging(prefill) {
         await ReportsPage.openPeriodModal(T("Accounts Receivable Aging"), "this_year_to_date", async (_period, params) => {
             const data = await API.get(`/reports/ar-aging?as_of_date=${params.as_of_date}`);
-            let rows = data.items.map(i =>
-                `<tr>
-                    <td>${escapeHtml(i.customer_name)}</td>
-                    <td class="amount">${formatCurrency(i.current)}</td>
-                    <td class="amount">${formatCurrency(i.over_30)}</td>
-                    <td class="amount">${formatCurrency(i.over_60)}</td>
-                    <td class="amount">${formatCurrency(i.over_90)}</td>
-                    <td class="amount" style="font-weight:600;">${formatCurrency(i.total)}</td>
-                </tr>`
-            ).join("");
+            // The API nets a customer's credits (unapplied payments and
+            // credit memos) into Current; show Current gross and the
+            // credits on their own, so the row still adds up to Total and
+            // Total is what account 1100 says.
+            const credit = (r) => r.unapplied_credits || 0;
+            const agingRow = (r, name, style = '') => `<tr style="${style}">
+                    <td>${name}</td>
+                    <td class="amount">${formatCurrency(r.current + credit(r))}</td>
+                    <td class="amount">${formatCurrency(r.over_30)}</td>
+                    <td class="amount">${formatCurrency(r.over_60)}</td>
+                    <td class="amount">${formatCurrency(r.over_90)}</td>
+                    <td class="amount">${credit(r) ? formatCurrency(-credit(r)) : ''}</td>
+                    <td class="amount" style="font-weight:600;">${formatCurrency(r.total)}</td>
+                </tr>`;
+            let rows = data.items.map(i => agingRow(i, escapeHtml(i.customer_name))).join("");
             const t = data.totals;
-            rows += `<tr style="font-weight:700; background:var(--gray-50);">
-                <td>TOTAL</td>
-                <td class="amount">${formatCurrency(t.current)}</td>
-                <td class="amount">${formatCurrency(t.over_30)}</td>
-                <td class="amount">${formatCurrency(t.over_60)}</td>
-                <td class="amount">${formatCurrency(t.over_90)}</td>
-                <td class="amount">${formatCurrency(t.total)}</td>
-            </tr>`;
+            rows += agingRow(t, 'TOTAL', 'font-weight:700; background:var(--gray-50);');
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div style="margin-bottom:12px; display:flex; gap:8px;">
@@ -665,9 +667,9 @@ const ReportsPage = {
                 <div class="table-container"><table>
                     <thead><tr>
                         <th scope="col">${T('Customer')}</th><th scope="col" class="amount">Current</th><th scope="col" class="amount">1-30</th>
-                        <th scope="col" class="amount">31-60</th><th scope="col" class="amount">61-90+</th><th scope="col" class="amount">Total</th>
+                        <th scope="col" class="amount">31-60</th><th scope="col" class="amount">61-90+</th><th scope="col" class="amount">Credits</th><th scope="col" class="amount">Total</th>
                     </tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
+                    <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
                 </table></div>`;
         }, "As Of", true, { reportType: 'ar_aging', prefill });
     },

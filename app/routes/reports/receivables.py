@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, Query
 from fastapi.responses import Response
 from app.schemas.common import StrictModel
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.models.invoices import Invoice, InvoiceStatus
@@ -29,8 +29,31 @@ class CollectionLetterRequest(StrictModel):
     send_email: bool = False
 
 
+def _aging_row(customer_names: dict, cid: int) -> dict:
+    return {
+        "customer_name": customer_names.get(cid, "Unknown"),
+        "customer_id": cid,
+        "current": Decimal(0),
+        "over_30": Decimal(0),
+        "over_60": Decimal(0),
+        "over_90": Decimal(0),
+        "total": Decimal(0),
+        "unapplied_credits": Decimal(0),
+    }
+
+
 @router.get("/ar-aging")
 def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
+    """What each customer owes, by age, in home currency — and net of the
+    credits they hold, so the total is what account 1100 says.
+
+    Two gaps made the total disagree with the balance sheet (explore
+    2.17.3, W-H9 / F17): a foreign-currency invoice counted at its document
+    amount (EUR 850) instead of what it was booked at (USD 935), and money
+    a customer paid that was not applied to an invoice was left out
+    entirely (unapplied_credits read 0 for everyone)."""
+    from app.services.contact_balances import home_amount, unapplied_payments
+
     if not as_of_date:
         as_of_date = date.today()
 
@@ -52,19 +75,11 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
     for inv in invoices:
         cid = inv.customer_id
         if cid not in aging:
-            aging[cid] = {
-                "customer_name": customer_names.get(cid, "Unknown"),
-                "customer_id": cid,
-                "current": Decimal(0),
-                "over_30": Decimal(0),
-                "over_60": Decimal(0),
-                "over_90": Decimal(0),
-                "total": Decimal(0),
-                "unapplied_credits": Decimal(0),
-            }
+            aging[cid] = _aging_row(customer_names, cid)
 
         days = (as_of_date - inv.due_date).days if inv.due_date else 0
-        bal = inv.balance_due
+        # At the rate it was booked at, as the ledger carries it.
+        bal = home_amount(inv.balance_due, inv.exchange_rate)
         if days <= 0:
             aging[cid]["current"] += bal
         elif days <= 30:
@@ -90,32 +105,26 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
         .filter(CreditMemo.balance_remaining > 0)
         .all()
     )
-    for cm in credits:
-        cid = cm.customer_id
+    held = [(cm.customer_id, Decimal(str(cm.balance_remaining))) for cm in credits]
+    # ...and payments, or the part of one, not applied to any invoice: they
+    # credited A/R in full when received, at the payment's rate.
+    held += [
+        (p.customer_id, p.unapplied_home)
+        for p in unapplied_payments(db, end=as_of_date)
+    ]
+    for cid, amt in held:
         if cid not in aging:
-            aging[cid] = {
-                "customer_name": customer_names.get(cid, "Unknown"),
-                "customer_id": cid,
-                "current": Decimal(0),
-                "over_30": Decimal(0),
-                "over_60": Decimal(0),
-                "over_90": Decimal(0),
-                "total": Decimal(0),
-                "unapplied_credits": Decimal(0),
-            }
-        amt = Decimal(str(cm.balance_remaining))
+            aging[cid] = _aging_row(customer_names, cid)
         aging[cid]["unapplied_credits"] += amt
         # A credit has no due date: it offsets the newest bucket.
         aging[cid]["current"] -= amt
         aging[cid]["total"] -= amt
 
     _COLS = ("current", "over_30", "over_60", "over_90", "total", "unapplied_credits")
-    items = list(aging.values())
-    for item in items:
-        item.setdefault("unapplied_credits", Decimal(0))
+    items = sorted(aging.values(), key=lambda i: (i["customer_name"] or "").lower())
     totals = {"customer_name": "TOTAL", "customer_id": 0}
     for k in _COLS:
-        totals[k] = sum(i[k] for i in items)
+        totals[k] = sum((i[k] for i in items), Decimal(0))
     # Convert Decimals to float for JSON
     for item in items:
         for k in _COLS:
@@ -132,7 +141,15 @@ def income_by_customer(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Income by Customer report."""
+    """Income by Customer: invoices dated in the period, in home currency.
+
+    Sales is the pre-tax subtotal — sales tax is money collected for the
+    state, not income — with the tax beside it (explore 2.17.3, W-L11).
+    Paid includes money the customer paid in the period that is not
+    applied to an invoice yet, and Balance is net of it, so
+    Sales + Tax − Paid = Balance (W-H9: $612.30 shown paid of $682.30)."""
+    from app.services.contact_balances import home_amount, unapplied_payments
+
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:
@@ -140,48 +157,61 @@ def income_by_customer(
 
     invoices = (
         db.query(Invoice)
+        .options(joinedload(Invoice.customer))
         .filter(Invoice.date >= start_date, Invoice.date <= end_date)
         .filter(Invoice.status != InvoiceStatus.VOID)
         .all()
     )
 
     by_customer = {}
-    for inv in invoices:
-        cid = inv.customer_id
+
+    def row(cid, name):
         if cid not in by_customer:
-            cname = inv.customer.name if inv.customer else "Unknown"
             by_customer[cid] = {
                 "customer_id": cid,
-                "customer_name": cname,
+                "customer_name": name,
                 "invoice_count": 0,
                 "total_sales": Decimal(0),
+                "total_tax": Decimal(0),
                 "total_paid": Decimal(0),
                 "total_balance": Decimal(0),
             }
-        by_customer[cid]["invoice_count"] += 1
-        by_customer[cid]["total_sales"] += inv.total
-        by_customer[cid]["total_paid"] += inv.amount_paid
-        by_customer[cid]["total_balance"] += inv.balance_due
+        return by_customer[cid]
 
-    items = sorted(
-        by_customer.values(), key=lambda x: float(x["total_sales"]), reverse=True
-    )
+    for inv in invoices:
+        r = row(inv.customer_id, inv.customer.name if inv.customer else "Unknown")
+        rate = inv.exchange_rate
+        r["invoice_count"] += 1
+        r["total_sales"] += home_amount(inv.subtotal, rate)
+        r["total_tax"] += home_amount(inv.tax_amount, rate)
+        r["total_paid"] += home_amount(inv.amount_paid, rate)
+        r["total_balance"] += home_amount(inv.balance_due, rate)
+
+    unapplied = unapplied_payments(db, start=start_date, end=end_date)
+    if unapplied:
+        names = {
+            c.id: c.name
+            for c in db.query(Customer.id, Customer.name).filter(
+                Customer.id.in_({p.customer_id for p in unapplied})
+            )
+        }
+        for p in unapplied:
+            r = row(p.customer_id, names.get(p.customer_id, "Unknown"))
+            r["total_paid"] += p.unapplied_home
+            r["total_balance"] -= p.unapplied_home
+
+    items = sorted(by_customer.values(), key=lambda x: x["total_sales"], reverse=True)
+    money = ("total_sales", "total_tax", "total_paid", "total_balance")
+    grand = {k: sum((i[k] for i in items), Decimal(0)) for k in money}
     for item in items:
-        item["total_sales"] = float(item["total_sales"])
-        item["total_paid"] = float(item["total_paid"])
-        item["total_balance"] = float(item["total_balance"])
-
-    grand_sales = sum(i["total_sales"] for i in items)
-    grand_paid = sum(i["total_paid"] for i in items)
-    grand_balance = sum(i["total_balance"] for i in items)
+        for k in money:
+            item[k] = float(item[k])
 
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),
         "items": items,
-        "total_sales": grand_sales,
-        "total_paid": grand_paid,
-        "total_balance": grand_balance,
+        **{k: float(v) for k, v in grand.items()},
     }
 
 
