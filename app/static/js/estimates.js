@@ -65,6 +65,12 @@ const EstimatesPage = {
     async convert(id) {
         if (!confirm('Convert this estimate to an invoice?')) return;
         try {
+            // the new invoice may take the customer past their credit limit
+            const est = await API.get(`/estimates/${id}`);
+            const customer = await API.get(`/customers/${est.customer_id}`);
+            if (!(await InvoicesPage.creditLimitOk(customer, parseFloat(est.total) || 0))) return;
+        } catch (err) { /* the server still decides the conversion */ }
+        try {
             const inv = await API.post(`/estimates/${id}/convert`);
             toast(`Created ${T('Invoice')} #${inv.invoice_number}`);
             closeModal();

@@ -353,6 +353,8 @@ const InvoicesPage = {
             lines: [],
         };
         if (id) inv = await API.get(`/invoices/${id}`);
+        // what the invoice owed before this edit, for the credit-limit check
+        InvoicesPage._editing = id ? { total: parseFloat(inv.total) || 0, paid: parseFloat(inv.amount_paid) || 0 } : null;
         const classGroup = await classFormGroupHtml(inv.class_id);
         const jobGroup = await jobFormGroupHtml(inv.job_id, 'inv-customer-select');
         // Nonprofit: a pledge prints as one; program fees and rentals stay invoices
@@ -580,12 +582,44 @@ const InvoicesPage = {
             lines,
         };
 
+        // Past the customer's credit limit? Say so, and let the user decide.
+        const total = InvoicesPage.recalc().total;
+        const before = InvoicesPage._editing;
+        if (!before || total > before.total) {
+            const customer = InvoicesPage._customers.find(c => c.id == data.customer_id);
+            const owed = (total - (before ? before.paid : 0)) * (data.exchange_rate || 1);
+            if (!(await InvoicesPage.creditLimitOk(customer, owed, id))) return;
+        }
+
         try {
             if (id) { await API.put(`/invoices/${id}`, data); toast(Terms.text('Invoice updated')); }
             else { await API.post('/invoices', data); toast(Terms.text('Invoice created')); }
             closeModal();
             App.navigate(location.hash);
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // The customer's credit limit, as a warning the user can pass: an invoice
+    // that takes them past it asks first. A $512.13 invoice went to a
+    // customer with a $500 limit without a word (2.17.3 exploratory, S-b).
+    // What they owe is their open invoices' balances in home dollars, the
+    // invoice being edited left out (its new amount is `owed`). Returns true
+    // to go ahead; a failure to look is not a reason to stop.
+    async creditLimitOk(customer, owed, editingId = null) {
+        const limit = parseFloat(customer && customer.credit_limit);
+        if (!customer || !(limit > 0)) return true;
+        let open = 0;
+        try {
+            const invoices = await API.get(`/invoices?customer_id=${encodeURIComponent(customer.id)}`);
+            invoices.forEach(i => {
+                if (i.status === 'void' || (editingId && String(i.id) === String(editingId))) return;
+                open += (parseFloat(i.balance_due) || 0) * (parseFloat(i.exchange_rate) || 1);
+            });
+        } catch (e) { return true; }
+        const after = SalesLines.cents(open + (Number(owed) || 0));
+        if (after <= limit) return true;
+        return confirm(`${customer.name}'s credit limit is ${formatCurrency(limit)}. `
+            + `With this ${T('invoice')} they would owe ${formatCurrency(after)}. Save it anyway?`);
     },
 
     async loadAttachments(entityType, entityId) {
