@@ -369,6 +369,17 @@ const PaymentsPage = {
             : `Applying ${formatCurrency(used / 100)}; ${formatCurrency((availableCents - used) / 100)} stays as a credit.`;
     },
 
+    // Apply one credit to invoices: an unapplied payment in one request, a
+    // credit memo one invoice at a time (its own endpoint). The invoice
+    // view's Apply Credit sends through here too.
+    async applyCredit(kind, creditId, allocations) {
+        if (kind === 'payment') {
+            await API.post(`/payments/${creditId}/apply`, { allocations });
+            return;
+        }
+        for (const a of allocations) await API.post(`/credit-memos/${creditId}/apply`, a);
+    },
+
     async saveApplyCredit(e, kind, creditId, customerId, backToForm) {
         e.preventDefault();
         const allocations = [];
@@ -378,11 +389,7 @@ const PaymentsPage = {
         });
         if (!allocations.length) { toast('Enter an amount to apply', 'error'); return; }
         try {
-            if (kind === 'payment') {
-                await API.post(`/payments/${creditId}/apply`, { allocations });
-            } else {
-                for (const a of allocations) await API.post(`/credit-memos/${creditId}/apply`, a);
-            }
+            await PaymentsPage.applyCredit(kind, creditId, allocations);
             toast('Credit applied');
             if (backToForm) { PaymentsPage.showForm(null, customerId); return; }
             closeModal();

@@ -312,6 +312,28 @@ def apply_credit(
             ),
         )
 
+    # A credit memo is in the home currency (it has no currency of its
+    # own), so it can pay a home-currency invoice only — the payment-side
+    # rule. Applying $50 of credit to a EUR invoice took EUR 50 off it.
+    # And an amount must be more than zero: a negative one put credit back
+    # on the memo and the balance back on the invoice, past what they were.
+    from app.services.currency import document_currency, home_currency
+
+    home = home_currency(db)
+    if document_currency(invoice, db) != home:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invoice {invoice.invoice_number} is in "
+                f"{document_currency(invoice, db)}, and credit memo "
+                f"{cm.memo_number} is in {home}. A credit pays an invoice in "
+                "its own currency only."
+            ),
+        )
+    if Decimal(str(data.amount)) <= 0:
+        raise HTTPException(
+            status_code=400, detail="Enter an amount more than zero to apply."
+        )
     if Decimal(str(data.amount)) > cm.balance_remaining:
         raise HTTPException(status_code=400, detail="Amount exceeds credit balance")
     if Decimal(str(data.amount)) > invoice.balance_due:

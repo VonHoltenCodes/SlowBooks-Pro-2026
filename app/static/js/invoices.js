@@ -204,6 +204,7 @@ const InvoicesPage = {
                 <div class="total-row grand-total"><span class="label">Balance Due</span><span class="value">${money(inv.balance_due)}</span></div>
             </div>
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
+            <div id="inv-credit-note"></div>
             <div style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
                 <h3 style="font-size:13px; margin-bottom:8px;">Attachments</h3>
                 <div id="inv-attachments-list" style="margin-bottom:8px; font-size:11px;">Loading...</div>
@@ -222,6 +223,115 @@ const InvoicesPage = {
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
         InvoicesPage.loadAttachments('invoice', inv.id);
+        InvoicesPage.loadCreditNote(inv);
+    },
+
+    // Credit the customer already holds — the unapplied part of a payment,
+    // a credit memo — can be applied to this invoice from here. The apply
+    // existed (Receive Payments, the payment, the customer page), but the
+    // invoice, where the balance is looked at, had no way to it (found
+    // integrating the 2.17.3 exploratory fixes). Only credit in the
+    // invoice's own currency can pay it.
+    _usableCredits(inv, credits) {
+        if (!credits || !Array.isArray(credits.credits)) return [];
+        const code = String(inv.currency || credits.home_currency || '').toUpperCase();
+        return credits.credits.filter(c =>
+            String(c.currency || '').toUpperCase() === code && (parseFloat(c.available) || 0) > 0);
+    },
+
+    async loadCreditNote(inv) {
+        const el = $('#inv-credit-note');
+        if (!el || inv.status === 'void' || !((parseFloat(inv.balance_due) || 0) > 0)) return;
+        let credits;
+        try { credits = await API.get(`/customers/${inv.customer_id}/credits`); } catch (e) { return; }
+        const usable = InvoicesPage._usableCredits(inv, credits);
+        if (!usable.length) return;
+        const held = usable.reduce((sum, c) => sum + PaymentsPage._cents(c.available), 0) / 100;
+        el.innerHTML = `<div style="margin:12px 0; padding:8px 10px; border-radius:4px; background:#fff4d6; color:#7a5500;">
+                ${escapeHtml(Terms.text(`This customer has ${SalesLines.money(held, inv.currency)} in credit not applied to an invoice yet.`))}
+                <button type="button" class="btn btn-sm btn-primary" style="margin-left:8px;" onclick="InvoicesPage.showApplyCredit(${inv.id})">Apply Credit</button>
+            </div>`;
+    },
+
+    // Each usable credit with an amount to take from it, filled oldest first
+    // up to what the invoice still owes; any of it can be changed.
+    async showApplyCredit(invoiceId) {
+        let inv, credits;
+        try {
+            inv = await API.get(`/invoices/${invoiceId}`);
+            credits = await API.get(`/customers/${inv.customer_id}/credits`);
+        } catch (err) { toast(err.message, 'error'); return; }
+        const usable = InvoicesPage._usableCredits(inv, credits);
+        const cents = PaymentsPage._cents;
+        const money = (v) => SalesLines.money(v, inv.currency);
+        const due = cents(inv.balance_due);
+        InvoicesPage._applying = { due, currency: inv.currency };
+        let left = due;
+        const rows = usable.map(c => {
+            const take = Math.max(0, Math.min(left, cents(c.available)));
+            left -= take;
+            const label = PaymentsPage._creditLabel(c);
+            return `<tr>
+                <td>${escapeHtml(label)}</td>
+                <td class="amount">${money(c.available)}</td>
+                <td><input class="credit-take" data-kind="${escapeHtml(c.kind)}" data-id="${c.id}" data-max="${c.available}"
+                    type="number" step="0.01" min="0" max="${c.available}" value="${take > 0 ? (take / 100).toFixed(2) : ''}"
+                    aria-label="Apply from ${escapeHtml(label)}" oninput="InvoicesPage._applyCreditStatus()" style="width:100px;"></td>
+            </tr>`;
+        }).join('');
+        openModal(`Apply Credit to ${T('Invoice')} #${inv.invoice_number}`, `
+            <form onsubmit="InvoicesPage.saveApplyCredit(event, ${inv.id})">
+                <p style="margin-bottom:8px;">${escapeHtml(inv.customer_name || '')} owes <strong>${money(inv.balance_due)}</strong> on this ${T('invoice')}.</p>
+                ${usable.length ? `<div class="table-container"><table><thead><tr>
+                    <th scope="col">Credit</th><th scope="col" class="amount">Available</th><th scope="col" class="amount">Apply</th>
+                </tr></thead><tbody>${rows}</tbody></table></div>
+                <div id="apply-credit-status" style="margin-top:8px; font-size:13px;"></div>`
+                : `<p style="color:var(--gray-400);">${Terms.text('This customer has no credit in this currency to apply.')}</p>`}
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="InvoicesPage.view(${inv.id})">Cancel</button>
+                    ${usable.length ? '<button type="submit" class="btn btn-primary">Apply Credit</button>' : ''}
+                </div>
+            </form>`);
+        InvoicesPage._applyCreditStatus();
+    },
+
+    // What the amounts come to against what the invoice owes, as they are typed.
+    _applyCreditStatus() {
+        const el = $('#apply-credit-status');
+        const state = InvoicesPage._applying;
+        if (!el || !state) return;
+        const money = (c) => SalesLines.money(c / 100, state.currency);
+        let used = 0, over = false;
+        $$('.credit-take').forEach(input => {
+            const c = PaymentsPage._cents(input.value);
+            used += c;
+            if (c > PaymentsPage._cents(input.dataset.max)) over = true;
+        });
+        const bad = over || used > state.due;
+        el.style.color = bad ? '#a4242b' : 'var(--gray-600)';
+        el.textContent = over
+            ? 'One of the amounts is more than that credit has left.'
+            : used > state.due
+                ? `That is ${money(used - state.due)} more than the ${T('invoice')} owes.`
+                : `Applying ${money(used)}; ${money(state.due - used)} still due.`;
+    },
+
+    async saveApplyCredit(e, invoiceId) {
+        e.preventDefault();
+        const picks = [];
+        $$('.credit-take').forEach(input => {
+            const c = PaymentsPage._cents(input.value);
+            if (c > 0) picks.push({ kind: input.dataset.kind, id: parseInt(input.dataset.id), amount: c / 100 });
+        });
+        if (!picks.length) { toast('Enter an amount to apply', 'error'); return; }
+        try {
+            for (const p of picks) {
+                await PaymentsPage.applyCredit(p.kind, p.id, [{ invoice_id: invoiceId, amount: p.amount }]);
+            }
+            toast('Credit applied');
+            closeModal();
+            App.navigate(location.hash);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async void(id) {
