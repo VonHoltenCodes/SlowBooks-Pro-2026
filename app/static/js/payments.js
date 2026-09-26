@@ -180,16 +180,32 @@ const PaymentsPage = {
             API.get(`/invoices?customer_id=${customerId}`),
             API.get(`/customers/${customerId}/credits`).catch(() => null),
         ]);
-        PaymentsPage._invoices = PaymentsPage._openInvoices(invoices);
+        // One payment is in one currency (the server refuses a mix), so the
+        // customer's open invoices are offered one currency at a time. A
+        // foreign-currency invoice could only be paid through the API: the
+        // form sent no currency at all (found integrating 2.17.3's fixes).
+        PaymentsPage._home = String(
+            (credits && credits.home_currency)
+            || (typeof App !== 'undefined' && App.settings && App.settings.home_currency)
+            || 'USD').toUpperCase();
+        const open = PaymentsPage._openInvoices(invoices);
+        PaymentsPage._currencies = [...new Set(open.map(i => (i.currency || PaymentsPage._home).toUpperCase()))];
+        if (PaymentsPage._currencyFor !== String(customerId)
+            || !PaymentsPage._currencies.includes(PaymentsPage._currency)) {
+            PaymentsPage._currencyFor = String(customerId);
+            PaymentsPage._currency = PaymentsPage._currencies.includes(PaymentsPage._home)
+                ? PaymentsPage._home : (PaymentsPage._currencies[0] || PaymentsPage._home);
+        }
+        PaymentsPage._invoices = open.filter(i => (i.currency || PaymentsPage._home) === PaymentsPage._currency);
         PaymentsPage._renderCredits(credits, customerId);
 
         if (PaymentsPage._invoices.length === 0) {
-            $('#payment-invoices').innerHTML = `<p style="color:var(--gray-400);">${Terms.text('No outstanding invoices')}</p>`;
+            $('#payment-invoices').innerHTML = PaymentsPage._currencyHtml() + `<p style="color:var(--gray-400);">${Terms.text('No outstanding invoices')}</p>`;
             PaymentsPage._updateAllocStatus();
             return;
         }
 
-        let html = `<h4 style="margin-bottom:8px;">Apply to ${T('Invoices')}</h4>
+        let html = PaymentsPage._currencyHtml() + `<h4 style="margin-bottom:8px;">Apply to ${T('Invoices')}</h4>
             <div class="table-container"><table><thead><tr>
             <th scope="col">${T('Invoice')}</th><th scope="col">Date</th><th scope="col">Due</th><th scope="col" class="amount">Balance</th><th scope="col" class="amount">Apply</th>
             </tr></thead><tbody>`;
@@ -198,7 +214,7 @@ const PaymentsPage = {
                 <td>#${escapeHtml(inv.invoice_number)}${inv.status === 'draft' ? ' <span style="color:var(--text-muted);">(draft)</span>' : ''}</td>
                 <td>${formatDate(inv.date)}</td>
                 <td>${formatDate(inv.due_date)}</td>
-                <td class="amount">${formatCurrency(inv.balance_due)}</td>
+                <td class="amount">${PaymentsPage._fmt(inv.balance_due)}</td>
                 <td><input class="alloc-amount" data-invoice="${inv.id}" data-max="${inv.balance_due}"
                     type="number" step="0.01" min="0" max="${inv.balance_due}"
                     aria-label="Apply to ${escapeHtml(inv.invoice_number)}"
@@ -214,6 +230,57 @@ const PaymentsPage = {
                 background:var(--gray-100); font-size:13px;"></div>`;
         $('#payment-invoices').innerHTML = html;
         PaymentsPage._autoApply();
+        PaymentsPage._prefillRate();
+    },
+
+    // Money in the currency the payment is being taken in.
+    _fmt(v) {
+        return typeof SalesLines !== 'undefined'
+            ? SalesLines.money(v, PaymentsPage._currency) : formatCurrency(v);
+    },
+
+    _isForeign() {
+        return !!PaymentsPage._currency && PaymentsPage._currency !== PaymentsPage._home;
+    },
+
+    // Currency picker (only when the customer has invoices in more than one
+    // currency, or in a foreign one) and, for a foreign currency, the rate on
+    // the payment date.
+    _currencyHtml() {
+        const list = PaymentsPage._currencies || [];
+        if (list.length < 2 && !PaymentsPage._isForeign()) return '';
+        const opts = list.map(c => `<option ${c === PaymentsPage._currency ? 'selected' : ''}>${escapeHtml(c)}</option>`).join('');
+        const cur = escapeHtml(PaymentsPage._currency);
+        return `<div class="form-grid" style="margin-bottom:8px;">
+                <div class="form-group"><label>Currency</label>
+                    <select name="pay_currency" onchange="PaymentsPage.setCurrency(this.value)">${opts}</select></div>
+                ${PaymentsPage._isForeign() ? `<div class="form-group"><label>Exchange rate on the payment date (${escapeHtml(PaymentsPage._home)} per ${cur})</label>
+                    <input name="pay_exchange_rate" type="number" step="0.00000001" min="0" required></div>` : ''}
+            </div>
+            ${PaymentsPage._isForeign() ? `<p style="font-size:12px; color:var(--text-muted); margin:0 0 8px;">Enter the amount received in ${cur}. The rate converts it for the books; a difference from the invoices' own rates posts as an exchange gain or loss.</p>` : ''}`;
+    },
+
+    setCurrency(code) {
+        PaymentsPage._currency = String(code || '').toUpperCase();
+        const customerId = $('#payment-form [name="customer_id"]')?.value;
+        if (customerId) PaymentsPage.loadInvoices(customerId);
+    },
+
+    // The rate for the payment date: the exchange-rate feed, else the most
+    // recent invoice's booked rate. The person can always change it.
+    async _prefillRate() {
+        const input = $('#payment-form [name="pay_exchange_rate"]');
+        if (!input || input.value) return;
+        let rate = null;
+        try {
+            const d = await API.get(`/fx/rate?from_currency=${encodeURIComponent(PaymentsPage._currency)}`);
+            rate = d && d.rate;
+        } catch (e) { /* offline: fall back to the invoice's rate */ }
+        if (!rate) {
+            const last = PaymentsPage._invoices[PaymentsPage._invoices.length - 1];
+            rate = last && last.exchange_rate;
+        }
+        if (rate && !input.value) input.value = rate;
     },
 
     // Fill the Apply column oldest invoice first with the amount received
@@ -254,8 +321,8 @@ const PaymentsPage = {
             if (leftOver) {
                 const none = PaymentsPage._invoices.length === 0;
                 $('#keep-credit-text').textContent = none
-                    ? Terms.text(`Keep the whole ${formatCurrency(remaining / 100)} as a credit on this customer's account (there are no open invoices); it can be applied to an invoice later.`)
-                    : Terms.text(`Keep the ${formatCurrency(remaining / 100)} not applied as a credit on this customer's account; it can be applied to an invoice later.`);
+                    ? Terms.text(`Keep the whole ${PaymentsPage._fmt(remaining / 100)} as a credit on this customer's account (there are no open invoices); it can be applied to an invoice later.`)
+                    : Terms.text(`Keep the ${PaymentsPage._fmt(remaining / 100)} not applied as a credit on this customer's account; it can be applied to an invoice later.`);
             } else {
                 const box = $('#keep-credit');
                 if (box) box.checked = false;
@@ -269,7 +336,7 @@ const PaymentsPage = {
             status.style.background = '#fde2e2';
             status.style.color = '#a4242b';
             status.textContent =
-                `${formatCurrency(allocated / 100)} allocated but the Payment amount is empty. ` +
+                `${PaymentsPage._fmt(allocated / 100)} allocated but the Payment amount is empty. ` +
                 `Enter the amount you received above.`;
         } else if (total === 0) {
             status.style.background = 'var(--gray-100)';
@@ -279,17 +346,17 @@ const PaymentsPage = {
             status.style.background = '#fff4d6';
             status.style.color = '#7a5500';
             status.textContent =
-                `${formatCurrency(remaining / 100)} not applied of ${formatCurrency(total / 100)}.`;
+                `${PaymentsPage._fmt(remaining / 100)} not applied of ${PaymentsPage._fmt(total / 100)}.`;
         } else if (remaining < 0) {
             status.style.background = '#fde2e2';
             status.style.color = '#a4242b';
             status.textContent =
-                `Over-allocated by ${formatCurrency(-remaining / 100)}. ` +
+                `Over-allocated by ${PaymentsPage._fmt(-remaining / 100)}. ` +
                 `Reduce one of the Apply amounts or increase the Payment amount.`;
         } else {
             status.style.background = '#d6f4e0';
             status.style.color = '#1f6f3a';
-            status.textContent = `Fully allocated (${formatCurrency(total / 100)}).`;
+            status.textContent = `Fully allocated (${PaymentsPage._fmt(total / 100)}).`;
         }
     },
 
@@ -407,7 +474,7 @@ const PaymentsPage = {
         }
         // Leaving money unapplied is a choice the user makes, not a default.
         if (remaining > 0 && !$('#keep-credit')?.checked) {
-            toast(Terms.text(`${formatCurrency(remaining / 100)} is not applied to an invoice. Apply it, or tick the box to keep it as a credit.`), 'error');
+            toast(Terms.text(`${PaymentsPage._fmt(remaining / 100)} is not applied to an invoice. Apply it, or tick the box to keep it as a credit.`), 'error');
             return;
         }
         const allocations = [];
@@ -418,10 +485,18 @@ const PaymentsPage = {
             }
         });
 
+        const foreign = PaymentsPage._isForeign();
+        const rate = foreign ? parseFloat(form.pay_exchange_rate?.value) : null;
+        if (foreign && !(rate > 0)) {
+            toast(`Enter the exchange rate for ${PaymentsPage._currency} on the payment date.`, 'error');
+            return;
+        }
         const data = {
             customer_id: parseInt(form.customer_id.value),
             date: form.date.value,
             amount: parseFloat(form.amount.value),
+            currency: PaymentsPage._currency || null,
+            exchange_rate: foreign ? rate : null,
             method: form.method.value || null,
             check_number: form.check_number.value || null,
             reference: form.reference.value || null,
