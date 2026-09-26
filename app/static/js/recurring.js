@@ -125,7 +125,7 @@ const RecurringPage = {
                 <td><select class="line-item" onchange="RecurringPage.itemSelected(${idx})"><option value="">--</option>${opts}</select></td>
                 <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
                 <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="RecurringPage.recalc()"></td>
-                <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="RecurringPage.recalc()"></td>
+                <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="RecurringPage.recalc()"></td>
                 <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="RecurringPage.recalc()"></td>
                 <td class="col-amount line-amount">$0.00</td>
                 <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="RecurringPage.removeLine(${idx})">X</button></td>

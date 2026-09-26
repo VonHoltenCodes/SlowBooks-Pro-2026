@@ -1,11 +1,27 @@
 from datetime import date as dt_date, datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PlainSerializer, field_validator, model_validator
 
 from app.models.invoices import InvoiceStatus
 from app.schemas.common import StrictModel, TaxRate, validate_non_negative_line
+
+
+def _rate_json(value) -> str:
+    """A unit price as the API writes it: two places as before ("12.50"),
+    up to four when it has them ("0.045"). Sales line rates are stored to
+    four places now, and "12.5000" on every line would be noise."""
+    d = Decimal(str(value))
+    if d == d.quantize(Decimal("0.01")):
+        return f"{d:.2f}"
+    return format(d.normalize(), "f")
+
+
+# A sales line's unit price in a response.
+RateOut = Annotated[
+    Decimal, PlainSerializer(_rate_json, return_type=str, when_used="json")
+]
 
 
 class InvoiceLineCreate(StrictModel):
@@ -33,7 +49,7 @@ class InvoiceLineResponse(BaseModel):
     item_id: Optional[int]
     description: Optional[str]
     quantity: Decimal
-    rate: Decimal
+    rate: RateOut
     amount: Decimal
     class_name: Optional[str]
     job_id: Optional[int] = None

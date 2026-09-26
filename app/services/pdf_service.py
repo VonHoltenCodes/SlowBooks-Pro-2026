@@ -156,6 +156,22 @@ def _format_currency(value, code=None):
     return f"{code} {v:,.2f}" if code else f"${v:,.2f}"
 
 
+def _format_rate(value, code=None):
+    """A unit price: two places ("$12.50"), or up to four when it has them
+    ("$0.045"); sales line rates are kept to four places."""
+    from decimal import Decimal, InvalidOperation
+
+    try:
+        d = Decimal(str(value or 0))
+    except (InvalidOperation, ValueError):
+        d = Decimal("0")
+    if d == d.quantize(Decimal("0.01")):
+        body = f"{d:,.2f}"
+    else:
+        body = format(d.normalize(), ",f")
+    return f"{code} {body}" if code else f"${body}"
+
+
 def document_currency_code(doc, company_settings: dict) -> str:
     """The ISO code to print on a document's amounts: its own currency when
     that is not the home currency, else "" (plain dollars)."""
@@ -173,6 +189,7 @@ def _format_date(value):
 
 
 _jinja_env.filters["currency"] = _format_currency
+_jinja_env.filters["rate"] = _format_rate
 _jinja_env.filters["fdate"] = _format_date
 _jinja_env.globals["document_currency_code"] = document_currency_code
 

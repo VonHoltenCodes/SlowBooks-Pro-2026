@@ -38,7 +38,7 @@ const SalesReceiptsPage = {
         const money = (v) => SalesLines.money(v, sr.currency);
         const linesHtml = sr.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
-             <td class="amount">${money(l.rate)}</td><td class="amount">${money(l.amount)}</td></tr>`
+             <td class="amount">${SalesLines.rate(l.rate, sr.currency)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
 
         const payment = await SalesReceiptsPage._findPayment(sr);
@@ -343,7 +343,7 @@ const SalesReceiptsPage = {
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="SalesReceiptsPage.recalc()"></td>
-            <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="SalesReceiptsPage.recalc()"></td>
+            <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="SalesReceiptsPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="SalesReceiptsPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="SalesReceiptsPage.removeLine(${idx})">X</button></td>

@@ -71,14 +71,20 @@ const SalesLines = {
     // Money as the document prints it: dollars in the home currency; a
     // foreign document carries its ISO code ("EUR 850.00"), so a euro
     // invoice never reads as $850.00 (W-M2). Matches the PDF's filter.
-    money(amount, currency) {
+    money(amount, currency, places = 2) {
         const home = ((typeof App !== 'undefined' && App.settings && App.settings.home_currency) || 'USD').toUpperCase();
         const code = String(currency || '').trim().toUpperCase();
-        if (!code || code === home) return formatCurrency(amount);
         const n = Number(amount) || 0;
-        const digits = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        if (!code || code === home) {
+            if (places === 2) return formatCurrency(amount);
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: home, minimumFractionDigits: 2, maximumFractionDigits: places }).format(n);
+        }
+        const digits = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: places });
         return `${code} ${digits}`;
     },
+
+    // A unit price: two places, or up to four when it has them ($0.045).
+    rate(value, currency) { return SalesLines.money(value, currency, 4); },
 };
 window.SalesLines = SalesLines;
 
@@ -158,7 +164,7 @@ const InvoicesPage = {
         const money = (v) => SalesLines.money(v, inv.currency);
         let linesHtml = inv.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
-             <td class="amount">${money(l.rate)}</td><td class="amount">${money(l.amount)}</td></tr>`
+             <td class="amount">${SalesLines.rate(l.rate, inv.currency)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
 
         openModal(`${T('Invoice')} #${inv.invoice_number}`, `
@@ -487,7 +493,7 @@ const InvoicesPage = {
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="InvoicesPage.recalc()"></td>
-            <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="InvoicesPage.recalc()"></td>
+            <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="InvoicesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="InvoicesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="InvoicesPage.removeLine(${idx})">X</button></td>

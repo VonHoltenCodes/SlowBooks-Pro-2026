@@ -121,7 +121,7 @@
             <tr>
                 <td>{{ line.description or '' }}{% if inv.tax_amount and not line.is_taxable and not nonprofit %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity }}</td>
-                <td class="r">{{ line.rate | currency(cur) }}</td>
+                <td class="r">{{ line.rate | rate(cur) }}</td>
                 <td class="r">{{ line.amount | currency(cur) }}</td>
             </tr>
         {% endfor %}

@@ -55,4 +55,11 @@ const eur = [row(10, 85, true)];
 S.totals(tbody(eur), '0', 'EUR');
 out.eurLine = eur[0].els['.line-amount'].textContent;
 
+// A unit price shows to four places when it has them.
+out.rates = [S.rate('0.045'), S.rate('12.5000'), S.rate('1.0055', 'EUR'), S.rate(1234.5)];
+// 1,000 boxes at $0.045 is $45.00; 3 at $0.3333 is $1.00 (each line to the cent)
+const boxes = [row(1000, '0.045', true), row(3, '0.3333', true)];
+out.subCent = S.totals(tbody(boxes), '0');
+out.subCentAmounts = boxes.map((r) => r.els['.line-amount'].textContent);
+
 console.log(JSON.stringify(out));

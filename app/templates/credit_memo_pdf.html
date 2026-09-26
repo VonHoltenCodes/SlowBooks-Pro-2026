@@ -93,7 +93,7 @@
             <tr>
                 <td>{{ line.description or '' }}</td>
                 <td class="r">{{ line.quantity }}</td>
-                <td class="r">{{ line.rate | currency }}</td>
+                <td class="r">{{ line.rate | rate }}</td>
                 <td class="r">{{ line.amount | currency }}</td>
             </tr>
         {% endfor %}
