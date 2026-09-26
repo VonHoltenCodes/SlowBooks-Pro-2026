@@ -515,7 +515,7 @@ const ReportsPage = {
             const rows = data.items.map(i =>
                 `<tr>
                     <td>${formatDate(i.date)}</td>
-                    <td>${escapeHtml(i.number)}${i.type === 'credit_memo' ? ` <span class="badge" style="font-size:9px">${T('Credit Memo')}</span>` : ''}</td>
+                    <td>${escapeHtml(i.number)}${i.type === 'credit_memo' ? ` <span class="badge" style="font-size:9px">Credit Memo</span>` : ''}</td>
                     <td>${escapeHtml(i.customer_name)}</td>
                     <td class="amount">${formatCurrency(i.subtotal)}</td>
                     <td class="amount">${formatCurrency(i.taxable)}</td>
@@ -536,7 +536,7 @@ const ReportsPage = {
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')} / ${T('Credit Memo')}</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Taxable</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
+                    <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')} / Credit Memo</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Taxable</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
                     <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No taxable sales</td></tr>'}</tbody>
                 </table></div>
                 <div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
