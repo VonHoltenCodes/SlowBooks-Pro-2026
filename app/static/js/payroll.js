@@ -75,6 +75,7 @@ const PayrollPage = {
                     <thead><tr><th scope="col" style="width:30px;"></th><th scope="col">Employee</th><th scope="col">Type</th><th scope="col" class="amount">Rate</th><th scope="col">Hours</th><th scope="col">Time Entries</th></tr></thead>
                     <tbody>${empRows}</tbody>
                 </table></div>
+                <div id="pr-error" role="alert" style="color:var(--danger);font-size:12px;margin-top:8px;"></div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Calculate Payroll</button>
@@ -94,8 +95,13 @@ const PayrollPage = {
                 const empId = parseInt(cell.dataset.emp);
                 const row = byEmp[empId];
                 if (row) {
-                    cell.textContent = `${row.total.toFixed(1)} hrs (${row.entry_count} entries)`;
-                    cell.style.color = '#003366';
+                    // Time still waiting for approval is not paid by this
+                    // run: say so before the run is calculated.
+                    const waiting = row.pending_count
+                        ? ` · ${row.pending_count} not approved (${row.pending_hours.toFixed(1)} hrs, not paid)`
+                        : '';
+                    cell.textContent = `${row.total.toFixed(1)} hrs (${row.entry_count} entries)${waiting}`;
+                    cell.style.color = row.pending_count ? 'var(--danger)' : '#003366';
                     cell.style.fontWeight = '600';
                 } else {
                     cell.textContent = '—';
@@ -130,7 +136,7 @@ const PayrollPage = {
         if (stubs.length === 0) { toast('Select employees', 'error'); return; }
 
         try {
-            await API.post('/payroll', {
+            const run = await API.post('/payroll', {
                 period_start: form.period_start.value,
                 period_end: form.period_end.value,
                 pay_date: form.pay_date.value,
@@ -139,7 +145,20 @@ const PayrollPage = {
             toast('Pay run created');
             closeModal();
             App.navigate('#/payroll');
-        } catch (err) { toast(err.message, 'error'); }
+            // Time left unapproved in the period was not paid; a toast is
+            // gone before it can be read, so this waits to be closed.
+            if (run.warnings && run.warnings.length) {
+                openModal('Pay run created: some time was not paid', `
+                    <ul>${run.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
+                    <div class="form-actions"><button class="btn btn-primary" onclick="closeModal()">OK</button></div>`);
+            }
+        } catch (err) {
+            // A refused run names every employee it could not pay; keep that
+            // on the open form, where the fix (untick, or approve time) is.
+            const box = $('#pr-error');
+            if (box) box.textContent = err.message;
+            toast(err.message, 'error');
+        }
     },
 
     async view(id) {

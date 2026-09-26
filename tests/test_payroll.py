@@ -508,8 +508,11 @@ def test_time_entries_swept_into_pay_run_arent_paid_again(
             "pay_date": "2026-08-25",
             "stubs": [{"employee_id": emp["id"], "use_time_entries": True}],
         },
-    ).json()
-    assert second["stubs"][0]["gross_pay"] == 0.0  # no unpaid entries left
+    )
+    # No unpaid entries left: the run is refused rather than paying the
+    # employee a $0.00 stub (2.17.3 exploratory test, W-H8).
+    assert second.status_code == 422, second.text
+    assert "has no approved time" in second.json()["detail"]
 
 
 def test_time_entry_summary_rejects_inverted_range(client):

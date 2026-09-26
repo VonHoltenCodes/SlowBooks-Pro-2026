@@ -250,10 +250,12 @@ def pay_period_summary(
 ):
     """Hours-by-employee summary for an upcoming pay period.
 
-    Only approved entries that haven't been swept into a pay run yet
-    (pay_run_id IS NULL) are included — same filter the pay-run create
-    flow applies when `use_time_entries=true`. The SPA uses this to
-    pre-fill / preview the "Calculate Payroll" form.
+    The hours are approved entries that haven't been swept into a pay run
+    yet (pay_run_id IS NULL) — same filter the pay-run create flow applies
+    when `use_time_entries=true`. `pending_count` / `pending_hours` are the
+    entries in the period still waiting for approval (draft or submitted),
+    which that flow will not pay. The SPA uses this to pre-fill / preview
+    the "Calculate Payroll" form and to warn before a run leaves time unpaid.
     """
     if period_end < period_start:
         raise HTTPException(status_code=400, detail="period_end before period_start")
@@ -262,7 +264,13 @@ def pay_period_summary(
         db.query(TimeEntry)
         .options(joinedload(TimeEntry.employee))
         .filter(
-            TimeEntry.status == TimeEntryStatus.APPROVED,
+            TimeEntry.status.in_(
+                [
+                    TimeEntryStatus.APPROVED,
+                    TimeEntryStatus.DRAFT,
+                    TimeEntryStatus.SUBMITTED,
+                ]
+            ),
             TimeEntry.pay_run_id.is_(None),
             TimeEntry.date >= period_start,
             TimeEntry.date <= period_end,
@@ -281,11 +289,20 @@ def pay_period_summary(
                 "overtime": Decimal("0"),
                 "doubletime": Decimal("0"),
                 "entry_count": 0,
+                "pending_count": 0,
+                "pending_hours": Decimal("0"),
             },
         )
-        bucket["regular"] += Decimal(str(te.hours_regular or 0))
-        bucket["overtime"] += Decimal(str(te.hours_overtime or 0))
-        bucket["doubletime"] += Decimal(str(te.hours_doubletime or 0))
+        reg = Decimal(str(te.hours_regular or 0))
+        ot = Decimal(str(te.hours_overtime or 0))
+        dt = Decimal(str(te.hours_doubletime or 0))
+        if te.status != TimeEntryStatus.APPROVED:
+            bucket["pending_count"] += 1
+            bucket["pending_hours"] += reg + ot + dt
+            continue
+        bucket["regular"] += reg
+        bucket["overtime"] += ot
+        bucket["doubletime"] += dt
         bucket["entry_count"] += 1
 
     return [
@@ -295,6 +312,7 @@ def pay_period_summary(
             "overtime": float(b["overtime"]),
             "doubletime": float(b["doubletime"]),
             "total": float(b["regular"] + b["overtime"] + b["doubletime"]),
+            "pending_hours": float(b["pending_hours"]),
         }
         for b in by_emp.values()
     ]
