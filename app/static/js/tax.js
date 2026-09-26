@@ -44,11 +44,21 @@ const TaxPage = {
             }
         }
 
+        // Part I in the form's own order: returns, cost of goods sold and
+        // other income only when there are any.
+        const row = (label, value) => `<div class="total-row"><span class="label">${label}</span><span class="value">${formatCurrency(value)}</span></div>`;
+        const partOne = [
+            row('Gross receipts (line 1)', data.gross_receipts),
+            data.returns_and_allowances ? row('Returns and allowances (line 2)', -data.returns_and_allowances) : '',
+            data.cost_of_goods_sold ? row('Cost of goods sold (line 4)', -data.cost_of_goods_sold) : '',
+            data.other_income ? row('Other income (line 6)', data.other_income) : '',
+        ].join('');
         html += `</tbody></table></div>
             <div class="invoice-totals" style="margin-top:12px;">
-                <div class="total-row"><span class="label">Gross Income</span><span class="value">${formatCurrency(data.gross_income)}</span></div>
-                <div class="total-row"><span class="label">Total Expenses</span><span class="value">${formatCurrency(data.total_expenses)}</span></div>
-                <div class="total-row grand-total"><span class="label">Net Profit (Loss)</span><span class="value">${formatCurrency(data.net_profit)}</span></div>
+                ${partOne}
+                <div class="total-row"><span class="label">Gross Income (line 7)</span><span class="value">${formatCurrency(data.gross_income)}</span></div>
+                <div class="total-row"><span class="label">Total Expenses (line 28)</span><span class="value">${formatCurrency(data.total_expenses)}</span></div>
+                <div class="total-row grand-total"><span class="label">Net Profit (Loss) (line 31)</span><span class="value">${formatCurrency(data.net_profit)}</span></div>
             </div>`;
         container.innerHTML = html;
     },
