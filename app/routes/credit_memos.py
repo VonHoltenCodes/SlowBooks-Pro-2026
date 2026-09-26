@@ -35,7 +35,7 @@ from app.services.accounting import (
     compute_line_totals,
     _q,
 )
-from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
+from app.routes.invoices.helpers import confirm_zero_total, resolve_line_taxable
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_credit_memo_number
 from app.services.settings_service import get_all_settings as get_settings
@@ -155,7 +155,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     # and nothing at all for a non-taxable customer.
     resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
-    refuse_zero_total(total, "credit memo")
+    confirm_zero_total(total, data.allow_zero_total, "credit memo")
 
     cm = None
     # Retry the number assignment a few times — next_credit_memo_number is just

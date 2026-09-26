@@ -85,6 +85,23 @@ const SalesLines = {
 
     // A unit price: two places, or up to four when it has them ($0.045).
     rate(value, currency) { return SalesLines.money(value, currency, 4); },
+
+    // Send a sales document. One that adds up to $0.00 comes back refused
+    // (409, code "zero_total") unless the person says it is meant to be:
+    // no-charge warranty work is a real invoice, a form that filled in no
+    // price was the accident (2.17.3 exploratory, W-M1 / F14). Ask the
+    // server's question ("This invoice adds up to $0.00. Save it anyway?")
+    // and on yes send it once more with allow_zero_total. `send(allow)`
+    // makes the request; resolves to its answer, or null for no.
+    async sendAllowingZero(send) {
+        try {
+            return await send(false);
+        } catch (err) {
+            if (!(err && err.status === 409 && err.detail && err.detail.code === 'zero_total')) throw err;
+            if (!confirm(err.detail.question || err.message)) return null;
+            return send(true);
+        }
+    },
 };
 window.SalesLines = SalesLines;
 
@@ -228,7 +245,9 @@ const InvoicesPage = {
 
     async duplicate(id) {
         try {
-            const inv = await API.post(`/invoices/${id}/duplicate`);
+            const inv = await SalesLines.sendAllowingZero(allow =>
+                API.post(`/invoices/${id}/duplicate`, allow ? { allow_zero_total: true } : undefined));
+            if (!inv) return;
             toast(`Duplicated as ${T('Invoice')} #${inv.invoice_number}`);
             closeModal();
             App.navigate('#/invoices');
@@ -598,8 +617,12 @@ const InvoicesPage = {
         }
 
         try {
-            if (id) { await API.put(`/invoices/${id}`, data); toast(Terms.text('Invoice updated')); }
-            else { await API.post('/invoices', data); toast(Terms.text('Invoice created')); }
+            const saved = await SalesLines.sendAllowingZero(allow => {
+                const body = allow ? { ...data, allow_zero_total: true } : data;
+                return id ? API.put(`/invoices/${id}`, body) : API.post('/invoices', body);
+            });
+            if (!saved) return; // $0.00 and the user said no: the form stays open
+            toast(Terms.text(id ? 'Invoice updated' : 'Invoice created'));
             closeModal();
             App.navigate(location.hash);
         } catch (err) { toast(err.message, 'error'); }

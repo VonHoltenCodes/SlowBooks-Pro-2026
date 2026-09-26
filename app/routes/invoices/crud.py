@@ -19,8 +19,9 @@ from app.services.closing_date import check_closing_date
 
 from app.routes.invoices._router import router
 from app.routes.invoices.helpers import (
+    confirm_zero_total,
+    opening_status,
     refuse_due_before_date,
-    refuse_zero_total,
     resolve_line_taxable,
     _due_date_from_terms,
     _compute_totals,
@@ -101,8 +102,9 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     refuse_due_before_date(data.date, due_date)
     resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
-    refuse_zero_total(
+    confirm_zero_total(
         total,
+        data.allow_zero_total,
         document_label(SimpleNamespace(is_pledge=data.is_pledge), words).lower(),
     )
     _check_fair_value(data.fair_value_amount, total)
@@ -143,6 +145,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             currency=doc_currency,
             exchange_rate=doc_rate,
             customer_id=cust_id,
+            status=opening_status(total),
             date=data.date,
             due_date=due_date,
             terms=data.terms,
@@ -237,7 +240,9 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         raise HTTPException(status_code=400, detail="Cannot edit voided invoice")
     check_closing_date(db, invoice.date)
 
-    update_data = data.model_dump(exclude_unset=True, exclude={"lines"})
+    update_data = data.model_dump(
+        exclude_unset=True, exclude={"lines", "allow_zero_total"}
+    )
     # Checked against the dates the invoice will have after this edit; a
     # cleared due date is derived from the terms below, so it cannot be early.
     refuse_due_before_date(
@@ -292,7 +297,11 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             effective_lines = list(invoice.lines)
         tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
         subtotal, tax_amount, total = _compute_totals(effective_lines, tax_rate)
-        refuse_zero_total(total, document_label(invoice, terms_from_db(db)).lower())
+        confirm_zero_total(
+            total,
+            data.allow_zero_total,
+            document_label(invoice, terms_from_db(db)).lower(),
+        )
         if total < invoice.amount_paid:
             raise HTTPException(
                 status_code=400,

@@ -36,16 +36,27 @@ def _invoice_body(customer_id, line):
     }
 
 
+def _asked(r, message, question):
+    """The refusal a page can turn into a question: 409, code zero_total."""
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == {
+        "code": "zero_total",
+        "message": message,
+        "question": question,
+    }
+
+
 def test_an_invoice_that_adds_up_to_nothing_is_refused(
     client, db_session, seed_accounts, seed_customer
 ):
     from app.models.invoices import Invoice
 
     r = client.post("/api/invoices", json=_invoice_body(seed_customer.id, ZERO_LINE))
-    assert r.status_code == 400, r.text
-    assert r.json()["detail"] == (
+    _asked(
+        r,
         "This invoice adds up to $0.00. Enter a rate on at least one line "
-        "before saving it."
+        "before saving it.",
+        "This invoice adds up to $0.00. Save it anyway?",
     )
     assert db_session.query(Invoice).count() == 0
 
@@ -57,8 +68,8 @@ def test_editing_an_invoice_down_to_nothing_is_refused(
     assert r.status_code == 201, r.text
     inv = r.json()
     r = client.put(f"/api/invoices/{inv['id']}", json={"lines": [ZERO_LINE]})
-    assert r.status_code == 400, r.text
-    assert "adds up to $0.00" in r.json()["detail"]
+    assert r.status_code == 409, r.text
+    assert "adds up to $0.00" in r.json()["detail"]["message"]
     assert Decimal(client.get(f"/api/invoices/{inv['id']}").json()["total"]) == Decimal(
         "17.00"
     )
@@ -77,10 +88,11 @@ def test_a_credit_memo_for_nothing_is_refused(
             "lines": [ZERO_LINE],
         },
     )
-    assert r.status_code == 400, r.text
-    assert r.json()["detail"] == (
+    _asked(
+        r,
         "This credit memo adds up to $0.00. Enter a rate on at least one line "
-        "before saving it."
+        "before saving it.",
+        "This credit memo adds up to $0.00. Save it anyway?",
     )
     assert db_session.query(CreditMemo).count() == 0
 
@@ -182,10 +194,11 @@ def test_converting_an_estimate_for_nothing_is_refused(
     )
     assert est.status_code == 201, est.text
     r = client.post(f"/api/estimates/{est.json()['id']}/convert")
-    assert r.status_code == 400, r.text
-    assert r.json()["detail"] == (
+    _asked(
+        r,
         "This estimate adds up to $0.00. Enter a rate on at least one line "
-        "before converting it."
+        "before converting it.",
+        "This estimate adds up to $0.00. Convert it to an invoice anyway?",
     )
     assert db_session.query(Invoice).count() == 0
     assert client.get(f"/api/estimates/{est.json()['id']}").json()["status"] == (

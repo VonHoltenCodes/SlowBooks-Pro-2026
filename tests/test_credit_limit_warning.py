@@ -47,12 +47,13 @@ def test_saving_and_converting_ask_before_they_post():
     save = inv[inv.index("    async save(e, id) {") :]
     save = save[: save.index("\n    },")]
     check = save.index("await InvoicesPage.creditLimitOk(customer, owed, id)")
-    assert check < save.index("await API.post('/invoices', data)")
-    assert check < save.index("await API.put(`/invoices/${id}`, data)")
+    # sent through SalesLines.sendAllowingZero (a $0.00 invoice asks too)
+    assert check < save.index("API.post('/invoices', body)")
+    assert check < save.index("API.put(`/invoices/${id}`, body)")
 
     est = (JS / "estimates.js").read_text(encoding="utf-8")
     convert = est[est.index("    async convert(id) {") :]
     convert = convert[: convert.index("\n    },")]
     assert convert.index("InvoicesPage.creditLimitOk(customer") < convert.index(
-        "await API.post(`/estimates/${id}/convert`)"
+        "API.post(`/estimates/${id}/convert`"
     )

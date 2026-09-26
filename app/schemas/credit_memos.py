@@ -51,6 +51,9 @@ class CreditMemoCreate(StrictModel):
     class_id: Optional[int] = None
     job_id: Optional[int] = None
     lines: list[CreditMemoLineCreate] = []
+    # A credit memo for $0.00 is saved only when this says so; otherwise it
+    # is refused with 409 "zero_total".
+    allow_zero_total: bool = False
 
     @field_validator("lines")
     @classmethod

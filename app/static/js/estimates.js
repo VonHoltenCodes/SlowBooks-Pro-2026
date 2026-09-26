@@ -71,7 +71,10 @@ const EstimatesPage = {
             if (!(await InvoicesPage.creditLimitOk(customer, parseFloat(est.total) || 0))) return;
         } catch (err) { /* the server still decides the conversion */ }
         try {
-            const inv = await API.post(`/estimates/${id}/convert`);
+            // an estimate for $0.00 asks before it becomes a $0.00 invoice
+            const inv = await SalesLines.sendAllowingZero(allow =>
+                API.post(`/estimates/${id}/convert`, allow ? { allow_zero_total: true } : undefined));
+            if (!inv) return;
             toast(`Created ${T('Invoice')} #${inv.invoice_number}`);
             closeModal();
             App.navigate('#/invoices');

@@ -13,7 +13,7 @@ from app.database import get_db
 from app.models.accounts import Account
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.items import Item
-from app.schemas.invoices import InvoiceResponse
+from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
 from app.services.accounting import (
     create_journal_entry,
     get_ar_account_id,
@@ -27,7 +27,8 @@ from app.routes.invoices._router import router
 from app.routes.invoices.helpers import (
     _due_date_from_terms,
     _post_invoice_journal,
-    refuse_zero_total,
+    confirm_zero_total,
+    opening_status,
 )
 from app.services.donor_documents import document_label
 from app.services.terminology import document_reference, terms_from_db
@@ -373,7 +374,11 @@ def write_off_invoice(
 
 
 @router.post("/{invoice_id}/duplicate", response_model=InvoiceResponse, status_code=201)
-def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db)):
+def duplicate_invoice(
+    invoice_id: int,
+    data: Optional[ZeroTotalConfirmation] = None,
+    db: Session = Depends(get_db),
+):
     """Duplicate — the same sale under a new number, dated today and not
     sent yet. The copy carries what the original says about the sale: its
     currency and the rate it was booked at, the job, class and PO number,
@@ -396,12 +401,19 @@ def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db)):
     today = date.today()
     copied = taxed_copy_lines(original.lines, original.customer)
     subtotal, tax_amount, total = compute_line_totals(copied, original.tax_rate)
-    refuse_zero_total(total, document_label(original, words).lower(), "duplicating it")
+    noun = document_label(original, words).lower()
+    confirm_zero_total(
+        total,
+        bool(data and data.allow_zero_total),
+        noun,
+        "duplicating it",
+        question=f"This {noun} adds up to $0.00. Duplicate it anyway?",
+    )
 
     new_invoice = Invoice(
         invoice_number=next_invoice_number(db),
         customer_id=original.customer_id,
-        status=InvoiceStatus.DRAFT,
+        status=opening_status(total),
         date=today,
         due_date=_due_date_from_terms(today, original.terms),
         terms=original.terms,
