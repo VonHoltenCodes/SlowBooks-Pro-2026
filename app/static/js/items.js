@@ -87,9 +87,9 @@ const ItemsPage = {
                     <div class="form-group full-width"><label>Description</label>
                         <textarea name="description">${escapeHtml(item.description || '')}</textarea></div>
                     <div class="form-group"><label>Rate (sell price)</label>
-                        <input name="rate" type="number" step="0.01" value="${item.rate}"></div>
+                        <input name="rate" type="number" step="0.0001" value="${item.rate}"></div>
                     <div class="form-group"><label>Cost</label>
-                        <input name="cost" type="number" step="0.01" value="${item.cost}"></div>
+                        <input name="cost" type="number" step="0.0001" value="${item.cost}"></div>
                     <div class="form-group"><label>${T('Income')} Account</label>
                         <select name="income_account_id">
                             <option value="">-- None --</option>
@@ -308,7 +308,7 @@ const ItemsPage = {
                         <label>Unit cost (optional)
                             <span style="font-size:10px;color:var(--text-muted)">— affects avg cost</span>
                         </label>
-                        <input name="unit_cost" type="number" step="0.01" min="0"
+                        <input name="unit_cost" type="number" step="0.0001" min="0"
                                placeholder="${currentAvg.toFixed(2)}">
                     </div>
                     <div class="form-group full-width">

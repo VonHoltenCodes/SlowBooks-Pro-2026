@@ -4,6 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.schemas.common import StrictModel, TaxRateFloat, validate_non_negative_line
+from app.schemas.invoices import RateOut
 
 
 class POLineCreate(StrictModel):
@@ -26,7 +27,7 @@ class POLineResponse(BaseModel):
     item_id: Optional[int] = None
     description: Optional[str] = None
     quantity: Decimal = Decimal("0")
-    rate: Decimal = Decimal("0")
+    rate: RateOut = Decimal("0")
     amount: Decimal = Decimal("0")
     received_qty: Decimal = Decimal("0")
     job_id: Optional[int] = None

@@ -111,7 +111,7 @@ class VendorCreditLine(Base):
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)
-    rate = Column(Numeric(15, 2), default=0)
+    rate = Column(Numeric(17, 4), default=0)  # unit price, to 4 places
     amount = Column(Numeric(15, 2), default=0)
     # Per-line job / class; NULL falls back to the header
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)

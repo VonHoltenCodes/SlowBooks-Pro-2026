@@ -138,7 +138,7 @@ const PurchaseOrdersPage = {
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="PurchaseOrdersPage.recalc()"></td>
-            <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="PurchaseOrdersPage.recalc()"></td>
+            <td><input class="line-rate" type="number" step="0.0001" value="${line.rate || 0}" oninput="PurchaseOrdersPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1)*(line.rate||0))}</td>
         </tr>`;
     },

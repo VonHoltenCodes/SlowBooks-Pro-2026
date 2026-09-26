@@ -4,6 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel
 from app.schemas.common import NonBlankName, StrictModel
+from app.schemas.invoices import RateOut
 
 from app.models.items import ItemType, MovementType
 
@@ -46,8 +47,8 @@ class ItemResponse(BaseModel):
     name: str
     item_type: ItemType
     description: Optional[str]
-    rate: Decimal
-    cost: Decimal
+    rate: RateOut
+    cost: RateOut
     income_account_id: Optional[int]
     expense_account_id: Optional[int]
     is_taxable: bool
