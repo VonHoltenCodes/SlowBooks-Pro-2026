@@ -680,6 +680,7 @@ _DOCUMENT_KINDS = frozenset(
         "givingstatements",
         "check",
         "purchaseorder",
+        "po",
         "bill",
         "vendorcredit",
     }
@@ -687,7 +688,8 @@ _DOCUMENT_KINDS = frozenset(
 
 
 def _folder_for(filename: str) -> str:
-    """ "Documents" for a document someone is sent, "Reports" otherwise."""
+    """The folder for a PDF: Documents for a document someone is sent,
+    Reports for everything else."""
     kind = str(filename or "").split("_", 1)[0].replace("-", "").lower()
     return "Documents" if kind in _DOCUMENT_KINDS else "Reports"
 
