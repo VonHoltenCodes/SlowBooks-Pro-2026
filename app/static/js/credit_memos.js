@@ -182,7 +182,7 @@ const CreditMemosPage = {
         } catch (e) { return; }
         if (!sel || $('#cm-customer-select')?.value !== String(customerId)) return;
         sel.innerHTML = '<option value="">None</option>' + CreditMemosPage._invoices.map(i =>
-            `<option value="${i.id}">#${escapeHtml(i.invoice_number)} · ${formatDate(i.date)} · ${formatCurrency(i.total)}</option>`).join('');
+            `<option value="${i.id}">#${escapeHtml(i.invoice_number)} · ${formatDate(i.date)} · ${SalesLines.money(i.total, i.currency)}</option>`).join('');
     },
 
     // Crediting a particular invoice puts its tax back at the rate it was charged.
