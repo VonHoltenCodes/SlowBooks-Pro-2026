@@ -114,6 +114,19 @@ function enableSubmitButtons() {
     document.querySelectorAll('#modal .btn-primary').forEach(b => { b.disabled = false; if(b.dataset.origText) b.textContent = b.dataset.origText; });
 }
 
+// The accounts an account picker offers for a new entry: active ones of the
+// given types, and — for a business — not the nonprofit-only ones (net
+// assets, 4400 In-Kind Contributions; the API marks them nonprofit_only).
+// keepId: the account the record already uses, listed whatever it is so a
+// save never silently drops it.
+function pickerAccounts(accounts, types, keepId) {
+    const nonprofit = typeof Terms !== 'undefined' && Terms.isNonprofit();
+    return (accounts || []).filter(a => (keepId && a.id == keepId) || (
+        types.includes(a.account_type)
+        && a.is_active !== false
+        && !(a.nonprofit_only && !nonprofit)));
+}
+
 function closeSearchDropdown() {
     const dd = $('#search-results');
     if (dd) dd.classList.add('hidden');

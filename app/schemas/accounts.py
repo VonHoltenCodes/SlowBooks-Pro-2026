@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from functools import lru_cache
 from typing import Optional
 
 from typing import Literal
@@ -10,6 +11,20 @@ from app.schemas.common import StrictModel
 from app.models.accounts import AccountType
 
 BankKind = Literal["bank", "credit_card"]
+
+
+@lru_cache(maxsize=1)
+def _nonprofit_only_accounts() -> dict:
+    """{seeded name (casefolded): number} for the nonprofit accounts a
+    business never uses: accounting.NONPROFIT_ACCOUNTS without Bad Debt
+    Expense, which every chart has and a business writes off to as well."""
+    from app.services.accounting import NONPROFIT_ACCOUNTS
+
+    return {
+        name.casefold(): number
+        for number, name, _type in NONPROFIT_ACCOUNTS
+        if name != "Bad Debt Expense"
+    }
 
 
 class AccountCreate(StrictModel):
@@ -57,6 +72,11 @@ class AccountResponse(BaseModel):
     # than keeping its own copy of the registry, which would drift.
     is_control: bool = False
     control_purpose: Optional[str] = None
+    # An account only a nonprofit posts to (net assets, in-kind gifts). Every
+    # new company's chart carries 4400 In-Kind Contributions, so a business's
+    # item form offered it as an income account (W-L13); the pickers leave
+    # these out for a business. The account itself stays in the chart.
+    nonprofit_only: bool = False
     balance: Decimal
     created_at: datetime
 
@@ -80,6 +100,16 @@ class AccountResponse(BaseModel):
                 # not put the business words back.
                 _name, purpose = control_accounts.describe(self.account_number)
                 self.control_purpose = purpose
+        return self
+
+    @model_validator(mode="after")
+    def mark_nonprofit_only(self):
+        """Matched on the name the nonprofit setup gives the account as well
+        as its number, so a business that renamed 4400 to something of its
+        own — or imported a chart with its own 4400 — is never hidden."""
+        seeded = _nonprofit_only_accounts().get(" ".join(self.name.split()).casefold())
+        if seeded and self.account_number in (None, seeded):
+            self.nonprofit_only = True
         return self
 
     updated_at: datetime
