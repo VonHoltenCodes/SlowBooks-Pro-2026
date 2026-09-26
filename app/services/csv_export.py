@@ -4,6 +4,7 @@
 # ============================================================================
 
 import csv
+from decimal import Decimal
 import io
 
 from sqlalchemy.orm import Session
@@ -14,6 +15,19 @@ from app.models.invoices import Invoice
 from app.models.accounts import Account
 
 _FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _rate_text(value) -> str:
+    """A unit price as a person writes it: at least two places, and the
+    third and fourth only when they carry a digit — 12.50, 0.045 — now that
+    line rates are stored to four places (a $12.50 rate read "12.5000")."""
+    if value is None:
+        return ""
+    d = Decimal(str(value))
+    text = format(d.quantize(Decimal("0.0001")), "f")
+    whole, _, frac = text.partition(".")
+    frac = frac.rstrip("0")
+    return f"{whole}.{frac.ljust(2, '0')}"
 
 
 def _csv_safe(value: str) -> str:
@@ -347,7 +361,7 @@ def export_bills(db: Session, date_from=None, date_to=None) -> str:
                     ln.cost_code.label if getattr(ln, "cost_code", None) else "",
                     ln.description or "",
                     ln.quantity,
-                    ln.rate,
+                    _rate_text(ln.rate),
                     ln.amount,
                     b.subtotal,
                     b.tax_amount,
@@ -450,7 +464,7 @@ def export_sales_receipts(db: Session, date_from=None, date_to=None) -> str:
                     ln.item.name if ln.item else "",
                     ln.description or "",
                     ln.quantity,
-                    ln.rate,
+                    _rate_text(ln.rate),
                     "Y" if ln.is_taxable else "N",
                     ln.amount,
                     inv.subtotal,
