@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 from app.models.accounts import Account, AccountType
 from app.models.transactions import TransactionLine
 from app.services import control_accounts
+from app.services.csv_export import strip_formula_guard
 
 # --- vocabulary -------------------------------------------------------------
 
@@ -332,8 +333,12 @@ def _parse_csv(text: str, errors: list[str]) -> tuple[list[Row], list[str], str]
             continue
 
         def cell(key: str) -> str:
+            # strip_formula_guard: our own chart export writes "'=Name" for
+            # a formula-shaped name; the name is "=Name" (W-M15)
             i = idx.get(key)
-            return cells[i].strip() if i is not None and i < len(cells) else ""
+            if i is None or i >= len(cells):
+                return ""
+            return strip_formula_guard(cells[i]).strip()
 
         name = cell("name")
         if not name:

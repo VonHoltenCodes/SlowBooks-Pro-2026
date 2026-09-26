@@ -72,10 +72,14 @@ def parse_date(raw: str, formats: tuple[str, ...]):
 
 def sniff_reader(csv_text: str) -> csv.DictReader:
     """DictReader with the delimiter sniffed from the header line —
-    MYOB classic exports are tab-separated, cloud exports are commas."""
+    MYOB classic exports are tab-separated, cloud exports are commas. A
+    value a spreadsheet export guarded with a leading apostrophe
+    ("'=Name") reads as the value itself (csv_export.strip_formula_guard)."""
+    from app.services.csv_import import UnguardedDictReader
+
     first_line = csv_text.split("\n", 1)[0]
     delimiter = "\t" if "\t" in first_line else ","
-    return csv.DictReader(io.StringIO(csv_text), delimiter=delimiter)
+    return UnguardedDictReader(io.StringIO(csv_text), delimiter=delimiter)
 
 
 def strip_code_suffix(name: str) -> str:
