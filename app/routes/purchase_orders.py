@@ -4,8 +4,10 @@
 # ============================================================================
 
 from decimal import Decimal
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
@@ -13,9 +15,19 @@ from app.database import get_db
 from app.routes._helpers import clamp_pagination
 from app.models.purchase_orders import PurchaseOrder, PurchaseOrderLine, POStatus
 from app.models.contacts import Vendor
-from app.schemas.purchase_orders import POCreate, POUpdate, POResponse
+from app.schemas.purchase_orders import (
+    POConvertToBill,
+    POCreate,
+    POResponse,
+    POUpdate,
+)
 from app.services.accounting import _q, compute_line_totals
 from app.services.numbering import next_po_number
+from app.services.purchase_posting import (
+    expense_account_for,
+    spread,
+    unit_cost_with_tax,
+)
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
 
@@ -172,18 +184,68 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
     return resp
 
 
+def _po_html(db: Session, po_id: int) -> tuple[PurchaseOrder, str]:
+    from app.services.pdf_service import _render
+    from app.services.settings_service import get_all_settings
+
+    po = db.query(PurchaseOrder).filter(PurchaseOrder.id == po_id).first()
+    if not po:
+        raise HTTPException(status_code=404, detail="Purchase order not found")
+    return po, _render("purchase_order_pdf.html", get_all_settings(db), po=po)
+
+
+@router.get("/{po_id}/pdf")
+def po_pdf(po_id: int, db: Session = Depends(get_db)):
+    """The purchase order as a PDF, to send to the vendor. A PO could be
+    created and turned into a bill, but never seen or sent (skytech W-L19)."""
+    from app.services.pdf_service import render_pdf
+
+    po, html_str = _po_html(db, po_id)
+    return Response(
+        content=render_pdf(html_str),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=PurchaseOrder_{po.po_number}.pdf"
+        },
+    )
+
+
+@router.get("/{po_id}/print-preview")
+def po_print_preview(po_id: int, db: Session = Depends(get_db)):
+    """The purchase order as a page that opens the print dialog."""
+    _, html_str = _po_html(db, po_id)
+    return HTMLResponse(
+        content=html_str.replace(
+            "</body>",
+            "<script>window.onload=function(){window.print();}</script></body>",
+        )
+    )
+
+
 @router.post("/{po_id}/convert-to-bill")
-def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
+def convert_to_bill(
+    po_id: int,
+    data: Optional[POConvertToBill] = None,
+    db: Session = Depends(get_db),
+):
     """Convert a PO to a bill — creates bill with PO's line items AND the
     corresponding double-entry journal + inventory movements.
 
     Pre-Phase-11 this function created an orphan Bill row with no JE at all
     (expense + AP side were both missing). That was a silent accounting bug.
+
+    Each line posts where Enter Bill would post it (see
+    services/purchase_posting.py): the account chosen for it in the To Bill
+    dialog (``lines: [{line_id, account_id}]``), else its item's expense
+    account, else the vendor's default — and a line none of them names is
+    refused rather than booked to account 6000 (Advertising). Tax on the PO
+    is part of the lines' cost, never a debit to Sales Tax Payable. The bill
+    takes the vendor's terms and a due date from them.
     """
     from app.models.bills import Bill, BillLine, BillStatus
-    from app.models.accounts import Account
     from app.models.items import Item as ItemModel
-    from app.services.accounting import create_journal_entry
+    from app.routes.invoices.helpers import _due_date_from_terms
+    from app.services.accounting import create_journal_entry, get_ap_account_id
     from app.services.closing_date import check_closing_date
     from app.services.inventory_service import (
         get_inventory_asset_account_id,
@@ -199,44 +261,49 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
     check_closing_date(db, po.date)
     if po.status == POStatus.CLOSED:
         raise HTTPException(status_code=400, detail="PO already closed")
+    if Decimal(str(po.total or 0)) <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{po.po_number} comes to $0.00, so there is nothing to bill. "
+                "Enter the prices on its lines, then turn it into a bill."
+            ),
+        )
+
+    chosen: dict[int, int] = {}
+    po_line_ids = {ln.id for ln in po.lines}
+    for pick in data.lines if data else []:
+        if pick.line_id not in po_line_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Line id {pick.line_id} is not a line of {po.po_number}. "
+                    "Open the order again and choose the accounts from there."
+                ),
+            )
+        chosen[pick.line_id] = pick.account_id
 
     vendor = po.vendor
-    bill = Bill(
-        bill_number=f"BILL-{po.po_number}",
-        vendor_id=po.vendor_id,
-        status=BillStatus.UNPAID,
-        po_id=po.id,
-        date=po.date,
-        terms="Net 30",
-        subtotal=po.subtotal,
-        tax_rate=po.tax_rate,
-        tax_amount=po.tax_amount,
-        total=po.total,
-        balance_due=po.total,
-        notes=f"From {po.po_number}",
-        job_id=po.job_id,
-    )
-    db.add(bill)
-    db.flush()
+    terms = (vendor.terms if vendor else None) or "Net 30"
+    ap_id = get_ap_account_id(db)  # a missing A/P account is said first (#119)
 
-    # Build the same journal-line structure bills.create_bill uses so the
-    # PO→Bill path produces a fully balanced, inventory-aware JE.
-    default_expense = db.query(Account).filter(Account.account_number == "6000").first()
-    default_expense_id = default_expense.id if default_expense else None
-    ap_acct = db.query(Account).filter(Account.account_number == "2000").first()
+    # Round per line so the bill's JE debit matches the rounded AP credit
+    # rebuilt from po.total below.
+    lines = list(po.lines)
+    amounts = [_q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))) for ln in lines]
+    tax_amount = _q(po.tax_amount or 0)
+    tax_shares = spread(tax_amount, amounts)
 
-    journal_lines: list[dict] = []
-    inv_receipts: list[tuple] = []
-    for poline in po.lines:
-        # Round per line so the bill's JE debit matches the rounded AP credit
-        # rebuilt from po.total below.
-        amt = _q(Decimal(str(poline.quantity)) * Decimal(str(poline.rate)))
+    # Where each line posts, decided before anything is written so a
+    # refused line leaves no bill behind.
+    plan = []
+    for i, poline in enumerate(lines):
+        amt = amounts[i]
         item = (
             db.query(ItemModel).filter(ItemModel.id == poline.item_id).first()
             if poline.item_id
             else None
         )
-
         if item and item.track_inventory:
             posting_acct = get_inventory_asset_account_id(db, item)
             if not posting_acct:
@@ -247,23 +314,54 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
                         "asset account and no #1300 is seeded."
                     ),
                 )
-            if poline.quantity and poline.quantity > 0:
-                inv_receipts.append(
-                    (
-                        item,
-                        Decimal(str(poline.quantity)),
-                        Decimal(str(poline.rate)),
-                    )
-                )
+        elif amt > 0 or chosen.get(poline.id):
+            posting_acct = expense_account_for(
+                db,
+                line_no=i + 1,
+                description=poline.description,
+                account_id=chosen.get(poline.id),
+                item=item,
+                vendor=vendor,
+                fix_hint="Choose an account for it when you turn the order into a bill",
+            )
         else:
-            posting_acct = None
-            if item and item.expense_account_id:
-                posting_acct = item.expense_account_id
-            elif vendor and vendor.default_expense_account_id:
-                posting_acct = vendor.default_expense_account_id
-            else:
-                posting_acct = default_expense_id
+            posting_acct = (item.expense_account_id if item else None) or (
+                vendor.default_expense_account_id if vendor else None
+            )
+        plan.append((poline, item, amt, tax_shares[i], posting_acct))
 
+    bill = Bill(
+        bill_number=f"BILL-{po.po_number}",
+        vendor_id=po.vendor_id,
+        status=BillStatus.UNPAID,
+        po_id=po.id,
+        date=po.date,
+        # The vendor's terms, and the due date they give — a converted bill
+        # had "Net 30" and no due date, so it never aged (macbase1 F10).
+        terms=terms,
+        due_date=_due_date_from_terms(po.date, terms),
+        subtotal=po.subtotal,
+        tax_rate=po.tax_rate,
+        tax_amount=tax_amount,
+        total=po.total,
+        balance_due=po.total,
+        notes=f"From {po.po_number}",
+        job_id=po.job_id,
+    )
+    db.add(bill)
+    db.flush()
+
+    journal_lines: list[dict] = []
+    inv_receipts: list[tuple] = []
+    for poline, item, amt, share, posting_acct in plan:
+        if item and item.track_inventory and poline.quantity and poline.quantity > 0:
+            inv_receipts.append(
+                (
+                    item,
+                    Decimal(str(poline.quantity)),
+                    unit_cost_with_tax(amt, share, poline.quantity, poline.rate),
+                )
+            )
         db.add(
             BillLine(
                 bill_id=bill.id,
@@ -282,7 +380,7 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
             journal_lines.append(
                 {
                     "account_id": posting_acct,
-                    "debit": amt,
+                    "debit": amt + share,
                     "credit": Decimal("0"),
                     "description": poline.description or "",
                     "job_id": poline.job_id or po.job_id,
@@ -290,22 +388,10 @@ def convert_to_bill(po_id: int, db: Session = Depends(get_db)):
                 }
             )
 
-    if bill.tax_amount and bill.tax_amount > 0:
-        tax_acct = db.query(Account).filter(Account.account_number == "2200").first()
-        if tax_acct:
-            journal_lines.append(
-                {
-                    "account_id": tax_acct.id,
-                    "debit": Decimal(str(bill.tax_amount)),
-                    "credit": Decimal("0"),
-                    "description": "Sales tax on bill",
-                }
-            )
-
-    if ap_acct and journal_lines:
+    if journal_lines:
         journal_lines.append(
             {
-                "account_id": ap_acct.id,
+                "account_id": ap_id,
                 "debit": Decimal("0"),
                 "credit": Decimal(str(bill.total)),
                 "description": f"From PO {po.po_number}",

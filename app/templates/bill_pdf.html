@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Bill</title>
+<style>
+    @page { size: letter; margin: 0.6in 0.75in; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .company-info { font-size: 9pt; color: #4a4a6a; }
+    .company-name { font-size: 16pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
+    .company-logo { display: block; max-height: 60px; max-width: 200px; margin-bottom: 6px; }
+    .doc-title { text-align: right; }
+    .doc-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
+    .doc-number { font-size: 12pt; color: #666; margin-top: 4px; }
+    .meta-table { width: 100%; margin-bottom: 16px; }
+    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; white-space: nowrap; }
+    .meta-label { font-weight: 700; color: #4a4a6a; width: 80px; }
+    .addresses { display: flex; gap: 40px; margin-bottom: 20px; }
+    .address-block { flex: 1; }
+    .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
+    .address-text { font-size: 9pt; color: #333; }
+    table.line-items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.line-items th.r { text-align: right; }
+    table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.line-items tr:nth-child(even) { background: #f7f9fb; }
+    .totals { float: right; width: 240px; }
+    .totals table { width: 100%; }
+    .totals td { padding: 3px 8px; font-size: 9pt; }
+    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    .totals .label { font-weight: 700; color: #4a4a6a; }
+    .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
+    .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
+</style>
+</head>
+<body>
+    {% set v = bill.vendor %}
+    <div class="header">
+        <div>
+            {% if company_logo_data_uri %}<img class="company-logo" src="{{ company_logo_data_uri }}" alt="">{% endif %}
+            <div class="company-name">{{ company.company_name }}</div>
+            <div class="company-info">
+                {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
+                {% if company.company_address2 %}{{ company.company_address2 }}<br>{% endif %}
+                {% if company.company_city %}{{ company.company_city }}, {{ company.company_state }} {{ company.company_zip }}<br>{% endif %}
+                {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
+                {% if company.company_email %}{{ company.company_email }}{% endif %}
+            </div>
+        </div>
+        <div class="doc-title">
+            <h1>BILL</h1>
+            <div class="doc-number">#{{ bill.bill_number }}</div>
+        </div>
+    </div>
+
+    <table class="meta-table">
+        <tr>
+            <td class="meta-label">Date:</td><td>{{ bill.date | fdate }}</td>
+            <td class="meta-label">Terms:</td><td>{{ bill.terms or '' }}</td>
+        </tr>
+        <tr>
+            <td class="meta-label">Due:</td><td>{{ bill.due_date | fdate }}</td>
+            <td class="meta-label">Status:</td><td>{{ bill.status.value | title }}</td>
+        </tr>
+        {% if bill.ref_number %}<tr>
+            <td class="meta-label">Ref:</td><td colspan="3">{{ bill.ref_number }}</td>
+        </tr>{% endif %}
+    </table>
+
+    <div class="addresses">
+        <div class="address-block">
+            <div class="address-label">Vendor</div>
+            <div class="address-text">
+                <strong>{{ v.name if v else '' }}</strong><br>
+                {% if v and v.address1 %}{{ v.address1 }}<br>{% endif %}
+                {% if v and v.address2 %}{{ v.address2 }}<br>{% endif %}
+                {% if v and (v.city or v.state or v.zip) %}{{ v.city or '' }}{% if v.city and (v.state or v.zip) %}, {% endif %}{{ v.state or '' }} {{ v.zip or '' }}{% endif %}
+            </div>
+        </div>
+    </div>
+
+    <table class="line-items">
+        <thead><tr><th>Description</th><th class="r" style="width:60px;">Qty</th><th class="r" style="width:80px;">Rate</th><th class="r" style="width:80px;">Amount</th></tr></thead>
+        <tbody>
+        {% for line in bill.lines %}
+            <tr>
+                <td>{{ line.description or (line.item.name if line.item else '') }}</td>
+                <td class="r">{{ line.quantity }}</td>
+                <td class="r">{{ line.rate | currency }}</td>
+                <td class="r">{{ line.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <table>
+            <tr><td class="label">Subtotal</td><td class="r">{{ bill.subtotal | currency }}</td></tr>
+            {% if bill.tax_amount and bill.tax_amount != 0 %}
+            <tr><td class="label">Tax ({{ "%.2f" | format(bill.tax_rate * 100) }}%)</td><td class="r">{{ bill.tax_amount | currency }}</td></tr>
+            {% endif %}
+            <tr><td class="label grand">Total</td><td class="r grand">{{ bill.total | currency }}</td></tr>
+            {% if bill.amount_paid and bill.amount_paid != 0 %}
+            <tr><td class="label">Paid</td><td class="r">{{ bill.amount_paid | currency }}</td></tr>
+            <tr><td class="label">Balance Due</td><td class="r">{{ bill.balance_due | currency }}</td></tr>
+            {% endif %}
+        </table>
+    </div>
+
+    {% if bill.notes %}
+    <div class="notes"><strong>Notes:</strong> {{ bill.notes }}</div>
+    {% endif %}
+
+    <div class="footer">Generated by Slowbooks Pro 2026</div>
+</body>
+</html>

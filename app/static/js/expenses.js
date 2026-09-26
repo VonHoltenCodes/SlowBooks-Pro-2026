@@ -64,7 +64,9 @@ const ExpensesPage = {
         await CostCodes.load();
         const costCodeGroup = CostCodes.any() ? `<div class="form-group"><label>Cost Code</label><select name="cost_code_id">${CostCodes.optionsHtml(null)}</select></div>` : '';
         const billableGroup = `<div class="form-group"><label>Billable</label><label style="font-weight:normal;"><input type="checkbox" name="is_billable"> Bill this cost to the job's customer</label></div>`;
-        const expenseAccts = accounts.filter(a => a.account_type === 'expense');
+        // Expense and cost-of-goods accounts: materials are bought against
+        // 5100 Materials Cost as often as against an expense (W-L18).
+        const expenseAccts = PurchaseAccounts.filter(accounts);
         const paidFrom = ExpensesPage.paidFromAccounts(accounts);
         const acctOpt = a => `<option value="${a.id}">${escapeHtml(a.account_number || '')} - ${escapeHtml(a.name)}</option>`;
         const checking = paidFrom.find(a => /checking/i.test(a.name || '')) || paidFrom[0];
@@ -179,13 +181,15 @@ const ExpensesPage = {
     async save(e) {
         e.preventDefault();
         const form = e.target;
+        const paidFrom = parseInt(form.paid_from_account_id.value);
+        if (!(await Overdraft.confirm(paidFrom, parseFloat(form.amount.value) || 0))) return;
         try {
             const vendorId = await VendorQuickAdd.ensure('expense-vendor');
             const result = await API.post('/expenses', {
                 date: form.date.value,
                 vendor_id: vendorId,
                 expense_account_id: parseInt(form.expense_account_id.value),
-                paid_from_account_id: parseInt(form.paid_from_account_id.value),
+                paid_from_account_id: paidFrom,
                 amount: parseFloat(form.amount.value),
                 reference: form.reference.value || null,
                 memo: form.memo.value || null,
@@ -282,5 +286,27 @@ const ExpensesPage = {
             toast('Attachment deleted');
             ExpensesPage.loadAttachments(id);
         } catch (err) { toast(err.message, 'error'); }
+    },
+};
+
+/**
+ * Money leaving a bank account: before an expense or a bill payment is
+ * saved, say so when it takes the account below zero, and let the user go
+ * ahead or stop (macbase1 S-a: an expense and a pay run overdrew Checking
+ * to -$2,986.90 without a word). The balance is the ledger balance the
+ * register shows. A card is left alone — its balance is money owed, not
+ * money in the bank. A failed lookup never blocks the save.
+ */
+const Overdraft = {
+    // accountId, or null for "the server's default" named by defaultNumber.
+    async confirm(accountId, amount, defaultNumber) {
+        if (!(amount > 0)) return true;
+        let accounts;
+        try { accounts = await API.get('/banking/overview'); } catch (e) { return true; }
+        const acct = accounts.find(a => accountId ? a.account_id === accountId : a.account_number === defaultNumber);
+        if (!acct || acct.bank_kind !== 'bank') return true;
+        const after = PurchaseLines.cents(Number(acct.balance) - amount);
+        if (after >= 0) return true;
+        return confirm(`${acct.name} will be overdrawn by ${formatCurrency(-after)}. Save anyway?`);
     },
 };
