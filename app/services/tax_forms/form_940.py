@@ -72,7 +72,8 @@ def compute_940(db, year: int) -> dict:
 
     return {
         "year": year,
-        "num_employees": len(paid_by_employee),
+        # Employees who received wages: a $0.00 stub pays no one.
+        "num_employees": sum(1 for paid in paid_by_employee.values() if paid > 0),
         "num_stubs": len(stubs),
         # Line 3 — total payments to all employees
         "total_payments": _q(total_payments),

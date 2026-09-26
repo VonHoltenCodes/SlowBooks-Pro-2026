@@ -219,6 +219,8 @@ class PayRunResponse(BaseModel):
     total_employer_benefits: float = 0
     burden_job_cost_id: Optional[int] = None
     stubs: list[PayStubResponse] = []
+    # Set on create only: time left unapproved in the period, not paid.
+    warnings: list[str] = []
     model_config = {"from_attributes": True}
 
 

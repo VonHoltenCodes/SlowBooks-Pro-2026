@@ -55,41 +55,41 @@
         <tr>
             <td>
                 <div class="box-num">Box 1 — Wages, tips, other compensation</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box1_federal_wages) }}</div>
+                <div class="box-val">{{ data.box1_federal_wages | currency }}</div>
             </td>
             <td>
                 <div class="box-num">Box 2 — Federal income tax withheld</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box2_federal_tax_withheld) }}</div>
+                <div class="box-val">{{ data.box2_federal_tax_withheld | currency }}</div>
             </td>
         </tr>
         <tr>
             <td>
                 <div class="box-num">Box 3 — Social security wages</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box3_ss_wages) }}</div>
+                <div class="box-val">{{ data.box3_ss_wages | currency }}</div>
             </td>
             <td>
                 <div class="box-num">Box 4 — Social security tax withheld</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box4_ss_tax_withheld) }}</div>
+                <div class="box-val">{{ data.box4_ss_tax_withheld | currency }}</div>
             </td>
         </tr>
         <tr>
             <td>
                 <div class="box-num">Box 5 — Medicare wages and tips</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box5_medicare_wages) }}</div>
+                <div class="box-val">{{ data.box5_medicare_wages | currency }}</div>
             </td>
             <td>
                 <div class="box-num">Box 6 — Medicare tax withheld</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box6_medicare_tax_withheld) }}</div>
+                <div class="box-val">{{ data.box6_medicare_tax_withheld | currency }}</div>
             </td>
         </tr>
         <tr>
             <td>
                 <div class="box-num">Box 16 — State wages, tips, etc. (aggregate)</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box16_state_wages) }}</div>
+                <div class="box-val">{{ data.box16_state_wages | currency }}</div>
             </td>
             <td>
                 <div class="box-num">Box 17 — State income tax (aggregate)</div>
-                <div class="box-val">{{ '%0.2f'|format(data.box17_state_income_tax) }}</div>
+                <div class="box-val">{{ data.box17_state_income_tax | currency }}</div>
             </td>
         </tr>
     </table>

@@ -6,6 +6,7 @@ from app.models.contacts import Vendor
 from app.schemas.contacts import VendorCreate, VendorUpdate, VendorResponse
 from app.routes._helpers import get_or_404
 from app.services.duplicate_detection import find_duplicates
+from app.services.form_1099 import clear_type_unless_1099
 
 router = APIRouter(prefix="/api/vendors", tags=["vendors"])
 
@@ -55,6 +56,7 @@ def create_vendor(
                 },
             )
     vendor = Vendor(**data.model_dump())
+    clear_type_unless_1099(vendor)
     db.add(vendor)
     db.commit()
     db.refresh(vendor)
@@ -66,6 +68,7 @@ def update_vendor(vendor_id: int, data: VendorUpdate, db: Session = Depends(get_
     vendor = get_or_404(db, Vendor, vendor_id)
     for key, val in data.model_dump(exclude_unset=True).items():
         setattr(vendor, key, val)
+    clear_type_unless_1099(vendor)
     db.commit()
     db.refresh(vendor)
     return vendor

@@ -510,21 +510,34 @@ const ReportsPage = {
     async salesTax(prefill) {
         await ReportsPage.openPeriodModal("Sales Tax Report", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/sales-tax?start_date=${range.start}&end_date=${range.end}`);
+            // Credit memos come back as negative rows; a document with
+            // nothing taxable shows no rate rather than "8.25%, $0.00".
             const rows = data.items.map(i =>
                 `<tr>
                     <td>${formatDate(i.date)}</td>
-                    <td>${escapeHtml(i.invoice_number)}</td>
+                    <td>${escapeHtml(i.number)}${i.type === 'credit_memo' ? ` <span class="badge" style="font-size:9px">Credit Memo</span>` : ''}</td>
                     <td>${escapeHtml(i.customer_name)}</td>
                     <td class="amount">${formatCurrency(i.subtotal)}</td>
-                    <td class="amount">${(i.tax_rate * 100).toFixed(2)}%</td>
+                    <td class="amount">${formatCurrency(i.taxable)}</td>
+                    <td class="amount">${i.tax_rate == null ? '—' : (i.tax_rate * 100).toFixed(2) + '%'}</td>
                     <td class="amount">${formatCurrency(i.tax_amount)}</td>
                 </tr>`
             ).join("");
+            const ledger = data.ledger;
+            const agrees = ledger && Math.abs(ledger.difference) < 0.005;
+            const reconcile = ledger ? `
+                    <div style="font-size:12px; margin-top:8px; border-top:1px solid var(--gray-200); padding-top:6px;">
+                        ${escapeHtml(ledger.account_number)} ${escapeHtml(ledger.account_name)}: tax posted this period <strong>${formatCurrency(ledger.tax_posted)}</strong>
+                        ${agrees
+                            ? '— agrees with this report.'
+                            : `— <span style="color:var(--danger); font-weight:700;">differs from this report by ${formatCurrency(ledger.difference)}</span>. Something other than a sale or credit memo posted to the account in these dates (tax on a bill, a journal entry, a void of an earlier sale).`}
+                        <div>Paid this period: ${formatCurrency(ledger.payments)} · Owed at ${formatDate(data.end_date)}: <strong>${formatCurrency(ledger.balance)}</strong></div>
+                    </div>` : '';
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')}</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No taxable sales</td></tr>'}</tbody>
+                    <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')} / Credit Memo</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Taxable</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No taxable sales</td></tr>'}</tbody>
                 </table></div>
                 <div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
                     <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
@@ -532,7 +545,9 @@ const ReportsPage = {
                         <span>Taxable: <strong>${formatCurrency(data.total_taxable)}</strong></span>
                         <span>Non-Taxable: <strong>${formatCurrency(data.total_non_taxable)}</strong></span>
                     </div>
+                    <div style="font-size:12px;">Tax on sales ${formatCurrency(data.tax_on_sales)} less tax on credit memos ${formatCurrency(data.tax_credited)}</div>
                     <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">Tax Collected: ${formatCurrency(data.total_tax)}</div>
+                    ${reconcile}
                 </div>`;
         }, "Dates", false, { reportType: 'sales_tax', prefill });
     },

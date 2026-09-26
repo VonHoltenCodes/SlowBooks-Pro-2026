@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.routes.payroll._router import router
 from app.routes.payroll.ytd import employee_ytd
+from app.services.payroll_documents import employer_block
 from app.models.payroll import (
     PayRun,
     PayStub,
@@ -33,14 +34,8 @@ def download_paystub(run_id: int, stub_id: int, db: Session = Depends(get_db)):
     emp = db.query(Employee).filter(Employee.id == stub.employee_id).first()
 
     ytd = employee_ytd(db, stub.employee_id, run.pay_date.year)
-    company = {
-        "name": config.COMPANY_NAME,
-        "address": config.COMPANY_ADDRESS,
-        "phone": config.COMPANY_PHONE,
-        "ein": config.EMPLOYER_EIN,
-    }
     pdf = generate_paystub_pdf(
-        stub, emp, run, company, {k: str(v) for k, v in ytd.items()}
+        stub, emp, run, employer_block(db), {k: str(v) for k, v in ytd.items()}
     )
     filename = f"paystub_{run_id}_{stub_id}.pdf"
     return Response(

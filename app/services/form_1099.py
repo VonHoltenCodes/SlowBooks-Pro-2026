@@ -16,7 +16,7 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models.contacts import Vendor
@@ -26,6 +26,29 @@ from app.services.pdf_service import _jinja_env, render_pdf
 
 # IRS 1099-NEC reporting threshold for nonemployee compensation.
 NEC_THRESHOLD = Decimal("600.00")
+
+
+def is_1099_vendor():
+    """Vendors flagged for 1099 reporting — one rule for the 1099 Summary
+    report and the 1099-NEC / 1096. The vendor form's "1099 Vendor: Yes"
+    sets is_1099_vendor; this service read is_1099_eligible, which nothing
+    sets, so the 1099-NEC listed no vendors (2.17.3, macbase1 F19). The old
+    column is still read, so a vendor flagged through it is not dropped."""
+    return or_(Vendor.is_1099_vendor.is_(True), Vendor.is_1099_eligible.is_(True))
+
+
+def clear_type_unless_1099(vendor: Vendor) -> None:
+    """A 1099 type describes a 1099 vendor; on any other vendor it is
+    cleared rather than kept as a type the forms would never use."""
+    if not vendor.is_1099_vendor:
+        vendor.vendor_1099_type = None
+
+
+def _files_nec(vendor: Vendor) -> bool:
+    """A 1099-NEC is for nonemployee compensation: NEC vendors, and 1099
+    vendors with no type (the default the 1099 Summary shows). MISC, INT
+    and DIV payments go on other forms."""
+    return (vendor.vendor_1099_type or "NEC").strip().upper() == "NEC"
 
 
 def _vendor_address(vendor: Vendor) -> str:
@@ -63,22 +86,18 @@ def _vendor_payment_totals(db: Session, year: int) -> dict[int, Decimal]:
 
 
 def compute_1099_data(db: Session, year: int) -> list[dict]:
-    """Return 1099-NEC data for every 1099-eligible vendor.
+    """Return 1099-NEC data for every 1099 vendor paid nonemployee
+    compensation (see is_1099_vendor and _files_nec).
 
     One dict per eligible vendor with vendor id, name, address, tax_id, the
     total amount paid in `year`, whether they cross the $600 reporting
     threshold (`reportable`), and whether a W-9 is on file.
     """
     totals = _vendor_payment_totals(db, year)
-    vendors = (
-        db.query(Vendor)
-        .filter(Vendor.is_1099_eligible.is_(True))
-        .order_by(Vendor.name)
-        .all()
-    )
+    vendors = db.query(Vendor).filter(is_1099_vendor()).order_by(Vendor.name).all()
 
     results: list[dict] = []
-    for vendor in vendors:
+    for vendor in filter(_files_nec, vendors):
         total = totals.get(vendor.id, Decimal("0.00"))
         results.append(
             {

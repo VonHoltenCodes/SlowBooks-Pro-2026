@@ -3,6 +3,7 @@
 # self-service portal access, and the per-employee HR document vault.
 # ============================================================================
 
+import re
 import secrets
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -50,6 +51,7 @@ from app.schemas.payroll import (
 from app.services.encryption import encrypt
 from app.services.nacha_export import validate_routing_number
 from app.services.onboarding import seed_onboarding_tasks
+from app.services.state_tax import is_supported as state_is_supported
 from app.services.upload_limits import read_limited
 
 # Portal tokens get a 1-year hard expiry on top of the 90-day idle window
@@ -134,9 +136,59 @@ def get_employee(request: Request, emp_id: int, db: Session = Depends(get_db)):
     return _employee_view(emp, request)
 
 
+# US territories: real work locations with no engine of their own (no state
+# income tax is withheld there), unlike a typo.
+_TERRITORIES = {"PR", "GU", "VI", "AS", "MP"}
+
+
+def _clean_employee_fields(fields: dict) -> dict:
+    """Refuse, in words, the values payroll cannot use, and tidy the rest.
+
+    SSN last 4 "abcd", a pay rate of -5 and a work state of "Illinois" were
+    all saved (2.17.3, skytech W-L4). The work state is how payroll picks
+    the withholding engine; a name instead of a code matched none and no
+    state income tax was withheld. Blanks from the form mean "none"."""
+    if "ssn_last_four" in fields:
+        ssn = (fields["ssn_last_four"] or "").strip()
+        if ssn and not re.fullmatch(r"\d{4}", ssn):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "SSN last 4 must be four digits: the last four of the "
+                    "employee's Social Security number, like 1234."
+                ),
+            )
+        fields["ssn_last_four"] = ssn or None
+    if fields.get("pay_rate") is not None and fields["pay_rate"] < 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Pay rate can't be negative. Enter the hourly rate, or the "
+                "yearly salary for a salaried employee."
+            ),
+        )
+    for key, label in (
+        ("work_state", "Work state"),
+        ("residence_state", "Residence state"),
+    ):
+        if key not in fields:
+            continue
+        code = (fields[key] or "").strip().upper()
+        if code and not (state_is_supported(code) or code in _TERRITORIES):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{label} must be a two-letter state code, like IL. "
+                    f'"{fields[key]}" is not one.'
+                ),
+            )
+        fields[key] = code or None
+    return fields
+
+
 @router.post("", response_model=EmployeeResponse, status_code=201)
 def create_employee(data: EmployeeCreate, db: Session = Depends(get_db)):
-    emp = Employee(**data.model_dump())
+    emp = Employee(**_clean_employee_fields(data.model_dump()))
     # Every new hire gets a self-service portal token and an onboarding checklist.
     _mint_portal_token(emp)
     db.add(emp)
@@ -152,7 +204,7 @@ def update_employee(emp_id: int, data: EmployeeUpdate, db: Session = Depends(get
     emp = db.query(Employee).filter(Employee.id == emp_id).first()
     if not emp:
         raise HTTPException(status_code=404, detail="Employee not found")
-    for key, val in data.model_dump(exclude_unset=True).items():
+    for key, val in _clean_employee_fields(data.model_dump(exclude_unset=True)).items():
         setattr(emp, key, val)
     db.commit()
     db.refresh(emp)

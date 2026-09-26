@@ -164,15 +164,9 @@ const OnboardingPage = {
         }
     },
 
-    async downloadReport(empId) {
-        async function _openPDF(url, method = 'POST') {
-            const res = await fetch(url, { method, credentials: 'same-origin' });
-            if (!res.ok) { toast('PDF generation failed', 'error'); return; }
-            const blob = await res.blob();
-            const u = URL.createObjectURL(blob);
-            window.open(u, '_blank');
-            setTimeout(() => URL.revokeObjectURL(u), 15000);
-        }
-        await _openPDF(`/api/onboarding/${empId}/new-hire-report/pdf`, 'GET');
+    downloadReport(empId) {
+        // Opened like an invoice PDF (the desktop shim shows it in the
+        // native viewer); a fetched blob: window opened nothing on the Mac.
+        window.open(`/api/onboarding/${empId}/new-hire-report/pdf`, '_blank');
     },
 };
