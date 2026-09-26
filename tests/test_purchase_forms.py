@@ -207,7 +207,7 @@ def test_money_leaving_a_bank_account_warns_before_it_overdraws():
     od = od[: od.index("\n};")]
     assert "API.get('/banking/overview')" in od
     assert "acct.bank_kind !== 'bank'" in od
-    assert "will be overdrawn by" in od and "Save anyway?" in od
+    assert "will be overdrawn by" in od and "${action} anyway?" in od
     expense_save = _method(helper, "async save(e)")
     assert "await Overdraft.confirm(paidFrom" in expense_save
     assert expense_save.index("Overdraft.confirm") < expense_save.index(
@@ -216,3 +216,16 @@ def test_money_leaving_a_bank_account_warns_before_it_overdraws():
     pay = _method(_js("bills.js"), "async savePay(e)")
     assert "await Overdraft.confirm(fromId, outgoing, '1000')" in pay
     assert pay.index("Overdraft.confirm") < pay.index("API.post('/bill-payments'")
+
+
+def test_processing_a_pay_run_warns_before_it_overdraws():
+    # macbase1 S-a named payroll too: net pay leaves 1000 when a run is
+    # processed, and took Checking to -$2,986.90 without a word.
+    process = _method(_js("payroll.js"), "async process(id)")
+    assert (
+        "await Overdraft.confirm(null, Number(run.total_net) || 0, '1000', 'Process')"
+        in process
+    )
+    assert process.index("Overdraft.confirm") < process.index(
+        "API.post(`/payroll/${id}/process`)"
+    )

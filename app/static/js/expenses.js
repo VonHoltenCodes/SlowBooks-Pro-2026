@@ -299,7 +299,7 @@ const ExpensesPage = {
  */
 const Overdraft = {
     // accountId, or null for "the server's default" named by defaultNumber.
-    async confirm(accountId, amount, defaultNumber) {
+    async confirm(accountId, amount, defaultNumber, action = 'Save') {
         if (!(amount > 0)) return true;
         let accounts;
         try { accounts = await API.get('/banking/overview'); } catch (e) { return true; }
@@ -307,6 +307,6 @@ const Overdraft = {
         if (!acct || acct.bank_kind !== 'bank') return true;
         const after = PurchaseLines.cents(Number(acct.balance) - amount);
         if (after >= 0) return true;
-        return confirm(`${acct.name} will be overdrawn by ${formatCurrency(-after)}. Save anyway?`);
+        return confirm(`${acct.name} will be overdrawn by ${formatCurrency(-after)}. ${action} anyway?`);
     },
 };

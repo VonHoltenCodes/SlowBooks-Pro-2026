@@ -213,6 +213,13 @@ const PayrollPage = {
 
     async process(id) {
         if (!confirm('Process this pay run? This will create journal entries.')) return;
+        // Net pay leaves the bank account (1000) when the run is processed;
+        // ask first if that would overdraw it, as expenses and Pay Bills do
+        // (macbase1: payroll took Checking to -$2,986.90 without a word).
+        try {
+            const run = await API.get(`/payroll/${id}`);
+            if (!(await Overdraft.confirm(null, Number(run.total_net) || 0, '1000', 'Process'))) return;
+        } catch (e) { /* a failed lookup never blocks processing */ }
         try {
             await API.post(`/payroll/${id}/process`);
             toast('Payroll processed');
