@@ -70,7 +70,7 @@ const ItemsPage = {
             <form id="item-form" onsubmit="ItemsPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Name *</label>
-                        <input name="name" required value="${escapeHtml(item.name)}"></div>
+                        <input name="name" required maxlength="200" value="${escapeHtml(item.name)}"></div>
                     <div class="form-group"><label>Type *</label>
                         <select name="item_type" id="item-type-sel">
                             ${['service','product','material','labor'].map(t =>

@@ -14,7 +14,7 @@ import re
 import sqlite3
 import subprocess
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -29,12 +29,59 @@ BACKUP_DIR = storage.backups_root()
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
 
 # Strict filename allow-list. Backup files we create are named
-# "slowbooks_YYYYMMDD_HHMMSS.sql" (Postgres) or ".db" (SQLite); we accept
-# any safe basename matching this character class with a known backup
-# extension. NO path separators, NO ".." components -- this is the trust
-# boundary that CodeQL needs to see at the start of restore_backup()
-# before BACKUP_DIR / filename is constructed.
+# "<company>_YYYYMMDD_HHMMSS.db" (SQLite) or ".sql" (Postgres) — before
+# 2.17.4 every company's were "slowbooks_YYYYMMDD_HHMMSS", which still
+# list and restore. We accept any safe basename matching this character
+# class with a known backup extension. NO path separators, NO ".."
+# components -- this is the trust boundary that CodeQL needs to see at the
+# start of restore_backup() before BACKUP_DIR / filename is constructed.
 _BACKUP_FILENAME_RE = re.compile(r"^[A-Za-z0-9_.-]+\.(sql|dump|backup|db)$")
+
+# Every company's backups share one folder, and the old names said nothing
+# about whose they were (explore 2.17.3, macbase1 F25: Riverbend x3,
+# NEONpulse x2 and Harbor Light x1, all "slowbooks_<date>_<time>.db"). The
+# name now starts with the company's own part: its file name on the
+# desktop, its database name on a server.
+_NAME_RE = re.compile(
+    r"^(?P<slug>.+)_(?P<stamp>\d{8}_\d{6})(?:-(?P<tag>[a-z0-9-]+))?"
+    r"\.(?P<ext>sql|dump|backup|db)$"
+)
+LEGACY_SLUG = "slowbooks"
+# The copy taken automatically just before a restore replaces the books.
+PRE_RESTORE_TAG = "before-restore"
+
+
+def parse_backup_name(filename: str) -> dict | None:
+    """{"slug", "stamp", "tag"} for a name this app makes, else None."""
+    m = _NAME_RE.match(filename or "")
+    return m.groupdict() if m else None
+
+
+def company_slug() -> str:
+    """This company's part of a backup file name: "harbor-light-bakery" for
+    harbor-light-bakery.db, the database name on a server. Never the old
+    anonymous "slowbooks", so a new name can always be told from an old one."""
+    if _is_sqlite():
+        path = _sqlite_db_path()
+        stem = path.stem if path is not None else ""
+    else:
+        stem = _parse_db_url(DATABASE_URL)["dbname"]
+    slug = re.sub(r"[^a-z0-9]+", "-", stem.lower()).strip("-")[:60].strip("-")
+    if not slug:
+        slug = "company"
+    return f"{slug}-books" if slug == LEGACY_SLUG else slug
+
+
+def _new_backup_filename(tag: str | None = None) -> str:
+    ext = "db" if _is_sqlite() else "sql"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base = f"{company_slug()}_{stamp}" + (f"-{tag}" if tag else "")
+    name = f"{base}.{ext}"
+    n = 2
+    while (BACKUP_DIR / name).exists():  # two in one second must not overwrite
+        name = f"{base}-{n}.{ext}"
+        n += 1
+    return name
 
 
 def _safe_backup_filename(filename: str) -> str | None:
@@ -91,7 +138,9 @@ def _parse_db_url(url: str) -> dict:
     }
 
 
-def _create_sqlite_backup(db: Session, notes: str, backup_type: str) -> dict:
+def _create_sqlite_backup(
+    db: Session, notes: str, backup_type: str, tag: str | None = None
+) -> dict:
     """Snapshot the active company's .db file into BACKUP_DIR."""
     src = _sqlite_db_path()
     if src is None or not src.exists():
@@ -100,8 +149,7 @@ def _create_sqlite_backup(db: Session, notes: str, backup_type: str) -> dict:
             "error": "Active database is not a file-backed SQLite database",
         }
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"slowbooks_{timestamp}.db"
+    filename = _new_backup_filename(tag)
     filepath = BACKUP_DIR / filename
 
     try:
@@ -160,14 +208,16 @@ def _restore_sqlite_backup(filepath: Path, safe_name: str) -> dict:
     return {"success": True, "message": f"Restored from {safe_name}"}
 
 
-def create_backup(db: Session, notes: str = None, backup_type: str = "manual") -> dict:
-    """Create a database backup (pg_dump on Postgres, file snapshot on SQLite)."""
+def create_backup(
+    db: Session, notes: str = None, backup_type: str = "manual", tag: str = None
+) -> dict:
+    """Create a database backup (pg_dump on Postgres, file snapshot on SQLite),
+    named for this company; ``tag`` marks it in the name (PRE_RESTORE_TAG)."""
     if _is_sqlite():
-        return _create_sqlite_backup(db, notes, backup_type)
+        return _create_sqlite_backup(db, notes, backup_type, tag)
 
     params = _parse_db_url(DATABASE_URL)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"slowbooks_{timestamp}.sql"
+    filename = _new_backup_filename(tag)
     filepath = BACKUP_DIR / filename
 
     env = {"PGPASSWORD": params["password"]}
@@ -277,11 +327,12 @@ def restore_backup(db: Session, filename: str) -> dict:
 
 
 def list_backup_files() -> list[dict]:
-    """List all backup files in the backup directory."""
+    """List every backup file in the (shared) backup directory, any company."""
     files = []
     candidates = [
-        *BACKUP_DIR.glob("slowbooks_*.sql"),
-        *BACKUP_DIR.glob("slowbooks_*.db"),
+        p
+        for p in BACKUP_DIR.iterdir()
+        if p.is_file() and _safe_backup_filename(p.name) is not None
     ]
     for f in sorted(candidates, key=lambda p: p.name, reverse=True):
         files.append(
@@ -292,3 +343,216 @@ def list_backup_files() -> list[dict]:
             }
         )
     return files
+
+
+# ---------------------------------------------------------------------------
+# Whose backup is it? (explore 2.17.3, macbase1 F25)
+# ---------------------------------------------------------------------------
+
+
+def backup_path(filename: str) -> Path | None:
+    """The backup's path, validated the same way restore_backup() does."""
+    safe_name = _safe_backup_filename(filename)
+    if safe_name is None:
+        return None
+    backup_root = os.path.normpath(str(BACKUP_DIR))
+    candidate = os.path.normpath(os.path.join(backup_root, safe_name))
+    if not candidate.startswith(backup_root + os.sep):
+        return None
+    return Path(candidate)
+
+
+def read_backup_facts(filename: str) -> dict:
+    """What a SQLite backup says about itself: {"company_name", "revision"}
+    (either may be None). Opened read-only and immutable, so reading never
+    changes the file. Empty for a Postgres dump or anything unreadable."""
+    path = backup_path(filename)
+    if path is None or path.suffix != ".db" or not path.exists():
+        return {}
+    facts = {"company_name": None, "revision": None}
+    try:
+        uri = path.resolve().as_uri() + "?mode=ro&immutable=1"
+        with closing(sqlite3.connect(uri, uri=True)) as conn:
+            for key, sql in (
+                (
+                    "company_name",
+                    "SELECT value FROM settings WHERE key = 'company_name'",
+                ),
+                ("revision", "SELECT version_num FROM alembic_version"),
+            ):
+                try:
+                    row = conn.execute(sql).fetchone()
+                except sqlite3.Error:
+                    row = None
+                facts[key] = (row[0] or None) if row else None
+    except sqlite3.Error:
+        logger.exception("Could not read backup %s", path.name)
+        return {}
+    return facts
+
+
+def _same_name(a: str | None, b: str | None) -> bool:
+    return (a or "").strip().casefold() == (b or "").strip().casefold()
+
+
+def current_company_name(db: Session) -> str:
+    from app.models.settings import DEFAULT_SETTINGS
+    from app.services.settings_service import get_setting_raw
+
+    return (get_setting_raw(db, "company_name") or "").strip() or DEFAULT_SETTINGS[
+        "company_name"
+    ]
+
+
+def list_company_backups(db: Session) -> list[dict]:
+    """The open company's backups, newest first.
+
+    The folder holds every company's. This company's are the files named
+    for it, plus older anonymous "slowbooks_*" files that are its own: ones
+    its backups table lists, or (a SQLite copy) that carry its company name.
+    Read from the folder, not only the table: restoring an older backup
+    replaces the table too, and the safety copy taken just before it must
+    still be listed afterwards."""
+    slug = company_slug()
+    rows = {b.filename: b for b in db.query(Backup).all()}
+    name = current_company_name(db)
+    listed = []
+    for path in BACKUP_DIR.iterdir():
+        filename = path.name
+        if not path.is_file() or _safe_backup_filename(filename) is None:
+            continue
+        parsed = parse_backup_name(filename)
+        owner = parsed["slug"] if parsed else None
+        if owner == slug:
+            mine = True
+        elif owner not in (None, LEGACY_SLUG):
+            mine = False  # named for another company
+        elif filename in rows:
+            mine = True
+        else:
+            mine = filename.endswith(".db") and _same_name(
+                read_backup_facts(filename).get("company_name"), name
+            )
+        if not mine:
+            continue
+        row = rows.get(filename)
+        stat = path.stat()
+        pre_restore = bool(parsed and (parsed["tag"] or "").startswith(PRE_RESTORE_TAG))
+        if row is not None and row.created_at is not None:
+            stamped = row.created_at
+            if stamped.tzinfo is None:  # SQLite's CURRENT_TIMESTAMP is UTC
+                stamped = stamped.replace(tzinfo=timezone.utc)
+            created = stamped.isoformat()
+        else:
+            created = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+        listed.append(
+            {
+                "id": row.id if row is not None else None,
+                "filename": filename,
+                "file_size": stat.st_size,
+                "backup_type": (
+                    row.backup_type
+                    if row is not None
+                    else ("pre-restore" if pre_restore else "manual")
+                ),
+                "notes": (
+                    row.notes
+                    if row is not None
+                    else (
+                        "Taken automatically just before a restore"
+                        if pre_restore
+                        else None
+                    )
+                ),
+                "created_at": created,
+                "_sort": (parsed["stamp"] if parsed else "")
+                or datetime.fromtimestamp(stat.st_mtime).strftime("%Y%m%d_%H%M%S"),
+            }
+        )
+    listed.sort(key=lambda b: (b["_sort"], b["filename"]), reverse=True)
+    for b in listed:
+        del b["_sort"]
+    return listed
+
+
+def other_company(db: Session, filename: str) -> dict | None:
+    """None when the backup is this company's (or nothing says otherwise);
+    else {"backup_company", "current_company"} naming both. A backup named
+    for another company, or carrying another company name in its settings,
+    belongs to that company."""
+    current = current_company_name(db)
+    parsed = parse_backup_name(filename)
+    stored = read_backup_facts(filename).get("company_name")
+    if stored and not _same_name(stored, current):
+        return {"backup_company": stored, "current_company": current}
+    if parsed and parsed["slug"] not in (company_slug(), LEGACY_SLUG):
+        return {"backup_company": stored or parsed["slug"], "current_company": current}
+    return None
+
+
+def _migration_script():
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+
+    root = Path(__file__).resolve().parent.parent.parent
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "migrations"))
+    return cfg, ScriptDirectory.from_config(cfg)
+
+
+def backup_revision_problem(filename: str) -> str | None:
+    """A sentence when this build cannot open the backup's books: a copy
+    made by a newer SlowBooks Pro, whose schema this one does not know.
+    Restoring it would leave a company file the app refuses to open."""
+    revision = read_backup_facts(filename).get("revision")
+    if not revision:
+        return None
+    try:
+        _cfg, script = _migration_script()
+        known = {rev.revision for rev in script.walk_revisions()}
+    except Exception:
+        logger.exception("Could not read the migration history")
+        return None
+    if revision in known:
+        return None
+    return (
+        "This backup was made by a newer version of SlowBooks Pro than this "
+        "one, which cannot open it. Update SlowBooks Pro, then restore it."
+    )
+
+
+def bring_restored_books_up_to_date() -> dict:
+    """After a SQLite restore: an older backup is brought to this build's
+    schema, the way the desktop app does when it opens a company, so the
+    running app can use it straight away. {"success": bool, "error"}."""
+    if not _is_sqlite():
+        return {"success": True}
+    path = _sqlite_db_path()
+    if path is None:
+        return {"success": True}
+    try:
+        with closing(sqlite3.connect(path)) as conn:
+            row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
+        current = row[0] if row else None
+    except sqlite3.Error:
+        current = None  # no migration history: not a file alembic manages
+    if not current:
+        return {"success": True}
+    try:
+        cfg, script = _migration_script()
+        if current == script.get_current_head():
+            return {"success": True}
+        from alembic import command
+
+        cfg.attributes["database_url"] = "sqlite:///" + path.as_posix()
+        command.upgrade(cfg, "head")
+    except Exception:
+        logger.exception("Could not upgrade the restored books")
+        return {
+            "success": False,
+            "error": "The restored books could not be brought up to this version.",
+        }
+    import app.database as db_module
+
+    db_module.engine.dispose()
+    return {"success": True}

@@ -24,11 +24,17 @@ from app.services.auth import (
     ensure_admin_user,
     is_multi_user,
     password_is_set,
+    remember_this_start,
     set_password,
+    signed_in_before_this_start,
 )
 from app.services.rate_limit import limiter
 from app.services.request_utils import client_ip as _client_ip
-from app.services.settings_service import set_setting
+from app.services.settings_service import (
+    SettingValueError,
+    clean_setting_value,
+    set_setting,
+)
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -101,11 +107,37 @@ _SETUP_SETTINGS_KEYS = (
 )
 
 
+def _company_name(db: Session) -> str:
+    """The company's name as the books carry it, else as the company list
+    (the picker) names this file — a company created before its name was
+    written into the file has only the latter. The shipped placeholder
+    ("My Company") is nobody's name: setup must not offer it as one."""
+    from app.models.settings import DEFAULT_SETTINGS
+    from app.services.settings_service import get_setting_raw
+
+    placeholder = DEFAULT_SETTINGS["company_name"]
+    name = (get_setting_raw(db, "company_name") or "").strip()
+    if not name:
+        try:
+            from app.services.company_service import current_manifest_name
+
+            name = current_manifest_name() or ""
+        except Exception:
+            name = ""
+    return "" if name == placeholder else name
+
+
 @router.get("/status")
 def auth_status(request: Request, db: Session = Depends(get_db)):
     """Tell the SPA whether first-run setup is needed and whether the
     current session is authenticated."""
     authenticated = request.session.get("authenticated") is True
+    if authenticated and signed_in_before_this_start(request.session):
+        # "Ask for the password each time SlowBooks Pro starts": a session
+        # from before this start is signed out here too, or the page would
+        # be told it is signed in while every request answers 401.
+        request.session.clear()
+        authenticated = False
     setup_needed = not password_is_set(db)
     out = {
         "setup_needed": setup_needed,
@@ -128,16 +160,16 @@ def auth_status(request: Request, db: Session = Depends(get_db)):
             .order_by(User.username)
             .all()
         ]
+    # Whose books these are. The sign-in screen names them (with several
+    # companies on one machine, "Unlock Slowbooks" did not say whose
+    # password it wanted — explore 2.17.3, macbase1 F2), and first-run setup
+    # prefills the name, so setup neither re-asks for the name typed in the
+    # New Company dialog (F3) nor silently renames a file that already holds
+    # a company's books (2.9.0 gate).
+    out["company_name"] = _company_name(db)
     if setup_needed:
-        # First-run setup can be reached on a file that already holds a
-        # company's books (a file copied in, or seeded through the API
-        # before anyone set a password). The form prefills the name the
-        # books already carry and warns, so setup does not silently rename
-        # another company's ledger (2.9.0 gate).
         from app.models.transactions import Transaction
-        from app.services.settings_service import get_setting_raw
 
-        out["company_name"] = get_setting_raw(db, "company_name") or ""
         out["has_data"] = db.query(Transaction.id).first() is not None
     if authenticated and request.session.get("username"):
         out["user"] = {
@@ -183,12 +215,20 @@ def setup(
             )
 
     # Persist any non-blank settings the user provided. set_password() will
-    # commit at the end, so all writes land in a single transaction.
+    # commit at the end, so all writes land in a single transaction. The
+    # values Settings checks (a default tax rate from 0 to 100) are checked
+    # here too, before anything is written.
     payload_dict = payload.model_dump()
+    to_store = {}
     for key in _SETUP_SETTINGS_KEYS:
         value = payload_dict.get(key)
         if value is not None and value != "":
-            set_setting(db, key, value)
+            try:
+                to_store[key] = clean_setting_value(key, value)
+            except SettingValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+    for key, value in to_store.items():
+        set_setting(db, key, value)
 
     set_password(db, payload.password)
     # Materialize the operator as the admin user row right away (Server
@@ -204,6 +244,7 @@ def setup(
     # is defence in depth and intent-revealing.
     request.session.clear()
     request.session["authenticated"] = True
+    remember_this_start(request.session)
     _stash_user(request, admin)
     return {"status": "ok", "authenticated": True}
 
@@ -257,6 +298,7 @@ def login(
     # Same rotation rationale as /setup.
     request.session.clear()
     request.session["authenticated"] = True
+    remember_this_start(request.session)
     _stash_user(request, user)
     return {"status": "ok", "authenticated": True}
 

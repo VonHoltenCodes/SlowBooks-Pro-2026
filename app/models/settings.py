@@ -42,6 +42,9 @@ DEFAULT_SETTINGS = {
     "company_tax_id": "",
     "operator_name": "",
     "operator_email": "",
+    # Desktop: "true" signs the company out whenever the app is quit, so the
+    # next start asks for the password (services/auth.py). Off by default.
+    "ask_password_on_start": "false",
     "default_terms": "Net 30",
     "default_tax_rate": "0.0",
     "invoice_prefix": "",

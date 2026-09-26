@@ -26,7 +26,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
 
 from app.services import storage
 from app.services.control_accounts import MissingControlAccount
@@ -120,6 +122,9 @@ from app.routes import reseller_permits as reseller_permits_routes
 # Tier 2: Receipt / document intake — local OCR (docs/design/receipt-intake.md)
 from app.routes import ocr as ocr_routes
 from app.services.auth import get_session_secret
+from app.services.auth import (
+    signed_in_before_this_start as _signed_in_before_this_start,
+)
 
 from app import __version__
 from app.config import (
@@ -131,6 +136,13 @@ from app.config import (
 from app.database import SessionLocal, Base, engine
 from app.services.audit import register_audit_hooks
 from app.services.request_context import acting_username as _acting_username
+from app.services.request_context import (
+    closing_date_password as _closing_date_password,
+)
+from app.services.closing_date import (
+    PASSWORD_HEADER as _CLOSING_PASSWORD_HEADER,
+    password_from_header as _closing_password_from_header,
+)
 from app.services.api_token_service import resolve as _resolve_api_token
 
 
@@ -514,6 +526,24 @@ async def _missing_control_account_handler(request: Request, exc: Exception):
 
 app.add_exception_handler(MissingControlAccount, _missing_control_account_handler)
 
+
+# ---- Validation errors (422), in sentences ----
+# FastAPI's own body, unchanged, with a plain "message" added to each entry
+# ("Name is required.") for the page to show instead of validator text
+# ("name: String should have at least 1 character" — explore 2.17.3, L5).
+async def _request_validation_handler(request: Request, exc: RequestValidationError):
+    from app.services.validation_messages import with_messages
+
+    terms = _company_terms()
+    wording = terms.text if terms.is_nonprofit else None
+    return JSONResponse(
+        status_code=422,
+        content={"detail": with_messages(jsonable_encoder(exc.errors()), wording)},
+    )
+
+
+app.add_exception_handler(RequestValidationError, _request_validation_handler)
+
 # ---- CORS (Phase 9.7: locked down) ----
 # Wildcard origins with credentials is a CSRF amplifier. Default to just
 # localhost; override with ALLOWED_ORIGINS env var (comma-separated) for
@@ -793,6 +823,17 @@ async def require_session(request: Request, call_next):
         return await call_next(request)
     token_principal = None
     if request.session.get("authenticated") is True:
+        if _signed_in_before_this_start(request.session):
+            # Settings -> "Ask for the password each time SlowBooks Pro
+            # starts": this session dates from before the app last started.
+            request.session.clear()
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": "SlowBooks Pro was restarted. Enter the password "
+                    "to continue."
+                },
+            )
         role = request.session.get("role") or "admin"
     else:
         # Scoped API tokens: non-human principals (agents, integrations)
@@ -867,12 +908,21 @@ class ActingUserContextMiddleware:
             return await self.app(scope, receive, send)
         session = scope.get("session") or {}
         acting = None
+        override = None
         if session.get("authenticated") is True:
             acting = session.get("username") or "operator"
+            # The closing-date override password a signed-in person resent a
+            # refused change with (get_db also stamps it on the Session).
+            wanted = _CLOSING_PASSWORD_HEADER.lower().encode("latin-1")
+            for name, value in scope.get("headers") or []:
+                if name == wanted:
+                    override = _closing_password_from_header(value.decode("latin-1"))
         token = _acting_username.set(acting)
+        override_token = _closing_date_password.set(override)
         try:
             await self.app(scope, receive, send)
         finally:
+            _closing_date_password.reset(override_token)
             _acting_username.reset(token)
 
 
