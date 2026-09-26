@@ -259,7 +259,7 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 
 ## QuickBooks Online Integration
 - **OAuth 2.0** — Connect to QuickBooks Online via Intuit's OAuth Authorization Code flow with automatic token refresh
-- **Import from QBO** — Pull accounts, customers, vendors, items, invoices, and payments from QBO with dependency-ordered import and duplicate detection
+- **Import from QBO** — Pull accounts, customers, vendors, items, invoices, payments, sales receipts, journal entries, and posted ledger activity from QBO with dependency-ordered import and duplicate detection
 - **Export to QBO** — Push Slowbooks data to QBO with entity type mapping and ID tracking
 - **ID Mapping** — `qbo_mappings` table tracks QBO ID ↔ Slowbooks ID per entity for dedup and re-sync
 - **Setup Guide** — See [docs/setup-qbo.md](setup-qbo.md)
@@ -271,7 +271,7 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 - **CSV Import/Export** — Import customers, vendors, items and the chart of accounts from CSV; export those plus invoices, bills, sales receipts, deposits, classes and jobs
 - **Bring your own chart** (#139 / #161) — Chart of Accounts → **Import…** takes a CSV in the export's own columns (Number, Name, Type, optional Parent, Description, Active), any spreadsheet whose header row uses those words, or **hledger's** account list: the output of `hledger accounts`, `hledger accounts --types` (the `; type:` tag wins), or `hledger balance -O csv` (the `total` row is ignored, balances are not imported). The first post is a dry run that shows every row's fate — create, update, skip, deactivate, keep, error — with a reason, and writes nothing; the second post applies exactly that plan. Existing accounts are matched by number, then by name; a file that names a control account (Receivable, Payable, Checking, Sales tax payable, Inventory, Undeposited funds, Retained earnings, Cost of goods sold, or a credit card under liabilities) **renames that control account** rather than creating a twin, so the operator's chart replaces ours and every document still finds its posting account. Rows without a number get the next free one in their type's range (1000s assets … 6000–9999 expenses). hledger paths keep their hierarchy: `assets:cash:petty cash` becomes *Petty cash* under a *Cash* parent (created if the file never lists it), with the full path kept as the description; the top segment (assets, liabilities, equity, revenues, expenses) is the category, not an account; `assets:bank:*` and `; type: C` accounts are marked as bank accounts. A parent segment that names a control account **is** that account: `assets:inventory` is 1300 Inventory and its children hang from it; a `liabilities:credit card` folder is 2100 and the cards inside it are its children, each marked as a card. Re-importing the same file changes nothing. **Replace the seeded chart** additionally deactivates every account the file does not name that has never been posted to — control accounts and accounts with history are always kept. Also on the CSV Import/Export page as an entity type. `POST /api/csv/import/accounts?dry_run=1|0&replace=0|1`
 - **Print Preview** — Browser print dialog for invoices and estimates via dedicated HTML preview endpoints. Native OS print dialog with "Save as PDF" option
-- **Print-Optimized PDF** — Enhanced invoice PDF template; the company logo (Settings → Company Information) prints on every document: invoices, estimates, statements, letters, donor documents and reports
+- **Print-Optimized PDF** — Enhanced invoice PDF template; the company logo (Settings → Company Logo) prints on invoices, estimates, statements, letters, donor documents and reports. When a logo is configured, **Show company logo on invoices** is available in Settings and when creating, editing, or viewing an invoice, alongside a logo preview. It controls all invoice PDFs, Print views, and emailed PDF attachments; enabled by default. Changes made from an invoice save immediately for all invoices.
 - **IIF Import/Export** — Full QuickBooks 2003 Pro interoperability (see below)
 
 ## Inventory, Drill-Down & Duplicate Detection
@@ -656,4 +656,3 @@ All read endpoints accept `?period=month|quarter|year` (or `mtd/qtd/ytd`), or ex
 - Accessibility: WCAG 2.1 AA posture ("strive to conform") — header scopes,
   labelled icon buttons, live-region toasts, dialog focus management, AA
   contrast, and tagged (PDF/UA-1) PDFs. See docs/accessibility.md.
-

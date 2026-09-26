@@ -11,6 +11,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 import pytest
+import stripe
 
 from app.services.payments import get_provider, enabled_providers
 from app.services.payments import paypal as pp
@@ -54,6 +55,10 @@ class FakeResponse:
 
 
 # ── Registry ─────────────────────────────────────────────────────────────
+
+
+def test_stripe_sdk_telemetry_is_disabled():
+    assert stripe.enable_telemetry is False
 
 
 def test_registry_resolves_paypal():

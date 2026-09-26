@@ -75,13 +75,17 @@ const InvoicesPage = {
     },
 
     async view(id) {
-        const inv = await API.get(`/invoices/${id}`);
+        const [inv, settings] = await Promise.all([
+            API.get(`/invoices/${id}`),
+            API.get('/settings'),
+        ]);
         let linesHtml = inv.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
              <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
         ).join('');
 
         openModal(`${T('Invoice')} #${inv.invoice_number}`, `
+            ${InvoicesPage.logoOptionHtml(settings)}
             <div style="margin-bottom:12px;">
                 <strong>${T('Customer')}:</strong> ${escapeHtml(inv.customer_name || '')}<br>
                 <strong>Date:</strong> ${formatDate(inv.date)}<br>
@@ -108,10 +112,10 @@ const InvoicesPage = {
                 <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.uploadAttachment(${inv.id})" style="margin-left:4px;">Upload</button>
             </div>
             <div class="form-actions">
-                <button class="btn btn-secondary" onclick="window.open('/api/invoices/${inv.id}/pdf','_blank')">Save PDF</button>
-                <button class="btn btn-secondary" onclick="window.open('/api/invoices/${inv.id}/print-preview','_blank')">Print</button>
+                <button class="btn btn-secondary" data-invoice-logo-action onclick="window.open('/api/invoices/${inv.id}/pdf','_blank')">Save PDF</button>
+                <button class="btn btn-secondary" data-invoice-logo-action onclick="window.open('/api/invoices/${inv.id}/print-preview','_blank')">Print</button>
                 <button class="btn btn-secondary" onclick="InvoicesPage.duplicate(${inv.id})">Duplicate</button>
-                <button class="btn btn-secondary" onclick="InvoicesPage.emailInvoice(${inv.id})">Email ${T('Invoice')}</button>
+                <button class="btn btn-secondary" data-invoice-logo-action onclick="InvoicesPage.emailInvoice(${inv.id})">Email ${T('Invoice')}</button>
                 <button class="btn btn-secondary" onclick="InvoicesPage.copyPaymentLink(${inv.id})">Copy Payment Link</button>
                 ${inv.checkout_provider && inv.status !== 'paid' && inv.status !== 'void' ? `<button class="btn btn-secondary" onclick="InvoicesPage.checkPaymentStatus(${inv.id}, '${inv.checkout_provider}')">Check Payment Status</button>` : ''}
                 ${inv.status === 'draft' ? `<button class="btn btn-primary" onclick="InvoicesPage.markSent(${inv.id})">Mark Sent</button>` : ''}
@@ -119,6 +123,49 @@ const InvoicesPage = {
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
         InvoicesPage.loadAttachments('invoice', inv.id);
+    },
+
+    logoOptionHtml(settings) {
+        if (!settings.company_logo_path) return '';
+        const enabled = settings.invoice_show_logo !== 'false';
+        return `<div class="invoice-logo-option">
+            <img class="invoice-logo-preview" src="${escapeHtml(settings.company_logo_path)}" alt="Company logo" ${enabled ? '' : 'hidden'}>
+            <div>
+                <label for="inv-show-logo">
+                    <input id="inv-show-logo" type="checkbox" ${enabled ? 'checked' : ''} onchange="InvoicesPage.setLogoOption(this)">
+                    Show company logo on invoices
+                </label>
+                <div class="invoice-logo-help">Applies to all invoices: PDF, Print, and emailed attachments. Changes save immediately.</div>
+                <div class="invoice-logo-status" role="status" aria-live="polite"></div>
+            </div>
+        </div>`;
+    },
+
+    async setLogoOption(input) {
+        const enabled = input.checked;
+        const option = input.closest('.invoice-logo-option');
+        const preview = option.querySelector('.invoice-logo-preview');
+        const status = option.querySelector('.invoice-logo-status');
+        // Keep document actions from using the previous preference while saving.
+        const actions = Array.from(input.closest('#modal-body').querySelectorAll('[data-invoice-logo-action]'))
+            .map(button => ({ button, disabled: button.disabled }));
+        input.disabled = true;
+        actions.forEach(({ button }) => { button.disabled = true; });
+        status.classList.remove('invoice-logo-error');
+        status.textContent = 'Saving logo option…';
+        try {
+            await API.put('/settings', { invoice_show_logo: String(enabled) });
+            App.settings.invoice_show_logo = String(enabled);
+            preview.hidden = !enabled;
+            status.textContent = 'Saved for all invoices.';
+        } catch (err) {
+            input.checked = !enabled;
+            status.classList.add('invoice-logo-error');
+            status.textContent = `Could not save logo option: ${err.message}`;
+        } finally {
+            input.disabled = false;
+            actions.forEach(({ button, disabled }) => { button.disabled = disabled; });
+        }
     },
 
     async void(id) {
@@ -283,6 +330,7 @@ const InvoicesPage = {
 
         openModal(Terms.text(id ? 'Edit Invoice' : 'New Invoice'), `
             <form id="invoice-form" onsubmit="InvoicesPage.save(event, ${id})">
+                ${InvoicesPage.logoOptionHtml(settings)}
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
                         <select name="customer_id" id="inv-customer-select" required onchange="InvoicesPage.customerSelected(this.value)"><option value="">Select...</option><option value="__new__">+ ${T('New Customer')}</option>${custOpts}</select>
@@ -336,7 +384,7 @@ const InvoicesPage = {
                     <textarea name="notes">${escapeHtml(inv.notes || '')}</textarea></div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                    <button type="submit" class="btn btn-primary">${id ? 'Update' : 'Create'} ${T('Invoice')}</button>
+                    <button type="submit" class="btn btn-primary" data-invoice-logo-action>${id ? 'Update' : 'Create'} ${T('Invoice')}</button>
                 </div>
             </form>`);
         if (!id && inv.customer_id) InvoicesPage.customerSelected(inv.customer_id);

@@ -39,7 +39,7 @@ const App = {
         // Phase 4: CSV Import/Export
         '/csv':           { page: 'csv',             label: 'CSV Import/Export',  render: () => App.renderCSV() },
         // Phase 8: QuickBooks Online
-        '/qbo':           { page: 'qbo',             label: 'QuickBooks Online',  render: () => QBOPage.render() },
+        '/qbo':           { page: 'qbo',             label: 'QuickBooks Online',  render: () => QBOPage.render(), mount: () => QBOPage.mount() },
         // Phase 5: Advanced Integration
         '/tax':           { page: 'tax',             label: 'Tax Reports',        render: () => TaxPage.render() },
         // Phase 6: Ambitious
@@ -74,6 +74,7 @@ const App = {
     },
 
     async navigate(hash) {
+        if (App._pageCleanup) { App._pageCleanup(); App._pageCleanup = null; }
         const path = hash.replace('#', '') || '/';
         let route = App.routes[path];
         let param = null;
@@ -100,6 +101,7 @@ const App = {
             const html = await route.render(param);
             $('#page-content').innerHTML = html;
             App.setStatus(`${route.label} — Ready`);
+            if (route.mount) App._pageCleanup = route.mount();
         } catch (err) {
             // Server-side detail (err.message and stack) goes to console
             // for devs; the DOM gets a clean user-facing error with a
@@ -747,7 +749,7 @@ const App = {
         App.updateClock();
         setInterval(App.updateClock, 60000);
 
-        // Real version in the footer + update badge on desktop installs
+        // Real version in the footer + optional update badge
         App.initSystemInfo();
 
         // Settings first: the vocabulary and the nonprofit nav items must
@@ -812,7 +814,7 @@ const App = {
                     }
                 }
             }
-            if (!info.desktop) return;
+            if (!info.update_check_enabled) return;
 
             res = await fetch('/api/system/update-check', { credentials: 'same-origin' });
             if (!res.ok) return;

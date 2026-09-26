@@ -11,7 +11,7 @@ const JournalPage = {
             </div>`;
 
         if (entries.length === 0) {
-            html += '<div class="empty-state"><p>No manual journal entries yet</p></div>';
+            html += '<div class="empty-state"><p>No journal entries yet</p></div>';
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr><th scope="col">ID</th><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th>
@@ -26,7 +26,7 @@ const JournalPage = {
                     <td class="amount">${formatCurrency(e.total_credit)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="JournalPage.view(${e.id})">View</button>
-                        ${!e.source_type.endsWith('_void') ? `<button class="btn btn-sm btn-danger" onclick="JournalPage.void(${e.id})">Void</button>` : ''}
+                        ${!e.source_type.endsWith('_void') && !['qbo_journal', 'qbo_ledger'].includes(e.source_type) ? `<button class="btn btn-sm btn-danger" onclick="JournalPage.void(${e.id})">Void</button>` : ''}
                     </td>
                 </tr>`;
             }

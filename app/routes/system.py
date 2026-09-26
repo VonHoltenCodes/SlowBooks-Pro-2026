@@ -3,8 +3,7 @@
 #
 # /api/system tells the frontend what it's running (version, desktop mode);
 # /api/system/update-check compares against the published latest.json on
-# dl.slowbookspro.com and powers the footer "Update available" badge on
-# desktop installs — same pattern as EasyAmp's footer badge.
+# dl.slowbookspro.com when the operator opts in to update checks.
 #
 # The check is proxied through the backend (not fetched from the browser)
 # so the manifest host needs no CORS relationship with the app, and it is
@@ -36,6 +35,10 @@ def _is_desktop() -> bool:
     return os.environ.get("SLOWBOOKS_DESKTOP") == "1"
 
 
+def _update_check_enabled() -> bool:
+    return _is_desktop() and os.environ.get("SLOWBOOKS_UPDATE_CHECK") == "1"
+
+
 def _is_server_mode() -> bool:
     """True when the launcher is serving beyond loopback (--serve-lan)."""
     return os.environ.get("SLOWBOOKS_SERVER_MODE") == "1"
@@ -65,12 +68,15 @@ async def system_info():
         "version": __version__,
         "desktop": _is_desktop(),
         "server_mode": _is_server_mode(),
+        "update_check_enabled": _update_check_enabled(),
     }
 
 
 @router.get("/update-check")
 async def update_check():
-    if not _is_desktop():
+    # Guard the network sink as well as the UI: a direct API request must
+    # never turn an installation with default settings into an update ping.
+    if not _update_check_enabled():
         return _NO_UPDATE
 
     now = time.monotonic()

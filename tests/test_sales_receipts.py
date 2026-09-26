@@ -208,7 +208,13 @@ def _wire_fake_qbo(monkeypatch, receipts):
 
     monkeypatch.setattr(qbo_import, "get_qbo_client", lambda db: None)
     monkeypatch.setattr(
-        sr_mod.SalesReceipt, "all", classmethod(lambda cls, qb=None: list(receipts))
+        sr_mod.SalesReceipt,
+        "all",
+        classmethod(
+            lambda cls, qb=None, start_position=1, max_results=100: list(receipts)[
+                start_position - 1 : start_position - 1 + max_results
+            ]
+        ),
     )
 
 

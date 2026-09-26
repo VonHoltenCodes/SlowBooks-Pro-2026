@@ -512,8 +512,21 @@ def test_ai_config_never_returns_raw_api_key(client, db_session):
 
 
 # ---------------------------------------------------------------------------
-# custom (OpenAI-compatible) provider
+# OpenAI and compatible request construction
 # ---------------------------------------------------------------------------
+
+
+def test_openai_request_uses_supported_completion_limit_for_gpt5():
+    req = build_request("openai", "sk-fake", "gpt-5.4-mini", "sys", "user")
+    assert req["json"]["max_completion_tokens"] == 1024
+    assert "max_tokens" not in req["json"]
+    assert "temperature" not in req["json"]
+
+
+def test_openai_request_keeps_temperature_for_older_models():
+    req = build_request("openai", "sk-fake", "gpt-4o-mini", "sys", "user")
+    assert req["json"]["max_completion_tokens"] == 1024
+    assert req["json"]["temperature"] == 0.3
 
 
 def test_build_request_custom_appends_chat_completions():
@@ -530,6 +543,8 @@ def test_build_request_custom_appends_chat_completions():
     assert req["url"] == "https://api.commandcode.ai/provider/v1/chat/completions"
     assert req["headers"]["Authorization"] == "Bearer sk-fake"
     assert req["json"]["model"] == "deepseek/deepseek-v4-flash"
+    assert req["json"]["max_tokens"] == 1024
+    assert "max_completion_tokens" not in req["json"]
 
 
 def test_build_request_custom_keeps_explicit_chat_completions():

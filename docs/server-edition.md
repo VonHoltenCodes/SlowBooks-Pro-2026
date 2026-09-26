@@ -86,8 +86,9 @@ trusted networks.
   it to the internet.
 - Comfortable for small teams (2–10 people). The database serializes
   writes; hundreds of concurrent users is not the design target.
-- The update badge appears in-app as usual; updating means running the
-  new installer on the host machine.
+- The update badge is off by default. Set `SLOWBOOKS_UPDATE_CHECK=1` in
+  the host's SlowBooks `.env` file and restart to enable it. Updating means
+  running the new installer on the host machine.
 
 ## Troubleshooting
 

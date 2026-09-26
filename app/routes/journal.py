@@ -6,11 +6,13 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.transactions import Transaction
 from app.models.accounts import Account
+from app.models.qbo_mapping import QBOMapping
 from app.schemas.journal import JournalEntryCreate, JournalEntryResponse
 from app.services.accounting import create_journal_entry, reversing_lines
 from app.services.bank_posting import assert_not_reconciled, release_statement_links
@@ -26,7 +28,7 @@ def _line_dict(line, acct) -> dict:
         "id": line.id,
         "account_id": line.account_id,
         "account_name": acct.name if acct else "",
-        "account_number": acct.account_number if acct else "",
+        "account_number": (acct.account_number or "") if acct else "",
         "debit": float(line.debit),
         "credit": float(line.credit),
         "description": line.description or "",
@@ -44,7 +46,24 @@ def list_journal_entries(source_type: str = None, db: Session = Depends(get_db))
     if source_type:
         q = q.filter(Transaction.source_type == source_type)
     else:
-        q = q.filter(Transaction.source_type == "manual")
+        # Older report imports stored journals as qbo_ledger. Show those
+        # immediately, even before the direct JournalEntry import is rerun.
+        report_journals = db.query(QBOMapping.slowbooks_id).filter(
+            QBOMapping.entity_type == "ledger",
+            or_(
+                QBOMapping.qbo_id.like("Journal Entry:%"),
+                QBOMapping.qbo_id.like("General Journal:%"),
+                QBOMapping.qbo_id.like("JournalEntry:%"),
+                QBOMapping.qbo_id.like("Journal:%"),
+            ),
+        )
+        q = q.filter(
+            or_(
+                Transaction.source_type.in_(["manual", "qbo_journal"]),
+                (Transaction.source_type == "qbo_ledger")
+                & Transaction.id.in_(report_journals),
+            )
+        )
     entries = q.order_by(Transaction.date.desc()).all()
     accounts = {a.id: a for a in db.query(Account).all()}
     results = []
@@ -60,8 +79,8 @@ def list_journal_entries(source_type: str = None, db: Session = Depends(get_db))
                 reference=txn.reference or "",
                 source_type=txn.source_type or "",
                 lines=lines_data,
-                total_debit=sum(line["debit"] for line in lines_data),
-                total_credit=sum(line["credit"] for line in lines_data),
+                total_debit=float(sum(line.debit for line in txn.lines)),
+                total_credit=float(sum(line.credit for line in txn.lines)),
             )
         )
     return results
@@ -83,8 +102,8 @@ def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
         reference=txn.reference or "",
         source_type=txn.source_type or "",
         lines=lines_data,
-        total_debit=sum(line["debit"] for line in lines_data),
-        total_credit=sum(line["credit"] for line in lines_data),
+        total_debit=float(sum(line.debit for line in txn.lines)),
+        total_credit=float(sum(line.credit for line in txn.lines)),
     )
 
 
@@ -149,6 +168,11 @@ def void_journal_entry(entry_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Journal entry not found")
     if txn.source_type and txn.source_type.endswith("_void"):
         raise HTTPException(status_code=400, detail="Cannot void a reversal entry")
+    if txn.source_type in {"qbo_ledger", "qbo_journal"}:
+        raise HTTPException(
+            status_code=400,
+            detail="QBO ledger entries are managed by the QBO import",
+        )
 
     assert_not_reconciled(txn)
     check_closing_date(db, txn.date)

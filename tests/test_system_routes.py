@@ -30,11 +30,33 @@ def test_system_info_reports_version(client):
     body = r.json()
     assert body["version"] == __version__
     assert body["desktop"] is False
+    assert body["update_check_enabled"] is False
 
 
 def test_system_info_desktop_flag(client, monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_DESKTOP", "1")
+    monkeypatch.delenv("SLOWBOOKS_UPDATE_CHECK", raising=False)
     assert client.get("/api/system").json()["desktop"] is True
+    assert client.get("/api/system").json()["update_check_enabled"] is False
+
+
+def test_system_info_reports_update_check_opt_in(client, monkeypatch):
+    monkeypatch.setenv("SLOWBOOKS_DESKTOP", "1")
+    monkeypatch.setenv("SLOWBOOKS_UPDATE_CHECK", "1")
+    assert client.get("/api/system").json()["update_check_enabled"] is True
+
+
+def test_update_check_requires_opt_in_even_in_desktop_mode(client, monkeypatch):
+    monkeypatch.setenv("SLOWBOOKS_DESKTOP", "1")
+    monkeypatch.delenv("SLOWBOOKS_UPDATE_CHECK", raising=False)
+
+    async def unexpected_get(*args, **kwargs):
+        pytest.fail("default update check made an outbound request")
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", unexpected_get)
+    assert client.get("/api/system/update-check").json() == {
+        "update_available": False
+    }
 
 
 def test_update_check_noop_outside_desktop_mode(client, monkeypatch):
@@ -57,6 +79,7 @@ def _mock_manifest(monkeypatch, payload=None, exc=None):
 
 def test_update_check_reports_newer_version(client, monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_DESKTOP", "1")
+    monkeypatch.setenv("SLOWBOOKS_UPDATE_CHECK", "1")
     _mock_manifest(
         monkeypatch,
         payload={
@@ -73,6 +96,7 @@ def test_update_check_reports_newer_version(client, monkeypatch):
 
 def test_update_check_same_version_is_not_an_update(client, monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_DESKTOP", "1")
+    monkeypatch.setenv("SLOWBOOKS_UPDATE_CHECK", "1")
     _mock_manifest(
         monkeypatch,
         payload={"version": __version__, "download_url": "https://x.example"},
@@ -82,6 +106,7 @@ def test_update_check_same_version_is_not_an_update(client, monkeypatch):
 
 def test_update_check_swallows_network_errors(client, monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_DESKTOP", "1")
+    monkeypatch.setenv("SLOWBOOKS_UPDATE_CHECK", "1")
     _mock_manifest(monkeypatch, exc=httpx.ConnectError("offline"))
     r = client.get("/api/system/update-check")
     assert r.status_code == 200
@@ -90,6 +115,7 @@ def test_update_check_swallows_network_errors(client, monkeypatch):
 
 def test_update_check_result_is_cached(client, monkeypatch):
     monkeypatch.setenv("SLOWBOOKS_DESKTOP", "1")
+    monkeypatch.setenv("SLOWBOOKS_UPDATE_CHECK", "1")
     calls = {"n": 0}
 
     async def counting_get(self, url, **kwargs):

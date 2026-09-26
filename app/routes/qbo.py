@@ -8,6 +8,8 @@
 #   GET  /api/qbo/status     -> connection status (never returns raw tokens)
 #
 # Data sync:
+#   POST /api/qbo/import-runs      -> start a background import (HTTP 202)
+#   GET  /api/qbo/import-runs/latest -> latest status and incremental events
 #   POST /api/qbo/import           -> import all entity types
 #   POST /api/qbo/import/{entity}  -> import single entity type
 #   POST /api/qbo/export           -> export all entity types
@@ -16,15 +18,26 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import RedirectResponse
+from intuitlib.exceptions import AuthClientError
+from pydantic import BaseModel
+from requests.exceptions import RequestException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.qbo import QBOImportResult, QBOExportResult, QBOConnectionStatus
+from app.routes._roles import require_admin
+from app.schemas.qbo import (
+    QBOImportResult,
+    QBOExportResult,
+    QBOConnectionStatus,
+    QBOImportRunRequest,
+)
 from app.services import qbo_service
 from app.services import qbo_import
+from app.services import qbo_ledger_import
 from app.services import qbo_export
+from app.services import qbo_import_runs
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +50,9 @@ router = APIRouter(prefix="/api/qbo", tags=["qbo"])
 
 
 @router.get("/auth-url")
-def get_auth_url(db: Session = Depends(get_db)):
+def get_auth_url(request: Request, db: Session = Depends(get_db)):
     """Generate the Intuit OAuth authorization URL."""
+    require_admin(request)
     try:
         url = qbo_service.get_auth_url(db)
         return {"url": url}
@@ -49,6 +63,55 @@ def get_auth_url(db: Session = Depends(get_db)):
             "Failed to generate the auth URL — check that Client ID and Client "
             "Secret are configured in Settings; the server log has the details.",
         )
+
+
+class ManualConnection(BaseModel):
+    authorization_code: str
+    realm_id: str
+
+
+@router.post("/connect-manual")
+def connect_manual(
+    credentials: ManualConnection,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Redeem an authorization code supplied by an authenticated admin."""
+    require_admin(request)
+    code = credentials.authorization_code.strip()
+    realm_id = credentials.realm_id.strip()
+    if not code or not realm_id or len(code) > 4096 or len(realm_id) > 128:
+        raise HTTPException(400, "Enter an Authorization Code and Realm ID")
+
+    try:
+        qbo_service.exchange_authorization_code(db, code, realm_id)
+    except AuthClientError as exc:
+        db.rollback()
+        logger.warning(
+            "Intuit rejected manual QBO connection (HTTP %s)", exc.status_code
+        )
+        if exc.status_code == 401:
+            detail = "Intuit rejected the QBO Client ID or Secret. Check Settings and the selected environment."
+        elif exc.status_code == 400:
+            detail = "Intuit rejected the authorization code. Get a fresh code and check that the Redirect URI matches the one used to obtain it."
+        else:
+            detail = "Intuit could not complete the connection. Try again with a fresh authorization code."
+        raise HTTPException(400, detail)
+    except RequestException:
+        db.rollback()
+        logger.warning("Manual QBO connection could not reach Intuit")
+        raise HTTPException(
+            502, "Could not reach Intuit. Check the server connection and try again."
+        )
+    except Exception as exc:
+        db.rollback()
+        logger.warning("Manual QBO connection failed (%s)", type(exc).__name__)
+        raise HTTPException(
+            400,
+            "QuickBooks connection failed. Check the code, Realm ID, and QBO Settings, then try again.",
+        )
+
+    return {"connected": True}
 
 
 @router.get("/callback")
@@ -83,7 +146,7 @@ def disconnect(db: Session = Depends(get_db)):
 
 
 @router.get("/status", response_model=QBOConnectionStatus)
-def get_status(db: Session = Depends(get_db)):
+def get_status(include_company_name: bool = True, db: Session = Depends(get_db)):
     """Get QBO connection status. Never returns raw tokens."""
     connected = qbo_service.is_connected(db)
     company_name = ""
@@ -92,10 +155,11 @@ def get_status(db: Session = Depends(get_db)):
     if connected:
         s = qbo_service.get_all_qbo_settings(db)
         realm_id = s.get("qbo_realm_id", "")
-        try:
-            company_name = qbo_service.get_company_name(db)
-        except Exception:
-            company_name = "(unable to fetch)"
+        if include_company_name:
+            try:
+                company_name = qbo_service.get_company_name(db)
+            except Exception:
+                company_name = "(unable to fetch)"
 
     return QBOConnectionStatus(
         connected=connected,
@@ -116,16 +180,49 @@ _IMPORT_ENTITY_MAP = {
     "invoices": qbo_import.import_invoices,
     "payments": qbo_import.import_payments,
     "sales_receipts": qbo_import.import_sales_receipts,
+    "journal_entries": qbo_import.import_journal_entries,
+    "ledger": qbo_ledger_import.import_ledger,
 }
 
 
+@router.post("/import-runs", status_code=202)
+def start_import_run(
+    payload: QBOImportRunRequest, request: Request, db: Session = Depends(get_db)
+):
+    require_admin(request)
+    if not qbo_service.is_connected(db):
+        raise HTTPException(400, "Not connected to QuickBooks Online")
+    entities = [
+        entity
+        for entity in qbo_import_runs.ENTITY_ORDER
+        if payload.entities is None or entity in payload.entities
+    ]
+    actor = db.info.get("acting_username", "operator")
+    return qbo_import_runs.start_run(
+        db, entities, actor, import_all=payload.entities is None
+    )
+
+
+@router.get("/import-runs/latest")
+def latest_import_run(
+    after: int = Query(default=0, ge=0), db: Session = Depends(get_db)
+):
+    return qbo_import_runs.store_for(db).latest(after)
+
+
 @router.post("/import", response_model=QBOImportResult)
-def import_all(db: Session = Depends(get_db)):
+def import_all(request: Request, db: Session = Depends(get_db)):
     """Import all entity types from QBO in dependency order."""
+    require_admin(request)
     if not qbo_service.is_connected(db):
         raise HTTPException(400, "Not connected to QuickBooks Online")
     try:
-        result = qbo_import.import_all(db)
+        with qbo_import_runs.synchronous_run(
+            db, qbo_import_runs.ENTITY_ORDER, db.info.get("acting_username", "operator")
+        ):
+            result = qbo_import.import_all(db)
+    except HTTPException:
+        raise
     except Exception:
         db.rollback()
         logger.exception("QBO import failed")
@@ -134,8 +231,9 @@ def import_all(db: Session = Depends(get_db)):
 
 
 @router.post("/import/{entity}")
-def import_entity(entity: str, db: Session = Depends(get_db)):
+def import_entity(entity: str, request: Request, db: Session = Depends(get_db)):
     """Import a single entity type from QBO."""
+    require_admin(request)
     if not qbo_service.is_connected(db):
         raise HTTPException(400, "Not connected to QuickBooks Online")
 
@@ -147,8 +245,13 @@ def import_entity(entity: str, db: Session = Depends(get_db)):
         )
 
     try:
-        result = _IMPORT_ENTITY_MAP[entity](db)
-        db.commit()
+        with qbo_import_runs.synchronous_run(
+            db, [entity], db.info.get("acting_username", "operator")
+        ):
+            result = _IMPORT_ENTITY_MAP[entity](db)
+            db.commit()
+    except HTTPException:
+        raise
     except Exception:
         db.rollback()
         logger.exception("QBO import of %s failed", entity)

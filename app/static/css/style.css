@@ -27,8 +27,6 @@
  * tiled BMP in the original. We recreated it as a CSS gradient. Close enough.
  * ============================================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Tahoma&display=swap');
-
 :root {
     /* -- the classic "Default Blue" palette -- */
     --qb-navy:        #003366;
@@ -948,6 +946,47 @@ a:hover { text-decoration: underline; }
 .line-items-table .col-amount { width: 80px; text-align: right; }
 .line-items-table .col-actions{ width: 30px; text-align: center; }
 
+.invoice-logo-option {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px;
+    margin-bottom: 12px;
+    border: 1px solid var(--panel-border);
+    background: var(--form-bg);
+}
+
+.invoice-logo-preview {
+    max-width: 140px;
+    max-height: 56px;
+    object-fit: contain;
+    padding: 4px;
+    background: white;
+}
+
+.invoice-logo-option label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+}
+
+.invoice-logo-option input {
+    width: auto;
+}
+
+.invoice-logo-help,
+.invoice-logo-status {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-top: 3px;
+}
+
+.invoice-logo-status.invoice-logo-error {
+    color: var(--danger);
+}
+
 .invoice-totals {
     display: flex;
     flex-direction: column;
@@ -1312,6 +1351,77 @@ tr.clickable { cursor: pointer; }
     margin-bottom: 12px;
     padding-bottom: 6px;
     border-bottom: 1px solid var(--panel-border);
+}
+
+/* QBO imports: keep the live log inside the import controls' column. */
+.qbo-sections { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.qbo-sections > .iif-section { min-width: 0; }
+.qbo-import-log {
+    --qbo-log-warning: #9a4b12;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: 12px;
+    border: 1px solid var(--panel-border);
+    background: var(--panel-bg);
+    font: 10px/1.5 var(--font-mono);
+    color: var(--text-primary);
+}
+.qbo-log-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 9px;
+    background: var(--form-bg);
+    border-bottom: 1px solid var(--panel-border);
+}
+.qbo-log-heading > strong { font-size: 11px; }
+.qbo-log-controls { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+.qbo-log-controls .btn { padding: 2px 5px; font-size: 10px; }
+.qbo-log-controls .btn[hidden] { display: none; }
+.qbo-run-status { font-weight: 700; color: var(--text-secondary); }
+.qbo-status-running { color: var(--text-link); }
+.qbo-status-complete { color: var(--text-success); }
+.qbo-status-warning { color: var(--qbo-log-warning); }
+.qbo-status-error { color: var(--danger); }
+.qbo-run-detail, .qbo-run-activity { padding: 5px 9px; overflow-wrap: anywhere; }
+.qbo-run-activity { color: var(--text-secondary); border-bottom: 1px solid var(--panel-border); }
+.qbo-run-counts { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 9px; }
+.qbo-run-counts strong { font-variant-numeric: tabular-nums; }
+.qbo-log-scroll { height: 320px; overflow: auto; overscroll-behavior: contain; }
+.qbo-log-table { width: 100%; min-width: 480px; table-layout: fixed; border-collapse: separate; border-spacing: 0; font-size: inherit; }
+.qbo-log-table th, .qbo-log-table td {
+    padding: 4px 5px;
+    font-size: inherit;
+    vertical-align: top;
+    text-align: left;
+    overflow-wrap: anywhere;
+    border-bottom: 1px solid var(--panel-border);
+}
+.qbo-log-table th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--form-bg);
+    color: var(--text-secondary);
+    font-weight: 700;
+}
+.qbo-log-table td:first-child { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qbo-col-ts { width: 87px; }
+.qbo-col-code, .qbo-col-item, .qbo-col-action { width: 56px; }
+.qbo-log-code, .qbo-log-item-label { display: block; color: var(--text-secondary); }
+.qbo-log-level { font-weight: 700; }
+.qbo-log-error .qbo-log-level { color: var(--danger); }
+.qbo-log-warning .qbo-log-level { color: var(--qbo-log-warning); }
+.qbo-log-error td:first-child { border-left: 2px solid var(--danger); }
+.qbo-log-warning td:first-child { border-left: 2px solid var(--qbo-log-warning); }
+.qbo-log-empty { padding: 18px 10px; color: var(--text-secondary); text-align: center; }
+.qbo-errors-only #qbo-log-rows > tr:not(.qbo-log-error) { display: none; }
+#qbo-errors-filter[aria-pressed="true"] { color: var(--danger); font-weight: 700; border-color: var(--danger); }
+.qbo-log-error .qbo-log-code { color: var(--danger); }
+[data-theme="dark"] .qbo-import-log { --qbo-log-warning: var(--qb-orange); }
+@media (max-width: 800px) {
+    .qbo-sections { grid-template-columns: minmax(0, 1fr); }
 }
 
 .iif-export-grid {

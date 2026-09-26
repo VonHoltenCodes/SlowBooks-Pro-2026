@@ -89,6 +89,8 @@ _LINKS = {
     "transfer": "/#/banking/transfers/{txn}",
     "bank_entry": "/#/journal/{txn}",
     "opening_balance": "/#/journal/{txn}",
+    "qbo_ledger": "/#/journal/{txn}",
+    "qbo_journal": "/#/journal/{txn}",
 }
 
 

@@ -14,6 +14,10 @@ from app.services.payments.base import CheckoutSession, PaymentProvider, Payment
 from app.services.donor_documents import document_label
 from app.services.terminology import document_reference, terms_for
 
+# The SDK otherwise creates a persistent telemetry ID and sends it, platform
+# details, and previous-request metrics alongside operator-initiated API calls.
+stripe.enable_telemetry = False
+
 
 class StripeProvider(PaymentProvider):
     name = "stripe"

@@ -179,25 +179,32 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
     template = _jinja_env.get_template(template_name)
     # Every document carries the company logo when one is set (discussion
     # #108: only the analytics PDF and the new-hire report ever received it).
-    context.setdefault(
-        "company_logo_data_uri", _company_logo_data_uri(company_settings)
-    )
+    if "company_logo_data_uri" not in context:
+        context["company_logo_data_uri"] = _company_logo_data_uri(company_settings)
     return template.render(
         company=company_settings, terms=terms_for(company_settings), **context
     )
 
 
-def generate_invoice_pdf(invoice, company_settings: dict) -> bytes:
+def render_invoice_html(invoice, company_settings: dict) -> str:
+    """Use the same invoice face and logo preference for PDF and Print."""
     from app.services.donor_documents import invoice_pdf_context
 
-    return render_pdf(
-        _render(
-            "invoice_pdf.html",
-            company_settings,
-            inv=invoice,
-            **invoice_pdf_context(invoice, company_settings),
-        )
+    return _render(
+        "invoice_pdf.html",
+        company_settings,
+        inv=invoice,
+        company_logo_data_uri=(
+            _company_logo_data_uri(company_settings)
+            if company_settings.get("invoice_show_logo", "true") != "false"
+            else ""
+        ),
+        **invoice_pdf_context(invoice, company_settings),
     )
+
+
+def generate_invoice_pdf(invoice, company_settings: dict) -> bytes:
+    return render_pdf(render_invoice_html(invoice, company_settings))
 
 
 def generate_estimate_pdf(estimate, company_settings: dict) -> bytes:

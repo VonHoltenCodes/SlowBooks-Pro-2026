@@ -65,6 +65,13 @@ const SettingsPage = {
                             ${s.company_logo_path ? `<img src="${escapeHtml(s.company_logo_path)}" style="max-width:200px; max-height:80px; margin-bottom:8px; display:block;">` : ''}
                             <input type="file" id="logo-upload" accept="image/*" onchange="SettingsPage.uploadLogo(this)">
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.</div>
+                            ${s.company_logo_path ? `<div style="margin-top:8px;">
+                                <label for="invoice-show-logo" style="font-weight:normal;">
+                                    <input type="checkbox" id="invoice-show-logo" name="invoice_show_logo" value="true" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_show_logo !== 'false' ? 'checked' : ''}>
+                                    Show company logo on invoices
+                                </label>
+                                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Applies to PDF, Print, and emailed invoice attachments.</div>
+                            </div>` : ''}
                         </div>
                     </div>
                 </div>
@@ -576,6 +583,8 @@ const SettingsPage = {
         const data = Object.fromEntries(new FormData(e.target).entries());
         // Remove file input from data
         delete data.file;
+        const logoOption = e.target.querySelector('[name="invoice_show_logo"]');
+        if (logoOption) data.invoice_show_logo = logoOption.checked ? 'true' : 'false';
         try {
             await API.put('/settings', data);
             toast('Settings saved');

@@ -10,6 +10,7 @@
 # Tokens are stored in the settings table (same as Stripe keys, SMTP creds, etc.)
 # ============================================================================
 
+import hmac
 import uuid
 from datetime import datetime, timezone
 
@@ -82,14 +83,13 @@ def get_auth_url(db: Session) -> str:
     Stores a random CSRF state token in settings for verification in callback.
     """
     state = uuid.uuid4().hex
-    _set_setting(db, "qbo_oauth_state", state)
-    db.commit()
-
     auth_client = _make_auth_client(db)
     url = auth_client.get_authorization_url(
         scopes=[Scopes.ACCOUNTING],
         state_token=state,
     )
+    _set_setting(db, "qbo_oauth_state", state)
+    db.commit()
     return url
 
 
@@ -99,11 +99,19 @@ def handle_callback(db: Session, code: str, state: str, realm_id: str):
     Raises ValueError on CSRF mismatch.
     """
     stored_state = _get_setting(db, "qbo_oauth_state")
-    if not stored_state or state != stored_state:
+    if not stored_state or not hmac.compare_digest(state, stored_state):
         raise ValueError("OAuth state mismatch — possible CSRF attack")
+
+    exchange_authorization_code(db, code, realm_id)
+
+
+def exchange_authorization_code(db: Session, code: str, realm_id: str):
+    """Redeem a code for an authenticated admin's manual QBO connection."""
 
     auth_client = _make_auth_client(db)
     auth_client.get_bearer_token(code, realm_id=realm_id)
+    if not auth_client.access_token or not auth_client.refresh_token:
+        raise RuntimeError("QuickBooks returned incomplete OAuth tokens")
 
     # Store tokens
     _set_setting(db, "qbo_access_token", auth_client.access_token or "")
