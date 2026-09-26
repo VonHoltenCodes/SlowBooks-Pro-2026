@@ -46,9 +46,9 @@ const DeductionsPage = {
                 <td>${g.calc_method === 'percent_disposable' ? '% of disposable' : 'fixed'}</td>
                 <td class="amount">${g.calc_method === 'percent_disposable' ? `${(+g.amount).toFixed(2)}%` : formatCurrency(g.amount)}</td>
                 <td style="font-size:12px;">${g.garnishment_type === 'child_support' ? [g.supports_secondary_family ? 'second family' : '', g.in_arrears_12_weeks ? '12+ wks arrears' : ''].filter(Boolean).join(', ') || '—' : '—'}</td>
-                <td>${g.is_active ? '<span class="badge badge-paid">Active</span>' : '<span class="badge badge-draft">Inactive</span>'}</td>
+                <td>${g.is_active ? '<span class="badge badge-paid">Active</span>' : '<span class="badge badge-draft">Ended</span>'}</td>
                 <td class="actions">
-                    <button class="btn btn-sm btn-secondary" onclick="DeductionsPage.deleteGarnishment(${g.id}, ${empId})">Remove</button>
+                    ${g.is_active ? `<button class="btn btn-sm btn-secondary" onclick="DeductionsPage.endGarnishment(${g.id}, ${empId})">End order</button>` : ''}
                 </td>
             </tr>`;
         }
@@ -147,11 +147,13 @@ const DeductionsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
-    async deleteGarnishment(id, empId) {
-        if (!confirm('Remove this garnishment order?')) return;
+    // A court-ordered withholding is ended, never deleted: it stops being
+    // withheld from future pay runs and its record stays.
+    async endGarnishment(id, empId) {
+        if (!confirm('End this garnishment order? It will no longer be withheld from future pay runs. Its record stays.')) return;
         try {
-            await API.del(`/deductions/garnishments/${id}`);
-            toast('Garnishment removed');
+            await API.post(`/deductions/garnishments/${id}/end`, {});
+            toast('Garnishment order ended');
             await DeductionsPage.loadGarnishments(empId);
         } catch (err) { toast(err.message, 'error'); }
     },

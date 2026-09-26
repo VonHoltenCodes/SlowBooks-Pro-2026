@@ -264,6 +264,9 @@ def test_collector_finds_something():
 # - Legacy paths superseded by newer endpoints (kept for backwards compat)
 _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     ("POST", "/api/stripe/webhook"),  # legacy alias for provider webhook
+    # A garnishment order is ended, never deleted; DELETE stays so an API
+    # client is told why (405) and where to go (POST .../end).
+    ("DELETE", "/api/deductions/garnishments/{order_id}"),
     # Provider payment routes without SPA callers: webhooks fire from the
     # provider's servers; create-checkout-session is called from the
     # public /pay/{token} page (a Jinja template, outside the JS scan).
