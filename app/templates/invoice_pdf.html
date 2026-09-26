@@ -17,9 +17,13 @@
     .invoice-title { text-align: right; }
     .invoice-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
     .invoice-number { font-size: 12pt; color: #666; margin-top: 4px; }
-    .meta-table { width: 100%; margin-bottom: 16px; }
-    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; }
-    .meta-label { font-weight: 700; color: #4a4a6a; width: 80px; }
+    /* Labels over values, one column each: side by side, four labels at a
+       fixed 80px squeezed the values until "Sep 01, 2026" and "Net 30" broke
+       over two lines whenever a PO # was present (2.17.3 exploratory W-L1). */
+    .meta-table { width: 100%; margin-bottom: 16px; border-collapse: collapse; table-layout: fixed; }
+    .meta-table th { padding: 3px 8px; font-size: 8pt; font-weight: 700; color: #4a4a6a; text-align: left; border-bottom: 1px solid #d0d6e0; }
+    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; white-space: nowrap; }
+    .meta-table td.po { white-space: normal; overflow-wrap: anywhere; }
     .addresses { display: flex; gap: 40px; margin-bottom: 20px; }
     .address-block { flex: 1; }
     .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
@@ -28,12 +32,12 @@
     table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
     table.line-items th.r { text-align: right; }
     table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
-    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     table.line-items tr:nth-child(even) { background: #f7f9fb; }
     .totals { float: right; width: 240px; }
     .totals table { width: 100%; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
-    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .totals .label { font-weight: 700; color: #4a4a6a; }
     .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
@@ -62,14 +66,24 @@
     </div>
 
     {# A sales receipt is paid at the time of sale — no due date, no terms. #}
-    <table class="meta-table"><tr>
-        <td class="meta-label">{% if kind == 'DonationReceipt' %}Date of contribution:{% elif kind == 'Pledge' %}Pledge date:{% else %}Date:{% endif %}</td><td>{{ inv.date | fdate }}</td>
-        {% if not inv.is_sales_receipt %}
-        <td class="meta-label">{% if kind == 'Pledge' %}Due:{% else %}Due Date:{% endif %}</td><td>{{ inv.due_date | fdate }}</td>
-        {% if kind != 'Pledge' %}<td class="meta-label">Terms:</td><td>{{ inv.terms or '' }}</td>{% endif %}
-        {% endif %}
-        {% if inv.po_number %}<td class="meta-label">PO #:</td><td>{{ inv.po_number }}</td>{% endif %}
-    </tr></table>
+    <table class="meta-table">
+        <tr>
+            <th scope="col">{% if kind == 'DonationReceipt' %}Date of contribution:{% elif kind == 'Pledge' %}Pledge date:{% else %}Date:{% endif %}</th>
+            {% if not inv.is_sales_receipt %}
+            <th scope="col">{% if kind == 'Pledge' %}Due:{% else %}Due Date:{% endif %}</th>
+            {% if kind != 'Pledge' %}<th scope="col">Terms:</th>{% endif %}
+            {% endif %}
+            {% if inv.po_number %}<th scope="col">PO #:</th>{% endif %}
+        </tr>
+        <tr>
+            <td>{{ inv.date | fdate }}</td>
+            {% if not inv.is_sales_receipt %}
+            <td>{{ inv.due_date | fdate }}</td>
+            {% if kind != 'Pledge' %}<td>{{ inv.terms or '' }}</td>{% endif %}
+            {% endif %}
+            {% if inv.po_number %}<td class="po">{{ inv.po_number }}</td>{% endif %}
+        </tr>
+    </table>
 
     <div class="addresses">
         <div class="address-block">
