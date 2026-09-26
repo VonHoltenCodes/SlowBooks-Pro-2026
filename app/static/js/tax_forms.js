@@ -3,13 +3,12 @@
  * Feature 18: Payroll tax form generation
  */
 
-async function _openPDF(url, method = 'POST') {
-    const res = await fetch(url, { method, credentials: 'same-origin' });
-    if (!res.ok) { toast('PDF generation failed', 'error'); return; }
-    const blob = await res.blob();
-    const u = URL.createObjectURL(blob);
-    window.open(u, '_blank');
-    setTimeout(() => URL.revokeObjectURL(u), 15000);
+// Forms open the way invoices do: window.open on the form's GET URL. In a
+// browser that is a new tab; in the desktop app the shim fetches it and
+// shows the native PDF viewer. A fetched blob: window opened nothing in the
+// Mac app (WKWebView), so W-2 / W-3 / 940 / 941 produced nothing there.
+function _openForm(url) {
+    window.open(url, '_blank');
 }
 
 const TaxFormsPage = {
@@ -97,21 +96,21 @@ const TaxFormsPage = {
         const empId = empEl ? empEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
         if (!empId) { toast('Please select an employee', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/w2/${empId}/pdf?year=${year}`, 'POST');
+        _openForm(`/api/payroll/forms/w2/${empId}/pdf?year=${year}`);
     },
 
     async generateW3() {
         const yearEl = document.getElementById('w2-year');
         const year = yearEl ? yearEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/w3/${year}/pdf`, 'POST');
+        _openForm(`/api/payroll/forms/w3/${year}/pdf`);
     },
 
     async generate940() {
         const yearEl = document.getElementById('f940-year');
         const year = yearEl ? yearEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/940/${year}/pdf`, 'POST');
+        _openForm(`/api/payroll/forms/940/${year}/pdf`);
     },
 
     async generate941() {
@@ -121,6 +120,6 @@ const TaxFormsPage = {
         const quarter = quarterEl ? quarterEl.value : '';
         if (!year) { toast('Please enter a year', 'error'); return; }
         if (!quarter) { toast('Please select a quarter', 'error'); return; }
-        await _openPDF(`/api/payroll/forms/941/${year}/${quarter}/pdf`, 'POST');
+        _openForm(`/api/payroll/forms/941/${year}/${quarter}/pdf`);
     },
 };

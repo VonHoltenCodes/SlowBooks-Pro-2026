@@ -53,10 +53,16 @@
             <tr><td class="box">2</td><td>Wages, tips, and other compensation</td><td class="r">{{ data.total_wages | currency }}</td></tr>
             <tr><td class="box">3</td><td>Federal income tax withheld from wages</td><td class="r">{{ data.federal_income_tax_withheld | currency }}</td></tr>
             <tr><td class="box">5a</td><td>Taxable Social Security wages</td><td class="r">{{ data.social_security_wages | currency }}</td></tr>
-            <tr><td class="box">5a</td><td>Social Security tax (12.4%)</td><td class="r">{{ data.social_security_tax | currency }}</td></tr>
+            <tr><td class="box">5a</td><td>Social Security tax (wages &times; 12.4%)</td><td class="r">{{ data.social_security_tax | currency }}</td></tr>
             <tr><td class="box">5c</td><td>Taxable Medicare wages</td><td class="r">{{ data.medicare_wages | currency }}</td></tr>
-            <tr><td class="box">5c</td><td>Medicare tax (2.9%)</td><td class="r">{{ data.medicare_tax | currency }}</td></tr>
-            <tr><td class="box">5e</td><td>Total Social Security and Medicare tax</td><td class="r">{{ data.total_fica_tax | currency }}</td></tr>
+            <tr><td class="box">5c</td><td>Medicare tax (wages &times; 2.9%)</td><td class="r">{{ data.medicare_tax | currency }}</td></tr>
+            {% if data.additional_medicare_wages %}
+            <tr><td class="box">5d</td><td>Wages subject to Additional Medicare Tax withholding</td><td class="r">{{ data.additional_medicare_wages | currency }}</td></tr>
+            <tr><td class="box">5d</td><td>Additional Medicare Tax (wages &times; 0.9%)</td><td class="r">{{ data.additional_medicare_tax | currency }}</td></tr>
+            {% endif %}
+            <tr><td class="box">5e</td><td>Total Social Security and Medicare taxes</td><td class="r">{{ data.total_fica_tax | currency }}</td></tr>
+            <tr><td class="box">6</td><td>Total taxes before adjustments</td><td class="r">{{ data.total_tax_before_adjustments | currency }}</td></tr>
+            <tr><td class="box">7</td><td>Current quarter's adjustment for fractions of cents</td><td class="r">{% if data.fractions_of_cents < 0 %}-{{ (0 - data.fractions_of_cents) | currency }}{% else %}{{ data.fractions_of_cents | currency }}{% endif %}</td></tr>
             <tr class="total"><td class="box">12</td><td>Total taxes after adjustments</td><td class="r">{{ data.total_tax_liability | currency }}</td></tr>
         </tbody>
     </table>

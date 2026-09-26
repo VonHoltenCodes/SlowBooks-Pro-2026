@@ -167,6 +167,13 @@ def generate_form_941(
 # the same data through WeasyPrint templates so the admin UI's "Generate"
 # buttons produce printable forms instead of raw JSON.
 #
+# Each answers GET as well as POST. The Tax Forms page opens them the way
+# invoices open (window.open on the URL), which the desktop shim turns into
+# a fetch + native PDF viewer; the page used to POST, wrap the reply in a
+# blob: URL and window.open that, which WKWebView silently ignores — the
+# Mac app produced nothing for W-2, W-3, 940 or 941 (2.17.3, macbase1 F23).
+# POST stays for callers that already use it.
+#
 # The PDFs are not pixel-exact replicas of the IRS-published forms — they
 # show all the right data in a readable layout with a clear disclaimer.
 # Match against the official form before filing.
@@ -203,6 +210,7 @@ def _hash_and_audit(
     return audit_footer_context(audit)
 
 
+@router.get("/forms/w2/{emp_id}/pdf", response_class=Response)
 @router.post("/forms/w2/{emp_id}/pdf", response_class=Response)
 def generate_w2_form_pdf(
     emp_id: int,
@@ -220,6 +228,7 @@ def generate_w2_form_pdf(
     return _pdf_response(pdf, f"w2_{emp_id}_{year}.pdf")
 
 
+@router.get("/forms/w3/{year}/pdf", response_class=Response)
 @router.post("/forms/w3/{year}/pdf", response_class=Response)
 def generate_w3_form_pdf(year: int, db: Session = Depends(get_db)):
     """W-3 transmittal PDF — aggregate across every W-2 for the year."""
@@ -229,6 +238,7 @@ def generate_w3_form_pdf(year: int, db: Session = Depends(get_db)):
     return _pdf_response(pdf, f"w3_{year}.pdf")
 
 
+@router.get("/forms/940/{year}/pdf", response_class=Response)
 @router.post("/forms/940/{year}/pdf", response_class=Response)
 def generate_form_940_pdf(year: int, db: Session = Depends(get_db)):
     """Form 940 (FUTA) PDF for the given calendar year."""
@@ -238,6 +248,7 @@ def generate_form_940_pdf(year: int, db: Session = Depends(get_db)):
     return _pdf_response(pdf, f"form_940_{year}.pdf")
 
 
+@router.get("/forms/941/{year}/{quarter}/pdf", response_class=Response)
 @router.post("/forms/941/{year}/{quarter}/pdf", response_class=Response)
 def generate_form_941_pdf(year: int, quarter: int, db: Session = Depends(get_db)):
     """Form 941 (quarterly FICA) PDF for year + quarter."""
