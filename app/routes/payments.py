@@ -252,6 +252,14 @@ def void_payment(payment_id: int, db: Session = Depends(get_db)):
     if payment.is_voided:
         raise HTTPException(status_code=400, detail="Payment already voided")
     check_closing_date(db, payment.date)
+    # Money already taken to the bank in a deposit (or received straight
+    # into a bank account that has since been reconciled) can't just be
+    # reversed out of Undeposited Funds: that drove 1200 negative while the
+    # deposit still claimed the money (explore 2.17.3, W-H4). A sales
+    # receipt is voided through here too, so the same rule covers it.
+    from app.services.undeposited_funds import refuse_void_if_deposited
+
+    refuse_void_if_deposited(db, payment)
 
     # Reverse journal entry
     if payment.transaction_id:
@@ -284,6 +292,11 @@ def void_payment(payment_id: int, db: Session = Depends(get_db)):
                 source_type="payment_void",
                 source_id=payment.id,
             )
+        # A bank-feed line matched to this payment goes back to review.
+        from app.services.bank_posting import release_statement_links
+
+        if payment.transaction is not None:
+            release_statement_links(db, payment.transaction)
 
     # Reverse invoice allocations. Lock each invoice row so a concurrent
     # create_payment / second void can't race the read-modify-write of
