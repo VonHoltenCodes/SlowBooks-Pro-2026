@@ -60,8 +60,11 @@ const TaxPage = {
     },
 
     async showPaySalesTax() {
+        // Tax is paid out of a bank or card account — never Accounts
+        // Receivable, Inventory or Undeposited Funds, which the old
+        // every-asset list offered (the server refuses those too).
         const [accounts, balSheet] = await Promise.all([
-            API.get('/accounts'),
+            API.get('/accounts?bank=1&active_only=true'),
             API.get('/reports/balance-sheet'),
         ]);
 
@@ -69,8 +72,8 @@ const TaxPage = {
         const taxLiability = balSheet.liabilities.find(l => l.account_number === '2200');
         const taxBalance = taxLiability ? Math.abs(taxLiability.amount) : 0;
 
-        const bankAccts = accounts.filter(a => a.account_type === 'asset');
-        const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)} (${formatCurrency(a.balance)})</option>`).join('');
+        const bankOpts = accounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)} (${formatCurrency(a.balance)})</option>`).join('');
+        const noBank = accounts.length ? '' : '<small style="color:var(--danger);">No bank or credit card account yet. Add one under Banking first.</small>';
 
         openModal('Pay Sales Tax', `
             <form onsubmit="TaxPage.submitPaySalesTax(event)">
@@ -83,7 +86,7 @@ const TaxPage = {
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Pay From Account *</label>
-                        <select name="pay_from_account_id" required><option value="">Select...</option>${bankOpts}</select></div>
+                        <select name="pay_from_account_id" required><option value="">Select...</option>${bankOpts}</select>${noBank}</div>
                     <div class="form-group"><label>Check #</label>
                         <input name="check_number"></div>
                 </div>

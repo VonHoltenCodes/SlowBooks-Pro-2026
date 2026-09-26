@@ -1,4 +1,5 @@
 from datetime import date
+from datetime import date as dt_date
 from decimal import Decimal
 from typing import Optional
 
@@ -8,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
 from app.database import get_db
-from app.services.accounting import taxable_subtotal
+from app.services.accounting import _q, taxable_subtotal
 from app.models.accounts import Account
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Vendor
@@ -16,7 +17,10 @@ from app.routes.reports._router import router
 
 
 class SalesTaxPaymentRequest(StrictModel):
-    date: Optional[date] = None
+    # `dt_date`, not `date`: inside the class body the field named `date`
+    # shadows the type, so `Optional[date]` became `Optional[None]` and every
+    # real date was refused with "date: Input should be None" (2.17.3).
+    date: Optional[dt_date] = None
     amount: Decimal
     pay_from_account_id: int
     check_number: Optional[str] = ""
@@ -90,7 +94,8 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     pay_date = data.date or date.today()
     check_closing_date(db, pay_date)
 
-    if data.amount <= 0:
+    amount = _q(data.amount)
+    if amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
 
     bank_account = (
@@ -98,6 +103,17 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     )
     if not bank_account:
         raise HTTPException(status_code=404, detail="Bank account not found")
+    # Tax is paid out of a bank or card account. The picker used to offer
+    # every asset (Accounts Receivable, Inventory, Undeposited Funds ...)
+    # and the credit landed wherever the user pointed it.
+    if not bank_account.bank_kind:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{bank_account.name} is not a bank or credit card account. "
+                "Pick the bank or credit card account the tax was paid from."
+            ),
+        )
 
     tax_account_id = get_sales_tax_account_id(db)
     if not tax_account_id:
@@ -108,14 +124,14 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
     journal_lines = [
         {
             "account_id": tax_account_id,
-            "debit": data.amount,
+            "debit": amount,
             "credit": Decimal("0"),
             "description": "Sales tax payment",
         },
         {
-            "account_id": data.pay_from_account_id,
+            "account_id": bank_account.id,
             "debit": Decimal("0"),
-            "credit": data.amount,
+            "credit": amount,
             "description": "Sales tax payment",
         },
     ]
@@ -131,7 +147,7 @@ def pay_sales_tax(data: SalesTaxPaymentRequest, db: Session = Depends(get_db)):
         reference=reference,
     )
     db.commit()
-    return {"status": "ok", "transaction_id": txn.id, "amount": float(data.amount)}
+    return {"status": "ok", "transaction_id": txn.id, "amount": float(amount)}
 
 
 @router.get("/ap-aging")
