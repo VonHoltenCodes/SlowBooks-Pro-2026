@@ -200,7 +200,7 @@ const BankingPage = {
             <form onsubmit="BankingPage.saveAccount(event)">
                 <div class="form-grid">
                     <div class="form-group full-width"><label>Ledger account *</label>
-                        <select name="account_id" onchange="BankingPage._toggleNewAcct(this)">
+                        <select name="account_id" onchange="BankingPage._toggleNewAcct(this); BankingPage._showLedgerBalance(this.form)">
                             ${opts}<option value="__new__">+ Create a new chart account…</option>
                         </select></div>
                     <div id="new-acct-fields" class="form-group full-width" style="display:${free.length ? 'none' : 'block'};">
@@ -217,23 +217,47 @@ const BankingPage = {
                         <input name="bank_name"></div>
                     <div class="form-group"><label>Last 4 digits</label>
                         <input name="last_four" maxlength="4"></div>
-                    <div class="form-group"><label>Opening balance</label>
-                        <input name="opening_balance" type="number" step="0.01" value="0">
-                        <div style="font-size:10px; color:var(--gray-500);">What the statement says: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900).</div></div>
+                    <div class="form-group"><label>Statement balance</label>
+                        <input name="opening_balance" type="number" step="0.01" value="0" oninput="this.dataset.touched = '1'">
+                        <div style="font-size:10px; color:var(--gray-500);">What the statement says on the As-of date: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900) — unless the books already carry this account, when only a difference you confirm is posted.</div>
+                        <div id="acct-ledger-note" style="font-size:11px; margin-top:4px;" role="status"></div></div>
                     <div class="form-group"><label>As of</label>
-                        <input name="opening_date" type="date" value="${todayISO()}"></div>
+                        <input name="opening_date" type="date" value="${todayISO()}" onchange="BankingPage._showLedgerBalance(this.form)"></div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Create</button>
                 </div>
             </form>`);
-        if (!free.length) { const sel = document.querySelector('select[name=account_id]'); if (sel) sel.value = '__new__'; }
+        const sel = document.querySelector('select[name=account_id]');
+        if (!free.length) { if (sel) sel.value = '__new__'; }
+        if (sel) BankingPage._showLedgerBalance(sel.form);
     },
 
     _toggleNewAcct(sel) {
         const box = $('#new-acct-fields');
         if (box) box.style.display = sel.value === '__new__' ? 'block' : 'none';
+    },
+
+    // What the books already say about the chosen account on the As-of
+    // date, shown beside the statement balance. Savings that already held
+    // $300 from a transfer took a second $300 when the statement balance
+    // was posted blind (exploratory 2.17.3, W-H6): the ledger's figure is
+    // the starting value now, so a matching statement posts nothing.
+    async _showLedgerBalance(form) {
+        const note = $('#acct-ledger-note');
+        if (!form || !note) return;
+        const accountId = form.account_id.value;
+        note.textContent = '';
+        if (!accountId || accountId === '__new__') return;
+        const asOf = form.opening_date.value || todayISO();
+        try {
+            const led = await API.get(`/banking/ledger-balance?account_id=${accountId}&as_of=${asOf}`);
+            if (form.account_id.value !== accountId) return;  // changed meanwhile
+            if (!led.has_postings) return;
+            note.textContent = `The books already show ${formatCurrency(led.balance)} in ${led.account_name} on ${formatDate(led.as_of)}. Enter the statement's figure: if it differs, you'll be asked before the difference is posted.`;
+            if (!form.opening_balance.dataset.touched) form.opening_balance.value = Number(led.balance).toFixed(2);
+        } catch (err) { /* the note is a courtesy; the server still guards the save */ }
     },
 
     async saveAccount(e) {
@@ -251,14 +275,27 @@ const BankingPage = {
                 });
                 accountId = created.id;
             }
-            await API.post('/banking/accounts', {
+            const body = {
                 name: form.name.value,
                 account_id: parseInt(accountId, 10),
                 bank_name: form.bank_name.value || null,
                 last_four: form.last_four.value || null,
                 opening_balance: form.opening_balance.value || '0',
                 opening_date: form.opening_date.value || null,
-            });
+            };
+            try {
+                await API.post('/banking/accounts', body);
+            } catch (err) {
+                // The ledger already carries this account and the statement
+                // differs: say both figures, and post only the difference
+                // when the user says so.
+                if (!(err.status === 409 && err.detail && err.detail.code === 'ledger_has_balance')) throw err;
+                if (!confirm(`${err.detail.message}\n\nPost the ${formatCurrency(Number(err.detail.difference))} difference now?`)) {
+                    toast('Nothing was created. Enter the balance the books already show to post nothing.', 'error');
+                    return;
+                }
+                await API.post('/banking/accounts', { ...body, post_difference: true });
+            }
             toast('Bank account created');
             closeModal();
             App.navigate('#/banking');

@@ -24,7 +24,12 @@ from app.services.accounting import (
     get_opening_balance_equity_id,
     reversing_lines,
 )
-from app.services.bank_register import is_debit_normal
+from app.services.bank_register import (
+    balance_as_of,
+    date_text,
+    is_debit_normal,
+    money_text,
+)
 from app.services.closing_date import check_closing_date
 
 
@@ -44,11 +49,16 @@ def require_bank_account(db: Session, account_id: int) -> Account:
 
 
 def post_opening_balance(
-    db: Session, account: Account, txn_date: date, amount: Decimal
+    db: Session,
+    account: Account,
+    txn_date: date,
+    amount: Decimal,
+    description: str | None = None,
 ) -> Transaction:
     """The balance a bank or card account carries in, against 3900 Opening
     Balance Equity. `amount` is what the statement says: cash in the bank,
-    or the amount owed on the card."""
+    or the amount owed on the card. (For an account the ledger already
+    carries, `post_statement_balance` decides what, if anything, posts.)"""
     amount = _q(amount)
     if amount == 0:
         raise HTTPException(status_code=400, detail="Opening balance is zero")
@@ -67,10 +77,58 @@ def post_opening_balance(
     return create_journal_entry(
         db,
         txn_date,
-        f"Opening balance: {account.name}",
+        description or f"Opening balance: {account.name}",
         lines,
         source_type="opening_balance",
         reference="",
+    )
+
+
+def post_statement_balance(
+    db: Session,
+    account: Account,
+    as_of: date,
+    statement: Decimal,
+    post_difference: bool = False,
+) -> Transaction | None:
+    """A new feed's "what the statement says on `as_of`".
+
+    An account with nothing in the ledger on or before that date takes the
+    whole figure as its opening balance. An account the ledger already
+    carries does not: posting the statement again counted Savings twice
+    ($300 from a transfer, then $300 more against 3900 — exploratory 2.17.3,
+    W-H6). There the statement is compared with the ledger: equal posts
+    nothing; different is refused, naming the ledger's balance, until the
+    caller confirms — and then only the difference posts."""
+    statement = _q(statement)
+    ledger, lines = balance_as_of(db, account, as_of)
+    if not lines:
+        return post_opening_balance(db, account, as_of, statement)
+    difference = _q(statement - ledger)
+    if difference == 0:
+        return None
+    if not post_difference:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "ledger_has_balance",
+                "message": (
+                    f"{account.name} already has a balance of {money_text(ledger)} "
+                    f"in the books on {date_text(as_of)}, so the statement's "
+                    f"{money_text(statement)} is not posted again. Post only the "
+                    f"{money_text(difference)} difference as an opening balance "
+                    f"adjustment, or enter {money_text(ledger)} to post nothing."
+                ),
+                "ledger_balance": str(_q(ledger)),
+                "difference": str(difference),
+            },
+        )
+    return post_opening_balance(
+        db,
+        account,
+        as_of,
+        difference,
+        description=f"Opening balance adjustment: {account.name}",
     )
 
 

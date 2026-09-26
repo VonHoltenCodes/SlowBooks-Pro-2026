@@ -28,6 +28,17 @@ def is_debit_normal(account: Account) -> bool:
     return account.account_type in DEBIT_NORMAL
 
 
+def money_text(value) -> str:
+    """$1,234.56 / -$1,234.56 — money as a sentence shows it."""
+    amount = Decimal(str(value or 0))
+    return f"{'-' if amount < 0 else ''}${abs(amount):,.2f}"
+
+
+def date_text(value: date) -> str:
+    """Sep 26, 2026 — a date as a sentence shows it."""
+    return f"{value:%b} {value.day}, {value.year}"
+
+
 def gl_balances(db: Session, account_ids) -> dict[int, Decimal]:
     """Natural-signed balance per account from the ledger lines, in one
     grouped query. Missing ids balance to zero."""
@@ -57,6 +68,26 @@ def gl_balances(db: Session, account_ids) -> dict[int, Decimal]:
 
 def gl_balance(db: Session, account_id: int) -> Decimal:
     return gl_balances(db, [account_id]).get(account_id, ZERO)
+
+
+def balance_as_of(db: Session, account: Account, as_of: date) -> tuple[Decimal, int]:
+    """The account's natural-signed balance from every line dated on or
+    before `as_of`, and how many lines that is — "does the ledger already
+    carry this account on that date, and with what?"."""
+    dr, cr, n = (
+        db.query(
+            func.coalesce(func.sum(TransactionLine.debit), 0),
+            func.coalesce(func.sum(TransactionLine.credit), 0),
+            func.count(TransactionLine.id),
+        )
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(TransactionLine.account_id == account.id)
+        .filter(Transaction.date <= as_of)
+        .one()
+    )
+    dr, cr = Decimal(str(dr)), Decimal(str(cr))
+    balance = (dr - cr) if is_debit_normal(account) else (cr - dr)
+    return balance, int(n or 0)
 
 
 def voided_transaction_ids(db: Session, txn_ids) -> set[int]:

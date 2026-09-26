@@ -12,7 +12,9 @@ class BankAccountCreate(StrictModel):
     """A bank feed / statement identity for a ledger account that has
     bank_kind set. An opening balance posts a journal entry against 3900
     Opening Balance Equity; it is what the statement says (cash in the
-    bank, or the amount owed on a card)."""
+    bank, or the amount owed on a card). When the ledger already carries
+    the account on the opening date, only a difference can post, and only
+    with `post_difference` set (the user confirmed it)."""
 
     name: str
     account_id: int
@@ -20,6 +22,7 @@ class BankAccountCreate(StrictModel):
     last_four: Optional[str] = None
     opening_balance: Decimal = Decimal("0")
     opening_date: Optional[dt_date] = None
+    post_difference: bool = False
 
 
 class BankAccountUpdate(StrictModel):

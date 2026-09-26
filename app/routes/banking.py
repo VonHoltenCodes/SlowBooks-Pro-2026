@@ -36,11 +36,13 @@ from app.models.transactions import Transaction
 from app.services.bank_posting import (
     post_bank_entry,
     post_opening_balance,
+    post_statement_balance,
     require_bank_account,
     void_document,
 )
 from app.services.bank_register import (
     account_register,
+    balance_as_of,
     gl_balance,
     gl_balances,
     voided_transaction_ids,
@@ -180,6 +182,22 @@ def _reject_second_feed(db: Session, account_id: int, exclude_id: int | None = N
         )
 
 
+@router.get("/ledger-balance")
+def ledger_balance(account_id: int, as_of: date = None, db: Session = Depends(get_db)):
+    """What the books already say about a bank or card account on a date —
+    the New Bank Account form shows it beside the statement balance."""
+    acct = require_bank_account(db, account_id)
+    as_of = as_of or date.today()
+    balance, lines = balance_as_of(db, acct, as_of)
+    return {
+        "account_id": acct.id,
+        "account_name": acct.name,
+        "as_of": as_of.isoformat(),
+        "balance": float(balance),
+        "has_postings": lines > 0,
+    }
+
+
 @router.post("/accounts", response_model=BankAccountResponse, status_code=201)
 def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
     acct = require_bank_account(db, data.account_id)
@@ -187,7 +205,9 @@ def create_bank_account(data: BankAccountCreate, db: Session = Depends(get_db)):
     if data.opening_balance:
         opening_date = data.opening_date or date.today()
         check_closing_date(db, opening_date)
-        post_opening_balance(db, acct, opening_date, data.opening_balance)
+        post_statement_balance(
+            db, acct, opening_date, data.opening_balance, data.post_difference
+        )
     ba = BankAccount(
         name=data.name,
         account_id=acct.id,
