@@ -19,12 +19,15 @@ const SettingsPage = {
             SettingsPage.loadOcrStatus();
             SettingsPage.loadOcrEnginePref();
             SettingsPage.scrollToFocus();
+            SettingsPage._installLeaveGuard();
+            SettingsPage._markClean();
         }, 0);
         return `
             <div class="page-header">
                 <h2>Company Settings</h2>
             </div>
-            <form id="settings-form" onsubmit="SettingsPage.save(event)">
+            <form id="settings-form" onsubmit="SettingsPage.save(event)"
+                oninput="SettingsPage._updateDirty()" onchange="SettingsPage._updateDirty()">
                 <div class="settings-section">
                     <h3>Company Information</h3>
                     <div class="form-grid">
@@ -62,7 +65,7 @@ const SettingsPage = {
                     <h3>Company Logo</h3>
                     <div class="form-grid">
                         <div class="form-group">
-                            ${s.company_logo_path ? `<img src="${escapeHtml(s.company_logo_path)}" style="max-width:200px; max-height:80px; margin-bottom:8px; display:block;">` : ''}
+                            ${s.company_logo_path ? `<img id="company-logo-preview" src="${escapeHtml(s.company_logo_path)}" style="max-width:200px; max-height:80px; margin-bottom:8px; display:block;">` : ''}
                             <input type="file" id="logo-upload" accept="image/*" onchange="SettingsPage.uploadLogo(this)">
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.</div>
                         </div>
@@ -450,10 +453,89 @@ const SettingsPage = {
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
                 </div>
 
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                <!-- Always in reach: the one Save for the settings above sat at
+                     the very bottom, after 25 other buttons, and the first
+                     "Save" on the page was AI Insights' (explore 2.17.3, L16). -->
+                <div class="form-actions" id="settings-savebar"
+                    style="position:sticky; bottom:0; z-index:5; align-items:center; background:var(--content-bg);
+                           padding-bottom:10px; box-shadow:0 -4px 8px -6px rgba(0,0,0,0.25);">
+                    <span id="settings-dirty-note" role="status" aria-live="polite"
+                        style="margin-right:auto; font-size:11px; color:var(--text-muted);"></span>
+                    <button type="submit" class="btn btn-primary" id="settings-save-btn">Save Settings</button>
                 </div>
             </form>`;
+    },
+
+    // ------------------------------------------------------------------
+    // Unsaved changes. Leaving the page used to drop the edits without a
+    // word (explore 2.17.3, skytech L16). The named fields of the form are
+    // compared with what was last loaded or saved; the sections that save
+    // themselves (AI, classes, users, tokens...) have no names and are not
+    // counted.
+    // ------------------------------------------------------------------
+    _snapshot: null,
+    _leaving: false,
+
+    _formData() {
+        const form = document.getElementById('settings-form');
+        if (!form) return null;
+        const data = {};
+        for (const [k, v] of new FormData(form).entries()) {
+            if (typeof v === 'string') data[k] = v;
+        }
+        return data;
+    },
+
+    _formState(except) {
+        const data = SettingsPage._formData();
+        if (!data) return null;
+        if (except) delete data[except];
+        return JSON.stringify(data);
+    },
+
+    _markClean() {
+        SettingsPage._snapshot = SettingsPage._formData();
+        SettingsPage._updateDirty();
+    },
+
+    // True when a field differs from what was last loaded or saved;
+    // `except` leaves one field out of the comparison.
+    isDirty(except) {
+        const snap = SettingsPage._snapshot;
+        const now = SettingsPage._formState(except);
+        if (!snap || now === null) return false;
+        const before = Object.assign({}, snap);
+        if (except) delete before[except];
+        return now !== JSON.stringify(before);
+    },
+
+    _updateDirty() {
+        const note = document.getElementById('settings-dirty-note');
+        if (note) note.textContent = SettingsPage.isDirty() ? 'Unsaved changes' : '';
+    },
+
+    // App.navigate is the one door every in-app move goes through: sidebar
+    // links (via hashchange), toolbar buttons, keyboard shortcuts, search.
+    _installLeaveGuard() {
+        if (SettingsPage._leaveGuardInstalled || typeof App === 'undefined') return;
+        SettingsPage._leaveGuardInstalled = true;
+        const navigate = App.navigate;
+        App.navigate = function (hash) {
+            const target = String(hash || '').replace('#', '') || '/';
+            if (target !== '/settings' && SettingsPage.isDirty()) {
+                if (!confirm('You have unsaved changes in Settings. Leave without saving them?')) {
+                    if (location.hash !== '#/settings') history.replaceState(null, '', '#/settings');
+                    return Promise.resolve();
+                }
+                SettingsPage._snapshot = null;
+            }
+            return navigate.apply(this, arguments);
+        };
+        window.addEventListener('beforeunload', e => {
+            if (SettingsPage._leaving || !SettingsPage.isDirty()) return;
+            e.preventDefault();
+            e.returnValue = '';
+        });
     },
 
     // ------------------------------------------------------------------
@@ -590,11 +672,16 @@ const SettingsPage = {
         const data = Object.fromEntries(new FormData(e.target).entries());
         // Remove file input from data
         delete data.file;
+        const btn = document.getElementById('settings-save-btn');
+        if (btn) btn.disabled = true;
         try {
             await API.put('/settings', data);
+            SettingsPage._markClean();
             toast('Settings saved');
         } catch (err) {
             toast(err.message, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
     },
 
@@ -616,7 +703,17 @@ const SettingsPage = {
                 throw new Error(msg);
             }
             toast('Logo uploaded');
-            App.navigate('#/settings');
+            if (!SettingsPage.isDirty()) { App.navigate('#/settings'); return; }
+            // Unsaved edits elsewhere on the page: show the new logo in place
+            // rather than re-render the page over them.
+            let img = document.getElementById('company-logo-preview');
+            if (!img) {
+                img = document.createElement('img');
+                img.id = 'company-logo-preview';
+                img.setAttribute('style', 'max-width:200px; max-height:80px; margin-bottom:8px; display:block;');
+                input.parentElement.insertBefore(img, input);
+            }
+            img.src = `${(data && data.path) || ''}?t=${Date.now()}`;
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -633,16 +730,25 @@ const SettingsPage = {
     async changeCompanyType(sel) {
         const value = sel.value;
         const previous = value === 'nonprofit' ? 'business' : 'nonprofit';
-        const msg = value === 'nonprofit'
+        // The switch reloads the page; other changes on it are saved with
+        // the new type rather than dropped by the reload.
+        const others = SettingsPage.isDirty('company_type');
+        const msg = (value === 'nonprofit'
             ? 'Switch this company to nonprofit mode? Screens will say donor, pledge, donation and fund; the net-asset accounts are added. Nothing in your data changes.'
-            : 'Switch this company back to business mode? Screens return to customer, invoice, sales receipt and class. Nothing in your data changes.';
+            : 'Switch this company back to business mode? Screens return to customer, invoice, sales receipt and class. Nothing in your data changes.')
+            + (others ? '\n\nYour other unsaved changes on this page are saved with it.' : '');
         if (!confirm(msg)) { sel.value = previous; return; }
+        const form = document.getElementById('settings-form');
+        if (others && form && !form.reportValidity()) { sel.value = previous; return; }
         try {
-            await API.put('/settings', { company_type: value });
+            const payload = others ? SettingsPage._formData() : {};
+            payload.company_type = value;
+            await API.put('/settings', payload);
             if (value === 'nonprofit') {
                 try { await API.post('/nonprofit/setup-accounts', {}); }
                 catch (e) { /* accounts can be created later from the Nonprofit section */ }
             }
+            SettingsPage._leaving = true;
             toast('Company type saved — reloading');
             setTimeout(() => location.reload(), 600);
         } catch (err) {
@@ -796,6 +902,7 @@ const SettingsPage = {
                 result = await send(true);
             }
             closeModal();
+            SettingsPage._leaving = true;  // the books were replaced; nothing here to keep
             toast(`Restored from ${filename}. The books as they were are kept in ${result.safety_backup}. Reloading…`);
             setTimeout(() => location.reload(), 1500);
         } catch (err) {
@@ -1056,7 +1163,7 @@ const SettingsPage = {
                 <button type="button" class="btn btn-secondary btn-sm" id="ai-settings-test">Test</button>
                 <span id="ai-settings-test-result" class="ai-settings-test-result"></span>
                 <div class="ai-settings-spacer"></div>
-                <button type="button" class="btn btn-primary btn-sm" id="ai-settings-save">Save</button>
+                <button type="button" class="btn btn-primary btn-sm" id="ai-settings-save">Save AI settings</button>
             </div>
         `;
     },
