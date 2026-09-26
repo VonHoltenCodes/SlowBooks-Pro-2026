@@ -25,7 +25,7 @@ const SalesReceiptsPage = {
                     <td>${escapeHtml(sr.customer_name || '')}</td>
                     <td>${formatDate(sr.date)}</td>
                     <td>${statusBadge(sr.status)}</td>
-                    <td class="amount">${formatCurrency(sr.total)}</td>
+                    <td class="amount">${SalesLines.money(sr.total, sr.currency)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="SalesReceiptsPage.view(${sr.id})">View</button>
                     </td>
@@ -35,9 +35,10 @@ const SalesReceiptsPage = {
 
     async view(id) {
         const sr = await API.get(`/invoices/${id}`);
+        const money = (v) => SalesLines.money(v, sr.currency);
         const linesHtml = sr.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
-             <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
+             <td class="amount">${SalesLines.rate(l.rate, sr.currency)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
 
         const payment = await SalesReceiptsPage._findPayment(sr);
@@ -56,11 +57,11 @@ const SalesReceiptsPage = {
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
-                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(sr.subtotal)}</span></div>
-                <div class="total-row"><span class="label">Tax</span><span class="value">${formatCurrency(sr.tax_amount)}</span></div>
-                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${formatCurrency(sr.total)}</span></div>
-                ${sr.fair_value_amount ? `<div class="total-row"><span class="label">Fair value of goods/services${sr.fair_value_description ? ` (${escapeHtml(sr.fair_value_description)})` : ''}</span><span class="value">${formatCurrency(sr.fair_value_amount)}</span></div>
-                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${formatCurrency(sr.total - sr.fair_value_amount)}</span></div>` : ''}
+                <div class="total-row"><span class="label">Subtotal</span><span class="value">${money(sr.subtotal)}</span></div>
+                <div class="total-row"><span class="label">Tax</span><span class="value">${money(sr.tax_amount)}</span></div>
+                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(sr.total)}</span></div>
+                ${sr.fair_value_amount ? `<div class="total-row"><span class="label">Fair value of goods/services${sr.fair_value_description ? ` (${escapeHtml(sr.fair_value_description)})` : ''}</span><span class="value">${money(sr.fair_value_amount)}</span></div>
+                <div class="total-row"><span class="label">Deductible portion</span><span class="value">${money(sr.total - sr.fair_value_amount)}</span></div>` : ''}
             </div>
             ${sr.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(sr.notes)}</p>` : ''}
             <div class="form-actions">
@@ -124,15 +125,21 @@ const SalesReceiptsPage = {
         SalesReceiptsPage._items = items;
         SalesReceiptsPage._customers = customers;
 
-        const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+        // A counter sale needs no customer: left on the first choice it is
+        // recorded against the built-in walk-in customer (S-c), which is
+        // listed once, as that choice.
+        const walkInId = String(settings.walk_in_customer_id || '');
+        const walkInLabel = Terms.isNonprofit() ? 'Anonymous Donor' : 'Walk-in Customer';
+        const custOpts = customers.filter(c => String(c.id) !== walkInId)
+            .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
         const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
 
         openModal(Terms.text('Enter Sales Receipt'), `
             <form id="sales-receipt-form" onsubmit="SalesReceiptsPage.save(event)">
                 ${ScanHelper.scanRowHtml()}
                 <div class="form-grid">
-                    <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" id="sr-customer-select" required onchange="SalesReceiptsPage.customerSelected(this.value)"><option value="">Select...</option><option value="__new__">+ ${T('New Customer')}</option>${custOpts}</select>
+                    <div class="form-group"><label>${T('Customer')}</label>
+                        <select name="customer_id" id="sr-customer-select" onchange="SalesReceiptsPage.customerSelected(this.value)"><option value="">${walkInLabel}</option><option value="__new__">+ ${T('New Customer')}</option>${custOpts}</select>
                         <div id="sr-new-customer-form" style="display:none; margin-top:8px; padding:8px; border:1px solid var(--gray-300); border-radius:4px; background:var(--primary-light);">
                             <div style="font-weight:700; font-size:11px; margin-bottom:6px;">Quick Add ${T('Customer')}</div>
                             <input id="sr-new-cust-name" placeholder="Name *" style="width:100%; margin-bottom:4px; padding:4px 8px; border:1px solid var(--gray-300); border-radius:4px;">
@@ -196,6 +203,8 @@ const SalesReceiptsPage = {
                     <button type="submit" class="btn btn-primary">Record ${T('Sales Receipt')}</button>
                 </div>
             </form>`);
+        // the totals carry the receipt's currency; follow a change of it
+        $('#sales-receipt-form [name="currency"]')?.addEventListener('change', () => SalesReceiptsPage.recalc());
         SalesReceiptsPage.recalc();
         ScanHelper.wire(SalesReceiptsPage._applyScan, SalesReceiptsPage._applyScanField,
             SalesReceiptsPage._scanFieldTarget);
@@ -334,7 +343,7 @@ const SalesReceiptsPage = {
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="SalesReceiptsPage.recalc()"></td>
-            <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="SalesReceiptsPage.recalc()"></td>
+            <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="SalesReceiptsPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="SalesReceiptsPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="SalesReceiptsPage.removeLine(${idx})">X</button></td>
@@ -356,39 +365,24 @@ const SalesReceiptsPage = {
 
     itemSelected(idx) {
         const row = $(`[data-line="${idx}"]`);
-        const itemId = row.querySelector('.line-item').value;
-        const item = SalesReceiptsPage._items.find(i => i.id == itemId);
-        if (item) {
-            row.querySelector('.line-desc').value = item.description || item.name;
-            row.querySelector('.line-rate').value = item.rate;
-            const tax = row.querySelector('.line-taxable');
-            if (tax) tax.checked = item.is_taxable !== false;
-            SalesReceiptsPage.recalc();
-        }
+        if (row && SalesLines.fillFromItem(row, SalesReceiptsPage._items)) SalesReceiptsPage.recalc();
     },
 
     recalc() {
         TaxExempt.enforce(SalesReceiptsPage._customers, $('#sr-customer-select')?.value, $('#sr-lines'));
-        let subtotal = 0, taxable = 0;
-        $$('#sr-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
-            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
-            const amountCell = row.querySelector('.line-amount');
-            if (amountCell) amountCell.textContent = formatCurrency(amount);
-        });
-        const taxPct = parseFloat($('#sales-receipt-form [name="tax_rate"]')?.value) || 0;
-        const tax = taxable * (taxPct / 100);
-        $('#sr-subtotal').textContent = formatCurrency(subtotal);
-        $('#sr-tax').textContent = formatCurrency(tax);
-        $('#sr-total').textContent = formatCurrency(subtotal + tax);
+        const cur = $('#sales-receipt-form [name="currency"]')?.value;
+        const t = SalesLines.totals($('#sr-lines'), $('#sales-receipt-form [name="tax_rate"]')?.value, cur);
+        SalesLines.show(t, ['sr-subtotal', 'sr-tax', 'sr-total'], cur);
+        return t;
     },
 
     async save(e) {
         e.preventDefault();
         const form = e.target;
+        if (form.customer_id.value === '__new__') {
+            toast(`Save the new ${T('customer')} first, or pick one from the list`, 'error');
+            return;
+        }
         const lines = [];
         $$('#sr-lines tr').forEach((row, i) => {
             const item_id = row.querySelector('.line-item')?.value;
@@ -403,7 +397,8 @@ const SalesReceiptsPage = {
         });
 
         const data = {
-            customer_id: parseInt(form.customer_id.value),
+            // blank = the walk-in customer, chosen by the server
+            customer_id: form.customer_id.value ? parseInt(form.customer_id.value) : null,
             date: form.date.value,
             method: form.method.value || null,
             check_number: form.check_number.value || null,

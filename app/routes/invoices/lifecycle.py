@@ -26,6 +26,7 @@ from app.services.settings_service import get_all_settings as get_settings
 from app.services.closing_date import check_closing_date
 
 from app.routes.invoices._router import router
+from app.routes.invoices.helpers import refuse_zero_total
 from app.services.donor_documents import document_label
 from app.services.terminology import document_reference, terms_from_db
 
@@ -393,6 +394,7 @@ def duplicate_invoice(invoice_id: int, db: Session = Depends(get_db)):
 
     copied = taxed_copy_lines(original.lines, original.customer)
     subtotal, tax_amount, total = compute_line_totals(copied, original.tax_rate)
+    refuse_zero_total(total, document_label(original, words).lower(), "duplicating it")
 
     new_invoice = Invoice(
         invoice_number=new_number,

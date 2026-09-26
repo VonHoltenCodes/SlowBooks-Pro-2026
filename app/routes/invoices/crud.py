@@ -1,4 +1,5 @@
 from decimal import Decimal
+from types import SimpleNamespace
 
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -18,6 +19,8 @@ from app.services.closing_date import check_closing_date
 
 from app.routes.invoices._router import router
 from app.routes.invoices.helpers import (
+    refuse_due_before_date,
+    refuse_zero_total,
     resolve_line_taxable,
     _due_date_from_terms,
     _compute_totals,
@@ -95,8 +98,13 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
 
     # Parse terms for due date (explicit due_date wins; else derive from terms)
     due_date = data.due_date or _due_date_from_terms(data.date, data.terms)
+    refuse_due_before_date(data.date, due_date)
     resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = _compute_totals(data.lines, data.tax_rate)
+    refuse_zero_total(
+        total,
+        document_label(SimpleNamespace(is_pledge=data.is_pledge), words).lower(),
+    )
     _check_fair_value(data.fair_value_amount, total)
 
     # Capture every customer field we need post-flush, because we may have to
@@ -230,6 +238,12 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     check_closing_date(db, invoice.date)
 
     update_data = data.model_dump(exclude_unset=True, exclude={"lines"})
+    # Checked against the dates the invoice will have after this edit; a
+    # cleared due date is derived from the terms below, so it cannot be early.
+    refuse_due_before_date(
+        update_data.get("date") or invoice.date,
+        update_data.get("due_date", invoice.due_date),
+    )
     status_requested = "status" in update_data
     requested_status = update_data.pop("status", None)
     if status_requested and requested_status == InvoiceStatus.VOID:
@@ -278,6 +292,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             effective_lines = list(invoice.lines)
         tax_rate = data.tax_rate if data.tax_rate is not None else invoice.tax_rate
         subtotal, tax_amount, total = _compute_totals(effective_lines, tax_rate)
+        refuse_zero_total(total, document_label(invoice, terms_from_db(db)).lower())
         if total < invoice.amount_paid:
             raise HTTPException(
                 status_code=400,

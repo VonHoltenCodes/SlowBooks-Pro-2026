@@ -4,6 +4,7 @@ from typing import Optional
 from pydantic import BaseModel, field_validator, model_validator
 
 from app.schemas.common import StrictModel, TaxRateFloat, validate_non_negative_line
+from app.schemas.invoices import RateOut
 
 
 class CreditMemoLineCreate(StrictModel):
@@ -11,6 +12,10 @@ class CreditMemoLineCreate(StrictModel):
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
+    # Whether the memo's tax rate applies to this line. None = the item's
+    # flag (a non-taxable customer: never), as on an invoice line. Used for
+    # the memo's tax; the line itself does not store it.
+    is_taxable: Optional[bool] = None
     line_order: int = 0
 
     @model_validator(mode="after")
@@ -24,7 +29,7 @@ class CreditMemoLineResponse(BaseModel):
     item_id: Optional[int] = None
     description: Optional[str] = None
     quantity: Decimal = Decimal("0")
-    rate: Decimal = Decimal("0")
+    rate: RateOut = Decimal("0")
     amount: Decimal = Decimal("0")
     line_order: int = 0
     model_config = {"from_attributes": True}
@@ -39,7 +44,9 @@ class CreditMemoCreate(StrictModel):
     customer_id: int
     date: dt_date
     original_invoice_id: Optional[int] = None
-    tax_rate: TaxRateFloat = 0
+    # Left out: the original invoice's rate when one is named, else 0 (the
+    # Credit Memo form fills in the company's default rate itself).
+    tax_rate: Optional[TaxRateFloat] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None

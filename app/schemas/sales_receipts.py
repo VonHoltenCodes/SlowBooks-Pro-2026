@@ -15,7 +15,9 @@ class SalesReceiptCreate(StrictModel):
     together (QB's "Enter Sales Receipts"). No terms/due date — payment is
     at the time of sale."""
 
-    customer_id: int
+    # Left out: a counter sale, recorded against the built-in walk-in
+    # customer ("Walk-in Customer"; "Anonymous Donor" for a nonprofit).
+    customer_id: Optional[int] = None
     date: dt_date
     tax_rate: TaxRate = Decimal("0")
     method: Optional[str] = None

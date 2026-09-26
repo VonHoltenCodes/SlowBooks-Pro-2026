@@ -6,6 +6,7 @@ from pydantic import BaseModel, field_validator, model_validator
 
 from app.models.estimates import EstimateStatus
 from app.schemas.common import StrictModel, TaxRate, validate_non_negative_line
+from app.schemas.invoices import RateOut
 
 
 class EstimateLineCreate(StrictModel):
@@ -32,7 +33,7 @@ class EstimateLineResponse(BaseModel):
     item_id: Optional[int]
     description: Optional[str]
     quantity: Decimal
-    rate: Decimal
+    rate: RateOut
     amount: Decimal
     cost_code_id: Optional[int] = None
     unit_cost: Optional[Decimal] = None

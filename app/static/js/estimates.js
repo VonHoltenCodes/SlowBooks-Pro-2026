@@ -34,7 +34,7 @@ const EstimatesPage = {
         const est = await API.get(`/estimates/${id}`);
         let linesHtml = est.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
-             <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
+             <td class="amount">${SalesLines.rate(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
         ).join('');
 
         openModal(`Estimate #${est.estimate_number}`, `
@@ -64,6 +64,12 @@ const EstimatesPage = {
 
     async convert(id) {
         if (!confirm('Convert this estimate to an invoice?')) return;
+        try {
+            // the new invoice may take the customer past their credit limit
+            const est = await API.get(`/estimates/${id}`);
+            const customer = await API.get(`/customers/${est.customer_id}`);
+            if (!(await InvoicesPage.creditLimitOk(customer, parseFloat(est.total) || 0))) return;
+        } catch (err) { /* the server still decides the conversion */ }
         try {
             const inv = await API.post(`/estimates/${id}/convert`);
             toast(`Created ${T('Invoice')} #${inv.invoice_number}`);
@@ -196,7 +202,7 @@ const EstimatesPage = {
             ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}
             <td><input class="line-unit-cost" type="number" step="0.01" value="${line.unit_cost ?? ''}" placeholder="cost" title="Unit cost (budget side); rate is what you charge"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
-            <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="EstimatesPage.recalc()"></td>
+            <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="EstimatesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="EstimatesPage.removeLine(${idx})">X</button></td>
@@ -218,38 +224,21 @@ const EstimatesPage = {
 
     itemSelected(idx) {
         const row = $(`[data-eline="${idx}"]`);
-        const itemId = row.querySelector('.line-item').value;
-        const item = EstimatesPage._items.find(i => i.id == itemId);
+        const item = row && SalesLines.fillFromItem(row, EstimatesPage._items);
         if (item) {
-            row.querySelector('.line-desc').value = item.description || item.name;
-            row.querySelector('.line-rate').value = item.rate;
             // the item's standard cost is the budget side of the line; blank
             // when the item carries none, and the user can overwrite it
             const cost = row.querySelector('.line-unit-cost');
             if (cost) cost.value = item.cost && Number(item.cost) !== 0 ? item.cost : '';
-            const tax = row.querySelector('.line-taxable');
-            if (tax) tax.checked = item.is_taxable !== false;
             EstimatesPage.recalc();
         }
     },
 
     recalc() {
         TaxExempt.enforce(EstimatesPage._customers, $('#est-customer-select')?.value, $('#est-lines'));
-        let subtotal = 0, taxable = 0;
-        $$('#est-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
-            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
-            const amountCell = row.querySelector('.line-amount');
-            if (amountCell) amountCell.textContent = formatCurrency(amount);
-        });
-        const taxPct = parseFloat($('[name="tax_rate"]')?.value) || 0;
-        const tax = taxable * (taxPct / 100);
-        if ($('#est-subtotal')) $('#est-subtotal').textContent = formatCurrency(subtotal);
-        if ($('#est-tax')) $('#est-tax').textContent = formatCurrency(tax);
-        if ($('#est-total')) $('#est-total').textContent = formatCurrency(subtotal + tax);
+        const t = SalesLines.totals($('#est-lines'), $('#est-form [name="tax_rate"]')?.value);
+        SalesLines.show(t, ['est-subtotal', 'est-tax', 'est-total']);
+        return t;
     },
 
     async save(e, id) {

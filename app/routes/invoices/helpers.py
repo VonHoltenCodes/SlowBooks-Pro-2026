@@ -6,6 +6,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.accounts import Account
@@ -15,6 +16,42 @@ from app.services.accounting import (
     _q,
 )
 from app.services.terminology import document_reference
+
+
+def refuse_zero_total(total, noun: str = "invoice", action: str = "saving it") -> None:
+    """A sales document for nothing is refused before anything is written.
+
+    The credit memo and recurring forms filled no price when an item was
+    picked, so a $0.00 credit memo and a schedule that generated two $0.00
+    invoices (which then sat on the dashboard as overdue) were saved without
+    a word; an invoice with one blank line saved at $0.00 too (2.17.3
+    exploratory, both QA agents). `noun` is the document as the user calls
+    it ("invoice", "credit memo", "recurring pledge")."""
+    if Decimal(str(total or 0)) <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This {noun} adds up to $0.00. Enter a rate on at least one "
+                f"line before {action}."
+            ),
+        )
+
+
+def _day(d: date) -> str:
+    return f"{d:%b} {d.day}, {d.year}"
+
+
+def refuse_due_before_date(doc_date: date | None, due_date: date | None) -> None:
+    """A due date before the invoice's own date was accepted and saved
+    (2.17.3 exploratory W-L4). An invoice cannot fall due before it exists."""
+    if doc_date and due_date and due_date < doc_date:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The due date ({_day(due_date)}) is before the invoice date "
+                f"({_day(doc_date)}). Pick a due date on or after the invoice date."
+            ),
+        )
 
 
 def _due_date_from_terms(base_date: date, terms: str | None) -> date:

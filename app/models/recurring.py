@@ -65,7 +65,9 @@ class RecurringInvoiceLine(Base):
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     description = Column(Text, nullable=True)
     quantity = Column(Numeric(10, 2), default=1)
-    rate = Column(Numeric(15, 2), default=0)
+    # Unit price to four places: bulk goods are priced like $0.045 a box.
+    # The line amount is still rounded to the cent (accounting._q).
+    rate = Column(Numeric(17, 4), default=0)
     # Per-line sales tax (default: the item's flag, or taxable). A customer-
     # owned-device repair is labor with no tax; the part on the same invoice
     # is taxed.

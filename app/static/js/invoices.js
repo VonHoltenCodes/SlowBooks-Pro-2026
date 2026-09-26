@@ -3,6 +3,91 @@
  * texture and all. We use an HTML table instead of a custom grid;
  * auto-fill on item selection lives in itemSelected() below.
  */
+
+/**
+ * Line arithmetic shared by every sales form — invoice, sales receipt,
+ * estimate, credit memo and recurring schedule. A line rounds to the cent
+ * the way the server stores it (accounting._q, half up), tax is taken on
+ * the rounded taxable lines, and the total is their sum, so the figure a
+ * form shows is the figure that posts. The credit memo and recurring forms
+ * had no arithmetic at all: picking an item filled no price, nothing showed
+ * a total, and $0.00 documents were saved (2.17.3 exploratory, W-M1 / F14).
+ */
+const SalesLines = {
+    // Half up to the cent. Shifting by exponent avoids binary drift:
+    // 1.005 * 100 is 100.49999... in floating point, Number('1.005e2') is 100.5.
+    cents(x) {
+        const n = Number(x) || 0;
+        const a = Math.abs(n);
+        const shifted = Number(`${a}e2`);
+        const r = Number.isFinite(shifted) ? Math.round(shifted) : Math.round(a * 100);
+        return (n < 0 ? -1 : 1) * Number(`${r}e-2`);
+    },
+
+    // Fill a line from the item picked in its .line-item select: description,
+    // price and the item's tax flag. Returns the item, or null for "--".
+    fillFromItem(row, items) {
+        const itemId = row.querySelector('.line-item')?.value;
+        const item = (items || []).find(i => i.id == itemId);
+        if (!item) return null;
+        const desc = row.querySelector('.line-desc');
+        if (desc) desc.value = item.description || item.name;
+        const rate = row.querySelector('.line-rate');
+        if (rate) rate.value = item.rate;
+        const tax = row.querySelector('.line-taxable');
+        if (tax) {
+            // An exempt customer's boxes are held off (TaxExempt); remember
+            // the item's flag for when the form switches back.
+            if (tax.disabled) tax.dataset.was = item.is_taxable !== false ? '1' : '0';
+            else tax.checked = item.is_taxable !== false;
+        }
+        return item;
+    },
+
+    // Recompute every row of `tbody` and return {subtotal, tax, total}. A
+    // row without a Tax box counts as taxable, as it does on the server.
+    totals(tbody, taxPct, currency) {
+        let subtotal = 0, taxable = 0;
+        (tbody ? [...tbody.querySelectorAll('tr')] : []).forEach(row => {
+            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
+            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+            const amount = SalesLines.cents(qty * rate);
+            subtotal += amount;
+            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
+            const cell = row.querySelector('.line-amount');
+            if (cell) cell.textContent = SalesLines.money(amount, currency);
+        });
+        subtotal = SalesLines.cents(subtotal);
+        const tax = SalesLines.cents(SalesLines.cents(taxable) * (parseFloat(taxPct) || 0) / 100);
+        return { subtotal, tax, total: SalesLines.cents(subtotal + tax) };
+    },
+
+    // Write totals into the form's Subtotal / Tax / Total cells (by id).
+    show(t, ids, currency) {
+        const put = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = SalesLines.money(v, currency); };
+        put(ids[0], t.subtotal); put(ids[1], t.tax); put(ids[2], t.total);
+    },
+
+    // Money as the document prints it: dollars in the home currency; a
+    // foreign document carries its ISO code ("EUR 850.00"), so a euro
+    // invoice never reads as $850.00 (W-M2). Matches the PDF's filter.
+    money(amount, currency, places = 2) {
+        const home = ((typeof App !== 'undefined' && App.settings && App.settings.home_currency) || 'USD').toUpperCase();
+        const code = String(currency || '').trim().toUpperCase();
+        const n = Number(amount) || 0;
+        if (!code || code === home) {
+            if (places === 2) return formatCurrency(amount);
+            return new Intl.NumberFormat('en-US', { style: 'currency', currency: home, minimumFractionDigits: 2, maximumFractionDigits: places }).format(n);
+        }
+        const digits = n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: places });
+        return `${code} ${digits}`;
+    },
+
+    // A unit price: two places, or up to four when it has them ($0.045).
+    rate(value, currency) { return SalesLines.money(value, currency, 4); },
+};
+window.SalesLines = SalesLines;
+
 const InvoicesPage = {
     // The document's literal face, as the PDF prints it: a flagged pledge is a
     // PLEDGE, everything else an INVOICE regardless of company vocabulary.
@@ -31,8 +116,8 @@ const InvoicesPage = {
                     <td>${formatDate(inv.date)}</td>
                     <td>${formatDate(inv.due_date)}</td>
                     <td>${statusBadge(inv.status)}</td>
-                    <td class="amount">${formatCurrency(inv.total)}</td>
-                    <td class="amount">${formatCurrency(inv.balance_due)}</td>
+                    <td class="amount">${SalesLines.money(inv.total, inv.currency)}</td>
+                    <td class="amount">${SalesLines.money(inv.balance_due, inv.currency)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.view(${inv.id})">View</button>
                         <button class="btn btn-sm btn-secondary" onclick="InvoicesPage.showForm(${inv.id})">Edit</button>
@@ -76,9 +161,10 @@ const InvoicesPage = {
 
     async view(id) {
         const inv = await API.get(`/invoices/${id}`);
+        const money = (v) => SalesLines.money(v, inv.currency);
         let linesHtml = inv.lines.map(l =>
             `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
-             <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
+             <td class="amount">${SalesLines.rate(l.rate, inv.currency)}</td><td class="amount">${money(l.amount)}</td></tr>`
         ).join('');
 
         openModal(`${T('Invoice')} #${inv.invoice_number}`, `
@@ -94,11 +180,11 @@ const InvoicesPage = {
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
-                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(inv.subtotal)}</span></div>
-                <div class="total-row"><span class="label">Tax</span><span class="value">${formatCurrency(inv.tax_amount)}</span></div>
-                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${formatCurrency(inv.total)}</span></div>
-                <div class="total-row"><span class="label">Paid</span><span class="value">${formatCurrency(inv.amount_paid)}</span></div>
-                <div class="total-row grand-total"><span class="label">Balance Due</span><span class="value">${formatCurrency(inv.balance_due)}</span></div>
+                <div class="total-row"><span class="label">Subtotal</span><span class="value">${money(inv.subtotal)}</span></div>
+                <div class="total-row"><span class="label">Tax</span><span class="value">${money(inv.tax_amount)}</span></div>
+                <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(inv.total)}</span></div>
+                <div class="total-row"><span class="label">Paid</span><span class="value">${money(inv.amount_paid)}</span></div>
+                <div class="total-row grand-total"><span class="label">Balance Due</span><span class="value">${money(inv.balance_due)}</span></div>
             </div>
             ${inv.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(inv.notes)}</p>` : ''}
             <div style="margin-top:16px; border-top:1px solid var(--gray-200); padding-top:12px;">
@@ -181,7 +267,11 @@ const InvoicesPage = {
 
     async emailInvoice(id) {
         const inv = await API.get(`/invoices/${id}`);
-        const email = inv.customer_email || '';
+        // The invoice has no address of its own; send to the customer's. It
+        // read a field the invoice never had, so the box was always empty (W-L3).
+        let email = '';
+        try { email = (await API.get(`/customers/${inv.customer_id}`)).email || ''; }
+        catch (e) { /* the user types it */ }
         openModal(Terms.text('Email Invoice'), `
             <form onsubmit="InvoicesPage.sendEmail(event, ${id})">
                 <div class="form-grid">
@@ -269,6 +359,8 @@ const InvoicesPage = {
             lines: [],
         };
         if (id) inv = await API.get(`/invoices/${id}`);
+        // what the invoice owed before this edit, for the credit-limit check
+        InvoicesPage._editing = id ? { total: parseFloat(inv.total) || 0, paid: parseFloat(inv.amount_paid) || 0 } : null;
         const classGroup = await classFormGroupHtml(inv.class_id);
         const jobGroup = await jobFormGroupHtml(inv.job_id, 'inv-customer-select');
         // Nonprofit: a pledge prints as one; program fees and rentals stay invoices
@@ -340,6 +432,8 @@ const InvoicesPage = {
                 </div>
             </form>`);
         if (!id && inv.customer_id) InvoicesPage.customerSelected(inv.customer_id);
+        // the totals carry the document's currency; follow a change of it
+        $('#invoice-form [name="currency"]')?.addEventListener('change', () => InvoicesPage.recalc());
         InvoicesPage.recalc();
         // Populate due_date for fresh invoices that don't already have one.
         if (!inv.due_date) InvoicesPage._recomputeDueDate();
@@ -399,7 +493,7 @@ const InvoicesPage = {
                 <option value="">--</option>${itemOpts}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.01" value="${line.quantity || 1}" oninput="InvoicesPage.recalc()"></td>
-            <td><input class="line-rate" type="number" step="0.01" value="${line.rate || 0}" oninput="InvoicesPage.recalc()"></td>
+            <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="InvoicesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${line.is_taxable === false ? '' : 'checked'} onchange="InvoicesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="InvoicesPage.removeLine(${idx})">X</button></td>
@@ -421,34 +515,15 @@ const InvoicesPage = {
 
     itemSelected(idx) {
         const row = $(`[data-line="${idx}"]`);
-        const itemId = row.querySelector('.line-item').value;
-        const item = InvoicesPage._items.find(i => i.id == itemId);
-        if (item) {
-            row.querySelector('.line-desc').value = item.description || item.name;
-            row.querySelector('.line-rate').value = item.rate;
-            const tax = row.querySelector('.line-taxable');
-            if (tax) tax.checked = item.is_taxable !== false;
-            InvoicesPage.recalc();
-        }
+        if (row && SalesLines.fillFromItem(row, InvoicesPage._items)) InvoicesPage.recalc();
     },
 
     recalc() {
         TaxExempt.enforce(InvoicesPage._customers, $('#inv-customer-select')?.value, $('#inv-lines'));
-        let subtotal = 0, taxable = 0;
-        $$('#inv-lines tr').forEach(row => {
-            const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
-            const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
-            const amount = qty * rate;
-            subtotal += amount;
-            if (row.querySelector('.line-taxable')?.checked !== false) taxable += amount;
-            const amountCell = row.querySelector('.line-amount');
-            if (amountCell) amountCell.textContent = formatCurrency(amount);
-        });
-        const taxPct = parseFloat($('[name="tax_rate"]')?.value) || 0;
-        const tax = taxable * (taxPct / 100);
-        $('#inv-subtotal').textContent = formatCurrency(subtotal);
-        $('#inv-tax').textContent = formatCurrency(tax);
-        $('#inv-total').textContent = formatCurrency(subtotal + tax);
+        const cur = $('#invoice-form [name="currency"]')?.value;
+        const t = SalesLines.totals($('#inv-lines'), $('#invoice-form [name="tax_rate"]')?.value, cur);
+        SalesLines.show(t, ['inv-subtotal', 'inv-tax', 'inv-total'], cur);
+        return t;
     },
 
     // Auto-fill due_date from date + terms when either changes. Backend
@@ -513,12 +588,44 @@ const InvoicesPage = {
             lines,
         };
 
+        // Past the customer's credit limit? Say so, and let the user decide.
+        const total = InvoicesPage.recalc().total;
+        const before = InvoicesPage._editing;
+        if (!before || total > before.total) {
+            const customer = InvoicesPage._customers.find(c => c.id == data.customer_id);
+            const owed = (total - (before ? before.paid : 0)) * (data.exchange_rate || 1);
+            if (!(await InvoicesPage.creditLimitOk(customer, owed, id))) return;
+        }
+
         try {
             if (id) { await API.put(`/invoices/${id}`, data); toast(Terms.text('Invoice updated')); }
             else { await API.post('/invoices', data); toast(Terms.text('Invoice created')); }
             closeModal();
             App.navigate(location.hash);
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // The customer's credit limit, as a warning the user can pass: an invoice
+    // that takes them past it asks first. A $512.13 invoice went to a
+    // customer with a $500 limit without a word (2.17.3 exploratory, S-b).
+    // What they owe is their open invoices' balances in home dollars, the
+    // invoice being edited left out (its new amount is `owed`). Returns true
+    // to go ahead; a failure to look is not a reason to stop.
+    async creditLimitOk(customer, owed, editingId = null) {
+        const limit = parseFloat(customer && customer.credit_limit);
+        if (!customer || !(limit > 0)) return true;
+        let open = 0;
+        try {
+            const invoices = await API.get(`/invoices?customer_id=${encodeURIComponent(customer.id)}`);
+            invoices.forEach(i => {
+                if (i.status === 'void' || (editingId && String(i.id) === String(editingId))) return;
+                open += (parseFloat(i.balance_due) || 0) * (parseFloat(i.exchange_rate) || 1);
+            });
+        } catch (e) { return true; }
+        const after = SalesLines.cents(open + (Number(owed) || 0));
+        if (after <= limit) return true;
+        return confirm(`${customer.name}'s credit limit is ${formatCurrency(limit)}. `
+            + `With this ${T('invoice')} they would owe ${formatCurrency(after)}. Save it anyway?`);
     },
 
     async loadAttachments(entityType, entityId) {

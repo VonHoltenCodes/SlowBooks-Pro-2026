@@ -3,7 +3,7 @@
 # then marks the estimate CONVERTED. PDFs are rendered with WeasyPrint.
 # ============================================================================
 
-from datetime import timedelta
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -12,7 +12,11 @@ from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
-from app.routes.invoices.helpers import resolve_line_taxable
+from app.routes.invoices.helpers import (
+    _due_date_from_terms,
+    refuse_zero_total,
+    resolve_line_taxable,
+)
 from app.routes._helpers import clamp_pagination
 from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
@@ -34,6 +38,13 @@ from app.services.donor_documents import document_label
 from app.services.terminology import document_reference, terms_from_db
 
 router = APIRouter(prefix="/api/estimates", tags=["estimates"])
+
+
+_ADDRESS_PARTS = ("address1", "address2", "city", "state", "zip")
+
+
+def _customer_bill_to(customer) -> dict:
+    return {f"bill_{k}": getattr(customer, f"bill_{k}", None) for k in _ADDRESS_PARTS}
 
 
 @router.get("", response_model=list[EstimateResponse])
@@ -83,6 +94,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
 
     cust_id = customer.id
     cust_name = customer.name
+    # The estimate is addressed to the customer, as an invoice is; it was
+    # never filled, so its PDF and the invoice it became had no address.
+    bill_to = _customer_bill_to(customer)
     resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
 
@@ -106,6 +120,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             notes=data.notes,
             class_id=data.class_id,
             job_id=data.job_id,
+            **bill_to,
         )
         db.add(estimate)
         try:
@@ -163,7 +178,14 @@ def update_estimate(
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
 
-    for key, val in data.model_dump(exclude_unset=True, exclude={"lines"}).items():
+    changes = data.model_dump(exclude_unset=True, exclude={"lines"})
+    if changes.get("customer_id") not in (None, estimate.customer_id):
+        customer = db.get(Customer, changes["customer_id"])
+        if not customer:
+            raise HTTPException(status_code=404, detail="Customer not found")
+        # a different customer, so their address
+        changes.update(_customer_bill_to(customer))
+    for key, val in changes.items():
         setattr(estimate, key, val)
 
     if data.lines is not None:
@@ -228,24 +250,15 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
     company = get_settings(db)
-    from jinja2 import Environment, FileSystemLoader
-    from pathlib import Path
+    from fastapi.responses import HTMLResponse
 
-    template_dir = Path(__file__).parent.parent / "templates"
-    env = Environment(loader=FileSystemLoader(str(template_dir)), autoescape=True)
-    from app.services.pdf_service import _format_currency, _format_date
+    from app.services.pdf_service import _render
 
-    env.filters["currency"] = _format_currency
-    env.filters["fdate"] = _format_date
-    template = env.get_template("estimate_pdf.html")
-    if est.customer and not hasattr(est, "customer_name"):
-        est.customer_name = est.customer.name
-    html_str = template.render(est=est, company=company)
+    # The PDF's own renderer: one set of filters and helpers for both.
+    html_str = _render("estimate_pdf.html", company, est=est)
     html_str = html_str.replace(
         "</body>", "<script>window.onload=function(){window.print();}</script></body>"
     )
-    from fastapi.responses import HTMLResponse
-
     return HTMLResponse(content=html_str)
 
 
@@ -260,22 +273,12 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Estimate not found")
     if estimate.status == EstimateStatus.CONVERTED:
         raise HTTPException(status_code=400, detail="Estimate already converted")
-    # Posts a JE dated to estimate.date; enforce closing date here too so an
-    # operator can't sidestep a closed period by converting an old estimate.
-    check_closing_date(db, estimate.date)
-
-    # Get next invoice number
-
-    invoice_number = next_invoice_number(db)
-
-    # Parse terms for due date
-    settings = get_settings(db)
-    terms = settings.get("default_terms", "Net 30")
-    try:
-        days = int(terms.lower().replace("net ", ""))
-    except ValueError:
-        days = 30
-    due_date = estimate.date + timedelta(days=days)
+    # The invoice is dated the day it is made, as QuickBooks does: keeping
+    # the estimate's date back-dated the sale and its due date (2.17.3
+    # exploratory W-L10). Its journal posts on that date, so that is the
+    # date the closing lock is checked against.
+    today = date.today()
+    check_closing_date(db, today)
 
     # A new invoice gets the customer's CURRENT tax treatment, computed —
     # not the estimate's stored tax (see taxed_copy_lines).
@@ -283,19 +286,38 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
 
     copied = taxed_copy_lines(estimate.lines, estimate.customer)
     subtotal, tax_amount, total = compute_line_totals(copied, estimate.tax_rate)
+    refuse_zero_total(total, "estimate", "converting it")
+
+    invoice_number = next_invoice_number(db)
+
+    # Terms and due date as a new invoice for this customer gets them: the
+    # customer's terms, else the company's (the form does the same).
+    settings = get_settings(db)
+    customer = estimate.customer
+    terms = (customer.terms if customer else None) or settings.get(
+        "default_terms", "Net 30"
+    )
+    due_date = _due_date_from_terms(today, terms)
+
+    # The bill-to is the estimate's, else the customer's, and the ship-to
+    # the customer's; the notes are the estimate's, else the company's
+    # default invoice notes. The converted invoice printed with no address
+    # and without the default notes (2.17.3 exploratory F21).
+    address = {f"bill_{k}": getattr(estimate, f"bill_{k}") for k in _ADDRESS_PARTS}
+    if customer and not any(address.values()):
+        address = _customer_bill_to(customer)
+    if customer:
+        address.update(
+            {f"ship_{k}": getattr(customer, f"ship_{k}") for k in _ADDRESS_PARTS}
+        )
 
     invoice = Invoice(
         invoice_number=invoice_number,
         customer_id=estimate.customer_id,
         status=InvoiceStatus.DRAFT,
-        date=estimate.date,
+        date=today,
         due_date=due_date,
         terms=terms,
-        bill_address1=estimate.bill_address1,
-        bill_address2=estimate.bill_address2,
-        bill_city=estimate.bill_city,
-        bill_state=estimate.bill_state,
-        bill_zip=estimate.bill_zip,
         subtotal=subtotal,
         tax_rate=estimate.tax_rate,
         tax_amount=tax_amount,
@@ -303,7 +325,8 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
         balance_due=total,
         class_id=estimate.class_id,
         job_id=estimate.job_id,
-        notes=estimate.notes,
+        notes=estimate.notes or settings.get("invoice_notes") or None,
+        **address,
     )
     face = document_label(invoice, words)
     db.add(invoice)
@@ -375,10 +398,9 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
                 }
             )
 
-        customer = estimate.customer
         txn = create_journal_entry(
             db,
-            estimate.date,
+            today,
             document_reference(face, invoice_number, customer.name if customer else ""),
             journal_lines,
             source_type="invoice",
@@ -396,7 +418,7 @@ def convert_to_invoice(estimate_id: int, db: Session = Depends(get_db)):
     db.refresh(invoice)
     from app.services.inventory_hooks import post_sale_for_invoice
 
-    post_sale_for_invoice(db, invoice, txn_date=estimate.date)
+    post_sale_for_invoice(db, invoice, txn_date=today)
 
     db.commit()
     db.refresh(invoice)
