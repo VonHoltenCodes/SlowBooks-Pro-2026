@@ -243,9 +243,7 @@ def test_the_page_asks_for_the_password_and_sends_the_change_again(
     assert "closing date (2026-06-30)" in out["prompts"][0]["message"]
     sent, resent = out["requests"]
     assert "X-Closing-Date-Password" not in sent["headers"]
-    assert resent["headers"]["X-Closing-Date-Password"] == quote(
-        UNICODE_PW, safe=""
-    )
+    assert resent["headers"]["X-Closing-Date-Password"] == quote(UNICODE_PW, safe="")
     assert resent["body"] == sent["body"] and resent["method"] == "POST"
 
 
