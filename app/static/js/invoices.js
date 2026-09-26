@@ -787,7 +787,7 @@ const InvoicesPage = {
         formData.append('file', fileInput.files[0]);
         try {
             const resp = await fetch(`/api/attachments/invoice/${entityId}`, { method: 'POST', body: formData });
-            if (!resp.ok) { const d = await resp.json(); throw new Error(d.detail || 'Upload failed'); }
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Upload failed'));
             toast('Attachment uploaded');
             fileInput.value = '';
             InvoicesPage.loadAttachments('invoice', entityId);

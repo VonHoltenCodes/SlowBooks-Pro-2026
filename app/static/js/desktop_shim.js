@@ -133,11 +133,12 @@
             return;
         }
         if (!response.ok) {
-            let detail = '';
-            try { detail = (await response.json()).detail || ''; } catch (e) { /* not JSON */ }
-            if (typeof toast === 'function') {
-                toast(detail || ('Could not load the document (HTTP ' + response.status + ')'), 'error');
-            }
+            // api.js's sentence for the refusal: a 422's list of entries
+            // printed as "[object Object]" here.
+            const message = typeof API !== 'undefined' && API.responseError
+                ? await API.responseError(response, 'Could not load the document')
+                : 'Could not load the document (HTTP ' + response.status + ')';
+            if (typeof toast === 'function') toast(message, 'error');
             return;
         }
 

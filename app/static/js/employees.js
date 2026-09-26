@@ -667,7 +667,7 @@ const EmployeesPage = {
                 body: formData,
                 credentials: 'same-origin',
             });
-            if (!res.ok) throw new Error((await res.json()).detail || 'Upload failed');
+            if (!res.ok) throw new Error(await API.responseError(res, 'Upload failed'));
             toast(`Uploaded ${file.name}`);
             EmployeesPage._loadDocuments(empId);
         } catch (err) {
@@ -691,10 +691,7 @@ const EmployeesPage = {
                 credentials: 'same-origin',
                 body: formData
             });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ message: 'Upload failed' }));
-                throw new Error(err.message || 'Upload failed');
-            }
+            if (!res.ok) throw new Error(await API.responseError(res, 'Upload failed'));
             toast('Document uploaded');
             EmployeesPage._loadDocuments(id);
         } catch (err) {

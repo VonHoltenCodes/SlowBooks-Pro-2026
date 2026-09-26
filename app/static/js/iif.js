@@ -129,8 +129,8 @@ const IIFPage = {
         try {
             App.setStatus('Importing QuickBooks report CSV...');
             const res = await fetch('/api/csv/import/qb-report', { method: 'POST', body: formData });
+            if (!res.ok) throw new Error(await API.responseError(res, 'Import failed'));
             const result = await res.json();
-            if (!res.ok) throw new Error(result.detail || 'Import failed');
 
             const kindLabel = { sales_receipts: 'Sales Receipts', deposits: 'Deposits', checks: 'Checks' };
             let html = '<div class="iif-results"><h4>Results</h4>';
@@ -190,10 +190,7 @@ const IIFPage = {
         try {
             App.setStatus('Exporting IIF...');
             const res = await fetch(url);
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || 'Export failed');
-            }
+            if (!res.ok) throw new Error(await API.responseError(res, 'Export failed'));
 
             // Get filename from Content-Disposition header if available
             const disposition = res.headers.get('Content-Disposition');
@@ -291,10 +288,7 @@ const IIFPage = {
         try {
             App.setStatus('Validating IIF file...');
             const res = await fetch('/api/iif/validate', { method: 'POST', body: formData });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || 'Validation failed');
-            }
+            if (!res.ok) throw new Error(await API.responseError(res, 'Validation failed'));
 
             const report = await res.json();
             IIFPage._showValidationReport(report);
@@ -368,10 +362,7 @@ const IIFPage = {
         try {
             App.setStatus('Importing IIF file...');
             const res = await fetch('/api/iif/import', { method: 'POST', body: formData });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || 'Import failed');
-            }
+            if (!res.ok) throw new Error(await API.responseError(res, 'Import failed'));
 
             const result = await res.json();
             IIFPage._showImportResult(result);

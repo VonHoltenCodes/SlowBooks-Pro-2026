@@ -389,9 +389,8 @@ const App = {
         const replace = form.replace.checked ? 1 : 0;
         const resp = await fetch(`/api/csv/import/accounts?dry_run=${dryRun ? 1 : 0}&replace=${replace}`,
             { method: 'POST', body: fd, headers: { 'X-Slowbooks-Desktop': '1' } });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || 'Import failed');
-        return data;
+        if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
+        return resp.json();
     },
 
     async previewChartImport(e) {
@@ -594,8 +593,8 @@ const App = {
             // The chart import is a dry run by default; this page applies directly.
             const query = entity === 'accounts' ? '?dry_run=0' : '';
             const resp = await fetch(`/api/csv/import/${entity}${query}`, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
             const n = data.created ?? data.imported ?? 0;
             let html = `<div style="color:var(--success); font-size:11px;">Imported ${n} ${entity === 'accounts' ? 'accounts' : entity}${data.updated ? `, updated ${data.updated}` : ''}${data.skipped ? `, ${data.skipped} already there` : ''}.</div>`;
             if (data.errors && data.errors.length > 0) {

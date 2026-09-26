@@ -897,8 +897,8 @@ const BankingPage = {
         try {
             const endpoint = isCsv ? '/api/bank-import/preview-csv' : '/api/bank-import/preview';
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Parse failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Parse failed');
             if (isCsv && data.error && data.header_row) {
                 // A layout detection missed ("Unknown CSV format" with no
                 // way forward — exploratory 2.17.3, W-L15): ask which
@@ -1018,8 +1018,8 @@ const BankingPage = {
                 ? `/api/bank-import/import-csv/${feedId}`
                 : `/api/bank-import/import/${feedId}`;
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
             toast(`Imported ${data.imported} (${data.skipped} duplicates skipped, ${data.matched || 0} matched to the books)`);
             closeModal();
             BankingPage.go(`#/banking/${accountId}`);

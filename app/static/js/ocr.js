@@ -96,10 +96,7 @@ const ScanHelper = {
             let resp;
             try { resp = await fetch('/api/ocr/receipt', { method: 'POST', body: fd }); }
             catch (err) { throw new Error("SlowBooks isn't responding (network error) — if this keeps happening, close and relaunch SlowBooks Pro."); }
-            if (!resp.ok) {
-                const d = await resp.json().catch(() => ({}));
-                throw new Error(d.detail || `Scan failed (HTTP ${resp.status})`);
-            }
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Scan failed'));
             const result = await resp.json();
             if (!result.ocr_available) {
                 if (statusEl) statusEl.textContent = result.message || 'Scanning unavailable.';
