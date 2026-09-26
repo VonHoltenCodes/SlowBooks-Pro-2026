@@ -152,3 +152,14 @@ def test_the_report_pages_show_the_credits_and_the_tax():
         js.index("async incomeByCustomer(") : js.index("async customerStatementPicker(")
     ]
     assert "total_tax" in income and ">Sales Tax<" in income
+
+
+def test_the_dashboard_total_receivables_is_the_same_figure(
+    client, db_session, seed_accounts, acme, muller
+):
+    """F17: the dashboard's Total Receivables read the invoice balances too."""
+    _scenario(client, acme, muller)
+    card = client.get("/api/dashboard/data?ids=receivables").json()["receivables"]
+    aging = client.get("/api/reports/ar-aging?as_of_date=2030-12-31").json()
+    aging = aging["totals"]["total"]
+    assert card["total"] == aging == float(_gl_ar(db_session, seed_accounts))
