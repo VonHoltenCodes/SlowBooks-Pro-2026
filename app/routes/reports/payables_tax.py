@@ -33,46 +33,83 @@ def sales_tax_report(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    """Sales Tax report."""
+    """Sales Tax report: the tax charged on sales less the tax given back on
+    credit memos, in the company's currency, checked against Sales Tax
+    Payable (2200).
+
+    Credit memos were left out (2.17.3, macbase1 F16), so the report read
+    higher than 2200 by the tax on every return. A document with nothing
+    taxable carries no rate: an all-labour invoice is not "8.25%, $0.00".
+    """
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:
         end_date = date.today()
 
-    # joinedload avoids an N+1 on inv.customer access in the loop below.
-    from sqlalchemy.orm import joinedload
+    # Eager loads avoid an N+1 on .customer / .lines in the loops below.
+    from sqlalchemy.orm import joinedload, selectinload
+
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.services.currency import to_home
 
     invoices = (
         db.query(Invoice)
-        .options(joinedload(Invoice.customer))
+        .options(joinedload(Invoice.customer), selectinload(Invoice.lines))
         .filter(Invoice.date >= start_date, Invoice.date <= end_date)
         .filter(Invoice.status != InvoiceStatus.VOID)
-        .order_by(Invoice.date)
+        .all()
+    )
+    # A write-off forgives a balance to Bad Debt; it returns no goods and
+    # carries no tax, so it is not a sale reversed.
+    memos = (
+        db.query(CreditMemo)
+        .options(joinedload(CreditMemo.customer), selectinload(CreditMemo.lines))
+        .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
+        .filter(CreditMemo.status != CreditMemoStatus.VOID)
+        .filter(CreditMemo.is_write_off.isnot(True))
         .all()
     )
 
-    total_sales = Decimal(0)
-    total_taxable = Decimal(0)
-    total_tax = Decimal(0)
-    items = []
-
+    rows = []
     for inv in invoices:
-        total_sales += inv.subtotal
-        if inv.tax_amount and inv.tax_amount > 0:
-            # Only the taxable lines form the base (a labor line on a
-            # customer-owned device sits beside a taxed part).
-            total_taxable += taxable_subtotal(inv.lines)
-            total_tax += inv.tax_amount
+        # Booked amounts: a foreign-currency invoice posts to the ledger at
+        # its exchange rate, and the tax is owed in the company's currency.
+        fx = Decimal(str(inv.exchange_rate or 1))
+        tax = to_home(inv.tax_amount or 0, fx)
+        # Only the taxable lines form the base (a labor line on a
+        # customer-owned device sits beside a taxed part).
+        taxable = to_home(taxable_subtotal(inv.lines), fx) if tax > 0 else _q(0)
+        subtotal = to_home(inv.subtotal or 0, fx)
+        rows.append(("invoice", inv, inv.invoice_number, subtotal, taxable, tax))
+    for cm in memos:
+        tax = _q(cm.tax_amount or 0)
+        taxable = taxable_subtotal(cm.lines) if tax > 0 else _q(0)
+        subtotal = _q(cm.subtotal or 0)
+        rows.append(("credit_memo", cm, cm.memo_number, -subtotal, -taxable, -tax))
+    rows.sort(key=lambda r: (r[1].date, r[0] != "invoice", str(r[2])))
+
+    items = []
+    for kind, doc, number, subtotal, taxable, tax in rows:
         items.append(
             {
-                "date": inv.date.isoformat(),
-                "invoice_number": inv.invoice_number,
-                "customer_name": inv.customer.name if inv.customer else "",
-                "subtotal": float(inv.subtotal),
-                "tax_rate": float(inv.tax_rate),
-                "tax_amount": float(inv.tax_amount),
+                "type": kind,
+                "date": doc.date.isoformat(),
+                "number": number,
+                "invoice_number": number if kind == "invoice" else None,
+                "memo_number": number if kind == "credit_memo" else None,
+                "customer_name": doc.customer.name if doc.customer else "",
+                "subtotal": float(subtotal),
+                "taxable": float(taxable),
+                "tax_rate": float(doc.tax_rate or 0) if taxable else None,
+                "tax_amount": float(tax),
             }
         )
+
+    total_sales = sum((r[3] for r in rows), Decimal(0))
+    total_taxable = sum((r[4] for r in rows), Decimal(0))
+    tax_on_sales = sum((r[5] for r in rows if r[0] == "invoice"), Decimal(0))
+    tax_credited = -sum((r[5] for r in rows if r[0] == "credit_memo"), Decimal(0))
+    total_tax = tax_on_sales - tax_credited
 
     return {
         "start_date": start_date.isoformat(),
@@ -81,7 +118,51 @@ def sales_tax_report(
         "total_sales": float(total_sales),
         "total_taxable": float(total_taxable),
         "total_non_taxable": float(total_sales - total_taxable),
+        "tax_on_sales": float(tax_on_sales),
+        "tax_credited": float(tax_credited),
         "total_tax": float(total_tax),
+        "ledger": _sales_tax_ledger(db, start_date, end_date, total_tax),
+    }
+
+
+def _sales_tax_ledger(db: Session, start_date, end_date, total_tax: Decimal):
+    """What Sales Tax Payable (2200) says for the same period: the tax posted
+    to it (sales and credit memos, and anything else that touched it), the
+    payments made, the balance owed at the end date, and how far the posted
+    tax is from the report's total. A difference names a posting the report
+    cannot see: tax on a bill, a journal entry, a void of an earlier sale."""
+    from sqlalchemy import or_
+
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services import control_accounts
+
+    tax_id = control_accounts.find(db, "2200")
+    if tax_id is None:
+        return None
+    account = db.get(Account, tax_id)
+
+    def owed(*conds) -> Decimal:
+        dr, cr = (
+            db.query(
+                sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
+                sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
+            )
+            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+            .filter(TransactionLine.account_id == tax_id, *conds)
+            .one()
+        )
+        return _q(Decimal(str(cr)) - Decimal(str(dr)))
+
+    in_period = (Transaction.date >= start_date, Transaction.date <= end_date)
+    payment = Transaction.source_type == "sales_tax_payment"
+    posted = owed(*in_period, or_(Transaction.source_type.is_(None), ~payment))
+    return {
+        "account_number": account.account_number,
+        "account_name": account.name,
+        "tax_posted": float(posted),
+        "payments": float(-owed(*in_period, payment)),
+        "balance": float(owed(Transaction.date <= end_date)),
+        "difference": float(_q(total_tax - posted)),
     }
 
 
