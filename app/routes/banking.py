@@ -3,6 +3,7 @@
 # their sum matches the statement balance.
 # ============================================================================
 
+import re
 from datetime import date
 from decimal import Decimal
 
@@ -608,6 +609,39 @@ def complete_reconciliation(recon_id: int, db: Session = Depends(get_db)):
     out = rc.complete(db, _recon(db, recon_id))
     db.commit()
     return out
+
+
+@router.get("/reconciliations/{recon_id}/report")
+def reconciliation_report(recon_id: int, db: Session = Depends(get_db)):
+    """A completed reconciliation's report: beginning and ending balances,
+    the items it cleared, what was outstanding on the statement date."""
+    from app.services import reconciliation as rc
+
+    return rc.report(db, _recon(db, recon_id))
+
+
+@router.get("/reconciliations/{recon_id}/pdf")
+def reconciliation_report_pdf(recon_id: int, db: Session = Depends(get_db)):
+    from fastapi.responses import Response
+
+    from app.services import reconciliation as rc
+    from app.services.pdf_service import generate_report_pdf
+    from app.services.settings_service import get_all_settings
+
+    data = rc.report(db, _recon(db, recon_id))
+    pdf = generate_report_pdf(rc.report_sections(data), get_all_settings(db))
+    label = re.sub(r"[^A-Za-z0-9_-]", "", data["account_number"] or "") or str(
+        data["account_id"]
+    )
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": (
+                f'inline; filename="reconciliation_{label}_{data["statement_date"]}.pdf"'
+            )
+        },
+    )
 
 
 @router.delete("/reconciliations/{recon_id}")

@@ -327,7 +327,7 @@ const BankingPage = {
         const [outLabel, inLabel] = BankingPage._cols(kind);
         let review = [];
         if (feed) review = await API.get(`/banking/transactions?bank_account_id=${feed.bank_account_id}&status=unmatched`);
-        BankingPage._ctx = { accountId: id, feedId: feed ? feed.bank_account_id : null, kind };
+        BankingPage._ctx = { accountId: id, feedId: feed ? feed.bank_account_id : null, kind, lastReconciled: info.last_reconciled || null };
 
         let html = `
             <div class="page-header">
@@ -339,6 +339,7 @@ const BankingPage = {
                     <button class="btn btn-secondary" onclick="BankingPage.showOFXImport(${id})">Import file</button>
                     ${feed ? `<button class="btn btn-secondary" onclick="BankingPage.findMatches(${feed.bank_account_id}, ${id})">Find matches</button>` : ''}
                     <button class="btn btn-secondary" onclick="BankingPage.startReconcile(${id})">Reconcile</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.showReconciliations(${id})">Reconciliations…</button>
                 </div>
             </div>
             <div class="card-grid" style="margin-bottom:16px;">
@@ -648,14 +649,27 @@ const BankingPage = {
     // Reconciliation — over the ledger's lines
     // ------------------------------------------------------------------
     async startReconcile(accountId) {
+        // A statement on or before the last reconciled one is refused by
+        // the server; the form says where the last one ended and won't
+        // offer an earlier date.
+        const ctx = BankingPage._ctx || {};
+        const last = ctx.accountId === accountId ? ctx.lastReconciled : null;
+        let minDate = '';
+        if (last) {
+            const d = new Date(last + 'T00:00:00');
+            d.setDate(d.getDate() + 1);
+            minDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        const defaultDate = minDate && todayISO() < minDate ? minDate : todayISO();
         openModal('Begin Reconciliation', `
             <form onsubmit="BankingPage.createReconciliation(event, ${accountId})">
                 <p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">
                     Enter the ending date and balance from your statement. For a card, the balance is the amount owed.
+                    ${last ? `This account is reconciled through ${formatDate(last)}; the statement date comes after that.` : ''}
                 </p>
                 <div class="form-grid">
                     <div class="form-group"><label>Statement Date *</label>
-                        <input name="statement_date" type="date" required value="${todayISO()}"></div>
+                        <input name="statement_date" type="date" required value="${defaultDate}" ${minDate ? `min="${minDate}"` : ''}></div>
                     <div class="form-group"><label>Statement Ending Balance *</label>
                         <input name="statement_balance" type="number" step="0.01" required></div>
                 </div>
@@ -706,9 +720,10 @@ const BankingPage = {
                 <div class="btn-group">
                     <button class="btn btn-secondary" onclick="BankingPage.go('#/banking/${data.account_id}')">Later</button>
                     <button class="btn btn-secondary" onclick="BankingPage.abandonReconcile(${reconId}, ${data.account_id})">Abandon</button>
-                    <button class="btn btn-primary" id="recon-finish-btn" onclick="BankingPage.finishReconcile(${reconId}, ${data.account_id})" ${balanced ? '' : 'disabled'}>Finish Reconciliation</button>
+                    <button class="btn btn-primary" id="recon-finish-btn" onclick="BankingPage.finishReconcile(${reconId}, ${data.account_id})">Finish Reconciliation</button>
                 </div>
             </div>
+            <div id="recon-finish-msg" role="alert" style="font-size:12px; color:var(--danger); margin-bottom:8px;"></div>
             <div class="card-grid" style="margin-bottom:16px;">
                 <div class="card"><div class="card-header">Beginning Balance</div>
                     <div class="card-value">${formatCurrency(data.beginning_balance)}</div></div>
@@ -718,7 +733,7 @@ const BankingPage = {
                     <div class="card-value">${formatCurrency(data.statement_balance)}</div></div>
                 <div class="card"><div class="card-header">Difference</div>
                     <div class="card-value" id="recon-diff" style="color:${diffColor}">${formatCurrency(data.difference)}</div>
-                    <div style="font-size:11px; font-weight:600;" role="status">${balanced ? '✓ Balanced' : '⚠ Out of balance'}</div></div>
+                    <div style="font-size:11px; font-weight:600;" role="status">${balanced ? '✓ Balanced — ready to finish' : '⚠ Out of balance — finish when this is $0.00'}</div></div>
             </div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col" style="width:30px;"></th><th scope="col">Date</th><th scope="col">Payee / Description</th><th scope="col">Ref #</th><th scope="col" class="amount">Amount</th></tr></thead>
@@ -736,12 +751,82 @@ const BankingPage = {
         }
     },
 
+    // An out-of-balance Finish was a disabled button: it did nothing and
+    // said nothing (exploratory 2.17.3, W-M20). It says why now — the
+    // difference, and what to do about it — and a finished reconciliation
+    // opens its report.
     async finishReconcile(reconId, accountId) {
-        if (!confirm('Mark this reconciliation as complete? Cleared lines are locked.')) return;
+        const msg = $('#recon-finish-msg');
         try {
+            const data = await API.get(`/banking/reconciliations/${reconId}/transactions`);
+            if (Math.abs(data.difference) >= 0.005) {
+                const why = `Not finished: the difference is ${formatCurrency(data.difference)}, and it must be $0.00. Tick the lines that are on your statement, or check the statement's ending balance.`;
+                if (msg) msg.textContent = why;
+                toast(why, 'error');
+                return;
+            }
+            if (!confirm('Mark this reconciliation as complete? Cleared lines are locked.')) return;
             await API.post(`/banking/reconciliations/${reconId}/complete`);
             toast('Reconciliation completed');
             BankingPage.go(`#/banking/${accountId}`);
+            BankingPage.showReconReport(reconId);
+        } catch (err) {
+            if (msg) msg.textContent = err.message;
+            toast(err.message, 'error');
+        }
+    },
+
+    async showReconciliations(accountId) {
+        try {
+            const rows = await API.get(`/banking/reconciliations?account_id=${accountId}`);
+            const body = rows.length ? `<div class="table-container"><table>
+                <thead><tr><th scope="col">Statement date</th><th scope="col" class="amount">Ending balance</th><th scope="col">Status</th><th scope="col"></th></tr></thead>
+                <tbody>${rows.map(r => `<tr>
+                    <td>${formatDate(r.statement_date)}</td>
+                    <td class="amount">${formatCurrency(r.statement_balance)}</td>
+                    <td>${r.status === 'completed' ? `Completed ${r.completed_at ? formatDate(r.completed_at) : ''}` : 'In progress'}</td>
+                    <td style="white-space:nowrap;">${r.status === 'completed'
+                        ? `<button class="btn btn-sm btn-secondary" onclick="BankingPage.showReconReport(${r.id})">Report</button>
+                           <button class="btn btn-sm btn-secondary" onclick="window.open('/api/banking/reconciliations/${r.id}/pdf', '_blank')">Save PDF</button>`
+                        : `<button class="btn btn-sm btn-primary" onclick="closeModal(); BankingPage.showReconcileView(${r.id})">Continue</button>`}</td>
+                </tr>`).join('')}</tbody></table></div>` : '<p>No reconciliations for this account yet.</p>';
+            openModal('Reconciliations', body + `<div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async showReconReport(reconId) {
+        try {
+            const r = await API.get(`/banking/reconciliations/${reconId}/report`);
+            const L = r.labels;
+            const line = (label, amount, style = '') => `<tr style="${style}"><td>${escapeHtml(label)}</td><td class="amount">${formatCurrency(amount)}</td></tr>`;
+            const bold = 'font-weight:700; background:var(--gray-50);';
+            const summary = `<div class="table-container"><table><tbody>
+                ${line('Beginning balance', r.beginning_balance)}
+                ${line(`Cleared ${L.increase.toLowerCase()} (${r.cleared.increase.count})`, r.cleared.increase.total)}
+                ${line(`Cleared ${L.decrease.toLowerCase()} (${r.cleared.decrease.count})`, r.cleared.decrease.total)}
+                ${line('Cleared balance', r.cleared_balance, bold)}
+                ${line('Statement ending balance', r.ending_balance)}
+                ${line('Difference', r.difference, bold)}
+                ${line(`Uncleared ${L.increase.toLowerCase()} (${r.uncleared.increase.count})`, r.uncleared.increase.total)}
+                ${line(`Uncleared ${L.decrease.toLowerCase()} (${r.uncleared.decrease.count})`, r.uncleared.decrease.total)}
+                ${line(`Register balance as of ${formatDate(r.statement_date)}`, r.register_balance, bold)}
+            </tbody></table></div>`;
+            const detail = [['cleared', 'Cleared'], ['uncleared', 'Uncleared']].map(([state, title]) =>
+                ['increase', 'decrease'].filter(side => r[state][side].items.length).map(side => `
+                    <h4 style="margin:12px 0 4px; font-size:12px;">${title} ${escapeHtml(L[side].toLowerCase())}</h4>
+                    <div class="table-container"><table>
+                        <thead><tr><th scope="col">Date</th><th scope="col">Ref #</th><th scope="col">Payee / description</th><th scope="col" class="amount">Amount</th></tr></thead>
+                        <tbody>${r[state][side].items.map(i => `<tr>
+                            <td>${formatDate(i.date)}</td><td>${escapeHtml(i.reference || '')}</td>
+                            <td>${escapeHtml(i.payee || i.description || '')}</td><td class="amount">${formatCurrency(i.amount)}</td>
+                        </tr>`).join('')}</tbody>
+                    </table></div>`).join('')).join('');
+            openModal(`Reconciliation — ${r.account_name}, statement of ${formatDate(r.statement_date)}`, `
+                ${summary}${detail}
+                <div class="form-actions">
+                    <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                    <button class="btn btn-primary" onclick="window.open('/api/banking/reconciliations/${reconId}/pdf', '_blank')">Save PDF</button>
+                </div>`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
