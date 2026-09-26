@@ -85,8 +85,7 @@ def test_the_statement_is_in_home_currency_and_ties_to_the_balance(
     usd, eur = _scenario(client, muller)
     act = statement_activity(db_session, muller, date(2026, 9, 30))
     got = [
-        (ln["type"], ln["currency"], ln["amount"], ln["balance"])
-        for ln in act["lines"]
+        (ln["type"], ln["currency"], ln["amount"], ln["balance"]) for ln in act["lines"]
     ]
     assert got == [
         ("Invoice", None, Decimal("100.00"), Decimal("100.00")),
@@ -154,4 +153,6 @@ def test_a_home_currency_statement_reads_as_before(
         (None, Decimal("-30.00")),
     ]
     assert act["has_foreign"] is False
-    assert act["lines"][1]["description"] == f"Wire · applied to #{inv['invoice_number']}"
+    assert (
+        act["lines"][1]["description"] == f"Wire · applied to #{inv['invoice_number']}"
+    )

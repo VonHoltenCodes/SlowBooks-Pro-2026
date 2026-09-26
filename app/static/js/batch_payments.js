@@ -8,7 +8,14 @@ const BatchPaymentsPage = {
             API.get('/invoices'),
             API.get('/accounts?account_type=asset'),
         ]);
-        const openInv = invoices.filter(i => i.balance_due > 0 && i.status !== 'void');
+        // A batch payment is in the home currency, so it pays home-currency
+        // invoices only (the server refuses a EUR one); those are left out
+        // here, so Select All never picks one.
+        const home = ((typeof App !== 'undefined' && App.settings && App.settings.home_currency) || 'USD').toUpperCase();
+        const isHome = i => !i.currency || String(i.currency).toUpperCase() === home;
+        const open = invoices.filter(i => i.balance_due > 0 && i.status !== 'void');
+        const openInv = open.filter(isHome);
+        const foreignCount = open.length - openInv.length;
 
         // Group by customer
         const byCustomer = {};
@@ -60,6 +67,10 @@ const BatchPaymentsPage = {
             html += '</tbody></table></div>';
         }
 
+        if (foreignCount) {
+            const one = foreignCount === 1;
+            html += `<p style="margin-top:8px;color:var(--gray-500);">${foreignCount} open ${one ? T('invoice') : T('invoices')} in another currency ${one ? 'is' : 'are'} not listed here: a batch payment is in ${escapeHtml(home)}, so pay ${one ? 'it' : 'each'} on its own.</p>`;
+        }
         html += `<div id="batch-total" style="margin-top:12px;font-size:16px;font-weight:700;color:var(--qb-navy);">Total: $0.00</div>
             <div class="form-actions">
                 <button type="submit" class="btn btn-primary">Apply Batch Payment</button>
