@@ -48,6 +48,25 @@ def list_bill_payments(
     return results
 
 
+@router.get("/{bill_payment_id}", response_model=BillPaymentResponse)
+def get_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
+    """One bill payment and the bills it paid. The bank register links a
+    bill payment here (#/bill-payments/{id}); the link said "Page not
+    found"."""
+    p = (
+        db.query(BillPayment)
+        .options(joinedload(BillPayment.vendor), selectinload(BillPayment.allocations))
+        .filter(BillPayment.id == bill_payment_id)
+        .first()
+    )
+    if not p:
+        raise HTTPException(status_code=404, detail="Bill payment not found")
+    resp = BillPaymentResponse.model_validate(p)
+    if p.vendor:
+        resp.vendor_name = p.vendor.name
+    return resp
+
+
 @router.post("", response_model=BillPaymentResponse, status_code=201)
 def create_bill_payment(data: BillPaymentCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)

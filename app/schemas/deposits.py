@@ -42,6 +42,15 @@ class DepositResponse(BaseModel):
     reconciled: bool = False
 
 
+class DepositDetailResponse(DepositResponse):
+    """One deposit with the payments it took, each in the shape Make
+    Deposits lists a waiting payment — what the bank register's link to a
+    deposit opens. A void deposit has given its payments back to the list,
+    so it names none."""
+
+    payments: list[PendingDepositResponse] = []
+
+
 class DepositCreate(StrictModel):
     deposit_to_account_id: int
     date: dt_date

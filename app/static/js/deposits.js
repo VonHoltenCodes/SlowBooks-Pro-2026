@@ -98,7 +98,8 @@ const DepositsPage = {
                 <td class="amount">${d.items == null ? '' : d.items}</td>
                 <td class="amount">${formatCurrency(d.amount)}</td>
                 <td>${escapeHtml(status)}</td>
-                <td>${canVoid ? `<button class="btn btn-sm btn-secondary" onclick="DepositsPage.voidDeposit(${d.id})">Void</button>` : ''}</td>
+                <td class="actions"><button class="btn btn-sm btn-secondary" onclick="DepositsPage.view(${d.id})">View</button>
+                    ${canVoid ? `<button class="btn btn-sm btn-secondary" onclick="DepositsPage.voidDeposit(${d.id})">Void</button>` : ''}</td>
             </tr>`;
         }).join('');
         return `
@@ -111,6 +112,44 @@ const DepositsPage = {
                 <th scope="col" class="amount">Payments</th><th scope="col" class="amount">Amount</th><th scope="col">Status</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>`;
+    },
+
+    // One deposit and the payments it took, with Void while it can still be
+    // voided. The bank register links a deposit to #/deposits/{id}, which
+    // said "Page not found" (explore 2.17.3).
+    async view(id) {
+        const d = await API.get(`/deposits/${id}`);
+        const status = d.voided ? 'Void' : (d.reconciled ? 'Reconciled' : 'Deposited');
+        const rows = (d.payments || []).map(p => `<tr>
+                <td>${formatDate(p.date)}</td>
+                <td>${escapeHtml(p.received_from || '')}</td>
+                <td>${escapeHtml(p.description)}${DepositsPage._paid(p)}</td>
+                <td>${escapeHtml(DepositsPage._ref(p))}</td>
+                <td>${escapeHtml(p.method || '')}</td>
+                <td class="amount">${formatCurrency(p.amount)}</td>
+            </tr>`).join('');
+        const payments = rows
+            ? `<div class="table-container"><table>
+                <thead><tr><th scope="col">Date</th><th scope="col">Received From</th><th scope="col">Description</th>
+                <th scope="col">Check # / Ref</th><th scope="col">Method</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <tbody>${rows}</tbody></table></div>`
+            : `<p style="font-size:11px; color:var(--text-muted);">${d.voided
+                ? 'This deposit is void: its payments went back on the Make Deposits list.'
+                : 'This deposit does not list its payments: it was recorded as an amount (imported, or made before deposits kept their list).'}</p>`;
+        const canVoid = !d.voided && !d.reconciled;
+        openModal(`Deposit — ${formatDate(d.date)}`, `
+            <div style="margin-bottom:12px;">
+                <strong>Deposited to:</strong> ${escapeHtml(d.account_name || '')}<br>
+                <strong>Date:</strong> ${formatDate(d.date)}<br>
+                ${d.reference ? `<strong>Slip #:</strong> ${escapeHtml(d.reference)}<br>` : ''}
+                <strong>Amount:</strong> ${formatCurrency(d.amount)}<br>
+                <strong>Status:</strong> ${status}${d.reconciled && !d.voided ? ' — on a reconciled bank statement, so it can\'t be voided' : ''}
+            </div>
+            ${payments}
+            <div class="form-actions">
+                ${canVoid ? `<button type="button" class="btn btn-danger" onclick="DepositsPage.voidDeposit(${d.id})">Void</button>` : ''}
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>`);
     },
 
     toggleAll() {
@@ -166,7 +205,10 @@ const DepositsPage = {
         try {
             await API.post(`/deposits/${id}/void`);
             toast('Deposit voided; its payments are back on the list');
-            App.navigate('#/deposits');
+            closeModal();
+            // off a deposit's own address (#/deposits/12), back to the list
+            if (location.hash === '#/deposits') App.navigate('#/deposits');
+            else location.hash = '#/deposits';
         } catch (err) { toast(err.message, 'error'); }
     },
 };
