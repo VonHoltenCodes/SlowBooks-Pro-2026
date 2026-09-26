@@ -9,20 +9,14 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.services.tax_forms import form_941, form_940, w2_w3, state_sui, tax_liability
 from app.services import form_1099
-from app import config
+from app.services.payroll_documents import employer_block
 
 router = APIRouter(prefix="/api/tax-forms", tags=["tax-forms"])
 
 
-def _company() -> dict:
-    return {
-        "name": config.COMPANY_NAME,
-        "address": config.COMPANY_ADDRESS,
-        "phone": config.COMPANY_PHONE,
-        "email": config.COMPANY_EMAIL,
-        "ein": config.EMPLOYER_EIN,
-        "state": config.EMPLOYER_STATE,
-    }
+def _company(db: Session) -> dict:
+    """The company in Settings (not the "My Company" config default)."""
+    return employer_block(db)
 
 
 def _pdf(content: bytes, filename: str) -> Response:
@@ -52,7 +46,7 @@ def get_941_pdf(
     year: int = Query(...), quarter: int = Query(...), db: Session = Depends(get_db)
 ):
     _check_quarter(quarter)
-    pdf = form_941.generate_941_pdf(db, year, quarter, _company())
+    pdf = form_941.generate_941_pdf(db, year, quarter, _company(db))
     return _pdf(pdf, f"form941_{year}Q{quarter}.pdf")
 
 
@@ -64,7 +58,7 @@ def get_940(year: int = Query(...), db: Session = Depends(get_db)):
 
 @router.get("/940/pdf")
 def get_940_pdf(year: int = Query(...), db: Session = Depends(get_db)):
-    pdf = form_940.generate_940_pdf(db, year, _company())
+    pdf = form_940.generate_940_pdf(db, year, _company(db))
     return _pdf(pdf, f"form940_{year}.pdf")
 
 
@@ -85,7 +79,7 @@ def get_w2(employee_id: int, year: int = Query(...), db: Session = Depends(get_d
 
 @router.get("/w2/{employee_id}/pdf")
 def get_w2_pdf(employee_id: int, year: int = Query(...), db: Session = Depends(get_db)):
-    pdf = w2_w3.generate_w2_pdf(db, year, employee_id, _company())
+    pdf = w2_w3.generate_w2_pdf(db, year, employee_id, _company(db))
     return _pdf(pdf, f"w2_{year}_emp{employee_id}.pdf")
 
 
@@ -124,7 +118,7 @@ def get_1099(year: int = Query(...), db: Session = Depends(get_db)):
 @router.get("/1099/{vendor_id}/pdf")
 def get_1099_pdf(vendor_id: int, year: int = Query(...), db: Session = Depends(get_db)):
     try:
-        pdf = form_1099.generate_1099_nec_pdf(db, year, vendor_id, _company())
+        pdf = form_1099.generate_1099_nec_pdf(db, year, vendor_id, _company(db))
     except ValueError as e:
         # form_1099 raises ValueError for missing or non-1099 vendors; surface
         # as 404 instead of leaking a 500 stack trace to the operator running
@@ -135,5 +129,5 @@ def get_1099_pdf(vendor_id: int, year: int = Query(...), db: Session = Depends(g
 
 @router.get("/1096/pdf")
 def get_1096_pdf(year: int = Query(...), db: Session = Depends(get_db)):
-    pdf = form_1099.generate_1096_pdf(db, year, _company())
+    pdf = form_1099.generate_1096_pdf(db, year, _company(db))
     return _pdf(pdf, f"form1096_{year}.pdf")

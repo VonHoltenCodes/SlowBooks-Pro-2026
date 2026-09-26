@@ -10,7 +10,7 @@ from app.services.document_audit import (
     compute_doc_hash,
     record_doc_audit,
 )
-from app.services.settings_service import get_all_settings
+from app.services.payroll_documents import employer_block
 from app.services.tax_forms.form_940 import compute_940, generate_940_pdf
 from app.services.tax_forms.form_941 import compute_941, generate_941_pdf
 from app.services.tax_forms.w2_w3 import (
@@ -19,7 +19,6 @@ from app.services.tax_forms.w2_w3 import (
     generate_w2_pdf,
     generate_w3_pdf,
 )
-from app import config
 
 # --- Tier 3: Tax Form Generation -----------------------------------------------
 
@@ -44,6 +43,7 @@ def generate_w2_form(
     # cap to box 3 and reports box 4/box 6 as the actual taxes withheld; the
     # JSON shape below maps its keys onto the legacy box_N field names.
     data = compute_w2(db, year, emp_id)
+    company = employer_block(db)
     w2_data = {
         "box_1": str(data["box1_federal_wages"]),
         "box_2": str(data["box2_federal_tax_withheld"]),
@@ -57,8 +57,8 @@ def generate_w2_form(
             f"XXX-XX-{emp.ssn_last_four}" if emp.ssn_last_four else "XXX-XX-XXXX"
         ),
         "employee_name": f"{emp.first_name} {emp.last_name}",
-        "employer_ein": config.EMPLOYER_EIN or "XX-XXXXXXX",
-        "employer_name": config.COMPANY_NAME,
+        "employer_ein": company["ein"] or "XX-XXXXXXX",
+        "employer_name": company["name"],
         "tax_year": str(year),
     }
 
@@ -78,6 +78,7 @@ def generate_w3_form(
     # It aggregates every W-2 for the year (each built with the SS wage-base
     # cap applied) in a single pass.
     data = compute_w3(db, year)
+    company = employer_block(db)
     w3_data = {
         "box_1": str(data["box1_federal_wages"]),
         "box_2": str(data["box2_federal_tax_withheld"]),
@@ -88,9 +89,9 @@ def generate_w3_form(
         "box_16": str(data["box16_state_wages"]),
         "box_17": str(data["box17_state_income_tax"]),
         "number_of_w2s": str(data["num_w2"]),
-        "employer_ein": config.EMPLOYER_EIN or "XX-XXXXXXX",
-        "employer_name": config.COMPANY_NAME,
-        "employer_address": config.COMPANY_ADDRESS or "",
+        "employer_ein": company["ein"] or "XX-XXXXXXX",
+        "employer_name": company["name"],
+        "employer_address": company["address"],
         "tax_year": str(year),
     }
 
@@ -110,13 +111,14 @@ def generate_form_940(
     # It applies the $7,000 per-employee FUTA wage base across the year's pay
     # stubs in a single pass and reports the actual withheld FUTA tax.
     data = compute_940(db, year)
+    company = employer_block(db)
     form_940_data = {
         "box_1": str(data["futa_taxable_wages"]),  # Wages subject to FUTA
         "box_2": str(data["total_futa_tax"]),  # FUTA tax for the year
         "total_payments": str(data["total_payments"]),
         "exempt_payments": str(data["exempt_payments"]),
-        "employer_ein": config.EMPLOYER_EIN or "XX-XXXXXXX",
-        "employer_name": config.COMPANY_NAME,
+        "employer_ein": company["ein"] or "XX-XXXXXXX",
+        "employer_name": company["name"],
         "tax_year": str(year),
         "payment_status": "Not yet filed",
     }
@@ -141,6 +143,7 @@ def generate_form_941(
     # It aggregates the quarter's PROCESSED pay stubs (single pass) into wage,
     # withholding and combined-FICA-tax totals.
     data = compute_941(db, year, quarter)
+    company = employer_block(db)
     form_941_data = {
         "quarter": str(quarter),
         "year": str(year),
@@ -152,8 +155,8 @@ def generate_form_941(
         "box_6": str(data["medicare_tax"]),  # Medicare tax
         "box_12": str(data["total_tax_liability"]),  # Total tax after adjustments
         "number_of_employees": str(data["num_employees"]),
-        "employer_ein": config.EMPLOYER_EIN or "XX-XXXXXXX",
-        "employer_name": config.COMPANY_NAME,
+        "employer_ein": company["ein"] or "XX-XXXXXXX",
+        "employer_name": company["name"],
         "payment_status": "Not yet filed",
     }
 
@@ -180,16 +183,8 @@ def generate_form_941(
 
 
 def _company_for_pdf(db: Session) -> dict:
-    """Shape the settings dict the tax-form templates expect."""
-    settings = get_all_settings(db)
-    return {
-        "name": settings.get("company_name") or config.COMPANY_NAME,
-        "address": settings.get("company_address1") or "",
-        "city": settings.get("company_city") or "",
-        "state": settings.get("company_state") or config.EMPLOYER_STATE,
-        "zip": settings.get("company_zip") or "",
-        "ein": settings.get("company_tax_id") or config.EMPLOYER_EIN,
-    }
+    """The company in Settings, as the tax-form templates expect it."""
+    return employer_block(db)
 
 
 def _pdf_response(pdf_bytes: bytes, filename: str) -> Response:

@@ -180,13 +180,14 @@ const PayrollPage = {
                 <td style="font-size:12px;">${benefitCell(s)}</td>
                 <td class="amount">${formatCurrency((s.pretax_deductions || 0) + (s.posttax_deductions || 0))}</td>
                 <td class="amount" style="font-weight:700;">${formatCurrency(s.net_pay)}</td>
+                <td class="actions"><button class="btn btn-sm btn-secondary" title="Printable pay stub (PDF)" onclick="window.open('/api/payroll/${run.id}/paystub/${s.id}','_blank')">Stub PDF</button></td>
             </tr>`).join('');
 
         openModal(`Pay Run: ${run.period_start} to ${run.period_end}`, `
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Employee</th><th scope="col" class="amount">Hours</th><th scope="col" class="amount">Gross</th>
                 <th scope="col" class="amount">Fed</th><th scope="col" class="amount">State</th><th scope="col" class="amount">SS</th>
-                <th scope="col" class="amount">Med</th><th scope="col">Benefits (EE, +ER)</th><th scope="col" class="amount">Deductions</th><th scope="col" class="amount">Net</th></tr></thead>
+                <th scope="col" class="amount">Med</th><th scope="col">Benefits (EE, +ER)</th><th scope="col" class="amount">Deductions</th><th scope="col" class="amount">Net</th><th scope="col">Stub</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
             <div class="invoice-totals">
