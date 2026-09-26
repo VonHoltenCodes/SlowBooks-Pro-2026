@@ -176,6 +176,11 @@ _jinja_env.filters["currency"] = _format_currency
 _jinja_env.filters["fdate"] = _format_date
 _jinja_env.globals["document_currency_code"] = document_currency_code
 
+from app.services.addresses import city_line, country_line  # noqa: E402
+
+_jinja_env.globals["city_line"] = city_line
+_jinja_env.globals["country_line"] = country_line
+
 # Templates may call terms('Invoice'); a direct render without company
 # settings gets the business words. _render() overrides this per call.
 from app.services.terminology import Terms as _Terms  # noqa: E402

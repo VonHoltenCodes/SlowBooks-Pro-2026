@@ -250,24 +250,15 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
     if not est:
         raise HTTPException(status_code=404, detail="Estimate not found")
     company = get_settings(db)
-    from jinja2 import Environment, FileSystemLoader
-    from pathlib import Path
+    from fastapi.responses import HTMLResponse
 
-    template_dir = Path(__file__).parent.parent / "templates"
-    env = Environment(loader=FileSystemLoader(str(template_dir)), autoescape=True)
-    from app.services.pdf_service import _format_currency, _format_date
+    from app.services.pdf_service import _render
 
-    env.filters["currency"] = _format_currency
-    env.filters["fdate"] = _format_date
-    template = env.get_template("estimate_pdf.html")
-    if est.customer and not hasattr(est, "customer_name"):
-        est.customer_name = est.customer.name
-    html_str = template.render(est=est, company=company)
+    # The PDF's own renderer: one set of filters and helpers for both.
+    html_str = _render("estimate_pdf.html", company, est=est)
     html_str = html_str.replace(
         "</body>", "<script>window.onload=function(){window.print();}</script></body>"
     )
-    from fastapi.responses import HTMLResponse
-
     return HTMLResponse(content=html_str)
 
 
