@@ -230,13 +230,29 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
     were left out, so Balance Due could disagree with the customer's
     balance. Each line now describes the document itself: when an invoice
     is due and its PO number; how a payment was made and which invoices it
-    paid; what a credit memo was applied to."""
+    paid; what a credit memo was applied to.
+
+    Amounts are in home currency, as A/R Aging and the customer's balance
+    are: a foreign-currency invoice at the rate it was booked at, and a
+    payment at what it took off A/R (each part applied to an invoice at
+    that invoice's rate, the rest at the payment's own). A EUR 850.00
+    invoice was summed as 850 dollars beside the dollar ones (explore
+    2.17.3, A11). A foreign line names its own amount ("EUR 850.00")."""
     from app.models.credit_memos import CreditMemo, CreditMemoStatus
     from app.models.payments import PaymentAllocation
+    from app.services.contact_balances import home_amount
+    from app.services.currency import home_currency
     from app.services.donor_documents import document_label
     from app.services.terminology import terms_from_db
 
     words = terms_from_db(db)
+    home = home_currency(db)
+
+    def foreign(doc) -> str:
+        """The document's currency code when it is not the home currency."""
+        code = (doc.currency or "").strip().upper()
+        return code if code and code != home else ""
+
     invoices = (
         db.query(Invoice)
         .filter(Invoice.customer_id == customer.id)
@@ -266,12 +282,16 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
         return ", ".join(f"#{d.invoice_number}" for d in docs if d is not None)
 
     events = []
+    invoiced = Decimal(0)
     for inv in invoices:
-        parts = []
+        code = foreign(inv)
+        parts = [f"{code} {Decimal(str(inv.total or 0)):,.2f}"] if code else []
         if inv.po_number:
             parts.append(f"PO {inv.po_number}")
         if inv.due_date:
             parts.append(f"Due {inv.due_date.strftime('%b %d, %Y')}")
+        amount = home_amount(inv.total, inv.exchange_rate)
+        invoiced += amount
         events.append(
             (
                 inv.date,
@@ -282,20 +302,40 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
                     "type": document_label(inv, words),
                     "number": inv.invoice_number,
                     "description": " · ".join(parts),
-                    "amount": Decimal(str(inv.total or 0)),
+                    "amount": amount,
+                    "currency": code or None,
                 },
             )
         )
+    received = Decimal(0)
     for p in payments:
+        code = foreign(p)
         applied = sum((Decimal(str(a.amount)) for a in p.allocations), Decimal(0))
         left = Decimal(str(p.amount)) - applied
-        parts = [p.method] if p.method else []
+        # What the payment took off A/R, in home currency, as its journal
+        # entry and any later apply did.
+        relieved = sum(
+            (
+                home_amount(
+                    a.amount, a.invoice.exchange_rate if a.invoice else p.exchange_rate
+                )
+                for a in p.allocations
+            ),
+            Decimal(0),
+        )
+        if left > 0:
+            relieved += home_amount(left, p.exchange_rate)
+        received += relieved
+        parts = [f"{code} {Decimal(str(p.amount)):,.2f}"] if code else []
+        if p.method:
+            parts.append(p.method)
         paid = numbers(a.invoice for a in p.allocations)
         if paid:
             parts.append(f"applied to {paid}")
         if left > 0:
+            left_text = f"{code} {left:,.2f}" if code else f"${left:,.2f}"
             parts.append(
-                words.text(f"${left:,.2f} not applied to an invoice yet")
+                words.text(f"{left_text} not applied to an invoice yet")
                 if paid
                 else words.text("not applied to an invoice yet")
             )
@@ -309,7 +349,8 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
                     "type": "Payment",
                     "number": p.check_number or p.reference or "",
                     "description": " · ".join(parts),
-                    "amount": -Decimal(str(p.amount)),
+                    "amount": -relieved,
+                    "currency": code or None,
                 },
             )
         )
@@ -328,6 +369,7 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
                         f"applied to {applied_to}" if applied_to else "credit"
                     ),
                     "amount": -Decimal(str(cm.total or 0)),
+                    "currency": None,
                 },
             )
         )
@@ -341,12 +383,12 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
         lines.append(line)
     return {
         "lines": lines,
-        "total_invoiced": sum(
-            (Decimal(str(i.total or 0)) for i in invoices), Decimal(0)
-        ),
-        "total_payments": sum((Decimal(str(p.amount)) for p in payments), Decimal(0)),
+        "total_invoiced": invoiced,
+        "total_payments": received,
         "total_credits": sum((Decimal(str(m.total or 0)) for m in memos), Decimal(0)),
         "balance_due": running,
+        "home_currency": home,
+        "has_foreign": any(line["currency"] for line in lines),
     }
 
 
