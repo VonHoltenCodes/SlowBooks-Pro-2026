@@ -95,6 +95,30 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
     if alloc_total > data.amount:
         raise HTTPException(status_code=400, detail="Allocations exceed payment amount")
 
+    # Validate every allocation owner before creating or applying the payment.
+    allocated_invoices = []
+    for alloc_data in data.allocations:
+        # Lock the invoice row for the read-check-write so two concurrent
+        # payments to the same invoice can't both pass the balance check and
+        # over-apply (driving balance_due negative). No-op on SQLite; real
+        # row lock on Postgres.
+        invoice = (
+            db.query(Invoice)
+            .filter(Invoice.id == alloc_data.invoice_id)
+            .with_for_update()
+            .first()
+        )
+        if not invoice:
+            raise HTTPException(
+                status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+            )
+        if invoice.customer_id != data.customer_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invoice {invoice.invoice_number} does not belong to payment customer",
+            )
+        allocated_invoices.append(invoice)
+
     payment = Payment(
         customer_id=data.customer_id,
         currency=pay_currency,
@@ -113,22 +137,8 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
     # Home-currency value of A/R relieved per allocation (at each
     # invoice's booked rate) — the FX gain/loss basis.
     ar_home_credits: list[Decimal] = []
-    # Apply allocations to invoices
-    for alloc_data in data.allocations:
-        # Lock the invoice row for the read-check-write so two concurrent
-        # payments to the same invoice can't both pass the balance check and
-        # over-apply (driving balance_due negative). No-op on SQLite; real
-        # row lock on Postgres.
-        invoice = (
-            db.query(Invoice)
-            .filter(Invoice.id == alloc_data.invoice_id)
-            .with_for_update()
-            .first()
-        )
-        if not invoice:
-            raise HTTPException(
-                status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
-            )
+    # Apply allocations to the invoices locked and validated above.
+    for alloc_data, invoice in zip(data.allocations, allocated_invoices):
         if alloc_data.amount > invoice.balance_due:
             raise HTTPException(
                 status_code=400,
