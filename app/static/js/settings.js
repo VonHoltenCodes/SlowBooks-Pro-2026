@@ -765,8 +765,9 @@ const SettingsPage = {
             try { data = await resp.json(); }
             catch (_) { data = null; }
             if (!resp.ok) {
-                const msg = (data && data.detail) ||
-                    `Upload failed (HTTP ${resp.status}). The file may be too large or the server returned an unexpected response.`;
+                const fallback = `Upload failed (HTTP ${resp.status}). The file may be too large or the server returned an unexpected response.`;
+                // a 422 is a list of entries: API.errorMessage makes sentences of it
+                const msg = data && data.detail ? API.errorMessage(data.detail, fallback) : fallback;
                 throw new Error(msg);
             }
             toast('Logo uploaded');

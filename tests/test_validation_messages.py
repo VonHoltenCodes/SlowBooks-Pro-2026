@@ -187,3 +187,11 @@ def test_first_run_setup_shows_sentences_too():
 )
 def test_name_inputs_stop_at_the_schema_limit(page, tag):
     assert tag in (JS / page).read_text(encoding="utf-8")
+
+
+def test_the_logo_upload_shows_sentences_too():
+    """Settings posts the logo with a raw fetch; its errors go through the
+    same formatter rather than printing a 422 list as "[object Object]"."""
+    settings = (JS / "settings.js").read_text(encoding="utf-8")
+    upload = settings[settings.index("async uploadLogo(input) {") :]
+    assert "API.errorMessage(data.detail, fallback)" in upload
