@@ -195,3 +195,24 @@ def test_an_inactive_vendor_leaves_the_pickers(client):
     assert vid not in [v["id"] for v in active]
     for page in ("bills.js", "expenses.js", "vendor_credits.js"):
         assert "/vendors?active_only=true" in _js(page), page
+
+
+# ── D1: overdraft warning ────────────────────────────────────────────────
+
+
+def test_money_leaving_a_bank_account_warns_before_it_overdraws():
+    # macbase1 S-a: Checking went to -$2,986.90 without a word.
+    helper = _js("expenses.js")
+    od = helper[helper.index("const Overdraft = {") :]
+    od = od[: od.index("\n};")]
+    assert "API.get('/banking/overview')" in od
+    assert "acct.bank_kind !== 'bank'" in od
+    assert "will be overdrawn by" in od and "Save anyway?" in od
+    expense_save = _method(helper, "async save(e)")
+    assert "await Overdraft.confirm(paidFrom" in expense_save
+    assert expense_save.index("Overdraft.confirm") < expense_save.index(
+        "API.post('/expenses'"
+    )
+    pay = _method(_js("bills.js"), "async savePay(e)")
+    assert "await Overdraft.confirm(fromId, outgoing, '1000')" in pay
+    assert pay.index("Overdraft.confirm") < pay.index("API.post('/bill-payments'")

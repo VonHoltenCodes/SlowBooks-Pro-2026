@@ -518,6 +518,8 @@ const BillsPage = {
         }
         // Blank Pay From pays from 1000 Checking (the server's default).
         const fromId = form.pay_from_account_id.value ? parseInt(form.pay_from_account_id.value) : null;
+        const outgoing = [...byVendor.values()].reduce((sum, v) => sum + v.total, 0);
+        if (!(await Overdraft.confirm(fromId, outgoing, '1000'))) return;
 
         const paid = [];
         try {
