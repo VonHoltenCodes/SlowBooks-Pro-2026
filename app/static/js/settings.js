@@ -115,7 +115,10 @@ const SettingsPage = {
                             <input name="closing_date" type="date" value="${escapeHtml(s.closing_date || '')}"></div>
                         <div class="form-group"><label>Password (optional)</label>
                             <input name="closing_date_password" type="password" value="${escapeHtml(s.closing_date_password || '')}"
-                                placeholder="Leave blank for no password"></div>
+                                placeholder="Leave blank for no password" autocomplete="new-password">
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                                With a password set, a change dated on or before the closing date asks for it
+                                and goes through when it is right. Without one, such changes are refused.</div></div>
                     </div>
                 </div>
 

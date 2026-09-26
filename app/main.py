@@ -133,6 +133,13 @@ from app.config import (
 from app.database import SessionLocal, Base, engine
 from app.services.audit import register_audit_hooks
 from app.services.request_context import acting_username as _acting_username
+from app.services.request_context import (
+    closing_date_password as _closing_date_password,
+)
+from app.services.closing_date import (
+    PASSWORD_HEADER as _CLOSING_PASSWORD_HEADER,
+    password_from_header as _closing_password_from_header,
+)
 from app.services.api_token_service import resolve as _resolve_api_token
 
 
@@ -887,12 +894,21 @@ class ActingUserContextMiddleware:
             return await self.app(scope, receive, send)
         session = scope.get("session") or {}
         acting = None
+        override = None
         if session.get("authenticated") is True:
             acting = session.get("username") or "operator"
+            # The closing-date override password a signed-in person resent a
+            # refused change with (get_db also stamps it on the Session).
+            wanted = _CLOSING_PASSWORD_HEADER.lower().encode("latin-1")
+            for name, value in scope.get("headers") or []:
+                if name == wanted:
+                    override = _closing_password_from_header(value.decode("latin-1"))
         token = _acting_username.set(acting)
+        override_token = _closing_date_password.set(override)
         try:
             await self.app(scope, receive, send)
         finally:
+            _closing_date_password.reset(override_token)
             _acting_username.reset(token)
 
 
