@@ -606,9 +606,13 @@ const ReportsPage = {
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
         openModal(T("Customer Statement"), `
             <form onsubmit="ReportsPage.openStatement(event)" data-readonly-ok>
-                <div class="form-grid">
-                    <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+                <!-- minmax(0, …) and width:100%: a select sizes itself to its
+                     longest option, and a 120-character customer name pushed
+                     As of past the dialog's edge (macbase1, F22). The picked
+                     name still shows in full in the open list. -->
+                <div class="form-grid" style="grid-template-columns:minmax(0, 2fr) minmax(0, 1fr);">
+                    <div class="form-group" style="min-width:0;"><label>${T('Customer')} *</label>
+                        <select name="customer_id" required style="width:100%; min-width:0; max-width:100%;"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>As of Date</label>
                         <input name="as_of_date" type="date" value="${todayISO()}"></div>
                 </div>
