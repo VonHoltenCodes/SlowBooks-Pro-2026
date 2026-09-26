@@ -235,6 +235,20 @@ def sync_manifest_name(company_name: str | None) -> bool:
     return changed
 
 
+def current_manifest_name() -> str | None:
+    """The name the manifest (the company picker) gives the file this app
+    is serving, or None. SQLite mode only."""
+    if not _is_sqlite():
+        return None
+    current = _current_company_file()
+    if not current:
+        return None
+    for entry in _read_manifest()["companies"]:
+        if entry.get("file") == current:
+            return (entry.get("name") or "").strip() or None
+    return None
+
+
 def company_name_taken_by(name: str, exclude_file: str | None = None) -> str | None:
     """The manifest file (other than ``exclude_file``) that already carries
     ``name`` — by the same rule creation uses (the derived filename) or a
@@ -270,13 +284,18 @@ def set_last_opened(filename: str) -> None:
     _write_manifest(manifest)
 
 
-def _init_company_db(url: str) -> None:
+def _init_company_db(url: str, company_name: str | None = None) -> None:
     """Bring a brand-new company database to the current schema and seed it.
 
     Runs `alembic upgrade head` (so the file is version-stamped and future
     upgrades apply cleanly — deliberately NOT Base.metadata.create_all),
     then seeds the Chart of Accounts, matching what the Docker entrypoint
     does on first run.
+
+    ``company_name`` — the name typed in the New Company dialog — is written
+    into the new books, so first-run setup opens with it filled in rather
+    than blank (explore 2.17.3, macbase1 F3), and the sign-in screen and
+    status bar can name the company before anyone has signed in.
     """
     from alembic import command
     from alembic.config import Config
@@ -298,11 +317,22 @@ def _init_company_db(url: str) -> None:
     command.upgrade(cfg, "head")
 
     from app.models.accounts import Account, AccountType
+    from app.models.settings import Settings
     from app.seed.chart_of_accounts import CHART_OF_ACCOUNTS
 
     engine = create_engine(url)
     try:
         with Session(engine) as session:
+            name = (company_name or "").strip()
+            if (
+                name
+                and session.query(Settings)
+                .filter(Settings.key == "company_name")
+                .first()
+                is None
+            ):
+                session.add(Settings(key="company_name", value=name))
+                session.commit()
             if session.query(Account).count() == 0:
                 for entry in CHART_OF_ACCOUNTS:
                     session.add(
@@ -356,7 +386,7 @@ def manifest_create_company(name: str) -> dict:
     companies_dir().mkdir(parents=True, exist_ok=True)
     url = "sqlite:///" + db_path.as_posix()
     try:
-        _init_company_db(url)
+        _init_company_db(url, company_name=name)
     except Exception:
         logger.exception("Failed to create company database %s", filename)
         db_path.unlink(missing_ok=True)
@@ -493,7 +523,7 @@ def create_company(
         # both do. A create_all-only database would boot with zero accounts
         # and no alembic version stamp, so future upgrades would not apply
         # cleanly.
-        _init_company_db(base_url + database_name)
+        _init_company_db(base_url + database_name, company_name=name)
 
         # Register in master DB
         company = Company(

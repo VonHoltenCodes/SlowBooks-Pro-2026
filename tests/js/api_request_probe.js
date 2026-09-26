@@ -6,8 +6,10 @@
 // scenario = {
 //   "call": ["POST", "/invoices", {...body}],
 //   "responses": [{"status": 403, "body": {...}, "headers": {...}}, ...],
-//   "answers": ["pw", null]   // what the closing-date prompt returns, in turn
+//   "answers": ["pw", null],  // what the closing-date prompt returns, in turn
+//   "auth": true              // what SlowbooksAuth.promptAuth() resolves to
 // }
+// A call still unsettled after a moment is reported as {"pending": true}.
 const fs = require('fs'), vm = require('vm');
 
 const scenario = JSON.parse(process.argv[2]);
@@ -41,6 +43,10 @@ const ctx = {
     return makeResponse(r);
   },
 };
+let authPrompts = 0;
+if ('auth' in scenario) {
+  ctx.window.SlowbooksAuth = { promptAuth: async () => { authPrompts++; return scenario.auth; } };
+}
 vm.createContext(ctx);
 vm.runInContext(fs.readFileSync('app/static/js/api.js', 'utf8') + '\nthis.API = API;', ctx);
 
@@ -53,10 +59,15 @@ ctx.API.askClosingDatePassword = async (message, wrong) => {
 (async () => {
   const [method, path, body] = scenario.call;
   const out = { requests, prompts };
+  const PENDING = {};
   try {
-    out.value = await ctx.API.request(method, path, body || null);
+    const call = ctx.API.request(method, path, body || null);
+    const value = await Promise.race([call, new Promise(r => setTimeout(() => r(PENDING), 300))]);
+    if (value === PENDING) out.pending = true;
+    else out.value = value;
   } catch (e) {
     out.error = { message: e.message, status: e.status === undefined ? null : e.status };
   }
+  if ('auth' in scenario) out.auth_prompts = authPrompts;
   console.log(JSON.stringify(out));
 })();

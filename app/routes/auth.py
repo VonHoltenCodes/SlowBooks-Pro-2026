@@ -105,6 +105,26 @@ _SETUP_SETTINGS_KEYS = (
 )
 
 
+def _company_name(db: Session) -> str:
+    """The company's name as the books carry it, else as the company list
+    (the picker) names this file — a company created before its name was
+    written into the file has only the latter. The shipped placeholder
+    ("My Company") is nobody's name: setup must not offer it as one."""
+    from app.models.settings import DEFAULT_SETTINGS
+    from app.services.settings_service import get_setting_raw
+
+    placeholder = DEFAULT_SETTINGS["company_name"]
+    name = (get_setting_raw(db, "company_name") or "").strip()
+    if not name:
+        try:
+            from app.services.company_service import current_manifest_name
+
+            name = current_manifest_name() or ""
+        except Exception:
+            name = ""
+    return "" if name == placeholder else name
+
+
 @router.get("/status")
 def auth_status(request: Request, db: Session = Depends(get_db)):
     """Tell the SPA whether first-run setup is needed and whether the
@@ -132,16 +152,16 @@ def auth_status(request: Request, db: Session = Depends(get_db)):
             .order_by(User.username)
             .all()
         ]
+    # Whose books these are. The sign-in screen names them (with several
+    # companies on one machine, "Unlock Slowbooks" did not say whose
+    # password it wanted — explore 2.17.3, macbase1 F2), and first-run setup
+    # prefills the name, so setup neither re-asks for the name typed in the
+    # New Company dialog (F3) nor silently renames a file that already holds
+    # a company's books (2.9.0 gate).
+    out["company_name"] = _company_name(db)
     if setup_needed:
-        # First-run setup can be reached on a file that already holds a
-        # company's books (a file copied in, or seeded through the API
-        # before anyone set a password). The form prefills the name the
-        # books already carry and warns, so setup does not silently rename
-        # another company's ledger (2.9.0 gate).
         from app.models.transactions import Transaction
-        from app.services.settings_service import get_setting_raw
 
-        out["company_name"] = get_setting_raw(db, "company_name") or ""
         out["has_data"] = db.query(Transaction.id).first() is not None
     if authenticated and request.session.get("username"):
         out["user"] = {

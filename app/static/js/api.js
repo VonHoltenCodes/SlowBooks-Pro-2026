@@ -32,8 +32,16 @@ const API = {
                 // Session expired, never authed, or fresh install -- let auth.js
                 // re-check status and pick setup vs. login. Hardcoding promptLogin
                 // here races with the DOMContentLoaded check on first install.
-                window.SlowbooksAuth.promptAuth();
-                throw new Error('Not authenticated');
+                // While its dialog is up, this request waits: the page reloads
+                // once the person is in, so nothing is lost by not answering,
+                // and nothing behind the dialog reports a failure that is not
+                // one ("Error loading page" behind a new company's setup —
+                // explore 2.17.3, M18).
+                const waiting = await window.SlowbooksAuth.promptAuth();
+                if (waiting === true) return new Promise(() => {});
+                const err = new Error('Not authenticated');
+                err.status = 401;
+                throw err;
             }
             if (res.status === 429) {
                 throw new Error('Rate limit exceeded -- slow down and try again');
