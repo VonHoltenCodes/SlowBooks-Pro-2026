@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Credit Memo</title>
+<style>
+    @page { size: letter; margin: 0.6in 0.75in; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #1a1a2e; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; margin-bottom: 20px; }
+    .company-info { font-size: 9pt; color: #4a4a6a; }
+    .company-name { font-size: 16pt; font-weight: 700; color: #003366; margin-bottom: 4px; }
+    .company-logo { display: block; max-height: 60px; max-width: 200px; margin-bottom: 6px; }
+    .doc-title { text-align: right; }
+    .doc-title h1 { font-size: 22pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
+    .doc-number { font-size: 12pt; color: #666; margin-top: 4px; }
+    .void { color: #b00020; font-weight: 700; }
+    .meta-table { width: 100%; margin-bottom: 16px; border-collapse: collapse; table-layout: fixed; }
+    .meta-table th { padding: 3px 8px; font-size: 8pt; font-weight: 700; color: #4a4a6a; text-align: left; border-bottom: 1px solid #d0d6e0; }
+    .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; white-space: nowrap; }
+    .addresses { display: flex; gap: 40px; margin-bottom: 20px; }
+    .address-block { flex: 1; }
+    .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
+    .address-text { font-size: 9pt; color: #333; }
+    table.line-items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+    table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
+    table.line-items th.r { text-align: right; }
+    table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
+    table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.line-items tr:nth-child(even) { background: #f7f9fb; }
+    .totals { float: right; width: 240px; }
+    .totals table { width: 100%; }
+    .totals td { padding: 3px 8px; font-size: 9pt; }
+    .totals td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .totals .label { font-weight: 700; color: #4a4a6a; }
+    .totals .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
+    .notes { clear: both; margin-top: 40px; padding-top: 12px; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
+    .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
+</style>
+</head>
+<body>
+    {% set customer = cm.customer %}
+    <div class="header">
+        <div>
+            {% if company_logo_data_uri %}<img class="company-logo" src="{{ company_logo_data_uri }}" alt="">{% endif %}
+            <div class="company-name">{{ company.company_name }}</div>
+            <div class="company-info">
+                {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
+                {% if company.company_address2 %}{{ company.company_address2 }}<br>{% endif %}
+                {% set company_city = city_line(company.company_city, company.company_state, company.company_zip) %}
+                {% if company_city %}{{ company_city }}<br>{% endif %}
+                {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
+                {% if company.company_email %}{{ company.company_email }}{% endif %}
+            </div>
+        </div>
+        <div class="doc-title">
+            <h1>CREDIT MEMO</h1>
+            <div class="doc-number">#{{ cm.memo_number }}{% if cm.status.value == 'void' %} · <span class="void">VOID</span>{% endif %}</div>
+        </div>
+    </div>
+
+    <table class="meta-table">
+        <tr>
+            <th scope="col">Date:</th>
+            {% if cm.original_invoice %}<th scope="col">For {{ terms('Invoice') }} #:</th>{% endif %}
+            {% if cm.is_write_off %}<th scope="col">Type:</th>{% endif %}
+        </tr>
+        <tr>
+            <td>{{ cm.date | fdate }}</td>
+            {% if cm.original_invoice %}<td>{{ cm.original_invoice.invoice_number }}</td>{% endif %}
+            {% if cm.is_write_off %}<td>Write-off</td>{% endif %}
+        </tr>
+    </table>
+
+    <div class="addresses">
+        <div class="address-block">
+            <div class="address-label">{% if terms.is_nonprofit %}Donor{% else %}Credit To{% endif %}</div>
+            <div class="address-text">
+                <strong>{{ customer.name if customer else '' }}</strong><br>
+                {% if customer %}
+                {% if customer.bill_address1 %}{{ customer.bill_address1 }}<br>{% endif %}
+                {% if customer.bill_address2 %}{{ customer.bill_address2 }}<br>{% endif %}
+                {% set bill_city = city_line(customer.bill_city, customer.bill_state, customer.bill_zip) %}
+                {% if bill_city %}{{ bill_city }}<br>{% endif %}
+                {% if customer.bill_address1 or bill_city %}{% set bill_country = country_line(customer.bill_country) %}{% if bill_country %}{{ bill_country }}{% endif %}{% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <table class="line-items">
+        <thead><tr><th scope="col">Description</th><th scope="col" class="r" style="width:60px;">Qty</th><th scope="col" class="r" style="width:80px;">Rate</th><th scope="col" class="r" style="width:80px;">Amount</th></tr></thead>
+        <tbody>
+        {% for line in cm.lines %}
+            <tr>
+                <td>{{ line.description or '' }}</td>
+                <td class="r">{{ line.quantity }}</td>
+                <td class="r">{{ line.rate | currency }}</td>
+                <td class="r">{{ line.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals">
+        <table>
+            <tr><td class="label">Subtotal</td><td class="r">{{ cm.subtotal | currency }}</td></tr>
+            {% if cm.tax_amount and cm.tax_amount != 0 %}
+            <tr><td class="label">Tax ({{ "%.2f" | format(cm.tax_rate * 100) }}%)</td><td class="r">{{ cm.tax_amount | currency }}</td></tr>
+            {% endif %}
+            <tr><td class="label grand">Total Credit</td><td class="r grand">{{ cm.total | currency }}</td></tr>
+            {% if cm.amount_applied and cm.amount_applied != 0 %}
+            <tr><td class="label">Applied</td><td class="r">{{ cm.amount_applied | currency }}</td></tr>
+            {% endif %}
+            {% if cm.status.value != 'void' %}
+            <tr><td class="label grand">Remaining Credit</td><td class="r grand">{{ cm.balance_remaining | currency }}</td></tr>
+            {% endif %}
+        </table>
+    </div>
+
+    {% if cm.notes %}
+    <div class="notes"><strong>Notes:</strong> {{ cm.notes }}</div>
+    {% endif %}
+
+    <div class="footer">Generated by Slowbooks Pro 2026</div>
+</body>
+</html>

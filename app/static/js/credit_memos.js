@@ -20,6 +20,7 @@ const CreditMemosPage = {
                     <td class="amount">${formatCurrency(m.total)}</td>
                     <td class="amount">${formatCurrency(m.balance_remaining)}</td>
                     <td class="actions">
+                        <button class="btn btn-sm btn-secondary" onclick="CreditMemosPage.view(${m.id})">View</button>
                         ${m.status === 'issued' ? `<button class="btn btn-sm btn-primary" onclick="CreditMemosPage.showApply(${m.id})">Apply</button>` : ''}
                         ${m.status !== 'void' ? `<button class="btn btn-sm btn-secondary" onclick="CreditMemosPage.void(${m.id})">Void</button>` : ''}
                     </td>
@@ -27,11 +28,55 @@ const CreditMemosPage = {
         });
     },
 
+    // A credit memo could be created and applied but never looked at, saved
+    // or printed, so it could not be sent to the customer (W-L19).
+    async view(id) {
+        const cm = await API.get(`/credit-memos/${id}`);
+        let forInvoice = '';
+        if (cm.original_invoice_id) {
+            try {
+                const inv = await API.get(`/invoices/${cm.original_invoice_id}`);
+                forInvoice = `<strong>For ${T('Invoice')}:</strong> #${escapeHtml(inv.invoice_number)}<br>`;
+            } catch (e) { /* shown without it */ }
+        }
+        const linesHtml = cm.lines.map(l =>
+            `<tr><td>${escapeHtml(l.description || '')}</td><td class="amount">${l.quantity}</td>
+             <td class="amount">${formatCurrency(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`
+        ).join('');
+        openModal(`Credit Memo ${cm.memo_number}`, `
+            <div style="margin-bottom:12px;">
+                <strong>${T('Customer')}:</strong> ${escapeHtml(cm.customer_name || '')}<br>
+                <strong>Date:</strong> ${formatDate(cm.date)}<br>
+                ${forInvoice}
+                <strong>Status:</strong> ${statusBadge(cm.status)}${cm.is_write_off ? ' (write-off)' : ''}
+            </div>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <tbody>${linesHtml}</tbody>
+            </table></div>
+            <div class="invoice-totals">
+                <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(cm.subtotal)}</span></div>
+                <div class="total-row"><span class="label">Tax</span><span class="value">${formatCurrency(cm.tax_amount)}</span></div>
+                <div class="total-row grand-total"><span class="label">Total Credit</span><span class="value">${formatCurrency(cm.total)}</span></div>
+                <div class="total-row"><span class="label">Applied</span><span class="value">${formatCurrency(cm.amount_applied)}</span></div>
+                <div class="total-row grand-total"><span class="label">Remaining</span><span class="value">${formatCurrency(cm.balance_remaining)}</span></div>
+            </div>
+            ${cm.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(cm.notes)}</p>` : ''}
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="window.open('/api/credit-memos/${cm.id}/pdf','_blank')">Save PDF</button>
+                <button class="btn btn-secondary" onclick="window.open('/api/credit-memos/${cm.id}/print-preview','_blank')">Print</button>
+                ${cm.status === 'issued' ? `<button class="btn btn-primary" onclick="CreditMemosPage.showApply(${cm.id})">Apply</button>` : ''}
+                ${cm.status !== 'void' ? `<button class="btn btn-danger" onclick="CreditMemosPage.void(${cm.id})">Void</button>` : ''}
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>`);
+    },
+
     async void(id) {
         if (!confirm('Void this credit memo? Any applied credit goes back onto the invoice and a reversing entry is posted.')) return;
         try {
             await API.post(`/credit-memos/${id}/void`, {});
             toast('Credit memo voided');
+            closeModal();
             App.navigate('#/credit-memos');
         } catch (err) { toast(err.message, 'error'); }
     },

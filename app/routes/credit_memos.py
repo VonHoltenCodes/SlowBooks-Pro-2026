@@ -6,6 +6,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
@@ -37,6 +38,7 @@ from app.services.accounting import (
 from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_credit_memo_number
+from app.services.settings_service import get_all_settings as get_settings
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -78,6 +80,42 @@ def get_credit_memo(cm_id: int, db: Session = Depends(get_db)):
     if cm.customer:
         resp.customer_name = cm.customer.name
     return resp
+
+
+def _memo_or_404(db: Session, cm_id: int) -> CreditMemo:
+    cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).first()
+    if not cm:
+        raise HTTPException(status_code=404, detail="Credit memo not found")
+    return cm
+
+
+@router.get("/{cm_id}/pdf")
+def credit_memo_pdf(cm_id: int, db: Session = Depends(get_db)):
+    """The credit memo as a PDF, to send to the customer."""
+    from app.services.pdf_service import generate_credit_memo_pdf
+
+    cm = _memo_or_404(db, cm_id)
+    pdf_bytes = generate_credit_memo_pdf(cm, get_settings(db))
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": f"inline; filename=CreditMemo_{cm.memo_number}.pdf"
+        },
+    )
+
+
+@router.get("/{cm_id}/print-preview")
+def credit_memo_print_preview(cm_id: int, db: Session = Depends(get_db)):
+    """The same page as the PDF, opened with the browser's print dialog."""
+    from app.services.pdf_service import _render
+
+    cm = _memo_or_404(db, cm_id)
+    html_str = _render("credit_memo_pdf.html", get_settings(db), cm=cm)
+    html_str = html_str.replace(
+        "</body>", "<script>window.onload=function(){window.print();}</script></body>"
+    )
+    return HTMLResponse(content=html_str)
 
 
 @router.post("", response_model=CreditMemoResponse, status_code=201)

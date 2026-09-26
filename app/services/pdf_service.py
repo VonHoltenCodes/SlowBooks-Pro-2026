@@ -217,6 +217,12 @@ def generate_invoice_pdf(invoice, company_settings: dict) -> bytes:
     )
 
 
+def generate_credit_memo_pdf(credit_memo, company_settings: dict) -> bytes:
+    """A credit memo, printed the way an invoice is (credit memos had no
+    PDF at all, so one could not be sent: 2.17.3 exploratory W-L19)."""
+    return render_pdf(_render("credit_memo_pdf.html", company_settings, cm=credit_memo))
+
+
 def generate_estimate_pdf(estimate, company_settings: dict) -> bytes:
     html_str = _render("estimate_pdf.html", company_settings, est=estimate)
     return render_pdf(html_str)
