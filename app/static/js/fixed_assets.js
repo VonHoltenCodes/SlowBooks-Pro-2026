@@ -38,6 +38,7 @@ const FixedAssetsPage = {
                     <td class="amount">${formatCurrency(a.accumulated_depreciation)}</td>
                     <td class="amount">${formatCurrency(a.book_value)}</td>
                     <td class="actions">
+                        ${a.status === 'registered' && !a.posted ? `<button class="btn btn-sm btn-secondary" title="This asset's purchase has no posting of its own" onclick="FixedAssetsPage.showPostPurchaseForm(${a.id})">Post purchase…</button>` : ''}
                         ${a.status === 'registered' ? `<button class="btn btn-sm btn-danger" onclick="FixedAssetsPage.showDisposeForm(${a.id})">Dispose</button>` : ''}
                     </td>
                 </tr>`,
@@ -100,10 +101,72 @@ const FixedAssetsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // How the purchase reaches the books. Registering used to post nothing,
+    // while depreciation credited accumulated depreciation, so net equipment
+    // went negative (exploratory 2.17.3, W-M19). The form asks now.
+    async _acquisitionFields(includeInBooks) {
+        const [banks, bills, expenses] = await Promise.all([
+            API.get('/accounts?bank=1&active_only=true'),
+            API.get('/bills'),
+            API.get('/expenses'),
+        ]);
+        const bankOpts = banks.map(a => `<option value="${a.id}">${escapeHtml(a.account_number || '')} - ${escapeHtml(a.name)}</option>`).join('');
+        const docs = bills.filter(b => b.status !== 'void' && b.status !== 'draft').slice(0, 100)
+            .map(b => `<option value="bill:${b.id}">Bill ${escapeHtml(b.bill_number)} · ${escapeHtml(b.vendor_name || '')} · ${formatDate(b.date)} · ${formatCurrency(b.total)}</option>`)
+            .concat(expenses.filter(x => x.status !== 'void').slice(0, 100)
+                .map(x => `<option value="expense:${x.id}">Expense · ${escapeHtml(x.payee || '')} · ${formatDate(x.date)} · ${formatCurrency(x.amount)}${x.reference ? ' · ' + escapeHtml(x.reference) : ''}</option>`))
+            .join('');
+        return `
+            <div class="form-group full-width"><label>How was it paid for? *</label>
+                <select name="acq_method" onchange="FixedAssetsPage._acqChanged(this)">
+                    <option value="paid_from">Paid from a bank or card account</option>
+                    <option value="document">On a bill or expense already entered</option>
+                    <option value="opening_balance">Owned before these books began</option>
+                    ${includeInBooks ? '<option value="in_books">Already in the books (an opening balance or journal entry put it in the asset account)</option>' : ''}
+                </select></div>
+            <div class="form-group acq acq-paid_from"><label>Paid from *</label>
+                <select name="acq_account_id">${bankOpts}</select></div>
+            <div class="form-group acq acq-paid_from"><label>Check / ref #</label>
+                <input name="acq_reference" maxlength="100"></div>
+            <div class="form-group full-width acq acq-document hidden"><label>Bill or expense *</label>
+                <select name="acq_document"><option value="">Choose…</option>${docs}</select>
+                <div style="font-size:10px; color:var(--gray-500);">Its cost moves from the expense account the bill or expense used into the asset account.</div></div>
+            <div class="form-group acq acq-opening_balance hidden"><label>The day your books began</label>
+                <input name="acq_as_of" type="date"></div>
+            <div class="form-group acq acq-opening_balance hidden"><label>Depreciation already taken by then</label>
+                <input name="acq_taken" type="number" step="0.01" min="0" value="0"></div>
+            <div class="form-group full-width acq acq-opening_balance hidden" style="font-size:10px; color:var(--gray-500);">
+                Posts the cost to the asset account against Opening Balance Equity (3900), less what was already depreciated.</div>
+            <div class="form-group full-width acq acq-in_books hidden" style="font-size:10px; color:var(--gray-500);">
+                Nothing is posted. The asset account must already hold the cost of every asset registered to it.</div>`;
+    },
+
+    _acqChanged(sel) {
+        const form = sel.form;
+        form.querySelectorAll('.acq').forEach(el => el.classList.toggle('hidden', !el.classList.contains(`acq-${sel.value}`)));
+    },
+
+    _acquisitionFromForm(form) {
+        const method = form.acq_method.value;
+        if (method === 'paid_from') {
+            return { method, account_id: parseInt(form.acq_account_id.value, 10) || null, reference: form.acq_reference.value || null };
+        }
+        if (method === 'document') {
+            const [kind, id] = (form.acq_document.value || ':').split(':');
+            if (!kind) return null;
+            return kind === 'bill' ? { method: 'bill', bill_id: parseInt(id, 10) } : { method: 'expense', expense_id: parseInt(id, 10) };
+        }
+        if (method === 'opening_balance') {
+            return { method, as_of: form.acq_as_of.value || null, accumulated_depreciation: form.acq_taken.value || '0' };
+        }
+        return { method };
+    },
+
     async showAssetForm() {
         const types = await API.get('/fixed-assets/types');
         if (!types.length) { toast('Create an asset type first', 'error'); return; }
         const typeOpts = types.map(t => `<option value="${t.id}">${escapeHtml(t.name)}</option>`).join('');
+        const acquisition = await FixedAssetsPage._acquisitionFields(true);
         openModal('Register Fixed Asset', `
             <form onsubmit="FixedAssetsPage.saveAsset(event)">
                 <div class="form-grid">
@@ -114,9 +177,11 @@ const FixedAssetsPage = {
                     <div class="form-group"><label>Purchase Date *</label>
                         <input name="purchase_date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Purchase Price *</label>
-                        <input name="purchase_price" type="number" step="0.01" required></div>
+                        <input name="purchase_price" type="number" step="0.01" min="0.01" required></div>
                     <div class="form-group"><label>Salvage Value</label>
-                        <input name="salvage_value" type="number" step="0.01" value="0"></div>
+                        <input name="salvage_value" type="number" step="0.01" min="0" value="0">
+                        <div style="font-size:10px; color:var(--gray-500);">No more than the purchase price.</div></div>
+                    ${acquisition}
                     <div class="form-group full-width"><label>Description</label>
                         <textarea name="description"></textarea></div>
                 </div>
@@ -130,16 +195,50 @@ const FixedAssetsPage = {
     async saveAsset(e) {
         e.preventDefault();
         const form = e.target;
+        const price = parseFloat(form.purchase_price.value);
+        const salvage = parseFloat(form.salvage_value.value) || 0;
+        if (salvage > price) { toast(`Salvage value can't be more than the purchase price (${formatCurrency(price)}).`, 'error'); return; }
+        const acquisition = FixedAssetsPage._acquisitionFromForm(form);
+        if (!acquisition) { toast('Choose the bill or expense the asset was bought on.', 'error'); return; }
         try {
             await API.post('/fixed-assets', {
                 name: form.name.value,
                 asset_type_id: parseInt(form.asset_type_id.value),
                 purchase_date: form.purchase_date.value,
-                purchase_price: parseFloat(form.purchase_price.value),
-                salvage_value: parseFloat(form.salvage_value.value) || 0,
+                purchase_price: form.purchase_price.value,
+                salvage_value: form.salvage_value.value || '0',
                 description: form.description.value || null,
+                acquisition,
             });
-            toast('Asset registered');
+            toast(acquisition.method === 'in_books' ? 'Asset registered' : 'Asset registered and its purchase posted');
+            closeModal();
+            App.navigate('#/fixed-assets');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async showPostPurchaseForm(assetId) {
+        const acquisition = await FixedAssetsPage._acquisitionFields(false);
+        openModal('Post the purchase', `
+            <form onsubmit="FixedAssetsPage.postPurchase(event, ${assetId})">
+                <p style="font-size:11px; margin-bottom:8px;">
+                    This asset's purchase has no posting of its own. Post it only if it isn't in the books yet —
+                    if an opening balance or a journal entry already put it in the asset account, leave it.
+                </p>
+                <div class="form-grid">${acquisition}</div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Post Purchase</button>
+                </div>
+            </form>`);
+    },
+
+    async postPurchase(e, assetId) {
+        e.preventDefault();
+        const acquisition = FixedAssetsPage._acquisitionFromForm(e.target);
+        if (!acquisition) { toast('Choose the bill or expense the asset was bought on.', 'error'); return; }
+        try {
+            await API.post(`/fixed-assets/${assetId}/post-purchase`, acquisition);
+            toast('Purchase posted');
             closeModal();
             App.navigate('#/fixed-assets');
         } catch (err) { toast(err.message, 'error'); }
