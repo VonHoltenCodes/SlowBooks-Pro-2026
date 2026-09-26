@@ -83,7 +83,7 @@ sudo apt install -y docker.io docker-compose-v2 git
 sudo usermod -aG docker books   # log out and in again afterwards
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git ~/slowbooks
 cd ~/slowbooks
-git checkout v2.17.0             # a release tag, never main
+git checkout v2.18.0             # a release tag, never main
 ```
 
 Pin a release tag. `main` moves between gates; a tag is a build that three
@@ -236,7 +236,7 @@ are in [operations.md](operations.md). Remember the encryption secret.
 ```bash
 cd ~/slowbooks
 git fetch --tags
-git checkout v2.18.0          # the new tag
+git checkout v2.19.0          # the new tag
 docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
 ```
 

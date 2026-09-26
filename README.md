@@ -52,6 +52,17 @@ Details, known gaps and how to report a barrier:
 
 ## What's New
 
+**v2.18 — Around the ledger.** Two of the QA agents each ran a brand-new
+company for a day through the screens and checked every figure against the
+ledger; this release fixes all sixty-eight things they found around it.
+Pay Sales Tax works, supplier tax is part of a purchase's cost instead of
+reducing the tax owed, Schedule C keeps expenses in expenses, customer and
+vendor balances show what is owed, a customer's leftover payment can be
+applied later, and every aging report ties to the balance sheet. Time
+tracking works end to end, tax forms open in the Mac app, foreign-currency
+invoices can be paid from the screen, and backups are kept and restored per
+company.
+
 **v2.17 — Your ledger, in a spreadsheet.** Trial Balance and General Ledger
 save as a CSV and a printable PDF, and Profit & Loss and Balance Sheet gain
 the CSV — amounts as plain numbers, ready to sum. The general ledger carries
@@ -72,14 +83,6 @@ Wave's full export importing no journals after a passing dry run (#169);
 2.16.2 stops charging tax to non-taxable customers, widens every money
 column for large-denomination currencies (#173), and puts the estimate and
 job-cost forms right (#174, #176); 2.16.3 lets a fresh Docker image start again.
-
-**v2.15 — Your chart, from your file.** Import a chart of accounts from a
-CSV in the export's own columns, any spreadsheet with Number / Name / Type,
-or hledger's account list — tested against files hledger itself wrote. A
-dry run shows every row's fate first. Accounts you already have take the
-file's names, including the control accounts the software posts to by
-number, renamed in place and never duplicated, so every document still finds
-its account. Asked for by @tresero (#139, #161).
 
 Full history, with the reasoning behind each change, in
 **[CHANGELOG.md](CHANGELOG.md)**; the same entries with the test count
@@ -104,7 +107,7 @@ against any of eight providers (xAI Grok, Groq, Cloudflare Workers AI,
 Anthropic Claude, OpenAI, Google Gemini, a Cloudflare Worker you host
 yourself, or any OpenAI-compatible endpoint you name) — keys encrypted at rest with versioned, rotatable ciphertext.
 And the whole app is agent-operable: every install serves a
-self-documenting local REST API (513 operations in v2.17) — point Claude
+self-documenting local REST API (535 operations in v2.18) — point Claude
 Code or any agentic CLI at it; the
 [AI setup guide](https://www.slowbookspro.com/ai/) has the paste-prompt.
 
