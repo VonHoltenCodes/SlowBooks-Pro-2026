@@ -125,6 +125,7 @@ def customer_credits(customer_id: int, db: Session = Depends(get_db)):
     return {
         "customer_id": customer.id,
         "customer_name": customer.name,
+        "home_currency": home,
         "total": float(total),
         "credits": credits,
     }

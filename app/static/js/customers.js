@@ -60,14 +60,15 @@ const CustomersPage = {
     // payments. Avoid the "click here to see notes, click here to see
     // invoices" gated-screen pattern.
     async showDetails(id) {
-        let customer, invoices, payments, permits, jobs;
+        let customer, invoices, payments, permits, jobs, credits;
         try {
-            [customer, invoices, payments, permits, jobs] = await Promise.all([
+            [customer, invoices, payments, permits, jobs, credits] = await Promise.all([
                 API.get(`/customers/${id}`),
                 API.get(`/invoices?customer_id=${id}`).catch(() => []),
                 API.get(`/payments?customer_id=${id}`).catch(() => []),
                 API.get(`/reseller-permits?entity_type=customer&entity_id=${id}`).catch(() => []),
                 API.get(`/jobs?customer_id=${id}&include_inactive=true`).catch(() => []),
+                API.get(`/customers/${id}/credits`).catch(() => null),
             ]);
         } catch (err) {
             toast(err.message, 'error');
@@ -103,12 +104,25 @@ const CustomersPage = {
                 <td>${escapeHtml(i.status || '')}</td>
             </tr>`).join('');
         const payRows = payments.slice(0, 10).map(p =>
-            `<tr>
+            `<tr style="cursor:pointer" onclick="PaymentsPage.view(${p.id})">
                 <td>${escapeHtml(p.date || '')}</td>
-                <td>${escapeHtml(p.payment_method || '')}</td>
-                <td>${escapeHtml(p.reference || '')}</td>
+                <td>${escapeHtml(p.method || '')}${p.is_voided ? ' <span style="color:#a4242b">(void)</span>' : ''}</td>
+                <td>${escapeHtml(p.reference || p.check_number || '')}</td>
                 <td class="amount">${formatCurrency(p.amount)}</td>
             </tr>`).join('');
+
+        // -- Credits the customer holds (unapplied payments, credit memos),
+        // each one applicable to open invoices from here --
+        const creditList = (credits && credits.credits) || [];
+        const creditsHtml = creditList.length === 0 ? '' : `
+            <div style="margin-bottom:14px">
+                <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Credits not applied yet (${formatCurrency(credits.total)})</h4>
+                <ul style="margin:0;padding-left:18px;font-size:13px">${creditList.map(c => `<li style="margin:2px 0">
+                    ${escapeHtml(PaymentsPage._creditLabel(c))}: <strong>${formatCurrency(c.available)}</strong>
+                    <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="PaymentsPage.showApplyCredit('${c.kind}', ${c.id}, ${id})">Apply</button>
+                </li>`).join('')}</ul>
+            </div>`;
+        const balance = parseFloat(customer.balance) || 0;
 
         const html = `
             <!-- header: name + balance + quick actions -->
@@ -124,9 +138,9 @@ const CustomersPage = {
                     </div>
                 </div>
                 <div style="text-align:right">
-                    <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em">Balance</div>
-                    <div style="font-size:22px;font-weight:700;color:${parseFloat(customer.balance) > 0 ? '#a4242b' : '#1a1a2e'}">
-                        ${formatCurrency(customer.balance)}
+                    <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em">${balance < 0 ? 'Credit' : 'Balance'}</div>
+                    <div style="font-size:22px;font-weight:700;color:${balance > 0 ? '#a4242b' : (balance < 0 ? '#1f7a36' : '#1a1a2e')}">
+                        ${formatCurrency(Math.abs(balance))}
                     </div>
                     <div style="margin-top:8px">
                         <button class="btn btn-sm btn-primary" onclick="closeModal();InvoicesPage.showForm(null,${id})">${T('New Invoice')}</button>
@@ -170,6 +184,8 @@ const CustomersPage = {
                     placeholder="Internal notes about this customer — visible to everyone with admin access."
                     onblur="CustomersPage._saveNotes(${id}, this.value)">${escapeHtml(customer.notes || '')}</textarea>
             </div>
+
+            ${creditsHtml}
 
             <!-- reseller permits -->
             <div style="margin-bottom:14px">
