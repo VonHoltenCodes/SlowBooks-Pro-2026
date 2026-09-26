@@ -907,7 +907,9 @@ ReportsPage.fixedAssetReconciliation = async function () {
 ReportsPage.financialStatementsPdf = async function () {
     await ReportsPage.openPeriodModal("Financial Statements Pack", "this_year_to_date", async (_period, range) => {
         window.open(`/api/reports/financial-statements/pdf?start_date=${range.start}&end_date=${range.end}`, '_blank');
-        return `<div style="font-size:12px;">The statements pack opened in a new tab —
+        // Said for both: a browser opens a tab, the desktop app saves the PDF,
+        // opens it in a window of its own and says where it saved it (F24).
+        return `<div style="font-size:12px;">The statements pack has opened as a PDF —
             ${T('P&L')} and Trial Balance for ${escapeHtml(range.start)} — ${escapeHtml(range.end)},
             ${T('Balance Sheet')} as of ${escapeHtml(range.end)}. Paper size follows
             Settings → Report PDF Paper Size.</div>`;
