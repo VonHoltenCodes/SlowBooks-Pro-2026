@@ -93,7 +93,9 @@ const BillsPage = {
     },
 
     // The payments that paid this bill, each with its own Void — a paid
-    // bill's payment could not be voided anywhere on screen (W-L19).
+    // bill's payment could not be voided anywhere on screen (W-L19) — and,
+    // for a check, Print Check: the only Print Check button sat on payments
+    // RECEIVED, and went when that was put right (W-M9).
     _paymentsHtml(bill, payments) {
         if (!payments.length) return '';
         const rows = payments.map(p => {
@@ -104,7 +106,7 @@ const BillsPage = {
                 <td>${formatDate(p.date)}</td>
                 <td>${escapeHtml(how)}</td>
                 <td class="amount">${formatCurrency(applied)}</td>
-                <td class="actions">${p.is_voided ? statusBadge('void') : `<button class="btn btn-sm btn-danger" onclick="BillsPage.voidBillPayment(${p.id}, ${bill.id})">Void</button>`}</td>
+                <td class="actions">${p.is_voided ? statusBadge('void') : `${BillsPage._printCheckButton(p)}<button class="btn btn-sm btn-danger" onclick="BillsPage.voidBillPayment(${p.id}, ${bill.id})">Void</button>`}</td>
             </tr>`;
         }).join('');
         return `<div style="margin-top:16px;">
@@ -114,6 +116,14 @@ const BillsPage = {
                     <tbody>${rows}</tbody>
                 </table></div>
             </div>`;
+    },
+
+    // A payment by check (or one that carries a check number) prints its
+    // check; ACH, cash and card payments have none to print.
+    _printCheckButton(p) {
+        const byCheck = !p.method || p.method === 'check' || !!p.check_number;
+        if (p.is_voided || !byCheck) return '';
+        return `<button class="btn btn-sm btn-secondary" onclick="window.open('/api/checks/print?bill_payment_id=${p.id}','_blank')">Print Check</button> `;
     },
 
     _items: [],

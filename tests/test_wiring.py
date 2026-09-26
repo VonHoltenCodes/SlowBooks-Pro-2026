@@ -327,11 +327,6 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     ("GET", "/api/document-audits"),
     ("GET", "/api/document-audits/{audit_id}"),
     ("GET", "/api/document-audits/verify/{content_hash}"),
-    # Check printing is for money going out (bill payments). Its only SPA
-    # button sat on RECEIVED customer payments and printed a check payable
-    # to the customer (explore 2.17.3, W-M9), so it was removed; Pay Bills
-    # has no per-payment view to host the button yet.
-    ("GET", "/api/checks/print"),
 }
 
 
