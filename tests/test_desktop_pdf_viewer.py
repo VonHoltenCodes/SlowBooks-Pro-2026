@@ -33,6 +33,9 @@ def home(monkeypatch, tmp_path):
     home = tmp_path / "home"
     (home / "Documents").mkdir(parents=True)
     monkeypatch.setattr(dl.Path, "home", lambda: home)
+    # On Windows the Documents folder is asked of the shell, not built from
+    # home, so the saved-documents root must be pinned here as well.
+    monkeypatch.setattr(dl, "_documents_dir", lambda: home / "Documents")
     monkeypatch.setattr(dl, "get_data_dir", lambda: tmp_path / "data")
     monkeypatch.setattr(dl.sys, "platform", "linux")
     return home
@@ -231,7 +234,7 @@ def test_the_toolbar_works(tmp_path):
         title="t", name="n", path="p", where="w", src="file:///x.pdf", open_label="o"
     )
     script = tmp_path / "viewer.js"
-    script.write_text(re.search(r"<script>(.*?)</script>", page, re.S).group(1))
+    script.write_text(re.search(r"<script>(.*?)</script>", page, re.S | re.I).group(1))
     root = Path(__file__).resolve().parents[1]
     out = subprocess.run(
         ["node", str(root / "tests" / "js" / "pdf_viewer_page_probe.js"), str(script)],

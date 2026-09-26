@@ -1,6 +1,9 @@
 // The views the bank register's links open, rendered against canned API
 // answers: a deposit (deposits.js), a bill payment (bills.js), and the
 // register's own lines (banking.js). Prints JSON {"<case>": {...}}.
+// Strip tags until nothing changes: one pass can leave a tag behind
+// ('<scr<script>ipt>'), which is how CodeQL reads a single replace.
+const stripTags = (s) => { let prev; s = String(s); do { prev = s; s = s.replace(/<[^>]*>/g, ''); } while (s !== prev); return s; };
 const fs = require('fs'), vm = require('vm');
 
 const answers = {
@@ -86,7 +89,7 @@ const flat = (html) => html.replace(/\s+/g, ' ');
 const buttons = (html) => (html.match(/<button[^>]*>[^<]*<\/button>/g) || []).map(flat);
 const cells = (html) => (html.match(/<tbody>[\s\S]*?<\/tbody>/g) || []).map((body) =>
   (body.match(/<tr>[\s\S]*?<\/tr>/g) || []).map((tr) =>
-    (tr.match(/<td[^>]*>([\s\S]*?)<\/td>/g) || []).map((td) => flat(td.replace(/<[^>]*>/g, '')).trim())));
+    (tr.match(/<td[^>]*>([\s\S]*?)<\/td>/g) || []).map((td) => flat(stripTags(td)).trim())));
 
 (async () => {
   const out = {};

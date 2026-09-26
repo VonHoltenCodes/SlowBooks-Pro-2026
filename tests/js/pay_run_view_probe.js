@@ -1,5 +1,8 @@
 // Render PayrollPage.view() for a pay run with an Oregon employee (0.1%
 // statewide transit tax) and print each row's money columns by header.
+// Strip tags until nothing changes: one pass can leave a tag behind
+// ('<scr<script>ipt>'), which is how CodeQL reads a single replace.
+const stripTags = (s) => { let prev; s = String(s); do { prev = s; s = s.replace(/<[^>]*>/g, ''); } while (s !== prev); return s; };
 const fs = require('fs'), vm = require('vm');
 let modal = '';
 const run = {
@@ -29,7 +32,7 @@ vm.runInContext(fs.readFileSync('app/static/js/payroll.js', 'utf8') + '\nthis.P 
   const heads = [...modal.matchAll(/<th scope="col"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1].trim());
   const body = modal.slice(modal.indexOf('<tbody>'), modal.indexOf('</tbody>'));
   for (const tr of body.split('<tr>').slice(1)) {
-    const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => m[1].replace(/<[^>]+>/g, '').trim());
+    const cells = [...tr.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map((m) => stripTags(m[1]).trim());
     console.log(JSON.stringify(Object.fromEntries(heads.map((h, i) => [h, cells[i]]))));
   }
 })();

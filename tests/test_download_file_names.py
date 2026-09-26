@@ -19,6 +19,7 @@ from urllib.parse import unquote
 import pytest
 
 from app.models.contacts import Customer, Vendor
+from tests.conftest import WEASYPRINT_AVAILABLE
 
 
 def _exact(header: str) -> str:
@@ -189,6 +190,13 @@ def test_a_giving_statement_for_any_donor_name(client, db_session, seed_accounts
     )
 
 
+@pytest.mark.skipif(
+    not WEASYPRINT_AVAILABLE,
+    reason=(
+        "emails a statement, which renders a PDF; the email route turns the "
+        "missing native stack into a failed send the exception hook cannot see"
+    ),
+)
 def test_an_emailed_statement_keeps_the_customers_name(
     client, db_session, seed_accounts, monkeypatch
 ):

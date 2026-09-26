@@ -2,6 +2,9 @@
 // Reseller Permit form, against canned answers where customer 5 and vendor
 // 10 are inactive. Prints JSON: each case's <option>s as [value, text,
 // selected], and every API path the pages asked for.
+// Strip tags until nothing changes: one pass can leave a tag behind
+// ('<scr<script>ipt>'), which is how CodeQL reads a single replace.
+const stripTags = (s) => { let prev; s = String(s); do { prev = s; s = s.replace(/<[^>]*>/g, ''); } while (s !== prev); return s; };
 const fs = require('fs'), vm = require('vm');
 
 const answers = {
@@ -58,7 +61,7 @@ const options = (html, selectPattern, end = '</select>') => {
   if (!m) return null;
   return (m[0].match(/<option[^>]*>[^<]*<\/option>/g) || []).map((o) => [
     (/value="([^"]*)"/.exec(o) || [])[1],
-    o.replace(/<[^>]*>/g, ''),
+    stripTags(o),
     /\sselected/.test(o),
   ]).filter((o) => o[0] !== '');
 };

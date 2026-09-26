@@ -6,6 +6,9 @@
 //   node tests/js/direct_fetch_errors_probe.js '{"status": 422, "body": {...}}'
 //
 // A string body stands for a response that is not JSON (a proxy's page).
+// Strip tags until nothing changes: one pass can leave a tag behind
+// ('<scr<script>ipt>'), which is how CodeQL reads a single replace.
+const stripTags = (s) => { let prev; s = String(s); do { prev = s; s = s.replace(/<[^>]*>/g, ''); } while (s !== prev); return s; };
 const fs = require('fs'), vm = require('vm');
 
 const refusal = JSON.parse(process.argv[2]);
@@ -72,7 +75,7 @@ function page(files, extras) {
 }
 
 // "<div ...>File is required.</div>" -> "File is required."
-const text = (html) => String(html).replace(/<[^>]*>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+const text = (html) => stripTags(html).replace(/&lt;/g, '<').replace(/&gt;/g, '>')
   .replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
 
 async function thrown(fn) {
