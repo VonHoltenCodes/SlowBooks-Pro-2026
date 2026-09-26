@@ -34,7 +34,7 @@ from app.services.accounting import (
     compute_line_totals,
     _q,
 )
-from app.routes.invoices.helpers import refuse_zero_total
+from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_credit_memo_number
 
@@ -88,7 +88,32 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
 
-    subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    # A memo that credits an invoice takes that invoice's tax rate unless
+    # it states its own: the tax goes back the way it was charged. It
+    # defaulted to 0%, so returned taxable goods were credited without
+    # their tax unless the user remembered (2.17.3 exploratory W-L14, F14).
+    tax_rate = data.tax_rate
+    if data.original_invoice_id is not None:
+        original = db.get(Invoice, data.original_invoice_id)
+        if original is None:
+            raise HTTPException(status_code=404, detail="Invoice not found")
+        if original.customer_id != data.customer_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invoice {original.invoice_number} belongs to a different "
+                    "customer than this credit memo."
+                ),
+            )
+        if tax_rate is None:
+            tax_rate = original.tax_rate
+    if tax_rate is None:
+        tax_rate = 0
+
+    # Tax follows the lines the way an invoice's does: an item's own flag,
+    # and nothing at all for a non-taxable customer.
+    resolve_line_taxable(db, data.lines, customer)
+    subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
     refuse_zero_total(total, "credit memo")
 
     cm = None
@@ -103,7 +128,7 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
             date=data.date,
             original_invoice_id=data.original_invoice_id,
             subtotal=subtotal,
-            tax_rate=data.tax_rate,
+            tax_rate=tax_rate,
             tax_amount=tax_amount,
             total=total,
             balance_remaining=total,

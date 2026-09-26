@@ -38,17 +38,24 @@ const CreditMemosPage = {
 
     _items: [],
     _customers: [],
+    _invoices: [],
     lineCount: 0,
 
     async showForm() {
-        const [customers, items] = await Promise.all([
+        const [customers, items, settings] = await Promise.all([
             API.get('/customers?active_only=true'),
             API.get('/items?active_only=true'),
+            API.get('/settings'),
         ]);
         CreditMemosPage._items = items;
         CreditMemosPage._customers = customers;
+        CreditMemosPage._invoices = [];
         CreditMemosPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
+        // The company's rate, as on a new invoice; picking the invoice being
+        // credited switches to that invoice's rate. It defaulted to 0%, so
+        // returned taxable goods were credited without their tax (W-L14, F14).
+        const defaultPct = parseFloat(settings.default_tax_rate || '0') || 0;
 
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
 
@@ -56,16 +63,18 @@ const CreditMemosPage = {
             <form id="cm-form" onsubmit="CreditMemosPage.save(event)">
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" id="cm-customer-select" required onchange="CreditMemosPage.recalc()"><option value="">Select...</option>${custOpts}</select></div>
+                        <select name="customer_id" id="cm-customer-select" required onchange="CreditMemosPage.customerSelected(this.value)"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
+                    <div class="form-group"><label>For ${T('Invoice')}</label>
+                        <select name="original_invoice_id" id="cm-invoice-select" onchange="CreditMemosPage.invoiceSelected(this.value)"><option value="">None</option></select></div>
                     <div class="form-group"><label>Tax Rate (%)</label>
-                        <input name="tax_rate" type="number" step="0.01" value="0" oninput="CreditMemosPage.recalc()"></div>
+                        <input name="tax_rate" type="number" step="0.01" value="${defaultPct}" oninput="CreditMemosPage.recalc()"></div>
                     ${classGroup}
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Credit Lines</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" title="Sales tax applies to this line">Tax</th><th scope="col" class="col-amount">Amount</th><th scope="col" class="col-actions"></th></tr></thead>
                     <tbody id="cm-lines">${CreditMemosPage.lineRowHtml(0)}</tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="CreditMemosPage.addLine()">+ Add Line</button>
@@ -92,6 +101,7 @@ const CreditMemosPage = {
                 <td><input class="line-desc"></td>
                 <td><input class="line-qty" type="number" step="0.01" value="1" oninput="CreditMemosPage.recalc()"></td>
                 <td><input class="line-rate" type="number" step="0.01" value="0" oninput="CreditMemosPage.recalc()"></td>
+                <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" checked onchange="CreditMemosPage.recalc()"></td>
                 <td class="col-amount line-amount">$0.00</td>
                 <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="CreditMemosPage.removeLine(${idx})">X</button></td>
             </tr>`;
@@ -114,7 +124,32 @@ const CreditMemosPage = {
         if (row && SalesLines.fillFromItem(row, CreditMemosPage._items)) CreditMemosPage.recalc();
     },
 
+    // The customer's invoices, for "For Invoice" (optional).
+    async customerSelected(customerId) {
+        CreditMemosPage._invoices = [];
+        const sel = $('#cm-invoice-select');
+        if (sel) sel.innerHTML = '<option value="">None</option>';
+        CreditMemosPage.recalc();
+        if (!customerId) return;
+        try {
+            const invoices = await API.get(`/invoices?customer_id=${encodeURIComponent(customerId)}`);
+            CreditMemosPage._invoices = invoices.filter(i => i.status !== 'void');
+        } catch (e) { return; }
+        if (!sel || $('#cm-customer-select')?.value !== String(customerId)) return;
+        sel.innerHTML = '<option value="">None</option>' + CreditMemosPage._invoices.map(i =>
+            `<option value="${i.id}">#${escapeHtml(i.invoice_number)} · ${formatDate(i.date)} · ${formatCurrency(i.total)}</option>`).join('');
+    },
+
+    // Crediting a particular invoice puts its tax back at the rate it was charged.
+    invoiceSelected(invoiceId) {
+        const inv = CreditMemosPage._invoices.find(i => String(i.id) === String(invoiceId));
+        const rate = $('#cm-form [name="tax_rate"]');
+        if (inv && rate) rate.value = SalesLines.cents(parseFloat(inv.tax_rate || 0) * 10000) / 100;
+        CreditMemosPage.recalc();
+    },
+
     recalc() {
+        TaxExempt.enforce(CreditMemosPage._customers, $('#cm-customer-select')?.value, $('#cm-lines'));
         const t = SalesLines.totals($('#cm-lines'), $('#cm-form [name="tax_rate"]')?.value);
         SalesLines.show(t, ['cm-subtotal', 'cm-tax', 'cm-total']);
         return t;
@@ -130,12 +165,14 @@ const CreditMemosPage = {
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
+                is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 line_order: i,
             });
         });
         try {
             await API.post('/credit-memos', {
                 customer_id: parseInt(form.customer_id.value),
+                original_invoice_id: form.original_invoice_id.value ? parseInt(form.original_invoice_id.value) : null,
                 date: form.date.value,
                 tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
                 notes: form.notes.value || null,

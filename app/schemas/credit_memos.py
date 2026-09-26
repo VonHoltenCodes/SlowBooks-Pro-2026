@@ -11,6 +11,10 @@ class CreditMemoLineCreate(StrictModel):
     description: Optional[str] = None
     quantity: float = 1
     rate: float = 0
+    # Whether the memo's tax rate applies to this line. None = the item's
+    # flag (a non-taxable customer: never), as on an invoice line. Used for
+    # the memo's tax; the line itself does not store it.
+    is_taxable: Optional[bool] = None
     line_order: int = 0
 
     @model_validator(mode="after")
@@ -39,7 +43,9 @@ class CreditMemoCreate(StrictModel):
     customer_id: int
     date: dt_date
     original_invoice_id: Optional[int] = None
-    tax_rate: TaxRateFloat = 0
+    # Left out: the original invoice's rate when one is named, else 0 (the
+    # Credit Memo form fills in the company's default rate itself).
+    tax_rate: Optional[TaxRateFloat] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
