@@ -246,14 +246,15 @@ def generate_estimate_pdf(estimate, company_settings: dict) -> bytes:
 
 
 def generate_statement_pdf(
-    customer, invoices, payments, company_settings: dict, as_of_date=None
+    customer, activity: dict, company_settings: dict, as_of_date=None
 ) -> bytes:
+    """`activity` is routes/reports/receivables.statement_activity(): the
+    dated lines with a running balance, and the totals."""
     html_str = _render(
         "statement_pdf.html",
         company_settings,
         customer=customer,
-        invoices=invoices,
-        payments=payments,
+        activity=activity,
         as_of_date=as_of_date,
     )
     return render_pdf(html_str)

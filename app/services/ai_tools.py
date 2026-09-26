@@ -214,6 +214,9 @@ def list_vendors(
         q = q.filter(Vendor.name.ilike(f"%{name_filter}%"))
 
     vendors = q.order_by(Vendor.name).limit(limit).all()
+    from app.services.contact_balances import vendor_balances
+
+    balances = vendor_balances(db, [v.id for v in vendors])
 
     return {
         "results": [
@@ -223,7 +226,7 @@ def list_vendors(
                 "company": v.company,
                 "email": v.email,
                 "phone": v.phone,
-                "balance": _to_float(v.balance),
+                "balance": _to_float(balances.get(v.id, 0)),
             }
             for v in vendors
         ],
@@ -243,6 +246,9 @@ def list_customers(
         q = q.filter(Customer.name.ilike(f"%{name_filter}%"))
 
     customers = q.order_by(Customer.name).limit(limit).all()
+    from app.services.contact_balances import customer_balances
+
+    balances = customer_balances(db, [c.id for c in customers])
 
     return {
         "results": [
@@ -252,7 +258,7 @@ def list_customers(
                 "company": c.company,
                 "email": c.email,
                 "phone": c.phone,
-                "balance": _to_float(c.balance),
+                "balance": _to_float(balances.get(c.id, 0)),
             }
             for c in customers
         ],

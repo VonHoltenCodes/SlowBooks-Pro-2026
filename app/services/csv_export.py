@@ -37,7 +37,12 @@ class _SafeWriter:
 
 
 def export_customers(db: Session) -> str:
+    from app.services.contact_balances import customer_balances
+
     customers = db.query(Customer).filter(Customer.is_active).all()
+    # Customer.balance is never written; the balance is summed from the
+    # open documents (services/contact_balances).
+    balances = customer_balances(db, [c.id for c in customers])
     output = io.StringIO()
     writer = _SafeWriter(output)
     writer.writerow(
@@ -68,14 +73,17 @@ def export_customers(db: Session) -> str:
                 c.bill_state or "",
                 c.bill_zip or "",
                 c.terms or "",
-                float(c.balance or 0),
+                float(balances.get(c.id, 0)),
             ]
         )
     return output.getvalue()
 
 
 def export_vendors(db: Session) -> str:
+    from app.services.contact_balances import vendor_balances
+
     vendors = db.query(Vendor).filter(Vendor.is_active).all()
+    balances = vendor_balances(db, [v.id for v in vendors])
     output = io.StringIO()
     writer = _SafeWriter(output)
     writer.writerow(
@@ -106,7 +114,7 @@ def export_vendors(db: Session) -> str:
                 v.state or "",
                 v.zip or "",
                 v.terms or "",
-                float(v.balance or 0),
+                float(balances.get(v.id, 0)),
             ]
         )
     return output.getvalue()
