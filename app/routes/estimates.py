@@ -26,6 +26,7 @@ from app.schemas.invoices import InvoiceResponse
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.numbering import next_estimate_number, next_invoice_number
 from app.services.settings_service import get_all_settings as get_settings, set_setting
+from app.services.request_utils import content_disposition
 from app.services.accounting import (
     _q,
     compute_line_totals,
@@ -238,7 +239,9 @@ def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=Estimate_{est.estimate_number}.pdf"
+            "Content-Disposition": content_disposition(
+                f"Estimate_{est.estimate_number}.pdf"
+            )
         },
     )
 

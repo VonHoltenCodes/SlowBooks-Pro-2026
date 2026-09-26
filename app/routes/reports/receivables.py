@@ -19,6 +19,7 @@ from app.services.pdf_service import (
     generate_collection_letter_pdf,
 )
 from app.services.settings_service import get_all_settings as get_settings
+from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
 
 logger = logging.getLogger(__name__)
@@ -371,7 +372,7 @@ def customer_statement_pdf(
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=Statement_{customer.name}.pdf"
+            "Content-Disposition": content_disposition(f"Statement_{customer.name}.pdf")
         },
     )
 

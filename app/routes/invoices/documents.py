@@ -9,6 +9,7 @@ from app.database import get_db
 from app.models.invoices import Invoice
 from app.services.pdf_service import generate_invoice_pdf
 from app.services.settings_service import get_all_settings as get_settings
+from app.services.request_utils import content_disposition
 from app.services.terminology import terms_for
 from app.services.donor_documents import invoice_doc_kind, invoice_pdf_context
 
@@ -38,7 +39,9 @@ def invoice_pdf(invoice_id: int, db: Session = Depends(get_db)):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename={doc_kind}_{inv.invoice_number}.pdf"
+            "Content-Disposition": content_disposition(
+                f"{doc_kind}_{inv.invoice_number}.pdf"
+            )
         },
     )
 

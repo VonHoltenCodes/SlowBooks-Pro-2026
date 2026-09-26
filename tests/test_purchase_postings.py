@@ -451,7 +451,10 @@ def test_a_bill_has_a_pdf_and_a_print_page(client, a_bill):
     assert r.headers["content-type"] == "application/pdf"
     assert r.content.startswith(PDF_MAGIC)
     disposition = r.headers["content-disposition"]
-    assert disposition.startswith("inline;") and "Bill_INV_77_3.pdf" in disposition
+    # the vendor's number as typed; "/" can't be in a file name
+    assert disposition.startswith("inline;")
+    assert 'filename="Bill_INV-77 #3.pdf"' in disposition
+    assert "filename*=UTF-8''Bill_INV-77%20%233.pdf" in disposition
 
     page = client.get(f"/api/bills/{a_bill['id']}/print-preview")
     assert page.status_code == 200

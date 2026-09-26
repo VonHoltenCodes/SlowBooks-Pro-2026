@@ -88,7 +88,11 @@ def send_email(
 
     if attachment_bytes and attachment_name:
         part = MIMEApplication(attachment_bytes, Name=attachment_name)
-        part["Content-Disposition"] = f'attachment; filename="{attachment_name}"'
+        # add_header encodes a name with accents or other letters the RFC
+        # 2231 way (filename*=utf-8''…). Setting the header as one string
+        # sent "Statement_Łódź Signs.pdf" as an encoded-word covering the
+        # whole value, which mail programs don't read as an attachment name.
+        part.add_header("Content-Disposition", "attachment", filename=attachment_name)
         msg.attach(part)
 
     server = None

@@ -39,6 +39,7 @@ from app.routes.invoices.helpers import refuse_zero_total, resolve_line_taxable
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_credit_memo_number
 from app.services.settings_service import get_all_settings as get_settings
+from app.services.request_utils import content_disposition
 
 router = APIRouter(prefix="/api/credit-memos", tags=["credit_memos"])
 
@@ -100,7 +101,9 @@ def credit_memo_pdf(cm_id: int, db: Session = Depends(get_db)):
         content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=CreditMemo_{cm.memo_number}.pdf"
+            "Content-Disposition": content_disposition(
+                f"CreditMemo_{cm.memo_number}.pdf"
+            )
         },
     )
 

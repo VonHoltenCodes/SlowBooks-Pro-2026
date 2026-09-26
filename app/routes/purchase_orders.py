@@ -23,6 +23,7 @@ from app.schemas.purchase_orders import (
 )
 from app.services.accounting import _q, compute_line_totals
 from app.services.numbering import next_po_number
+from app.services.request_utils import content_disposition
 from app.services.purchase_posting import (
     expense_account_for,
     spread,
@@ -205,7 +206,9 @@ def po_pdf(po_id: int, db: Session = Depends(get_db)):
         content=render_pdf(html_str),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"inline; filename=PurchaseOrder_{po.po_number}.pdf"
+            "Content-Disposition": content_disposition(
+                f"PurchaseOrder_{po.po_number}.pdf"
+            )
         },
     )
 
