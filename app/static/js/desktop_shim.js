@@ -48,8 +48,9 @@
  *     open_document_html(), which opens it in a new native window via
  *     pywebview's html= parameter.
  *   - A PDF response is base64-encoded and handed to open_document_pdf(),
- *     which writes it to a local temp file and opens that (file:// needs
- *     no auth at all) so Chromium's built-in PDF viewer can render it.
+ *     which saves it under Documents/SlowBooks Pro and opens it from there
+ *     (file:// needs no auth at all) in a window of its own, under a
+ *     toolbar with Open in <the PDF app> and Show in folder.
  *
  * In a normal browser this file is a no-op, but for
  * window.SlowbooksDesktop.saveFile(), which answers false there.
