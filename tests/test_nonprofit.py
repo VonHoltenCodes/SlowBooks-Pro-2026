@@ -1188,7 +1188,10 @@ def test_report_pdfs_are_named_by_their_period_and_land_in_documents():
 
     root = Path(__file__).resolve().parent.parent
     launcher = (root / "desktop_launcher.py").read_text(encoding="utf-8")
-    assert '"SlowBooks Pro" / "Reports"' in launcher
+    # Reports by default; an invoice or statement goes to a Documents folder
+    # beside it (F24, tests/test_desktop_pdf_names.py saves both for real)
+    assert '"SlowBooks Pro" / folder' in launcher
+    assert 'folder: str = "Reports"' in launcher
     assert "def reveal_path" in launcher
     assert 'return {"success": True, "path": str(dest)}' in launcher
     shim = (root / "app/static/js/desktop_shim.js").read_text(encoding="utf-8")
