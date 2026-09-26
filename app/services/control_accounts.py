@@ -87,7 +87,10 @@ CONTROL_ACCOUNTS: dict[str, tuple[str, str]] = {
     "4800": ("Late Fee Income", "finance charges added to overdue invoices"),
     "5000": ("Cost of Goods Sold", "the cost side of an inventory item's sale"),
     "5900": ("Inventory Adjustments", "write-offs and quantity corrections"),
-    "6000": ("Advertising & Marketing", "the default expense account for bill lines"),
+    "6000": (
+        "Advertising & Marketing",
+        "payroll expense when 6110 or 6120 is missing from an older chart",
+    ),
     "6120": ("Payroll Tax Expense", "employer taxes posted by job costing"),
     "6150": ("Employee Benefits Expense", "benefit costs posted by job costing"),
 }

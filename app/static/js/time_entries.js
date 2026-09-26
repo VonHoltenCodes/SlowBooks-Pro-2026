@@ -47,24 +47,30 @@ const TimeEntriesPage = {
                     <th scope="col">${T('Job')}</th>
                     <th scope="col" class="amount">Regular Hrs</th>
                     <th scope="col" class="amount">OT Hrs</th>
+                    <th scope="col" class="amount">DT Hrs</th>
                     <th scope="col">Description</th>
                     <th scope="col">Status</th>
                     <th scope="col">Actions</th>
                 </tr></thead><tbody>`;
+            const hrs = (v) => Number(v || 0).toFixed(2);
             for (const en of filtered) {
                 const empName = escapeHtml(empMap[en.employee_id] || `Employee ${en.employee_id}`);
-                const isPending = en.status === 'pending';
+                // A new entry is a draft; the employee portal submits one.
+                // Either can be approved (only approved time is paid) or
+                // rejected, until a pay run has paid it.
+                const undecided = (en.status === 'draft' || en.status === 'submitted') && !en.pay_run_id;
                 html += `<tr>
                     <td>${formatDate(en.date)}</td>
                     <td>${empName}</td>
                     <td>${escapeHtml(en.job_name || '')}${en.cost_code_label ? ` <span style="font-size:10px;color:#888">${escapeHtml(en.cost_code_label)}</span>` : ''}${en.job_cost_id ? ' <span class="badge" style="font-size:9px">posted</span>' : ''}</td>
-                    <td class="amount">${(en.regular_hours || 0).toFixed(2)}</td>
-                    <td class="amount">${(en.overtime_hours || 0).toFixed(2)}</td>
-                    <td>${escapeHtml(en.description || '')}</td>
-                    <td>${statusBadge(en.status)}</td>
+                    <td class="amount">${hrs(en.hours_regular)}</td>
+                    <td class="amount">${hrs(en.hours_overtime)}</td>
+                    <td class="amount">${hrs(en.hours_doubletime)}</td>
+                    <td>${escapeHtml(en.notes || '')}</td>
+                    <td>${statusBadge(en.status)}${en.pay_run_id ? ' <span class="badge" style="font-size:9px">paid</span>' : ''}</td>
                     <td class="actions">
-                        ${isPending ? `<button class="btn btn-sm btn-primary" onclick="TimeEntriesPage.approve(${en.id})">Approve</button>` : ''}
-                        ${isPending ? `<button class="btn btn-sm btn-secondary" onclick="TimeEntriesPage.reject(${en.id})">Reject</button>` : ''}
+                        ${undecided ? `<button class="btn btn-sm btn-primary" onclick="TimeEntriesPage.approve(${en.id})">Approve</button>` : ''}
+                        ${undecided ? `<button class="btn btn-sm btn-secondary" onclick="TimeEntriesPage.reject(${en.id})">Reject</button>` : ''}
                     </td>
                 </tr>`;
             }
@@ -99,11 +105,12 @@ const TimeEntriesPage = {
                     <div class="form-group"><label>Double-Time Hours</label>
                         <input name="doubletime_hours" type="number" step="0.01" min="0" value="0"></div>
                     <div class="form-group"><label>Clock In (optional)</label>
-                        <input name="clock_in" type="time"></div>
+                        <input name="clock_in" type="time" oninput="TimeEntriesPage._hoursFromClock(this.form)"></div>
                     <div class="form-group"><label>Clock Out (optional)</label>
-                        <input name="clock_out" type="time"></div>
+                        <input name="clock_out" type="time" oninput="TimeEntriesPage._hoursFromClock(this.form)">
+                        <small style="color:var(--gray-400);">Clock times work out Regular Hours</small></div>
                     <div class="form-group"><label>Break (minutes)</label>
-                        <input name="break_minutes" type="number" min="0" value="0"></div>
+                        <input name="break_minutes" type="number" min="0" value="0" oninput="TimeEntriesPage._hoursFromClock(this.form)"></div>
                     ${jobGroup}${codeGroup}
                 </div>
                 <div class="form-group"><label>Description</label>
@@ -115,11 +122,27 @@ const TimeEntriesPage = {
             </form>`);
     },
 
+    // Clock In / Clock Out less the break fill Regular Hours. The entry
+    // stores hours, not clock times, so the times themselves are not sent.
+    _hoursFromClock(form) {
+        const minutes = (v) => {
+            const m = /^(\d{1,2}):(\d{2})/.exec(v || '');
+            return m ? Number(m[1]) * 60 + Number(m[2]) : null;
+        };
+        const start = minutes(form.clock_in.value);
+        const end = minutes(form.clock_out.value);
+        if (start === null || end === null) return;
+        let worked = end - start;
+        if (worked <= 0) worked += 24 * 60; // a shift that runs past midnight
+        worked -= parseFloat(form.break_minutes.value) || 0;
+        form.regular_hours.value = (Math.max(0, worked) / 60).toFixed(2);
+    },
+
     async approve(id) {
         try {
             await API.post(`/time-entries/${id}/approve?approved_by=admin`, {});
             toast('Time entry approved');
-            App.navigate('#/time-entries');
+            App.navigate('#/hr/time-entries');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -127,13 +150,13 @@ const TimeEntriesPage = {
         try {
             await API.post(`/time-entries/${id}/reject`, {});
             toast('Time entry rejected');
-            App.navigate('#/time-entries');
+            App.navigate('#/hr/time-entries');
         } catch (err) { toast(err.message, 'error'); }
     },
 
     filterByEmployee(empId) {
         TimeEntriesPage._selectedEmpId = empId;
-        App.navigate('#/time-entries');
+        App.navigate('#/hr/time-entries');
     },
 
     async save(e) {
@@ -148,12 +171,15 @@ const TimeEntriesPage = {
         data.notes = data.description || null; delete data.description;
         data.job_id = data.job_id ? parseInt(data.job_id) : null;
         data.cost_code_id = data.cost_code_id ? parseInt(data.cost_code_id) : null;
+        // The clock times have already worked out Regular Hours on the form
+        // (_hoursFromClock); an entry stores hours only, and the API refuses
+        // fields it does not know.
         delete data.break_minutes; delete data.clock_in; delete data.clock_out;
         try {
             await API.post('/time-entries', data);
             toast('Time entry logged');
             closeModal();
-            App.navigate('#/time-entries');
+            App.navigate('#/hr/time-entries');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -161,7 +187,7 @@ const TimeEntriesPage = {
         try {
             const r = await API.post(`/time-entries/${id}/post-to-job`, {});
             toast(`${r.number} posted: ${formatCurrency(r.total)}`);
-            App.navigate('#/time-entries');
+            App.navigate('#/hr/time-entries');
         } catch (err) { toast(err.message, 'error'); }
     },
 };

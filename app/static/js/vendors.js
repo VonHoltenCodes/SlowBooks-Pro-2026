@@ -23,8 +23,9 @@ const VendorsPage = {
                     <th scope="col" class="amount">Balance</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const v of vendors) {
-                html += `<tr>
-                    <td><strong>${escapeHtml(v.name)}</strong></td>
+                const inactive = v.is_active === false;
+                html += `<tr${inactive ? ' style="opacity:.55;"' : ''}>
+                    <td><strong>${escapeHtml(v.name)}</strong>${inactive ? ' <span class="badge badge-draft">inactive</span>' : ''}</td>
                     <td>${escapeHtml(v.company) || ''}</td>
                     <td>${escapeHtml(v.phone) || ''}</td>
                     <td>${escapeHtml(v.email) || ''}</td>
@@ -46,14 +47,17 @@ const VendorsPage = {
             is_1099_vendor:false, vendor_1099_type:'', notes:'' };
         if (id) v = await API.get(`/vendors/${id}`);
 
-        const accounts = await API.get('/accounts?account_type=expense');
-        const acctOpts = accounts.map(a => `<option value="${a.id}" ${v.default_expense_account_id==a.id?'selected':''}>${escapeHtml(a.account_number)} - ${escapeHtml(a.name)}</option>`).join('');
+        // Cost of goods too: a flour mill or a panel supplier is bought
+        // against 5100 Materials Cost, not an expense (W-L18, F8).
+        const accounts = await API.get('/accounts');
+        const acctOpts = PurchaseAccounts.options(
+            PurchaseAccounts.filter(accounts, v.default_expense_account_id), v.default_expense_account_id);
 
         openModal(id ? 'Edit Vendor' : 'New Vendor', `
             <form id="vendor-form" onsubmit="VendorsPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Name *</label>
-                        <input name="name" required value="${escapeHtml(v.name)}"></div>
+                        <input name="name" required maxlength="200" value="${escapeHtml(v.name)}"></div>
                     <div class="form-group"><label>Company</label>
                         <input name="company" value="${escapeHtml(v.company || '')}"></div>
                     <div class="form-group"><label>Email</label>
@@ -92,13 +96,18 @@ const VendorsPage = {
                         <input name="account_number" value="${escapeHtml(v.account_number || '')}"></div>
                     <div class="form-group"><label>Default Expense Account</label>
                         <select name="default_expense_account_id"><option value="">-- None --</option>${acctOpts}</select></div>
+                    ${id ? `<div class="form-group"><label>Status</label>
+                        <select name="is_active" title="An inactive vendor keeps its history but leaves the pickers on bills, expenses and orders">
+                            <option value="true" ${v.is_active !== false ? 'selected' : ''}>Active</option>
+                            <option value="false" ${v.is_active === false ? 'selected' : ''}>Inactive</option>
+                        </select></div>` : ''}
                     <div class="form-group"><label>1099 Vendor</label>
-                        <select name="is_1099_vendor">
+                        <select name="is_1099_vendor" onchange="VendorsPage.toggle1099Type(this)">
                             <option value="false" ${!v.is_1099_vendor ? 'selected' : ''}>No</option>
                             <option value="true" ${v.is_1099_vendor ? 'selected' : ''}>Yes</option>
                         </select></div>
                     <div class="form-group"><label>1099 Type</label>
-                        <select name="vendor_1099_type">
+                        <select name="vendor_1099_type" ${v.is_1099_vendor ? '' : 'disabled'} title="Set 1099 Vendor to Yes to choose a type">
                             <option value="" ${!v.vendor_1099_type ? 'selected' : ''}>-- None --</option>
                             <option value="NEC" ${v.vendor_1099_type==='NEC' ? 'selected' : ''}>NEC (Non-Employee Comp)</option>
                             <option value="MISC" ${v.vendor_1099_type==='MISC' ? 'selected' : ''}>MISC</option>
@@ -115,12 +124,24 @@ const VendorsPage = {
             </form>`);
     },
 
+    // A 1099 type describes a 1099 vendor only: the server clears it on any
+    // other vendor, and the select stayed live under "1099 Vendor: No" as
+    // if the type were kept. It is off, and empty, until the answer is Yes.
+    toggle1099Type(select) {
+        const type = select.form && select.form.elements.namedItem('vendor_1099_type');
+        if (!type) return;
+        const on = select.value === 'true';
+        type.disabled = !on;
+        if (!on) type.value = '';
+    },
+
     async save(e, id, force) {
         e.preventDefault();
         const data = Object.fromEntries(new FormData(e.target).entries());
         data.default_expense_account_id = data.default_expense_account_id ? parseInt(data.default_expense_account_id) : null;
         data.is_1099_vendor = data.is_1099_vendor === 'true';
         data.vendor_1099_type = data.vendor_1099_type || null;
+        if ('is_active' in data) data.is_active = data.is_active === 'true';
         try {
             if (id) {
                 await API.put(`/vendors/${id}`, data);
@@ -176,6 +197,40 @@ const VendorsPage = {
         await VendorsPage.save(fakeEvt, id, true);
         VendorsPage._pendingForm = null;
     },
+};
+
+/**
+ * The accounts a purchase posts to — expenses and cost of goods sold, by
+ * number — for the Account pickers on bills, purchase orders, vendor
+ * credits, expenses, card charges and the vendor's default. They listed
+ * expense accounts only, so materials could not be pointed at 5100
+ * Materials Cost (W-L18, F8). `keepId` keeps an account already chosen on
+ * the record even when it is of another type or inactive.
+ */
+const PurchaseAccounts = {
+    filter(accounts, keepId) {
+        return accounts.filter(a =>
+            ((a.account_type === 'expense' || a.account_type === 'cogs') && a.is_active !== false)
+            || (keepId && a.id == keepId));
+    },
+    options(accounts, selectedId) {
+        return accounts.map(a =>
+            `<option value="${a.id}" ${selectedId && a.id == selectedId ? 'selected' : ''}>${escapeHtml(a.account_number || '')} - ${escapeHtml(a.name)}</option>`
+        ).join('');
+    },
+};
+
+/** Line arithmetic for the purchase forms, the way the server stores it. */
+const PurchaseLines = {
+    cents(x) { return Math.round((Number(x) + Number.EPSILON) * 100) / 100; },
+    // Each line is rounded to the cent before it is added up.
+    lineAmount(row) {
+        const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;
+        const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
+        return PurchaseLines.cents(qty * rate);
+    },
+    // What a picked item fills in: what it costs, else its price.
+    price(item) { return Number(item.cost) ? item.cost : item.rate; },
 };
 
 /**

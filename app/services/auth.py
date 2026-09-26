@@ -256,3 +256,59 @@ def require_auth(request: Request) -> None:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
+
+
+# ---------------------------------------------------------------------------
+# "Ask for the password each time SlowBooks Pro starts" (explore 2.17.3,
+# macbase1 S-j). The session cookie outlives the app — the desktop window
+# keeps a persistent profile so that print windows and downloads share the
+# sign-in — so quitting and relaunching reopened the company signed in. A
+# company can now choose otherwise: every session remembers which start of
+# the server signed it in, and with the setting on, one from an earlier
+# start counts as signed out. Off by default, so nothing changes for anyone
+# who does not ask.
+#
+# Desktop only (SLOWBOOKS_DESKTOP=1, set by the launcher for the window and
+# for Server Edition's --serve-lan, one server process either way). A Docker
+# deployment runs two workers, each with its own start, and would sign
+# people out at random.
+# ---------------------------------------------------------------------------
+
+BOOT_ID = secrets.token_hex(16)
+SESSION_BOOT_KEY = "boot"
+ASK_ON_START_KEY = "ask_password_on_start"
+
+
+def remember_this_start(session: dict) -> None:
+    """Called where a session is signed in."""
+    session[SESSION_BOOT_KEY] = BOOT_ID
+
+
+def _asks_for_password_on_start() -> bool:
+    # Looked up on the module at call time: the test harness and the
+    # launcher both repoint app.database.SessionLocal.
+    import app.database as database
+
+    try:
+        db = database.SessionLocal()
+        try:
+            return get_setting_raw(db, ASK_ON_START_KEY) == "true"
+        finally:
+            db.close()
+    except Exception:
+        logger.exception("could not read %s; keeping the session", ASK_ON_START_KEY)
+        return False
+
+
+def signed_in_before_this_start(session: dict) -> bool:
+    """True when a signed-in session dates from an earlier start of the app
+    and the company asks for the password each time it starts: the caller
+    treats it as signed out. A session found current is marked with this
+    start, so the setting is read once per session per start, not on every
+    request."""
+    if session.get(SESSION_BOOT_KEY) == BOOT_ID:
+        return False
+    if os.environ.get("SLOWBOOKS_DESKTOP") == "1" and _asks_for_password_on_start():
+        return True
+    remember_this_start(session)
+    return False

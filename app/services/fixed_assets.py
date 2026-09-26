@@ -1,5 +1,6 @@
 # ============================================================================
-# Fixed assets service — depreciation math, disposal, CSV import.
+# Fixed assets service — the purchase in the books, depreciation math,
+# disposal, CSV import.
 #
 # Depreciation runs are month-granular: a run covers the FULL months
 # between the asset's depreciation start (purchase date, or the day
@@ -12,6 +13,7 @@
 import csv
 import io
 import logging
+from collections import defaultdict
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
@@ -19,18 +21,49 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.accounts import Account, AccountType
+from app.models.bills import Bill, BillStatus
+from app.models.transactions import Transaction
 from app.models.fixed_assets import (
     DepreciationMethod,
     FixedAsset,
     FixedAssetStatus,
     FixedAssetType,
 )
-from app.services.accounting import _q, create_journal_entry
+from app.services.accounting import (
+    _q,
+    create_journal_entry,
+    get_opening_balance_equity_id,
+)
+from app.services.bank_register import gl_balance, money_text, voided_transaction_ids
 
 logger = logging.getLogger(__name__)
 
 DISPOSAL_ACCOUNT_NUMBER = "7999"
 DISPOSAL_ACCOUNT_NAME = "Gain/Loss on Asset Disposal"
+
+
+def check_amounts(purchase_price, salvage_value) -> None:
+    """Cost must be something, and salvage between nothing and the cost. A
+    salvage value above cost was accepted (exploratory 2.17.3, W-M19)."""
+    price = _q(Decimal(str(purchase_price or 0)))
+    salvage = _q(Decimal(str(salvage_value or 0)))
+    if price <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Enter the purchase price: it must be more than $0.00.",
+        )
+    if salvage < 0:
+        raise HTTPException(
+            status_code=400, detail="Salvage value can't be less than $0.00."
+        )
+    if salvage > price:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Salvage value can't be more than the purchase price "
+                f"({money_text(price)})."
+            ),
+        )
 
 
 def book_value(asset: FixedAsset) -> Decimal:
@@ -331,6 +364,20 @@ def import_assets_csv(db: Session, csv_text: str) -> dict:
                 bad_amount = True
         if bad_amount:
             continue
+        if amounts["purchase_price"] <= 0:
+            errors.append({"row": i, "message": "purchase_price must be more than 0"})
+            continue
+        if not 0 <= amounts["salvage_value"] <= amounts["purchase_price"]:
+            errors.append(
+                {
+                    "row": i,
+                    "message": (
+                        f"salvage_value {amounts['salvage_value']} must be between 0 "
+                        f"and the purchase_price {amounts['purchase_price']}"
+                    ),
+                }
+            )
+            continue
 
         try:
             db.add(
@@ -355,3 +402,336 @@ def import_assets_csv(db: Session, csv_text: str) -> dict:
             db.rollback()
     db.commit()
     return {"imported": imported, "errors": errors}
+
+
+# ---------------------------------------------------------------------------
+# The purchase in the books.
+#
+# Registering a $12,000 asset posted nothing to its asset account, but
+# depreciation then credited accumulated depreciation, so the balance sheet
+# showed negative net equipment (exploratory 2.17.3, W-M19). Registering
+# now says how the purchase reaches the books:
+#   paid_from        DR asset account / CR the bank or card account
+#   opening_balance  owned before these books began: DR asset account /
+#                    CR accumulated depreciation (what was already taken) /
+#                    CR 3900 Opening Balance Equity (the rest)
+#   bill | expense   bought on a bill or expense already entered: its cost
+#                    is moved from the expense account(s) the document
+#                    posted to into the asset account (nothing moves when
+#                    the document posted to the asset account itself)
+#   in_books         an opening balance or journal entry already put it in
+#                    the asset account: nothing posts, and the account must
+#                    hold at least the cost of every asset registered to it
+# ---------------------------------------------------------------------------
+
+ACQUISITION_METHODS = ("paid_from", "opening_balance", "bill", "expense", "in_books")
+_ACQUISITION_SOURCES = ("asset_acquisition", "opening_balance")
+
+
+def acquisition_transactions(db: Session, asset_ids) -> dict[int, int]:
+    """asset id -> the journal entry that put its purchase in the books
+    (a voided one doesn't count)."""
+    ids = [int(i) for i in asset_ids]
+    if not ids:
+        return {}
+    rows = (
+        db.query(Transaction.source_id, Transaction.id)
+        .filter(
+            Transaction.source_type.in_(_ACQUISITION_SOURCES),
+            Transaction.source_id.in_(ids),
+        )
+        .all()
+    )
+    voided = voided_transaction_ids(db, [txn_id for _, txn_id in rows])
+    return {aid: txn_id for aid, txn_id in rows if txn_id not in voided}
+
+
+def _asset_account(atype: FixedAssetType) -> int:
+    if not atype.asset_account_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Asset type '{atype.name}' has no fixed-asset account. Choose one "
+                "for the type first, so the purchase has somewhere to go."
+            ),
+        )
+    return atype.asset_account_id
+
+
+def registered_cost(db: Session, asset_account_id: int) -> Decimal:
+    """The cost of every registered asset whose type keeps it in this account."""
+    total = Decimal("0")
+    for asset in (
+        db.query(FixedAsset)
+        .join(FixedAssetType, FixedAsset.asset_type_id == FixedAssetType.id)
+        .filter(
+            FixedAssetType.asset_account_id == asset_account_id,
+            FixedAsset.status == FixedAssetStatus.REGISTERED,
+        )
+        .all()
+    ):
+        total += Decimal(str(asset.purchase_price))
+    return _q(total)
+
+
+def books_cover(db: Session, asset_account_id: int) -> tuple[bool, Decimal, Decimal]:
+    """(the account holds every registered asset's cost, what it holds,
+    what the register says it should)."""
+    held = _q(gl_balance(db, asset_account_id))
+    registered = registered_cost(db, asset_account_id)
+    return held >= registered, held, registered
+
+
+def _document(db: Session, acq) -> tuple[Transaction, str, str]:
+    """The bill's or expense's journal entry, how to name it, and its
+    reference number (a bill's own number; an expense's reference)."""
+    if acq.method == "bill":
+        bill = db.get(Bill, acq.bill_id) if acq.bill_id else None
+        if not bill:
+            raise HTTPException(status_code=404, detail="Bill not found")
+        if bill.status == BillStatus.VOID:
+            raise HTTPException(status_code=400, detail="That bill is void.")
+        txn = db.get(Transaction, bill.transaction_id) if bill.transaction_id else None
+        if txn is None:
+            raise HTTPException(
+                status_code=400, detail="That bill isn't in the books yet."
+            )
+        # (lengths capped: the label ends up in a 300-character line memo)
+        label = f"bill {(bill.bill_number or '')[:60]}"
+        reference = bill.bill_number or ""
+    else:
+        txn = (
+            db.query(Transaction)
+            .filter(
+                Transaction.id == (acq.expense_id or 0),
+                Transaction.source_type == "expense",
+            )
+            .first()
+        )
+        if txn is None:
+            raise HTTPException(status_code=404, detail="Expense not found")
+        payee = (txn.description or "").removeprefix("Expense: ").strip()
+        label = f"expense to {(payee or 'no payee')[:60]}"
+        if txn.reference:
+            label += f" ({txn.reference[:40]})"
+        reference = txn.reference or ""
+    if txn.id in voided_transaction_ids(db, [txn.id]):
+        raise HTTPException(status_code=400, detail=f"That {acq.method} is void.")
+    return txn, label, reference
+
+
+def _capitalize(db: Session, asset: FixedAsset, acq, asset_account_id: int):
+    """Move the asset's cost out of the expense account(s) a bill or expense
+    posted it to."""
+    txn, label, reference = _document(db, acq)
+    cost = _q(Decimal(str(asset.purchase_price)))
+    on_asset = Decimal("0")
+    spent = defaultdict(Decimal)
+    for ln in txn.lines:
+        if ln.account_id == asset_account_id:
+            on_asset += Decimal(str(ln.debit or 0)) - Decimal(str(ln.credit or 0))
+        elif (
+            ln.account
+            and ln.account.account_type in (AccountType.EXPENSE, AccountType.COGS)
+            and ln.debit
+        ):
+            spent[ln.account_id] += Decimal(str(ln.debit))
+    if on_asset > 0:
+        # The document put the purchase in the asset account already.
+        if on_asset < cost:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"The {label} put {money_text(on_asset)} in the asset account; "
+                    f"this asset costs {money_text(cost)}. Check the purchase price."
+                ),
+            )
+        return None
+    # What other assets have already taken from this document.
+    tag = f" capitalized from {label}"
+    for other in (
+        db.query(Transaction)
+        .filter(
+            Transaction.source_type == "asset_acquisition",
+            Transaction.date == txn.date,
+        )
+        .all()
+    ):
+        if other.id in voided_transaction_ids(db, [other.id]):
+            continue
+        for ln in other.lines:
+            if ln.credit and (ln.description or "").endswith(tag):
+                spent[ln.account_id] -= Decimal(str(ln.credit))
+    available = _q(sum((v for v in spent.values() if v > 0), Decimal("0")))
+    if available < cost:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"The {label} has {money_text(available)} on expense accounts that "
+                f"isn't an asset yet; this asset costs {money_text(cost)}. Check "
+                "the purchase price, or choose the account it was paid from instead."
+            ),
+        )
+    lines = [
+        {
+            "account_id": asset_account_id,
+            "debit": cost,
+            "credit": Decimal("0"),
+            "description": f"{asset.asset_number} {asset.name}",
+        }
+    ]
+    remaining = cost
+    for account_id, amount in sorted(spent.items(), key=lambda kv: (-kv[1], kv[0])):
+        if remaining <= 0 or amount <= 0:
+            continue
+        take = min(amount, remaining)
+        lines.append(
+            {
+                "account_id": account_id,
+                "debit": Decimal("0"),
+                "credit": _q(take),
+                "description": f"{asset.asset_number}{tag}",
+            }
+        )
+        remaining -= take
+    return create_journal_entry(
+        db,
+        txn.date,
+        f"Capitalize {asset.asset_number} {asset.name} from the {label}",
+        lines,
+        source_type="asset_acquisition",
+        source_id=asset.id,
+        reference=reference,
+    )
+
+
+def post_acquisition(db: Session, asset: FixedAsset, acq):
+    """Put the asset's purchase in the books (see the block comment above).
+    Flushes; the caller commits. Returns the journal entry, or None when
+    nothing needed posting."""
+    if acq.method not in ACQUISITION_METHODS:
+        raise HTTPException(
+            status_code=400, detail="Choose how the asset was paid for."
+        )
+    atype = asset.asset_type or db.get(FixedAssetType, asset.asset_type_id)
+    asset_account_id = _asset_account(atype)
+    cost = _q(Decimal(str(asset.purchase_price)))
+    name = f"{asset.asset_number} {asset.name}"
+
+    if acq.method == "in_books":
+        covered, held, registered = books_cover(db, asset_account_id)
+        if not covered:
+            acct = db.get(Account, asset_account_id)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{acct.name} holds {money_text(held)} in the books, less than "
+                    f"the {money_text(registered)} of assets registered to it with "
+                    f"this one. Its {money_text(cost)} purchase isn't in the books "
+                    "yet: choose how it was paid for, so it is posted."
+                ),
+            )
+        return None
+
+    if acq.method == "paid_from":
+        paid_from = db.get(Account, acq.account_id) if acq.account_id else None
+        if paid_from is None or not paid_from.bank_kind:
+            raise HTTPException(
+                status_code=400,
+                detail="Pick the bank or card account the asset was paid from.",
+            )
+        return create_journal_entry(
+            db,
+            asset.purchase_date,
+            f"Purchase: {name}",
+            [
+                {
+                    "account_id": asset_account_id,
+                    "debit": cost,
+                    "credit": Decimal("0"),
+                    "description": name,
+                },
+                {
+                    "account_id": paid_from.id,
+                    "debit": Decimal("0"),
+                    "credit": cost,
+                    "description": name,
+                },
+            ],
+            source_type="asset_acquisition",
+            source_id=asset.id,
+            reference=acq.reference or "",
+        )
+
+    if acq.method == "opening_balance":
+        as_of = acq.as_of or asset.purchase_date
+        if as_of < asset.purchase_date:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "The day your books began can't be before the purchase date. "
+                    "An asset bought after that was paid from a bank or card account."
+                ),
+            )
+        taken = _q(Decimal(str(acq.accumulated_depreciation or 0)))
+        depreciable = cost - _q(Decimal(str(asset.salvage_value or 0)))
+        if taken < 0 or taken > depreciable:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Depreciation already taken must be between $0.00 and "
+                    f"{money_text(depreciable)} (the cost less the salvage value)."
+                ),
+            )
+        if taken and Decimal(str(asset.accumulated_depreciation or 0)):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This asset has depreciation posted in these books already; "
+                    "post its opening balance at cost, with no depreciation taken."
+                ),
+            )
+        lines = [
+            {
+                "account_id": asset_account_id,
+                "debit": cost,
+                "credit": Decimal("0"),
+                "description": name,
+            }
+        ]
+        if taken:
+            _require_type_accounts(atype)
+            lines.append(
+                {
+                    "account_id": atype.accumulated_depreciation_account_id,
+                    "debit": Decimal("0"),
+                    "credit": taken,
+                    "description": f"Depreciation taken before these books: {name}",
+                }
+            )
+        if cost - taken:
+            lines.append(
+                {
+                    "account_id": get_opening_balance_equity_id(db),
+                    "debit": Decimal("0"),
+                    "credit": cost - taken,
+                    "description": name,
+                }
+            )
+        txn = create_journal_entry(
+            db,
+            as_of,
+            f"Opening balance: {name}",
+            lines,
+            source_type="opening_balance",
+            source_id=asset.id,
+        )
+        if taken:
+            asset.accumulated_depreciation = taken
+        if as_of > asset.purchase_date and not asset.last_depreciation_date:
+            # What was taken before the books began is the figure above;
+            # the books depreciate it from here.
+            asset.last_depreciation_date = as_of
+        return txn
+
+    return _capitalize(db, asset, acq, asset_account_id)

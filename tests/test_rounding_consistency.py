@@ -11,9 +11,17 @@ from decimal import Decimal
 
 
 def _vendor(db_session):
+    from app.models.accounts import Account
     from app.models.contacts import Vendor
 
-    v = Vendor(name="Test Vendor", is_active=True)
+    # Bill lines here name no account; they post to the vendor's default
+    # expense account (nothing falls back to 6000 now).
+    expense = db_session.query(Account).filter_by(account_number="6000").first()
+    v = Vendor(
+        name="Test Vendor",
+        is_active=True,
+        default_expense_account_id=expense.id if expense else None,
+    )
     db_session.add(v)
     db_session.commit()
     return v

@@ -63,8 +63,77 @@ def next_document_number(
         n += 1
 
 
+def _positive_int(raw) -> int | None:
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
+
+
+def _highest_in_series(numbers, prefix: str) -> tuple[int | None, int]:
+    """(highest numeric part, its zero-padded width or 0) among `numbers`
+    shaped prefix + digits."""
+    highest, pad = None, 0
+    for number in numbers:
+        number = number or ""
+        digits = number[len(prefix) :]
+        if not number.startswith(prefix) or not digits.isdigit():
+            continue
+        if highest is None or int(digits) > highest:
+            highest = int(digits)
+            # keep a zero-padded series padded ("0099" -> "0100")
+            pad = len(digits) if digits.startswith("0") else 0
+    return highest, pad
+
+
 def next_invoice_number(db: Session) -> str:
-    return next_document_number(db, Invoice.invoice_number)
+    """Settings -> Invoice prefix + Next invoice #.
+
+    Both were saved and never read: invoices stayed "1001..." with a prefix
+    set, and the counter showed 1001 while invoices ran to 1005 (2.17.3
+    exploratory W-M3, F6, F20). The number is now the prefix plus the larger
+    of the setting and one past the highest number already used with that
+    prefix, so raising the setting jumps ahead and lowering it can never
+    reuse a number. Existing invoice numbers never change.
+
+    The counter moves past the number it hands out, in the caller's
+    transaction (rolled back with it if the insert fails), so Settings
+    always shows the number the next invoice will get. Until the first
+    invoice after this change the counter may still hold its untouched
+    default (1001), which is not a choice anyone made: a file whose imported
+    invoices run below it continues its own series instead of jumping to
+    1001, and turning a prefix on continues the plain series (1005 ->
+    HLB-1006). A number typed into Settings is a choice, so a new prefix can
+    also start over ("0001" keeps its zeros: 2026-0001).
+    """
+    from app.models.settings import DEFAULT_SETTINGS
+    from app.services.settings_service import set_setting
+
+    settings = get_all_settings(db)
+    prefix = (settings.get("invoice_prefix") or "").strip()
+    raw = str(settings.get("invoice_next_number") or "").strip()
+    seed = _positive_int(raw)
+    chosen = seed is not None and raw != DEFAULT_SETTINGS["invoice_next_number"]
+
+    numbers = [n for (n,) in db.query(Invoice.invoice_number)]
+    top, pad = _highest_in_series(numbers, prefix)
+    if top is None and prefix and not chosen:
+        top, pad = _highest_in_series(numbers, "")
+    if chosen:
+        n = seed if top is None else max(seed, top + 1)
+        if raw.startswith("0"):
+            pad = max(pad, len(raw))
+    else:
+        n = top + 1 if top is not None else 1001
+
+    while True:
+        candidate = f"{prefix}{str(n).zfill(pad)}"
+        if db.query(Invoice.id).filter(Invoice.invoice_number == candidate).first():
+            n += 1
+            continue
+        set_setting(db, "invoice_next_number", str(n + 1))
+        return candidate
 
 
 def next_credit_memo_number(db: Session) -> str:

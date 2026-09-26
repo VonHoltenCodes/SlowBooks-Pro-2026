@@ -9,17 +9,26 @@ const App = {
         '/jobs':          { page: 'jobs',            label: 'Jobs',               render: () => JobsPage.render() },
         '/jobs/:id':      { page: 'jobs',            label: 'Job',                render: (id) => JobsPage.renderDetail(id) },
         '/job-costs':     { page: 'job-costs',       label: 'Job Cost Entries',   render: () => JobCostsPage.render() },
-        '/releases':      { page: 'releases',        label: 'Releases from Restriction', render: () => ReleasesPage.render() },
-        '/functional-allocations': { page: 'functional-allocations', label: 'Functional Allocations', render: () => AllocationsPage.render() },
+        '/releases':      { page: 'releases',        label: 'Releases from Restriction', nonprofit: true, render: () => ReleasesPage.render() },
+        '/functional-allocations': { page: 'functional-allocations', label: 'Functional Allocations', nonprofit: true, render: () => AllocationsPage.render() },
         '/vendors':       { page: 'vendors',         label: 'Vendor Center',      render: () => VendorsPage.render() },
         '/items':         { page: 'items',           label: 'Item List',          render: () => ItemsPage.render() },
         '/invoices':      { page: 'invoices',        label: 'Create Invoices',    render: () => InvoicesPage.render() },
+        // A posting's own address (#/invoices/12, #/deposits/31): the bank
+        // register and the report drill-downs link each line to the document
+        // behind it (app/services/bank_register.py source_link), and every
+        // link but a vendor credit's said "Page not found" (explore 2.17.3).
+        // The document opens over its list (App.withDocument); a card charge
+        // or a transfer opens as its journal entry.
+        '/invoices/:id':      { page: 'invoices',   label: 'Invoice',       render: (id) => App.withDocument(() => InvoicesPage.render(), () => InvoicesPage.view(id)) },
         '/sales-receipts': { page: 'sales-receipts', label: 'Enter Sales Receipts', render: () => SalesReceiptsPage.render() },
-        '/in-kind-gifts': { page: 'in-kind-gifts',   label: 'In-Kind Gifts',      render: () => InKindPage.render() },
+        '/in-kind-gifts': { page: 'in-kind-gifts',   label: 'In-Kind Gifts',      nonprofit: true, render: () => InKindPage.render() },
         '/estimates':     { page: 'estimates',       label: 'Create Estimates',   render: () => EstimatesPage.render() },
         '/payments':      { page: 'payments',        label: 'Receive Payments',   render: () => PaymentsPage.render() },
+        '/payments/:id':      { page: 'payments',   label: 'Payment',       render: (id) => App.withDocument(() => PaymentsPage.render(), () => PaymentsPage.view(id)) },
         '/banking':       { page: 'banking',         label: 'Banking',            render: () => BankingPage.render() },
         '/banking/:id':   { page: 'banking',         label: 'Register',           render: (id) => BankingPage.renderRegister(id) },
+        '/banking/transfers/:id': { page: 'banking', label: 'Transfer',     render: (id) => App.withDocument(() => BankingPage.render(), () => JournalPage.view(id)) },
         '/accounts':      { page: 'accounts',        label: 'Chart of Accounts',  render: () => App.renderAccounts() },
         '/reports':       { page: 'reports',         label: 'Report Center',      render: () => ReportsPage.render() },
         '/settings':      { page: 'settings',        label: 'Company Settings',   render: () => SettingsPage.render() },
@@ -30,6 +39,8 @@ const App = {
         // Phase 2: Accounts Payable
         '/purchase-orders': { page: 'purchase-orders', label: 'Purchase Orders',  render: () => PurchaseOrdersPage.render() },
         '/bills':         { page: 'bills',           label: 'Bills',              render: () => BillsPage.render() },
+        '/bills/:id':         { page: 'bills',      label: 'Bill',          render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.view(id)) },
+        '/bill-payments/:id': { page: 'bills',      label: 'Bill Payment',  render: (id) => App.withDocument(() => BillsPage.render(), () => BillsPage.viewPayment(id)) },
         '/credit-memos':  { page: 'credit-memos',    label: 'Credit Memos',       render: () => CreditMemosPage.render() },
         '/vendor-credits':{ page: 'vendor-credits',  label: 'Vendor Credits',     render: () => VendorCreditsPage.render() },
         '/vendor-credits/:id': { page: 'vendor-credits', label: 'Vendor Credit',  render: (id) => VendorCreditsPage.view(id) },
@@ -58,11 +69,15 @@ const App = {
         '/analytics':     { page: 'analytics',       label: 'Analytics & AI',     render: () => AnalyticsPage.render() },
         // Phase 9: Forum Bug Fixes & Missing Features
         '/journal':       { page: 'journal',         label: 'Journal Entries',    render: () => JournalPage.render() },
+        '/journal/:id':       { page: 'journal',    label: 'Journal Entry', render: (id) => App.withDocument(() => JournalPage.render(), () => JournalPage.view(id)) },
         '/deposits':      { page: 'deposits',        label: 'Make Deposits',      render: () => DepositsPage.render() },
+        '/deposits/:id':      { page: 'deposits',   label: 'Deposit',       render: (id) => App.withDocument(() => DepositsPage.render(), () => DepositsPage.view(id)) },
         // The Check Register page is the Banking register now (2.10); old bookmarks land there.
         '/check-register': { page: 'banking',         label: 'Banking',            render: () => { App.navigate('#/banking'); return ''; } },
         '/cc-charges':    { page: 'cc-charges',      label: 'CC Charges',         render: () => CCChargesPage.render() },
+        '/cc-charges/:id':    { page: 'cc-charges', label: 'CC Charge',     render: (id) => App.withDocument(() => CCChargesPage.render(), () => JournalPage.view(id)) },
         '/expenses':      { page: 'expenses',        label: 'Enter Expenses',     render: () => ExpensesPage.render() },
+        '/expenses/:id':      { page: 'expenses',   label: 'Expense',       render: (id) => App.withDocument(() => ExpensesPage.render(), () => ExpensesPage.showDetail(id)) },
         // Phase 10: Quick Wins + Medium Effort Features
         '/budgets':       { page: 'budgets',         label: 'Budget vs Actual',   render: () => BudgetsPage.render() },
         '/bank-rules':    { page: 'bank-rules',      label: 'Bank Rules',         render: () => BankRulesPage.render() },
@@ -71,6 +86,18 @@ const App = {
         '/xero-import':   { page: 'migrate',         label: 'Migrate Data',       render: () => MigrationPage.render('xero') },
         '/myob-import':   { page: 'migrate',         label: 'Migrate Data',       render: () => MigrationPage.render('myob') },
         '/opening-balances': { page: 'opening-balances', label: 'Opening Balances', render: () => OpeningBalancesPage.render() },
+    },
+
+    // A document over its list: the list is the page, and the document opens
+    // in the dialog once the page is in place. One that cannot be opened
+    // (gone since the link was made) says so over the list.
+    async withDocument(list, open) {
+        const html = await list();
+        setTimeout(() => {
+            Promise.resolve().then(open)
+                .catch(err => toast(err.message || 'Could not open this document', 'error'));
+        }, 0);
+        return html;
     },
 
     async navigate(hash) {
@@ -96,6 +123,15 @@ const App = {
         // Status bar
         App.setStatus(`Loading ${route.label}...`);
 
+        // The nonprofit pages are in the sidebar only in nonprofit mode, but
+        // a bookmark or a typed URL reached them in a business company too
+        // (W-L13) — and posted to net-asset accounts a business never has.
+        if (route.nonprofit && !Terms.isNonprofit()) {
+            $('#page-content').innerHTML = App._nonprofitOnlyHtml(route.label);
+            App.setStatus(`${route.label} — nonprofit companies only`);
+            return;
+        }
+
         try {
             const html = await route.render(param);
             $('#page-content').innerHTML = html;
@@ -115,6 +151,78 @@ const App = {
             </div>`;
             App.setStatus('Error loading page');
         }
+    },
+
+    _nonprofitOnlyHtml(label) {
+        return `<div class="empty-state">
+            <h3>${escapeHtml(label)} is for nonprofit companies</h3>
+            <p>This company is set up as a business, so there is nothing to record here.
+               If it is a nonprofit, change its Company Type in Settings first.</p>
+            <p style="margin-top:12px;">
+                <a href="#/" class="btn btn-secondary">Return to Dashboard</a>
+                <a href="#/settings" class="btn btn-secondary">Open Settings</a>
+            </p>
+        </div>`;
+    },
+
+    // ---- Read-only sign-ins (Server Edition) -------------------------------
+    // The server refuses every write from the readonly role with a 403 —
+    // that stays the enforcement. But every page offered "+ New", and a
+    // whole form could be filled in before the refusal arrived (2.17.3
+    // exploratory test, W-L17). Once /api/auth/status names the role, the
+    // create buttons are hidden and every form a dialog opens is shown
+    // locked, with a sentence saying why.
+    role: 'admin',
+    READ_ONLY_MESSAGE: 'Your sign-in is read-only: you can look, but not save changes. '
+        + 'An administrator can change your role under Settings → Users.',
+
+    isReadOnly() { return App.role === 'readonly'; },
+
+    setRole(role) {
+        App.role = role || 'admin';
+        document.body.classList.toggle('role-readonly', App.isReadOnly());
+        const page = document.getElementById('page-content');
+        if (!App.isReadOnly() || !page) return;
+        // the toolbar's shortcuts to new documents, and batch entry
+        document.querySelectorAll('#topbar .tb-btn[data-action], #topbar .tb-btn[data-nav="#/quick-entry"]')
+            .forEach(b => b.classList.add('hidden'));
+        App.hideWriteControls(page);
+        if (!App._roObserver) {
+            // pages re-render in place (tabs, filters): keep them clean
+            App._roObserver = new MutationObserver(() => App.hideWriteControls(page));
+            App._roObserver.observe(page, { childList: true, subtree: true });
+        }
+    },
+
+    // "+ New Invoice", "+ Record Payment", "New Account": a create button is
+    // labelled "+ …", or is the page header's primary action.
+    hideWriteControls(root) {
+        if (!root || !App.isReadOnly()) return;
+        root.querySelectorAll('button, a.btn').forEach(el => {
+            const label = (el.textContent || '').trim();
+            const headerAction = el.classList.contains('btn-primary') && el.closest('.page-header');
+            if (label.startsWith('+') || headerAction) el.classList.add('hidden');
+        });
+    },
+
+    // Called by openModal(). A form that only opens a document (the
+    // customer statement) carries data-readonly-ok and stays usable.
+    lockForms(root) {
+        if (!root || !App.isReadOnly()) return;
+        root.querySelectorAll('form:not([data-readonly-ok])').forEach(form => {
+            form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = true; });
+            form.querySelectorAll('button').forEach(b => {
+                if (/closeModal\(/.test(b.getAttribute('onclick') || '')) return;
+                b.disabled = true;
+                b.style.opacity = '0.5';
+                b.style.cursor = 'not-allowed';
+            });
+            form.onsubmit = (e) => { e.preventDefault(); toast(App.READ_ONLY_MESSAGE, 'error'); return false; };
+            if (!form.querySelector('.readonly-note')) {
+                form.insertAdjacentHTML('afterbegin',
+                    `<div class="hint hint--locked readonly-note" style="margin-bottom:10px;">${escapeHtml(App.READ_ONLY_MESSAGE)}</div>`);
+            }
+        });
     },
 
     setStatus(text) {
@@ -231,6 +339,10 @@ const App = {
         // number and the type are fixed and the API refuses to change them (400).
         // Renaming is allowed and is the point — say so instead of hiding the form.
         const locked = !!acct.is_control;
+        // A number is required (digits; 6150.1 or 6150-01 for a sub-account),
+        // except on an account an importer brought in without one, which can
+        // still be renamed.
+        const numberRequired = !locked && (!id || !!acct.account_number);
         const lockNote = locked
             ? `<div class="form-group full-width"><div class="hint hint--locked">
                    <strong>${escapeHtml(acct.account_number || '')} ${escapeHtml(acct.name)} is a control account.</strong>
@@ -243,8 +355,10 @@ const App = {
             <form onsubmit="App.saveAccount(event, ${id})">
                 <div class="form-grid">
                     ${lockNote}
-                    <div class="form-group"><label>Account Number</label>
-                        <input name="account_number" value="${escapeHtml(acct.account_number || '')}"${locked ? ' readonly disabled' : ''}></div>
+                    <div class="form-group"><label>Account Number${numberRequired ? ' *' : ''}</label>
+                        <input name="account_number" value="${escapeHtml(acct.account_number || '')}"${locked ? ' readonly disabled' : ''}
+                            ${numberRequired ? 'required' : ''} pattern="\\d+([.\\-]\\d+)*" maxlength="20" placeholder="e.g. 6150"
+                            title="Digits, like 6150. A sub-account can use 6150.1 or 6150-01."></div>
                     <div class="form-group"><label>Name *</label>
                         <input name="name" required value="${escapeHtml(acct.name)}"></div>
                     <div class="form-group"><label>Type *</label>
@@ -302,9 +416,8 @@ const App = {
         const replace = form.replace.checked ? 1 : 0;
         const resp = await fetch(`/api/csv/import/accounts?dry_run=${dryRun ? 1 : 0}&replace=${replace}`,
             { method: 'POST', body: fd, headers: { 'X-Slowbooks-Desktop': '1' } });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.detail || 'Import failed');
-        return data;
+        if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
+        return resp.json();
     },
 
     async previewChartImport(e) {
@@ -414,20 +527,32 @@ const App = {
             try {
                 const results = await API.get(`/search?q=${encodeURIComponent(query)}`);
                 let html = '';
+                // A document reads "number · who · amount", so a search for an
+                // amount (612.30) shows which document matched.
+                const doc = (num, who, amt) => [num, who, formatCurrency(amt)].filter(Boolean).join(' · ');
                 const sections = [
                     { key: 'customers', label: T('Customers'), onClick: (item) => `App.navigate('#/customers');closeSearchDropdown();` },
                     { key: 'vendors', label: 'Vendors', onClick: (item) => `App.navigate('#/vendors');closeSearchDropdown();` },
                     { key: 'items', label: 'Items', onClick: (item) => `App.navigate('#/items');closeSearchDropdown();` },
-                    { key: 'invoices', label: T('Invoices'), onClick: (item) => `InvoicesPage.view(${item.id});closeSearchDropdown();` },
-                    { key: 'estimates', label: 'Estimates', onClick: (item) => `App.navigate('#/estimates');closeSearchDropdown();` },
-                    { key: 'payments', label: 'Payments', onClick: (item) => `App.navigate('#/payments');closeSearchDropdown();` },
+                    { key: 'invoices', label: T('Invoices'), onClick: (item) => `InvoicesPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(i.invoice_number, i.customer_name, i.total) },
+                    { key: 'sales_receipts', label: T('Sales Receipts'), onClick: (item) => `SalesReceiptsPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(i.invoice_number, i.customer_name, i.total) },
+                    { key: 'estimates', label: 'Estimates', onClick: (item) => `App.navigate('#/estimates');closeSearchDropdown();`,
+                      text: (i) => doc(i.estimate_number, i.customer_name, i.total) },
+                    { key: 'credit_memos', label: 'Credit Memos', onClick: (item) => `App.navigate('#/credit-memos');closeSearchDropdown();`,
+                      text: (i) => doc(i.memo_number, i.customer_name, i.total) },
+                    { key: 'bills', label: 'Bills', onClick: (item) => `BillsPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(i.bill_number, i.vendor_name, i.total) },
+                    { key: 'payments', label: 'Payments', onClick: (item) => `PaymentsPage.view(${item.id});closeSearchDropdown();`,
+                      text: (i) => doc(formatDate(i.date), i.customer_name, i.amount) },
                 ];
                 for (const sec of sections) {
                     const items = results[sec.key];
                     if (items && items.length > 0) {
                         html += `<div class="search-section">${sec.label}</div>`;
                         items.forEach(item => {
-                            const label = item.display || item.name || item.invoice_number || `#${item.id}`;
+                            const label = sec.text ? sec.text(item) : (item.display || item.name || item.invoice_number || `#${item.id}`);
                             html += `<div class="search-item" onclick="${sec.onClick(item)}">${escapeHtml(label)}</div>`;
                         });
                     }
@@ -495,8 +620,8 @@ const App = {
             // The chart import is a dry run by default; this page applies directly.
             const query = entity === 'accounts' ? '?dry_run=0' : '';
             const resp = await fetch(`/api/csv/import/${entity}${query}`, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
             const n = data.created ?? data.imported ?? 0;
             let html = `<div style="color:var(--success); font-size:11px;">Imported ${n} ${entity === 'accounts' ? 'accounts' : entity}${data.updated ? `, updated ${data.updated}` : ''}${data.skipped ? `, ${data.skipped} already there` : ''}.</div>`;
             if (data.errors && data.errors.length > 0) {
@@ -792,6 +917,7 @@ const App = {
             const auth = await fetch('/api/auth/status', { credentials: 'same-origin' });
             if (auth.ok) {
                 const a = await auth.json();
+                if (a.user) App.setRole(a.user.role);
                 if (a.multi_user && a.user && a.user.role !== 'admin') {
                     // HR and payroll are admin functions; the server refuses
                     // them for other roles, so do not offer the pages.

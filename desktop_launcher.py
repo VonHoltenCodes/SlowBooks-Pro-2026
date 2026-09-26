@@ -44,7 +44,9 @@ import sys
 import time
 import urllib.request
 from datetime import datetime
+from html import escape as _html_escape
 from pathlib import Path
+from string import Template
 
 # PyInstaller: the read-only application files (app/, migrations/,
 # alembic.ini, .env.example) live in the bundle; everything writable
@@ -654,11 +656,44 @@ def _documents_dir() -> Path:
     return docs if docs.is_dir() else Path.home()
 
 
-def _fallback_reports_dir() -> Path:
+def _fallback_reports_dir(folder: str = "Reports") -> Path:
     """Where Save PDF lands when the Documents folder refuses the write:
     the app's own data directory, which no folder-protection feature
     guards (Application Support on macOS, LOCALAPPDATA on Windows)."""
-    return get_data_dir() / "Reports"
+    return get_data_dir() / folder
+
+
+# What a customer, vendor or donor is sent — as against a report about the
+# books — known by the name the server gives the PDF ("Invoice_1002.pdf",
+# "Statement_Acme Diner.pdf"). Invoices and statements used to land in
+# .../Reports beside the P&L (macbase1, F24); they go to a Documents folder
+# beside it.
+_DOCUMENT_KINDS = frozenset(
+    {
+        "invoice",
+        "salesreceipt",
+        "estimate",
+        "statement",
+        "creditmemo",
+        "pledge",
+        "donationreceipt",
+        "acknowledgment",
+        "givingstatement",
+        "givingstatements",
+        "check",
+        "purchaseorder",
+        "po",
+        "bill",
+        "vendorcredit",
+    }
+)
+
+
+def _folder_for(filename: str) -> str:
+    """The folder for a PDF: Documents for a document someone is sent,
+    Reports for everything else."""
+    kind = str(filename or "").split("_", 1)[0].replace("-", "").lower()
+    return "Documents" if kind in _DOCUMENT_KINDS else "Reports"
 
 
 def _write_unique(folder: Path, name: str, data: bytes) -> Path:
@@ -693,10 +728,13 @@ def _folder_permission_remedy(folder: Path) -> str:
     return f"Check the permissions on {folder}."
 
 
-def _save_report(name: str, data: bytes) -> tuple[Path, str | None]:
+def _save_report(
+    name: str, data: bytes, folder: str = "Reports"
+) -> tuple[Path, str | None]:
     """Save a report PDF where the user can find it.
 
-    Documents/SlowBooks Pro/Reports first. Existence of the Documents
+    Documents/SlowBooks Pro/<folder> first — Reports, or Documents for an
+    invoice or statement (_folder_for). Existence of the Documents
     folder says nothing about permission -- on macOS the system decides
     per application (a consent prompt on first use; a denial is
     remembered), on Windows Controlled Folder Access can block it -- so
@@ -705,11 +743,11 @@ def _save_report(name: str, data: bytes) -> tuple[Path, str | None]:
     the user saying so, naming both folders and the remedy. Any other
     failure propagates.
     """
-    preferred = _documents_dir() / "SlowBooks Pro" / "Reports"
+    preferred = _documents_dir() / "SlowBooks Pro" / folder
     try:
         return _write_unique(preferred, name, data), None
     except PermissionError:
-        dest = _write_unique(_fallback_reports_dir(), name, data)
+        dest = _write_unique(_fallback_reports_dir(folder), name, data)
         note = (
             f"SlowBooks Pro was not allowed to write to {preferred}, so the "
             f"file was saved to {dest.parent} instead. "
@@ -727,6 +765,238 @@ def _safe_temp_filename(title: str, suffix: str) -> str:
     if not slug:
         slug = "document"
     return slug[:80] + suffix
+
+
+def _saved_document_roots() -> tuple[Path, ...]:
+    """The folders the app saves into when asked to: Documents/SlowBooks Pro
+    (its Reports and Documents), and the app-data folders a refused
+    Documents write falls back to."""
+    return (
+        (_documents_dir() / "SlowBooks Pro").resolve(),
+        _fallback_reports_dir().resolve(),
+        _fallback_reports_dir("Documents").resolve(),
+    )
+
+
+def _openable_pdf(path) -> Path | None:
+    """``path`` as a PDF this app saved, or None: the guard in front of
+    handing a file to another program. Only a .pdf that exists, resolved
+    (links and '..' followed) inside a saved-documents folder — anything
+    else there (an export named by the page, an attachment) could be run
+    rather than shown by the program the system picks."""
+    try:
+        target = Path(str(path or "")).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return None
+    if target.suffix.lower() != ".pdf" or not target.is_file():
+        return None
+    if not any(target.is_relative_to(root) for root in _saved_document_roots()):
+        return None
+    return target
+
+
+def _open_with_default_app(target: Path) -> None:
+    """Hand a file to the program the system opens that kind of file with."""
+    if sys.platform == "win32":
+        os.startfile(str(target))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(target)])
+    else:
+        subprocess.Popen(["xdg-open", str(target)])
+
+
+def _default_pdf_app(pdf: Path) -> str | None:
+    """The name of the program the system opens a PDF with ("Preview",
+    "Microsoft Edge"), for the viewer's button; None when it can't be told,
+    and the button says "your PDF app"."""
+    try:
+        if sys.platform == "darwin":
+            # pyobjc, which pywebview's macOS backend brings along
+            from AppKit import NSWorkspace
+            from Foundation import NSURL
+
+            app = NSWorkspace.sharedWorkspace().URLForApplicationToOpenURL_(
+                NSURL.fileURLWithPath_(str(pdf))
+            )
+            if app is None:
+                return None
+            return Path(str(app.path())).stem or None
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            size = wintypes.DWORD(260)
+            buf = ctypes.create_unicode_buffer(size.value)
+            # ASSOCF_NONE, ASSOCSTR_FRIENDLYAPPNAME
+            found = ctypes.windll.shlwapi.AssocQueryStringW(
+                0, 4, ".pdf", None, buf, ctypes.byref(size)
+            )
+            return (buf.value or None) if found == 0 else None
+    except Exception:
+        return None
+    return None
+
+
+def _reveal(path) -> dict:
+    """Open the folder that holds a file this app saved (Explorer / Finder /
+    the desktop's file manager), with the file selected where the system
+    can. Only paths under the app's saved-documents folders and the user's
+    Downloads folder are accepted."""
+    try:
+        target = Path(str(path or "")).resolve()
+        allowed = (*_saved_document_roots(), (Path.home() / "Downloads").resolve())
+        if not any(target.is_relative_to(base) for base in allowed):
+            return {"success": False, "error": "Not a file this app saved"}
+        folder = target if target.is_dir() else target.parent
+        if sys.platform == "win32":
+            if target.is_file():
+                subprocess.Popen(["explorer", "/select,", str(target)])
+            else:
+                os.startfile(str(folder))  # type: ignore[attr-defined]
+        elif sys.platform == "darwin":
+            args = (
+                ["open", "-R", str(target)]
+                if target.is_file()
+                else ["open", str(folder)]
+            )
+            subprocess.Popen(args)
+        else:
+            subprocess.Popen(["xdg-open", str(folder)])
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+    return {"success": True}
+
+
+# The page a Save PDF window shows: the PDF under a toolbar. The platform
+# viewers offered no Save or Print on macOS, and Cmd+S did nothing (F24);
+# the program the system opens a PDF with has both, so the toolbar opens
+# the file there, or shows it in its folder. Cmd/Ctrl+P and Cmd/Ctrl+S do
+# the first.
+_VIEWER_PAGE = Template("""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>$title</title>
+<style>
+  :root { color-scheme: light dark; }
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; background: #525659;
+         font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  .bar { display: flex; align-items: center; gap: 8px; padding: 6px 10px;
+         background: #f3f4f6; color: #1f2937; border-bottom: 1px solid #c9ced6; }
+  .name { font-weight: 600; white-space: nowrap; }
+  .where { flex: 1; min-width: 0; color: #6b7280; white-space: nowrap;
+           overflow: hidden; text-overflow: ellipsis; }
+  .note { color: #b91c1c; }
+  button { font: inherit; padding: 4px 10px; border: 1px solid #9aa3af;
+           border-radius: 4px; background: #fff; color: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+  @media (prefers-color-scheme: dark) {
+    .bar { background: #1f2937; color: #e5e7eb; border-color: #374151; }
+    .where { color: #9ca3af; }
+    .note { color: #fca5a5; }
+    button { background: #374151; border-color: #4b5563; }
+  }
+</style>
+</head>
+<body>
+<div class="bar" role="toolbar" aria-label="$name">
+  <span class="name">$name</span>
+  <span class="where" title="$path">Saved in $where</span>
+  <span class="note" id="note" role="status"></span>
+  <button type="button" id="open-in-app" disabled
+          title="Print it, or save a copy somewhere else, from there">$open_label</button>
+  <button type="button" id="show-in-folder" disabled>Show in folder</button>
+</div>
+<iframe src="$src" title="$name"></iframe>
+<script>
+(function () {
+  var note = document.getElementById('note');
+  function call(name) {
+    var api = window.pywebview && window.pywebview.api;
+    if (!api || !api[name]) { note.textContent = 'Not available in this window.'; return; }
+    note.textContent = '';
+    api[name]().then(function (r) {
+      if (!r || !r.success) note.textContent = (r && r.error) || 'That did not work.';
+    });
+  }
+  function ready() {
+    document.getElementById('open-in-app').disabled = false;
+    document.getElementById('show-in-folder').disabled = false;
+  }
+  document.getElementById('open-in-app').addEventListener('click', function () {
+    call('open_in_default_app');
+  });
+  document.getElementById('show-in-folder').addEventListener('click', function () {
+    call('show_in_folder');
+  });
+  document.addEventListener('keydown', function (e) {
+    if ((e.metaKey || e.ctrlKey) && (e.key === 'p' || e.key === 's')) {
+      e.preventDefault();
+      call('open_in_default_app');
+    }
+  });
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.open_in_default_app) ready();
+  else window.addEventListener('pywebviewready', ready);
+})();
+</script>
+</body>
+</html>
+""")
+
+
+def _write_viewer(pdf: Path, title: str) -> Path:
+    """Write the viewer page for a saved PDF and return it. It goes in the
+    app's own data folder, never beside the user's files; pages older than
+    a day are cleared out as a new one is written."""
+    folder = get_data_dir() / "viewer"
+    folder.mkdir(parents=True, exist_ok=True)
+    cutoff = time.time() - 86400
+    for old in folder.glob("viewer-*.html"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
+    app = _default_pdf_app(pdf)
+    page = _VIEWER_PAGE.substitute(
+        title=_html_escape(title or pdf.name),
+        name=_html_escape(pdf.name),
+        path=_html_escape(str(pdf)),
+        where=_html_escape(str(pdf.parent)),
+        src=_html_escape(pdf.as_uri()),
+        open_label=_html_escape(f"Open in {app}" if app else "Open in your PDF app"),
+    )
+    dest = folder / f"viewer-{secrets.token_hex(8)}.html"
+    dest.write_text(page, encoding="utf-8")
+    return dest
+
+
+class DocumentViewerApi:
+    """js_api of a Save PDF window: its toolbar's two buttons. Bound to the
+    one file the window shows — no method takes a path, so the page can't
+    name another file — with the path guard behind that. State stays
+    underscore-private (see PickerApi)."""
+
+    def __init__(self, path):
+        self._path = str(path)
+
+    def open_in_default_app(self) -> dict:
+        target = _openable_pdf(self._path)
+        if target is None:
+            return {
+                "success": False,
+                "error": "This PDF has been moved or deleted. Use Show in folder.",
+            }
+        try:
+            _open_with_default_app(target)
+        except Exception as exc:
+            return {"success": False, "error": str(exc)}
+        return {"success": True}
+
+    def show_in_folder(self) -> dict:
+        return _reveal(self._path)
 
 
 class PickerApi:
@@ -801,7 +1071,9 @@ class PickerApi:
 
     def open_document_pdf(self, title: str, base64_data: str) -> dict:
         """Save an already-fetched PDF (base64-encoded by the caller) under
-        Documents/SlowBooks Pro/Reports and show it in a new native window.
+        Documents/SlowBooks Pro/Reports — or .../Documents for an invoice,
+        estimate, statement or other document someone is sent — and show it
+        in a new native window.
         The platform web view renders a file:// PDF with its own viewer
         (WebView2/Chromium on Windows, WKWebView on macOS, WebKitGTK on
         Linux), and a local file needs no authentication at all --
@@ -816,6 +1088,10 @@ class PickerApi:
         refuses the write (macOS consent denied, Controlled Folder Access)
         the file goes to the app's data directory and ``note`` explains,
         so a denial never looks like a crash.
+
+        The window shows the PDF under a toolbar (_VIEWER_PAGE): Open in
+        <the PDF app>, which has Print and Save — the platform viewer had
+        neither on macOS (F24) — and Show in folder.
         """
         import base64
 
@@ -823,8 +1099,19 @@ class PickerApi:
             import webview
 
             data = base64.b64decode(base64_data)
-            dest, note = _save_report(_safe_temp_filename(title, ".pdf"), data)
-            webview.create_window(title or "SlowBooks Pro 2026", dest.as_uri())
+            # The title is the server's filename, "Invoice_1002.pdf": take
+            # the extension off before the name is made safe, or the dot
+            # became a dash and the file was "Invoice_1002-pdf.pdf" (F24).
+            stem = re.sub(r"\.pdf$", "", str(title or ""), flags=re.IGNORECASE)
+            name = _safe_temp_filename(stem, ".pdf")
+            dest, note = _save_report(name, data, _folder_for(name))
+            # The PDF under a toolbar (Open in the PDF app, Show in folder);
+            # the bare PDF if the page can't be written.
+            try:
+                url, api = _write_viewer(dest, title).as_uri(), DocumentViewerApi(dest)
+            except OSError:
+                url, api = dest.as_uri(), None
+            webview.create_window(title or "SlowBooks Pro 2026", url, js_api=api)
         except Exception as exc:
             return {"success": False, "error": str(exc)}
         result = {"success": True, "path": str(dest)}
@@ -859,33 +1146,7 @@ class PickerApi:
         """Open the folder that holds a file this app saved (Explorer /
         Finder / the desktop's file manager). Only paths under the app's
         own Reports and the user's Downloads folders are accepted."""
-        try:
-            target = Path(str(path or "")).resolve()
-            allowed = (
-                (_documents_dir() / "SlowBooks Pro").resolve(),
-                _fallback_reports_dir().resolve(),
-                (Path.home() / "Downloads").resolve(),
-            )
-            if not any(target.is_relative_to(base) for base in allowed):
-                return {"success": False, "error": "Not a file this app saved"}
-            folder = target if target.is_dir() else target.parent
-            if sys.platform == "win32":
-                if target.is_file():
-                    subprocess.Popen(["explorer", "/select,", str(target)])
-                else:
-                    os.startfile(str(folder))  # type: ignore[attr-defined]
-            elif sys.platform == "darwin":
-                args = (
-                    ["open", "-R", str(target)]
-                    if target.is_file()
-                    else ["open", str(folder)]
-                )
-                subprocess.Popen(args)
-            else:
-                subprocess.Popen(["xdg-open", str(folder)])
-        except Exception as exc:
-            return {"success": False, "error": str(exc)}
-        return {"success": True}
+        return _reveal(path)
 
     def save_backup_file(self, filename: str) -> dict:
         """Copy a backup file straight from disk into the user's Downloads

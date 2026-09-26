@@ -12,7 +12,7 @@
             <div>
                 {% if company_logo_data_uri %}<img src="{{ company_logo_data_uri }}" alt="" style="display:block;max-height:44px;max-width:160px;margin-bottom:4px">{% endif %}
                 <h1>{{ section.title }}</h1>
-                <div style="font-size:12px; font-weight:600;">{{ company.get('company_name', '') }}</div>
+                <div class="report-company" style="font-size:12px; font-weight:600;">{{ company.get('company_name', '') }}</div>
             </div>
             <div class="report-meta">
                 {{ section.period }}<br>

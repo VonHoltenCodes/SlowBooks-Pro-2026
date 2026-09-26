@@ -4,15 +4,23 @@
    international installs both print natively. Ported concept from the
    joelmacklow fork's _document_theme partial. #}
 <style>
+    {# The footer takes the company name from the page itself (string-set
+       on .report-company below), not from text written into this style
+       block: <style> is raw text, so autoescaping printed "Explore Signs
+       &amp; Co" on every page, and a quote in a name would have ended the
+       CSS string. A margin box does not inherit the body's font either —
+       it fell back to a serif or monospace face — so it names the font. #}
     @page {
         size: {{ 'A4' if paper_size == 'a4' else 'letter' }};
         margin: 18mm 16mm 20mm 16mm;
         @bottom-center {
-            content: "{{ company.get('company_name', '') }} — page " counter(page) " of " counter(pages);
+            content: string(company) " — page " counter(page) " of " counter(pages);
+            font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
             font-size: 8px;
             color: #888;
         }
     }
+    .report-company { string-set: company content(); }
     body {
         font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
         font-size: 10.5px;

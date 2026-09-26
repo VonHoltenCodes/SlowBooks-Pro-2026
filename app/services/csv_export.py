@@ -4,6 +4,7 @@
 # ============================================================================
 
 import csv
+from decimal import Decimal
 import io
 
 from sqlalchemy.orm import Session
@@ -13,14 +14,46 @@ from app.models.items import Item
 from app.models.invoices import Invoice
 from app.models.accounts import Account
 
+_FORMULA_LEADS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _rate_text(value) -> str:
+    """A unit price as a person writes it: at least two places, and the
+    third and fourth only when they carry a digit — 12.50, 0.045 — now that
+    line rates are stored to four places (a $12.50 rate read "12.5000")."""
+    if value is None:
+        return ""
+    d = Decimal(str(value))
+    text = format(d.quantize(Decimal("0.0001")), "f")
+    whole, _, frac = text.partition(".")
+    frac = frac.rstrip("0")
+    return f"{whole}.{frac.ljust(2, '0')}"
+
 
 def _csv_safe(value: str) -> str:
     """Neutralize spreadsheet formula injection. A cell beginning with
     =, +, -, @, TAB, or CR is treated as a formula by Excel/Sheets; prefixing
     with an apostrophe forces plain text without changing the displayed value.
     A customer named `=HYPERLINK(...)` otherwise executes on open."""
-    if value and value[0] in ("=", "+", "-", "@", "\t", "\r"):
+    if value and value[0] in _FORMULA_LEADS:
         return "'" + value
+    return value
+
+
+def strip_formula_guard(value):
+    """The importers' half of _csv_safe: take off the apostrophe the export
+    put in front of a formula-shaped value, so re-importing our own file
+    gives back `=HYPERLINK(...)` rather than a second customer named
+    `'=HYPERLINK(...)` (2.17.3 exploratory test, W-M15). Only an apostrophe
+    followed by one of the guarded characters is removed; any other value,
+    and anything that is not text, passes through untouched."""
+    if (
+        isinstance(value, str)
+        and len(value) > 1
+        and value[0] == "'"
+        and value[1] in _FORMULA_LEADS
+    ):
+        return value[1:]
     return value
 
 
@@ -37,7 +70,12 @@ class _SafeWriter:
 
 
 def export_customers(db: Session) -> str:
+    from app.services.contact_balances import customer_balances
+
     customers = db.query(Customer).filter(Customer.is_active).all()
+    # Customer.balance is never written; the balance is summed from the
+    # open documents (services/contact_balances).
+    balances = customer_balances(db, [c.id for c in customers])
     output = io.StringIO()
     writer = _SafeWriter(output)
     writer.writerow(
@@ -68,14 +106,17 @@ def export_customers(db: Session) -> str:
                 c.bill_state or "",
                 c.bill_zip or "",
                 c.terms or "",
-                float(c.balance or 0),
+                float(balances.get(c.id, 0)),
             ]
         )
     return output.getvalue()
 
 
 def export_vendors(db: Session) -> str:
+    from app.services.contact_balances import vendor_balances
+
     vendors = db.query(Vendor).filter(Vendor.is_active).all()
+    balances = vendor_balances(db, [v.id for v in vendors])
     output = io.StringIO()
     writer = _SafeWriter(output)
     writer.writerow(
@@ -106,7 +147,7 @@ def export_vendors(db: Session) -> str:
                 v.state or "",
                 v.zip or "",
                 v.terms or "",
-                float(v.balance or 0),
+                float(balances.get(v.id, 0)),
             ]
         )
     return output.getvalue()
@@ -320,7 +361,7 @@ def export_bills(db: Session, date_from=None, date_to=None) -> str:
                     ln.cost_code.label if getattr(ln, "cost_code", None) else "",
                     ln.description or "",
                     ln.quantity,
-                    ln.rate,
+                    _rate_text(ln.rate),
                     ln.amount,
                     b.subtotal,
                     b.tax_amount,
@@ -423,7 +464,7 @@ def export_sales_receipts(db: Session, date_from=None, date_to=None) -> str:
                     ln.item.name if ln.item else "",
                     ln.description or "",
                     ln.quantity,
-                    ln.rate,
+                    _rate_text(ln.rate),
                     "Y" if ln.is_taxable else "N",
                     ln.amount,
                     inv.subtotal,

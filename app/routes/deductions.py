@@ -57,11 +57,32 @@ def create_garnishment(data: GarnishmentOrderCreate, db: Session = Depends(get_d
     return order
 
 
-@router.delete("/garnishments/{order_id}")
-def remove_garnishment(order_id: int, db: Session = Depends(get_db)):
+@router.post("/garnishments/{order_id}/end", response_model=GarnishmentOrderResponse)
+def end_garnishment(order_id: int, db: Session = Depends(get_db)):
+    """End a garnishment order: it is no longer withheld from future pay runs
+    (runs read active orders only), and its record — case number, type,
+    amount, priority — stays, as a court-ordered withholding's should. It
+    used to be deleted outright from the Deductions page."""
     order = db.query(GarnishmentOrder).filter(GarnishmentOrder.id == order_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Garnishment order not found")
-    db.delete(order)
+    if not order.is_active:
+        raise HTTPException(
+            status_code=400, detail="This garnishment order has already ended."
+        )
+    order.is_active = False
     db.commit()
-    return {"status": "deleted", "id": order_id}
+    db.refresh(order)
+    return order
+
+
+@router.delete("/garnishments/{order_id}")
+def remove_garnishment(order_id: int, db: Session = Depends(get_db)):
+    """A garnishment order is ended, not deleted, so its record stays."""
+    raise HTTPException(
+        status_code=405,
+        detail=(
+            "A garnishment order is ended, not deleted, so its record stays: "
+            f"use POST /api/deductions/garnishments/{order_id}/end"
+        ),
+    )

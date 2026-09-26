@@ -16,21 +16,30 @@ pass, and the per-integration setup guides ([Stripe](setup-stripe.md),
 - **Invoices** — Create, edit, duplicate, void, mark as sent, email as PDF. Auto-numbering, auto due-date from terms, dynamic line items with running totals. Print/PDF generation via WeasyPrint. Inline customer creation from invoice form
 - **Sales Receipts** — One-screen invoice + payment for point-of-sale style sales where the customer pays on the spot. Payment method, deposit-to account, and line items on a single form; posts both documents and their journal entries atomically. Imports from QuickBooks Desktop (IIF `CASH SALE`) and QuickBooks Online (SalesReceipt API)
 - **Receipt scanning (Tier 2 OCR)** — A Scan Receipt button on the Sales Receipt and Bill forms uploads a receipt image or PDF and pre-fills the form from local OCR: date, merchant/vendor hint, and the grand total as a single line, with detected tax split out (tax-rate field on sales receipts; noted in Bill Notes). The operator always reviews before saving, and the source file attaches to the document. On Windows and macOS the OS engine reads the text and the OS renders PDF pages, so nothing is installed; on Linux, Tesseract + poppler-utils are user-installed system binaries called via subprocess — zero new Python dependencies, never bundled, graceful "install Tesseract to enable scanning" degrade. Deterministic parsing, no AI. Spec: [docs/design/receipt-intake-spec.md](design/receipt-intake-spec.md)
-- **Estimates** — Full estimate workflow with convert-to-invoice (deep-copies all fields and line items). Inline customer creation from estimate form
-- **Payments** — Record payments with allocation across multiple invoices. Auto-updates invoice balances and status (draft/sent/partial/paid). Void payments with reversing journal entries
-- **Recurring Invoices** — Schedule automatic invoice generation (weekly/monthly/quarterly/yearly) with manual "Generate Now" or cron script
-- **Batch Payments** — Apply payments to multiple invoices across multiple customers in a single transaction
-- **Credit Memos** — Issue credits against customers, apply to invoices to reduce balance due. Proper reversing journal entries
+- **Estimates** — Full estimate workflow with convert-to-invoice: the invoice is dated the day it is made, due by the customer's terms, addressed to the customer (the estimate is addressed when saved). Inline customer creation from estimate form
+- **Payments** — Record payments with allocation across multiple invoices. Typing the amount fills the Apply column oldest invoice first (change any of it); money left over is kept as a customer credit only when you tick the box that says so. Draft invoices can be paid too. Auto-updates invoice balances and status (draft/sent/partial/paid). Void payments with reversing journal entries — refused while the payment is in a deposit, and once that deposit is reconciled
+- **Customer credits** — Unapplied payment money and open credit memos are listed on Receive Payment, the customer page, the payment and the invoice, each with **Apply**; applying a foreign-currency remainder posts the realized exchange difference. A/R Aging, Income by Customer, the dashboard and every customer balance count them, so they tie to account 1100
+- **Foreign-currency invoices** — The document carries its currency ("EUR 850.00") on screen, in lists, on the PDF and in email; the ledger books the home amount at the invoice's rate, and A/R reports count that booked amount. Receive Payment offers the customer's invoice currencies and takes the rate on the payment date
+- **Recurring Invoices** — Schedule automatic invoice generation (weekly/monthly/quarterly/yearly) with manual "Generate Now" or cron script. The form prices the item and shows a total; a schedule that adds up to $0.00 is refused, and the generator skips an old one
+- **Documents that add up to $0.00** — An invoice, credit memo, duplicate or estimate conversion for $0.00 asks "Save it anyway?" before it saves (API: `allow_zero_total: true`, else 409 `zero_total`); a no-charge invoice starts Paid
+- **Invoice numbering and footer** — Settings' invoice prefix, next invoice number (leading zeros kept as padding) and invoice footer are used
+- **Walk-in sales** — A sales receipt needs no customer: counter sales go to a built-in Walk-in Customer (Anonymous Donor in a nonprofit)
+- **Unit prices to four places** — $0.045 a box on invoices, estimates, sales receipts, credit memos, recurring schedules, bills, purchase orders, vendor credits and items; each line amount is rounded to the cent
+- **Credit limit** — Saving an invoice that takes a customer past their credit limit asks first
+- **Batch Payments** — Apply payments to multiple invoices across multiple customers in a single transaction. Each line pays only its own customer's invoices, in the home currency; a batch with one wrong line is refused whole
+- **Credit Memos** — Issue credits against customers, apply to that customer's invoices to reduce balance due. Picking an item fills its price; the form totals up; tax starts at the company's rate or the credited invoice's, and falls on the lines an invoice would tax. View, Save PDF and Print. Proper reversing journal entries
 - **Vendor Credits** — Record a credit a supplier gave you for a return, a short shipment or an overcharge. Debits Accounts Payable and credits the expense (or Inventory, for stock going back), then applies to any of that vendor's open bills or sits on their account until there is one. Applying posts nothing — A/P moved when the credit was issued
 - **Quick Entry Mode** — Batch invoice entry for paper invoice backlog. Save & Next (Ctrl+Enter) with running log
 
 ![Invoices with IRS Pub 583 Mock Data](../screenshots/invoices.png)
 
 ## Accounts Payable
-- **Purchase Orders** — Non-posting documents to vendors with auto-numbering, convert-to-bill workflow
-- **Bills** — Enter vendor bills (AP mirror of invoices). Track payables with status progression (draft/unpaid/partial/paid/void). Vendor default expense account pre-fill (account resolution: explicit → item → vendor default → global fallback). Scan a vendor receipt to pre-fill the form (see Receipt scanning under Sales Receipts)
-- **Bill Payments** — Pay vendor bills with allocation. Journal: DR AP, CR Bank
-- **AP Aging Report** — Outstanding payables grouped by vendor with 30/60/90 day buckets
+- **Purchase Orders** — Non-posting documents to vendors with auto-numbering, live line amounts and totals, View, Save PDF and Print, and a To Bill step that asks for an account on each line that has none. A new PO starts at no tax
+- **Bills** — Enter vendor bills (AP mirror of invoices). Track payables with status progression (draft/unpaid/partial/paid/void). Each line posts to the account on the line, else the item's expense account, else the vendor's default — a line none of them names is refused (it used to fall back to 6000). Enter Bill has an Account column, fills a picked item's cost and account, takes the vendor's terms and due date, shows a running total and refuses $0.00. Save PDF and Print. Scan a vendor receipt to pre-fill the form (see Receipt scanning under Sales Receipts)
+- **Tax on a purchase** — Sales tax a supplier charges is part of what the purchase cost: spread over the lines to the cent and posted with them (expense, cost of goods or inventory, in the item's unit cost). It never touches 2200 Sales Tax Payable. The Sales Tax report names purchase tax an older release posted there and gives the correcting entry
+- **Vendor list** — Balances worked out from open bills and unapplied credits; a vendor can be made inactive; cost-of-goods accounts can be a vendor's default
+- **Bill Payments** — Pay vendor bills with allocation. Journal: DR AP, CR Bank. Pay Bills makes one payment per vendor and asks for one vendor at a time when a check number is entered; a payment pays only its own vendor's bills. A bill lists its payments, each with View, Print Check and Void (refused once the check is reconciled). Paying from a bank account that would go below zero asks first
+- **AP Aging Report** — Outstanding payables grouped by vendor with 30/60/90 day buckets past due, in home currency, with vendor credits and bill-payment money not yet applied netted, so the total equals account 2000. A bill with no due date ages from its date and terms
 
 ## Double-Entry Accounting
 - **Manual Journal Entries** — Full CRUD for manual journal entries with dynamic line rows, running debit/credit totals, balance indicator, and void with reversing entries
@@ -40,11 +49,13 @@ pass, and the per-integration setup guides ([Stripe](setup-stripe.md),
 - **Closing Date Enforcement** — Prevent modifications to transactions before a configurable closing date with optional password protection
 - **Audit Log** — Automatic logging of all create/update/delete operations with old/new value tracking via SQLAlchemy event hooks
 - **Account Balances** — Updated in real-time as transactions post
+- **Fixed Assets** — Register an asset and its purchase posts: paid from a bank or card account, on a bill or expense already entered (the cost moves out of the expense account), or owned before the books began (with depreciation already taken). Straight-line depreciation posts monthly; salvage above cost is refused
 
 ## Payroll & HR
 - **Core payroll** — pay runs with federal/state/FICA withholding, balanced journal entries, pay stubs, YTD totals, encrypted ACH direct deposit, gross-up calculator, supplemental wages, multi-state withholding
-- **HR** — 8-task onboarding checklist with e-signature, time tracking with approve/reject, PTO policies + requests with accrual draw-down, pre/post-tax deductions, court-ordered garnishments
-- **Tax forms** — W-2, W-3, Form 940 (FUTA), Form 941 (FICA) endpoints. JSON for downstream integrations + WeasyPrint PDFs with tamper-evident audit hashes in the footer (SHA-256 + audit ID matched against the `document_audits` table).
+- **HR** — 8-task onboarding checklist with e-signature, time tracking (hours shown, approve or reject from draft, clock times work out the hours), PTO policies + requests with accrual draw-down, pre/post-tax deductions, court-ordered garnishments. A pay run that would pay someone $0.00 is refused and names them and the time waiting for approval
+- **Pay stubs** — a Stub PDF per employee on the pay-run view, naming the company; the view's Other column (state taxes other than income tax, garnishments) makes every row add up to Net. Processing a run that would overdraw the bank account asks first
+- **Tax forms** — W-2, W-3, Form 940 (FUTA), Form 941 (FICA), 1099-NEC and 1096. JSON for downstream integrations + WeasyPrint PDFs with tamper-evident audit hashes in the footer (SHA-256 + audit ID matched against the `document_audits` table). The PDFs open by GET, as invoices do, so they appear in the desktop app's viewer. W-3, 940 and 941 count only employees paid wages; the 941 works lines 5a–5d from the rates and carries the rounding on line 7. A vendor marked "1099 Vendor: Yes" reaches the 1099-NEC and 1096
 - **Self-service portal** — token-accessed at `/portal/{token}` — pay stubs, W-4 updates, direct-deposit setup, PTO requests; branded with the employer's logo and company name
 
 Tax calculations are approximate — verify with a tax professional. Full module reference (models, routes, UI pages, pending items) lives at [docs/payroll-hr-module.md](payroll-hr-module.md).
@@ -54,11 +65,12 @@ The register is the ledger account (v2.10, issue #114). Full guide: [docs/bankin
 - **Bank and credit-card accounts** — chart accounts flagged `bank` / `credit_card`; every paid-from, deposit-to and pay-from picker lists exactly those
 - **Register** — every posting on the account with a running balance (a card shows the amount owed), payee, source link, cleared/reconciled marks; a register entry posts (DR category / CR account for money out, the reverse for money in)
 - **Transfers** — DR to / CR from between bank and card accounts; paying a card is a transfer. Voidable
-- **Make Deposits** — Move funds from Undeposited Funds to a bank account. Select pending payments, choose target account, create deposit
+- **Make Deposits** — Move funds from Undeposited Funds to a bank account. Select pending payments (each named with its receipt or check number), choose target account, create deposit. A deposit records the payments it took; Recent deposits lists them with View and Void
 - **Credit Card Charges** — DR Expense, CR the card you pick (default 2100). Voidable
 - **Check Printing** — Generate check PDFs in standard 3-per-page format (stub/stub/check) with payee, amount in words, memo, and signature line
-- **Bank feeds and file imports (SimpleFIN, OFX/QFX, Bank of America/Chase/PayPal CSV)** — a review queue: each statement line is auto-matched to the posting the ledger already has (same amount and side within five days, check number narrows, ambiguity waits), or added with a category, or excluded. Bank rules suggest categories and never post
-- **Bank Reconciliation** — over the ledger's lines: beginning balance from the prior statement, tick cleared lines (matched statement lines arrive cleared), difference must be $0, completing locks the lines
+- **Bank feeds and file imports (SimpleFIN, OFX/QFX, any CSV with a date, a description and an amount)** — a review queue: each statement line is auto-matched to the posting the ledger already has (same amount and side within five days, check number narrows, ambiguity waits), or added with a category, or excluded. A category picked on screen is kept on the line. A CSV the import can't read asks which column is which. Bank rules suggest categories and never post. Adding a feed compares the statement balance with the books and never counts it twice
+- **Bank Reconciliation** — over the ledger's lines: beginning balance from the prior statement, tick cleared lines (matched statement lines arrive cleared), difference must be $0 (Finish says by how much when it isn't), completing locks the lines; statements go forward only; each completed reconciliation has a report and PDF
+- **Register links** — every register line opens its document: invoice, payment, bill, bill payment, deposit, expense, card charge, transfer, or its journal entry
 
 ## Reports & Tax
 - **QuickBooks-style period selector** — All reports support preset periods (This Month, This Quarter, This/Last Year, Year to Date, Custom Date) with live refresh
@@ -66,13 +78,14 @@ The register is the ledger account (v2.10, issue #114). Full guide: [docs/bankin
 - **Balance Sheet** — Assets, liabilities, and equity as of any date
 - **Trial Balance** — Every account's debit or credit balance for the period, with totals that must agree
 - **Save as spreadsheet / printable** — Profit & Loss, Balance Sheet, Trial Balance and General Ledger each save as a CSV (amounts as plain numbers, one row per line, ready for Excel or LibreOffice) and a PDF. The figures in the file are the figures on the screen
-- **A/R Aging** — Outstanding receivables grouped by customer with 30/60/90 day buckets
-- **A/P Aging** — Outstanding payables grouped by vendor with 30/60/90 day buckets
-- **Sales Tax** — Per-line taxable flag (defaults from the item and the customer) so untaxed labor and a taxed part share one invoice; the rate lives on the document. Sales Tax report shows the taxable base and tax collected. Pay Sales Tax feature records payments to government (DR Sales Tax Payable, CR Bank)
+- **A/R Aging** — Outstanding receivables grouped by customer with 30/60/90 day buckets, in home currency, with a Credits column for unapplied payments and credit memos; the total equals account 1100. Email All Overdue sends a statement to each customer with overdue sent invoices and reports who didn't get one
+- **A/P Aging** — see Accounts Payable
+- **Cash Flow** — Indirect method: net income, non-cash adjustments, changes in working capital, investing and financing; the net change equals the change in the bank accounts
+- **Sales Tax** — Per-line taxable flag (defaults from the item and the customer) so untaxed labor and a taxed part share one invoice; the rate lives on the document. Sales Tax report shows the taxable base and tax collected, nets credit memos, and checks itself against Sales Tax Payable. Pay Sales Tax records payments to government (DR Sales Tax Payable, CR a bank or card account)
 - **General Ledger** — Every posted line grouped by account: balance brought forward, running balance in the account's natural sign (a payable or income reads positive), the source document type, and a period total that ties to the Trial Balance
-- **Income by Customer** — Sales totals per customer with invoice counts
-- **Customer Statements** — PDF statement with invoice/payment history and running balance
-- **Schedule C (Tax)** — Generate Schedule C data from P&L with configurable account-to-tax-line mappings. Export as CSV
+- **Income by Customer** — Sales before tax per customer, with tax in its own column, payments received (applied or not) and invoice counts
+- **Customer Statements** — PDF statement: one list in date order (invoices, payments, credit memos), each line describing its document, with a running balance in home currency
+- **Schedule C (Tax)** — Generate Schedule C data from P&L with configurable account-to-tax-line mappings, matched to exact line ids and following the seeded chart (cost of goods on line 4; income 1, other expense 27a when unmapped); net profit equals the P&L. Export as CSV
 
 ## Nonprofit mode
 - **One switch** — Settings → Company Type → Nonprofit swaps the vocabulary (Donor, Pledge, Donation, Fund, Grant, Statement of Activities / Financial Position, Net Assets) on screens, report titles, PDF names and the dashboard; the API and database never change name. Printed faces are literal: Donation Receipt / Pledge / Invoice by the document, not the setting
@@ -291,7 +304,8 @@ curl http://localhost:3001/api/analytics/export.pdf > snapshot.pdf
 - **Saved reports** — Full CRUD on named `(report_type, parameters)` tuples at `/api/saved-reports`. Lets users one-click rerun their favorite P&L, Balance Sheet, or account drill-down without re-entering dates
 
 ## Security & Authentication
-- Single-user authentication with Argon2id password hashing and rate-limited login
+- Single-user authentication with Argon2id password hashing and rate-limited login; a new company opens on setup with its name; an opt-in setting asks for the password each time the app starts
+- Closing date override password: asked for when a change falls in the closed period; five wrong passwords lock the override for ten minutes
 - App-level HTTPS redirect, HSTS, and `Secure` session cookie when `FORCE_HTTPS=true`
 - Field-level Fernet encryption for bank routing/account numbers, with zero-downtime key rotation
 - Self-service portal tokens expire on 90-day idle + 1-year hard windows
@@ -301,7 +315,7 @@ Canonical list of security measures lives in [SECURITY.md](../SECURITY.md); engi
 
 ## System & Administration
 - **Dark Mode** — Toggle between QB2003 Blue theme and dark mode (Alt+D or toolbar button). Persists in localStorage
-- **Backup/Restore** — Create and download PostgreSQL backups from the settings page
+- **Backup/Restore** — Create, download and restore backups from Settings. Backups are named for their company and listed per company; a restore takes a safety copy first, asks twice for another company's backup, and refuses a newer version's
 - **Multi-Company** — Support for multiple company databases, switchable from UI
 - **Global Search** — Unified server-side search across customers, vendors, items, invoices, estimates, and payments
 - **Attachments** — Upload files (PDF, images) to invoices, bills, and other entities with MIME type and extension validation
@@ -454,7 +468,12 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 300+ routes across 50 rout
 | `/api/estimates/{id}/convert` | POST | Convert estimate to invoice |
 | `/api/estimates/{id}/print-preview` | GET | Browser print preview (HTML) |
 | `/api/payments` | GET, POST | Record payments with invoice allocation |
-| `/api/payments/{id}/void` | POST | Void payment with reversing journal entry |
+| `/api/payments/{id}/void` | POST | Void payment with reversing journal entry (refused while in a deposit) |
+| `/api/payments/{id}/apply` | POST | Apply a payment's unapplied remainder to invoices (`allocations`) |
+| `/api/customers/{id}/credits` | GET | A customer's unapplied payments and open credit memos |
+| `/api/banking/ledger-balance` | GET | The ledger balance of a bank/card account as of a date |
+| `/api/banking/transactions/{id}` | PATCH | Keep the category picked for a statement line |
+| `/api/banking/reconciliations/{id}/report · /pdf` | GET | A completed reconciliation's report |
 | `/api/banking/overview` | GET | Bank and card accounts with ledger balances, feed, to-review count |
 | `/api/banking/accounts` | GET, POST, PUT | Bank feeds (statement identity of a ledger account); `opening_balance` posts; `…/post-legacy-balance` |
 | `/api/banking/transactions` | GET, POST | GET: statement lines (review queue). POST: a register entry — posts a journal entry |
@@ -468,12 +487,16 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 300+ routes across 50 rout
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/purchase-orders` | GET, POST, PUT | Purchase order CRUD |
-| `/api/purchase-orders/{id}/convert-to-bill` | POST | Convert PO to bill |
+| `/api/purchase-orders/{id}/convert-to-bill` | POST | Convert PO to bill; optional body `lines: [{line_id, account_id}]` |
+| `/api/purchase-orders/{id}/pdf · /print-preview` | GET | Purchase order PDF / print page |
 | `/api/bills` | GET, POST, PUT | Bill CRUD with line items |
 | `/api/bills/{id}/void` | POST | Void bill |
-| `/api/bill-payments` | POST | Pay vendor bills with allocation |
+| `/api/bills/{id}/pdf · /print-preview` | GET | Bill PDF / print page |
+| `/api/bill-payments` | GET, POST | Pay vendor bills with allocation (a payment pays its own vendor's bills only); `?bill_id=` lists a bill's payments |
+| `/api/bill-payments/{id}` | GET | One bill payment with what it paid |
 | `/api/credit-memos` | GET, POST | Credit memo CRUD |
-| `/api/credit-memos/{id}/apply` | POST | Apply credit to invoices |
+| `/api/credit-memos/{id}/apply` | POST | Apply credit to that customer's invoices |
+| `/api/credit-memos/{id}/pdf · /print-preview` | GET | Credit memo PDF / print page |
 | `/api/vendor-credits` | GET, POST | Vendor credit list and create |
 | `/api/vendor-credits/{id}` | GET | One vendor credit with its lines |
 | `/api/vendor-credits/{id}/apply` | POST | Apply a vendor credit to a bill |
@@ -505,9 +528,11 @@ All payroll, HR, tax-form, and self-service portal endpoints are documented with
 |----------|---------|-------------|
 | `/api/banking/check-register` | GET | The register: ledger lines on a bank/card account with running balance, links, cleared state |
 | `/api/deposits/pending` | GET | Pending deposits in Undeposited Funds |
-| `/api/deposits` | GET, POST | Create deposits (move funds to bank) |
+| `/api/deposits` | GET, POST | List and create deposits (move funds to bank; `line_ids` are the payments taken) |
+| `/api/deposits/{id}` | GET | One deposit with its payments |
+| `/api/deposits/{id}/void` | POST | Void a deposit (its payments wait to be deposited again) |
 | `/api/cc-charges` | GET, POST | Credit card charge entry (`card_account_id`, `…/{id}/void`) |
-| `/api/checks/print` | GET | Generate check PDF (3-per-page format) |
+| `/api/checks/print` | GET | Generate check PDF (3-per-page format) for a bill payment (`bill_payment_id`) |
 
 ### Journal Entries
 | Endpoint | Methods | Description |
@@ -515,6 +540,8 @@ All payroll, HR, tax-form, and self-service portal endpoints are documented with
 | `/api/journal` | GET, POST | Manual journal entry CRUD |
 | `/api/journal/{id}` | GET | Get journal entry with lines |
 | `/api/journal/{id}/void` | POST | Void with reversing entry |
+| `/api/fixed-assets` | GET, POST, PUT | Fixed asset register (`acquisition` posts the purchase) |
+| `/api/fixed-assets/{id}/post-purchase` | POST | Post the purchase of an asset registered without one |
 
 ### Reports & Tax
 | Endpoint | Methods | Description |

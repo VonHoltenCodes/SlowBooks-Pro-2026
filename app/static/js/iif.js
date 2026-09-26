@@ -129,8 +129,8 @@ const IIFPage = {
         try {
             App.setStatus('Importing QuickBooks report CSV...');
             const res = await fetch('/api/csv/import/qb-report', { method: 'POST', body: formData });
+            if (!res.ok) throw new Error(await API.responseError(res, 'Import failed'));
             const result = await res.json();
-            if (!res.ok) throw new Error(result.detail || 'Import failed');
 
             const kindLabel = { sales_receipts: 'Sales Receipts', deposits: 'Deposits', checks: 'Checks' };
             let html = '<div class="iif-results"><h4>Results</h4>';
@@ -189,11 +189,12 @@ const IIFPage = {
     async _download(url, fallbackName) {
         try {
             App.setStatus('Exporting IIF...');
-            const res = await fetch(url);
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || 'Export failed');
-            }
+            // Asked for inline: the desktop app's web view takes an
+            // "attachment" answer to a page's own fetch() for a download and
+            // never hands it back ("Failed to fetch"). This page saves the
+            // file itself either way.
+            const res = await fetch(url, { headers: { 'X-Slowbooks-Desktop': '1' } });
+            if (!res.ok) throw new Error(await API.responseError(res, 'Export failed'));
 
             // Get filename from Content-Disposition header if available
             const disposition = res.headers.get('Content-Disposition');
@@ -204,13 +205,17 @@ const IIFPage = {
             }
 
             const blob = await res.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(a.href);
-
-            toast(`Exported ${filename}`);
+            // The desktop app saves it to Documents/SlowBooks Pro/Reports and
+            // says where, as Save CSV does; a browser downloads it.
+            const desktop = window.SlowbooksDesktop;
+            if (!(desktop && await desktop.saveFile(blob, filename))) {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+                toast(`Exported ${filename}`);
+            }
             App.setStatus('QuickBooks Interop — Ready');
         } catch (err) {
             toast(err.message, 'error');
@@ -257,9 +262,7 @@ const IIFPage = {
         IIFPage._selectedFile = file;
         IIFPage._validated = false;
 
-        const size = file.size < 1024 ? `${file.size} B` :
-                     file.size < 1048576 ? `${(file.size / 1024).toFixed(1)} KB` :
-                     `${(file.size / 1048576).toFixed(1)} MB`;
+        const size = formatFileSize(file.size);
 
         const info = $('#iif-file-info');
         info.style.display = '';
@@ -293,10 +296,7 @@ const IIFPage = {
         try {
             App.setStatus('Validating IIF file...');
             const res = await fetch('/api/iif/validate', { method: 'POST', body: formData });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || 'Validation failed');
-            }
+            if (!res.ok) throw new Error(await API.responseError(res, 'Validation failed'));
 
             const report = await res.json();
             IIFPage._showValidationReport(report);
@@ -370,10 +370,7 @@ const IIFPage = {
         try {
             App.setStatus('Importing IIF file...');
             const res = await fetch('/api/iif/import', { method: 'POST', body: formData });
-            if (!res.ok) {
-                const err = await res.json().catch(() => ({ detail: res.statusText }));
-                throw new Error(err.detail || 'Import failed');
-            }
+            if (!res.ok) throw new Error(await API.responseError(res, 'Import failed'));
 
             const result = await res.json();
             IIFPage._showImportResult(result);

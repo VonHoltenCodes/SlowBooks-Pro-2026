@@ -17,7 +17,13 @@ A **bank feed** (Banking → + New Bank Account) is the account's statement
 identity: bank name, last four, and where SimpleFIN or a file import lands.
 It links to exactly one ledger account. An **opening balance** entered there
 posts against 3900 Opening Balance Equity (created on demand): for a bank,
-the cash in it; for a card, the amount owed.
+the cash in it; for a card, the amount owed. When the ledger already
+carries the account on the As-of date, the statement balance is compared
+with it instead: equal posts nothing, and a difference posts (as "Opening
+balance adjustment") only after you confirm — the form shows what the books
+hold (`GET /api/banking/ledger-balance?account_id=&as_of=`); the API
+answers 409 `ledger_has_balance` until the request carries
+`post_difference: true`.
 
 ## One sign rule
 
@@ -34,11 +40,13 @@ nothing is flipped on import.
 
 ## The register
 
-Banking → an account. Every posting on the account — expenses, deposits,
+Banking → an account (its own address, `#/banking/<account id>`, so a
+refresh stays on it). Every posting on the account — expenses, deposits,
 bill payments, customer payments, payroll, card charges, transfers, register
-entries, journal entries — with payee, reference, type, a link to the
-document, the running balance, and a ✓ when a statement line has cleared it
-or **R** when a reconciliation has closed it.
+entries, journal entries — with payee, reference (a bill payment's check
+number included), type, a link to the document, the running balance, and a
+✓ when a statement line has cleared it or **R** when a reconciliation has
+closed it.
 
 **+ Entry** posts a register entry: date, amount (sign per the rule), payee,
 check/ref number, **category** (required — the other side of the entry) and
@@ -61,7 +69,15 @@ DR to / CR from. Paying a card is a transfer from the bank to the card.
 
 ## Bank feeds and file imports: the review queue
 
-A statement line arriving by SimpleFIN sync, OFX/QFX or CSV import:
+A statement line arriving by SimpleFIN sync, OFX/QFX or CSV import. CSV
+files: the Bank of America, Chase and PayPal layouts, or any file whose
+header names a date, a description (or payee / memo) and either one signed
+amount or money-out / money-in columns. For a file whose header says none
+of that, the import dialog shows its columns and a few rows and asks which
+is which (and the date format); the answer travels with the preview and the
+import as a `mapping` form field (JSON: column indexes for `date`,
+`description`, `payee`, `amount` or `debit`/`credit`, `check_number`, plus
+`date_format` and `has_header`).
 
 1. **Duplicates are skipped** (bank transaction id / FITID, or a
    content-derived id for CSV).
@@ -78,7 +94,10 @@ A statement line arriving by SimpleFIN sync, OFX/QFX or CSV import:
    - **Match** — pick from the ledger lines within 30 days with that amount.
    - **Exclude** — drop it (Restore brings it back).
    - **Add all categorised** — adds every line that carries a category and
-     reports what it skipped (a closed period, for instance).
+     reports what it skipped (a closed period, for instance). A category
+     picked in a line's list is saved on the line as it is picked
+     (`PATCH /api/banking/transactions/{id} {category_account_id}`), so
+     Add all posts it and a reload keeps it.
    - **Find matches** — re-runs auto-match for the feed.
 
 `GET /api/banking/transactions?bank_account_id=&status=unmatched`;
@@ -104,6 +123,13 @@ reconciliation per account.
 statement_balance}` (409 with `existing_id` when one is open), `GET
 /{id}/transactions`, `POST /{id}/toggle/{line_id}`, `POST /{id}/complete`,
 `DELETE /{id}`.
+
+A statement date on or before the last completed one is refused. Finish
+names the difference when it isn't $0.00. A completed reconciliation keeps
+a report — beginning and ending balances, the items it cleared, what was
+still outstanding on the statement date, the register balance then — on
+screen (register → **Reconciliations…**) and as a PDF: `GET /{id}/report`,
+`GET /{id}/pdf`.
 
 ## Upgrading from 2.9 and earlier
 

@@ -28,9 +28,17 @@ def _set_closing_date(client, iso: str):
 
 
 def _mk_vendor(db_session, name="V"):
+    from app.models.accounts import Account
     from app.models.contacts import Vendor
 
-    v = Vendor(name=name, is_active=True)
+    # The bills below name no account on their lines, so they post to the
+    # vendor's default expense account (nothing falls back to 6000 now).
+    expense = db_session.query(Account).filter_by(account_number="6000").first()
+    v = Vendor(
+        name=name,
+        is_active=True,
+        default_expense_account_id=expense.id if expense else None,
+    )
     db_session.add(v)
     db_session.commit()
     return v
@@ -69,23 +77,36 @@ def test_po_convert_to_bill_respects_closing_date(client, db_session, seed_accou
 def test_estimate_convert_respects_closing_date(
     client, db_session, seed_accounts, seed_customer
 ):
-    r = client.post(
-        "/api/estimates",
-        json={
-            "customer_id": seed_customer.id,
-            "date": "2025-06-15",
-            "tax_rate": 0,
-            "lines": [
-                {"description": "x", "quantity": 1, "rate": 100, "line_order": 0}
-            ],
-        },
-    )
-    assert r.status_code == 201, r.text
-    est_id = r.json()["id"]
+    """A converted invoice is dated the day it is made (2.17.3 exploratory
+    W-L10), so its journal lands today: converting an old estimate after a
+    close posts into the open period, and the guard is checked against
+    today."""
+    from datetime import date, timedelta
+
+    def estimate():
+        r = client.post(
+            "/api/estimates",
+            json={
+                "customer_id": seed_customer.id,
+                "date": "2025-06-15",
+                "tax_rate": 0,
+                "lines": [
+                    {"description": "x", "quantity": 1, "rate": 100, "line_order": 0}
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+        return r.json()["id"]
+
+    old, blocked = estimate(), estimate()
 
     _set_closing_date(client, "2025-12-31")
+    r = client.post(f"/api/estimates/{old}/convert")
+    assert r.status_code == 200, r.text
+    assert r.json()["date"] == date.today().isoformat()
 
-    r = client.post(f"/api/estimates/{est_id}/convert")
+    _set_closing_date(client, (date.today() + timedelta(days=1)).isoformat())
+    r = client.post(f"/api/estimates/{blocked}/convert")
     assert r.status_code == 403, r.text
 
 

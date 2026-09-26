@@ -283,7 +283,15 @@ def test_bill_payment_create_locks_the_bill_row(
             "vendor_id": v.id,
             "date": "2026-03-01",
             "bill_number": "B-LOCK",
-            "lines": [{"description": "x", "quantity": 1, "rate": 75, "line_order": 0}],
+            "lines": [
+                {
+                    "description": "x",
+                    "quantity": 1,
+                    "rate": 75,
+                    "account_id": seed_accounts["6000"].id,
+                    "line_order": 0,
+                }
+            ],
         },
     )
     assert r.status_code == 201, r.text

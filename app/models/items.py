@@ -52,9 +52,9 @@ class Item(Base):
     name = Column(String(200), nullable=False)
     item_type = Column(Enum(ItemType), nullable=False)
     description = Column(Text, nullable=True)
-    rate = Column(Numeric(15, 2), default=0)
+    rate = Column(Numeric(17, 4), default=0)  # unit price, to 4 places
     cost = Column(
-        Numeric(15, 2), default=0
+        Numeric(17, 4), default=0
     )  # standard/last cost; weighted avg lives in `avg_cost`
     income_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     expense_account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)

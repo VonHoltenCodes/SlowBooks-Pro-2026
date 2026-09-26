@@ -38,11 +38,13 @@ def _f(v) -> float:
 
 
 def receivables(db: Session) -> dict:
-    total = (
-        db.query(func.coalesce(func.sum(Invoice.balance_due), 0))
-        .filter(Invoice.status.in_(OPEN_INVOICE))
-        .scalar()
-    )
+    # What customers owe net of the credits they hold (unapplied payments,
+    # credit memos), in home currency: the A/R Aging total and account 1100.
+    # Summing invoice balances alone read $782.13 against a balance sheet of
+    # $555.74 (explore 2.17.3, F17).
+    from app.services.contact_balances import customer_balances
+
+    total = sum(customer_balances(db).values(), Decimal(0))
     overdue = (
         db.query(func.count(Invoice.id))
         .filter(

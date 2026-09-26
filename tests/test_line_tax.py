@@ -279,14 +279,25 @@ def test_the_sales_forms_show_the_exemption():
 def test_the_estimate_preview_taxes_only_the_ticked_lines():
     """The estimate page built the taxable base and then taxed the subtotal,
     so its on-screen tax ignored every Tax box — $8.90 shown, 0.00 saved
-    (macbase1, 2.16.2 gate). It reads the same as the invoice page now."""
+    (macbase1, 2.16.2 gate). It reads the same as the invoice page now: every
+    sales form adds up through SalesLines.totals (invoices.js), which the
+    node probe in test_zero_total_documents runs with a ticked and an
+    unticked line."""
     from pathlib import Path
 
     js = Path(__file__).resolve().parents[1] / "app" / "static" / "js"
-    for page in ("estimates.js", "invoices.js", "sales_receipts.js"):
+    shared = (js / "invoices.js").read_text(encoding="utf-8")
+    totals = shared[shared.index("    totals(tbody, taxPct") :]
+    totals = totals[: totals.index("\n    },")]
+    assert "SalesLines.cents(taxable) *" in totals
+    assert "cents(subtotal) *" not in totals and "subtotal *" not in totals
+    for page, prefix in (
+        ("estimates.js", "est"),
+        ("invoices.js", "inv"),
+        ("sales_receipts.js", "sr"),
+    ):
         src = (js / page).read_text(encoding="utf-8")
-        assert "const tax = taxable * (taxPct / 100);" in src, page
-        assert "const tax = subtotal * (taxPct / 100);" not in src, page
+        assert f"SalesLines.totals($('#{prefix}-lines')" in src, page
 
 
 def _taxed_while_taxable(client, db_session, path_create, extra=None):

@@ -13,15 +13,38 @@ from app.routes._helpers import clamp_pagination
 from app.models.payments import Payment, PaymentAllocation
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Customer
-from app.schemas.payments import PaymentCreate, PaymentResponse
+from app.models.transactions import Transaction
+from app.schemas.payments import PaymentApply, PaymentCreate, PaymentResponse
 from app.services.accounting import (
+    _q,
     create_journal_entry,
     get_ar_account_id,
     get_undeposited_funds_id,
+    reversing_lines,
 )
 from app.services.closing_date import check_closing_date
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
+
+
+def _response(payment: Payment, customer_name: str = None) -> PaymentResponse:
+    """The payment as the screens read it: allocations by invoice NUMBER,
+    and how much of it is not applied to any invoice yet (a credit the
+    customer holds). Callers eager-load .allocations and their invoices."""
+    resp = PaymentResponse.model_validate(payment)
+    numbers = {a.id: a.invoice.invoice_number for a in payment.allocations if a.invoice}
+    for a in resp.allocations:
+        a.invoice_number = numbers.get(a.id)
+    applied = sum((Decimal(str(a.amount)) for a in payment.allocations), Decimal("0"))
+    resp.unapplied = (
+        Decimal("0")
+        if payment.is_voided
+        else max(_q(Decimal(str(payment.amount)) - applied), Decimal("0"))
+    )
+    if customer_name is None and payment.customer:
+        customer_name = payment.customer.name
+    resp.customer_name = customer_name
+    return resp
 
 
 @router.get("", response_model=list[PaymentResponse])
@@ -35,18 +58,12 @@ def list_payments(
     # Eager-load to avoid N+1 on .customer and .allocations during model_validate.
     q = db.query(Payment).options(
         joinedload(Payment.customer),
-        selectinload(Payment.allocations),
+        selectinload(Payment.allocations).joinedload(PaymentAllocation.invoice),
     )
     if customer_id:
         q = q.filter(Payment.customer_id == customer_id)
     payments = q.order_by(Payment.date.desc()).offset(skip).limit(limit).all()
-    results = []
-    for p in payments:
-        resp = PaymentResponse.model_validate(p)
-        if p.customer:
-            resp.customer_name = p.customer.name
-        results.append(resp)
-    return results
+    return [_response(p) for p in payments]
 
 
 @router.get("/{payment_id}", response_model=PaymentResponse)
@@ -54,9 +71,11 @@ def get_payment(payment_id: int, db: Session = Depends(get_db)):
     payment = db.query(Payment).filter(Payment.id == payment_id).first()
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
-    resp = PaymentResponse.model_validate(payment)
-    if payment.customer:
-        resp.customer_name = payment.customer.name
+    resp = _response(payment)
+    if not payment.is_voided and payment.transaction_id:
+        from app.services.undeposited_funds import deposit_holding
+
+        resp.deposited_in = deposit_holding(db, payment)
     return resp
 
 
@@ -234,9 +253,152 @@ def create_payment(data: PaymentCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(payment)
-    resp = PaymentResponse.model_validate(payment)
-    resp.customer_name = customer.name
-    return resp
+    return _response(payment, customer.name)
+
+
+@router.post("/{payment_id}/apply", response_model=PaymentResponse)
+def apply_payment(payment_id: int, data: PaymentApply, db: Session = Depends(get_db)):
+    """Apply the unapplied part of an earlier payment — an overpayment, a
+    prepayment, or a payment recorded without choosing invoices — to the
+    same customer's open invoices.
+
+    Before this there was no way to: the credit sat on account 1100 while
+    every invoice still read unpaid (explore 2.17.3, macbase1 F12). Moving
+    money between the payment and an invoice changes which document it
+    settles, not the ledger: the payment already credited A/R in full. A
+    foreign-currency remainder relieved A/R at the payment's rate; settling
+    an invoice booked at another rate posts the difference as realized FX,
+    exactly as applying it on the day would have."""
+    from app.services.currency import (
+        document_currency,
+        fx_gain_loss_account_id,
+        to_home,
+    )
+
+    # Lock the payment for the read-check-write, as the void does: two
+    # applies at once must not both spend the same remainder.
+    payment = (
+        db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    if payment.is_voided:
+        raise HTTPException(
+            status_code=400, detail="This payment is void, so it has nothing to apply."
+        )
+    if any(_q(a.amount) <= 0 for a in data.allocations):
+        raise HTTPException(
+            status_code=400, detail="Allocation amounts must be positive"
+        )
+    applied = sum((Decimal(str(a.amount)) for a in payment.allocations), Decimal("0"))
+    unapplied = _q(Decimal(str(payment.amount)) - applied)
+    wanted = _q(sum((Decimal(str(a.amount)) for a in data.allocations), Decimal("0")))
+    if wanted > unapplied:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Only ${unapplied:,.2f} of this payment is not applied yet; "
+                f"lower the amounts (they add up to ${wanted:,.2f})."
+            ),
+        )
+
+    pay_currency = document_currency(payment, db)
+    pay_rate = Decimal(str(payment.exchange_rate or 1))
+    fx_home = Decimal("0")  # A/R still to relieve (+) or over-relieved (−)
+    latest = payment.date
+    for alloc_data in data.allocations:
+        invoice = (
+            db.query(Invoice)
+            .filter(Invoice.id == alloc_data.invoice_id)
+            .with_for_update()
+            .first()
+        )
+        if not invoice:
+            raise HTTPException(
+                status_code=404, detail=f"Invoice {alloc_data.invoice_id} not found"
+            )
+        # A payment pays its own customer's invoices only (#189).
+        if invoice.customer_id != payment.customer_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invoice {invoice.invoice_number} belongs to a different "
+                    "customer than this payment."
+                ),
+            )
+        if invoice.status == InvoiceStatus.VOID:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invoice {invoice.invoice_number} is void.",
+            )
+        amount = _q(alloc_data.amount)
+        if amount > invoice.balance_due:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"${amount:,.2f} is more than the ${invoice.balance_due:,.2f} "
+                    f"still due on invoice {invoice.invoice_number}."
+                ),
+            )
+        inv_currency = document_currency(invoice, db)
+        if inv_currency != pay_currency:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Payment currency {pay_currency} does not match invoice "
+                    f"{invoice.invoice_number} currency {inv_currency}; apply "
+                    "it to an invoice in the same currency"
+                ),
+            )
+        fx_home += to_home(amount, Decimal(str(invoice.exchange_rate or 1))) - to_home(
+            amount, pay_rate
+        )
+        latest = max(latest, invoice.date)
+        db.add(
+            PaymentAllocation(
+                payment_id=payment.id, invoice_id=invoice.id, amount=amount
+            )
+        )
+        invoice.amount_paid += amount
+        invoice.balance_due -= amount
+        invoice.status = (
+            InvoiceStatus.PAID if invoice.balance_due == 0 else InvoiceStatus.PARTIAL
+        )
+
+    if fx_home != 0:
+        customer = db.query(Customer).filter(Customer.id == payment.customer_id).first()
+        cname = customer.name if customer else "customer"
+        ar_id = get_ar_account_id(db)
+        fx_id = fx_gain_loss_account_id(db)
+        amt = abs(fx_home)
+        loss = fx_home > 0  # the invoice was booked dearer than the cash
+        lines = [
+            {
+                "account_id": fx_id if loss else ar_id,
+                "debit": amt,
+                "credit": Decimal("0"),
+                "description": f"Realized FX on payment from {cname}",
+            },
+            {
+                "account_id": ar_id if loss else fx_id,
+                "debit": Decimal("0"),
+                "credit": amt,
+                "description": f"Realized FX on payment from {cname}",
+            },
+        ]
+        create_journal_entry(
+            db,
+            latest,
+            f"Realized FX on applying payment from {cname}",
+            lines,
+            source_type="payment_apply",
+            source_id=payment.id,
+            reference=payment.reference or payment.check_number or "",
+        )
+
+    db.commit()
+    db.refresh(payment)
+    return _response(payment)
 
 
 @router.post("/{payment_id}/void", response_model=PaymentResponse)
@@ -252,6 +414,14 @@ def void_payment(payment_id: int, db: Session = Depends(get_db)):
     if payment.is_voided:
         raise HTTPException(status_code=400, detail="Payment already voided")
     check_closing_date(db, payment.date)
+    # Money already taken to the bank in a deposit (or received straight
+    # into a bank account that has since been reconciled) can't just be
+    # reversed out of Undeposited Funds: that drove 1200 negative while the
+    # deposit still claimed the money (explore 2.17.3, W-H4). A sales
+    # receipt is voided through here too, so the same rule covers it.
+    from app.services.undeposited_funds import refuse_void_if_deposited
+
+    refuse_void_if_deposited(db, payment)
 
     # Reverse journal entry
     if payment.transaction_id:
@@ -284,6 +454,31 @@ def void_payment(payment_id: int, db: Session = Depends(get_db)):
                 source_type="payment_void",
                 source_id=payment.id,
             )
+        # A bank-feed line matched to this payment goes back to review.
+        from app.services.bank_posting import release_statement_links
+
+        if payment.transaction is not None:
+            release_statement_links(db, payment.transaction)
+
+    # Realized FX posted when the payment's remainder was applied later
+    # (POST /apply) is part of the payment: undo it with the rest.
+    for applied_fx in (
+        db.query(Transaction)
+        .filter(
+            Transaction.source_type == "payment_apply",
+            Transaction.source_id == payment.id,
+        )
+        .all()
+    ):
+        create_journal_entry(
+            db,
+            applied_fx.date,
+            f"VOID {applied_fx.description or ''}".strip(),
+            reversing_lines(applied_fx.lines),
+            source_type="payment_apply_void",
+            source_id=applied_fx.id,
+            reference=applied_fx.reference or "",
+        )
 
     # Reverse invoice allocations. Lock each invoice row so a concurrent
     # create_payment / second void can't race the read-modify-write of
@@ -308,7 +503,4 @@ def void_payment(payment_id: int, db: Session = Depends(get_db)):
     payment.is_voided = True
     db.commit()
     db.refresh(payment)
-    resp = PaymentResponse.model_validate(payment)
-    if payment.customer:
-        resp.customer_name = payment.customer.name
-    return resp
+    return _response(payment)

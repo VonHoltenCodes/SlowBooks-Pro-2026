@@ -510,21 +510,36 @@ const ReportsPage = {
     async salesTax(prefill) {
         await ReportsPage.openPeriodModal("Sales Tax Report", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/sales-tax?start_date=${range.start}&end_date=${range.end}`);
+            // Credit memos come back as negative rows; a document with
+            // nothing taxable shows no rate rather than "8.25%, $0.00".
             const rows = data.items.map(i =>
                 `<tr>
                     <td>${formatDate(i.date)}</td>
-                    <td>${escapeHtml(i.invoice_number)}</td>
+                    <td>${escapeHtml(i.number)}${i.type === 'credit_memo' ? ` <span class="badge" style="font-size:9px">Credit Memo</span>` : ''}</td>
                     <td>${escapeHtml(i.customer_name)}</td>
                     <td class="amount">${formatCurrency(i.subtotal)}</td>
-                    <td class="amount">${(i.tax_rate * 100).toFixed(2)}%</td>
+                    <td class="amount">${formatCurrency(i.taxable)}</td>
+                    <td class="amount">${i.tax_rate == null ? '—' : (i.tax_rate * 100).toFixed(2) + '%'}</td>
                     <td class="amount">${formatCurrency(i.tax_amount)}</td>
                 </tr>`
             ).join("");
+            const ledger = data.ledger;
+            const agrees = ledger && Math.abs(ledger.difference) < 0.005;
+            const reconcile = ledger ? `
+                    <div style="font-size:12px; margin-top:8px; border-top:1px solid var(--gray-200); padding-top:6px;">
+                        ${escapeHtml(ledger.account_number)} ${escapeHtml(ledger.account_name)}: tax posted this period <strong>${formatCurrency(ledger.tax_posted)}</strong>
+                        ${agrees
+                            ? '— agrees with this report.'
+                            : `— <span style="color:var(--danger); font-weight:700;">differs from this report by ${formatCurrency(ledger.difference)}</span>. Something other than a sale or credit memo posted to the account in these dates (tax on a bill, a journal entry, a void of an earlier sale).`}
+                        <div>Paid this period: ${formatCurrency(ledger.payments)} · Owed at ${formatDate(data.end_date)}: <strong>${formatCurrency(ledger.balance)}</strong></div>
+                        ${Math.abs(ledger.purchase_tax_to_date || 0) >= 0.005 ? `<div style="margin-top:6px;">
+                            Of that, <strong>${formatCurrency(ledger.purchase_tax)}</strong> this period is sales tax paid to suppliers on bills entered before SlowBooks Pro 2.18, which posted it to ${escapeHtml(ledger.account_name)}; since 2.18 that tax is part of what the purchase cost. To correct it, post one journal entry: debit the expense or cost-of-goods account those purchases used, and credit ${escapeHtml(ledger.account_number)} ${escapeHtml(ledger.account_name)} <strong>${formatCurrency(ledger.purchase_tax_to_date)}</strong> (the total to ${formatDate(data.end_date)}).</div>` : ''}
+                    </div>` : '';
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')}</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No taxable sales</td></tr>'}</tbody>
+                    <thead><tr><th scope="col">Date</th><th scope="col">${T('Invoice')} / Credit Memo</th><th scope="col">${T('Customer')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Taxable</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Tax</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No taxable sales</td></tr>'}</tbody>
                 </table></div>
                 <div style="margin-top:12px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200);">
                     <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:4px;">
@@ -532,7 +547,9 @@ const ReportsPage = {
                         <span>Taxable: <strong>${formatCurrency(data.total_taxable)}</strong></span>
                         <span>Non-Taxable: <strong>${formatCurrency(data.total_non_taxable)}</strong></span>
                     </div>
+                    <div style="font-size:12px;">Tax on sales ${formatCurrency(data.tax_on_sales)} less tax on credit memos ${formatCurrency(data.tax_credited)}</div>
                     <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">Tax Collected: ${formatCurrency(data.total_tax)}</div>
+                    ${reconcile}
                 </div>`;
         }, "Dates", false, { reportType: 'sales_tax', prefill });
     },
@@ -576,11 +593,14 @@ const ReportsPage = {
     async incomeByCustomer(prefill) {
         await ReportsPage.openPeriodModal(T("Income by Customer"), "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}`);
+            // Sales before tax, the tax beside it; Paid includes money not
+            // yet applied to an invoice, and Balance is net of it.
             let rows = data.items.map(i =>
                 `<tr>
                     <td>${escapeHtml(i.customer_name)}</td>
                     <td class="amount">${i.invoice_count}</td>
                     <td class="amount">${formatCurrency(i.total_sales)}</td>
+                    <td class="amount">${formatCurrency(i.total_tax || 0)}</td>
                     <td class="amount">${formatCurrency(i.total_paid)}</td>
                     <td class="amount">${formatCurrency(i.total_balance)}</td>
                 </tr>`
@@ -589,14 +609,15 @@ const ReportsPage = {
                 <td>TOTAL</td>
                 <td class="amount">${data.items.reduce((sum, item) => sum + item.invoice_count, 0)}</td>
                 <td class="amount">${formatCurrency(data.total_sales)}</td>
+                <td class="amount">${formatCurrency(data.total_tax || 0)}</td>
                 <td class="amount">${formatCurrency(data.total_paid)}</td>
                 <td class="amount">${formatCurrency(data.total_balance)}</td>
             </tr>`;
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
-                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
-                    <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col" class="amount">${T('Invoices')}</th><th scope="col" class="amount">Sales</th><th scope="col" class="amount">Sales Tax</th><th scope="col" class="amount">Paid</th><th scope="col" class="amount">Balance</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'income_by_customer', prefill });
     },
@@ -605,10 +626,14 @@ const ReportsPage = {
         const customers = await API.get("/customers?active_only=true");
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
         openModal(T("Customer Statement"), `
-            <form onsubmit="ReportsPage.openStatement(event)">
-                <div class="form-grid">
-                    <div class="form-group"><label>${T('Customer')} *</label>
-                        <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>
+            <form onsubmit="ReportsPage.openStatement(event)" data-readonly-ok>
+                <!-- minmax(0, …) and width:100%: a select sizes itself to its
+                     longest option, and a 120-character customer name pushed
+                     As of past the dialog's edge (macbase1, F22). The picked
+                     name still shows in full in the open list. -->
+                <div class="form-grid" style="grid-template-columns:minmax(0, 2fr) minmax(0, 1fr);">
+                    <div class="form-group" style="min-width:0;"><label>${T('Customer')} *</label>
+                        <select name="customer_id" required style="width:100%; min-width:0; max-width:100%;"><option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>As of Date</label>
                         <input name="as_of_date" type="date" value="${todayISO()}"></div>
                 </div>
@@ -631,25 +656,23 @@ const ReportsPage = {
     async arAging(prefill) {
         await ReportsPage.openPeriodModal(T("Accounts Receivable Aging"), "this_year_to_date", async (_period, params) => {
             const data = await API.get(`/reports/ar-aging?as_of_date=${params.as_of_date}`);
-            let rows = data.items.map(i =>
-                `<tr>
-                    <td>${escapeHtml(i.customer_name)}</td>
-                    <td class="amount">${formatCurrency(i.current)}</td>
-                    <td class="amount">${formatCurrency(i.over_30)}</td>
-                    <td class="amount">${formatCurrency(i.over_60)}</td>
-                    <td class="amount">${formatCurrency(i.over_90)}</td>
-                    <td class="amount" style="font-weight:600;">${formatCurrency(i.total)}</td>
-                </tr>`
-            ).join("");
+            // The API nets a customer's credits (unapplied payments and
+            // credit memos) into Current; show Current gross and the
+            // credits on their own, so the row still adds up to Total and
+            // Total is what account 1100 says.
+            const credit = (r) => r.unapplied_credits || 0;
+            const agingRow = (r, name, style = '') => `<tr style="${style}">
+                    <td>${name}</td>
+                    <td class="amount">${formatCurrency(r.current + credit(r))}</td>
+                    <td class="amount">${formatCurrency(r.over_30)}</td>
+                    <td class="amount">${formatCurrency(r.over_60)}</td>
+                    <td class="amount">${formatCurrency(r.over_90)}</td>
+                    <td class="amount">${credit(r) ? formatCurrency(-credit(r)) : ''}</td>
+                    <td class="amount" style="font-weight:600;">${formatCurrency(r.total)}</td>
+                </tr>`;
+            let rows = data.items.map(i => agingRow(i, escapeHtml(i.customer_name))).join("");
             const t = data.totals;
-            rows += `<tr style="font-weight:700; background:var(--gray-50);">
-                <td>TOTAL</td>
-                <td class="amount">${formatCurrency(t.current)}</td>
-                <td class="amount">${formatCurrency(t.over_30)}</td>
-                <td class="amount">${formatCurrency(t.over_60)}</td>
-                <td class="amount">${formatCurrency(t.over_90)}</td>
-                <td class="amount">${formatCurrency(t.total)}</td>
-            </tr>`;
+            rows += agingRow(t, 'TOTAL', 'font-weight:700; background:var(--gray-50);');
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">As of ${formatDate(data.as_of_date)}</p>
                 <div style="margin-bottom:12px; display:flex; gap:8px;">
@@ -665,9 +688,9 @@ const ReportsPage = {
                 <div class="table-container"><table>
                     <thead><tr>
                         <th scope="col">${T('Customer')}</th><th scope="col" class="amount">Current</th><th scope="col" class="amount">1-30</th>
-                        <th scope="col" class="amount">31-60</th><th scope="col" class="amount">61-90+</th><th scope="col" class="amount">Total</th>
+                        <th scope="col" class="amount">31-60</th><th scope="col" class="amount">61-90+</th><th scope="col" class="amount">Credits</th><th scope="col" class="amount">Total</th>
                     </tr></thead>
-                    <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
+                    <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No outstanding receivables</td></tr>'}</tbody>
                 </table></div>`;
         }, "As Of", true, { reportType: 'ar_aging', prefill });
     },
@@ -738,29 +761,34 @@ const ReportsPage = {
     async cashFlow(prefill) {
         await ReportsPage.openPeriodModal("Cash Flow Statement", "this_year_to_date", async (_period, range) => {
             const data = await API.get(`/reports/cash-flow?start_date=${range.start}&end_date=${range.end}`);
-            const section = (title, items, total) => {
-                let html = `<tr><td><strong>${title}</strong></td><td></td></tr>`;
-                if (items.length === 0) {
-                    html += `<tr><td style="padding-left:24px; color:var(--gray-400);">None</td><td></td></tr>`;
-                } else {
-                    html += items.map(i =>
-                        `<tr><td style="padding-left:24px;">${escapeHtml(i.account_name)}</td><td class="amount">${formatCurrency(i.amount)}</td></tr>`
-                    ).join('');
-                }
-                html += `<tr style="font-weight:600; background:var(--gray-50);"><td>Total ${title}</td><td class="amount">${formatCurrency(total)}</td></tr>`;
-                return html;
-            };
+            // Indirect method (banking, exploratory 2.17.3 W-M6/F18): net
+            // income, what moved no cash, the change in working capital;
+            // then investing and financing; the net change is the bank's.
+            const rows = (items, indent) => items.length
+                ? items.map(i => `<tr><td style="padding-left:${indent}px;">${escapeHtml(i.account_name)}</td><td class="amount">${formatCurrency(i.amount)}</td></tr>`).join('')
+                : `<tr><td style="padding-left:${indent}px; color:var(--gray-400);">None</td><td></td></tr>`;
+            const head = (title, indent = 0) => `<tr><td style="padding-left:${indent}px;"><strong>${title}</strong></td><td></td></tr>`;
+            const total = (title, amount) => `<tr style="font-weight:600; background:var(--gray-50);"><td>Total ${title}</td><td class="amount">${formatCurrency(amount)}</td></tr>`;
+            const adjustments = data.adjustments || [];
+            const workingCapital = data.working_capital || [];
+            const operating = `${head('Operating Activities')}
+                <tr><td style="padding-left:24px;">${T('Net Income')}</td><td class="amount">${formatCurrency(data.net_income)}</td></tr>
+                ${adjustments.length ? head('Adjustments for non-cash items', 24) + rows(adjustments, 48) : ''}
+                ${workingCapital.length ? head('Changes in working capital', 24) + rows(workingCapital, 48) : ''}
+                ${total('Operating Activities', data.total_operating)}`;
             return `
                 <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Account</th><th scope="col" class="amount">Amount</th></tr></thead>
                     <tbody>
-                        ${section('Operating Activities', data.operating, data.total_operating)}
-                        ${section('Investing Activities', data.investing, data.total_investing)}
-                        ${section('Financing Activities', data.financing, data.total_financing)}
+                        ${operating}
+                        ${head('Investing Activities')}${rows(data.investing, 24)}${total('Investing Activities', data.total_investing)}
+                        ${head('Financing Activities')}${rows(data.financing, 24)}${total('Financing Activities', data.total_financing)}
                         <tr style="font-weight:700; font-size:15px; background:var(--primary-light);">
                             <td>Net Change in Cash</td><td class="amount">${formatCurrency(data.net_change)}</td>
                         </tr>
+                        <tr><td>Cash at beginning of period</td><td class="amount">${formatCurrency(data.beginning_cash)}</td></tr>
+                        <tr style="font-weight:700;"><td>Cash at end of period</td><td class="amount">${formatCurrency(data.ending_cash)}</td></tr>
                     </tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'cash_flow', prefill });
@@ -821,10 +849,23 @@ const ReportsPage = {
         if (!confirm('Email statements to all customers with overdue invoices?')) return;
         try {
             const result = await API.post('/reports/batch-email-statements');
-            let msg = `Sent ${result.sent} statements`;
-            if (result.failed > 0) msg += `, ${result.failed} failed`;
-            toast(msg);
+            if (!result.sent && !result.failed) {
+                toast(Terms.text('No customer has an overdue invoice, so there was nothing to send.'));
+                return;
+            }
+            // Only what actually went out is "sent"; a customer who didn't
+            // get one is named, with the reason (explore 2.17.3, W-H7).
+            ReportsPage._sendResult('Statements',
+                `Sent ${result.sent} statement${result.sent === 1 ? '' : 's'}.`, result.errors || []);
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    _sendResult(title, headline, errors) {
+        if (!errors.length) { toast(headline); return; }
+        openModal(title, `
+            <p>${escapeHtml(headline)} ${errors.length} could not be sent:</p>
+            <ul style="margin:8px 0 12px 20px;">${errors.map(e => `<li>${escapeHtml(e)}</li>`).join('')}</ul>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
     },
 
     async sendCollectionLetters() {
@@ -835,7 +876,8 @@ const ReportsPage = {
                 letter_type: letterType,
                 send_email: true,
             });
-            toast(`Generated ${result.generated} letters, emailed ${result.emailed}`);
+            ReportsPage._sendResult('Collection Letters',
+                `Generated ${result.generated} letter${result.generated === 1 ? '' : 's'}, emailed ${result.emailed}.`, result.errors || []);
         } catch (err) { toast(err.message, 'error'); }
     },
 };
@@ -903,7 +945,9 @@ ReportsPage.fixedAssetReconciliation = async function () {
 ReportsPage.financialStatementsPdf = async function () {
     await ReportsPage.openPeriodModal("Financial Statements Pack", "this_year_to_date", async (_period, range) => {
         window.open(`/api/reports/financial-statements/pdf?start_date=${range.start}&end_date=${range.end}`, '_blank');
-        return `<div style="font-size:12px;">The statements pack opened in a new tab —
+        // Said for both: a browser opens a tab, the desktop app saves the PDF,
+        // opens it in a window of its own and says where it saved it (F24).
+        return `<div style="font-size:12px;">The statements pack has opened as a PDF —
             ${T('P&L')} and Trial Balance for ${escapeHtml(range.start)} — ${escapeHtml(range.end)},
             ${T('Balance Sheet')} as of ${escapeHtml(range.end)}. Paper size follows
             Settings → Report PDF Paper Size.</div>`;

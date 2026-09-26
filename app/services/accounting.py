@@ -199,8 +199,11 @@ def create_journal_entry(
     total_credit = sum(Decimal(str(line.get("credit", 0))) for line in lines)
 
     if total_debit != total_credit:
+        # The sentence a person reads when they save an unbalanced entry
+        # (the journal form's own live wording, not "debits=5000, ...").
         raise DataProblem(
-            f"Journal entry not balanced: debits={total_debit}, credits={total_credit}"
+            "Debits and credits must be equal: this entry is out of balance "
+            f"by ${abs(total_debit - total_credit):,.2f}"
         )
 
     # Invoice edits retain their header identity after removing old splits.

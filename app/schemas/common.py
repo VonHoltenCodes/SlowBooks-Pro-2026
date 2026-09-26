@@ -100,6 +100,12 @@ class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+def _as_percent(value) -> str:
+    """0.089 -> "8.9", 1.5 -> "150": the rate as the person typed it."""
+    pct = (Decimal(str(value)) * 100).normalize()
+    return format(pct, "f")
+
+
 def _check_tax_rate(value):
     """A document tax rate is a FRACTION of the subtotal (0.089 = 8.9%).
     The company default in Settings (``default_tax_rate``) is a PERCENT
@@ -107,14 +113,27 @@ def _check_tax_rate(value):
     divides by 100 before posting. An agent that copies the setting onto
     a document books 890% tax with a 201 (2.9.0 gate: $1.94M of tax on
     $731K of revenue, and the trial balance still balanced). Anything
-    above 1 cannot be a fraction, so reject it and say which unit."""
+    above 1 cannot be a fraction, so reject it and say which unit.
+
+    The same sentence reaches a person on the invoice form, who typed a
+    percent (or had one filled in from Settings), so it leads in percent
+    and says where a bad default lives; the unit note for API callers
+    follows (explore 2.17.3: "tax_rate: Value error, tax_rate cannot be
+    negative" under a field labelled "Tax Rate (%)")."""
     if value is not None and value > 1:
         raise ValueError(
-            f"tax_rate is a fraction of the subtotal (0.089 = 8.9%); {value} "
-            "looks like a percent — divide by 100"
+            f"Tax rate {_as_percent(value)}% is more than 100%. Use a rate "
+            "from 0 to 100%; if it came from the company default, correct "
+            "Default Tax Rate in Settings. (API: tax_rate is a fraction of "
+            f"the subtotal, 0.089 = 8.9%, so {value} looks like a percent; "
+            "divide by 100.)"
         )
     if value is not None and value < 0:
-        raise ValueError("tax_rate cannot be negative")
+        raise ValueError(
+            f"Tax rate {_as_percent(value)}% is negative. Use a rate from 0 "
+            "to 100%; if it came from the company default, correct Default "
+            "Tax Rate in Settings."
+        )
     return value
 
 

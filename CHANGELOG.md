@@ -7,6 +7,264 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.18.0 — Around the ledger
+
+Two of the QA agents each started a brand-new company and ran it for a day
+as its owner would, through the screens: skytech on Windows (a sign shop,
+771 recorded steps) and macbase1 on macOS (a bakery). Every figure was
+checked by hand against the ledger. The ledger held — every trial balance
+balanced and every account they rebuilt matched to the cent. What they found
+was around it: figures that were never kept up to date, postings a person
+couldn't see, flows that couldn't be finished from the screen, and tax forms
+mapped wrong. Seventy-four findings between them, sixty-eight once the
+overlaps were merged, and this release fixes every one — along with
+twenty-nine more that fixing them turned up.
+
+#### Money that was wrong
+
+**Pay Sales Tax never worked.** Every attempt was refused with "date: Input
+should be None" — a field named `date` hid the date type. It records the
+payment now, and only from a bank or credit card account (the list used to
+offer Accounts Receivable and Inventory).
+
+**Tax paid to a supplier reduced the sales tax owed to the state.** A
+purchase order started at the company's *selling* tax rate, and turning it
+into a bill debited that tax to Sales Tax Payable, netting it against the
+tax collected from customers. macbase1's bakery collected $59.57 and Pay
+Sales Tax offered $0.33. Tax on a purchase is now part of what the purchase
+cost: it is spread over the bill's lines, to the cent, and posts with them.
+Purchase orders start at no tax. *If your books were entered on an earlier
+version,* the Sales Tax report now names the supplier tax sitting in Sales
+Tax Payable and gives the one journal entry that moves it.
+
+**Purchases with no account were booked as advertising.** A bill line with
+no account fell back to account 6000, which the standard chart names
+Advertising & Marketing — a bakery's flour and a sign shop's panels. A line
+now posts where someone said: the account on the line, the item's, or the
+vendor's default; a line none of them names is refused with a sentence
+saying what to choose. Enter Bill has an Account column, To Bill asks for an
+account per line, and cost-of-goods accounts can be chosen for vendors,
+expenses and card charges.
+
+**Schedule C counted expenses as income.** Lines 10, 13, 15, 17 and 18
+contain "Line 1", and a substring test moved office expense, depreciation,
+insurance and more into gross income. Lines are matched exactly now, the
+mapping follows the standard chart, and cost of goods lands on line 4. Net
+profit equals the P&L.
+
+**Customer and vendor balances always read $0.00** — on the Customer Center,
+the customer page, the Vendor list and both CSV exports. They are worked out
+from the open documents and unapplied credits whenever they're shown.
+
+**Money a customer paid could disappear from view.** Receive Payment didn't
+apply a payment to anything unless each amount was typed by hand, and the
+leftover could never be applied later; A/R Aging ignored it and disagreed
+with the balance sheet. Typing the amount now fills the invoices oldest
+first; leaving money unapplied is a choice with its own box; a customer's
+credits are listed on Receive Payment, the customer page and the payment,
+with Apply; and A/R Aging, Income by Customer and the dashboard all tie to
+account 1100. Foreign-currency invoices count at the amount the ledger
+booked.
+
+**Foreign-currency money is counted at what the ledger booked.** A/R Aging,
+A/P Aging, customer and vendor balances, statements, Income by Customer, the
+analytics charts and the assistant all count a EUR invoice at its booked
+dollars, and every aging report now equals its control account. A
+foreign-currency invoice can be paid from Receive Payment, which offers the
+currency and asks for the rate on the payment date (it could only be paid
+through the API).
+
+**A deposited payment could be voided out from under its deposit,** driving
+Undeposited Funds negative — even after the deposit was reconciled. A
+deposit now records the payments it took; a payment in a deposit can't be
+voided until the deposit is, and never once it is reconciled. Deposits can
+be voided from Make Deposits.
+
+**Adding a bank feed could count the opening balance twice.** The statement
+balance was posted even when the account already had it. It is now compared
+with the books: equal posts nothing, different asks before posting only the
+difference.
+
+**Email All Overdue said "Sent 2 statements" when nothing went out,** and
+counted draft invoices as overdue. It counts what was sent and names who
+didn't get one. Collection letters had the same fault.
+
+**Time tracking couldn't be used.** Entries showed 0.00 hours, saving landed
+on "Page not found", draft entries could never be approved, and a pay run
+from approved time paid an hourly employee $0.00 without a word. All fixed;
+a pay run that would pay someone nothing is refused and names them, and the
+W-3, 940 and 941 count only employees who were paid.
+
+**The Cash Flow statement put customer receipts under Investing** and
+supplier and payroll payments under Financing. It is built the standard way
+now, from net income, and its net change equals the change in cash.
+
+**Tax forms produced nothing in the Mac app.** W-2, W-3, 940, 941 and the
+New-Hire Report open in the viewer as invoices do. The 941 works lines 5a–5d
+from the rates and puts the rounding difference on line 7.
+
+#### Purchases
+
+- Bills and purchase orders have Save PDF and Print; purchase orders have a
+  View; a bill lists its payments, each with View, Print Check and Void.
+- A bill takes its vendor's terms and a due date from them; bills made from
+  a PO before this release get the due date their terms give.
+- The PO, bill and vendor credit forms show line amounts and totals as you
+  type, fill an item's cost when it's picked, and won't save at $0.00.
+- Prices to four places on bills, purchase orders, vendor credits and items
+  ($0.045 a box).
+- A vendor can be made inactive. An expense, a bill payment or a pay run
+  that would overdraw a bank account asks first.
+- A/P Aging is in home currency, nets vendor credits and bill-payment money
+  not yet applied, and equals account 2000.
+
+#### Sales documents
+
+- Credit memos and recurring schedules fill an item's price and show a
+  total; credit memos start at the company's tax rate (or the credited
+  invoice's) and have View, Save PDF and Print.
+- A document that adds up to $0.00 asks before it saves, and a no-charge
+  invoice starts Paid (a recurring schedule for $0.00 is refused).
+- Duplicating an invoice keeps its currency, rate and job; changing an
+  invoice's or estimate's customer or rate re-totals its tax.
+- Foreign-currency invoices say which currency they're in, on screen, in
+  lists and on the PDF.
+- Settings' invoice prefix, next invoice number and invoice footer are used.
+- Converting an estimate makes today's invoice, due by the customer's terms,
+  addressed to the customer.
+- Addresses print without a dangling comma, and with the country abroad; the
+  invoice header no longer wraps dates and terms.
+- Email Invoice fills in the customer's email and thanks them once.
+- A due date before the invoice date, or a schedule ending before it starts,
+  is refused.
+- A counter sale needs no customer (Walk-in Customer). Unit prices take four
+  decimal places. Saving past a customer's credit limit asks first.
+
+#### Customers, payments and statements
+
+- Receive Payment lists draft invoices too, and no longer offers Print Check
+  for money received. An invoice shows the customer's credit with Apply
+  Credit.
+- The customer statement is one list in date order, each line describing its
+  document.
+- Income by Customer shows sales before tax, with tax in its own column.
+- Customers get the company's default terms, a Tax exempt box and an Active
+  box; a negative credit limit is refused.
+- Make Deposits names each sales receipt and check.
+
+#### Banking and the books
+
+- Reconciliations go forward only; Finish says what's out of balance; a
+  completed reconciliation has a report and PDF.
+- A category picked in the bank review list is kept; Add all categorised
+  uses it.
+- Bank CSV import reads any file with a date, a description and an amount,
+  and asks which column is which when it can't tell.
+- The register shows bill payments' check numbers, keeps its place on
+  refresh, and every line opens its document (deposits and bill payments
+  have views of their own).
+- Registering a fixed asset posts its purchase (paid from an account, on a
+  bill already entered, or owned before the books began); salvage above cost
+  is refused.
+- An unbalanced journal entry says by how much, in dollars.
+
+#### Payroll and tax forms
+
+- Each employee on a pay run has a Stub PDF naming the company; the pay-run
+  view has an Other column, so every row adds up to Net.
+- A vendor marked "1099 Vendor: Yes" reaches the 1099-NEC and 1096, which
+  the Tax Forms page now prints.
+- The Sales Tax report nets credit memos and checks itself against Sales Tax
+  Payable.
+- SSN last 4, pay rate and work state are checked, in words.
+- A garnishment order is ended, not deleted: End order stops it being
+  withheld and keeps its record.
+
+#### Settings, sign-in and backups
+
+- Settings refuses a tax rate outside 0–100%, a next number that isn't a
+  whole number, and the like, in words; Save Settings stays in reach and
+  leaving with unsaved changes asks first; the closing date shows whether
+  one is set and clears in one click.
+- The closing-date override password is asked for and works; five wrong
+  passwords lock it for ten minutes.
+- A new company opens on setup with its name filled in; the unlock screen
+  names the company.
+- Backups are named for their company, listed per company, and can be
+  restored from Settings — with a safety copy first and a second question
+  for another company's backup.
+- An opt-in setting asks for the password each time SlowBooks Pro starts.
+- A refused form says what to fix in a sentence, not validator text.
+
+#### Import, export, lists and search
+
+- Every CSV export opens correctly in Excel (UTF-8 byte-order mark); the IIF
+  export is written for QuickBooks (Windows-1252), at home-currency amounts,
+  and a sales receipt goes across once.
+- Re-importing our own export no longer creates `'=HYPERLINK…` duplicates; a
+  CSV row is checked like the form, and blank terms take the company
+  default.
+- One active item per name; items can be made inactive; the item form offers
+  only income accounts, and no nonprofit accounts in a business company.
+- Account numbers are digits. Search finds documents by amount. Read-only
+  sign-ins see no "+ New" buttons.
+- Report PDFs print the company name as written; Save PDF files documents
+  under Documents and reports under Reports, named once, and a download
+  named after a customer keeps its accents.
+- Desktop app: the PDF window has **Open in** your PDF app and **Show in
+  folder**; the IIF export and file attachments save instead of failing or
+  opening as text; upload and import refusals read as sentences.
+
+#### For API clients and agents
+
+- `POST /api/bills`, `POST /api/vendor-credits` and PO convert-to-bill: a
+  line with an amount and no account (none on the line, the item or the
+  vendor) is a 400; convert-to-bill takes an optional `lines: [{line_id,
+  account_id}]`.
+- Tax on a bill, PO→bill or vendor credit no longer touches 2200.
+- An invoice, credit memo, duplicate or estimate conversion that adds up to
+  $0.00 is a 409 (`code: zero_total`) unless the request sends
+  `allow_zero_total: true`; a recurring template for $0.00 is a 400.
+- 422 responses carry a plain `message` on each error.
+- A payment, batch line or credit-memo application reaches only its own
+  customer's invoices; a batch payment is in the home currency.
+- New: `GET /api/bills/{id}/pdf`, `/api/purchase-orders/{id}/pdf`,
+  `/api/credit-memos/{id}/pdf` (and `/print-preview`); `POST
+  /api/payments/{id}/apply`; `GET /api/customers/{id}/credits`; `GET
+  /api/deposits`, `POST /api/deposits/{id}/void`; `GET
+  /api/banking/ledger-balance`; `PATCH /api/banking/transactions/{id}`;
+  `POST /api/fixed-assets/{id}/post-purchase`; `GET
+  /api/banking/reconciliations/{id}/report` (and `/pdf`); `GET
+  /api/deposits/{id}`, `GET /api/bill-payments/{id}`; `POST
+  /api/backups/restore` now reachable from Settings; `GET` on the
+  W-2/W-3/940/941 PDFs; `POST /api/deductions/garnishments/{id}/end` (DELETE
+  is a 405). 535 operations.
+- Income by Customer `total_sales` excludes tax (new `total_tax`);
+  `/api/checks/print` takes `bill_payment_id` only.
+
+#### What you'll notice after upgrading
+
+- A bill line with no account (and none on its item or vendor) is refused
+  instead of booked to Advertising — give your vendors a default expense
+  account.
+- A pay run that would pay someone $0.00 is refused and names them; approve
+  their time or leave them off.
+- Account numbers are digits; a customer CSV's terms must be ones the form
+  offers.
+- **If your books were entered on an earlier version:** the Sales Tax report
+  shows any supplier tax an older release posted to Sales Tax Payable, and
+  the entry that corrects it; bills made from a purchase order get their due
+  dates; deposits made earlier are matched to the oldest waiting payments,
+  so Make Deposits may list different waiting lines for a company with a
+  partly deposited batch.
+
+#### Schema
+
+Three migrations: sales line prices to four places, deposits remember their
+payments, purchase and item prices to four places (which also gives old
+PO-made bills their due dates). An existing company file upgrades when it
+opens.
+
 ### v2.17.3 — Payments land on the right account
 
 **Pay Bills paid one vendor's bills with another vendor's payment.** The
@@ -27,8 +285,9 @@ the document and write nothing; a batch with one wrong line is refused whole.
 Vendor credits already checked this.
 
 If you paid several vendors at once from Pay Bills in an earlier version,
-check Vendor Balances: a payment may be recorded against the first vendor
-for bills that belonged to others. Void it and pay each vendor separately.
+look at those bill payments themselves (Vendor Balances look right, because
+every bill was marked paid): a payment to the first vendor may cover bills
+that belonged to others. Void it and pay each vendor separately.
 
 No schema change.
 

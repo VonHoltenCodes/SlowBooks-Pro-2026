@@ -193,7 +193,8 @@ def test_one_off_pledge_and_exports(client, seed_accounts, seed_customer):
     pdf = client.get(f"/api/reports/pledges/pdf?{qs}")
     assert pdf.status_code == 200 and pdf.content[:5] == b"%PDF-"
     csv_r = client.get(f"/api/reports/pledges/csv?{qs}")
-    assert csv_r.status_code == 200 and csv_r.text.startswith(
+    # utf-8-sig: every CSV opens with the byte-order mark Excel needs
+    assert csv_r.status_code == 200 and csv_r.content.decode("utf-8-sig").startswith(
         "Donor,Pledge,Campaign,Pledged"
     )
     assert client.post(

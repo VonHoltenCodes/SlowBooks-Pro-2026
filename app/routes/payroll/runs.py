@@ -112,6 +112,36 @@ def _last_regular_gross(db: Session, employee_id: int, before: date) -> Decimal:
     return Decimal(str(stub.gross_pay)) if stub else Decimal("0")
 
 
+def _unapproved_time(db: Session, employee_id: int, start: date, end: date):
+    """(count, hours) of the employee's time entries in the period that are
+    still waiting for approval — draft or submitted, not yet paid."""
+    waiting = (
+        db.query(TimeEntry)
+        .filter(
+            TimeEntry.employee_id == employee_id,
+            TimeEntry.status.in_([TimeEntryStatus.DRAFT, TimeEntryStatus.SUBMITTED]),
+            TimeEntry.pay_run_id.is_(None),
+            TimeEntry.date >= start,
+            TimeEntry.date <= end,
+        )
+        .all()
+    )
+    hours = sum(
+        (
+            Decimal(str(te.hours_regular or 0))
+            + Decimal(str(te.hours_overtime or 0))
+            + Decimal(str(te.hours_doubletime or 0))
+            for te in waiting
+        ),
+        Decimal("0"),
+    )
+    return len(waiting), _q(hours)
+
+
+def _entries(count: int) -> str:
+    return f"{count} time entry" if count == 1 else f"{count} time entries"
+
+
 @router.post("", response_model=PayRunResponse, status_code=201)
 def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     try:
@@ -156,6 +186,13 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     year = data.pay_date.year
     total_gross = total_taxes = total_net = total_employer = Decimal("0")
     total_employer_benefits = Decimal("0")
+    period = f"{data.period_start} to {data.period_end}"
+    # A stub that pays nothing is refused, all at once with every name
+    # (2.17.3: "Use approved time entries" made a $0.00 stub for an hourly
+    # employee whose time was never approved, and said nothing). Time left
+    # unapproved beside approved time is paid later; the run says so.
+    refused: list[str] = []
+    warnings: list[str] = []
 
     for stub_input in data.stubs:
         emp = db.query(Employee).filter(Employee.id == stub_input.employee_id).first()
@@ -167,6 +204,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         reg = ot = dt = Decimal("0")
         rate = Decimal(str(emp.pay_rate or 0))
         time_entry_ids: list[int] = []
+        waiting = (0, Decimal("0"))
 
         if stub_input.gross_override is not None:
             gross = Decimal(str(stub_input.gross_override))
@@ -192,6 +230,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
                     ot += te.hours_overtime or 0
                     dt += te.hours_doubletime or 0
                     time_entry_ids.append(te.id)
+                waiting = _unapproved_time(
+                    db, emp.id, data.period_start, data.period_end
+                )
             else:
                 ot = Decimal(str(stub_input.overtime_hours or 0))
                 dt = Decimal(str(stub_input.doubletime_hours or 0))
@@ -210,6 +251,36 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         total_hours = reg + ot + dt
 
         reimbursements = _q(Decimal(str(stub_input.reimbursements or 0)))
+
+        name = emp.full_name
+        if gross == 0 and reimbursements == 0:
+            if stub_input.use_time_entries and emp.pay_type.value != "salary":
+                if waiting[0]:
+                    refused.append(
+                        f"{name} has no approved time from {period}: "
+                        f"{_entries(waiting[0])} ({waiting[1]} hours) "
+                        "waiting for approval under Time Entries. Approve them, "
+                        f"or leave {name} out of this run."
+                    )
+                else:
+                    refused.append(
+                        f"{name} has no approved time from {period}. Log and "
+                        f"approve it under Time Entries, or leave {name} out "
+                        "of this run."
+                    )
+            else:
+                refused.append(
+                    f"{name} would be paid $0.00. Enter hours or an amount, "
+                    f"or leave {name} out of this run."
+                )
+            continue
+        if waiting[0]:
+            warnings.append(
+                f"{name}: {_entries(waiting[0])} ({waiting[1]} hours) from "
+                f"{period} {'is' if waiting[0] == 1 else 'are'} not approved "
+                "and not paid in this run. Approve them under Time Entries to "
+                "pay them in a later run."
+            )
 
         # Multi-state: per-stub work location, with reciprocity deciding which
         # state's income tax is actually withheld.
@@ -395,6 +466,10 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         total_employer += result["total_employer_tax"]
         total_net += net
 
+    if refused:
+        # Nothing is written: the session is never committed.
+        raise HTTPException(status_code=422, detail=" ".join(refused))
+
     run.total_gross = total_gross
     run.total_taxes = total_taxes
     run.total_employer_taxes = total_employer
@@ -403,7 +478,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(run)
-    return _with_employee_names(run)
+    resp = _with_employee_names(run)
+    resp.warnings = warnings
+    return resp
 
 
 @router.post("/{run_id}/process")

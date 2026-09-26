@@ -30,8 +30,8 @@ const CustomersPage = {
                 </tr></thead>
                 <tbody id="customer-tbody">`;
             for (const c of customers) {
-                html += `<tr class="clickable customer-row" data-name="${escapeHtml(c.name).toLowerCase()}" onclick="CustomersPage.showDetails(${c.id})">
-                    <td><strong>${escapeHtml(c.name)}</strong></td>
+                html += `<tr class="clickable customer-row" data-name="${escapeHtml(c.name).toLowerCase()}" onclick="CustomersPage.showDetails(${c.id})"${c.is_active === false ? ' style="color:var(--gray-400);"' : ''}>
+                    <td><strong>${escapeHtml(c.name)}</strong>${c.is_active === false ? ' <span style="font-size:11px;">(inactive)</span>' : ''}</td>
                     <td>${escapeHtml(c.company) || ''}</td>
                     <td>${escapeHtml(c.phone) || ''}</td>
                     <td>${escapeHtml(c.email) || ''}</td>
@@ -60,14 +60,15 @@ const CustomersPage = {
     // payments. Avoid the "click here to see notes, click here to see
     // invoices" gated-screen pattern.
     async showDetails(id) {
-        let customer, invoices, payments, permits, jobs;
+        let customer, invoices, payments, permits, jobs, credits;
         try {
-            [customer, invoices, payments, permits, jobs] = await Promise.all([
+            [customer, invoices, payments, permits, jobs, credits] = await Promise.all([
                 API.get(`/customers/${id}`),
                 API.get(`/invoices?customer_id=${id}`).catch(() => []),
                 API.get(`/payments?customer_id=${id}`).catch(() => []),
                 API.get(`/reseller-permits?entity_type=customer&entity_id=${id}`).catch(() => []),
                 API.get(`/jobs?customer_id=${id}&include_inactive=true`).catch(() => []),
+                API.get(`/customers/${id}/credits`).catch(() => null),
             ]);
         } catch (err) {
             toast(err.message, 'error');
@@ -103,12 +104,25 @@ const CustomersPage = {
                 <td>${escapeHtml(i.status || '')}</td>
             </tr>`).join('');
         const payRows = payments.slice(0, 10).map(p =>
-            `<tr>
+            `<tr style="cursor:pointer" onclick="PaymentsPage.view(${p.id})">
                 <td>${escapeHtml(p.date || '')}</td>
-                <td>${escapeHtml(p.payment_method || '')}</td>
-                <td>${escapeHtml(p.reference || '')}</td>
+                <td>${escapeHtml(p.method || '')}${p.is_voided ? ' <span style="color:#a4242b">(void)</span>' : ''}</td>
+                <td>${escapeHtml(p.reference || p.check_number || '')}</td>
                 <td class="amount">${formatCurrency(p.amount)}</td>
             </tr>`).join('');
+
+        // -- Credits the customer holds (unapplied payments, credit memos),
+        // each one applicable to open invoices from here --
+        const creditList = (credits && credits.credits) || [];
+        const creditsHtml = creditList.length === 0 ? '' : `
+            <div style="margin-bottom:14px">
+                <h4 style="font-size:11px;text-transform:uppercase;color:#888;margin:0 0 4px 0">Credits not applied yet (${formatCurrency(credits.total)})</h4>
+                <ul style="margin:0;padding-left:18px;font-size:13px">${creditList.map(c => `<li style="margin:2px 0">
+                    ${escapeHtml(PaymentsPage._creditLabel(c))}: <strong>${formatCurrency(c.available)}</strong>
+                    <button class="btn btn-sm btn-secondary" style="margin-left:6px" onclick="PaymentsPage.showApplyCredit('${c.kind}', ${c.id}, ${id})">Apply</button>
+                </li>`).join('')}</ul>
+            </div>`;
+        const balance = parseFloat(customer.balance) || 0;
 
         const html = `
             <!-- header: name + balance + quick actions -->
@@ -119,14 +133,15 @@ const CustomersPage = {
                     <div style="margin-top:6px;font-size:12px;color:#888">
                         ${customer.is_active === false ? '<span style="color:#a4242b">Inactive</span>' : '<span style="color:#1f7a36">Active</span>'}
                         &nbsp;·&nbsp; Terms: ${escapeHtml(customer.terms || 'Net 30')}
+                        ${customer.is_taxable === false ? ' · <strong>Tax exempt</strong>' : ''}
                         ${customer.credit_limit ? ` · Credit limit: ${formatCurrency(customer.credit_limit)}` : ''}
                         ${customer.tax_id ? ` · Tax ID: <code>${escapeHtml(customer.tax_id)}</code>` : ''}
                     </div>
                 </div>
                 <div style="text-align:right">
-                    <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em">Balance</div>
-                    <div style="font-size:22px;font-weight:700;color:${parseFloat(customer.balance) > 0 ? '#a4242b' : '#1a1a2e'}">
-                        ${formatCurrency(customer.balance)}
+                    <div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.05em">${balance < 0 ? 'Credit' : 'Balance'}</div>
+                    <div style="font-size:22px;font-weight:700;color:${balance > 0 ? '#a4242b' : (balance < 0 ? '#1f7a36' : '#1a1a2e')}">
+                        ${formatCurrency(Math.abs(balance))}
                     </div>
                     <div style="margin-top:8px">
                         <button class="btn btn-sm btn-primary" onclick="closeModal();InvoicesPage.showForm(null,${id})">${T('New Invoice')}</button>
@@ -170,6 +185,8 @@ const CustomersPage = {
                     placeholder="Internal notes about this customer — visible to everyone with admin access."
                     onblur="CustomersPage._saveNotes(${id}, this.value)">${escapeHtml(customer.notes || '')}</textarea>
             </div>
+
+            ${creditsHtml}
 
             <!-- reseller permits -->
             <div style="margin-bottom:14px">
@@ -234,15 +251,24 @@ const CustomersPage = {
         let c = { name: '', company: '', email: '', phone: '', mobile: '', fax: '', website: '',
             bill_address1: '', bill_address2: '', bill_city: '', bill_state: '', bill_zip: '', bill_country: 'US',
             ship_address1: '', ship_address2: '', ship_city: '', ship_state: '', ship_zip: '', ship_country: 'US',
-            terms: 'Net 30', credit_limit: '', tax_id: '', is_taxable: true, notes: '' };
-        if (id) c = await API.get(`/customers/${id}`);
+            terms: 'Net 30', credit_limit: '', tax_id: '', is_taxable: true, is_active: true, notes: '' };
+        if (id) {
+            c = await API.get(`/customers/${id}`);
+        } else {
+            // A new customer starts on the company's default terms
+            // (Settings), not a hard-coded Net 30.
+            const settings = await API.get('/settings').catch(() => ({}));
+            if (settings.default_terms) c.terms = settings.default_terms;
+        }
+        const termChoices = ['Net 15', 'Net 30', 'Net 45', 'Net 60', 'Due on Receipt'];
+        if (c.terms && !termChoices.includes(c.terms)) termChoices.unshift(c.terms);
 
         const title = id ? `Edit ${T('Customer')}` : T('New Customer');
         openModal(title, `
             <form id="customer-form" onsubmit="CustomersPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Name *</label>
-                        <input name="name" required value="${escapeHtml(c.name)}"></div>
+                        <input name="name" required maxlength="200" value="${escapeHtml(c.name)}"></div>
                     <div class="form-group"><label>Company</label>
                         <input name="company" value="${escapeHtml(c.company || '')}"></div>
                     <div class="form-group"><label>Email</label>
@@ -257,8 +283,8 @@ const CustomersPage = {
                         <input name="website" value="${escapeHtml(c.website || '')}"></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms">
-                            ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                `<option ${c.terms===t?'selected':''}>${t}</option>`).join('')}
+                            ${termChoices.map(t =>
+                                `<option ${c.terms===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
                         </select></div>
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Billing Address</h3>
@@ -295,7 +321,13 @@ const CustomersPage = {
                     <div class="form-group"><label>Tax ID</label>
                         <input name="tax_id" value="${escapeHtml(c.tax_id || '')}"></div>
                     <div class="form-group"><label>Credit Limit</label>
-                        <input name="credit_limit" type="number" step="0.01" value="${c.credit_limit || ''}"></div>
+                        <input name="credit_limit" type="number" step="0.01" min="0" placeholder="No limit" value="${c.credit_limit || ''}"></div>
+                    <div class="form-group"><label>Sales Tax</label>
+                        <label style="font-weight:normal;"><input type="checkbox" name="tax_exempt" ${c.is_taxable === false ? 'checked' : ''}>
+                            Tax exempt: no sales tax on anything sold to them (a reseller, a church, a school)</label></div>
+                    ${id ? `<div class="form-group"><label>Status</label>
+                        <label style="font-weight:normal;"><input type="checkbox" name="is_active" ${c.is_active === false ? '' : 'checked'}>
+                            Active (an inactive one is left out of the lists you pick from)</label></div>` : ''}
                     ${Terms.isNonprofit() ? `
                     <div class="form-group"><label>${T('Customer')} type</label>
                         <select name="donor_type">
@@ -321,9 +353,15 @@ const CustomersPage = {
         const form = new FormData(e.target);
         const data = Object.fromEntries(form.entries());
         if (data.credit_limit) data.credit_limit = parseFloat(data.credit_limit);
+        else if (id) data.credit_limit = null;  // cleared: no limit
         else delete data.credit_limit;
         if (e.target.send_year_end_statement) data.send_year_end_statement = e.target.send_year_end_statement.checked;
         if ('donor_type' in data && !data.donor_type) data.donor_type = null;
+        // Checkboxes: "Tax exempt" is the customer's is_taxable, inverted;
+        // "Active" is on the edit form only.
+        delete data.tax_exempt;
+        data.is_taxable = !(e.target.tax_exempt && e.target.tax_exempt.checked);
+        if (e.target.is_active) data.is_active = e.target.is_active.checked;
 
         try {
             if (id) {

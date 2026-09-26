@@ -31,8 +31,11 @@ const ItemsPage = {
                     ? `<button class="btn btn-sm btn-secondary" onclick="ItemsPage.showAdjust(${item.id})" title="Adjust quantity on hand">Adjust</button>
                        <button class="btn btn-sm btn-secondary" onclick="ItemsPage.showMovements(${item.id})" title="Inventory movement history">History</button>`
                     : '';
-                html += `<tr>
-                    <td><strong>${escapeHtml(item.name)}</strong></td>
+                // An inactive item stays in the list, marked, so it can be
+                // opened and made active again; the pickers leave it out.
+                const inactive = item.is_active === false;
+                html += `<tr${inactive ? ' style="opacity:.55;"' : ''}>
+                    <td><strong>${escapeHtml(item.name)}</strong>${inactive ? ' <span class="badge badge-draft">inactive</span>' : ''}</td>
                     <td>${statusBadge(item.item_type)}</td>
                     <td>${escapeHtml(item.description) || ''}</td>
                     <td class="amount">${formatCurrency(item.rate)}</td>
@@ -57,9 +60,14 @@ const ItemsPage = {
         if (id) item = await API.get(`/items/${id}`);
 
         const accounts = await API.get('/accounts');
-        const incomeAccts = accounts.filter(a => ['income','cogs'].includes(a.account_type));
-        const expenseAccts = accounts.filter(a => ['expense','cogs'].includes(a.account_type));
-        const assetAccts = accounts.filter(a => a.account_type === 'asset');
+        // Income means income accounts only — the list used to offer COGS
+        // and expense accounts too, and a business's 4400 In-Kind
+        // Contributions (W-L13). The account an item already uses stays
+        // listed, so saving the form never drops it.
+        const incomeAccts = pickerAccounts(accounts, ['income'], item.income_account_id);
+        const expenseAccts = pickerAccounts(accounts, ['expense','cogs'], item.expense_account_id);
+        const assetAccts = pickerAccounts(accounts, ['asset'], item.asset_account_id);
+        const acctLabel = a => `${a.account_number ? escapeHtml(a.account_number) + ' - ' : ''}${escapeHtml(a.name)}`;
 
         // Phase 11 inventory only makes sense for tangible items.
         const trackable = ['product','material'].includes(item.item_type);
@@ -70,7 +78,7 @@ const ItemsPage = {
             <form id="item-form" onsubmit="ItemsPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Name *</label>
-                        <input name="name" required value="${escapeHtml(item.name)}"></div>
+                        <input name="name" required maxlength="200" value="${escapeHtml(item.name)}"></div>
                     <div class="form-group"><label>Type *</label>
                         <select name="item_type" id="item-type-sel">
                             ${['service','product','material','labor'].map(t =>
@@ -79,22 +87,26 @@ const ItemsPage = {
                     <div class="form-group full-width"><label>Description</label>
                         <textarea name="description">${escapeHtml(item.description || '')}</textarea></div>
                     <div class="form-group"><label>Rate (sell price)</label>
-                        <input name="rate" type="number" step="0.01" value="${item.rate}"></div>
+                        <input name="rate" type="number" step="0.0001" value="${item.rate}"></div>
                     <div class="form-group"><label>Cost</label>
-                        <input name="cost" type="number" step="0.01" value="${item.cost}"></div>
+                        <input name="cost" type="number" step="0.0001" value="${item.cost}"></div>
                     <div class="form-group"><label>${T('Income')} Account</label>
                         <select name="income_account_id">
                             <option value="">-- None --</option>
-                            ${incomeAccts.map(a => `<option value="${a.id}" ${item.income_account_id==a.id?'selected':''}>${a.account_number} - ${escapeHtml(a.name)}</option>`).join('')}
+                            ${incomeAccts.map(a => `<option value="${a.id}" ${item.income_account_id==a.id?'selected':''}>${acctLabel(a)}</option>`).join('')}
                         </select></div>
                     <div class="form-group"><label>Expense Account</label>
                         <select name="expense_account_id">
                             <option value="">-- None --</option>
-                            ${expenseAccts.map(a => `<option value="${a.id}" ${item.expense_account_id==a.id?'selected':''}>${a.account_number} - ${escapeHtml(a.name)}</option>`).join('')}
+                            ${expenseAccts.map(a => `<option value="${a.id}" ${item.expense_account_id==a.id?'selected':''}>${acctLabel(a)}</option>`).join('')}
                         </select></div>
                     <div class="form-group"><label>
                         <input type="checkbox" name="is_taxable" ${item.is_taxable?'checked':''}>
                         Taxable</label></div>
+                    ${id ? `<div class="form-group"><label>
+                        <input type="checkbox" name="is_active" ${item.is_active !== false ? 'checked' : ''}>
+                        Active</label>
+                        <div style="font-size:10px; color:var(--text-muted);">An inactive item stays on the documents that use it but is left out of every item picker.</div></div>` : ''}
                 </div>
 
                 <fieldset id="inv-fieldset" style="margin-top:16px; padding:10px 14px; border:1px solid var(--panel-border); border-radius:4px; ${trackable ? '' : 'display:none;'}">
@@ -120,7 +132,7 @@ const ItemsPage = {
                         <div class="form-group"><label>Asset Account ${id ? '' : '<span style="font-size:10px;color:var(--text-muted)">(blank = Inventory 1300)</span>'}</label>
                             <select name="asset_account_id">
                                 <option value="">-- Default (Inventory 1300) --</option>
-                                ${assetAccts.map(a => `<option value="${a.id}" ${item.asset_account_id==a.id?'selected':''}>${a.account_number} - ${escapeHtml(a.name)}</option>`).join('')}
+                                ${assetAccts.map(a => `<option value="${a.id}" ${item.asset_account_id==a.id?'selected':''}>${acctLabel(a)}</option>`).join('')}
                             </select></div>
                         ${id ? `<div class="form-group"><label>Avg Cost <span style="font-size:10px;color:var(--text-muted)">(weighted, computed from movements)</span></label>
                             <div style="padding:8px 10px; border:1px solid var(--panel-border); border-radius:4px; background:transparent; color:var(--text-primary); font-variant-numeric:tabular-nums;">${formatCurrency(item.avg_cost || 0)}</div></div>` : ''}
@@ -168,6 +180,8 @@ const ItemsPage = {
             asset_account_id: trackInv && form.asset_account_id && form.asset_account_id.value
                 ? parseInt(form.asset_account_id.value) : null,
         };
+        // Active/inactive is an edit (a new item is active).
+        if (id && form.is_active) data.is_active = form.is_active.checked;
         // Initial quantity is only settable on create — backend recomputes
         // it from inventory_movements after that, so PUT silently ignores it.
         if (!id && trackInv && form.quantity_on_hand) {
@@ -294,7 +308,7 @@ const ItemsPage = {
                         <label>Unit cost (optional)
                             <span style="font-size:10px;color:var(--text-muted)">— affects avg cost</span>
                         </label>
-                        <input name="unit_cost" type="number" step="0.01" min="0"
+                        <input name="unit_cost" type="number" step="0.0001" min="0"
                                placeholder="${currentAvg.toFixed(2)}">
                     </div>
                     <div class="form-group full-width">

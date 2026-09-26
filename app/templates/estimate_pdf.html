@@ -43,7 +43,8 @@
             <div class="company-info">
                 {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
                 {% if company.company_address2 %}{{ company.company_address2 }}<br>{% endif %}
-                {% if company.company_city %}{{ company.company_city }}, {{ company.company_state }} {{ company.company_zip }}<br>{% endif %}
+                {% set company_city = city_line(company.company_city, company.company_state, company.company_zip) %}
+                {% if company_city %}{{ company_city }}<br>{% endif %}
                 {% if company.company_phone %}{{ company.company_phone }}<br>{% endif %}
                 {% if company.company_email %}{{ company.company_email }}{% endif %}
             </div>
@@ -67,7 +68,9 @@
                 <strong>{{ est.customer.name if est.customer else '' }}</strong><br>
                 {% if est.bill_address1 %}{{ est.bill_address1 }}<br>{% endif %}
                 {% if est.bill_address2 %}{{ est.bill_address2 }}<br>{% endif %}
-                {% if est.bill_city %}{{ est.bill_city }}, {{ est.bill_state }} {{ est.bill_zip }}{% endif %}
+                {% set bill_city = city_line(est.bill_city, est.bill_state, est.bill_zip) %}
+                {% if bill_city %}{{ bill_city }}<br>{% endif %}
+                {% if est.bill_address1 or bill_city %}{% set bill_country = country_line(est.customer.bill_country if est.customer else None) %}{% if bill_country %}{{ bill_country }}{% endif %}{% endif %}
             </div>
         </div>
     </div>
@@ -79,7 +82,7 @@
             <tr>
                 <td>{{ line.description or '' }}{% if est.tax_amount and not line.is_taxable %} <span style="font-size:8px;color:#666;">(non-taxable)</span>{% endif %}</td>
                 <td class="r">{{ line.quantity }}</td>
-                <td class="r">{{ line.rate | currency }}</td>
+                <td class="r">{{ line.rate | rate }}</td>
                 <td class="r">{{ line.amount | currency }}</td>
             </tr>
         {% endfor %}

@@ -12,6 +12,16 @@
  */
 const BankingPage = {
     _kindLabel(kind) { return kind === 'credit_card' ? 'Credit card' : 'Bank'; },
+
+    // Every banking page is a route of its own: #/banking, and a register
+    // at #/banking/<account id>. App.navigate renders without touching the
+    // address bar, so the register used to keep #/banking and a refresh
+    // lost it (exploratory 2.17.3, W-L6). Moving the hash renders through
+    // the hashchange listener; the same hash re-renders in place.
+    go(hash) {
+        if (location.hash === hash) App.navigate(hash);
+        else location.hash = hash;
+    },
     _cols(kind) { return kind === 'credit_card' ? ['Charge', 'Payment'] : ['Payment', 'Deposit']; },
 
     // ------------------------------------------------------------------
@@ -39,7 +49,7 @@ const BankingPage = {
             html += `<div class="card-grid">`;
             for (const a of rows) {
                 const owed = a.bank_kind === 'credit_card';
-                html += `<div class="card" style="cursor:pointer" onclick="App.navigate('#/banking/${a.account_id}')">
+                html += `<div class="card" style="cursor:pointer" onclick="BankingPage.go('#/banking/${a.account_id}')">
                     <div class="card-header">${escapeHtml(a.name)} <span style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.account_number || '')} · ${BankingPage._kindLabel(a.bank_kind)}</span></div>
                     <div class="card-value">${formatCurrency(a.balance)}${owed ? ' <span style="font-size:11px; color:var(--gray-500);">owed</span>' : ''}</div>
                     <div style="font-size:12px; color:var(--gray-400); margin-top:4px;">
@@ -75,7 +85,7 @@ const BankingPage = {
         try {
             await API.post(`/banking/accounts/${feedId}/post-legacy-balance`, { date: d });
             toast('Opening balance posted');
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -83,7 +93,7 @@ const BankingPage = {
         if (!confirm('Dismiss the pre-2.10 balance? It will not be posted.')) return;
         try {
             await API.put(`/banking/accounts/${feedId}`, { legacy_balance: null });
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -153,7 +163,7 @@ const BankingPage = {
         try {
             const data = await API.post('/simplefin/claim', { setup_token: token });
             toast(`Connected — found ${data.accounts.length} account(s). Now map them below.`);
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -171,7 +181,7 @@ const BankingPage = {
             const r = await API.post('/simplefin/sync');
             toast(`Synced: ${r.imported} new, ${r.skipped} duplicates skipped`);
             if (r.warnings && r.warnings.length) toast(r.warnings[0], 'error');
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -180,7 +190,7 @@ const BankingPage = {
         try {
             await API.post('/simplefin/disconnect');
             toast('Bank feed disconnected');
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -200,7 +210,7 @@ const BankingPage = {
             <form onsubmit="BankingPage.saveAccount(event)">
                 <div class="form-grid">
                     <div class="form-group full-width"><label>Ledger account *</label>
-                        <select name="account_id" onchange="BankingPage._toggleNewAcct(this)">
+                        <select name="account_id" onchange="BankingPage._toggleNewAcct(this); BankingPage._showLedgerBalance(this.form)">
                             ${opts}<option value="__new__">+ Create a new chart account…</option>
                         </select></div>
                     <div id="new-acct-fields" class="form-group full-width" style="display:${free.length ? 'none' : 'block'};">
@@ -217,23 +227,51 @@ const BankingPage = {
                         <input name="bank_name"></div>
                     <div class="form-group"><label>Last 4 digits</label>
                         <input name="last_four" maxlength="4"></div>
-                    <div class="form-group"><label>Opening balance</label>
-                        <input name="opening_balance" type="number" step="0.01" value="0">
-                        <div style="font-size:10px; color:var(--gray-500);">What the statement says: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900).</div></div>
+                    <div class="form-group"><label>Statement balance</label>
+                        <input name="opening_balance" type="number" step="0.01" value="0" oninput="this.dataset.touched = '1'">
+                        <div style="font-size:10px; color:var(--gray-500);">What the statement says on the As-of date: cash in the bank, or the amount owed on a card. Posted against the opening-balance offset account (3900) — unless the books already carry this account, when only a difference you confirm is posted.</div>
+                        <div id="acct-ledger-note" style="font-size:11px; margin-top:4px;" role="status"></div></div>
                     <div class="form-group"><label>As of</label>
-                        <input name="opening_date" type="date" value="${todayISO()}"></div>
+                        <input name="opening_date" type="date" value="${todayISO()}" onchange="BankingPage._showLedgerBalance(this.form)"></div>
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                     <button type="submit" class="btn btn-primary">Create</button>
                 </div>
             </form>`);
-        if (!free.length) { const sel = document.querySelector('select[name=account_id]'); if (sel) sel.value = '__new__'; }
+        const sel = document.querySelector('select[name=account_id]');
+        if (!free.length) { if (sel) sel.value = '__new__'; }
+        if (sel) BankingPage._showLedgerBalance(sel.form);
     },
 
     _toggleNewAcct(sel) {
         const box = $('#new-acct-fields');
         if (box) box.style.display = sel.value === '__new__' ? 'block' : 'none';
+    },
+
+    // What the books already say about the chosen account on the As-of
+    // date, shown beside the statement balance. Savings that already held
+    // $300 from a transfer took a second $300 when the statement balance
+    // was posted blind (exploratory 2.17.3, W-H6): the ledger's figure is
+    // the starting value now, so a matching statement posts nothing.
+    async _showLedgerBalance(form) {
+        const note = $('#acct-ledger-note');
+        if (!form || !note) return;
+        const accountId = form.account_id.value;
+        const untouched = !form.opening_balance.dataset.touched;
+        note.textContent = '';
+        if (!accountId || accountId === '__new__') {
+            if (untouched) form.opening_balance.value = '0';
+            return;
+        }
+        const asOf = form.opening_date.value || todayISO();
+        try {
+            const led = await API.get(`/banking/ledger-balance?account_id=${accountId}&as_of=${asOf}`);
+            if (form.account_id.value !== accountId) return;  // changed meanwhile
+            if (untouched) form.opening_balance.value = led.has_postings ? Number(led.balance).toFixed(2) : '0';
+            if (!led.has_postings) return;
+            note.textContent = `The books already show ${formatCurrency(led.balance)} in ${led.account_name} on ${formatDate(led.as_of)}. Enter the statement's figure: if it differs, you'll be asked before the difference is posted.`;
+        } catch (err) { /* the note is a courtesy; the server still guards the save */ }
     },
 
     async saveAccount(e) {
@@ -251,17 +289,30 @@ const BankingPage = {
                 });
                 accountId = created.id;
             }
-            await API.post('/banking/accounts', {
+            const body = {
                 name: form.name.value,
                 account_id: parseInt(accountId, 10),
                 bank_name: form.bank_name.value || null,
                 last_four: form.last_four.value || null,
                 opening_balance: form.opening_balance.value || '0',
                 opening_date: form.opening_date.value || null,
-            });
+            };
+            try {
+                await API.post('/banking/accounts', body);
+            } catch (err) {
+                // The ledger already carries this account and the statement
+                // differs: say both figures, and post only the difference
+                // when the user says so.
+                if (!(err.status === 409 && err.detail && err.detail.code === 'ledger_has_balance')) throw err;
+                if (!confirm(`${err.detail.message}\n\nPost the ${formatCurrency(Number(err.detail.difference))} difference now?`)) {
+                    toast('Nothing was created. Enter the balance the books already show to post nothing.', 'error');
+                    return;
+                }
+                await API.post('/banking/accounts', { ...body, post_difference: true });
+            }
             toast('Bank account created');
             closeModal();
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -280,18 +331,19 @@ const BankingPage = {
         const [outLabel, inLabel] = BankingPage._cols(kind);
         let review = [];
         if (feed) review = await API.get(`/banking/transactions?bank_account_id=${feed.bank_account_id}&status=unmatched`);
-        BankingPage._ctx = { accountId: id, feedId: feed ? feed.bank_account_id : null, kind };
+        BankingPage._ctx = { accountId: id, feedId: feed ? feed.bank_account_id : null, kind, lastReconciled: info.last_reconciled || null };
 
         let html = `
             <div class="page-header">
                 <h2>${escapeHtml(reg.account_name)} <span style="font-size:11px; color:var(--gray-400);">${escapeHtml(reg.account_number || '')} · ${BankingPage._kindLabel(kind)}</span></h2>
                 <div class="btn-group">
-                    <button class="btn btn-secondary" onclick="App.navigate('#/banking')">Back</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.go('#/banking')">Back</button>
                     <button class="btn btn-primary" onclick="BankingPage.showEntryForm(${id})">+ Entry</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showTransferForm(${id})">Transfer</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showOFXImport(${id})">Import file</button>
                     ${feed ? `<button class="btn btn-secondary" onclick="BankingPage.findMatches(${feed.bank_account_id}, ${id})">Find matches</button>` : ''}
                     <button class="btn btn-secondary" onclick="BankingPage.startReconcile(${id})">Reconcile</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.showReconciliations(${id})">Reconciliations…</button>
                 </div>
             </div>
             <div class="card-grid" style="margin-bottom:16px;">
@@ -312,7 +364,7 @@ const BankingPage = {
                 <tr style="${e.voided ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                     <td>${formatDate(e.date)}</td>
                     <td>${escapeHtml(e.payee || '')}</td>
-                    <td>${e.source_link ? `<a href="${escapeHtml(e.source_link)}">${escapeHtml(e.description)}</a>` : escapeHtml(e.description)}</td>
+                    <td><a href="${escapeHtml(BankingPage._entryHref(e))}">${escapeHtml(e.description || 'View entry')}</a></td>
                     <td>${escapeHtml(e.reference || '')}</td>
                     <td style="font-size:10px; color:var(--gray-500);">${escapeHtml((e.source_type || '').replace(/_/g, ' '))}</td>
                     <td class="amount">${e.payment > 0 ? formatCurrency(e.payment) : ''}</td>
@@ -331,13 +383,20 @@ const BankingPage = {
         return html;
     },
 
+    // Where a register line opens: the document behind it, or — for a
+    // posting with none of its own (a void, a sales-tax or payroll payment,
+    // an import) — its journal entry. Every line opens something.
+    _entryHref(e) {
+        return e.source_link || `#/journal/${e.transaction_id}`;
+    },
+
     _reviewPanel(review, feedId, accountId, kind) {
         const rows = review.map(t => `
             <tr>
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(t.description || '')}</div></td>
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--success)' : 'color:var(--danger)'}">${formatCurrency(t.amount)}</td>
-                <td><select id="cat-${t.id}" class="review-cat" data-current="${t.category_account_id || ''}"><option value="">${t.category_name ? escapeHtml(t.category_name) : 'Pick a category…'}</option></select></td>
+                <td><select id="cat-${t.id}" class="review-cat" data-current="${t.category_account_id || ''}" aria-label="Category" onchange="BankingPage.setCategory(${t.id}, this)"><option value="">${t.category_name ? escapeHtml(t.category_name) : 'Pick a category…'}</option></select></td>
                 <td style="white-space:nowrap;">
                     <button class="btn btn-sm btn-primary" onclick="BankingPage.addLine(${t.id}, ${accountId})">Add</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.showMatch(${t.id}, ${accountId})">Match</button>
@@ -355,7 +414,8 @@ const BankingPage = {
                 <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                <strong>Add</strong> posts the line with the category. <strong>Match</strong> links it to something you already entered.
+                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category; <strong>Add all categorised</strong> posts every line that has one.
+                <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
         </div>`;
@@ -378,36 +438,55 @@ const BankingPage = {
         try {
             await API.post(`/banking/transactions/${lineId}/add`, body);
             toast('Added to the books');
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async excludeLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/exclude`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async restoreLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/restore`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async unmatchLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/unmatch`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // A category picked in a line's dropdown is saved as it is picked, so
+    // "Add all categorised" posts it and a reload still shows it. Before,
+    // a pick lived only in the dropdown until that line's own Add: Add all
+    // posted just the rule-categorised lines, and reloading lost the rest
+    // (exploratory 2.17.3, W-M12).
+    _pendingCategories: new Set(),
+
+    setCategory(lineId, sel) {
+        const value = sel.value ? parseInt(sel.value, 10) : null;
+        const saving = API.request('PATCH', `/banking/transactions/${lineId}`, { category_account_id: value })
+            .then(() => { sel.dataset.current = value ? String(value) : ''; })
+            .catch(err => { sel.value = sel.dataset.current || ''; toast(err.message, 'error'); });
+        BankingPage._pendingCategories.add(saving);
+        saving.finally(() => BankingPage._pendingCategories.delete(saving));
+        return saving;
     },
 
     async addAll(feedId, accountId) {
         try {
+            // A pick made a moment ago may still be on its way.
+            await Promise.allSettled([...BankingPage._pendingCategories]);
             const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`);
             toast(`Added ${r.added}${r.skipped.length ? `, skipped ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -415,7 +494,7 @@ const BankingPage = {
         try {
             const r = await API.post(`/banking/accounts/${feedId}/feed/auto-match`);
             toast(`Matched ${r.matched} statement line${r.matched === 1 ? '' : 's'}`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -440,7 +519,7 @@ const BankingPage = {
             await API.post(`/banking/transactions/${lineId}/match`, { line_id: ledgerLineId });
             toast('Matched');
             closeModal();
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -452,7 +531,7 @@ const BankingPage = {
         try {
             await API.post(path);
             toast('Voided');
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -509,7 +588,7 @@ const BankingPage = {
             await API.post('/banking/transactions', data);
             toast('Entry posted');
             closeModal();
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -551,7 +630,7 @@ const BankingPage = {
             });
             toast('Transfer posted');
             closeModal();
-            App.navigate(`#/banking/${t.from_account_id}`);
+            BankingPage.go(`#/banking/${t.from_account_id}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -573,7 +652,7 @@ const BankingPage = {
             await API.post(`/transfers/${id}/void`);
             toast('Transfer voided');
             closeModal();
-            App.navigate('#/banking');
+            BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -581,14 +660,27 @@ const BankingPage = {
     // Reconciliation — over the ledger's lines
     // ------------------------------------------------------------------
     async startReconcile(accountId) {
+        // A statement on or before the last reconciled one is refused by
+        // the server; the form says where the last one ended and won't
+        // offer an earlier date.
+        const ctx = BankingPage._ctx || {};
+        const last = ctx.accountId === accountId ? ctx.lastReconciled : null;
+        let minDate = '';
+        if (last) {
+            const d = new Date(last + 'T00:00:00');
+            d.setDate(d.getDate() + 1);
+            minDate = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+        }
+        const defaultDate = minDate && todayISO() < minDate ? minDate : todayISO();
         openModal('Begin Reconciliation', `
             <form onsubmit="BankingPage.createReconciliation(event, ${accountId})">
                 <p style="margin-bottom:12px; font-size:11px; color:var(--gray-500);">
                     Enter the ending date and balance from your statement. For a card, the balance is the amount owed.
+                    ${last ? `This account is reconciled through ${formatDate(last)}; the statement date comes after that.` : ''}
                 </p>
                 <div class="form-grid">
                     <div class="form-group"><label>Statement Date *</label>
-                        <input name="statement_date" type="date" required value="${todayISO()}"></div>
+                        <input name="statement_date" type="date" required value="${defaultDate}" ${minDate ? `min="${minDate}"` : ''}></div>
                     <div class="form-group"><label>Statement Ending Balance *</label>
                         <input name="statement_balance" type="number" step="0.01" required></div>
                 </div>
@@ -637,11 +729,12 @@ const BankingPage = {
             <div class="page-header">
                 <h2>Reconcile — statement of ${formatDate(data.statement_date)}</h2>
                 <div class="btn-group">
-                    <button class="btn btn-secondary" onclick="App.navigate('#/banking/${data.account_id}')">Later</button>
+                    <button class="btn btn-secondary" onclick="BankingPage.go('#/banking/${data.account_id}')">Later</button>
                     <button class="btn btn-secondary" onclick="BankingPage.abandonReconcile(${reconId}, ${data.account_id})">Abandon</button>
-                    <button class="btn btn-primary" id="recon-finish-btn" onclick="BankingPage.finishReconcile(${reconId}, ${data.account_id})" ${balanced ? '' : 'disabled'}>Finish Reconciliation</button>
+                    <button class="btn btn-primary" id="recon-finish-btn" onclick="BankingPage.finishReconcile(${reconId}, ${data.account_id})">Finish Reconciliation</button>
                 </div>
             </div>
+            <div id="recon-finish-msg" role="alert" style="font-size:12px; color:var(--danger); margin-bottom:8px;"></div>
             <div class="card-grid" style="margin-bottom:16px;">
                 <div class="card"><div class="card-header">Beginning Balance</div>
                     <div class="card-value">${formatCurrency(data.beginning_balance)}</div></div>
@@ -651,7 +744,7 @@ const BankingPage = {
                     <div class="card-value">${formatCurrency(data.statement_balance)}</div></div>
                 <div class="card"><div class="card-header">Difference</div>
                     <div class="card-value" id="recon-diff" style="color:${diffColor}">${formatCurrency(data.difference)}</div>
-                    <div style="font-size:11px; font-weight:600;" role="status">${balanced ? '✓ Balanced' : '⚠ Out of balance'}</div></div>
+                    <div style="font-size:11px; font-weight:600;" role="status">${balanced ? '✓ Balanced — ready to finish' : '⚠ Out of balance — finish when this is $0.00'}</div></div>
             </div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col" style="width:30px;"></th><th scope="col">Date</th><th scope="col">Payee / Description</th><th scope="col">Ref #</th><th scope="col" class="amount">Amount</th></tr></thead>
@@ -669,12 +762,82 @@ const BankingPage = {
         }
     },
 
+    // An out-of-balance Finish was a disabled button: it did nothing and
+    // said nothing (exploratory 2.17.3, W-M20). It says why now — the
+    // difference, and what to do about it — and a finished reconciliation
+    // opens its report.
     async finishReconcile(reconId, accountId) {
-        if (!confirm('Mark this reconciliation as complete? Cleared lines are locked.')) return;
+        const msg = $('#recon-finish-msg');
         try {
+            const data = await API.get(`/banking/reconciliations/${reconId}/transactions`);
+            if (Math.abs(data.difference) >= 0.005) {
+                const why = `Not finished: the difference is ${formatCurrency(data.difference)}, and it must be $0.00. Tick the lines that are on your statement, or check the statement's ending balance.`;
+                if (msg) msg.textContent = why;
+                toast(why, 'error');
+                return;
+            }
+            if (!confirm('Mark this reconciliation as complete? Cleared lines are locked.')) return;
             await API.post(`/banking/reconciliations/${reconId}/complete`);
             toast('Reconciliation completed');
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
+            BankingPage.showReconReport(reconId);
+        } catch (err) {
+            if (msg) msg.textContent = err.message;
+            toast(err.message, 'error');
+        }
+    },
+
+    async showReconciliations(accountId) {
+        try {
+            const rows = await API.get(`/banking/reconciliations?account_id=${accountId}`);
+            const body = rows.length ? `<div class="table-container"><table>
+                <thead><tr><th scope="col">Statement date</th><th scope="col" class="amount">Ending balance</th><th scope="col">Status</th><th scope="col"></th></tr></thead>
+                <tbody>${rows.map(r => `<tr>
+                    <td>${formatDate(r.statement_date)}</td>
+                    <td class="amount">${formatCurrency(r.statement_balance)}</td>
+                    <td>${r.status === 'completed' ? `Completed ${r.completed_at ? formatDate(r.completed_at) : ''}` : 'In progress'}</td>
+                    <td style="white-space:nowrap;">${r.status === 'completed'
+                        ? `<button class="btn btn-sm btn-secondary" onclick="BankingPage.showReconReport(${r.id})">Report</button>
+                           <button class="btn btn-sm btn-secondary" onclick="window.open('/api/banking/reconciliations/${r.id}/pdf', '_blank')">Save PDF</button>`
+                        : `<button class="btn btn-sm btn-primary" onclick="closeModal(); BankingPage.showReconcileView(${r.id})">Continue</button>`}</td>
+                </tr>`).join('')}</tbody></table></div>` : '<p>No reconciliations for this account yet.</p>';
+            openModal('Reconciliations', body + `<div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async showReconReport(reconId) {
+        try {
+            const r = await API.get(`/banking/reconciliations/${reconId}/report`);
+            const L = r.labels;
+            const line = (label, amount, style = '') => `<tr style="${style}"><td>${escapeHtml(label)}</td><td class="amount">${formatCurrency(amount)}</td></tr>`;
+            const bold = 'font-weight:700; background:var(--gray-50);';
+            const summary = `<div class="table-container"><table><tbody>
+                ${line('Beginning balance', r.beginning_balance)}
+                ${line(`Cleared ${L.increase.toLowerCase()} (${r.cleared.increase.count})`, r.cleared.increase.total)}
+                ${line(`Cleared ${L.decrease.toLowerCase()} (${r.cleared.decrease.count})`, r.cleared.decrease.total)}
+                ${line('Cleared balance', r.cleared_balance, bold)}
+                ${line('Statement ending balance', r.ending_balance)}
+                ${line('Difference', r.difference, bold)}
+                ${line(`Uncleared ${L.increase.toLowerCase()} (${r.uncleared.increase.count})`, r.uncleared.increase.total)}
+                ${line(`Uncleared ${L.decrease.toLowerCase()} (${r.uncleared.decrease.count})`, r.uncleared.decrease.total)}
+                ${line(`Register balance as of ${formatDate(r.statement_date)}`, r.register_balance, bold)}
+            </tbody></table></div>`;
+            const detail = [['cleared', 'Cleared'], ['uncleared', 'Uncleared']].map(([state, title]) =>
+                ['increase', 'decrease'].filter(side => r[state][side].items.length).map(side => `
+                    <h4 style="margin:12px 0 4px; font-size:12px;">${title} ${escapeHtml(L[side].toLowerCase())}</h4>
+                    <div class="table-container"><table>
+                        <thead><tr><th scope="col">Date</th><th scope="col">Ref #</th><th scope="col">Payee / description</th><th scope="col" class="amount">Amount</th></tr></thead>
+                        <tbody>${r[state][side].items.map(i => `<tr>
+                            <td>${formatDate(i.date)}</td><td>${escapeHtml(i.reference || '')}</td>
+                            <td>${escapeHtml(i.payee || i.description || '')}</td><td class="amount">${formatCurrency(i.amount)}</td>
+                        </tr>`).join('')}</tbody>
+                    </table></div>`).join('')).join('');
+            openModal(`Reconciliation — ${r.account_name}, statement of ${formatDate(r.statement_date)}`, `
+                ${summary}${detail}
+                <div class="form-actions">
+                    <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+                    <button class="btn btn-primary" onclick="window.open('/api/banking/reconciliations/${reconId}/pdf', '_blank')">Save PDF</button>
+                </div>`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -682,14 +845,19 @@ const BankingPage = {
         if (!confirm('Abandon this reconciliation? Ticks are kept.')) return;
         try {
             await API.del(`/banking/reconciliations/${reconId}`);
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     // ------------------------------------------------------------------
-    // File import (OFX/QFX, CSV: Chase checking/credit, PayPal) — needs a
-    // feed on the account; offers to create one.
+    // File import (OFX/QFX; CSV: Bank of America, Chase checking/credit,
+    // PayPal, or any file whose header names a date, a description and an
+    // amount — and, for one that doesn't, a step that asks which column is
+    // which) — needs a feed on the account; offers to create one.
     // ------------------------------------------------------------------
+    _csvMapping: null,   // the mapping step's answer, sent with preview and import
+    _csvLayout: null,    // the columns and sample rows the step shows
+
     async showOFXImport(accountId) {
         const feeds = await API.get('/banking/accounts');
         const feed = feeds.find(f => f.account_id === accountId);
@@ -698,11 +866,13 @@ const BankingPage = {
             return;
         }
         const feedId = feed.id;
+        BankingPage._csvMapping = null;
+        BankingPage._csvLayout = null;
         openModal('Import Bank File', `
-            <form onsubmit="BankingPage.previewOFX(event, ${feedId}, ${accountId})">
+            <form id="ofx-form" onsubmit="BankingPage.previewOFX(event, ${feedId}, ${accountId})">
                 <div class="form-group">
-                    <label>Select an OFX/QFX file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal)</label>
-                    <input type="file" name="file" accept=".ofx,.qfx,.csv" required id="ofx-file">
+                    <label>Select an OFX/QFX file, or a CSV export (Bank of America, Chase checking, Chase credit, PayPal, or any file with date, description and amount columns)</label>
+                    <input type="file" name="file" accept=".ofx,.qfx,.csv" required id="ofx-file" onchange="BankingPage._csvMapping = null">
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -723,6 +893,7 @@ const BankingPage = {
         const isCsv = BankingPage._isCsvFile(file);
         const formData = new FormData();
         formData.append('file', file);
+        if (isCsv && BankingPage._csvMapping) formData.append('mapping', JSON.stringify(BankingPage._csvMapping));
         // The pane stayed empty for the whole round trip and the button
         // stayed live, so a second click put a second parse in flight
         // (2.13.0 gate, owner + skytech). Say something first, and take
@@ -733,9 +904,19 @@ const BankingPage = {
         try {
             const endpoint = isCsv ? '/api/bank-import/preview-csv' : '/api/bank-import/preview';
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Parse failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Parse failed');
+            if (isCsv && data.error && data.header_row) {
+                // A layout detection missed ("Unknown CSV format" with no
+                // way forward — exploratory 2.17.3, W-L15): ask which
+                // column is which, then preview again with the answer.
+                $('#ofx-preview').innerHTML = BankingPage._mappingStep(data, data.has_header !== false);
+                return;
+            }
             if (isCsv && data.error) throw new Error(data.error);
+            const layout = data.format === 'generic'
+                ? (BankingPage._csvMapping ? 'the columns you chose' : 'date, description and amount columns')
+                : data.format;
             const rows = data.transactions.map(t => `<tr>
                 <td>${escapeHtml(t.date || '')}</td>
                 <td>${escapeHtml(t.payee || '')}</td>
@@ -745,7 +926,8 @@ const BankingPage = {
             $('#ofx-preview').innerHTML = `
                 <div style="margin-bottom:8px; font-size:11px;">
                     <strong>${data.transactions.length}</strong> transactions found.
-                    ${isCsv && data.format ? `Format: ${escapeHtml(data.format)}` : ''}
+                    ${isCsv && data.format ? `Format: ${escapeHtml(layout)}.` : ''}
+                    ${isCsv && data.unread ? `${data.unread} row${data.unread === 1 ? '' : 's'} could not be read and will be skipped.` : ''}
                     ${data.account_id ? `Account: ${escapeHtml(data.account_id)}` : ''}
                 </div>
                 <div class="table-container" style="max-height:300px; overflow-y:auto;"><table>
@@ -762,6 +944,69 @@ const BankingPage = {
         }
     },
 
+    _mappingStep(layout, hasHeader) {
+        BankingPage._csvLayout = layout;
+        const head = layout.header_row || [];
+        const sample = hasHeader ? (layout.sample || []) : [head].concat(layout.sample || []).slice(0, 5);
+        const names = head.map((c, i) => (hasHeader && c) ? `${i + 1}: ${c}` : `Column ${i + 1}`);
+        const chosen = BankingPage._csvMapping || {};
+        const guess = layout.suggested || {};
+        const pick = (role, required) => {
+            const current = chosen[role] !== undefined && chosen[role] !== null ? chosen[role] : guess[role];
+            return `<select id="csv-map-${role}">
+                <option value="">${required ? 'Choose…' : '— none —'}</option>
+                ${names.map((n, i) => `<option value="${i}" ${current === i ? 'selected' : ''}>${escapeHtml(n)}</option>`).join('')}
+            </select>`;
+        };
+        const fmt = chosen.date_format || 'auto';
+        const fmtOpt = (value, text) => `<option value="${value}" ${fmt === value ? 'selected' : ''}>${text}</option>`;
+        return `
+            <div style="font-size:11px; margin-bottom:8px;" role="status">${escapeHtml(layout.error || '')}</div>
+            <div class="form-grid">
+                <div class="form-group full-width"><label><input type="checkbox" id="csv-map-header" ${hasHeader ? 'checked' : ''}
+                    onchange="BankingPage._redrawMapping(this.checked)"> The first row holds column names</label></div>
+                <div class="form-group"><label for="csv-map-date">Date *</label>${pick('date', true)}</div>
+                <div class="form-group"><label for="csv-map-date_format">Date format</label>
+                    <select id="csv-map-date_format">${fmtOpt('auto', 'Work it out')}${fmtOpt('MM/DD/YYYY', 'MM/DD/YYYY')}${fmtOpt('DD/MM/YYYY', 'DD/MM/YYYY')}${fmtOpt('YYYY-MM-DD', 'YYYY-MM-DD')}</select></div>
+                <div class="form-group"><label for="csv-map-description">Description *</label>${pick('description', true)}</div>
+                <div class="form-group"><label for="csv-map-payee">Payee</label>${pick('payee')}</div>
+                <div class="form-group"><label for="csv-map-amount">Amount (one column; money out is negative)</label>${pick('amount')}</div>
+                <div class="form-group"><label for="csv-map-check_number">Check #</label>${pick('check_number')}</div>
+                <div class="form-group"><label for="csv-map-debit">…or money out (debit)</label>${pick('debit')}</div>
+                <div class="form-group"><label for="csv-map-credit">…and money in (credit)</label>${pick('credit')}</div>
+            </div>
+            <div class="table-container" style="max-height:180px; overflow:auto;"><table>
+                <thead><tr>${names.map(n => `<th scope="col">${escapeHtml(n)}</th>`).join('')}</tr></thead>
+                <tbody>${sample.map(r => `<tr>${names.map((_, i) => `<td>${escapeHtml(r[i] || '')}</td>`).join('')}</tr>`).join('')}</tbody>
+            </table></div>
+            <div class="form-actions" style="margin-top:12px;">
+                <button type="button" class="btn btn-primary" onclick="BankingPage.previewMapped()">Preview with these columns</button>
+            </div>`;
+    },
+
+    _redrawMapping(hasHeader) {
+        if (BankingPage._csvLayout) $('#ofx-preview').innerHTML = BankingPage._mappingStep(BankingPage._csvLayout, hasHeader);
+    },
+
+    previewMapped() {
+        const col = role => {
+            const el = $(`#csv-map-${role}`);
+            return el && el.value !== '' ? parseInt(el.value, 10) : null;
+        };
+        BankingPage._csvMapping = {
+            date: col('date'),
+            description: col('description'),
+            payee: col('payee'),
+            amount: col('amount'),
+            debit: col('debit'),
+            credit: col('credit'),
+            check_number: col('check_number'),
+            date_format: $('#csv-map-date_format').value,
+            has_header: $('#csv-map-header').checked,
+        };
+        $('#ofx-form').requestSubmit();
+    },
+
     async confirmOFXImport(feedId, accountId, importBtn) {
         // Same guard on the import itself: one click, one import. The
         // button comes in from its own onclick (`this`) — the first cut
@@ -775,15 +1020,16 @@ const BankingPage = {
             const isCsv = BankingPage._isCsvFile(file);
             const formData = new FormData();
             formData.append('file', file);
+            if (isCsv && BankingPage._csvMapping) formData.append('mapping', JSON.stringify(BankingPage._csvMapping));
             const endpoint = isCsv
                 ? `/api/bank-import/import-csv/${feedId}`
                 : `/api/bank-import/import/${feedId}`;
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
             toast(`Imported ${data.imported} (${data.skipped} duplicates skipped, ${data.matched || 0} matched to the books)`);
             closeModal();
-            App.navigate(`#/banking/${accountId}`);
+            BankingPage.go(`#/banking/${accountId}`);
         } catch (err) {
             toast(err.message, 'error');
         } finally {

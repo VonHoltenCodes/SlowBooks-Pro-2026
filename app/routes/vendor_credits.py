@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.models.accounts import Account
 from app.models.bills import Bill, BillStatus
 from app.models.contacts import Vendor
 from app.models.items import Item
@@ -47,6 +46,11 @@ from app.services.accounting import (
 from app.services.inventory_service import get_inventory_asset_account_id
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_vendor_credit_number
+from app.services.purchase_posting import (
+    expense_account_for,
+    spread,
+    unit_cost_with_tax,
+)
 
 router = APIRouter(prefix="/api/vendor-credits", tags=["vendor_credits"])
 
@@ -156,16 +160,21 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
             detail="Could not assign a vendor credit number — please retry.",
         )
 
-    default_expense = db.query(Account).filter(Account.account_number == "6000").first()
-    default_expense_id = default_expense.id if default_expense else None
-
     journal_lines = []
     returns = []  # [(item, quantity, unit_cost), ...] for inventory lines
 
+    # Round per line so the stored line amount matches compute_line_totals
+    # and the credits land on the same cents as the rounded A/P debit.
+    amounts = [
+        _q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))) for ln in data.lines
+    ]
+    # The mirror of a bill: tax on a purchase was part of what the lines
+    # cost, so the tax coming back reduces those same lines. It never
+    # credits Sales Tax Payable, which is the tax owed on sales.
+    tax_shares = spread(tax_amount, amounts)
+
     for i, line_data in enumerate(data.lines):
-        # Round per line so the stored line amount matches compute_line_totals
-        # and the credits land on the same cents as the rounded A/P debit.
-        amt = _q(Decimal(str(line_data.quantity)) * Decimal(str(line_data.rate)))
+        amt = amounts[i]
         item = None
         if line_data.item_id:
             item = db.query(Item).filter(Item.id == line_data.item_id).first()
@@ -192,17 +201,24 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
                     (
                         item,
                         Decimal(str(line_data.quantity)),
-                        Decimal(str(line_data.rate)),
+                        unit_cost_with_tax(
+                            amt, tax_shares[i], line_data.quantity, line_data.rate
+                        ),
                     )
                 )
+        elif amt > 0 or line_data.account_id:
+            posting_acct = expense_account_for(
+                db,
+                line_no=i + 1,
+                description=line_data.description,
+                account_id=line_data.account_id,
+                item=item,
+                vendor=vendor,
+            )
         else:
-            posting_acct = line_data.account_id
-            if not posting_acct and item and item.expense_account_id:
-                posting_acct = item.expense_account_id
-            if not posting_acct and vendor.default_expense_account_id:
-                posting_acct = vendor.default_expense_account_id
-            if not posting_acct:
-                posting_acct = default_expense_id
+            posting_acct = (item.expense_account_id if item else None) or (
+                vendor.default_expense_account_id
+            )
 
         db.add(
             VendorCreditLine(
@@ -225,38 +241,13 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
                 {
                     "account_id": posting_acct,
                     "debit": Decimal("0"),
-                    "credit": amt,
+                    "credit": amt + tax_shares[i],
                     "description": line_data.description or "",
                     "job_id": line_data.job_id,
                     "class_id": line_data.class_id,
                     "cost_code_id": line_data.cost_code_id,
                 }
             )
-
-    # Give back the sales tax that was charged on the original bill.
-    if tax_amount > 0:
-        tax_acct = db.query(Account).filter(Account.account_number == "2200").first()
-        if tax_acct:
-            journal_lines.append(
-                {
-                    "account_id": tax_acct.id,
-                    "debit": Decimal("0"),
-                    "credit": tax_amount,
-                    "description": "Sales tax on vendor credit",
-                }
-            )
-
-    if not journal_lines:
-        # Every line resolved to no account. Refuse rather than record a
-        # document that never reached the books — #119's rule.
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "No account could be found for any line on this credit, so "
-                "nothing would be posted. Set an account on each line, or "
-                "add account 6000 to the chart of accounts. Nothing was saved."
-            ),
-        )
 
     ap_id = get_ap_account_id(db)
     journal_lines.append(

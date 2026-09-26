@@ -127,7 +127,11 @@ jobs:
           DATABASE_URL: "sqlite:///:memory:"
           SESSION_SECRET_KEY: ci-secret-key
           RATE_LIMIT_ENABLED: "0"
-          MAX_SKIPS: "78"  # 74 observed; the ceiling leaves room for one more platform guard, not for drift
+          # 90 observed at 2.18.0: the explore-2.17.3 fixes added PDF tests (bills, purchase
+          # orders, credit memos, reconciliation reports, tax forms, report footers, the
+          # invoice header, emailed statements) that skip where WeasyPrint's native stack
+          # is absent, as this image is by design. 74 before them; room for one more guard.
+          MAX_SKIPS: "94"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

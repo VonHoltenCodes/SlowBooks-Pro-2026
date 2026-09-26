@@ -194,7 +194,13 @@ def test_committed_cost_counts_open_pos_and_clears_on_bill(
 ):
     job = _job(client, seed_customer.id)
     other = _job(client, seed_customer.id, name="Other")
-    vendor = client.post("/api/vendors", json={"name": "Supply"}).json()
+    vendor = client.post(
+        "/api/vendors",
+        json={
+            "name": "Supply",
+            "default_expense_account_id": seed_accounts["6000"].id,
+        },
+    ).json()
     po = client.post(
         "/api/purchase-orders",
         json={

@@ -1,4 +1,15 @@
 {
+  "2.18.0": {
+    "title": "Around the ledger",
+    "items": [
+      "Pay Sales Tax works; tax you pay suppliers is part of the purchase's cost and no longer reduces the sales tax you owe; Schedule C keeps expenses in expenses",
+      "Customer and vendor balances show what is owed; a customer's leftover payment can be applied to a later invoice, and every aging report ties to the balance sheet",
+      "Bills need an account on each line (never Advertising by default); bills, purchase orders and credit memos print and save as PDF",
+      "Time tracking works end to end, a pay run never pays someone $0.00 without saying so, and tax forms open in the Mac app",
+      "Foreign-currency invoices show their currency and can be paid from Receive Payment; unit prices take four decimal places",
+      "Backups are kept per company and can be restored from Settings; Settings refuses values that can't work, in plain words"
+    ]
+  },
   "2.17.3": {
     "title": "Payments land on the right account",
     "items": [

@@ -77,8 +77,8 @@ const MigrationPage = {
         const source = $('#migration-source').value;
         try {
             const resp = await fetch(`/api/migration/${source}/dry-run`, { method: 'POST', body: fd });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Dry run failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Dry run failed');
             MigrationPage._dryRunOk = data.ok;
             $('#migration-import-btn').disabled = !data.ok;
             MigrationPage._renderResult(data, false);
@@ -92,8 +92,8 @@ const MigrationPage = {
         const source = $('#migration-source').value;
         try {
             const resp = await fetch(`/api/migration/${source}/import`, { method: 'POST', body: fd });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
             MigrationPage._renderResult(data, true);
             if (data.ok) toast(`Imported ${data.imported_accounts} accounts, ${data.imported_journals} journals`);
         } catch (err) { toast(err.message, 'error'); }

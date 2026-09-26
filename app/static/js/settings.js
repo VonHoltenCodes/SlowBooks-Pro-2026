@@ -16,15 +16,19 @@ const SettingsPage = {
             SettingsPage.loadEquipment();
             SettingsPage.loadUsers();
             SettingsPage.loadApiTokens();
+            SettingsPage.loadSignInPref();
             SettingsPage.loadOcrStatus();
             SettingsPage.loadOcrEnginePref();
             SettingsPage.scrollToFocus();
+            SettingsPage._installLeaveGuard();
+            SettingsPage._markClean();
         }, 0);
         return `
             <div class="page-header">
                 <h2>Company Settings</h2>
             </div>
-            <form id="settings-form" onsubmit="SettingsPage.save(event)">
+            <form id="settings-form" onsubmit="SettingsPage.save(event)"
+                oninput="SettingsPage._updateDirty()" onchange="SettingsPage._updateDirty()">
                 <div class="settings-section">
                     <h3>Company Information</h3>
                     <div class="form-grid">
@@ -62,7 +66,7 @@ const SettingsPage = {
                     <h3>Company Logo</h3>
                     <div class="form-grid">
                         <div class="form-group">
-                            ${s.company_logo_path ? `<img src="${escapeHtml(s.company_logo_path)}" style="max-width:200px; max-height:80px; margin-bottom:8px; display:block;">` : ''}
+                            ${s.company_logo_path ? `<img id="company-logo-preview" src="${escapeHtml(s.company_logo_path)}" style="max-width:200px; max-height:80px; margin-bottom:8px; display:block;">` : ''}
                             <input type="file" id="logo-upload" accept="image/*" onchange="SettingsPage.uploadLogo(this)">
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">PNG, JPG, GIF, WebP, or SVG &middot; max 5 MB &middot; 200&times;80 px recommended.</div>
                         </div>
@@ -78,15 +82,21 @@ const SettingsPage = {
                                     `<option ${s.default_terms===t?'selected':''}>${t}</option>`).join('')}
                             </select></div>
                         <div class="form-group"><label>Default Tax Rate (%)</label>
-                            <input name="default_tax_rate" type="number" step="0.01" value="${s.default_tax_rate || '0.0'}"></div>
+                            <input name="default_tax_rate" type="number" min="0" max="100" step="0.01"
+                                title="A percent from 0 to 100: 8.25 means 8.25%"
+                                value="${escapeHtml(s.default_tax_rate || '0.0')}"></div>
                         <div class="form-group"><label>${`${T('Invoice')} Prefix`}</label>
                             <input name="invoice_prefix" value="${escapeHtml(s.invoice_prefix || '')}" placeholder="e.g. INV-"></div>
                         <div class="form-group"><label>${`Next ${T('Invoice')} #`}</label>
-                            <input name="invoice_next_number" value="${escapeHtml(s.invoice_next_number || '1001')}"></div>
+                            <input name="invoice_next_number" inputmode="numeric" pattern="[0-9]*[1-9][0-9]*" required
+                                title="A whole number, 1 or more"
+                                value="${escapeHtml(s.invoice_next_number || '1001')}"></div>
                         <div class="form-group"><label>Estimate Prefix</label>
                             <input name="estimate_prefix" value="${escapeHtml(s.estimate_prefix || '')}" placeholder="e.g. E-"></div>
                         <div class="form-group"><label>Next Estimate #</label>
-                            <input name="estimate_next_number" value="${escapeHtml(s.estimate_next_number || '1001')}"></div>
+                            <input name="estimate_next_number" inputmode="numeric" pattern="[0-9]*[1-9][0-9]*" required
+                                title="A whole number, 1 or more"
+                                value="${escapeHtml(s.estimate_next_number || '1001')}"></div>
                         <div class="form-group full-width"><label>${`Default ${T('Invoice')} Notes`}</label>
                             <textarea name="invoice_notes">${escapeHtml(s.invoice_notes || '')}</textarea></div>
                         <div class="form-group full-width"><label>${`${T('Invoice')} Footer`}</label>
@@ -99,17 +109,49 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section">
+                <!-- Desktop app only (shown by loadSignInPref); the session used
+                     to outlive the app, so a relaunch reopened the company
+                     without its password (explore 2.17.3, macbase1 S-j). -->
+                <div class="settings-section" id="settings-sign-in" hidden>
+                    <h3>Sign-in</h3>
+                    <div class="form-grid">
+                        <div class="form-group full-width">
+                            <label for="ask-password-on-start">Ask for the password each time SlowBooks Pro starts</label>
+                            <select id="ask-password-on-start" name="ask_password_on_start">
+                                <option value="false" ${s.ask_password_on_start !== 'true' ? 'selected' : ''}>No: stay signed in until you sign out</option>
+                                <option value="true" ${s.ask_password_on_start === 'true' ? 'selected' : ''}>Yes: quitting the app signs this company out</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                                With Yes, the next start asks for the password even if you did not sign out.
+                                On Server Edition, a restart of the server signs everyone out.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="settings-section" id="settings-closing-date">
                     <h3>Closing Date</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Prevent modifications to transactions before this date.
                     </div>
                     <div class="form-grid">
-                        <div class="form-group"><label>Closing Date</label>
-                            <input name="closing_date" type="date" value="${escapeHtml(s.closing_date || '')}"></div>
+                        <div class="form-group"><label for="closing-date">Closing Date</label>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <input id="closing-date" name="closing_date" type="date" value="${escapeHtml(s.closing_date || '')}"
+                                    aria-describedby="closing-date-state"
+                                    oninput="SettingsPage.showClosingState()" onchange="SettingsPage.showClosingState()">
+                                <button type="button" class="btn btn-sm btn-secondary" id="closing-date-clear"
+                                    onclick="SettingsPage.clearClosingDate()" ${s.closing_date ? '' : 'disabled'}>Clear</button>
+                            </div>
+                            <!-- An empty date field shows today's date in grey on macOS, which
+                                 read as "closed through today" (explore 2.17.3, macbase1 S-i). -->
+                            <div id="closing-date-state" role="status" aria-live="polite"
+                                style="font-size:11px; margin-top:4px;">${escapeHtml(SettingsPage._closingStateText(s.closing_date))}</div></div>
                         <div class="form-group"><label>Password (optional)</label>
                             <input name="closing_date_password" type="password" value="${escapeHtml(s.closing_date_password || '')}"
-                                placeholder="Leave blank for no password"></div>
+                                placeholder="Leave blank for no password" autocomplete="new-password">
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                                With a password set, a change dated on or before the closing date asks for it
+                                and goes through when it is right. Without one, such changes are refused.</div></div>
                     </div>
                 </div>
 
@@ -122,7 +164,7 @@ const SettingsPage = {
                         <div class="form-group"><label>SMTP Host</label>
                             <input name="smtp_host" value="${escapeHtml(s.smtp_host || '')}" placeholder="smtp.gmail.com"></div>
                         <div class="form-group"><label>SMTP Port</label>
-                            <input name="smtp_port" type="number" value="${escapeHtml(s.smtp_port || '587')}"></div>
+                            <input name="smtp_port" type="number" min="1" max="65535" step="1" value="${escapeHtml(s.smtp_port || '587')}"></div>
                         <div class="form-group"><label>Username</label>
                             <input name="smtp_user" value="${escapeHtml(s.smtp_user || '')}"></div>
                         <div class="form-group"><label>Password</label>
@@ -282,9 +324,9 @@ const SettingsPage = {
                                 <option value="true" ${s.late_fee_enabled === 'true' ? 'selected' : ''}>Enabled</option>
                             </select></div>
                         <div class="form-group"><label>Late Fee Rate (%)</label>
-                            <input name="late_fee_rate" type="number" step="0.1" value="${escapeHtml(s.late_fee_rate || '1.5')}"></div>
+                            <input name="late_fee_rate" type="number" min="0" max="100" step="0.01" value="${escapeHtml(s.late_fee_rate || '1.5')}"></div>
                         <div class="form-group"><label>Grace Days</label>
-                            <input name="late_fee_grace_days" type="number" value="${escapeHtml(s.late_fee_grace_days || '15')}"></div>
+                            <input name="late_fee_grace_days" type="number" min="0" step="1" value="${escapeHtml(s.late_fee_grace_days || '15')}"></div>
                     </div>
                 </div>
 
@@ -371,8 +413,13 @@ const SettingsPage = {
                     <div id="equipment-list"></div>
                 </div>
 
-                <div class="settings-section">
+                <div class="settings-section" id="settings-backups">
                     <h3>Backup / Restore</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Backups of this company only, named for it. Restore replaces everything in this
+                        company with the backup; a safety backup of the books as they are is taken first,
+                        so a restore can be undone by restoring that one.
+                    </div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;">
                         <button type="button" class="btn btn-primary" onclick="SettingsPage.createBackup()">Create Backup</button>
                     </div>
@@ -436,10 +483,89 @@ const SettingsPage = {
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
                 </div>
 
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save Settings</button>
+                <!-- Always in reach: the one Save for the settings above sat at
+                     the very bottom, after 25 other buttons, and the first
+                     "Save" on the page was AI Insights' (explore 2.17.3, L16). -->
+                <div class="form-actions" id="settings-savebar"
+                    style="position:sticky; bottom:0; z-index:5; align-items:center; background:var(--content-bg);
+                           padding-bottom:10px; box-shadow:0 -4px 8px -6px rgba(0,0,0,0.25);">
+                    <span id="settings-dirty-note" role="status" aria-live="polite"
+                        style="margin-right:auto; font-size:11px; color:var(--text-muted);"></span>
+                    <button type="submit" class="btn btn-primary" id="settings-save-btn">Save Settings</button>
                 </div>
             </form>`;
+    },
+
+    // ------------------------------------------------------------------
+    // Unsaved changes. Leaving the page used to drop the edits without a
+    // word (explore 2.17.3, skytech L16). The named fields of the form are
+    // compared with what was last loaded or saved; the sections that save
+    // themselves (AI, classes, users, tokens...) have no names and are not
+    // counted.
+    // ------------------------------------------------------------------
+    _snapshot: null,
+    _leaving: false,
+
+    _formData() {
+        const form = document.getElementById('settings-form');
+        if (!form) return null;
+        const data = {};
+        for (const [k, v] of new FormData(form).entries()) {
+            if (typeof v === 'string') data[k] = v;
+        }
+        return data;
+    },
+
+    _formState(except) {
+        const data = SettingsPage._formData();
+        if (!data) return null;
+        if (except) delete data[except];
+        return JSON.stringify(data);
+    },
+
+    _markClean() {
+        SettingsPage._snapshot = SettingsPage._formData();
+        SettingsPage._updateDirty();
+    },
+
+    // True when a field differs from what was last loaded or saved;
+    // `except` leaves one field out of the comparison.
+    isDirty(except) {
+        const snap = SettingsPage._snapshot;
+        const now = SettingsPage._formState(except);
+        if (!snap || now === null) return false;
+        const before = Object.assign({}, snap);
+        if (except) delete before[except];
+        return now !== JSON.stringify(before);
+    },
+
+    _updateDirty() {
+        const note = document.getElementById('settings-dirty-note');
+        if (note) note.textContent = SettingsPage.isDirty() ? 'Unsaved changes' : '';
+    },
+
+    // App.navigate is the one door every in-app move goes through: sidebar
+    // links (via hashchange), toolbar buttons, keyboard shortcuts, search.
+    _installLeaveGuard() {
+        if (SettingsPage._leaveGuardInstalled || typeof App === 'undefined') return;
+        SettingsPage._leaveGuardInstalled = true;
+        const navigate = App.navigate;
+        App.navigate = function (hash) {
+            const target = String(hash || '').replace('#', '') || '/';
+            if (target !== '/settings' && SettingsPage.isDirty()) {
+                if (!confirm('You have unsaved changes in Settings. Leave without saving them?')) {
+                    if (location.hash !== '#/settings') history.replaceState(null, '', '#/settings');
+                    return Promise.resolve();
+                }
+                SettingsPage._snapshot = null;
+            }
+            return navigate.apply(this, arguments);
+        };
+        window.addEventListener('beforeunload', e => {
+            if (SettingsPage._leaving || !SettingsPage.isDirty()) return;
+            e.preventDefault();
+            e.returnValue = '';
+        });
     },
 
     // ------------------------------------------------------------------
@@ -474,6 +600,17 @@ const SettingsPage = {
                 <thead><tr><th scope="col">Username</th><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Last login</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
+    },
+
+    // The start-up password choice applies to the desktop app (and its
+    // Server Edition), where one server process serves the company.
+    async loadSignInPref() {
+        const section = $('#settings-sign-in');
+        if (!section) return;
+        try {
+            const sys = await API.get('/system');
+            if (sys && sys.desktop) section.hidden = false;
+        } catch (e) { /* stays hidden */ }
     },
 
     // ------------------------------------------------------------------
@@ -576,12 +713,43 @@ const SettingsPage = {
         const data = Object.fromEntries(new FormData(e.target).entries());
         // Remove file input from data
         delete data.file;
+        const btn = document.getElementById('settings-save-btn');
+        if (btn) btn.disabled = true;
         try {
             await API.put('/settings', data);
+            SettingsPage._markClean();
             toast('Settings saved');
         } catch (err) {
             toast(err.message, 'error');
+        } finally {
+            if (btn) btn.disabled = false;
         }
+    },
+
+    // Closing date: say plainly whether one is set, and clear it in one
+    // click — clearing used to mean emptying three date segments by hand,
+    // which WebKit could leave half-empty and silently invalid.
+    _closingStateText(value) {
+        return value
+            ? `Closed through ${formatDate(value)}: changes dated on or before it are refused.`
+            : 'No closing date: every period is open.';
+    },
+
+    showClosingState() {
+        const input = document.getElementById('closing-date');
+        const value = input ? input.value : '';
+        const state = document.getElementById('closing-date-state');
+        if (state) state.textContent = SettingsPage._closingStateText(value);
+        const clear = document.getElementById('closing-date-clear');
+        if (clear) clear.disabled = !value;
+    },
+
+    clearClosingDate() {
+        const input = document.getElementById('closing-date');
+        if (!input) return;
+        input.value = '';
+        SettingsPage.showClosingState();
+        SettingsPage._updateDirty();
     },
 
     async uploadLogo(input) {
@@ -597,12 +765,23 @@ const SettingsPage = {
             try { data = await resp.json(); }
             catch (_) { data = null; }
             if (!resp.ok) {
-                const msg = (data && data.detail) ||
-                    `Upload failed (HTTP ${resp.status}). The file may be too large or the server returned an unexpected response.`;
+                const fallback = `Upload failed (HTTP ${resp.status}). The file may be too large or the server returned an unexpected response.`;
+                // a 422 is a list of entries: API.errorMessage makes sentences of it
+                const msg = data && data.detail ? API.errorMessage(data.detail, fallback) : fallback;
                 throw new Error(msg);
             }
             toast('Logo uploaded');
-            App.navigate('#/settings');
+            if (!SettingsPage.isDirty()) { App.navigate('#/settings'); return; }
+            // Unsaved edits elsewhere on the page: show the new logo in place
+            // rather than re-render the page over them.
+            let img = document.getElementById('company-logo-preview');
+            if (!img) {
+                img = document.createElement('img');
+                img.id = 'company-logo-preview';
+                img.setAttribute('style', 'max-width:200px; max-height:80px; margin-bottom:8px; display:block;');
+                input.parentElement.insertBefore(img, input);
+            }
+            img.src = `${(data && data.path) || ''}?t=${Date.now()}`;
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -619,16 +798,25 @@ const SettingsPage = {
     async changeCompanyType(sel) {
         const value = sel.value;
         const previous = value === 'nonprofit' ? 'business' : 'nonprofit';
-        const msg = value === 'nonprofit'
+        // The switch reloads the page; other changes on it are saved with
+        // the new type rather than dropped by the reload.
+        const others = SettingsPage.isDirty('company_type');
+        const msg = (value === 'nonprofit'
             ? 'Switch this company to nonprofit mode? Screens will say donor, pledge, donation and fund; the net-asset accounts are added. Nothing in your data changes.'
-            : 'Switch this company back to business mode? Screens return to customer, invoice, sales receipt and class. Nothing in your data changes.';
+            : 'Switch this company back to business mode? Screens return to customer, invoice, sales receipt and class. Nothing in your data changes.')
+            + (others ? '\n\nYour other unsaved changes on this page are saved with it.' : '');
         if (!confirm(msg)) { sel.value = previous; return; }
+        const form = document.getElementById('settings-form');
+        if (others && form && !form.reportValidity()) { sel.value = previous; return; }
         try {
-            await API.put('/settings', { company_type: value });
+            const payload = others ? SettingsPage._formData() : {};
+            payload.company_type = value;
+            await API.put('/settings', payload);
             if (value === 'nonprofit') {
                 try { await API.post('/nonprofit/setup-accounts', {}); }
                 catch (e) { /* accounts can be created later from the Nonprofit section */ }
             }
+            SettingsPage._leaving = true;
             toast('Company type saved — reloading');
             setTimeout(() => location.reload(), 600);
         } catch (err) {
@@ -699,6 +887,7 @@ const SettingsPage = {
     async loadBackups() {
         try {
             const backups = await API.get('/backups');
+            SettingsPage._backups = backups;
             const el = $('#backup-list');
             if (!el) return;
             if (backups.length === 0) {
@@ -708,15 +897,87 @@ const SettingsPage = {
             el.innerHTML = `<div class="table-container"><table>
                 <thead><tr><th scope="col">Filename</th><th scope="col">Size</th><th scope="col">Created</th><th scope="col">Actions</th></tr></thead>
                 <tbody>${backups.map(b => `<tr>
-                    <td>${escapeHtml(b.filename)}</td>
+                    <td>${escapeHtml(b.filename)}${b.backup_type === 'pre-restore'
+                        ? ' <span style="font-size:10px; color:var(--text-muted);">(taken before a restore)</span>' : ''}</td>
                     <td>${(b.file_size / 1024).toFixed(1)} KB</td>
-                    <td>${formatDate(b.created_at)}</td>
+                    <td>${escapeHtml(SettingsPage._when(b.created_at))}</td>
                     <td class="actions">
                         <a href="/api/backups/download/${encodeURIComponent(b.filename)}" class="btn btn-sm btn-secondary" download>Download</a>
+                        <button type="button" class="btn btn-sm btn-secondary" data-filename="${escapeHtml(b.filename)}"
+                            onclick="SettingsPage.confirmRestore(this.dataset.filename)">Restore…</button>
                     </td>
                 </tr>`).join('')}</tbody>
             </table></div>`;
         } catch (e) { /* ignore */ }
+    },
+
+    // Date and time: a company often has several backups on one day.
+    _when(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        return Number.isNaN(d.getTime()) ? String(iso) : d.toLocaleString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+        });
+    },
+
+    // Restore had an endpoint and no button (explore 2.17.3, macbase1 F25).
+    // It replaces the whole company, so it asks plainly and needs a tick.
+    confirmRestore(filename) {
+        const b = (SettingsPage._backups || []).find(x => x.filename === filename) || { filename };
+        const when = b.created_at ? SettingsPage._when(b.created_at) : 'when it was made';
+        const company = (App.settings && App.settings.company_name) || 'this company';
+        openModal('Restore a backup', `
+            <form id="restore-form" onsubmit="SettingsPage.restoreBackup(event)">
+                <input type="hidden" name="filename" value="${escapeHtml(filename)}">
+                <p style="margin:0 0 8px;"><strong>This replaces everything in ${escapeHtml(company)} with the books
+                    as they were in ${escapeHtml(filename)} (${escapeHtml(when)}).</strong></p>
+                <p style="margin:0 0 8px;">Anything entered or changed since then (${T('invoices')}, payments, bills,
+                    settings, users) is replaced. A safety backup of the books as they are now is taken first;
+                    restore that one to undo this.</p>
+                <label style="display:flex; gap:6px; align-items:flex-start; font-weight:normal;">
+                    <input type="checkbox" name="understood" required
+                        onchange="this.form.querySelector('button[type=submit]').disabled = !this.checked">
+                    <span>I understand that everything since ${escapeHtml(when)} will be replaced.</span></label>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-danger" disabled>Replace my books with this backup</button>
+                </div>
+            </form>`);
+    },
+
+    async restoreBackup(e) {
+        e.preventDefault();
+        const form = e.target;
+        const filename = form.filename.value;
+        const btn = form.querySelector('button[type=submit]');
+        const label = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Restoring…';
+        const send = allowOther => API.post('/backups/restore',
+            allowOther ? { filename, allow_other_company: true } : { filename });
+        try {
+            let result;
+            try {
+                result = await send(false);
+            } catch (err) {
+                // Another company's backup: say whose, and ask a second time.
+                if (!(err.status === 409 && err.detail && err.detail.code === 'other_company')) throw err;
+                if (!confirm(`${err.message}\n\nRestore it over this company anyway?`)) {
+                    btn.disabled = false;
+                    btn.textContent = label;
+                    return;
+                }
+                result = await send(true);
+            }
+            closeModal();
+            SettingsPage._leaving = true;  // the books were replaced; nothing here to keep
+            toast(`Restored from ${filename}. The books as they were are kept in ${result.safety_backup}. Reloading…`);
+            setTimeout(() => location.reload(), 1500);
+        } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = label;
+        }
     },
 
     async seedTemplates() {
@@ -970,7 +1231,7 @@ const SettingsPage = {
                 <button type="button" class="btn btn-secondary btn-sm" id="ai-settings-test">Test</button>
                 <span id="ai-settings-test-result" class="ai-settings-test-result"></span>
                 <div class="ai-settings-spacer"></div>
-                <button type="button" class="btn btn-primary btn-sm" id="ai-settings-save">Save</button>
+                <button type="button" class="btn btn-primary btn-sm" id="ai-settings-save">Save AI settings</button>
             </div>
         `;
     },

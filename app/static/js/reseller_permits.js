@@ -109,11 +109,15 @@ const ResellerPermitsPage = {
     },
 
     async showForm(id = null) {
-        const [customers, vendors, existing] = await Promise.all([
-            API.get('/customers').catch(() => []),
-            API.get('/vendors').catch(() => []),
+        // The pickers list active customers and vendors (inactive ones were
+        // offered too); the one a permit already names stays listed.
+        const [active, activeVendors, existing] = await Promise.all([
+            API.get('/customers?active_only=true').catch(() => []),
+            API.get('/vendors?active_only=true').catch(() => []),
             id ? API.get(`/reseller-permits/${id}`) : Promise.resolve(null),
         ]);
+        const customers = await ResellerPermitsPage._withOwn(active, existing, 'customer');
+        const vendors = await ResellerPermitsPage._withOwn(activeVendors, existing, 'vendor');
         const p = existing || {
             entity_type: 'customer',
             entity_id: customers[0]?.id || null,
@@ -174,6 +178,18 @@ const ResellerPermitsPage = {
         ResellerPermitsPage._swapEntityOptions(p.entity_type);
         // Initial format check so the hint reflects current values on open.
         ResellerPermitsPage._checkFormat();
+    },
+
+    // `list` plus the customer or vendor the permit already names, if it has
+    // gone inactive since — or the edit would quietly move the permit to
+    // whoever is first in the list.
+    async _withOwn(list, permit, entityType) {
+        if (!permit || permit.entity_type !== entityType || !permit.entity_id) return list;
+        if (list.some(x => x.id === permit.entity_id)) return list;
+        const path = entityType === 'vendor' ? `/vendors/${permit.entity_id}` : `/customers/${permit.entity_id}`;
+        let name = '';
+        try { name = (await API.get(path)).name; } catch (e) { /* gone */ }
+        return list.concat([{ id: permit.entity_id, name: `${name || `#${permit.entity_id}`} (inactive)` }]);
     },
 
     _swapEntityOptions(entityType) {

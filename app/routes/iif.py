@@ -33,6 +33,7 @@ from app.services.iif_export import (
     export_payments,
     export_sales_receipts,
     export_vendors,
+    to_ansi,
 )
 from app.services.iif_import import import_all, validate_iif
 from app.services.upload_limits import read_limited
@@ -43,10 +44,11 @@ logger = logging.getLogger(__name__)
 
 
 def _iif_response(content: str, filename: str) -> Response:
-    """Return IIF content as a downloadable text file."""
+    """Return IIF content as a downloadable text file, in the Windows-1252
+    encoding QuickBooks reads it in (iif_export.to_ansi)."""
     return Response(
-        content=content,
-        media_type="text/plain",
+        content=to_ansi(content),
+        media_type="text/plain; charset=windows-1252",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 

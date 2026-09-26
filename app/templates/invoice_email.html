@@ -26,7 +26,8 @@ td { padding: 8px; border-bottom: 1px solid #eee; }
         <tr><th>Terms</th><td>{{ inv.terms or 'Net 30' }}</td></tr>
     </table>
 
-    <p class="amount">Amount Due: ${{ "%.2f"|format(inv.balance_due|float) }}</p>
+    {% set cur = (inv.currency or '')|upper %}
+    <p class="amount">Amount Due: {% if cur and cur != (company.get('home_currency') or 'USD')|upper %}{{ cur }} {% else %}${% endif %}{{ "%.2f"|format(inv.balance_due|float) }}</p>
 
     {% if pay_url %}
     <p style="margin: 20px 0; text-align: center;">
@@ -38,7 +39,9 @@ td { padding: 8px; border-bottom: 1px solid #eee; }
     <p style="color:#666;">{{ inv.notes }}</p>
     {% endif %}
 
-    <p>{% if terms.is_nonprofit %}Thank you for your support.{% else %}Thank you for your business.{% endif %}</p>
+    {# The default invoice notes already say it; say it once. #}
+    {% set thanks = "Thank you for your support." if terms.is_nonprofit else "Thank you for your business." %}
+    {% if thanks | lower not in (inv.notes or '') | lower %}<p>{{ thanks }}</p>{% endif %}
 </div>
 <div class="footer">
     <p>{{ company.get('company_name', '') }}<br>

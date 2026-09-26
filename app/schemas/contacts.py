@@ -1,10 +1,23 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import AfterValidator, BaseModel, Field
 
 from app.schemas.common import BlankableEmail, NonBlankName, StrictModel
+
+
+def _check_credit_limit(value):
+    """A credit limit is an amount the customer may owe; below zero it
+    means nothing (explore 2.17.3, W-L4: −500 was accepted)."""
+    if value is not None and value < 0:
+        raise ValueError(
+            "A credit limit can't be negative. Leave it blank for no limit."
+        )
+    return value
+
+
+CreditLimit = Annotated[Optional[Decimal], AfterValidator(_check_credit_limit)]
 
 
 # Field lengths below mirror the VARCHAR(n) widths on the Customer model.
@@ -34,8 +47,9 @@ class CustomerCreate(StrictModel):
     ship_state: Optional[str] = Field(None, max_length=50)
     ship_zip: Optional[str] = Field(None, max_length=20)
     ship_country: str = Field("US", max_length=100)
-    terms: str = Field("Net 30", max_length=50)
-    credit_limit: Optional[Decimal] = None
+    # None = the company's default terms (Settings); see create_customer.
+    terms: Optional[str] = Field(None, max_length=50)
+    credit_limit: CreditLimit = None
     tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: bool = True
     notes: Optional[str] = None
@@ -66,7 +80,7 @@ class CustomerUpdate(StrictModel):
     ship_zip: Optional[str] = Field(None, max_length=20)
     ship_country: Optional[str] = Field(None, max_length=100)
     terms: Optional[str] = Field(None, max_length=50)
-    credit_limit: Optional[Decimal] = None
+    credit_limit: CreditLimit = None
     tax_id: Optional[str] = Field(None, max_length=50)
     is_taxable: Optional[bool] = None
     notes: Optional[str] = None

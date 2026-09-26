@@ -3,7 +3,10 @@
 # Feature 18: Upload → preview → confirm → auto-match by amount/date
 # ============================================================================
 
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+import json
+from typing import Optional
+
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -61,26 +64,51 @@ async def import_ofx(
     return result
 
 
+def _mapping(raw: Optional[str]) -> Optional[dict]:
+    """The import dialog's column choices, sent as a JSON form field."""
+    if not raw:
+        return None
+    try:
+        mapping = json.loads(raw)
+    except ValueError:
+        mapping = None
+    if not isinstance(mapping, dict):
+        raise HTTPException(
+            status_code=400,
+            detail="The column choices could not be read. Choose them again.",
+        )
+    return mapping
+
+
 @router.post("/preview-csv")
-async def preview_csv(file: UploadFile = File(...)):
-    """Parse CSV bank statement and return preview of transactions."""
+async def preview_csv(
+    file: UploadFile = File(...), mapping: Optional[str] = Form(None)
+):
+    """Parse CSV bank statement and return preview of transactions. An
+    unrecognised layout answers with its columns and a few rows, for the
+    dialog's mapping step; `mapping` (JSON) is that step's answer."""
     content = await read_limited(file, label="CSV file")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
         text = content.decode("latin-1")
 
-    result = parse_csv(text)
+    result = parse_csv(text, _mapping(mapping))
     if result["error"]:
-        return {
+        out = {
             "format": result["format"],
             "error": result["error"],
             "count": 0,
             "transactions": [],
         }
+        for key in ("header_row", "sample", "has_header", "suggested"):
+            if key in result:
+                out[key] = result[key]
+        return out
 
     return {
         "format": result["format"],
+        "unread": result.get("unread", 0),
         "count": len(result["transactions"]),
         "transactions": [
             {
@@ -104,11 +132,14 @@ async def preview_csv(file: UploadFile = File(...)):
 async def import_csv(
     bank_account_id: int,
     file: UploadFile = File(...),
+    mapping: Optional[str] = Form(None),
     db: Session = Depends(get_db),
 ):
     """Import CSV bank transactions into a bank account.
 
-    Auto-detects format (Bank of America detail, Chase checking/credit, PayPal).
+    Auto-detects format (Bank of America detail, Chase checking/credit,
+    PayPal, or a header naming date / description / amount), or takes the
+    dialog's column `mapping` (JSON) for a layout detection missed.
     Deduplicates by content-derived import_id (re-imports and overlapping
     exports skip; legitimate same-day duplicates still import).
     Auto-applies bank rules after import.
@@ -123,5 +154,7 @@ async def import_csv(
     except UnicodeDecodeError:
         text = content.decode("latin-1")
 
-    result = import_csv_transactions(db, bank_account_id, text)
+    result = import_csv_transactions(
+        db, bank_account_id, text, mapping=_mapping(mapping)
+    )
     return result

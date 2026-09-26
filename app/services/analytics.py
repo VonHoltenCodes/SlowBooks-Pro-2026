@@ -16,7 +16,6 @@
 #     on the Bill model. (Yes, that was a bug in the first cut. Fixed.)
 # ============================================================================
 
-from collections import defaultdict
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -25,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.models.accounts import Account
 from app.models.bills import Bill, BillLine, BillStatus
-from app.models.contacts import Customer, Vendor
+from app.models.contacts import Customer
 from app.models.invoices import Invoice, InvoiceStatus
 
 
@@ -151,92 +150,54 @@ class AnalyticsEngine:
     # ------------------------------------------------------------------
 
     def ar_aging(self):
-        """A/R aging by customer — buckets keyed current / 30 / 60 / 90.
+        """A/R aging by customer — buckets keyed current / 30 / 60 / 90 —
+        read from the A/R Aging report itself, so the chart and the report
+        agree: balances in home currency (a EUR 850 invoice booked at 1.10
+        counts $935, not 850), and the credits a customer holds (unapplied
+        payments, credit memos) netted into Current, so the buckets add up
+        to what account 1100 carries. This chart summed raw invoice
+        balances instead (found integrating the 2.17.3 exploratory fixes).
+        A customer whose credits exceed what is current shows a negative
+        Current, as the report's own Current column does.
 
-        Uses Invoice.balance_due (the canonical open-balance column) so we
-        don't double-count partial payments. Single joined query returning
-        only `(customer_name, due_date, balance_due)` tuples — avoids the N+1
-        relationship load that `inv.customer.name` would have triggered.
+        Bucketed by days past DUE, as the report is."""
+        from app.routes.reports.receivables import ar_aging_report
 
-        Bucketed by days-past-DUE (today - due_date), matching the regular
-        /api/reports/ar-aging endpoint. Previously this version bucketed by
-        days-since-INVOICED, so the dashboard widget and the report disagreed
-        on the same data set.
-        """
-        today = date.today()
-        rows = (
-            self.db.query(
-                Customer.name, Invoice.due_date, Invoice.date, Invoice.balance_due
-            )
-            .join(Customer, Invoice.customer_id == Customer.id)
-            .filter(
-                Invoice.status.in_(
-                    [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
-                )
-            )
-            .filter(Invoice.balance_due > 0)
-            .all()
-        )
-
-        aging = {
-            "current": defaultdict(float),
-            "30": defaultdict(float),
-            "60": defaultdict(float),
-            "90": defaultdict(float),
-        }
-
-        for customer_name, due_date, inv_date, balance in rows:
-            # Days past due. If the invoice has no due_date fall back to the
-            # invoice date so we don't crash; treat that case the same way
-            # the reports.ar_aging endpoint does.
-            ref = due_date or inv_date
-            days = (today - ref).days
-            if days <= 0:
-                bucket = "current"
-            elif days <= 30:
-                bucket = "30"
-            elif days <= 60:
-                bucket = "60"
-            else:
-                bucket = "90"
-            aging[bucket][customer_name or "Unknown"] += float(balance or 0)
-
-        return {k: dict(v) for k, v in aging.items()}
+        report = ar_aging_report(self.db, date.today())
+        aging = {"current": {}, "30": {}, "60": {}, "90": {}}
+        for row in report["items"]:
+            name = row["customer_name"] or "Unknown"
+            for bucket, column in (
+                ("current", "current"),
+                ("30", "over_30"),
+                ("60", "over_60"),
+                ("90", "over_90"),
+            ):
+                if row[column]:
+                    aging[bucket][name] = aging[bucket].get(name, 0.0) + row[column]
+        return aging
 
     def ap_aging(self):
-        """A/P aging by vendor — buckets keyed current / 30 / 60 / 90.
+        """A/P aging by vendor — buckets keyed current / 30 / 60 / 90 — read
+        from the A/P Aging report, so the chart and the report agree: home
+        currency, credits netted into Current, bucketed by days past due
+        (this chart summed raw bill balances by bill date; found
+        integrating the 2.17.3 exploratory fixes)."""
+        from app.routes.reports.payables_tax import ap_aging_report
 
-        Single joined query; same N+1-avoidance story as `ar_aging`.
-        """
-        today = date.today()
-        rows = (
-            self.db.query(Vendor.name, Bill.date, Bill.balance_due)
-            .join(Vendor, Bill.vendor_id == Vendor.id)
-            .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
-            .filter(Bill.balance_due > 0)
-            .all()
-        )
-
-        aging = {
-            "current": defaultdict(float),
-            "30": defaultdict(float),
-            "60": defaultdict(float),
-            "90": defaultdict(float),
-        }
-
-        for vendor_name, bill_date, balance in rows:
-            days = (today - bill_date).days
-            if days <= 30:
-                bucket = "current"
-            elif days <= 60:
-                bucket = "30"
-            elif days <= 90:
-                bucket = "60"
-            else:
-                bucket = "90"
-            aging[bucket][vendor_name or "Unknown"] += float(balance or 0)
-
-        return {k: dict(v) for k, v in aging.items()}
+        report = ap_aging_report(self.db, date.today())
+        aging = {"current": {}, "30": {}, "60": {}, "90": {}}
+        for row in report["items"]:
+            name = row["vendor_name"] or "Unknown"
+            for bucket, column in (
+                ("current", "current"),
+                ("30", "over_30"),
+                ("60", "over_60"),
+                ("90", "over_90"),
+            ):
+                if row[column]:
+                    aging[bucket][name] = aging[bucket].get(name, 0.0) + row[column]
+        return aging
 
     # ------------------------------------------------------------------
     # Cash metrics
@@ -249,22 +210,23 @@ class AnalyticsEngine:
         """
         thirty_days_ago = date.today() - _days(30)
 
-        ar_balance = (
-            self.db.query(func.coalesce(func.sum(Invoice.balance_due), 0))
-            .filter(
-                Invoice.status.in_(
-                    [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
-                )
-            )
-            .scalar()
-        ) or Decimal(0)
+        # What customers owe, as account 1100 carries it: home currency and
+        # net of the credits they hold (the A/R Aging report's total).
+        from app.routes.reports.receivables import ar_aging_report
+        from app.services.contact_balances import home_amount
 
-        recent_revenue = (
-            self.db.query(func.coalesce(func.sum(Invoice.total), 0))
-            .filter(Invoice.date >= thirty_days_ago)
-            .filter(Invoice.status == InvoiceStatus.PAID)
-            .scalar()
-        ) or Decimal(0)
+        ar_balance = Decimal(
+            str(ar_aging_report(self.db, date.today())["totals"]["total"])
+        )
+        recent_revenue = sum(
+            (
+                home_amount(total, rate)
+                for total, rate in self.db.query(Invoice.total, Invoice.exchange_rate)
+                .filter(Invoice.date >= thirty_days_ago)
+                .filter(Invoice.status == InvoiceStatus.PAID)
+            ),
+            Decimal(0),
+        )
 
         if recent_revenue == 0:
             return 0.0
@@ -281,8 +243,11 @@ class AnalyticsEngine:
         """
         today = date.today()
 
+        from app.services.contact_balances import home_amount
+
+        # home currency: a EUR invoice brings in what it is booked at
         ar_rows = (
-            self.db.query(Invoice.due_date, Invoice.balance_due)
+            self.db.query(Invoice.due_date, Invoice.balance_due, Invoice.exchange_rate)
             .filter(
                 Invoice.status.in_(
                     [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
@@ -292,14 +257,14 @@ class AnalyticsEngine:
             .all()
         )
         ap_rows = (
-            self.db.query(Bill.due_date, Bill.balance_due)
+            self.db.query(Bill.due_date, Bill.balance_due, Bill.exchange_rate)
             .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
             .filter(Bill.due_date.isnot(None))
             .all()
         )
 
-        ar_sorted = sorted((d, float(b or 0)) for d, b in ar_rows)
-        ap_sorted = sorted((d, float(b or 0)) for d, b in ap_rows)
+        ar_sorted = sorted((d, float(home_amount(b or 0, r))) for d, b, r in ar_rows)
+        ap_sorted = sorted((d, float(home_amount(b or 0, r))) for d, b, r in ap_rows)
 
         offsets = list(range(0, days, 7))
         if not offsets or offsets[-1] != days:

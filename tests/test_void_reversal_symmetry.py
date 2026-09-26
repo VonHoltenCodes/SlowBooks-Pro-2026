@@ -175,7 +175,13 @@ def test_bill_payment_void_restores_bill_balance(client, db_session, seed_accoun
             "date": "2026-05-05",
             "bill_number": "B-VOID-1",
             "lines": [
-                {"description": "x", "quantity": 1, "rate": 175, "line_order": 0}
+                {
+                    "description": "x",
+                    "quantity": 1,
+                    "rate": 175,
+                    "account_id": seed_accounts["6000"].id,
+                    "line_order": 0,
+                }
             ],
         },
     )

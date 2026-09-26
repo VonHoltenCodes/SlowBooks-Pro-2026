@@ -48,7 +48,14 @@
             let detail = "Request failed";
             try {
                 const data = await res.json();
-                detail = data.detail || detail;
+                // A 422 is a list of entries; API.errorMessage turns them into
+                // sentences ("Company name must be 200 characters or fewer.")
+                // where a bare list used to print "[object Object]".
+                // (API is a top-level const in api.js: a shared global
+                // binding, not a property of window.)
+                detail = typeof API !== "undefined" && typeof API.errorMessage === "function"
+                    ? API.errorMessage(data.detail, detail)
+                    : (typeof data.detail === "string" ? data.detail : detail);
             } catch (e) {}
             const err = new Error(detail);
             err.status = res.status;
@@ -210,16 +217,24 @@
     }
 
     function loginViewHTML() {
+        // Name the books: with several companies on one machine, "Unlock
+        // Slowbooks" did not say whose password it wanted (explore 2.17.3,
+        // macbase1 F2).
+        const name = existingCompany.name;
         return (
             '<form id="auth-form" ' +
             'style="background:#fff;color:#111;padding:32px 28px;border-radius:8px;' +
             'min-width:340px;max-width:400px;width:100%;' +
             'box-shadow:0 20px 60px rgba(0,0,0,0.4);">' +
-            '<h2 style="margin:0 0 6px;font-size:20px;">Unlock Slowbooks</h2>' +
+            '<h2 id="auth-title" style="margin:0 0 6px;font-size:20px;">' +
+            (name ? "Unlock " + escapeText(name) : "Unlock Slowbooks") +
+            "</h2>" +
             '<p style="margin:0 0 20px;color:#555;font-size:13px;line-height:1.5;">' +
             (multiUser
                 ? "Sign in to continue."
-                : "Enter your password to continue.") +
+                : name
+                    ? "Enter the password for " + escapeText(name) + " to continue."
+                    : "Enter your password to continue.") +
             "</p>" +
             (multiUser ? userSelectHTML() + '<div style="height:10px"></div>' : "") +
             field("auth-password", "Password", {
@@ -451,11 +466,31 @@
         if (existing) existing.remove();
     }
 
+    // The status bar behind the overlay. The shell's own placeholder and the
+    // failed first page load used to read "Error loading page · Company:
+    // bookkeeper.sbk" behind a brand-new company's sign-in (explore 2.17.3,
+    // skytech M18); nothing had failed.
+    function paintStatusBar(mode) {
+        const text = document.getElementById("status-text");
+        if (text) {
+            text.textContent = mode === "setup"
+                ? "Set up this company to continue"
+                : "Sign in to continue";
+        }
+        const company = document.getElementById("status-company");
+        if (company) {
+            company.textContent = existingCompany.name
+                ? "Company: " + existingCompany.name
+                : "";
+        }
+    }
+
     function renderView(mode, onSuccess) {
         removeOverlay();
         const html = mode === "setup" ? setupViewHTML() : loginViewHTML();
         const overlay = buildShell(html);
         document.body.appendChild(overlay);
+        paintStatusBar(mode);
         if (mode === "setup") {
             wireSetup(overlay, onSuccess);
         } else {
@@ -464,27 +499,38 @@
     }
 
     // Single entry point used by api.js (on 401) and the DOMContentLoaded
-    // handler. Login is the canonical entry view — setup is reachable via the
-    // hyperlink on the login form. Race-safe: a flurry of 401s from parallel
-    // API calls can only ever paint one overlay.
-    let authPromptInFlight = false;
-    async function promptAuth(onSuccess) {
-        if (authPromptInFlight) return;
-        if (document.getElementById(OVERLAY_ID)) return;
-        authPromptInFlight = true;
-        try {
-            const status = await checkStatus();
-            multiUser = status.multi_user === true;
-            usernames = Array.isArray(status.usernames) ? status.usernames : [];
-            existingCompany = {
-                name: status.company_name || "",
-                hasData: status.has_data === true,
-            };
-            if (status.authenticated) return;
-            renderView("login", onSuccess);
-        } finally {
-            authPromptInFlight = false;
-        }
+    // handler. The view follows /api/auth/status: a company nobody has set
+    // up yet opens on first-run setup, every other one on sign-in. (It used
+    // to open on "Unlock Slowbooks — enter your password" for a company that
+    // had no password; the way on was a small link, or a wrong password —
+    // explore 2.17.3, skytech M18 / macbase1 F1.) The cross-links still flip
+    // between the two.
+    //
+    // Race-safe: a flurry of 401s from parallel API calls shares one status
+    // check and can only ever paint one overlay. Resolves to true while an
+    // overlay is up (the page reloads when the person is in), false when the
+    // session turned out to be signed in after all.
+    let authPromptPromise = null;
+    function promptAuth(onSuccess) {
+        if (document.getElementById(OVERLAY_ID)) return Promise.resolve(true);
+        if (authPromptPromise) return authPromptPromise;
+        authPromptPromise = (async function () {
+            try {
+                const status = await checkStatus();
+                multiUser = status.multi_user === true;
+                usernames = Array.isArray(status.usernames) ? status.usernames : [];
+                existingCompany = {
+                    name: status.company_name || "",
+                    hasData: status.has_data === true,
+                };
+                if (status.authenticated) return false;
+                renderView(status.setup_needed ? "setup" : "login", onSuccess);
+                return true;
+            } finally {
+                authPromptPromise = null;
+            }
+        })();
+        return authPromptPromise;
     }
 
     // Expose globals so api.js can prompt on 401

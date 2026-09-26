@@ -13,8 +13,14 @@
 #   - Sign convention: TRNS amount = primary (debit), SPL = splits (credits)
 #   - Dates: MM/DD/YYYY
 #   - No CSV-style quoting — tabs in values would break the format
+#   - Encoding: Windows-1252 ("ANSI"), which is what QuickBooks reads an
+#     IIF file as — see to_ansi()
+#   - Amounts are home currency: a foreign-currency document goes out at
+#     the amounts its journal entry booked, as QuickBooks 2003 has one
+#     currency
 # ============================================================================
 
+import unicodedata
 from datetime import date
 from decimal import Decimal
 
@@ -26,6 +32,8 @@ from app.models.items import Item
 from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.estimates import Estimate, EstimateLine
+from app.services.csv_export import _csv_safe
+from app.services.currency import convert_lines, to_home
 from app.services.iif_common import account_to_iif_type, item_to_iif_type
 
 
@@ -58,6 +66,71 @@ def _iif_line(fields: list) -> str:
     return _tab_join(fields) + "\r\n"
 
 
+def _iif_text(value) -> str:
+    """A name or free-text field, cleaned and neutralised the way the CSV
+    export neutralises a cell: people edit IIF files in Excel (it is the
+    documented way to fix one before import), and a customer named
+    `=HYPERLINK(...)` would run there. The leading apostrophe makes it
+    text; the importer takes it off again. Only text goes through here —
+    an amount like -850.00 must stay a number."""
+    return _csv_safe(_iif_clean(value))
+
+
+# Letters with no Windows-1252 form and no accent to drop (NFKD leaves
+# them whole), spelled the way a person would type them without the key.
+_ANSI_PLAIN = {"Ł": "L", "ł": "l", "Đ": "D", "đ": "d", "ı": "i", "Ħ": "H", "ħ": "h"}
+
+
+def _ansi_char(ch: str) -> str:
+    try:
+        ch.encode("cp1252")
+        return ch
+    except UnicodeEncodeError:
+        pass
+    if ch in _ANSI_PLAIN:
+        return _ANSI_PLAIN[ch]
+    plain = ""
+    for part in unicodedata.normalize("NFKD", ch):
+        if unicodedata.combining(part):
+            continue
+        try:
+            part.encode("cp1252")
+        except UnicodeEncodeError:
+            continue
+        plain += part
+    return plain or "?"
+
+
+def to_ansi(text: str) -> bytes:
+    """The file as QuickBooks reads it: Windows-1252. QuickBooks reads an
+    IIF file in the ANSI code page, so a UTF-8 file turned "Bäckerei
+    Müller" into "BÃ¤ckerei MÃ¼ller" on import (2.17.3 exploratory test,
+    W-M14). Every character Windows-1252 has (accents, €, curly quotes,
+    dashes) is written as itself; one it lacks becomes its plain letter
+    ("ő" -> "o", "Ł" -> "L") or "?", never an error or a broken file."""
+    try:
+        return text.encode("cp1252")
+    except UnicodeEncodeError:
+        return "".join(_ansi_char(ch) for ch in text).encode("cp1252")
+
+
+def _rate(doc) -> Decimal:
+    return Decimal(str(getattr(doc, "exchange_rate", None) or 1))
+
+
+def _home(lines: list[tuple], rate: Decimal) -> list[tuple]:
+    """(debit, credit) pairs in the document's currency, converted to home
+    currency exactly as the posting code converted its journal lines (the
+    same rounding, the same cent of drift on the same line), so the file
+    carries the amounts the ledger booked. Pass the pairs in the order the
+    posting code built them."""
+    converted = convert_lines(
+        [{"debit": Decimal(str(d)), "credit": Decimal(str(c))} for d, c in lines],
+        rate,
+    )
+    return [(ln["debit"], ln["credit"]) for ln in converted]
+
+
 def _class_name(db: Session, class_id) -> str:
     """The class a document is tagged with, verbatim (Parent:Child paths
     round-trip). Empty when untagged — the CLASS column is still emitted so
@@ -67,7 +140,7 @@ def _class_name(db: Session, class_id) -> str:
     from app.models.classes import TxnClass
 
     row = db.get(TxnClass, class_id)
-    return _iif_clean(row.name) if row else ""
+    return _iif_text(row.name) if row else ""
 
 
 # Column sets for transaction blocks. Every block ends with CLASS so a tag
@@ -116,12 +189,14 @@ def _resolve_account_name(db: Session, account_id: int) -> str:
 
 
 def _full_account_name(db: Session, acct: Account) -> str:
-    """Build colon-separated parent:child account name for QB convention."""
+    """Build colon-separated parent:child account name for QB convention.
+    Neutralised as text (see _iif_text): the list row and every transaction
+    that names the account go through here, so they still match."""
     if acct.parent_id:
         parent = db.query(Account).filter(Account.id == acct.parent_id).first()
         if parent:
-            return f"{_full_account_name(db, parent)}:{acct.name}"
-    return acct.name
+            return _iif_text(f"{_full_account_name(db, parent)}:{acct.name}")
+    return _iif_text(acct.name)
 
 
 # ============================================================================
@@ -148,7 +223,7 @@ def export_accounts(db: Session) -> str:
                 "ACCNT",
                 name,
                 account_to_iif_type(acct),
-                acct.description or "",
+                _iif_text(acct.description),
                 acct.account_number or "",
                 "",  # EXTRA field (unused, but QB expects the column)
             ]
@@ -212,14 +287,14 @@ def export_customers(db: Session) -> str:
         lines += _iif_line(
             [
                 "CUST",
-                c.name or "",
-                c.company or "",
-                first,
-                last,
-                addr1,
-                addr2,
-                addr3,
-                city_st_zip,
+                _iif_text(c.name),
+                _iif_text(c.company),
+                _iif_text(first),
+                _iif_text(last),
+                _iif_text(addr1),
+                _iif_text(addr2),
+                _iif_text(addr3),
+                _iif_text(city_st_zip),
                 "",  # ADDR5
                 c.phone or "",
                 c.mobile or "",
@@ -233,7 +308,7 @@ def export_customers(db: Session) -> str:
         # QuickBooks "Customer:Job" — every job goes out as a CUST row under
         # its customer, which is exactly what the importer splits back.
         for job in sorted(getattr(c, "jobs", None) or [], key=lambda j: j.name):
-            lines += _iif_line(["CUST", _iif_clean(f"{c.name}:{job.name}")] + [""] * 14)
+            lines += _iif_line(["CUST", _iif_text(f"{c.name}:{job.name}")] + [""] * 14)
     return lines
 
 
@@ -276,11 +351,11 @@ def export_vendors(db: Session) -> str:
         lines += _iif_line(
             [
                 "VEND",
-                v.name or "",
-                addr1,
-                addr2,
-                addr3,
-                city_st_zip,
+                _iif_text(v.name),
+                _iif_text(addr1),
+                _iif_text(addr2),
+                _iif_text(addr3),
+                _iif_text(city_st_zip),
                 "",  # ADDR5
                 v.phone or "",
                 v.fax or "",
@@ -315,9 +390,9 @@ def export_items(db: Session) -> str:
         lines += _iif_line(
             [
                 "INVITEM",
-                item.name or "",
+                _iif_text(item.name),
                 item_to_iif_type(item),
-                item.description or "",
+                _iif_text(item.description),
                 acct_name,
                 str(item.rate) if item.rate else "0",
                 "Y" if item.is_taxable else "N",
@@ -358,10 +433,11 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
     lines = header
     for inv in invoices:
         cls = _class_name(db, getattr(inv, "class_id", None))
-        cust_name = inv.customer.name if inv.customer else ""
+        cust_name = _iif_text(inv.customer.name) if inv.customer else ""
         inv_date = _iif_date(inv.date)
         due_date = _iif_date(inv.due_date)
-        total = Decimal(str(inv.total or 0))
+        splits, tax_amt, home = _sale_amounts(inv)
+        total_home = home[0][0]
 
         # TRNS line — debit A/R for full invoice amount
         lines += _iif_line(
@@ -371,7 +447,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                 inv_date,
                 "Accounts Receivable",
                 cust_name,
-                str(total),
+                str(total_home),
                 inv.invoice_number or "",
                 due_date,
                 inv.terms or "",
@@ -381,10 +457,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
         )
 
         # SPL lines — credit income accounts for each line item
-        for il in inv.lines:
-            amt = Decimal(str(il.amount or 0))
-            if amt == 0:
-                continue
+        for il, (_dr, credit) in zip(splits, home[1:]):
             acct_name = ""
             if il.item and il.item.income_account_id:
                 acct_name = _resolve_account_name(db, il.item.income_account_id)
@@ -398,17 +471,16 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                     inv_date,
                     acct_name,
                     cust_name,
-                    str(-amt),
+                    str(-credit),
                     inv.invoice_number or "",
                     "",
                     "",
-                    il.description or "",
+                    _iif_text(il.description),
                     cls,
                 ]
             )
 
         # SPL line for tax if applicable
-        tax_amt = Decimal(str(inv.tax_amount or 0))
         if tax_amt > 0:
             lines += _iif_line(
                 [
@@ -417,7 +489,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                     inv_date,
                     "Sales Tax Payable",
                     cust_name,
-                    str(-tax_amt),
+                    str(-home[-1][1]),
                     inv.invoice_number or "",
                     "",
                     "",
@@ -429,6 +501,21 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
         lines += _iif_line(["ENDTRNS"])
 
     return lines
+
+
+def _sale_amounts(inv):
+    """An invoice's (or sales receipt's) split lines, its tax, and every
+    amount of the block in home currency: [total, one per split, tax if
+    any] as (debit, credit), converted the way the invoice's journal entry
+    was (routes/invoices/helpers.py: the A/R debit, one credit per non-zero
+    line, then the tax)."""
+    splits = [il for il in inv.lines if Decimal(str(il.amount or 0)) != 0]
+    tax_amt = Decimal(str(inv.tax_amount or 0))
+    pairs = [(Decimal(str(inv.total or 0)), Decimal("0"))]
+    pairs += [(Decimal("0"), Decimal(str(il.amount))) for il in splits]
+    if tax_amt > 0:
+        pairs.append((Decimal("0"), tax_amt))
+    return splits, tax_amt, _home(pairs, _rate(inv))
 
 
 def export_payments(db: Session, date_from: date = None, date_to: date = None) -> str:
@@ -458,11 +545,33 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
     payments = query.order_by(Payment.date, Payment.id).all()
 
     lines = header
+    fx_name = None
     for pmt in payments:
+        # A sales receipt is an invoice plus its own payment here, but one
+        # CASH SALE in QuickBooks, and export_sales_receipts writes that
+        # block. The payment went out as well — applied to the receipt's
+        # number — so QuickBooks got the money twice and the customer a
+        # phantom credit. What the receipt covers stays out of this block.
+        allocations = [
+            a
+            for a in (pmt.allocations or [])
+            if not (a.invoice and a.invoice.is_sales_receipt)
+        ]
+        receipt_part = sum(
+            (
+                Decimal(str(a.amount or 0))
+                for a in (pmt.allocations or [])
+                if a not in allocations
+            ),
+            Decimal("0"),
+        )
+        amount = Decimal(str(pmt.amount or 0)) - receipt_part
+        if receipt_part and amount <= 0:
+            continue
         cls = _class_name(db, getattr(pmt, "class_id", None))
-        cust_name = pmt.customer.name if pmt.customer else ""
+        cust_name = _iif_text(pmt.customer.name) if pmt.customer else ""
         pmt_date = _iif_date(pmt.date)
-        amount = Decimal(str(pmt.amount or 0))
+        pay_rate = _rate(pmt)
 
         # Deposit account name
         deposit_acct = "Undeposited Funds"
@@ -470,6 +579,35 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
             deposit_acct = _full_account_name(db, pmt.deposit_to_account)
 
         ref = pmt.reference or pmt.check_number or ""
+
+        # Home currency, as routes/payments.py posted it: the cash at the
+        # payment's rate, the A/R each allocation relieved at its invoice's
+        # booked rate, any unallocated remainder at the payment's rate, and
+        # the difference as realized exchange gain or loss.
+        cash_home = to_home(amount, pay_rate)
+        splits = []
+        allocated = Decimal("0")
+        for alloc in allocations:
+            alloc_amt = Decimal(str(alloc.amount or 0))
+            allocated += alloc_amt
+            inv = alloc.invoice
+            splits.append(
+                (
+                    "Accounts Receivable",
+                    to_home(alloc_amt, _rate(inv) if inv else pay_rate),
+                    (inv.invoice_number or "") if inv else "",
+                )
+            )
+        remainder = amount - allocated
+        if remainder or not splits:
+            # A payment's unapplied remainder is still credited to A/R (a
+            # customer credit); leaving it out left the block unbalanced.
+            splits.append(("Accounts Receivable", to_home(remainder, pay_rate), ""))
+        residual = cash_home - sum((amt for _a, amt, _d in splits), Decimal("0"))
+        if residual:
+            if fx_name is None:
+                fx_name = _fx_account_name(db)
+            splits.append((fx_name, residual, ""))
 
         # TRNS line — debit bank/deposit account
         lines += _iif_line(
@@ -479,43 +617,25 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
                 pmt_date,
                 deposit_acct,
                 cust_name,
-                str(amount),
+                str(cash_home),
                 ref,
-                pmt.notes or "",
+                _iif_text(pmt.notes),
                 cls,
             ]
         )
 
-        # SPL lines — credit A/R (one per allocation, or single if no allocations)
-        if pmt.allocations:
-            for alloc in pmt.allocations:
-                alloc_amt = Decimal(str(alloc.amount or 0))
-                doc_num = ""
-                if alloc.invoice:
-                    doc_num = alloc.invoice.invoice_number or ""
-                lines += _iif_line(
-                    [
-                        "SPL",
-                        "PAYMENT",
-                        pmt_date,
-                        "Accounts Receivable",
-                        cust_name,
-                        str(-alloc_amt),
-                        doc_num,
-                        "",
-                        cls,
-                    ]
-                )
-        else:
+        # SPL lines — credit A/R once per allocation (DOCNUM = the invoice),
+        # then any remainder and any exchange difference
+        for acct_name, credit, doc_num in splits:
             lines += _iif_line(
                 [
                     "SPL",
                     "PAYMENT",
                     pmt_date,
-                    "Accounts Receivable",
+                    acct_name,
                     cust_name,
-                    str(-amount),
-                    "",
+                    str(-credit),
+                    doc_num,
                     "",
                     cls,
                 ]
@@ -524,6 +644,19 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
         lines += _iif_line(["ENDTRNS"])
 
     return lines
+
+
+def _fx_account_name(db: Session) -> str:
+    """The realized exchange gain/loss account, looked up the way
+    app.services.currency finds it — but never created: an export writes
+    nothing."""
+    from app.services.currency import FX_ACCOUNT_NAME, FX_ACCOUNT_NUMBER
+
+    acct = (
+        db.query(Account).filter(Account.account_number == FX_ACCOUNT_NUMBER).first()
+        or db.query(Account).filter(Account.name == FX_ACCOUNT_NAME).first()
+    )
+    return _full_account_name(db, acct) if acct else FX_ACCOUNT_NAME
 
 
 def export_estimates(db: Session) -> str:
@@ -547,7 +680,7 @@ def export_estimates(db: Session) -> str:
     lines = header
     for est in estimates:
         cls = _class_name(db, getattr(est, "class_id", None))
-        cust_name = est.customer.name if est.customer else ""
+        cust_name = _iif_text(est.customer.name) if est.customer else ""
         est_date = _iif_date(est.date)
         total = Decimal(str(est.total or 0))
 
@@ -560,7 +693,7 @@ def export_estimates(db: Session) -> str:
                 cust_name,
                 str(total),
                 est.estimate_number or "",
-                est.notes or "",
+                _iif_text(est.notes),
                 cls,
             ]
         )
@@ -584,7 +717,7 @@ def export_estimates(db: Session) -> str:
                     cust_name,
                     str(-amt),
                     est.estimate_number or "",
-                    el.description or "",
+                    _iif_text(el.description),
                     cls,
                 ]
             )
@@ -623,7 +756,7 @@ def export_classes(db: Session) -> str:
         .all()
     )
     for c in rows:
-        lines += _iif_line(["CLASS", _iif_clean(c.name), "Y" if c.is_archived else "N"])
+        lines += _iif_line(["CLASS", _iif_text(c.name), "Y" if c.is_archived else "N"])
     return lines
 
 
@@ -636,26 +769,60 @@ def _row(
             trnstype,
             d,
             acct,
-            _iif_clean(name),
+            _iif_text(name),
             str(amount),
             _iif_clean(docnum),
             due,
             terms,
-            _iif_clean(memo),
+            _iif_text(memo),
             cls,
         ]
     )
 
 
+def _tax_posted_to_sales_tax_payable(db: Session, bill, tax_account_id) -> bool:
+    """Whether this bill's journal debited Sales Tax Payable with its tax —
+    how bills were posted before purchase tax became part of line cost."""
+    if not tax_account_id or not bill.transaction_id:
+        return False
+    from app.models.transactions import TransactionLine
+
+    return (
+        db.query(TransactionLine.id)
+        .filter(
+            TransactionLine.transaction_id == bill.transaction_id,
+            TransactionLine.account_id == tax_account_id,
+            TransactionLine.debit > 0,
+        )
+        .first()
+        is not None
+    )
+
+
 def export_bills(db: Session, date_from: date = None, date_to: date = None) -> str:
-    """Bills as BILL blocks. QB convention: TRNS is the A/P credit (negative),
-    each SPL the expense debit (positive); the importer reads abs() so
-    either sign re-imports."""
+    """Bills as BILL blocks, at the amounts the ledger booked. QB
+    convention: TRNS is the A/P credit (negative), each SPL the expense
+    debit (positive); the importer reads abs() so either sign re-imports.
+
+    Sales tax a supplier charges is part of what the purchase cost: the
+    posting spreads it over the lines in proportion to their amounts and
+    debits each line's account with its amount plus its share
+    (services/purchase_posting.py), and nothing goes to Sales Tax Payable.
+    This export still wrote the tax as its own split to Sales Tax Payable,
+    so QuickBooks took the tax paid to a supplier off the sales tax owed —
+    the posting the ledger stopped making for explore 2.17.3 (macbase1 F9;
+    the export was found still making it while integrating the fixes).
+    Each split now carries its line's share. A bill posted before that
+    change still has its Sales Tax Payable debit in the ledger, and goes
+    out as it was booked."""
     from app.models.bills import Bill, BillStatus
     from app.services.control_accounts import find
+    from app.services.purchase_posting import spread
 
-    # Display name only: an export must not fail because a chart is odd.
+    # Display names only: an export must not fail because a chart is odd.
     ap_name = _resolve_account_name(db, find(db, "2000")) or "Accounts Payable"
+    tax_account_id = find(db, "2200")
+    tax_name = _resolve_account_name(db, tax_account_id) or "Sales Tax Payable"
     q = (
         db.query(Bill)
         .options(joinedload(Bill.vendor), joinedload(Bill.lines))
@@ -669,24 +836,43 @@ def export_bills(db: Session, date_from: date = None, date_to: date = None) -> s
     for bill in q.order_by(Bill.date, Bill.id).all():
         cls = _class_name(db, bill.class_id)
         vendor = bill.vendor.name if bill.vendor else ""
-        total = Decimal(str(bill.total or 0))
+        # The order the posting code built its journal in: the lines as they
+        # were entered (by id), each line's debit, [the tax,] the A/P credit.
+        entered = sorted(bill.lines, key=lambda bl: bl.id)
+        splits = [bl for bl in entered if Decimal(str(bl.amount or 0)) != 0]
+        tax = Decimal(str(bill.tax_amount or 0))
+        tax_on_its_own = tax > 0 and _tax_posted_to_sales_tax_payable(
+            db, bill, tax_account_id
+        )
+        if tax_on_its_own:
+            pairs = [(Decimal(str(bl.amount)), Decimal("0")) for bl in splits]
+            pairs.append((tax, Decimal("0")))
+        else:
+            shares = dict(
+                zip(
+                    (bl.id for bl in entered),
+                    spread(tax, [bl.amount for bl in entered]),
+                )
+            )
+            pairs = [
+                (Decimal(str(bl.amount)) + shares[bl.id], Decimal("0")) for bl in splits
+            ]
+        pairs.append((Decimal("0"), Decimal(str(bill.total or 0))))
+        home = _home(pairs, _rate(bill))
         lines += _row(
             "TRNS",
             "BILL",
             _iif_date(bill.date),
             ap_name,
             vendor,
-            -total,
+            -home[-1][1],
             bill.bill_number or "",
             _iif_date(bill.due_date),
             bill.terms or "",
             bill.notes or "",
             cls,
         )
-        for bl in bill.lines:
-            amt = Decimal(str(bl.amount or 0))
-            if amt == 0:
-                continue
+        for bl, (debit, _cr) in zip(splits, home):
             acct = _resolve_account_name(db, bl.account_id) if bl.account_id else ""
             if not acct and bl.item and bl.item.expense_account_id:
                 acct = _resolve_account_name(db, bl.item.expense_account_id)
@@ -696,22 +882,21 @@ def export_bills(db: Session, date_from: date = None, date_to: date = None) -> s
                 _iif_date(bill.date),
                 acct or "Uncategorized Expenses",
                 vendor,
-                amt,
+                debit,
                 bill.bill_number or "",
                 "",
                 "",
                 bl.description or "",
                 cls,
             )
-        tax = Decimal(str(bill.tax_amount or 0))
-        if tax > 0:
+        if tax_on_its_own:
             lines += _row(
                 "SPL",
                 "BILL",
                 _iif_date(bill.date),
-                "Sales Tax Payable",
+                tax_name,
                 vendor,
-                tax,
+                home[len(splits)][0],
                 bill.bill_number or "",
                 "",
                 "",
@@ -813,23 +998,21 @@ def export_sales_receipts(
             else default_dep
         )
         d = _iif_date(inv.date)
+        splits, tax, home = _sale_amounts(inv)
         lines += _row(
             "TRNS",
             "CASH SALE",
             d,
             dep_name,
             cust,
-            Decimal(str(inv.total or 0)),
+            home[0][0],
             inv.invoice_number or "",
             "",
             "",
             inv.notes or "",
             cls,
         )
-        for il in inv.lines:
-            amt = Decimal(str(il.amount or 0))
-            if amt == 0:
-                continue
+        for il, (_dr, credit) in zip(splits, home[1:]):
             acct = ""
             if il.item and il.item.income_account_id:
                 acct = _resolve_account_name(db, il.item.income_account_id)
@@ -839,14 +1022,13 @@ def export_sales_receipts(
                 d,
                 acct or "Service Income",
                 cust,
-                -amt,
+                -credit,
                 inv.invoice_number or "",
                 "",
                 "",
                 il.description or "",
                 cls,
             )
-        tax = Decimal(str(inv.tax_amount or 0))
         if tax > 0:
             lines += _row(
                 "SPL",
@@ -854,7 +1036,7 @@ def export_sales_receipts(
                 d,
                 "Sales Tax Payable",
                 cust,
-                -tax,
+                -home[-1][1],
                 inv.invoice_number or "",
                 "",
                 "",

@@ -88,6 +88,7 @@ def test_pl_expense_row_positive_after_bill_creation(client, db_session, seed_ac
                     "description": "Supplies",
                     "quantity": 1,
                     "rate": 250.00,
+                    "account_id": seed_accounts["6400"].id,
                     "line_order": 0,
                 }
             ],

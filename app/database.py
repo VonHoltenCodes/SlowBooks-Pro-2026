@@ -69,6 +69,18 @@ def get_db(request: HTTPConnection = None):
         session = getattr(request, "session", None) if request is not None else None
         if isinstance(session, dict) and session.get("authenticated") is True:
             db.info["acting_username"] = session.get("username") or "operator"
+            # The closing-date override password, when the page resent a
+            # refused change with it. A signed-in person's request only —
+            # the token branch below never carries it.
+            from app.services.closing_date import (
+                PASSWORD_HEADER,
+                SESSION_INFO_KEY,
+                password_from_header,
+            )
+
+            supplied = password_from_header(request.headers.get(PASSWORD_HEADER))
+            if supplied:
+                db.info[SESSION_INFO_KEY] = supplied
         elif request is not None:
             # Scoped API tokens: the middleware stashes the principal on
             # request.state — audit rows attribute to "token:<label>".

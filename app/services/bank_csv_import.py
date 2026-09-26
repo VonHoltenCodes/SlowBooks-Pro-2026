@@ -1,5 +1,6 @@
 # ============================================================================
-# CSV Bank Transaction Import — Bank of America, Chase, and PayPal
+# CSV Bank Transaction Import — Bank of America, Chase, PayPal, and any
+# file with date / description / amount columns
 # Extends Feature 18 (bank feed import) to support CSV bank statement exports.
 #
 # Column mapping & pitfalls documented in the skill. Key rules:
@@ -7,12 +8,17 @@
 #   - Chase credit:   Amount column already signed (neg=charge, pos=payment)
 #   - PayPal:         Gross (NOT Net) = transaction amount;
 #                     Fee column goes to Merchant Fee expense (6120)
+#   - Generic:        a header naming a date, a description and either one
+#                     signed amount or money-out / money-in columns; when
+#                     no header says so, the import dialog asks the user
+#                     which column is which (a "mapping")
 # ============================================================================
 
 import csv
 import hashlib
 import io
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -20,6 +26,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.models.banking import BankTransaction
+from app.services.accounting import _q
 from app.services.bank_rules_engine import apply_bank_rules
 from app.services.safe_errors import DataProblem
 
@@ -345,29 +352,352 @@ def parse_bofa_detail(reader: csv.DictReader) -> list[dict]:
     return transactions
 
 
+# ── Generic layouts: date, description, amount (or money out / money in) ──
+#
+# A plain "Date,Description,Amount" export from a bank we have no named
+# parser for was "Unknown CSV format", with no way forward (exploratory
+# 2.17.3, W-L15). A header that names the three things is enough now; and
+# when none does, the import dialog asks which column is which and sends
+# that back as a mapping: {"date": i, "description": i, "payee": i|None,
+# "amount": i|None, "debit": i|None, "credit": i|None, "check_number":
+# i|None, "date_format": "auto"|..., "has_header": bool} — column indexes,
+# so a file without a header row (or with two columns of the same name)
+# maps just as well.
+
+
+def _norm(header: str) -> str:
+    return " ".join(header.strip().strip('"').strip("'").lower().split())
+
+
+_ROLE_HEADERS = {
+    "date": (
+        "date",
+        "transaction date",
+        "trans date",
+        "trans. date",
+        "txn date",
+        "posted date",
+        "posting date",
+        "post date",
+        "value date",
+        "booking date",
+        "effective date",
+    ),
+    "description": (
+        "description",
+        "transaction description",
+        "details",
+        "transaction details",
+        "narrative",
+        "memo",
+        "notes",
+    ),
+    "payee": ("payee", "name", "merchant", "vendor", "payee name", "merchant name"),
+    "amount": (
+        "amount",
+        "transaction amount",
+        "amount (usd)",
+        "amount usd",
+        "usd amount",
+        "amt",
+    ),
+    "debit": (
+        "debit",
+        "debits",
+        "debit amount",
+        "withdrawal",
+        "withdrawals",
+        "withdrawal amount",
+        "money out",
+        "paid out",
+    ),
+    "credit": (
+        "credit",
+        "credits",
+        "credit amount",
+        "deposit",
+        "deposits",
+        "deposit amount",
+        "money in",
+        "paid in",
+    ),
+    "check_number": (
+        "check",
+        "check number",
+        "check #",
+        "check no",
+        "check no.",
+        "chk",
+        "chk #",
+        "cheque",
+        "cheque number",
+        "check or slip #",
+    ),
+}
+
+DATE_FORMATS = ("auto", "MM/DD/YYYY", "DD/MM/YYYY", "YYYY-MM-DD")
+
+UNKNOWN_LAYOUT_TEXT = (
+    "SlowBooks doesn't recognise this file's columns. Choose which column holds "
+    "the date, the description and the amount, then preview again."
+)
+
+# Rows shown under the column pickers so the user can see what each holds.
+MAPPING_SAMPLE_ROWS = 5
+
+
+def _generic_roles(cells: list[str]) -> dict:
+    """Column index per role, from a header row's names (first match wins).
+
+    With no description-like column, the payee column is the description."""
+    roles: dict = {}
+    for index, cell in enumerate(cells):
+        name = _norm(cell)
+        for role, names in _ROLE_HEADERS.items():
+            if role not in roles and name in names:
+                roles[role] = index
+                break
+    if "description" not in roles and "payee" in roles:
+        roles["description"] = roles.pop("payee")
+    return roles
+
+
+def _is_generic_header(roles: dict) -> bool:
+    has_amount = "amount" in roles or ("debit" in roles and "credit" in roles)
+    return "date" in roles and "description" in roles and has_amount
+
+
+_NUMERIC_DATE = re.compile(r"^\s*(\d{1,4})[/.\-](\d{1,2})[/.\-](\d{1,4})(?:\D|$)")
+
+
+def _date_order(date_format: str, values: list[str]) -> str:
+    """ "mdy" | "dmy" | "ymd" for the whole file. "auto" reads the values: a
+    four-digit first part is year-first, a first part over 12 can only be a
+    day; otherwise the US month-first order."""
+    explicit = {"MM/DD/YYYY": "mdy", "DD/MM/YYYY": "dmy", "YYYY-MM-DD": "ymd"}
+    if date_format in explicit:
+        return explicit[date_format]
+    for value in values:
+        m = _NUMERIC_DATE.match(value)
+        if not m:
+            continue
+        if len(m.group(1)) == 4:
+            return "ymd"
+        if int(m.group(1)) > 12:
+            return "dmy"
+    return "mdy"
+
+
+def _mapped_date(value: str, order: str) -> date:
+    m = _NUMERIC_DATE.match(value)
+    if not m:
+        return parse_date(value)  # "Sep 1, 2026" and friends
+    a, b, c = (int(g) for g in m.groups())
+    if order == "ymd":
+        year, month, day = a, b, c
+    elif order == "dmy":
+        day, month, year = a, b, c
+    else:
+        month, day, year = a, b, c
+    if year < 100:  # a two-digit year, as strptime's %y reads it
+        year += 2000 if year < 69 else 1900
+    return date(year, month, day)
+
+
+def _parse_amount(value: str) -> Decimal:
+    """1,234.56 · $1,234.56 · -25.00 · (25.00) · 25.00- → Decimal."""
+    text = value.strip().replace(",", "").replace("$", "").replace(" ", "")
+    negative = False
+    if text.startswith("(") and text.endswith(")"):
+        text, negative = text[1:-1], True
+    if text.endswith("-"):
+        text, negative = text[:-1], not negative
+    amount = Decimal(text.lstrip("+"))
+    return _q(-amount if negative else amount)
+
+
+def _clean_mapping(mapping: dict) -> dict:
+    """The user's column choices, checked; a DataProblem says what to fix."""
+    if not isinstance(mapping, dict):
+        raise DataProblem("Choose which column holds each part of a transaction.")
+
+    def column(key, missing=None):
+        raw = mapping.get(key)
+        if raw is None or raw == "":
+            if missing:
+                raise DataProblem(missing)
+            return None
+        try:
+            index = int(raw)
+        except (TypeError, ValueError):
+            raise DataProblem("Choose the columns from the lists.") from None
+        if index < 0:
+            raise DataProblem("Choose the columns from the lists.")
+        return index
+
+    out = {
+        "date": column("date", "Choose the column that holds the date."),
+        "description": column(
+            "description", "Choose the column that holds the description."
+        ),
+        "payee": column("payee"),
+        "amount": column("amount"),
+        "debit": column("debit"),
+        "credit": column("credit"),
+        "check_number": column("check_number"),
+    }
+    sides = out["debit"] is not None or out["credit"] is not None
+    if out["amount"] is None and not sides:
+        raise DataProblem(
+            "Choose the amount column, or the money-out and money-in columns."
+        )
+    if out["amount"] is not None and sides:
+        raise DataProblem(
+            "Choose either one amount column or the money-out and money-in "
+            "columns, not both."
+        )
+    date_format = mapping.get("date_format") or "auto"
+    if date_format not in DATE_FORMATS:
+        raise DataProblem("Choose a date format from the list.")
+    out["date_format"] = date_format
+    out["has_header"] = bool(mapping.get("has_header", True))
+    return out
+
+
+def _cell(row: list[str], index) -> str:
+    if index is None or index >= len(row):
+        return ""
+    return (row[index] or "").strip()
+
+
+def _layout(rows: list[list[str]], has_header: bool | None = None) -> dict:
+    """What the mapping step shows: the first row's cells (the header, if it
+    is one), a few rows under it, and a first guess at the roles."""
+    rows = [r for r in rows if any((c or "").strip() for c in r)]
+    first = rows[0] if rows else []
+    roles = _generic_roles(first)
+    if has_header is None:
+        # A first row that names a role is a header; one that is all data
+        # (a date and numbers) is not.
+        has_header = bool(roles) or not any(
+            _NUMERIC_DATE.match((c or "").strip()) for c in first
+        )
+    return {
+        "header_row": [(c or "").strip() for c in first],
+        "sample": [
+            [(c or "").strip() for c in r] for r in rows[1 : MAPPING_SAMPLE_ROWS + 1]
+        ],
+        "has_header": has_header,
+        "suggested": roles,
+    }
+
+
+def _parse_mapped(lines: list[str], mapping: dict, fmt: str = "generic") -> dict:
+    rows = list(csv.reader(lines))
+    try:
+        m = _clean_mapping(mapping)
+    except DataProblem as problem:
+        return {
+            "format": "unknown",
+            "transactions": [],
+            "error": problem.user_text,
+            **_layout(rows),
+        }
+    body = rows[1:] if m["has_header"] else rows
+    body = [r for r in body if any((c or "").strip() for c in r)]
+    order = _date_order(
+        m["date_format"], [_cell(r, m["date"]) for r in body if _cell(r, m["date"])]
+    )
+    transactions, unread = [], 0
+    for row in body:
+        date_str = _cell(row, m["date"])
+        if not date_str:
+            continue  # a totals or note row
+        try:
+            txn_date = _mapped_date(date_str, order)
+            if m["amount"] is not None:
+                raw = _cell(row, m["amount"])
+                if not raw:
+                    continue
+                amount = _parse_amount(raw)
+            else:
+                out_raw = _cell(row, m["debit"])
+                in_raw = _cell(row, m["credit"])
+                if not out_raw and not in_raw:
+                    continue
+                money_out = abs(_parse_amount(out_raw)) if out_raw else Decimal("0")
+                money_in = abs(_parse_amount(in_raw)) if in_raw else Decimal("0")
+                amount = money_in - money_out
+        except (ValueError, InvalidOperation):
+            unread += 1
+            continue
+        if amount == 0:
+            continue
+        description = _cell(row, m["description"])
+        payee = _cell(row, m["payee"]) or description
+        check = _cell(row, m["check_number"])
+        transactions.append(
+            {
+                "date": txn_date,
+                "amount": amount,
+                "payee": payee,
+                "description": description or payee,
+                "check_number": check or None,
+            }
+        )
+    result = {
+        "format": fmt,
+        "transactions": transactions,
+        "error": None,
+        "unread": unread,
+        "mapping": m,
+    }
+    if not transactions:
+        result.update(
+            {
+                "format": "unknown",
+                "error": (
+                    "No transactions could be read with these columns. Check the "
+                    "date format and the amount columns, then preview again."
+                ),
+                **_layout(rows, m["has_header"]),
+            }
+        )
+    return result
+
+
 # ── Dispatch ─────────────────────────────────────────────────────────────
 
 
-def parse_csv(csv_text: str) -> dict:
+def parse_csv(csv_text: str, mapping: Optional[dict] = None) -> dict:
     """Parse CSV text, auto-detect format, return parsed transactions.
 
     Strips BOM and surrounding quotes from headers for reliable detection.
-    Handles PayPal's '\ufeff"Date"' header format.
+    Handles PayPal's '\ufeff"Date"' header format. A named layout wins;
+    then a header naming a date, a description and an amount (or money
+    out / money in); otherwise the result carries the file's columns and a
+    few rows for the import dialog's mapping step. `mapping` is that
+    step's answer, and skips detection.
 
     Returns:
         {"format": str, "transactions": list[dict], "error": str | None}
+        plus, for an unknown layout, header_row / sample / has_header /
+        suggested.
     """
     # Strip BOM before handing to csv reader
     if csv_text.startswith("\ufeff"):
         csv_text = csv_text[1:]
 
     lines = csv_text.splitlines()
-    if not lines:
+    if not any(line.strip() for line in lines):
         return {
             "format": "unknown",
             "transactions": [],
-            "error": "Empty CSV or no headers",
+            "error": "The file is empty — there is nothing to import.",
         }
+
+    if mapping is not None:
+        return _parse_mapped(lines, mapping)
 
     # Some exports (notably Bank of America detail CSVs) put a statement
     # summary before the transaction table, so the header is not physical
@@ -383,20 +713,31 @@ def parse_csv(csv_text: str) -> dict:
     # we can say "unknown format".
     reader = None
     fmt = "unknown"
-    headers: set[str] = set()
     for index, line in enumerate(lines[:PREAMBLE_SCAN_LINES]):
         candidate = next(csv.reader([line]), [])
         candidate_headers = {h.strip().strip('"').strip("'") for h in candidate if h}
         candidate_format = detect_format(candidate_headers)
         if candidate_format != "unknown":
-            headers = candidate_headers
             fmt = candidate_format
             reader = csv.DictReader(io.StringIO("\n".join(lines[index:])))
             break
 
     if reader is None:
-        first_row = next(csv.reader([lines[0]]), [])
-        headers = {h.strip().strip('"').strip("'") for h in first_row if h}
+        # No named layout: a header that names a date, a description and
+        # an amount is enough (same bounded scan, same reason).
+        for index, line in enumerate(lines[:PREAMBLE_SCAN_LINES]):
+            roles = _generic_roles(next(csv.reader([line]), []))
+            if _is_generic_header(roles):
+                return _parse_mapped(
+                    lines[index:],
+                    {**roles, "has_header": True, "date_format": "auto"},
+                )
+        return {
+            "format": "unknown",
+            "transactions": [],
+            "error": UNKNOWN_LAYOUT_TEXT,
+            **_layout(list(csv.reader(lines[: MAPPING_SAMPLE_ROWS + 1]))),
+        }
 
     parsers = {
         "chase_checking": parse_chase_checking,
@@ -406,15 +747,7 @@ def parse_csv(csv_text: str) -> dict:
         "bofa_detail": parse_bofa_detail,
     }
 
-    parser = parsers.get(fmt)
-    if not parser:
-        return {
-            "format": "unknown",
-            "transactions": [],
-            "error": f"Unknown CSV format. Headers found: {sorted(headers)}",
-        }
-
-    transactions = parser(reader)
+    transactions = parsers[fmt](reader)
     return {"format": fmt, "transactions": transactions, "error": None}
 
 
@@ -463,13 +796,15 @@ def import_csv_transactions(
     bank_account_id: int,
     csv_text: str,
     format_hint: Optional[str] = None,
+    mapping: Optional[dict] = None,
 ) -> dict:
     """Parse CSV and import into BankTransaction records.
 
     Dedup strategy: content-derived import_id (see assign_import_ids),
-    mirroring the FITID dedup in ofx_import.import_transactions.
+    mirroring the FITID dedup in ofx_import.import_transactions. `mapping`
+    is the import dialog's column choices for a layout detection missed.
     """
-    result = parse_csv(csv_text)
+    result = parse_csv(csv_text, mapping)
     if result["error"]:
         return {"imported": 0, "skipped": 0, "errors": [result["error"]], "total": 0}
 
