@@ -21,7 +21,7 @@ payments, and guessing which ones it took would be inventing history; the
 Make Deposits list keeps netting those old deposits the way it always did.
 
 Revision ID: 697f63b2975e
-Revises: a9b0c1d2e3f4
+Revises: 6f57f762f464
 Create Date: 2026-09-26
 
 """
@@ -32,7 +32,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "697f63b2975e"
-down_revision: Union[str, None] = "a9b0c1d2e3f4"
+down_revision: Union[str, None] = "6f57f762f464"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
