@@ -31,11 +31,13 @@
  * exactly like the app's normal API calls, which is why those always
  * succeed — then hand the already-fetched content over to Python to
  * display. No second authenticated network request is ever made.
- *   - CSV exports ask the server for Content-Disposition: inline (see the
- *     X-Slowbooks-Desktop header below) instead of attachment. text/csv is
- *     browser-renderable, so "inline" isn't download-flagged and the
- *     fetch() completes normally; the response is then saved via
- *     createObjectURL + <a download>, entirely in this page.
+ *   - Every fetch here sends the X-Slowbooks-Desktop header, and the server
+ *     answers Content-Disposition: inline instead of attachment for it
+ *     (app/main.py), so the fetch() completes normally. A file to save —
+ *     anything that is not a page or a PDF: a CSV or IIF export, an
+ *     attachment — goes to save_document_file(), which writes it to
+ *     Documents/SlowBooks Pro/Reports and says where; createObjectURL +
+ *     <a download> is the fallback without the bridge.
  *   - Settings → Backups "Download" skips HTTP entirely — see the
  *     save_backup_file() branch in the click handler below. The backup
  *     file (application/octet-stream, never browser-renderable, so
@@ -49,7 +51,8 @@
  *     which writes it to a local temp file and opens that (file:// needs
  *     no auth at all) so Chromium's built-in PDF viewer can render it.
  *
- * In a normal browser this file is a no-op.
+ * In a normal browser this file is a no-op, but for
+ * window.SlowbooksDesktop.saveFile(), which answers false there.
  */
 (function () {
     'use strict';
@@ -113,6 +116,32 @@
         setTimeout(function () { URL.revokeObjectURL(objectUrl); }, 30000);
     }
 
+    // Save a file this page already holds through the native bridge: it goes
+    // to Documents/SlowBooks Pro/Reports, and a toast says where, with Show
+    // in folder. Resolves false when there is no bridge (a browser), so the
+    // caller downloads the file itself. Pages that fetch a file themselves
+    // (the IIF export) use it as window.SlowbooksDesktop.saveFile.
+    async function saveFile(blob, name) {
+        const api = window.pywebview && window.pywebview.api;
+        if (!api || !api.save_document_file) return false;
+        const buffer = await blob.arrayBuffer();
+        const result = await api.save_document_file(name, arrayBufferToBase64(buffer));
+        if (result && result.success && result.path) {
+            const message = result.note || ('Saved to ' + result.path);
+            if (typeof toastAction === 'function') {
+                toastAction(message, 'Show in folder', function () {
+                    api.reveal_path(result.path);
+                }, result.note ? 20000 : 10000);
+            } else if (typeof toast === 'function') {
+                toast(message);
+            }
+        } else if (typeof toast === 'function') {
+            toast('Could not save the file: ' + ((result && result.error) || 'unknown error'), 'error');
+        }
+        return true;
+    }
+    window.SlowbooksDesktop = { saveFile: saveFile };
+
     // Backups download URLs are handled by save_backup_file() instead of a
     // fetch (see module docstring) -- matched here so the click handler can
     // route them differently before falling into the generic fetch path.
@@ -146,41 +175,26 @@
         const contentType = (response.headers.get('Content-Type') || '').toLowerCase();
         const fallbackName = url.split('/').pop().split('?')[0] || 'download';
 
-        // CSV exports ask the server for "inline" instead of "attachment"
-        // (see app/routes/csv.py's X-Slowbooks-Desktop handling) specifically
-        // so WebView2 doesn't intercept the fetch() itself -- but that means
-        // the /attachment/ check below no longer catches them, and they'd
-        // otherwise fall through to the HTML branch and render as a raw-text
-        // "document" window instead of saving. text/csv is never meant to be
-        // *displayed* here, only saved, regardless of its disposition.
-        if (/attachment/i.test(disposition) || contentType.includes('csv')) {
+        // A page (print preview) opens in a window and a PDF in the viewer;
+        // anything else is a file to save — a CSV or IIF export, an
+        // attachment (a scanned receipt, a spreadsheet). Every request from
+        // here carries the desktop header, so the server answers "inline"
+        // (app/main.py) and a file to save can't be told by an "attachment"
+        // disposition: only CSVs were, by type, and an image or an .iif fell
+        // through to the page branch and showed as garbage text.
+        const isPdf = contentType.includes('pdf');
+        const isPage = contentType.includes('text/html');
+        if (/attachment/i.test(disposition) || (!isPdf && !isPage)) {
             const name = filenameFromDisposition(disposition, fallbackName);
+            const blob = await response.blob();
             // Prefer the bridge: it writes to Documents/SlowBooks Pro/Reports
             // and says where, exactly like Save PDF. A blob <a download> is
             // the fallback for a shell without the bridge.
-            if (window.pywebview && window.pywebview.api && window.pywebview.api.save_document_file) {
-                const buffer = await response.arrayBuffer();
-                const result = await window.pywebview.api.save_document_file(name, arrayBufferToBase64(buffer));
-                if (result && result.success && result.path) {
-                    const message = result.note || ('Saved to ' + result.path);
-                    if (typeof toastAction === 'function') {
-                        toastAction(message, 'Show in folder', function () {
-                            window.pywebview.api.reveal_path(result.path);
-                        }, result.note ? 20000 : 10000);
-                    } else if (typeof toast === 'function') {
-                        toast(message);
-                    }
-                } else if (typeof toast === 'function') {
-                    toast('Could not save the file: ' + ((result && result.error) || 'unknown error'), 'error');
-                }
-                return;
-            }
-            const blob = await response.blob();
-            saveBlob(blob, name);
+            if (!(await saveFile(blob, name))) saveBlob(blob, name);
             return;
         }
 
-        if (contentType.includes('pdf')) {
+        if (isPdf) {
             const buffer = await response.arrayBuffer();
             const base64 = arrayBufferToBase64(buffer);
             const title = filenameFromDisposition(disposition, fallbackName);
@@ -269,7 +283,10 @@
         const a = e.target && e.target.closest
             ? e.target.closest('a[target="_blank"], a[download]')
             : null;
-        if (!a || !a.href || !isSameOrigin(a.href)) return;
+        // A blob: link is a file the page already made (saveBlob's own
+        // fallback): the web view downloads it; fetching it back here went
+        // round in a circle.
+        if (!a || !a.href || /^blob:/i.test(a.href) || !isSameOrigin(a.href)) return;
         if (isPortalUrl(a.href)) {
             // system browser via the launcher bridge when it's there;
             // otherwise fall through to WebView2's new-window handling,

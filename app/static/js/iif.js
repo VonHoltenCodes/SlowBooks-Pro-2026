@@ -189,7 +189,11 @@ const IIFPage = {
     async _download(url, fallbackName) {
         try {
             App.setStatus('Exporting IIF...');
-            const res = await fetch(url);
+            // Asked for inline: the desktop app's web view takes an
+            // "attachment" answer to a page's own fetch() for a download and
+            // never hands it back ("Failed to fetch"). This page saves the
+            // file itself either way.
+            const res = await fetch(url, { headers: { 'X-Slowbooks-Desktop': '1' } });
             if (!res.ok) throw new Error(await API.responseError(res, 'Export failed'));
 
             // Get filename from Content-Disposition header if available
@@ -201,13 +205,17 @@ const IIFPage = {
             }
 
             const blob = await res.blob();
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = filename;
-            a.click();
-            URL.revokeObjectURL(a.href);
-
-            toast(`Exported ${filename}`);
+            // The desktop app saves it to Documents/SlowBooks Pro/Reports and
+            // says where, as Save CSV does; a browser downloads it.
+            const desktop = window.SlowbooksDesktop;
+            if (!(desktop && await desktop.saveFile(blob, filename))) {
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = filename;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+                toast(`Exported ${filename}`);
+            }
             App.setStatus('QuickBooks Interop — Ready');
         } catch (err) {
             toast(err.message, 'error');
