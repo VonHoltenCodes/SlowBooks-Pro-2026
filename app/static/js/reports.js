@@ -605,7 +605,7 @@ const ReportsPage = {
         const customers = await API.get("/customers?active_only=true");
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
         openModal(T("Customer Statement"), `
-            <form onsubmit="ReportsPage.openStatement(event)">
+            <form onsubmit="ReportsPage.openStatement(event)" data-readonly-ok>
                 <div class="form-grid">
                     <div class="form-group"><label>${T('Customer')} *</label>
                         <select name="customer_id" required><option value="">Select...</option>${custOpts}</select></div>

@@ -138,6 +138,66 @@ const App = {
         </div>`;
     },
 
+    // ---- Read-only sign-ins (Server Edition) -------------------------------
+    // The server refuses every write from the readonly role with a 403 —
+    // that stays the enforcement. But every page offered "+ New", and a
+    // whole form could be filled in before the refusal arrived (2.17.3
+    // exploratory test, W-L17). Once /api/auth/status names the role, the
+    // create buttons are hidden and every form a dialog opens is shown
+    // locked, with a sentence saying why.
+    role: 'admin',
+    READ_ONLY_MESSAGE: 'Your sign-in is read-only: you can look, but not save changes. '
+        + 'An administrator can change your role under Settings → Users.',
+
+    isReadOnly() { return App.role === 'readonly'; },
+
+    setRole(role) {
+        App.role = role || 'admin';
+        document.body.classList.toggle('role-readonly', App.isReadOnly());
+        const page = document.getElementById('page-content');
+        if (!App.isReadOnly() || !page) return;
+        // the toolbar's shortcuts to new documents, and batch entry
+        document.querySelectorAll('#topbar .tb-btn[data-action], #topbar .tb-btn[data-nav="#/quick-entry"]')
+            .forEach(b => b.classList.add('hidden'));
+        App.hideWriteControls(page);
+        if (!App._roObserver) {
+            // pages re-render in place (tabs, filters): keep them clean
+            App._roObserver = new MutationObserver(() => App.hideWriteControls(page));
+            App._roObserver.observe(page, { childList: true, subtree: true });
+        }
+    },
+
+    // "+ New Invoice", "+ Record Payment", "New Account": a create button is
+    // labelled "+ …", or is the page header's primary action.
+    hideWriteControls(root) {
+        if (!root || !App.isReadOnly()) return;
+        root.querySelectorAll('button, a.btn').forEach(el => {
+            const label = (el.textContent || '').trim();
+            const headerAction = el.classList.contains('btn-primary') && el.closest('.page-header');
+            if (label.startsWith('+') || headerAction) el.classList.add('hidden');
+        });
+    },
+
+    // Called by openModal(). A form that only opens a document (the
+    // customer statement) carries data-readonly-ok and stays usable.
+    lockForms(root) {
+        if (!root || !App.isReadOnly()) return;
+        root.querySelectorAll('form:not([data-readonly-ok])').forEach(form => {
+            form.querySelectorAll('input, select, textarea').forEach(el => { el.disabled = true; });
+            form.querySelectorAll('button').forEach(b => {
+                if (/closeModal\(/.test(b.getAttribute('onclick') || '')) return;
+                b.disabled = true;
+                b.style.opacity = '0.5';
+                b.style.cursor = 'not-allowed';
+            });
+            form.onsubmit = (e) => { e.preventDefault(); toast(App.READ_ONLY_MESSAGE, 'error'); return false; };
+            if (!form.querySelector('.readonly-note')) {
+                form.insertAdjacentHTML('afterbegin',
+                    `<div class="hint hint--locked readonly-note" style="margin-bottom:10px;">${escapeHtml(App.READ_ONLY_MESSAGE)}</div>`);
+            }
+        });
+    },
+
     setStatus(text) {
         const el = $('#status-text');
         if (el) el.textContent = text;
@@ -831,6 +891,7 @@ const App = {
             const auth = await fetch('/api/auth/status', { credentials: 'same-origin' });
             if (auth.ok) {
                 const a = await auth.json();
+                if (a.user) App.setRole(a.user.role);
                 if (a.multi_user && a.user && a.user.role !== 'admin') {
                     // HR and payroll are admin functions; the server refuses
                     // them for other roles, so do not offer the pages.

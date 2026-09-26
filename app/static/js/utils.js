@@ -80,6 +80,9 @@ function openModal(title, html, opts) {
     _modalOpener = document.activeElement;
     $('#modal-title').textContent = title;
     $('#modal-body').innerHTML = html;
+    // A read-only sign-in sees the form locked, not a 403 after filling it
+    // in (app.js App.lockForms).
+    if (window.App && typeof window.App.lockForms === 'function') window.App.lockForms($('#modal-body'));
     $('#modal-overlay').classList.remove('hidden');
     const modal = $('#modal');
     modal.classList.toggle('modal--wide', !!(opts && opts.wide));
