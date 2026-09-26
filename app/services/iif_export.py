@@ -547,10 +547,30 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
     lines = header
     fx_name = None
     for pmt in payments:
+        # A sales receipt is an invoice plus its own payment here, but one
+        # CASH SALE in QuickBooks, and export_sales_receipts writes that
+        # block. The payment went out as well — applied to the receipt's
+        # number — so QuickBooks got the money twice and the customer a
+        # phantom credit. What the receipt covers stays out of this block.
+        allocations = [
+            a
+            for a in (pmt.allocations or [])
+            if not (a.invoice and a.invoice.is_sales_receipt)
+        ]
+        receipt_part = sum(
+            (
+                Decimal(str(a.amount or 0))
+                for a in (pmt.allocations or [])
+                if a not in allocations
+            ),
+            Decimal("0"),
+        )
+        amount = Decimal(str(pmt.amount or 0)) - receipt_part
+        if receipt_part and amount <= 0:
+            continue
         cls = _class_name(db, getattr(pmt, "class_id", None))
         cust_name = _iif_text(pmt.customer.name) if pmt.customer else ""
         pmt_date = _iif_date(pmt.date)
-        amount = Decimal(str(pmt.amount or 0))
         pay_rate = _rate(pmt)
 
         # Deposit account name
@@ -567,7 +587,7 @@ def export_payments(db: Session, date_from: date = None, date_to: date = None) -
         cash_home = to_home(amount, pay_rate)
         splits = []
         allocated = Decimal("0")
-        for alloc in pmt.allocations or []:
+        for alloc in allocations:
             alloc_amt = Decimal(str(alloc.amount or 0))
             allocated += alloc_amt
             inv = alloc.invoice
