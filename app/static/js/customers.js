@@ -30,8 +30,8 @@ const CustomersPage = {
                 </tr></thead>
                 <tbody id="customer-tbody">`;
             for (const c of customers) {
-                html += `<tr class="clickable customer-row" data-name="${escapeHtml(c.name).toLowerCase()}" onclick="CustomersPage.showDetails(${c.id})">
-                    <td><strong>${escapeHtml(c.name)}</strong></td>
+                html += `<tr class="clickable customer-row" data-name="${escapeHtml(c.name).toLowerCase()}" onclick="CustomersPage.showDetails(${c.id})"${c.is_active === false ? ' style="color:var(--gray-400);"' : ''}>
+                    <td><strong>${escapeHtml(c.name)}</strong>${c.is_active === false ? ' <span style="font-size:11px;">(inactive)</span>' : ''}</td>
                     <td>${escapeHtml(c.company) || ''}</td>
                     <td>${escapeHtml(c.phone) || ''}</td>
                     <td>${escapeHtml(c.email) || ''}</td>
@@ -133,6 +133,7 @@ const CustomersPage = {
                     <div style="margin-top:6px;font-size:12px;color:#888">
                         ${customer.is_active === false ? '<span style="color:#a4242b">Inactive</span>' : '<span style="color:#1f7a36">Active</span>'}
                         &nbsp;·&nbsp; Terms: ${escapeHtml(customer.terms || 'Net 30')}
+                        ${customer.is_taxable === false ? ' · <strong>Tax exempt</strong>' : ''}
                         ${customer.credit_limit ? ` · Credit limit: ${formatCurrency(customer.credit_limit)}` : ''}
                         ${customer.tax_id ? ` · Tax ID: <code>${escapeHtml(customer.tax_id)}</code>` : ''}
                     </div>
@@ -250,8 +251,17 @@ const CustomersPage = {
         let c = { name: '', company: '', email: '', phone: '', mobile: '', fax: '', website: '',
             bill_address1: '', bill_address2: '', bill_city: '', bill_state: '', bill_zip: '', bill_country: 'US',
             ship_address1: '', ship_address2: '', ship_city: '', ship_state: '', ship_zip: '', ship_country: 'US',
-            terms: 'Net 30', credit_limit: '', tax_id: '', is_taxable: true, notes: '' };
-        if (id) c = await API.get(`/customers/${id}`);
+            terms: 'Net 30', credit_limit: '', tax_id: '', is_taxable: true, is_active: true, notes: '' };
+        if (id) {
+            c = await API.get(`/customers/${id}`);
+        } else {
+            // A new customer starts on the company's default terms
+            // (Settings), not a hard-coded Net 30.
+            const settings = await API.get('/settings').catch(() => ({}));
+            if (settings.default_terms) c.terms = settings.default_terms;
+        }
+        const termChoices = ['Net 15', 'Net 30', 'Net 45', 'Net 60', 'Due on Receipt'];
+        if (c.terms && !termChoices.includes(c.terms)) termChoices.unshift(c.terms);
 
         const title = id ? `Edit ${T('Customer')}` : T('New Customer');
         openModal(title, `
@@ -273,8 +283,8 @@ const CustomersPage = {
                         <input name="website" value="${escapeHtml(c.website || '')}"></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms">
-                            ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                `<option ${c.terms===t?'selected':''}>${t}</option>`).join('')}
+                            ${termChoices.map(t =>
+                                `<option ${c.terms===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
                         </select></div>
                 </div>
                 <h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Billing Address</h3>
@@ -311,7 +321,13 @@ const CustomersPage = {
                     <div class="form-group"><label>Tax ID</label>
                         <input name="tax_id" value="${escapeHtml(c.tax_id || '')}"></div>
                     <div class="form-group"><label>Credit Limit</label>
-                        <input name="credit_limit" type="number" step="0.01" value="${c.credit_limit || ''}"></div>
+                        <input name="credit_limit" type="number" step="0.01" min="0" placeholder="No limit" value="${c.credit_limit || ''}"></div>
+                    <div class="form-group"><label>Sales Tax</label>
+                        <label style="font-weight:normal;"><input type="checkbox" name="tax_exempt" ${c.is_taxable === false ? 'checked' : ''}>
+                            Tax exempt: no sales tax on anything sold to them (a reseller, a church, a school)</label></div>
+                    ${id ? `<div class="form-group"><label>Status</label>
+                        <label style="font-weight:normal;"><input type="checkbox" name="is_active" ${c.is_active === false ? '' : 'checked'}>
+                            Active (an inactive one is left out of the lists you pick from)</label></div>` : ''}
                     ${Terms.isNonprofit() ? `
                     <div class="form-group"><label>${T('Customer')} type</label>
                         <select name="donor_type">
@@ -337,9 +353,15 @@ const CustomersPage = {
         const form = new FormData(e.target);
         const data = Object.fromEntries(form.entries());
         if (data.credit_limit) data.credit_limit = parseFloat(data.credit_limit);
+        else if (id) data.credit_limit = null;  // cleared: no limit
         else delete data.credit_limit;
         if (e.target.send_year_end_statement) data.send_year_end_statement = e.target.send_year_end_statement.checked;
         if ('donor_type' in data && !data.donor_type) data.donor_type = null;
+        // Checkboxes: "Tax exempt" is the customer's is_taxable, inverted;
+        // "Active" is on the edit form only.
+        delete data.tax_exempt;
+        data.is_taxable = !(e.target.tax_exempt && e.target.tax_exempt.checked);
+        if (e.target.is_active) data.is_active = e.target.is_active.checked;
 
         try {
             if (id) {

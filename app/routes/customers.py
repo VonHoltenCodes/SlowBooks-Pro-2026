@@ -151,7 +151,14 @@ def create_customer(
                     "duplicates": dupes,
                 },
             )
-    customer = Customer(**data.model_dump())
+    values = data.model_dump()
+    if not (values.get("terms") or "").strip():
+        # A new customer gets the company's default terms (Settings), not a
+        # hard-coded Net 30 (explore 2.17.3, macbase1 F5).
+        from app.services.settings_service import get_setting_raw
+
+        values["terms"] = get_setting_raw(db, "default_terms") or "Net 30"
+    customer = Customer(**values)
     db.add(customer)
     db.commit()
     db.refresh(customer)
