@@ -102,12 +102,12 @@ const VendorsPage = {
                             <option value="false" ${v.is_active === false ? 'selected' : ''}>Inactive</option>
                         </select></div>` : ''}
                     <div class="form-group"><label>1099 Vendor</label>
-                        <select name="is_1099_vendor">
+                        <select name="is_1099_vendor" onchange="VendorsPage.toggle1099Type(this)">
                             <option value="false" ${!v.is_1099_vendor ? 'selected' : ''}>No</option>
                             <option value="true" ${v.is_1099_vendor ? 'selected' : ''}>Yes</option>
                         </select></div>
                     <div class="form-group"><label>1099 Type</label>
-                        <select name="vendor_1099_type">
+                        <select name="vendor_1099_type" ${v.is_1099_vendor ? '' : 'disabled'} title="Set 1099 Vendor to Yes to choose a type">
                             <option value="" ${!v.vendor_1099_type ? 'selected' : ''}>-- None --</option>
                             <option value="NEC" ${v.vendor_1099_type==='NEC' ? 'selected' : ''}>NEC (Non-Employee Comp)</option>
                             <option value="MISC" ${v.vendor_1099_type==='MISC' ? 'selected' : ''}>MISC</option>
@@ -122,6 +122,17 @@ const VendorsPage = {
                     <button type="submit" class="btn btn-primary">${id ? 'Update' : 'Create'} Vendor</button>
                 </div>
             </form>`);
+    },
+
+    // A 1099 type describes a 1099 vendor only: the server clears it on any
+    // other vendor, and the select stayed live under "1099 Vendor: No" as
+    // if the type were kept. It is off, and empty, until the answer is Yes.
+    toggle1099Type(select) {
+        const type = select.form && select.form.elements.namedItem('vendor_1099_type');
+        if (!type) return;
+        const on = select.value === 'true';
+        type.disabled = !on;
+        if (!on) type.value = '';
     },
 
     async save(e, id, force) {
