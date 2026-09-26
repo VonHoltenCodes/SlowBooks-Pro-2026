@@ -258,15 +258,19 @@ const BankingPage = {
         const note = $('#acct-ledger-note');
         if (!form || !note) return;
         const accountId = form.account_id.value;
+        const untouched = !form.opening_balance.dataset.touched;
         note.textContent = '';
-        if (!accountId || accountId === '__new__') return;
+        if (!accountId || accountId === '__new__') {
+            if (untouched) form.opening_balance.value = '0';
+            return;
+        }
         const asOf = form.opening_date.value || todayISO();
         try {
             const led = await API.get(`/banking/ledger-balance?account_id=${accountId}&as_of=${asOf}`);
             if (form.account_id.value !== accountId) return;  // changed meanwhile
+            if (untouched) form.opening_balance.value = led.has_postings ? Number(led.balance).toFixed(2) : '0';
             if (!led.has_postings) return;
             note.textContent = `The books already show ${formatCurrency(led.balance)} in ${led.account_name} on ${formatDate(led.as_of)}. Enter the statement's figure: if it differs, you'll be asked before the difference is posted.`;
-            if (!form.opening_balance.dataset.touched) form.opening_balance.value = Number(led.balance).toFixed(2);
         } catch (err) { /* the note is a courtesy; the server still guards the save */ }
     },
 
