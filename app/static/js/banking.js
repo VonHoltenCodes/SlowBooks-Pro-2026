@@ -364,7 +364,7 @@ const BankingPage = {
                 <tr style="${e.voided ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                     <td>${formatDate(e.date)}</td>
                     <td>${escapeHtml(e.payee || '')}</td>
-                    <td>${e.source_link ? `<a href="${escapeHtml(e.source_link)}">${escapeHtml(e.description)}</a>` : escapeHtml(e.description)}</td>
+                    <td><a href="${escapeHtml(BankingPage._entryHref(e))}">${escapeHtml(e.description || 'View entry')}</a></td>
                     <td>${escapeHtml(e.reference || '')}</td>
                     <td style="font-size:10px; color:var(--gray-500);">${escapeHtml((e.source_type || '').replace(/_/g, ' '))}</td>
                     <td class="amount">${e.payment > 0 ? formatCurrency(e.payment) : ''}</td>
@@ -381,6 +381,13 @@ const BankingPage = {
                 </tr></thead><tbody>${rows}</tbody></table></div>`;
         }
         return html;
+    },
+
+    // Where a register line opens: the document behind it, or — for a
+    // posting with none of its own (a void, a sales-tax or payroll payment,
+    // an import) — its journal entry. Every line opens something.
+    _entryHref(e) {
+        return e.source_link || `#/journal/${e.transaction_id}`;
     },
 
     _reviewPanel(review, feedId, accountId, kind) {
@@ -897,8 +904,8 @@ const BankingPage = {
         try {
             const endpoint = isCsv ? '/api/bank-import/preview-csv' : '/api/bank-import/preview';
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Parse failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Parse failed');
             if (isCsv && data.error && data.header_row) {
                 // A layout detection missed ("Unknown CSV format" with no
                 // way forward — exploratory 2.17.3, W-L15): ask which
@@ -1018,8 +1025,8 @@ const BankingPage = {
                 ? `/api/bank-import/import-csv/${feedId}`
                 : `/api/bank-import/import/${feedId}`;
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
             toast(`Imported ${data.imported} (${data.skipped} duplicates skipped, ${data.matched || 0} matched to the books)`);
             closeModal();
             BankingPage.go(`#/banking/${accountId}`);

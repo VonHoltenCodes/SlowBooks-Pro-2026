@@ -19,7 +19,12 @@ from app.models.accounts import Account
 from app.models.payments import Payment, PaymentAllocation
 from app.models.transactions import Transaction, TransactionLine
 from app.routes._helpers import clamp_pagination
-from app.schemas.deposits import DepositCreate, DepositResponse, PendingDepositResponse
+from app.schemas.deposits import (
+    DepositCreate,
+    DepositDetailResponse,
+    DepositResponse,
+    PendingDepositResponse,
+)
 from app.services.accounting import _q, create_journal_entry, get_undeposited_funds_id
 from app.services.bank_posting import void_document
 from app.services.closing_date import check_closing_date
@@ -78,32 +83,33 @@ def _payment_details(db: Session, txns) -> dict[int, dict]:
     return out
 
 
+def _payment_line(tl: TransactionLine, txn: Transaction, d: dict):
+    """A payment's Undeposited Funds line as the page lists it."""
+    return PendingDepositResponse(
+        transaction_line_id=tl.id,
+        transaction_id=txn.id,
+        date=txn.date,
+        description=d.get("description") or txn.description or "",
+        reference=txn.reference or "",
+        source_type=txn.source_type or "",
+        amount=float(tl.debit),
+        payment_id=d.get("payment_id"),
+        received_from=d.get("received_from", ""),
+        check_number=d.get("check_number", ""),
+        payment_reference=d.get("payment_reference", ""),
+        method=d.get("method", ""),
+        document=d.get("document", ""),
+    )
+
+
 @router.get("/pending", response_model=list[PendingDepositResponse])
 def list_pending_deposits(db: Session = Depends(get_db)):
     """Payments sitting in Undeposited Funds (1200), newest first."""
     items = waiting_items(db)
     details = _payment_details(db, [t for _, t in items])
-    results = []
-    for tl, txn in reversed(items):
-        d = details.get(txn.id, {})
-        results.append(
-            PendingDepositResponse(
-                transaction_line_id=tl.id,
-                transaction_id=txn.id,
-                date=txn.date,
-                description=d.get("description") or txn.description or "",
-                reference=txn.reference or "",
-                source_type=txn.source_type or "",
-                amount=float(tl.debit),
-                payment_id=d.get("payment_id"),
-                received_from=d.get("received_from", ""),
-                check_number=d.get("check_number", ""),
-                payment_reference=d.get("payment_reference", ""),
-                method=d.get("method", ""),
-                document=d.get("document", ""),
-            )
-        )
-    return results
+    return [
+        _payment_line(tl, txn, details.get(txn.id, {})) for tl, txn in reversed(items)
+    ]
 
 
 @router.get("", response_model=list[DepositResponse])
@@ -151,6 +157,42 @@ def list_deposits(skip: int = 0, limit: int = 25, db: Session = Depends(get_db))
             )
         )
     return out
+
+
+@router.get("/{deposit_id}", response_model=DepositDetailResponse)
+def get_deposit(deposit_id: int, db: Session = Depends(get_db)):
+    """One deposit and the payments it took. The bank register links a
+    deposit here (#/deposits/{id}); the link said "Page not found"."""
+    txn = (
+        db.query(Transaction)
+        .options(selectinload(Transaction.lines))
+        .filter(Transaction.id == deposit_id, Transaction.source_type == "deposit")
+        .first()
+    )
+    if not txn:
+        raise HTTPException(status_code=404, detail="Deposit not found")
+    taken = (
+        db.query(TransactionLine, Transaction)
+        .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+        .filter(TransactionLine.deposit_transaction_id == txn.id)
+        .order_by(Transaction.date, Transaction.id, TransactionLine.id)
+        .all()
+    )
+    details = _payment_details(db, [t for _, t in taken])
+    bank = next((ln for ln in txn.lines if ln.debit > 0), None)
+    account = db.get(Account, bank.account_id) if bank else None
+    return DepositDetailResponse(
+        id=txn.id,
+        date=txn.date,
+        reference=txn.reference or "",
+        account_id=account.id if account else None,
+        account_name=account.name if account else "",
+        amount=Decimal(str(bank.debit)) if bank else Decimal("0"),
+        items=len(taken) or None,
+        voided=txn.id in dead_transaction_ids(db, [txn]),
+        reconciled=reconciled(txn),
+        payments=[_payment_line(tl, t, details.get(t.id, {})) for tl, t in taken],
+    )
 
 
 @router.post("")

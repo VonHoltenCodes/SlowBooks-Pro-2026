@@ -21,7 +21,6 @@
 const JobsPage = {
     _jobs: [],
     _bva: {},
-    _customers: [],
     _filter: { customer_id: '', status: '', q: '' },
     // detail state
     _job: null,
@@ -41,17 +40,20 @@ const JobsPage = {
     // List page
     // =====================================================================
     async render() {
-        const [jobs, bva, customers] = await Promise.all([
+        const [jobs, bva] = await Promise.all([
             API.get('/jobs?include_inactive=true'),
             API.get('/jobs/budget-vs-actual?include_inactive=true').catch(() => []),
-            API.get('/customers'),
         ]);
         JobsPage._jobs = jobs;
-        JobsPage._customers = customers;
         JobsPage._bva = {};
         for (const r of bva) JobsPage._bva[r.job_id] = r;
 
-        const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+        // The filter offers the customers these jobs belong to — every one,
+        // an inactive customer's too — rather than every customer on file.
+        const jobCustomers = new Map();
+        for (const j of jobs) if (j.customer_id) jobCustomers.set(j.customer_id, j.customer_name || '');
+        const custOpts = [...jobCustomers].sort((a, b) => a[1].localeCompare(b[1]))
+            .map(([cid, name]) => `<option value="${cid}">${escapeHtml(name)}</option>`).join('');
         const statusOpts = Object.entries(JobsPage.STATUS_LABELS)
             .map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
 
@@ -570,8 +572,8 @@ const JobsPage = {
             description: '', site_address: '', start_date: '', projected_end_date: '', end_date: '',
             contract_amount: '', notes: '', is_active: true };
         if (id) { try { job = await API.get(`/jobs/${id}`); } catch (err) { toast(err.message, 'error'); return; } }
-        if (!JobsPage._customers.length) { try { JobsPage._customers = await API.get('/customers'); } catch (e) { /* keep empty */ } }
-        const custOpts = JobsPage._customers.map(c => `<option value="${c.id}" ${String(job.customer_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+        const customers = await JobsPage._pickerCustomers(job);
+        const custOpts = customers.map(c => `<option value="${c.id}" ${String(job.customer_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
         const statusOpts = Object.entries(JobsPage.STATUS_LABELS)
             .map(([k, v]) => `<option value="${k}" ${job.status === k ? 'selected' : ''}>${v}</option>`).join('');
         const html = `
@@ -611,6 +613,21 @@ const JobsPage = {
                 </div>
             </form>`;
         openModal(id ? `Edit ${T('Job')}` : `New ${T('Job')}`, html);
+    },
+
+    // Active customers only — the picker listed inactive ones too — plus the
+    // job's own customer if it has gone inactive since (or the Customer
+    // Center's, for a new job), so an edit never asks for a customer again.
+    async _pickerCustomers(job) {
+        let customers = [];
+        try { customers = await API.get('/customers?active_only=true'); } catch (e) { /* keep empty */ }
+        const own = job.customer_id ? String(job.customer_id) : '';
+        if (own && !customers.some(c => String(c.id) === own)) {
+            let name = job.customer_name;
+            if (!name) { try { name = (await API.get(`/customers/${own}`)).name; } catch (e) { name = ''; } }
+            customers.push({ id: job.customer_id, name: `${name || `${T('Customer')} ${own}`} (inactive)` });
+        }
+        return customers;
     },
 
     async save(e, id) {

@@ -272,7 +272,7 @@ const ExpensesPage = {
         formData.append('file', fileInput.files[0]);
         try {
             const resp = await fetch(`/api/attachments/expense/${id}`, { method: 'POST', body: formData });
-            if (!resp.ok) { const d = await resp.json().catch(() => ({})); throw new Error(d.detail || 'Upload failed'); }
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Upload failed'));
             toast('Attachment uploaded');
             fileInput.value = '';
             ExpensesPage.loadAttachments(id);

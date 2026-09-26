@@ -14,6 +14,8 @@ import base64
 import sys
 import types
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
 
 import pytest
 
@@ -73,7 +75,9 @@ def test_a_saved_pdf_is_named_once_and_filed_by_kind(home, title, saved):
     assert Path(result["path"]) == expected
     assert expected.read_bytes() == b"%PDF-1.7 test"
     assert "-pdf" not in expected.name
-    assert windows and windows[0][1] == expected.as_uri()
+    # the window shows it under the viewer's toolbar (test_desktop_pdf_viewer)
+    viewer = Path(url2pathname(urlparse(windows[0][1]).path))
+    assert f'<iframe src="{expected.as_uri()}"' in viewer.read_text(encoding="utf-8")
 
 
 def test_the_show_in_folder_bridge_accepts_the_documents_folders(home, monkeypatch):

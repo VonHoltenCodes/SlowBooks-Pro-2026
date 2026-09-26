@@ -331,8 +331,8 @@ const FixedAssetsPage = {
         formData.append('file', file);
         try {
             const resp = await fetch('/api/fixed-assets/import-csv', { method: 'POST', body: formData });
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            if (!resp.ok) throw new Error(data.detail || 'Import failed');
             const errs = data.errors.length ? ` (${data.errors.length} rows failed)` : '';
             toast(`Imported ${data.imported} assets${errs}`);
             if (data.errors.length) console.warn('Asset import errors:', data.errors);

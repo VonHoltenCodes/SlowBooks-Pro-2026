@@ -176,8 +176,8 @@ const QBOPage = {
         for (const entity of checked) {
             try {
                 const r = await fetch(`/api/qbo/import/${entity}`, { method: 'POST' });
+                if (!r.ok) throw new Error(await API.responseError(r, `Import ${entity} failed`));
                 const data = await r.json();
-                if (!r.ok) throw new Error(data.detail || `Import ${entity} failed`);
                 result[entity] = data.imported || 0;
                 if (data.errors) result.errors.push(...data.errors);
             } catch (err) {
@@ -217,8 +217,8 @@ const QBOPage = {
         for (const entity of checked) {
             try {
                 const r = await fetch(`/api/qbo/export/${entity}`, { method: 'POST' });
+                if (!r.ok) throw new Error(await API.responseError(r, `Export ${entity} failed`));
                 const data = await r.json();
-                if (!r.ok) throw new Error(data.detail || `Export ${entity} failed`);
                 result[entity] = data.exported || 0;
                 if (data.errors) result.errors.push(...data.errors);
             } catch (err) {

@@ -270,12 +270,12 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     ("POST", "/api/payments/{provider_name}/webhook"),
     ("POST", "/api/payments/{provider_name}/create-checkout-session"),
     ("GET", "/api/qbo/callback"),
-    ("POST", "/api/deductions/types/seed-standard"),
     ("POST", "/api/payroll/gross-up"),
     ("POST", "/api/payroll/{run_id}/nacha"),
     ("POST", "/api/time-entries/classify"),
     # Legacy: superseded by /api/payroll/forms/* — kept until next major release.
-    # Migration tracker in docs/todo.md.
+    # Migration tracker in docs/todo.md. (The 1099 summary, the 1099-NEC and
+    # the 1096 have screen callers now, on the Tax Forms page.)
     ("GET", "/api/tax-forms/w2"),
     ("GET", "/api/tax-forms/w2/{employee_id}"),
     ("GET", "/api/tax-forms/w2/{employee_id}/pdf"),
@@ -283,9 +283,6 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     ("GET", "/api/tax-forms/940/pdf"),
     ("GET", "/api/tax-forms/941"),
     ("GET", "/api/tax-forms/941/pdf"),
-    ("GET", "/api/tax-forms/1099"),
-    ("GET", "/api/tax-forms/1099/{vendor_id}/pdf"),
-    ("GET", "/api/tax-forms/1096/pdf"),
     ("GET", "/api/tax-forms/sui"),
     ("GET", "/api/tax-forms/liability"),
     # Legacy JSON-mode tax form endpoints — superseded by /pdf variants.
@@ -308,9 +305,6 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     ("GET", "/api/analytics/expenses"),
     ("GET", "/api/analytics/cash-flow"),
     ("GET", "/api/analytics/profitability"),
-    # Singular paystub fetch — SPA renders paystubs via the bulk list +
-    # PDF endpoints. This route exists for direct linking / API consumers.
-    ("GET", "/api/payroll/{run_id}/paystub/{stub_id}"),
     # Employee self-service "submit timecard" — meant to be called from
     # the employee portal, not the admin TimeEntriesPage (which uses
     # /approve and /reject). Portal time-entry UI is future work.
@@ -318,20 +312,11 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     # Year-end PTO carryover — annual admin batch job, scheduled via
     # cron or run manually by the operator at fiscal year-end.
     ("POST", "/api/pto/accruals/year-end-carryover"),
-    # Garnishment order delete — court-ordered garnishments must retain
-    # an audit trail. This endpoint exists for data-correction overrides
-    # only and is deliberately not surfaced in the deductions UI.
-    ("DELETE", "/api/deductions/garnishments/{order_id}"),
     # DocumentAudit hash-chain viewer/verifier — endpoints ready, the
     # admin UI ("Compliance" tab) is future work (docs/todo.md).
     ("GET", "/api/document-audits"),
     ("GET", "/api/document-audits/{audit_id}"),
     ("GET", "/api/document-audits/verify/{content_hash}"),
-    # Check printing is for money going out (bill payments). Its only SPA
-    # button sat on RECEIVED customer payments and printed a check payable
-    # to the customer (explore 2.17.3, W-M9), so it was removed; Pay Bills
-    # has no per-payment view to host the button yet.
-    ("GET", "/api/checks/print"),
 }
 
 
@@ -366,4 +351,47 @@ def test_no_orphan_backend_routes(app_routes):
         "Backend routes with no JS caller (add a caller, mark them as "
         "intentional in _INTENTIONAL_BACKEND_ONLY, or delete them):\n"
         + "\n".join(orphans)
+    )
+
+
+def _names_route(call_segs: list[str], route_segs: list[str]) -> bool:
+    """Does this JS call name this route? Stricter than _route_matches: a
+    `*` from `${...}` counts only where the route takes a parameter, so
+    `/api/payroll/${id}` names /api/payroll/{run_id} but not
+    /api/payroll/gross-up."""
+    if len(call_segs) != len(route_segs):
+        return False
+    return all(
+        (route.startswith("{") and route.endswith("}")) or call == route
+        for call, route in zip(call_segs, route_segs)
+    )
+
+
+def test_the_backend_only_list_names_only_routes_without_callers(app_routes):
+    """An entry in _INTENTIONAL_BACKEND_ONLY exempts its route from the
+    orphan check. Once a screen calls the route (the 1099 forms, the
+    paystub, Print Check) or the route is gone, the entry only hides it:
+    each one must be a real route that nothing on screen calls."""
+    registered = {(m, "/".join(segs)) for m, segs in app_routes}
+    calls = list(_collect_api_calls())
+    gone, called = [], []
+    for method, path in sorted(_INTENTIONAL_BACKEND_ONLY):
+        if (method, path) not in registered:
+            gone.append(f"  {method:6} {path}")
+            continue
+        segs = path.split("/")
+        callers = sorted(
+            {
+                f"{file}:{line}"
+                for file, line, jm, jpath in calls
+                if jm in (method, "*") and _names_route(jpath.split("/"), segs)
+            }
+        )
+        if callers:
+            called.append(f"  {method:6} {path}  <- {', '.join(callers)}")
+    assert not (gone or called), (
+        "Take these off _INTENTIONAL_BACKEND_ONLY.\nNot a route:\n"
+        + "\n".join(gone)
+        + "\nCalled from the screen:\n"
+        + "\n".join(called)
     )

@@ -93,7 +93,9 @@ const BillsPage = {
     },
 
     // The payments that paid this bill, each with its own Void — a paid
-    // bill's payment could not be voided anywhere on screen (W-L19).
+    // bill's payment could not be voided anywhere on screen (W-L19) — and,
+    // for a check, Print Check: the only Print Check button sat on payments
+    // RECEIVED, and went when that was put right (W-M9).
     _paymentsHtml(bill, payments) {
         if (!payments.length) return '';
         const rows = payments.map(p => {
@@ -104,7 +106,7 @@ const BillsPage = {
                 <td>${formatDate(p.date)}</td>
                 <td>${escapeHtml(how)}</td>
                 <td class="amount">${formatCurrency(applied)}</td>
-                <td class="actions">${p.is_voided ? statusBadge('void') : `<button class="btn btn-sm btn-danger" onclick="BillsPage.voidBillPayment(${p.id}, ${bill.id})">Void</button>`}</td>
+                <td class="actions">${p.is_voided ? statusBadge('void') : `${BillsPage._printCheckButton(p)}<button class="btn btn-sm btn-danger" onclick="BillsPage.voidBillPayment(${p.id}, ${bill.id})">Void</button>`}</td>
             </tr>`;
         }).join('');
         return `<div style="margin-top:16px;">
@@ -114,6 +116,54 @@ const BillsPage = {
                     <tbody>${rows}</tbody>
                 </table></div>
             </div>`;
+    },
+
+    // One bill payment and the bills it paid, with Print Check and Void as
+    // on a bill's own view. The bank register links a bill payment to
+    // #/bill-payments/{id}, which said "Page not found" (explore 2.17.3).
+    async viewPayment(id) {
+        const p = await API.get(`/bill-payments/${id}`);
+        const allocations = p.allocations || [];
+        const bills = await Promise.all(allocations.map(a =>
+            API.get(`/bills/${a.bill_id}`).catch(() => ({ id: a.bill_id }))));
+        const billById = Object.fromEntries(bills.map(b => [b.id, b]));
+        const rows = allocations.map(a => {
+            const b = billById[a.bill_id] || {};
+            return `<tr>
+                <td>${escapeHtml(b.bill_number || '')}</td>
+                <td>${formatDate(b.date)}</td>
+                <td class="amount">${formatCurrency(a.amount)}</td>
+                <td class="actions"><button class="btn btn-sm btn-secondary" onclick="BillsPage.view(${a.bill_id})">View Bill</button></td>
+            </tr>`;
+        }).join('');
+        const applied = allocations.reduce((sum, a) => sum + Number(a.amount), 0);
+        const ahead = Math.round((Number(p.amount) - applied) * 100) / 100;
+        const how = [p.method ? p.method.replace('_', ' ') : '', p.check_number ? `#${p.check_number}` : ''].filter(Boolean).join(' ');
+        const firstBill = allocations.length ? allocations[0].bill_id : null;
+        openModal(`Bill Payment — ${p.vendor_name || ''}`, `
+            <div style="margin-bottom:12px;">
+                <strong>Vendor:</strong> ${escapeHtml(p.vendor_name || '')}<br>
+                <strong>Date:</strong> ${formatDate(p.date)}<br>
+                <strong>Paid by:</strong> ${escapeHtml(how)}<br>
+                <strong>Amount:</strong> ${formatCurrency(p.amount)}<br>
+                <strong>Status:</strong> ${p.is_voided ? statusBadge('void') : 'Paid'}
+            </div>
+            ${rows ? `<div class="table-container"><table>
+                <thead><tr><th scope="col">Bill #</th><th scope="col">Date</th><th scope="col" class="amount">Applied</th><th scope="col"></th></tr></thead>
+                <tbody>${rows}</tbody></table></div>` : ''}
+            ${!p.is_voided && ahead > 0 ? `<p style="font-size:11px; color:var(--text-muted);">${formatCurrency(ahead)} paid ahead, not applied to a bill.</p>` : ''}
+            <div class="form-actions">
+                ${p.is_voided ? '' : `${BillsPage._printCheckButton(p)}<button type="button" class="btn btn-danger" onclick="BillsPage.voidBillPayment(${p.id}, ${firstBill})">Void</button>`}
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>`);
+    },
+
+    // A payment by check (or one that carries a check number) prints its
+    // check; ACH, cash and card payments have none to print.
+    _printCheckButton(p) {
+        const byCheck = !p.method || p.method === 'check' || !!p.check_number;
+        if (p.is_voided || !byCheck) return '';
+        return `<button class="btn btn-sm btn-secondary" onclick="window.open('/api/checks/print?bill_payment_id=${p.id}','_blank')">Print Check</button> `;
     },
 
     _items: [],
@@ -589,7 +639,7 @@ const BillsPage = {
         formData.append('file', fileInput.files[0]);
         try {
             const resp = await fetch(`/api/attachments/bill/${billId}`, { method: 'POST', body: formData });
-            if (!resp.ok) { const d = await resp.json(); throw new Error(d.detail || 'Upload failed'); }
+            if (!resp.ok) throw new Error(await API.responseError(resp, 'Upload failed'));
             toast('Attachment uploaded');
             fileInput.value = '';
             BillsPage.loadAttachments(billId);

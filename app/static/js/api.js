@@ -167,6 +167,22 @@ const API = {
         }
         return (detail && detail.message) || fallback || 'Request failed';
     },
+    // The same sentence for a refused request a page sent with fetch()
+    // itself — uploads post FormData and downloads read a file, so they
+    // can't go through request(). Those pages printed a 422's list of
+    // entries as "[object Object]", and a body that is not JSON (a proxy's
+    // error page) as a SyntaxError. Reads the body; call it only when
+    // !res.ok.
+    async responseError(res, fallback) {
+        let body = null;
+        try { body = await res.json(); } catch (e) { body = null; }
+        const detail = body && typeof body === 'object' ? body.detail : undefined;
+        if (detail === undefined || detail === null || detail === ''
+            || (Array.isArray(detail) && !detail.length)) {
+            return `${fallback || 'Request failed'} (HTTP ${res.status})`;
+        }
+        return API.errorMessage(detail, fallback);
+    },
     // post/put accept an optional opts.query → appended as a query string.
     // Used e.g. by vendors/customers to retry with ?force=true after a
     // duplicate-warning 409.
