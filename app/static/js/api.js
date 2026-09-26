@@ -33,23 +33,11 @@ const API = {
         if (!res.ok) {
             const body = await res.json().catch(() => ({ detail: res.statusText }));
             // FastAPI HTTPException(detail=str) → string; HTTPException(detail=dict) → object;
-            // pydantic validation (422) → array of {loc, msg} entries.
+            // pydantic validation (422) → array of {loc, msg, message} entries.
             // Carry both the human message and the structured body so callers can
             // introspect 409s, 422s, etc. without losing information.
             const detail = body && body.detail !== undefined ? body.detail : body;
-            let message;
-            if (typeof detail === 'string') {
-                message = detail;
-            } else if (Array.isArray(detail)) {
-                // Name the field(s): "email: String should match pattern ..."
-                // — a bare "Unprocessable Entity" left users guessing (#64).
-                message = detail.map(d => {
-                    const field = (d.loc || []).filter(p => p !== 'body').join('.');
-                    return field ? `${field}: ${d.msg}` : d.msg;
-                }).filter(Boolean).join('; ') || res.statusText || 'Request failed';
-            } else {
-                message = (detail && detail.message) || res.statusText || 'Request failed';
-            }
+            const message = API.errorMessage(detail, res.statusText);
             const err = new Error(message);
             err.status = res.status;
             err.detail = detail;
@@ -57,6 +45,24 @@ const API = {
             throw err;
         }
         return res.json();
+    },
+    // The sentence to show for an error body's `detail`. A 422 is a list of
+    // entries, each with a plain `message` from the server ("Name is
+    // required.") — the page used to show validator text instead: "name:
+    // String should have at least 1 character" (explore 2.17.3, L5). An
+    // entry without one still names its field, never a bare "Unprocessable
+    // Entity" (#64).
+    errorMessage(detail, fallback) {
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            return detail.map(d => {
+                if (!d) return '';
+                if (d.message) return d.message;
+                const field = (d.loc || []).filter(p => p !== 'body').join('.');
+                return field ? `${field}: ${d.msg}` : d.msg;
+            }).filter(Boolean).join(' ') || fallback || 'Request failed';
+        }
+        return (detail && detail.message) || fallback || 'Request failed';
     },
     // post/put accept an optional opts.query → appended as a query string.
     // Used e.g. by vendors/customers to retry with ?force=true after a

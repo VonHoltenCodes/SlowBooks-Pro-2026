@@ -26,7 +26,9 @@ from starlette.middleware.sessions import SessionMiddleware
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from fastapi.encoders import jsonable_encoder
 from fastapi.exception_handlers import http_exception_handler
+from fastapi.exceptions import RequestValidationError
 
 from app.services import storage
 from app.services.control_accounts import MissingControlAccount
@@ -513,6 +515,24 @@ async def _missing_control_account_handler(request: Request, exc: Exception):
 
 
 app.add_exception_handler(MissingControlAccount, _missing_control_account_handler)
+
+
+# ---- Validation errors (422), in sentences ----
+# FastAPI's own body, unchanged, with a plain "message" added to each entry
+# ("Name is required.") for the page to show instead of validator text
+# ("name: String should have at least 1 character" — explore 2.17.3, L5).
+async def _request_validation_handler(request: Request, exc: RequestValidationError):
+    from app.services.validation_messages import with_messages
+
+    terms = _company_terms()
+    wording = terms.text if terms.is_nonprofit else None
+    return JSONResponse(
+        status_code=422,
+        content={"detail": with_messages(jsonable_encoder(exc.errors()), wording)},
+    )
+
+
+app.add_exception_handler(RequestValidationError, _request_validation_handler)
 
 # ---- CORS (Phase 9.7: locked down) ----
 # Wildcard origins with credentials is a CSRF amplifier. Default to just

@@ -48,7 +48,14 @@
             let detail = "Request failed";
             try {
                 const data = await res.json();
-                detail = data.detail || detail;
+                // A 422 is a list of entries; API.errorMessage turns them into
+                // sentences ("Company name must be 200 characters or fewer.")
+                // where a bare list used to print "[object Object]".
+                // (API is a top-level const in api.js: a shared global
+                // binding, not a property of window.)
+                detail = typeof API !== "undefined" && typeof API.errorMessage === "function"
+                    ? API.errorMessage(data.detail, detail)
+                    : (typeof data.detail === "string" ? data.detail : detail);
             } catch (e) {}
             const err = new Error(detail);
             err.status = res.status;

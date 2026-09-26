@@ -53,7 +53,7 @@ const VendorsPage = {
             <form id="vendor-form" onsubmit="VendorsPage.save(event, ${id})">
                 <div class="form-grid">
                     <div class="form-group"><label>Name *</label>
-                        <input name="name" required value="${escapeHtml(v.name)}"></div>
+                        <input name="name" required maxlength="200" value="${escapeHtml(v.name)}"></div>
                     <div class="form-group"><label>Company</label>
                         <input name="company" value="${escapeHtml(v.company || '')}"></div>
                     <div class="form-group"><label>Email</label>
