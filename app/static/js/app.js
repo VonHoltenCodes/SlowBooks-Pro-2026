@@ -252,6 +252,10 @@ const App = {
         // number and the type are fixed and the API refuses to change them (400).
         // Renaming is allowed and is the point — say so instead of hiding the form.
         const locked = !!acct.is_control;
+        // A number is required (digits; 6150.1 or 6150-01 for a sub-account),
+        // except on an account an importer brought in without one, which can
+        // still be renamed.
+        const numberRequired = !locked && (!id || !!acct.account_number);
         const lockNote = locked
             ? `<div class="form-group full-width"><div class="hint hint--locked">
                    <strong>${escapeHtml(acct.account_number || '')} ${escapeHtml(acct.name)} is a control account.</strong>
@@ -264,8 +268,10 @@ const App = {
             <form onsubmit="App.saveAccount(event, ${id})">
                 <div class="form-grid">
                     ${lockNote}
-                    <div class="form-group"><label>Account Number</label>
-                        <input name="account_number" value="${escapeHtml(acct.account_number || '')}"${locked ? ' readonly disabled' : ''}></div>
+                    <div class="form-group"><label>Account Number${numberRequired ? ' *' : ''}</label>
+                        <input name="account_number" value="${escapeHtml(acct.account_number || '')}"${locked ? ' readonly disabled' : ''}
+                            ${numberRequired ? 'required' : ''} pattern="\\d+([.\\-]\\d+)*" maxlength="20" placeholder="e.g. 6150"
+                            title="Digits, like 6150. A sub-account can use 6150.1 or 6150-01."></div>
                     <div class="form-group"><label>Name *</label>
                         <input name="name" required value="${escapeHtml(acct.name)}"></div>
                     <div class="form-group"><label>Type *</label>

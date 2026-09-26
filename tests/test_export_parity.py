@@ -242,24 +242,22 @@ def test_section_endpoints_and_csv_exports(
 
 
 def test_non_numeric_account_number_does_not_break_the_chart_export(
-    client, seed_accounts
+    client, seed_accounts, db_session
 ):
     """Found by sweeping the API against a real company file: one account
-    numbered "sweep-account_number" crashed export_all."""
-    r = client.post(
-        "/api/accounts",
-        json={
-            "name": "Odd numbered",
-            "account_number": "sweep-account_number",
-            "account_type": "asset",
-        },
-    )
-    assert r.status_code in (200, 201), r.text
-    r2 = client.post(
-        "/api/accounts",
-        json={"name": "Dashed", "account_number": "1000-A", "account_type": "asset"},
-    )
-    assert r2.status_code in (200, 201), r2.text
+    numbered "sweep-account_number" crashed export_all. The form and the
+    API now refuse such a number (W-L4), but a company file or an imported
+    chart can still carry one, so the rows are written directly."""
+    from app.models.accounts import Account, AccountType
+
+    for name, number in (
+        ("Odd numbered", "sweep-account_number"),
+        ("Dashed", "1000-A"),
+    ):
+        db_session.add(
+            Account(name=name, account_number=number, account_type=AccountType.ASSET)
+        )
+    db_session.commit()
     text = client.get("/api/iif/export/accounts").text
     assert "Odd numbered" in text and "Dashed" in text
     from app.services.iif_common import _account_number_value

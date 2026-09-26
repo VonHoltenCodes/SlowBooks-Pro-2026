@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -29,6 +31,34 @@ def _reject_duplicate_number(db: Session, number, exclude_id=None):
             detail=(
                 f"Account number {number} is already used by "
                 f"'{clash.name}'. Account numbers must be unique."
+            ),
+        )
+
+
+# Digits, optionally in dotted or dashed groups for a sub-account (6150.1,
+# 6150-01) — the pattern the seeded chart and the chart importer use. "ABC"
+# and a blank number were accepted, and a blank one then listed as
+# " - Name" in every picker (2.17.3 exploratory test, W-L4). Charts brought
+# in by an importer keep whatever numbers they carry; this is the rule for
+# numbers typed on the form or sent to the API.
+_ACCOUNT_NUMBER_RE = re.compile(r"^\d+(?:[.-]\d+)*$")
+
+
+def _check_account_number(number) -> None:
+    if not number:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Give the account a number, like 6150. A sub-account can use "
+                "6150.1 or 6150-01."
+            ),
+        )
+    if len(number) > 20 or not _ACCOUNT_NUMBER_RE.match(number):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f'"{number[:40]}" is not an account number. Use digits, like '
+                "6150; a sub-account can use 6150.1 or 6150-01."
             ),
         )
 
@@ -92,8 +122,9 @@ def _in_company_words(db: Session, accounts):
 
 @router.post("", response_model=AccountResponse, status_code=201)
 def create_account(data: AccountCreate, db: Session = Depends(get_db)):
-    _reject_duplicate_number(db, data.account_number)
     _check_bank_kind(data.bank_kind, data.account_type)
+    _check_account_number(data.account_number)
+    _reject_duplicate_number(db, data.account_number)
     account = Account(**data.model_dump())
     db.add(account)
     try:
@@ -134,6 +165,10 @@ def update_account(account_id: int, data: AccountUpdate, db: Session = Depends(g
                 )
 
     if "account_number" in fields:
+        # Checked only when it changes: an account an importer brought in
+        # with its own number (or none) can still be renamed from the form.
+        if fields["account_number"] != account.account_number:
+            _check_account_number(fields["account_number"])
         _reject_duplicate_number(db, fields["account_number"], exclude_id=account_id)
     if fields.get("parent_id") == account_id:
         raise HTTPException(
