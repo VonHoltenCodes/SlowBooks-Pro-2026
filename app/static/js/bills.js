@@ -227,6 +227,10 @@ const BillsPage = {
         BillsPage._items = items;
         BillsPage._accounts = PurchaseAccounts.filter(accounts, ...(bill ? bill.lines.map(l => l.account_id) : []));
         BillsPage._defaultExpenseAccountId = null;
+        // A bill's tax rate (set through the API, #250) is kept by the save,
+        // so the form shows its tax and a total that is the bill's (2.22.1
+        // gate, NEW-47: a $35.42 bill opened as $33.72).
+        BillsPage._taxRate = bill ? Number(bill.tax_rate) || 0 : 0;
         BillsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml(bill ? bill.class_id : undefined);
         const jobGroup = await jobFormGroupHtml(bill ? bill.job_id : null);
@@ -263,6 +267,8 @@ const BillsPage = {
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="BillsPage.addLine()">+ Add Line</button>
                 <div class="invoice-totals">
+                    ${BillsPage._taxRate ? `<div class="total-row"><span class="label">Subtotal</span><span class="value" id="bill-subtotal">$0.00</span></div>
+                    <div class="total-row" title="Part of what the goods cost: it posts with the lines, not to Sales Tax Payable"><span class="label">Tax (${Number((BillsPage._taxRate * 100).toFixed(4))}%)</span><span class="value" id="bill-tax">$0.00</span></div>` : ''}
                     <div class="total-row grand-total"><span class="label">Total</span><span class="value" id="bill-total">$0.00</span></div>
                 </div>
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
@@ -425,16 +431,24 @@ const BillsPage = {
     },
 
     recalc() {
-        let total = 0;
+        let subtotal = 0;
         $$('#bill-lines tr').forEach(row => {
             const amount = PurchaseLines.lineAmount(row);
-            total += amount;
+            subtotal += amount;
             const amountCell = row.querySelector('.line-amount');
             if (amountCell) amountCell.textContent = formatCurrency(amount);
         });
+        subtotal = PurchaseLines.cents(subtotal);
+        // the tax as the server works it: the rate on the subtotal, to the cent
+        const tax = PurchaseLines.cents(subtotal * (BillsPage._taxRate || 0));
+        const total = PurchaseLines.cents(subtotal + tax);
+        const subEl = $('#bill-subtotal');
+        if (subEl) subEl.textContent = formatCurrency(subtotal);
+        const taxEl = $('#bill-tax');
+        if (taxEl) taxEl.textContent = formatCurrency(tax);
         const totalEl = $('#bill-total');
         if (totalEl) totalEl.textContent = formatCurrency(total);
-        return PurchaseLines.cents(total);
+        return total;
     },
 
     // Split support (nonprofit): one line becomes the rule's shares, each

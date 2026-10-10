@@ -86,6 +86,72 @@ def test_edit_opens_the_bill_filled_in_and_save_changes_the_total(
         page.close()
 
 
+def test_edit_shows_a_taxed_bills_tax_and_its_own_total(
+    browser, company, books, client
+):
+    """2.22.1 gate, NEW-47: a bill with a tax rate (an API edit since #250)
+    opened in Edit with a total that left the tax out, and its half-cent
+    line a cent short (NEW-48): $33.72 for a $35.42 bill."""
+    bill = client.get(f"/api/bills/{books['bill']}").json()
+    account = bill["lines"][0]["account_id"]
+    r = client.put(
+        f"/api/bills/{bill['id']}",
+        json={
+            "tax_rate": "0.05",
+            "lines": [
+                {
+                    "description": "Flour",
+                    "account_id": account,
+                    "quantity": 2.5,
+                    "rate": 13.37,
+                    "line_order": 0,
+                },
+                {
+                    "description": "Twine",
+                    "account_id": account,
+                    "quantity": 3,
+                    "rate": 0.10,
+                    "line_order": 1,
+                },
+            ],
+        },
+    )
+    assert r.status_code == 200, r.text
+    stored = r.json()
+    assert (stored["subtotal"], stored["tax_amount"], stored["total"]) == (
+        "33.73",
+        "1.69",
+        "35.42",
+    )
+    page, handled = _open(browser, company)
+    try:
+        _visit(page, handled, "#/bills")
+        page.evaluate(f"async () => {{ await BillsPage.showForm({bill['id']}); }}")
+        page.wait_for_function(OPEN, timeout=5000)
+        settle(page, handled)
+        shown = page.evaluate("""() => ({
+                amounts: [...document.querySelectorAll('#bill-lines .line-amount')].map(c => c.textContent),
+                subtotal: document.getElementById('bill-subtotal').textContent,
+                taxLabel: document.getElementById('bill-tax').previousElementSibling.textContent,
+                tax: document.getElementById('bill-tax').textContent,
+                total: document.getElementById('bill-total').textContent,
+            })""")
+        assert shown == {
+            "amounts": ["$33.43", "$0.30"],
+            "subtotal": "$33.73",
+            "taxLabel": "Tax (5%)",
+            "tax": "$1.69",
+            "total": "$35.42",
+        }
+        # an untaxed bill still shows its total alone
+        page.evaluate("() => closeModal()")
+        page.evaluate("async () => { await BillsPage.showForm(); }")
+        page.wait_for_function(OPEN, timeout=5000)
+        assert page.evaluate("() => document.getElementById('bill-tax')") is None
+    finally:
+        page.close()
+
+
 def test_a_read_only_sign_in_sees_no_edit_on_a_bill(
     browser, company, db_session, books
 ):
