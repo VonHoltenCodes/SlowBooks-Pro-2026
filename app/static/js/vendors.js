@@ -459,7 +459,19 @@ const PurchaseAccounts = {
 
 /** Line arithmetic for the purchase forms, the way the server stores it. */
 const PurchaseLines = {
-    cents(x) { return Math.round((Number(x) + Number.EPSILON) * 100) / 100; },
+    // Half up to the cent, as the server rounds and as SalesLines.cents does:
+    // shift by exponent, not by multiplying. 2.5 x 13.37 is 33.42499999...
+    // in floating point, Number.EPSILON is far below its last digit, and
+    // x 100 rounded to $33.42 while the server stored $33.43 (2.22.1 gate,
+    // NEW-48: bills, purchase orders and vendor credits).
+    cents(x) {
+        const n = Number(x) || 0;
+        const a = Math.abs(n);
+        let r = Number(`${a}e2`);
+        r = Number.isFinite(r) ? Math.round(r) : Math.round(a * 100);
+        const back = Number(`${r}e-2`); // NaN past 1e21, where the string has an exponent
+        return (n < 0 ? -1 : 1) * (Number.isFinite(back) ? back : r / 100);
+    },
     // Each line is rounded to the cent before it is added up.
     lineAmount(row) {
         const qty = parseFloat(row.querySelector('.line-qty')?.value) || 0;

@@ -237,6 +237,39 @@ def test_the_purchase_accounts_are_grouped_cost_of_goods_first():
     assert '<option value="3" >Old Asset</option>' in html
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_purchase_forms_round_a_half_cent_up_as_the_server_does():
+    # 2.22.1 gate, NEW-48: 2.5 x 13.37 = 33.425 showed $33.42 in the bill
+    # form and saved $33.43 (the server rounds half up); the invoice form's
+    # SalesLines.cents already got it right.
+    import json
+    import subprocess
+
+    js = _js("vendors.js")
+    helper = js[js.index("const PurchaseLines = {") :]
+    helper = helper[: helper.index("\n};") + 3]
+    cases = [
+        [2.5 * 13.37, 33.43],
+        [1.005, 1.01],
+        [3 * 0.1, 0.3],
+        [-2.5 * 13.37, -33.43],
+        [0, 0],
+        [19.994, 19.99],
+    ]
+    script = (
+        helper + "\n"
+        f"process.stdout.write(JSON.stringify([{json.dumps(cases)}.map(([x]) => PurchaseLines.cents(x)),"
+        " Number.isFinite(PurchaseLines.cents(1e21))]));"
+    )
+    out = subprocess.run(
+        ["node", "-e", script], capture_output=True, text=True, timeout=30
+    )
+    assert out.returncode == 0, out.stderr
+    got, huge_is_a_number = json.loads(out.stdout)
+    assert got == [want for _, want in cases]
+    assert huge_is_a_number  # past 1e21 the shift has an exponent: still a number
+
+
 # ── B16: a vendor can be made inactive ───────────────────────────────────
 
 
