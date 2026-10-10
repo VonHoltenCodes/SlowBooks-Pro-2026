@@ -114,6 +114,96 @@ def test_a_header_edit_changes_the_words_and_leaves_the_posting(
     assert lines_after == lines_before
 
 
+def test_a_header_only_edit_that_reposts_needs_no_lines(client, db_session, books):
+    """An edit that has to re-post the journal — a class, a job, the tax
+    rate, a new vendor or number, the currency — sent without its lines
+    took the stored lines into code that reads request lines: a 500 for
+    `{"class_id": 3}` alone (found by an API client tagging bills to a
+    class, 2.22.0). The stored lines are re-posted as they are."""
+    bill = books["bill"]
+    lines_before = [
+        (ln.description, ln.account_id, ln.quantity, ln.rate)
+        for ln in sorted(
+            db_session.get(Bill, bill["id"]).lines, key=lambda x: x.line_order
+        )
+    ]
+    cls = client.post("/api/classes", json={"name": "Shop"}).json()
+    other = _vendor(client, name="Pier Lumber")
+    for body in (
+        {"class_id": cls["id"]},
+        {"tax_rate": 0.05},
+        {"vendor_id": other["id"]},
+        {"bill_number": "PL-200"},
+        {"currency": "USD"},
+    ):
+        r = client.put(f"/api/bills/{bill['id']}", json=body)
+        assert r.status_code == 200, (body, r.text)
+    db_session.expire_all()
+    got = db_session.get(Bill, bill["id"])
+    assert [
+        (ln.description, ln.account_id, ln.quantity, ln.rate)
+        for ln in sorted(got.lines, key=lambda x: x.line_order)
+    ] == lines_before
+    assert got.class_id == cls["id"] and got.vendor_id == other["id"]
+    assert got.bill_number == "PL-200"
+    # re-posted under the class, with the tax, and the books balance
+    assert got.total == D("420.00") and got.tax_amount == D("20.00")
+    txn = db_session.get(Transaction, got.transaction_id)
+    assert txn.class_id == cls["id"]
+    assert _gl(db_session, books["ap"]) == D("420.00")
+    _balanced(db_session)
+
+
+def test_a_header_only_edit_keeps_each_lines_function(
+    client, db_session, seed_accounts
+):
+    """Re-posting the stored lines keeps what each journal line carried: a
+    line with no function of its own takes its fund's default again, as on
+    the day it was entered, and a line that named one keeps it."""
+    fund = client.post(
+        "/api/classes", json={"name": "Music Programs", "default_function": "program"}
+    ).json()
+    v = _vendor(client)
+    bill = _bill(
+        client,
+        v["id"],
+        [
+            {
+                "description": "Sheet music",
+                "account_id": seed_accounts["6000"].id,
+                "quantity": 1,
+                "rate": 80,
+                "class_id": fund["id"],
+                "line_order": 0,
+            },
+            {
+                "description": "Audit share",
+                "account_id": seed_accounts["5300"].id,
+                "quantity": 1,
+                "rate": 40,
+                "class_id": fund["id"],
+                "function": "management",
+                "line_order": 1,
+            },
+        ],
+        bill_number="MP-1",
+    )
+
+    def functions():
+        db_session.expire_all()
+        txn = db_session.get(
+            Transaction, db_session.get(Bill, bill["id"]).transaction_id
+        )
+        return sorted((ln.description, ln.function) for ln in txn.lines if ln.debit)
+
+    before = functions()
+    assert before == [("Audit share", "management"), ("Sheet music", "program")]
+    r = client.put(f"/api/bills/{bill['id']}", json={"bill_number": "MP-2"})
+    assert r.status_code == 200, r.text
+    assert functions() == before
+    _balanced(db_session)
+
+
 def test_a_date_edit_moves_the_posting_without_replacing_it(client, db_session, books):
     bill = books["bill"]
     r = client.put(f"/api/bills/{bill['id']}", json={"date": "2026-07-20"})
