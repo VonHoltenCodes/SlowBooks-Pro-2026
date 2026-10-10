@@ -1,4 +1,12 @@
 {
+  "2.22.1": {
+    "title": "Claude's current models",
+    "items": [
+      "Claude's request follows Anthropic's current API: no temperature, which Claude Sonnet 5.5 refuses, and room for the thinking the Claude 5 models do before they answer; a reply cut off at its limit says so",
+      "A bill's class, job, tax rate, vendor, number or currency can be changed through the API on its own, without resending its lines (it failed with a server error)",
+      "The docs say which AI providers have run against a live key, and that an expense is voided and entered again rather than edited"
+    ]
+  },
   "2.22.0": {
     "title": "Connected",
     "items": [

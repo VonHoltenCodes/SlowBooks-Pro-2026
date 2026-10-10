@@ -68,7 +68,10 @@ its document (#241); the per-line Class cell for every company, with a
 warning for a transaction saved without one (#243). And from the gate: a
 ← Back in the toolbar (⌘[ / Alt+←), Tab reaching every control in a
 dialog on a Mac, a job that is always its customer's, and a closed report
-that stays closed.
+that stays closed. 2.22.1 brings Claude's request up to Anthropic's current
+API, with no temperature, which Claude Sonnet 5.5 refuses, and room for its
+thinking; and a bill's class, job or tax rate can be changed through the API
+without resending its lines.
 
 **v2.21 — Three things you'd reach for.** Click a vendor for its own
 page, with its bills, payments, credits and what's owed (#223). Edit a

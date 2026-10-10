@@ -7,6 +7,41 @@ on what the software does, not on what sprint shipped what.
 
 ## [Unreleased]
 
+### v2.22.1 — Claude's current models
+
+**Claude's request follows Anthropic's current API** (#251). Checked against
+Anthropic's Claude Sonnet 5.5 migration guide, the request SlowBooks sent
+would be refused: it carried a temperature of 0.3, and "on Claude Sonnet
+5.5, a non-default value returns a 400 error". Sonnet 5.5 is SlowBooks'
+default Claude model and Claude the default provider, so that was every
+Claude request, the Test button's included. Claude requests now send no
+temperature. Claude from the 5 line on thinks before it answers, out of the
+answer's token budget, so those models get the 8,192-token ceiling OpenAI's
+reasoning models have, billed only as used, and any model that thinks first
+gets three minutes to answer instead of one. A reply that stops at the limit
+says so, and a refusal says the model declined. In a tool-calling analysis,
+Claude's turn goes back exactly as it came, its thinking included, and every
+tool call is answered by the id Claude gave it. Built to Anthropic's
+documentation and covered by request-shape tests; not yet run against a live
+Claude key.
+
+**A bill's class, job, tax rate, vendor, number or currency can be changed on
+its own** (#250). `PUT /api/bills/{id}` with only those fields, such as
+`{"class_id": 3}`, failed with a 500: an edit that re-posts the journal
+without resending the lines handed the stored lines to code that reads
+request lines. The stored lines now re-post as they are, each keeping its
+fund's default function or its own. The Mac QA agent found it tagging
+existing bills to a class through the API.
+
+**Docs** (#252). `docs/features.md` says which AI providers have run against
+a live key: Groq at v2.0.0; OpenAI corrected in v2.17.1; Claude brought up to
+date here; the others built to each vendor's API and unit-tested. It replaces
+a "verified April 2026" that meant the endpoints were looked up, not run.
+Expenses are void-only by design, voided and entered again, and the docs now
+say so beside Bills, with the Expenses API.
+
+No schema change. 555 operations.
+
 ### v2.22.0 — Connected
 
 The last three releases each built one edge of the same graph — classes,
