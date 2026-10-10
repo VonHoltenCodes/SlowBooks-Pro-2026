@@ -36,6 +36,7 @@ pass, and the per-integration setup guides ([Stripe](setup-stripe.md),
 ## Accounts Payable
 - **Purchase Orders** — Non-posting documents to vendors with auto-numbering, live line amounts and totals, View, Save PDF and Print, and a To Bill step that asks for an account on each line that has none. A new PO starts at no tax
 - **Bills** — Enter vendor bills (AP mirror of invoices). A posted bill can be edited the way an invoice can (v2.21.0): the header or the lines, re-posting its journal; not below what has been paid, not when voided, not into a closed period. Track payables with status progression (draft/unpaid/partial/paid/void). Each line posts to the account on the line, else the item's expense account, else the vendor's default — a line none of them names is refused (it used to fall back to 6000). Enter Bill has an Account column, fills a picked item's cost and account, takes the vendor's terms and due date, shows a running total and refuses $0.00. Save PDF and Print. Scan a vendor receipt to pre-fill the form (see Receipt scanning under Sales Receipts)
+- **Expenses** — A receipt that's already paid, by card, cash or check: DR the expense account, CR the bank, cash or credit-card account it was paid from, in one step with no bill to pay later. Scan Receipt fills it in. An expense takes a vendor or a payee, a reference, a class, a job and cost code, a nonprofit function, and can be marked billable. **An expense is not edited, unlike a bill**: a mistake is voided (a reversing entry; both stay in the register) and entered again. Voiding is refused once the expense is reconciled or when its date is in a closed period
 - **Tax on a purchase** — Sales tax a supplier charges is part of what the purchase cost: spread over the lines to the cent and posted with them (expense, cost of goods or inventory, in the item's unit cost). It never touches 2200 Sales Tax Payable. The Sales Tax report names purchase tax an older release posted there and gives the correcting entry
 - **Vendor page** (v2.21.0) — click a vendor for its own page: contact, terms, 1099 status, the default account, notes edited in place, what's owed, its bills, bill payments and unapplied credits, each opening from the page
 - **Vendor list** — Balances worked out from open bills and unapplied credits; a vendor can be made inactive; cost-of-goods accounts can be a vendor's default ("Default Expense or COGS Account")
@@ -184,7 +185,7 @@ Flat CSV with columns `(section, key, subkey, value)` covering 9 sections: perio
 ### AI Insights
 An optional LLM layer sits on top of the analytics snapshot and produces a compact **3 observations / 3 risks / 3 recommendations** executive brief. Nothing is sent until you click the **AI Insights** button — the feature is zero-cost by default.
 
-**Eight providers supported out of the box**, Claude and Grok first (verified April 2026):
+**Eight providers supported out of the box**, Claude and Grok first:
 
 | Provider | Wire format | Default model | Free tier |
 |---|---|---|---|
@@ -201,7 +202,7 @@ Each provider's model string is configurable from **Settings → AI Insights** �
 
 ![AI Insights provider configuration](../screenshots/ai-insights-settings.png)
 
-> **Verified providers as of v2.0.0:** Only **Groq** has been validated end-to-end against a live key (both the AI Insights button and the predefined-analysis dropdown). The other six providers' wire formats are implemented and unit-tested but have not been exercised against live credentials. **Accepting working PRs that confirm or fix any provider's config** — open an issue or PR with provider name, working model ID, and any quirks discovered (e.g., headers, payload shape, error mapping).
+> **Which providers have run against a live key.** **Groq** was validated end-to-end against a live key at v2.0.0, both the AI Insights button and the predefined-analysis dropdown. **OpenAI's** request was corrected in v2.17.1 for its current reasoning models (#185, @Sciumo). **Claude's** request was brought up to Anthropic's current API in v2.22.1: no temperature, which Claude Sonnet 5.5 refuses, and room for the thinking the Claude 5 models do before they answer. It is covered by request-shape tests but has not yet been run against a live key. The others are built to each vendor's published API and unit-tested, without a live-key run by the maintainers. **Accepting working PRs that confirm or fix any provider's config** — open an issue or PR with provider name, working model ID, and any quirks discovered (e.g., headers, payload shape, error mapping).
 
 **Settings encryption.** API keys are stored in the `settings` table under `ai_api_key`, encrypted with **Fernet** (AES-128-CBC + HMAC-SHA256) via `app/services/crypto.py`. Ciphertext rows carry the prefix `fernet:v1:` so legacy plaintext rows are detected and migrated gracefully. The master key is resolved in priority order:
 
@@ -526,6 +527,9 @@ All endpoints under `/api/`. Swagger docs at `/docs`. 300+ routes across 50 rout
 | `/api/bills` | GET, POST, PUT | Bill CRUD with line items; PUT edits a posted bill (v2.21.0), re-posting its journal |
 | `/api/bills/{id}/void` | POST | Void bill |
 | `/api/bills/{id}/pdf · /print-preview` | GET | Bill PDF / print page |
+| `/api/expenses` | GET, POST | A receipt already paid: DR the expense account, CR the bank, cash or card account it came from. No PUT: an expense is voided and entered again |
+| `/api/expenses/{id}` | GET | One expense |
+| `/api/expenses/{id}/void` | POST | Void an expense with a reversing entry; refused once reconciled or in a closed period |
 | `/api/bill-payments` | GET, POST | Pay vendor bills with allocation (a payment pays its own vendor's bills only); `?bill_id=` lists a bill's payments; `class_id`/`job_id` are refused (they were accepted and dropped; v2.22.0) |
 | `/api/bill-payments/{id}` | GET | One bill payment with what it paid |
 | `/api/credit-memos` | GET, POST | Credit memo CRUD; a job must be the customer's (v2.22.0) |
