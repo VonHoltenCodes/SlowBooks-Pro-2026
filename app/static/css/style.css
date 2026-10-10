@@ -140,9 +140,12 @@
        3.95:1 there, this is 4.57 (macOS gate's contrast sweep, 2.18.0) */
     --qb-teal:        #76a4a4;
     /* Green and orange are text (report amounts, import results) and the
-       success toast's ground: #339966 was 3.57:1 on white and #cc6633 3.81;
-       these are 4.86 and 4.82, and 4.6 on a table's striped row */
-    --qb-green:       #2b8055;
+       success toast's ground: #339966 was 3.57:1 on white and #cc6633 3.81.
+       The green is 5.54:1 on white, 5.25 on a striped row and 4.96 on a
+       totals row's tint; #2b8055 was 4.36 there, under AA (2.22.1 gate,
+       NEW-50: Analytics' A/P aging TOTAL), and 4.0 on a hovered one, where
+       this is 4.55. The orange is 4.82 on white. */
+    --qb-green:       #277650;
     --qb-green-dark:  #2d7d56;
     --qb-gold:        #cc9933;
     /* The keyboard's ring (NEW-43): a deeper gold than the brand's, so it

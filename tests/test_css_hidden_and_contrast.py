@@ -132,6 +132,43 @@ def test_link_and_success_tokens_pass_AA_in_both_themes():
         assert r >= 4.5, f"{name} in {theme} is {r:.2f}:1, below AA's 4.5"
 
 
+def test_a_green_amount_passes_AA_on_every_row_it_sits_on():
+    """2.22.1 gate, NEW-50: Analytics' A/P aging TOTAL is a green amount on
+    the totals row's tint, and #2b8055 was 4.36:1 there in the light theme.
+    The rows a green amount sits on, read from the stylesheet: white, the
+    striped row, the hovered row, and the totals row's tint over the striped
+    and the hovered row."""
+    import re
+
+    green = _token(STYLE, "--qb-green")
+    striped = _hex(
+        re.search(
+            r"tbody tr:nth-child\(even\) \{ background: (#[0-9a-f]{6})", STYLE
+        ).group(1)
+    )
+    hovered = _hex(
+        re.search(r"tbody tr:hover \{ background: (#[0-9a-f]{6})", STYLE).group(1)
+    )
+    tint = re.search(
+        r"\.totals-row td \{[^}]*background: rgba\((\d+), (\d+), (\d+), ([\d.]+)\)",
+        STYLE,
+    )
+    r, g, b, a = (*map(int, tint.groups()[:3]), float(tint.group(4)))
+
+    def under_tint(base):
+        return tuple(round(a * c + (1 - a) * x) for c, x in zip((r, g, b), base))
+
+    for name, bg in (
+        ("white", (255, 255, 255)),
+        ("a striped row", striped),
+        ("a hovered row", hovered),
+        ("a totals row", under_tint(striped)),
+        ("a hovered totals row", under_tint(hovered)),
+    ):
+        ratio = _ratio(green, bg)
+        assert ratio >= 4.5, f"--qb-green on {name} is {ratio:.2f}:1, below AA's 4.5"
+
+
 def test_the_dark_sidebar_footer_is_readable():
     """It carries the running version and the feedback link at 2.53:1."""
     import re
