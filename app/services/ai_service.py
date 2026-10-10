@@ -20,7 +20,8 @@
 #   * custom       — any OpenAI-compatible /v1/chat/completions endpoint
 #                   (user-supplied base URL, HTTPS-only, SSRF-guarded)
 #
-# Every network call goes through httpx with a 60-second timeout. API keys
+# Every network call goes through httpx with a timeout: 60 seconds, three
+# minutes for a model that thinks before it answers. API keys
 # are passed in from the caller — this module has no database access and
 # never logs key material.
 # ============================================================================
@@ -28,6 +29,7 @@
 from __future__ import annotations
 
 import ipaddress
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -199,10 +201,14 @@ def validate_worker_url(url: str) -> str:
 
 
 DEFAULT_TIMEOUT = 60.0  # seconds
+# A model that thinks before it answers can take minutes over a long think
+# at the ceiling below.
+REASONING_TIMEOUT = 180.0
 MAX_TOKENS = 1024
-# OpenAI's reasoning models spend hidden reasoning tokens out of the same
-# max_completion_tokens budget as the answer, so 1024 can run out before a
-# word of the answer is written. It is a ceiling, billed only as used.
+# OpenAI's reasoning models, and Claude from the Claude 5 line on, spend
+# their thinking out of the same token budget as the answer, so 1024 can
+# run out before a word of the answer is written. It is a ceiling, billed
+# only as used.
 REASONING_MAX_TOKENS = 8192
 TEMPERATURE = 0.3  # low — we want grounded analysis, not creative writing
 
@@ -213,12 +219,56 @@ def _is_openai_reasoning_model(model: str) -> bool:
     return (model or "").startswith(_OPENAI_REASONING_PREFIXES)
 
 
+# claude-<family>-<major>-...: Claude Sonnet 5.5 thinks before it answers
+# unless told otherwise (a request with no `thinking` field runs with
+# adaptive thinking); Claude Sonnet 4.6, Haiku 4.5 and earlier do not. The
+# older claude-3-... names do not match and are all below 5.
+_CLAUDE_MAJOR = re.compile(r"^claude-[a-z]+-(\d+)")
+
+
+def _claude_thinks_by_default(model: str) -> bool:
+    m = _CLAUDE_MAJOR.match(model or "")
+    return bool(m) and int(m.group(1)) >= 5
+
+
+def _thinks_first(provider_key: str, model: str) -> bool:
+    """True for a model that spends thinking out of the answer's budget."""
+    if provider_key == "openai":
+        return _is_openai_reasoning_model(model)
+    if provider_key == "anthropic":
+        return _claude_thinks_by_default(model)
+    return False
+
+
+def _timeout_for(provider_key: str, model: str) -> float:
+    return REASONING_TIMEOUT if _thinks_first(provider_key, model) else DEFAULT_TIMEOUT
+
+
 def _ran_out_of_tokens(body: Dict[str, Any]) -> bool:
-    """True when an OpenAI-style reply stopped at the token limit."""
+    """True when a reply stopped at the token limit: OpenAI-style
+    `finish_reason: length`, or Claude's `stop_reason: max_tokens`."""
+    if isinstance(body, dict) and body.get("stop_reason") == "max_tokens":
+        return True
     try:
         return body["choices"][0].get("finish_reason") == "length"
     except (KeyError, IndexError, TypeError, AttributeError):
         return False
+
+
+def _refused(body: Dict[str, Any]) -> bool:
+    """True when Claude declined to answer (`stop_reason: refusal`)."""
+    return isinstance(body, dict) and body.get("stop_reason") == "refusal"
+
+
+def _explain_no_answer(provider_key: str, body: Dict[str, Any]) -> None:
+    """A reply with no answer in it, when the reply says why: raise that."""
+    if _ran_out_of_tokens(body):
+        raise AIProviderError(
+            f"{provider_key}: the model reached its output limit before writing an "
+            "answer. Try again, or pick a smaller or non-reasoning model."
+        )
+    if _refused(body):
+        raise AIProviderError(f"{provider_key}: the model declined to answer.")
 
 
 # ---------------------------------------------------------------------------
@@ -703,6 +753,22 @@ def build_request(
         return _openai_style_request(safe_url, api_key, model, system, user)
 
     if provider_key == "anthropic":
+        body = {
+            "model": model,
+            "max_tokens": (
+                REASONING_MAX_TOKENS if _claude_thinks_by_default(model) else MAX_TOKENS
+            ),
+            "messages": [{"role": "user", "content": user}],
+        }
+        # No temperature. Anthropic's migration guide: on Claude Sonnet 5.5
+        # "a non-default value returns a 400 error. Remove them." Sonnet 5.5
+        # is SlowBooks' default Claude model, so every request on it, the
+        # Test button's included, would be refused. The default suits the
+        # models that would still take one. No thinking settings either:
+        # what each model accepts differs (Sonnet 5.5 refuses "disabled",
+        # Sonnet 5 takes it), and left out, each runs as it does by default.
+        if system:
+            body["system"] = system
         return {
             "method": "POST",
             "url": "https://api.anthropic.com/v1/messages",
@@ -711,13 +777,7 @@ def build_request(
                 "anthropic-version": "2023-06-01",
                 "Content-Type": "application/json",
             },
-            "json": {
-                "model": model,
-                "max_tokens": MAX_TOKENS,
-                "temperature": TEMPERATURE,
-                "system": system,
-                "messages": [{"role": "user", "content": user}],
-            },
+            "json": body,
         }
 
     if provider_key == "gemini":
@@ -773,13 +833,15 @@ def parse_response(provider_key: str, body: Dict[str, Any]) -> str:
 
     if provider_key == "anthropic":
         try:
-            # content is a list of blocks; we want the first text block
+            # content is a list of blocks: a Claude 5 model's reply begins
+            # with its thinking, and the answer is every text block after it
             blocks = body.get("content") or []
-            for block in blocks:
-                if isinstance(block, dict) and block.get("type") == "text":
-                    return block.get("text") or ""
-            return ""
-        except (KeyError, TypeError):
+            return "".join(
+                block.get("text") or ""
+                for block in blocks
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        except (KeyError, TypeError, AttributeError):
             return ""
 
     if provider_key == "gemini":
@@ -831,13 +893,16 @@ def call_provider(
     account_id: Optional[str] = None,
     worker_url: Optional[str] = None,
     endpoint_url: Optional[str] = None,
-    timeout: float = DEFAULT_TIMEOUT,
+    timeout: Optional[float] = None,
     client: Optional[httpx.Client] = None,
 ) -> str:
     """Make the HTTP call and return the assistant's text.
 
     `client` is injectable for tests that want to stub out the transport.
+    `timeout` defaults to the model's: longer for one that thinks first.
     """
+    if timeout is None:
+        timeout = _timeout_for(provider_key, model)
     req = build_request(
         provider_key,
         api_key,
@@ -881,11 +946,8 @@ def call_provider(
         raise AIProviderError(f"{provider_key}: non-JSON response") from e
 
     text = parse_response(provider_key, body)
-    if not text and _ran_out_of_tokens(body):
-        raise AIProviderError(
-            f"{provider_key}: the model reached its output limit before writing an "
-            "answer. Try again, or pick a smaller or non-reasoning model."
-        )
+    if not text:
+        _explain_no_answer(provider_key, body)
     if not text:
         raise AIProviderError(f"{provider_key}: empty response (body shape unexpected)")
     return text
@@ -1081,7 +1143,7 @@ def call_with_tools(
         # call_provider (verify=True, follow_redirects=False, explicit UA).
         try:
             if client is None:
-                with _hardened_client(DEFAULT_TIMEOUT) as c:
+                with _hardened_client(_timeout_for(provider_key, model)) as c:
                     resp = c.request(
                         req["method"],
                         safe_url,
@@ -1114,6 +1176,8 @@ def call_with_tools(
         if not tool_calls:
             # No tool calls — LLM is done. Extract final text.
             final_text = parse_response(provider_key, body)
+            if not final_text:
+                _explain_no_answer(provider_key, body)
             return {
                 "provider": provider_key,
                 "model": model,
@@ -1124,6 +1188,7 @@ def call_with_tools(
             }
 
         # Execute the tool calls and build results
+        anthropic_results = []
         for call in tool_calls:
             tool_name = call.get("name")
             tool_params = call.get("arguments", {})
@@ -1164,29 +1229,11 @@ def call_with_tools(
                 )
 
             elif wire_format == "anthropic":
-                messages.append(
+                anthropic_results.append(
                     {
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "tool_use",
-                                "id": f"tool_use_{len(tool_calls_made)}",
-                                "name": tool_name,
-                                "input": tool_params,
-                            }
-                        ],
-                    }
-                )
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": f"tool_use_{len(tool_calls_made)}",
-                                "content": str(result),
-                            }
-                        ],
+                        "type": "tool_result",
+                        "tool_use_id": call.get("id"),
+                        "content": json.dumps(result, default=str),
                     }
                 )
 
@@ -1217,6 +1264,15 @@ def call_with_tools(
                         ],
                     }
                 )
+
+        if wire_format == "anthropic":
+            # Claude's turn goes back exactly as it came, every block in it:
+            # a Claude 5 model's thinking blocks must be passed back
+            # unchanged in a tool loop, and each tool_use is answered by the
+            # id Claude gave it, all in one user turn (a turn was rebuilt
+            # per call before, under made-up ids, without the thinking).
+            messages.append({"role": "assistant", "content": body.get("content") or []})
+            messages.append({"role": "user", "content": anthropic_results})
 
     # Max iterations reached
     return {
@@ -1256,7 +1312,11 @@ def _extract_tool_calls(wire_format: str, body: Dict[str, Any]) -> list:
         try:
             content = body.get("content", [])
             return [
-                {"name": c.get("name"), "arguments": c.get("input", {})}
+                {
+                    "id": c.get("id"),
+                    "name": c.get("name"),
+                    "arguments": c.get("input", {}),
+                }
                 for c in content
                 if isinstance(c, dict) and c.get("type") == "tool_use"
             ]

@@ -10,7 +10,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from app.services import ai_service
 from app.services.ai_service import (
+    DEFAULT_TIMEOUT,
+    REASONING_TIMEOUT,
     _extract_tool_calls,
     _parse_json_args,
     MAX_TOKENS,
@@ -672,3 +675,189 @@ def test_a_reply_cut_off_at_the_limit_says_so():
     client = _fake_client([_mock_response(truncated)])
     with pytest.raises(AIProviderError, match="output limit"):
         call_provider("openai", "sk-fake", "gpt-5.4-mini", "s", "u", client=client)
+
+
+# ---------------------------------------------------------------------------
+# Claude request shape (2.22.1): Claude Sonnet 5.5 refuses a non-default
+# temperature with a 400 and thinks before it answers by default, out of the
+# answer's max_tokens; its thinking blocks go back unchanged in a tool loop
+# ---------------------------------------------------------------------------
+
+_THINKING = {"type": "thinking", "thinking": "", "signature": "sig-1"}
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-4-5-20251001",
+        "claude-sonnet-4-6",
+    ],
+)
+def test_claude_requests_send_no_temperature(model):
+    body = build_request("anthropic", "sk-ant-fake", model, "s", "u")["json"]
+    assert "temperature" not in body and "top_p" not in body
+    assert "thinking" not in body
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-fable-5-1"],
+)
+def test_claude_5_models_get_room_to_think(model):
+    body = build_request("anthropic", "sk-ant-fake", model, "s", "u")["json"]
+    assert body["max_tokens"] == REASONING_MAX_TOKENS
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-haiku-4-5-20251001", "claude-sonnet-4-6", "claude-3-5-haiku-20241022"],
+)
+def test_claude_models_that_do_not_think_first_keep_the_short_limit(model):
+    body = build_request("anthropic", "sk-ant-fake", model, "s", "u")["json"]
+    assert body["max_tokens"] == MAX_TOKENS
+
+
+def test_claude_request_leaves_out_an_empty_system_prompt():
+    assert (
+        "system"
+        not in build_request("anthropic", "k", "claude-sonnet-5-5", "", "u")["json"]
+    )
+    with_system = build_request("anthropic", "k", "claude-sonnet-5-5", "be brief", "u")
+    assert with_system["json"]["system"] == "be brief"
+
+
+def test_claude_reply_is_its_text_after_the_thinking():
+    body = {
+        "content": [
+            _THINKING,
+            {"type": "text", "text": "Cash "},
+            {"type": "text", "text": "is up."},
+        ],
+        "stop_reason": "end_turn",
+    }
+    assert parse_response("anthropic", body) == "Cash is up."
+
+
+def test_a_claude_reply_cut_off_at_the_limit_says_so():
+    cut = {"content": [_THINKING], "stop_reason": "max_tokens"}
+    client = _fake_client([_mock_response(cut)])
+    with pytest.raises(AIProviderError, match="output limit"):
+        call_provider("anthropic", "k", "claude-sonnet-5-5", "s", "u", client=client)
+
+
+def test_a_claude_refusal_says_so():
+    client = _fake_client([_mock_response({"content": [], "stop_reason": "refusal"})])
+    with pytest.raises(AIProviderError, match="declined"):
+        call_provider("anthropic", "k", "claude-sonnet-5-5", "s", "u", client=client)
+
+
+def test_the_tool_loop_explains_a_reply_with_no_answer():
+    client = _fake_client(
+        [_mock_response({"content": [_THINKING], "stop_reason": "max_tokens"})]
+    )
+    with pytest.raises(AIProviderError, match="output limit"):
+        call_with_tools(
+            provider_key="anthropic",
+            api_key="k",
+            model="claude-sonnet-5-5",
+            user_question="hi",
+            tools=_FAKE_TOOLS,
+            tool_executor=MagicMock(),
+            client=client,
+        )
+
+
+def test_a_model_that_thinks_first_is_given_longer_to_answer(monkeypatch):
+    seen = []
+
+    class _Client:
+        def __init__(self, timeout):
+            seen.append(timeout)
+
+        def __enter__(self):
+            ok = {
+                "content": [{"type": "text", "text": "ok"}],
+                "stop_reason": "end_turn",
+            }
+            return _fake_client([_mock_response(ok)])
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(ai_service, "_hardened_client", _Client)
+    call_provider("anthropic", "k", "claude-sonnet-5-5", "s", "u")
+    call_provider("anthropic", "k", "claude-haiku-4-5-20251001", "s", "u")
+    assert seen == [REASONING_TIMEOUT, DEFAULT_TIMEOUT]
+    assert ai_service._timeout_for("openai", "gpt-5.4-mini") == REASONING_TIMEOUT
+    assert ai_service._timeout_for("grok", "grok-4-fast") == DEFAULT_TIMEOUT
+
+
+def test_the_claude_tool_loop_passes_the_turn_back_as_it_came():
+    """Two tool calls in one turn, after thinking: the turn goes back whole,
+    thinking block and all, and one user turn answers both by Claude's ids."""
+    first = {
+        "content": [
+            _THINKING,
+            {"type": "text", "text": "Checking both."},
+            {
+                "type": "tool_use",
+                "id": "toolu_A",
+                "name": "list_customers",
+                "input": {"limit": 3},
+            },
+            {
+                "type": "tool_use",
+                "id": "toolu_B",
+                "name": "list_customers",
+                "input": {"limit": 1},
+            },
+        ],
+        "stop_reason": "tool_use",
+    }
+    client = _fake_client(
+        [
+            _mock_response(first),
+            _mock_response(
+                {
+                    "content": [{"type": "text", "text": "Found 3."}],
+                    "stop_reason": "end_turn",
+                }
+            ),
+        ]
+    )
+    executor = MagicMock(side_effect=[{"count": 3}, {"count": 1}])
+    result = call_with_tools(
+        provider_key="anthropic",
+        api_key="sk-ant-fake",
+        model="claude-sonnet-5-5",
+        user_question="How many?",
+        tools=_FAKE_TOOLS,
+        tool_executor=executor,
+        client=client,
+    )
+    assert result["success"] and result["final_response"] == "Found 3."
+    assert executor.call_count == 2
+    sent = client.request.call_args_list[1].kwargs["json"]
+    assert "temperature" not in sent and "system" not in sent
+    assert sent["max_tokens"] == REASONING_MAX_TOKENS
+    assert sent["messages"] == [
+        {"role": "user", "content": "How many?"},
+        {"role": "assistant", "content": first["content"]},
+        {
+            "role": "user",
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_A",
+                    "content": '{"count": 3}',
+                },
+                {
+                    "type": "tool_result",
+                    "tool_use_id": "toolu_B",
+                    "content": '{"count": 1}',
+                },
+            ],
+        },
+    ]
