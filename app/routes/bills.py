@@ -16,7 +16,7 @@ from app.routes.invoices.helpers import _due_date_from_terms
 from app.models.bills import Bill, BillLine, BillStatus
 from app.models.contacts import Vendor
 from app.models.items import Item
-from app.schemas.bills import BillCreate, BillResponse, BillUpdate
+from app.schemas.bills import BillCreate, BillLineCreate, BillResponse, BillUpdate
 from app.services.accounting import (
     _q,
     create_journal_entry,
@@ -490,7 +490,37 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         for key in repost_fields
     )
 
-    effective_lines = data.lines if data.lines is not None else list(bill.lines)
+    # The lines to post: the ones sent, else the bill's own. A header-only
+    # edit that re-posts (a class, a job, a new vendor or number, the tax
+    # rate, the currency) passed the stored ORM lines to _post_bill_lines,
+    # which reads request lines (model_fields_set): a 500 for any such edit
+    # sent without its lines. They are copied into the request shape here,
+    # before their rows are deleted below, and posted as they are stored.
+    if data.lines is not None:
+        effective_lines = data.lines
+    else:
+        effective_lines = []
+        for ln in sorted(bill.lines, key=lambda x: (x.line_order or 0, x.id)):
+            fields = dict(
+                item_id=ln.item_id,
+                account_id=ln.account_id,
+                job_id=ln.job_id,
+                class_id=ln.class_id,
+                cost_code_id=ln.cost_code_id,
+                is_billable=bool(ln.is_billable),
+                description=ln.description,
+                # the stored Decimals, not a float round trip (everything
+                # below reads them through Decimal(str(...)))
+                quantity=ln.quantity if ln.quantity is not None else Decimal("1"),
+                rate=ln.rate if ln.rate is not None else Decimal("0"),
+                line_order=ln.line_order or 0,
+            )
+            # A stored function is sent; none stored is left unsent, so the
+            # journal line takes its fund's default function, as it did when
+            # the bill was entered and as the form's own edit does.
+            if ln.function is not None:
+                fields["function"] = ln.function
+            effective_lines.append(BillLineCreate.model_construct(**fields))
     amount_paid = bill.amount_paid or Decimal("0")
     if needs_repost:
         tax_rate = data.tax_rate if data.tax_rate is not None else bill.tax_rate
