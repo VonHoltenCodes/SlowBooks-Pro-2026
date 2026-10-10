@@ -7,7 +7,8 @@
 # model string per provider from the UI so they're not stuck when the
 # vendors inevitably rename everything next quarter.
 #
-# Providers (verified April 2026):
+# Providers (endpoints as each vendor documented them in April 2026;
+# docs/features.md says which have run against a live key):
 #   * grok        — xAI, OpenAI-compat,    https://api.x.ai/v1
 #   * groq        — Groq LPU cloud, OpenAI-compat, https://api.groq.com/openai/v1
 #                   (GENEROUS free tier)
