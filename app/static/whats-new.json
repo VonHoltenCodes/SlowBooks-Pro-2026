@@ -4,7 +4,8 @@
     "items": [
       "Claude's request follows Anthropic's current API: no temperature, which Claude Sonnet 5.5 refuses, and room for the thinking the Claude 5 models do before they answer; a reply cut off at its limit says so",
       "A bill's class, job, tax rate, vendor, number or currency can be changed through the API on its own, without resending its lines (it failed with a server error)",
-      "The docs say which AI providers have run against a live key, and that an expense is voided and entered again rather than edited"
+      "The docs say which AI providers have run against a live key, and that an expense is voided and entered again rather than edited",
+      "From the release gate: a saved AI key goes only to the provider it was entered for; Claude's menu offers Anthropic's current models; Edit Bill shows a taxed bill's tax; the purchase forms round a half cent up, as the server does; and a green total passes AA on every row"
     ]
   },
   "2.22.0": {

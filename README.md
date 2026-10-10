@@ -70,8 +70,9 @@ warning for a transaction saved without one (#243). And from the gate: a
 dialog on a Mac, a job that is always its customer's, and a closed report
 that stays closed. 2.22.1 brings Claude's request up to Anthropic's current
 API, with no temperature, which Claude Sonnet 5.5 refuses, and room for its
-thinking, tested against a live key on Sonnet 5.5, Opus 5.5 and Haiku 4.5; and a bill's class, job or tax rate can be changed through the API
-without resending its lines.
+thinking, tested against a live key on Anthropic's current models; a bill's
+class, job or tax rate can be changed through the API without resending its
+lines; and a saved AI key goes only to the provider it was entered for.
 
 **v2.21 — Three things you'd reach for.** Click a vendor for its own
 page, with its bills, payments, credits and what's owed (#223). Edit a

@@ -23,11 +23,12 @@ says so, and a refusal says the model declined. In a tool-calling analysis,
 Claude's turn goes back exactly as it came, its thinking included, and every
 tool call is answered by the id Claude gave it.
 
-Run against a live key on the release build: Claude Sonnet 5.5, Opus 5.5
-and Haiku 4.5 each pass the Test button and AI Insights, and on Sonnet 5.5 a
-predefined analysis and a tool-calling question answer correctly. The
-request 2.22.0 sent is refused by Sonnet 5.5 with "`temperature` is
-deprecated for this model".
+Run against a live key on the release build: Claude Fable 5.1, Opus 5.5,
+Sonnet 5.5 and Haiku 5.5, Anthropic's current models and now the four the
+menu offers, each pass the Test button and AI Insights, as does the legacy
+Haiku 4.5, and on Sonnet 5.5 a predefined analysis and a tool-calling
+question answer correctly. The request 2.22.0 sent is refused by Sonnet 5.5
+with "`temperature` is deprecated for this model".
 
 **A bill's class, job, tax rate, vendor, number or currency can be changed on
 its own** (#250). `PUT /api/bills/{id}` with only those fields, such as
@@ -40,10 +41,32 @@ existing bills to a class through the API.
 **Docs** (#252). `docs/features.md` says which AI providers have run against
 a live key: Groq at v2.0.0; OpenAI corrected in v2.17.1; Claude brought up to
 date and run live here; the others built to each vendor's API and
-unit-tested. It replaces
-a "verified April 2026" that meant the endpoints were looked up, not run.
+unit-tested. It replaces a "verified April 2026" that meant the endpoints
+were looked up, not run.
 Expenses are void-only by design, voided and entered again, and the docs now
 say so beside Bills, with the Expenses API.
+
+**From the release gate**, five older things the Mac QA agent found:
+
+- **A saved AI key goes only to the provider it was entered for** (NEW-46).
+  One key was stored whatever the provider, so picking another provider and
+  pressing Test sent the first provider's key to the second: OpenAI was sent
+  an Anthropic key. The key now carries its provider; another provider has
+  no key until one is entered for it, and switching back finds the saved key
+  again. A key saved before 2.22.1 stays with the provider it was used with,
+  or with the vendor its prefix names, so a key already left on the wrong
+  provider is not sent there either. If you switched providers before this
+  release, enter the key for the provider you use.
+- **Edit Bill shows a taxed bill's tax and its own total** (NEW-47): a
+  $35.42 bill ($33.73 + 5% tax) opened as $33.72.
+- **The purchase forms round a half cent up**, as the server does
+  (NEW-48): 2.5 × $13.37 showed $33.42 and saved $33.43. Bills, purchase
+  orders and vendor credits.
+- **Claude's menu offers Anthropic's current models** (NEW-49): Fable 5.1,
+  Opus 5.5, Sonnet 5.5 and Haiku 5.5, in place of the legacy Haiku 4.5.
+  Sonnet 5.5 stays the default; a saved Haiku 4.5 is kept, shown as Custom.
+- **A green amount passes AA on every row** (NEW-50): Analytics' A/P aging
+  TOTAL was 4.36:1 on the totals row's tint in the light theme.
 
 No schema change. 555 operations.
 
