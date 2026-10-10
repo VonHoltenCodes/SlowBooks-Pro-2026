@@ -309,10 +309,14 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         wire_format="anthropic",
         docs_url="https://console.anthropic.com/",
         free_tier_hint="Paid only (no free tier)",
+        # Anthropic's current lineup (models overview, October 2026). Haiku
+        # 4.5 is legacy there: it was offered here in its place until the
+        # 2.22.1 gate (NEW-49); a saved Haiku 4.5 is kept, shown as Custom.
         model_choices=(
+            "claude-fable-5-1",
             "claude-opus-5-5",
             "claude-sonnet-5-5",
-            "claude-haiku-4-5-20251001",
+            "claude-haiku-5-5",
         ),
     ),
     "grok": ProviderSpec(

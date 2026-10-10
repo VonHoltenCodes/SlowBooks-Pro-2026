@@ -703,7 +703,13 @@ def test_claude_requests_send_no_temperature(model):
 
 @pytest.mark.parametrize(
     "model",
-    ["claude-opus-5-5", "claude-sonnet-5-5", "claude-sonnet-5", "claude-fable-5-1"],
+    [
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-sonnet-5",
+        "claude-fable-5-1",
+        "claude-haiku-5-5",
+    ],
 )
 def test_claude_5_models_get_room_to_think(model):
     body = build_request("anthropic", "sk-ant-fake", model, "s", "u")["json"]

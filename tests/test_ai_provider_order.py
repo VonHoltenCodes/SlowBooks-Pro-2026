@@ -32,10 +32,12 @@ def test_claude_starts_on_a_current_model():
     # a new company starts on Claude, so Claude's default is what most get
     spec = PROVIDERS["anthropic"]
     assert spec.default_model == "claude-sonnet-5-5"
+    # Anthropic's current lineup; Haiku 4.5 is legacy (2.22.1 gate, NEW-49)
     assert spec.model_choices == (
+        "claude-fable-5-1",
         "claude-opus-5-5",
         "claude-sonnet-5-5",
-        "claude-haiku-4-5-20251001",
+        "claude-haiku-5-5",
     )
 
 
