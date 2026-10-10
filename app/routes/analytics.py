@@ -17,6 +17,7 @@ import io
 import time
 from datetime import date, datetime, timezone
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -360,15 +361,29 @@ _AI_ENDPOINT_URL_KEY = "ai_endpoint_url"  # custom provider: HTTPS-only, validat
 # until one is entered for it, and switching back finds the key again.
 _AI_KEY_PROVIDER = "ai_api_key_provider"
 
-# A vendor's key by its published prefix, for a key saved before the
-# provider was recorded with it. Anything else: the provider it was used
-# with, which is the one it was saved for unless someone switched since.
+# A key saved before 2.22.1 carries no provider. The provider picked now is
+# not evidence: the old behaviour moved keys between providers, and a
+# fallback to it still sent an OpenAI key left under Gemini to Google (gate
+# round 2, W-1 / NEW-51). Its provider is read from the audit log instead:
+# the provider in effect when the key was last written. Without that, a
+# vendor's own prefix says whose it is; and otherwise it is nobody's, sent
+# nowhere, until its key is entered again.
 _AI_KEY_PREFIXES = (
     ("sk-ant-", "anthropic"),
     ("xai-", "grok"),
     ("gsk_", "groq"),
     ("AIza", "gemini"),
 )
+# A Custom endpoint on a vendor's own host takes that vendor's key: it is
+# going home (round 2, NEW-52: Custom at api.anthropic.com/v1 lost its key).
+_AI_VENDOR_HOSTS = {
+    "anthropic": "api.anthropic.com",
+    "grok": "api.x.ai",
+    "groq": "api.groq.com",
+    "gemini": "generativelanguage.googleapis.com",
+}
+# Recorded for a key whose provider cannot be told: no provider's.
+_KEY_OWNER_UNKNOWN = "?"
 
 
 def _decrypt_key(encrypted_key: str) -> str:
@@ -379,15 +394,83 @@ def _decrypt_key(encrypted_key: str) -> str:
         return ""
 
 
-def _key_provider(settings: dict, api_key: str) -> str:
-    """The provider the stored key belongs to (see _AI_KEY_PROVIDER)."""
+def _owner_from_audit(db: Session) -> Optional[str]:
+    """The provider in effect when the stored key was last written, from
+    the audit log's rows for the two settings, or None when it holds no
+    such write. One save's rows share a timestamp in no set order (the
+    session flushes once), so a save's provider is applied before its key.
+    A key re-encrypted by the rewrap tool counts as written then."""
+    from itertools import groupby
+
+    from app.models.audit import AuditLog
+    from app.models.settings import Settings
+
+    ids = dict(
+        db.query(Settings.key, Settings.id)
+        .filter(Settings.key.in_((_AI_PROVIDER_KEY, _AI_API_KEY)))
+        .all()
+    )
+    key_id, provider_id = ids.get(_AI_API_KEY), ids.get(_AI_PROVIDER_KEY)
+    if key_id is None:
+        return None
+    rows = (
+        db.query(AuditLog.timestamp, AuditLog.record_id, AuditLog.new_values)
+        .filter(
+            AuditLog.table_name == "settings",
+            AuditLog.record_id.in_([i for i in (provider_id, key_id) if i]),
+        )
+        .order_by(AuditLog.timestamp, AuditLog.id)
+        .all()
+    )
+    provider, owner = "", None
+    for _when, group in groupby(rows, key=lambda r: r[0]):
+        group = [(rid, v) for _t, rid, v in group if isinstance(v, dict)]
+        for rid, values in group:
+            if rid == provider_id and "value" in values:
+                provider = values["value"] or ""
+        for rid, values in group:
+            if rid == key_id and "value" in values:
+                owner = provider if values["value"] else None
+    return owner or None
+
+
+def _key_provider(db: Session, settings: dict, api_key: str) -> str:
+    """The provider the stored key belongs to (see _AI_KEY_PROVIDER):
+    recorded with it since 2.22.1; for an older key, from the audit log,
+    else its vendor's prefix, else nobody (_KEY_OWNER_UNKNOWN)."""
     recorded = settings.get(_AI_KEY_PROVIDER, "") or ""
     if recorded or not api_key:
         return recorded
+    owner = _owner_from_audit(db)
+    if owner:
+        return owner
+    current = settings.get(_AI_PROVIDER_KEY, "") or ""
     for prefix, vendor in _AI_KEY_PREFIXES:
         if api_key.startswith(prefix):
+            host = urlparse(settings.get(_AI_ENDPOINT_URL_KEY, "") or "").hostname
+            if current == "custom" and host == _AI_VENDOR_HOSTS.get(vendor):
+                return current
             return vendor
-    return settings.get(_AI_PROVIDER_KEY, "") or ""
+    return _KEY_OWNER_UNKNOWN
+
+
+def _require_key(cfg: dict) -> None:
+    """A provider chosen and its own key saved, or a 400 that says which
+    is missing (gate round 2, W-2: a provider with no key of its own was
+    called "not configured")."""
+    provider = cfg.get("provider") or ""
+    if not provider:
+        raise HTTPException(
+            status_code=400,
+            detail="AI provider not configured. Set one in Settings → AI Insights.",
+        )
+    if not cfg.get("api_key"):
+        label = getattr(AI_PROVIDERS.get(provider), "label", provider)
+        raise HTTPException(
+            status_code=400,
+            detail=f"No API key saved for {label}. Enter its key in Settings → "
+            "AI Insights, then Test.",
+        )
 
 
 def _ai_error_detail(exc: AIProviderError) -> str:
@@ -455,7 +538,7 @@ def _read_ai_config(db: Session) -> dict:
     settings = get_all_settings(db)
     provider = settings.get(_AI_PROVIDER_KEY, "") or ""
     api_key = _decrypt_key(settings.get(_AI_API_KEY, "") or "")
-    if api_key and _key_provider(settings, api_key) != provider:
+    if api_key and _key_provider(db, settings, api_key) != provider:
         api_key = ""  # another provider's key is never sent (NEW-46)
     return {
         "provider": provider,
@@ -477,7 +560,8 @@ def get_ai_config(db: Session = Depends(get_db)):
     settings = get_all_settings(db)
     raw_key = settings.get(_AI_API_KEY, "") or ""
     provider = settings.get(_AI_PROVIDER_KEY, "") or ""
-    key_provider = _key_provider(settings, _decrypt_key(raw_key)) if raw_key else ""
+    key_provider = _key_provider(db, settings, _decrypt_key(raw_key)) if raw_key else ""
+    unknown = key_provider == _KEY_OWNER_UNKNOWN
     return {
         "provider": provider,
         "model": settings.get(_AI_MODEL_KEY, "") or "",
@@ -487,7 +571,10 @@ def get_ai_config(db: Session = Depends(get_db)):
         # a key saved for this provider; the page shows "saved" only then
         "has_api_key": bool(raw_key) and key_provider == provider,
         # which provider the saved key is for (never the key itself)
-        "api_key_provider": key_provider,
+        "api_key_provider": "" if unknown else key_provider,
+        # a key saved before 2.22.1 whose provider can't be told: sent to
+        # none until a key is entered (the page says so)
+        "api_key_unmatched": unknown,
         "api_key_encrypted": is_encrypted(raw_key),
         "providers": ai_provider_list(),
     }
@@ -568,7 +655,9 @@ def put_ai_config(
     current = get_all_settings(db)
     stored = current.get(_AI_API_KEY, "") or ""
     if stored and not current.get(_AI_KEY_PROVIDER):
-        set_setting(db, _AI_KEY_PROVIDER, _key_provider(current, _decrypt_key(stored)))
+        set_setting(
+            db, _AI_KEY_PROVIDER, _key_provider(db, current, _decrypt_key(stored))
+        )
 
     set_setting(db, _AI_PROVIDER_KEY, provider)
     set_setting(db, _AI_MODEL_KEY, model)
@@ -605,15 +694,7 @@ def test_ai_config(request: Request, db: Session = Depends(get_db)):
     provider = cfg.get("provider") or ""
     api_key = cfg.get("api_key") or ""
 
-    if not provider:
-        raise HTTPException(status_code=400, detail="No AI provider configured")
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail=f"No API key saved for "
-            f"{getattr(AI_PROVIDERS.get(provider), 'label', provider)}. "
-            "Enter its key, then Test.",
-        )
+    _require_key(cfg)
     _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]
@@ -667,11 +748,7 @@ def ai_insights(
     provider = cfg.get("provider") or ""
     api_key = cfg.get("api_key") or ""
 
-    if not provider or not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="AI provider not configured. POST /api/analytics/ai-config first.",
-        )
+    _require_key(cfg)
     _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]
@@ -777,11 +854,7 @@ def run_ai_action(
     provider = cfg.get("provider") or ""
     api_key = cfg.get("api_key") or ""
 
-    if not provider or not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="AI provider not configured. Set one in Settings → AI Insights.",
-        )
+    _require_key(cfg)
     _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]
@@ -839,11 +912,7 @@ def ai_query(
     provider = cfg.get("provider") or ""
     api_key = cfg.get("api_key") or ""
 
-    if not provider or not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="AI provider not configured. POST /api/analytics/ai-config first.",
-        )
+    _require_key(cfg)
     _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]

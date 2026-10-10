@@ -78,45 +78,204 @@ def test_a_key_entered_for_the_new_provider_is_that_providers(client, db_session
     assert cfg["has_api_key"] is False and cfg["api_key_provider"] == ""
 
 
-def _legacy(db_session, provider, key):
-    """A company file saved before 2.22.1: a key, no provider recorded."""
-    set_setting(db_session, "ai_provider", provider)
-    set_setting(db_session, "ai_api_key", encrypt_value(key))
+# ── keys saved before 2.22.1 (gate round 2: W-1 / NEW-51, NEW-52) ──────────
+
+
+def _save(db_session, **values):
+    """One save as a pre-2.22.1 build made it: settings written through the
+    ORM (so the audit log records them), no provider recorded with the key."""
+    for key, value in values.items():
+        if key == "ai_api_key":
+            value = encrypt_value(value) if value else ""
+        set_setting(db_session, key, value)
     db_session.commit()
 
 
-def test_a_key_saved_before_2221_stays_with_the_provider_it_was_used_with(
+def _history(db_session, *saves):
+    """Several saves, as a person makes them: seconds apart. One save's audit
+    rows share its timestamp; the next save's come later."""
+    from datetime import datetime, timedelta
+
+    from app.models.audit import AuditLog
+
+    base = datetime(2026, 9, 1, 12, 0, 0)
+    for n, values in enumerate(saves):
+        before = {r.id for r in db_session.query(AuditLog.id)}
+        _save(db_session, **values)
+        for row in db_session.query(AuditLog).filter(AuditLog.id.notin_(before)):
+            row.timestamp = base + timedelta(seconds=10 * n)
+        db_session.commit()
+
+
+def _forget_history(db_session):
+    """A company file whose audit log holds none of it (an old one)."""
+    from app.models.audit import AuditLog
+
+    db_session.query(AuditLog).filter(AuditLog.table_name == "settings").delete()
+    db_session.commit()
+
+
+def _cfg(client):
+    return client.get("/api/analytics/ai-config").json()
+
+
+def test_an_old_key_never_switched_keeps_working(client, db_session):
+    """The common case: an OpenAI key saved under OpenAI on 2.22.0 needs
+    nothing done to it (its sk- prefix is shared by other vendors' keys)."""
+    _history(db_session, {"ai_provider": "openai", "ai_api_key": OPENAI_KEY})
+    cfg = _cfg(client)
+    assert cfg["has_api_key"] is True and cfg["api_key_provider"] == "openai"
+    assert _read_ai_config(db_session)["api_key"] == OPENAI_KEY
+
+
+def test_an_old_key_moved_by_the_old_bug_goes_to_no_one_else(client, db_session):
+    """W-1's repro: an OpenAI key saved under OpenAI, then Gemini picked with
+    no key on 2.22.0. Gemini takes its key in the URL; Google must not get
+    the OpenAI key."""
+    _history(
+        db_session,
+        {"ai_provider": "openai", "ai_api_key": OPENAI_KEY},
+        {"ai_provider": "gemini"},
+    )
+    cfg = _cfg(client)
+    assert cfg["has_api_key"] is False and cfg["api_key_provider"] == "openai"
+    assert _read_ai_config(db_session)["api_key"] == ""
+    r = client.post("/api/analytics/ai-config/test", json={})
+    assert r.status_code == 400 and "No API key saved for Google Gemini" in r.text
+    # the first save binds it to OpenAI before anything else can move it
+    cfg = _put(client, "groq")
+    assert cfg["api_key_provider"] == "openai"
+    assert _put(client, "openai")["has_api_key"] is True
+
+
+def test_an_old_custom_key_left_under_openai_is_not_sent_to_openai(client, db_session):
+    """NEW-51's L3: a Custom endpoint's key (an sk- key, as many vendors'
+    are) left under OpenAI by the old behaviour."""
+    _history(
+        db_session,
+        {
+            "ai_provider": "custom",
+            "ai_endpoint_url": "https://api.example.com/v1",
+            "ai_api_key": "sk-qa-custom-dummy-0000",
+        },
+        {"ai_provider": "openai"},
+    )
+    cfg = _cfg(client)
+    assert cfg["has_api_key"] is False and cfg["api_key_provider"] == "custom"
+    assert _read_ai_config(db_session)["api_key"] == ""
+
+
+def test_without_history_a_vendors_prefix_says_whose_a_key_is(client, db_session):
+    _history(db_session, {"ai_provider": "openai", "ai_api_key": ANT_KEY})
+    _forget_history(db_session)
+    cfg = _cfg(client)
+    assert cfg["has_api_key"] is False and cfg["api_key_provider"] == "anthropic"
+    assert _put(client, "anthropic")["has_api_key"] is True
+
+
+def test_without_history_an_unrecognised_key_is_nobodys_until_entered_again(
     client, db_session
 ):
-    _legacy(db_session, "openai", OPENAI_KEY)
-    cfg = client.get("/api/analytics/ai-config").json()
-    assert cfg["has_api_key"] is True and cfg["api_key_provider"] == "openai"
-    # the first save binds it before the provider changes under it
-    cfg = _put(client, "groq")
-    assert cfg["has_api_key"] is False and cfg["api_key_provider"] == "openai"
+    _history(db_session, {"ai_provider": "gemini", "ai_api_key": OPENAI_KEY})
+    _forget_history(db_session)
+    cfg = _cfg(client)
+    assert cfg["has_api_key"] is False and cfg["api_key_provider"] == ""
+    assert cfg["api_key_unmatched"] is True
+    assert _read_ai_config(db_session)["api_key"] == ""
+    # saving another provider doesn't hand it the key either
+    cfg = _put(client, "custom", endpoint_url="https://api.example.com/v1")
+    assert cfg["has_api_key"] is False and cfg["api_key_unmatched"] is True
     db_session.expire_all()
     assert _read_ai_config(db_session)["api_key"] == ""
-    cfg = _put(client, "openai")
-    assert cfg["has_api_key"] is True
+    # a key entered for a provider is that provider's
+    cfg = _put(client, "openai", api_key=OPENAI_KEY)
+    assert cfg["has_api_key"] is True and cfg["api_key_unmatched"] is False
 
 
-def test_a_vendors_own_prefix_names_a_key_already_switched_under_the_old_bug(
+def test_a_custom_endpoint_on_a_vendors_own_host_keeps_that_vendors_key(
     client, db_session
 ):
-    """An Anthropic key left behind on OpenAI by the old behaviour is not
-    sent to OpenAI: its prefix says whose it is."""
-    _legacy(db_session, "openai", ANT_KEY)
-    cfg = client.get("/api/analytics/ai-config").json()
-    assert cfg["has_api_key"] is False and cfg["api_key_provider"] == "anthropic"
-    assert _read_ai_config(db_session)["api_key"] == ""
-    cfg = _put(client, "anthropic")
-    assert cfg["has_api_key"] is True
+    """NEW-52: Custom pointed at Anthropic's OpenAI-compatible endpoint with
+    an Anthropic key worked on 2.22.0; the key is going home."""
+    _history(
+        db_session,
+        {
+            "ai_provider": "custom",
+            "ai_endpoint_url": "https://api.anthropic.com/v1",
+            "ai_api_key": ANT_KEY,
+        },
+    )
+    assert _cfg(client)["has_api_key"] is True  # from the audit log
+    _forget_history(db_session)
+    cfg = _cfg(client)  # and from its host, with no history
+    assert cfg["has_api_key"] is True and cfg["api_key_provider"] == "custom"
+
+
+def test_one_saves_provider_is_applied_before_its_key(db_session):
+    """A save flushes once, so its audit rows share a timestamp in no set
+    order: a key row ahead of its own provider row is still that
+    provider's key."""
+    from datetime import datetime
+
+    from app.models.audit import AuditLog
+    from app.models.settings import Settings
+    from app.routes.analytics import _owner_from_audit
+
+    _history(db_session, {"ai_provider": "anthropic", "ai_api_key": ANT_KEY})
+    _forget_history(db_session)
+    ids = dict(db_session.query(Settings.key, Settings.id))
+    when = datetime(2026, 9, 2, 9, 0, 0)
+    for record, values in (
+        (ids["ai_api_key"], {"value": "fernet:v1:x"}),
+        (ids["ai_provider"], {"value": "grok"}),
+    ):
+        db_session.add(
+            AuditLog(
+                table_name="settings",
+                record_id=record,
+                action="UPDATE",
+                new_values=values,
+                timestamp=when,
+            )
+        )
+    db_session.commit()
+    assert _owner_from_audit(db_session) == "grok"
+
+
+def test_every_ai_call_names_the_provider_that_has_no_key(client, db_session):
+    """W-2: AI Insights and the analyses called a provider with no key of its
+    own "not configured"."""
+    _put(client, "anthropic", api_key=ANT_KEY)
+    _put(client, "openai")
+    for r in (
+        client.post("/api/analytics/ai-insights"),
+        client.post("/api/analytics/ai-actions/top_customers"),
+        client.post("/api/analytics/ai-query", params={"question": "Who owes most?"}),
+        client.post("/api/analytics/ai-config/test", json={}),
+    ):
+        assert r.status_code == 400
+        assert "No API key saved for OpenAI" in r.json()["detail"], r.text
+    analytics = open("app/static/js/analytics.js", encoding="utf-8").read()
+    assert analytics.count("msg.match(/No API key saved[^]*$/i)") == 2
 
 
 def test_the_settings_page_drops_a_typed_key_and_the_saved_mark_on_a_provider_change():
     src = open("app/static/js/settings.js", encoding="utf-8").read()
     change = src[src.index("providerSel.addEventListener('change'") :]
     change = change[: change.index("});")]
-    assert "keyBox.value = ''" in change
-    assert "SettingsPage._aiKeyOwner(cfg) === providerSel.value" in change
-    assert "savedEl.classList.toggle('hidden', !keySaved)" in change
+    assert "document.getElementById('ai-settings-key').value = ''" in change
+    assert "syncKeyMark();" in change
+    mark = src[src.index("const syncKeyMark = () => {") :]
+    mark = mark[: mark.index("};")]
+    assert "SettingsPage._aiKeyOwner(cfg) === providerSel.value" in mark
+    assert "savedEl.classList.toggle('hidden', !keySaved)" in mark
+    assert "unmatched.classList.toggle('hidden', !cfg.api_key_unmatched)" in mark
+
+
+def test_test_refreshes_the_saved_mark_from_what_it_saved():
+    """NEW-53: after Test saved OpenAI's key, picking Anthropic still showed
+    "(saved ✓)" for the key Test had replaced."""
+    src = open("app/static/js/settings.js", encoding="utf-8").read()
+    test = src[src.index("testBtn.addEventListener('click'") :]
+    test = test[: test.index("testRes.textContent = 'Testing…'")]
+    assert "Object.assign(cfg, updated);" in test and "syncKeyMark();" in test

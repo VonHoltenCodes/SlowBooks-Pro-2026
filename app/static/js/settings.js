@@ -1481,11 +1481,15 @@ const SettingsPage = {
                 </p>
             </fieldset>
             <label class="form-field">
-                <span>API Key / Shared Secret ${keyOwner ? `<span id="ai-settings-key-saved"${hasKey ? '' : ' class="hidden"'}><em class="ai-key-saved">(saved &#10003;)</em> <button type="button" class="btn btn-sm" id="ai-settings-key-remove" data-write data-admin title="Remove the stored key">Remove</button></span>` : ''}</span>
+                <span>API Key / Shared Secret <span id="ai-settings-key-saved"${hasKey ? '' : ' class="hidden"'}><em class="ai-key-saved">(saved &#10003;)</em> <button type="button" class="btn btn-sm" id="ai-settings-key-remove" data-write data-admin title="Remove the stored key">Remove</button></span></span>
                 <input type="password" id="ai-settings-key" data-admin
                        placeholder="${hasKey ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32'}"
                        autocomplete="new-password">
             </label>
+            <div id="ai-settings-key-unmatched" class="ai-settings-hint${cfg.api_key_unmatched ? '' : ' hidden'}">
+                The key saved before 2.22.1 couldn't be matched to a provider, so it
+                isn't sent to any. Enter the key for the provider you use.
+            </div>
             <div class="ai-settings-buttons">
                 <button type="button" class="btn btn-secondary btn-sm" data-write data-admin id="ai-settings-test">Test</button>
                 <span id="ai-settings-test-result" class="ai-settings-test-result"></span>
@@ -1537,6 +1541,20 @@ const SettingsPage = {
 
         if (!providerSel) return; // render failed; nothing to wire
 
+        // "(saved ✓)" and the key box's hint show only for the provider the
+        // saved key was entered for; the server sends a key there only.
+        // `cfg` is what the server last said: Test's save updates it, so the
+        // mark follows the key Test saved (gate round 2, NEW-53).
+        const syncKeyMark = () => {
+            const keySaved = SettingsPage._aiKeyOwner(cfg) === providerSel.value;
+            document.getElementById('ai-settings-key').placeholder =
+                keySaved ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32';
+            const savedEl = document.getElementById('ai-settings-key-saved');
+            if (savedEl) savedEl.classList.toggle('hidden', !keySaved);
+            const unmatched = document.getElementById('ai-settings-key-unmatched');
+            if (unmatched) unmatched.classList.toggle('hidden', !cfg.api_key_unmatched);
+        };
+
         // Show the custom text input only when "Custom…" is selected.
         const syncCustomVisibility = () => {
             modelCustom.style.display =
@@ -1562,15 +1580,9 @@ const SettingsPage = {
             workerWrap.style.display = spec.needs_worker_url ? '' : 'none';
             if (endpointWrap) endpointWrap.style.display = spec.needs_endpoint_url ? '' : 'none';
             // A key is one provider's credential (2.22.1 gate, NEW-46): a
-            // key typed for the last provider is not carried to this one,
-            // and "saved" shows only where the saved key was entered. The
-            // server sends a key to its own provider only.
-            const keyBox = document.getElementById('ai-settings-key');
-            const keySaved = SettingsPage._aiKeyOwner(cfg) === providerSel.value;
-            keyBox.value = '';
-            keyBox.placeholder = keySaved ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32';
-            const savedEl = document.getElementById('ai-settings-key-saved');
-            if (savedEl) savedEl.classList.toggle('hidden', !keySaved);
+            // key typed for the last provider is not carried to this one.
+            document.getElementById('ai-settings-key').value = '';
+            syncKeyMark();
         });
 
         const resolveModel = () => {
@@ -1625,7 +1637,10 @@ const SettingsPage = {
             testRes.textContent = 'Saving…';
             testRes.className = 'ai-settings-test-result';
             try {
-                await API.put('/analytics/ai-config', { ...collectPayload(), ...keyPayload() });
+                const updated = await API.put('/analytics/ai-config', { ...collectPayload(), ...keyPayload() });
+                Object.assign(cfg, updated);
+                SettingsPage.aiConfigState = updated;
+                syncKeyMark();
             } catch (err) {
                 testRes.textContent = 'Save failed: ' + (err.message || err);
                 testRes.classList.add('ai-test-fail');

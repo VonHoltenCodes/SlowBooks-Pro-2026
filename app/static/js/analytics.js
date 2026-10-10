@@ -761,8 +761,10 @@ const AnalyticsPage = {
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
       // 400 → config missing. Offer settings modal.
-      if (/not configured/i.test(msg)) {
-        toast("Configure an AI provider first", "error");
+      // the provider is chosen but has no key of its own: say so (W-2)
+      const noKey = msg.match(/No API key saved[^]*$/i);
+      if (noKey || /not configured/i.test(msg)) {
+        toast(noKey ? noKey[0] : "Configure an AI provider first", "error");
         this._openAiSettings();
       } else {
         toast("AI insights failed: " + msg, "error");
@@ -914,8 +916,10 @@ const AnalyticsPage = {
       this.state.aiActionResult = result;
     } catch (err) {
       const msg = err && err.message ? err.message : String(err);
-      if (/not configured/i.test(msg)) {
-        toast("Configure an AI provider first", "error");
+      // the provider is chosen but has no key of its own: say so (W-2)
+      const noKey = msg.match(/No API key saved[^]*$/i);
+      if (noKey || /not configured/i.test(msg)) {
+        toast(noKey ? noKey[0] : "Configure an AI provider first", "error");
         this._openAiSettings();
       } else {
         toast("Analysis failed: " + msg, "error");
