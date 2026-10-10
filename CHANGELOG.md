@@ -53,10 +53,14 @@ say so beside Bills, with the Expenses API.
   pressing Test sent the first provider's key to the second: OpenAI was sent
   an Anthropic key. The key now carries its provider; another provider has
   no key until one is entered for it, and switching back finds the saved key
-  again. A key saved before 2.22.1 stays with the provider it was used with,
-  or with the vendor its prefix names, so a key already left on the wrong
-  provider is not sent there either. If you switched providers before this
-  release, enter the key for the provider you use.
+  again. A key saved before 2.22.1 belongs to the provider that was chosen
+  when it was saved, read from the audit log, so a key the old behaviour
+  left under another provider is not sent there either. Where the log has
+  no such save, a vendor's own key prefix (sk-ant-, xai-, gsk_, AIza) says
+  whose it is; failing that, the key goes to no provider and Settings asks
+  for it once. AI Insights and the analyses now say which provider has no
+  key, as Test does, and Test's save updates the page's "(saved ✓)" at
+  once (the gate's second round).
 - **Edit Bill shows a taxed bill's tax and its own total** (NEW-47): a
   $35.42 bill ($33.73 + 5% tax) opened as $33.72.
 - **The purchase forms round a half cent up**, as the server does
