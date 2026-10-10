@@ -226,7 +226,7 @@ const ANSWERS = {
   '/email-templates/1': { id: 1, name: 'Invoice', template_type: 'invoice', subject_template: 'Invoice', body_template: '<p>Hello</p>' },
   '/invoices?is_sales_receipt=false&limit=50': [{ id: 7, invoice_number: '1001', customer_name: 'Maple Street Cafe' }],
   '/analytics/ai-config': {
-    provider: 'anthropic', model: 'claude-sonnet', has_api_key: true,
+    provider: 'anthropic', model: 'claude-sonnet', has_api_key: true, api_key_provider: 'anthropic',
     providers: [{ key: 'anthropic', label: 'Anthropic Claude', model_choices: ['claude-sonnet'], default_model: 'claude-sonnet' }],
   },
   '/classes?include_archived=true': [{ id: 1, name: 'Retail', is_archived: false, is_system_default: false }],

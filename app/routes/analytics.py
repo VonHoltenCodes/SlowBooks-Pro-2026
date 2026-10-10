@@ -337,6 +337,8 @@ def export_pdf(
 #   ai_model             — user-editable model string
 #   ai_api_key           — FERNET-ENCRYPTED api key (never returned raw)
 #   ai_cloudflare_account_id — only populated when provider == cloudflare
+#   ai_api_key_provider  — the provider the key was entered for; it is sent
+#                          to that provider only (2.22.1 gate, NEW-46)
 #
 # The /ai-config endpoints treat the key as write-only: GET never returns
 # it, and PUT only touches it when a non-empty string is supplied (empty
@@ -351,6 +353,41 @@ _AI_API_KEY = "ai_api_key"  # STORED ENCRYPTED
 _AI_CF_ACCOUNT_KEY = "ai_cloudflare_account_id"
 _AI_WORKER_URL_KEY = "ai_worker_url"  # HTTPS-only, validated
 _AI_ENDPOINT_URL_KEY = "ai_endpoint_url"  # custom provider: HTTPS-only, validated
+# The provider the stored key was entered for (2.22.1 gate, NEW-46). A key
+# is one company's credential: it is sent to that provider only. Picking
+# another provider used to send it to the new one (OpenAI was sent an
+# Anthropic key by the Test button); now the other provider has no key
+# until one is entered for it, and switching back finds the key again.
+_AI_KEY_PROVIDER = "ai_api_key_provider"
+
+# A vendor's key by its published prefix, for a key saved before the
+# provider was recorded with it. Anything else: the provider it was used
+# with, which is the one it was saved for unless someone switched since.
+_AI_KEY_PREFIXES = (
+    ("sk-ant-", "anthropic"),
+    ("xai-", "grok"),
+    ("gsk_", "groq"),
+    ("AIza", "gemini"),
+)
+
+
+def _decrypt_key(encrypted_key: str) -> str:
+    try:
+        return decrypt_value(encrypted_key) if encrypted_key else ""
+    except Exception:
+        # Master key rotated or row tampered with — treat as no-key.
+        return ""
+
+
+def _key_provider(settings: dict, api_key: str) -> str:
+    """The provider the stored key belongs to (see _AI_KEY_PROVIDER)."""
+    recorded = settings.get(_AI_KEY_PROVIDER, "") or ""
+    if recorded or not api_key:
+        return recorded
+    for prefix, vendor in _AI_KEY_PREFIXES:
+        if api_key.startswith(prefix):
+            return vendor
+    return settings.get(_AI_PROVIDER_KEY, "") or ""
 
 
 def _ai_error_detail(exc: AIProviderError) -> str:
@@ -416,14 +453,12 @@ def _require_provider_extras(provider: str, cfg: dict) -> None:
 def _read_ai_config(db: Session) -> dict:
     """Read the current AI config from settings, decrypting the key."""
     settings = get_all_settings(db)
-    encrypted_key = settings.get(_AI_API_KEY, "") or ""
-    try:
-        api_key = decrypt_value(encrypted_key) if encrypted_key else ""
-    except Exception:
-        # Master key rotated or row tampered with — treat as no-key.
-        api_key = ""
+    provider = settings.get(_AI_PROVIDER_KEY, "") or ""
+    api_key = _decrypt_key(settings.get(_AI_API_KEY, "") or "")
+    if api_key and _key_provider(settings, api_key) != provider:
+        api_key = ""  # another provider's key is never sent (NEW-46)
     return {
-        "provider": settings.get(_AI_PROVIDER_KEY, "") or "",
+        "provider": provider,
         "model": settings.get(_AI_MODEL_KEY, "") or "",
         "api_key": api_key,
         "cloudflare_account_id": settings.get(_AI_CF_ACCOUNT_KEY, "") or "",
@@ -441,13 +476,18 @@ def get_ai_config(db: Session = Depends(get_db)):
     """
     settings = get_all_settings(db)
     raw_key = settings.get(_AI_API_KEY, "") or ""
+    provider = settings.get(_AI_PROVIDER_KEY, "") or ""
+    key_provider = _key_provider(settings, _decrypt_key(raw_key)) if raw_key else ""
     return {
-        "provider": settings.get(_AI_PROVIDER_KEY, "") or "",
+        "provider": provider,
         "model": settings.get(_AI_MODEL_KEY, "") or "",
         "cloudflare_account_id": settings.get(_AI_CF_ACCOUNT_KEY, "") or "",
         "worker_url": settings.get(_AI_WORKER_URL_KEY, "") or "",
         "endpoint_url": settings.get(_AI_ENDPOINT_URL_KEY, "") or "",
-        "has_api_key": bool(raw_key),
+        # a key saved for this provider; the page shows "saved" only then
+        "has_api_key": bool(raw_key) and key_provider == provider,
+        # which provider the saved key is for (never the key itself)
+        "api_key_provider": key_provider,
         "api_key_encrypted": is_encrypted(raw_key),
         "providers": ai_provider_list(),
     }
@@ -522,6 +562,14 @@ def put_ai_config(
     should_update_key = isinstance(new_api_key, str) and new_api_key.strip() != ""
     should_clear_key = isinstance(new_api_key, str) and new_api_key.strip() == ""
 
+    # A key saved before its provider was recorded is bound now, to the
+    # provider it was saved and used with, before the provider can change
+    # under it (NEW-46).
+    current = get_all_settings(db)
+    stored = current.get(_AI_API_KEY, "") or ""
+    if stored and not current.get(_AI_KEY_PROVIDER):
+        set_setting(db, _AI_KEY_PROVIDER, _key_provider(current, _decrypt_key(stored)))
+
     set_setting(db, _AI_PROVIDER_KEY, provider)
     set_setting(db, _AI_MODEL_KEY, model)
     set_setting(db, _AI_CF_ACCOUNT_KEY, account_id)
@@ -530,8 +578,10 @@ def put_ai_config(
     if should_update_key:
         encrypted = encrypt_value(new_api_key.strip())
         set_setting(db, _AI_API_KEY, encrypted)
+        set_setting(db, _AI_KEY_PROVIDER, provider)
     elif should_clear_key:
         set_setting(db, _AI_API_KEY, "")
+        set_setting(db, _AI_KEY_PROVIDER, "")
 
     db.commit()
     _clear_ai_cache()
@@ -558,7 +608,12 @@ def test_ai_config(request: Request, db: Session = Depends(get_db)):
     if not provider:
         raise HTTPException(status_code=400, detail="No AI provider configured")
     if not api_key:
-        raise HTTPException(status_code=400, detail="No AI API key configured")
+        raise HTTPException(
+            status_code=400,
+            detail=f"No API key saved for "
+            f"{getattr(AI_PROVIDERS.get(provider), 'label', provider)}. "
+            "Enter its key, then Test.",
+        )
     _require_provider_extras(provider, cfg)
 
     spec = AI_PROVIDERS[provider]

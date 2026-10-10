@@ -1393,6 +1393,8 @@ const SettingsPage = {
         const needsWorker = !!currentSpec.needs_worker_url;
         const needsEndpoint = !!currentSpec.needs_endpoint_url;
         const hasKey = !!cfg.has_api_key;
+        // the provider the saved key was entered for (NEW-46)
+        const keyOwner = SettingsPage._aiKeyOwner(cfg);
         const currentModel = cfg.model || '';
 
         const providerOptions = providers.map(p =>
@@ -1479,7 +1481,7 @@ const SettingsPage = {
                 </p>
             </fieldset>
             <label class="form-field">
-                <span>API Key / Shared Secret ${hasKey ? '<em class="ai-key-saved">(saved &#10003;)</em> <button type="button" class="btn btn-sm" id="ai-settings-key-remove" data-write data-admin title="Remove the stored key">Remove</button>' : ''}</span>
+                <span>API Key / Shared Secret ${keyOwner ? `<span id="ai-settings-key-saved"${hasKey ? '' : ' class="hidden"'}><em class="ai-key-saved">(saved &#10003;)</em> <button type="button" class="btn btn-sm" id="ai-settings-key-remove" data-write data-admin title="Remove the stored key">Remove</button></span>` : ''}</span>
                 <input type="password" id="ai-settings-key" data-admin
                        placeholder="${hasKey ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32'}"
                        autocomplete="new-password">
@@ -1491,6 +1493,12 @@ const SettingsPage = {
                 <button type="button" class="btn btn-primary btn-sm" data-write data-admin id="ai-settings-save">Save AI settings</button>
             </div>
         `;
+    },
+
+    // The provider the saved key was entered for: the server says
+    // (api_key_provider); a key it calls this provider's is this one's.
+    _aiKeyOwner(cfg) {
+        return cfg.api_key_provider || (cfg.has_api_key ? cfg.provider : '') || '';
     },
 
     // True when the saved model isn't in the curated list — the dropdown
@@ -1553,6 +1561,16 @@ const SettingsPage = {
             cfWrap.style.display = spec.needs_account_id ? '' : 'none';
             workerWrap.style.display = spec.needs_worker_url ? '' : 'none';
             if (endpointWrap) endpointWrap.style.display = spec.needs_endpoint_url ? '' : 'none';
+            // A key is one provider's credential (2.22.1 gate, NEW-46): a
+            // key typed for the last provider is not carried to this one,
+            // and "saved" shows only where the saved key was entered. The
+            // server sends a key to its own provider only.
+            const keyBox = document.getElementById('ai-settings-key');
+            const keySaved = SettingsPage._aiKeyOwner(cfg) === providerSel.value;
+            keyBox.value = '';
+            keyBox.placeholder = keySaved ? 'Leave blank to keep existing' : 'Paste key or openssl rand -hex 32';
+            const savedEl = document.getElementById('ai-settings-key-saved');
+            if (savedEl) savedEl.classList.toggle('hidden', !keySaved);
         });
 
         const resolveModel = () => {
