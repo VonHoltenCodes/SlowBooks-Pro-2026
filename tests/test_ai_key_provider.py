@@ -318,36 +318,73 @@ def test_a_setting_written_twice_before_a_flush_is_one_row(db_session):
     assert [r.value for r in rows] == ["openai"]
 
 
-@pytest.mark.parametrize(
-    "key_first", [False, True], ids=["provider first", "key first"]
-)
-def test_two_saves_in_one_second_are_two_saves(db_session, key_first):
-    """NEW-54: a script saved a Custom key and then switched to OpenAI in the
-    same second; the second's rows were read as one save, so the key was
-    OpenAI's. A setting written again begins the next save."""
+def _second(db_session, *writes):
+    """Audit rows in one second, in id order: ("p", provider) or ("k", key)."""
     from datetime import datetime
 
     from app.models.audit import AuditLog
     from app.models.settings import Settings
-    from app.routes.analytics import _owner_from_audit
 
     _history(db_session, {"ai_provider": "anthropic", "ai_api_key": ANT_KEY})
     _forget_history(db_session)
     ids = dict(db_session.query(Settings.key, Settings.id))
-    custom = (ids["ai_provider"], {"value": "custom"})
-    key = (ids["ai_api_key"], {"value": "fernet:v1:x"})
-    first_save = [key, custom] if key_first else [custom, key]
     when = datetime(2026, 9, 2, 9, 0, 0)
-    for record, values in first_save + [(ids["ai_provider"], {"value": "openai"})]:
+    for kind, value in writes:
+        record = ids["ai_provider"] if kind == "p" else ids["ai_api_key"]
         db_session.add(
             AuditLog(
                 table_name="settings",
                 record_id=record,
                 action="UPDATE",
-                new_values=values,
+                new_values={"value": value},
                 timestamp=when,
             )
         )
-        db_session.flush()  # ids in the order the saves wrote them
+        db_session.flush()  # ids in the order given
     db_session.commit()
-    assert _owner_from_audit(db_session) == "custom"
+
+
+@pytest.mark.parametrize(
+    "writes",
+    [
+        [("p", "custom"), ("k", "fernet:v1:x"), ("p", "openai")],
+        [("k", "fernet:v1:x"), ("p", "custom"), ("p", "openai")],
+    ],
+    ids=["provider first", "key first"],
+)
+def test_two_saves_in_one_second_whose_order_cant_be_told_are_nobodys(
+    db_session, writes
+):
+    """NEW-54: a script saved a Custom key and switched to OpenAI in the same
+    second; the key was read as OpenAI's. A save's own rows come in no set
+    order, so whether the provider written straight after the key was its
+    own save's or the next one's can't be told: the key is nobody's."""
+    from app.routes.analytics import _KEY_OWNER_UNKNOWN, _owner_from_audit
+
+    _second(db_session, *writes)
+    assert _owner_from_audit(db_session) == _KEY_OWNER_UNKNOWN
+
+
+def test_one_save_with_its_key_logged_first_is_still_its_providers(db_session):
+    """A key inserted for the first time is logged ahead of its own provider:
+    the commonest save, a provider picked and its key entered, reads right."""
+    from app.routes.analytics import _owner_from_audit
+
+    _second(db_session, ("k", "fernet:v1:x"), ("p", "openai"))
+    assert _owner_from_audit(db_session) == "openai"
+
+
+def test_several_saves_in_one_second_that_can_be_told_apart_are_read(db_session):
+    """Several saves in one second where the order doesn't matter: the
+    provider after the key is the one already in effect, or there is none."""
+    from app.routes.analytics import _owner_from_audit
+
+    _second(db_session, ("p", "groq"), ("k", "fernet:v1:x"), ("p", "groq"))
+    assert _owner_from_audit(db_session) == "groq"
+
+
+def test_a_key_with_no_provider_after_it_takes_the_one_before(db_session):
+    from app.routes.analytics import _owner_from_audit
+
+    _second(db_session, ("p", "gemini"), ("p", "grok"), ("k", "fernet:v1:y"))
+    assert _owner_from_audit(db_session) == "grok"

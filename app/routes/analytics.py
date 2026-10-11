@@ -396,10 +396,9 @@ def _decrypt_key(encrypted_key: str) -> str:
 
 def _owner_from_audit(db: Session) -> Optional[str]:
     """The provider in effect when the stored key was last written, from
-    the audit log's rows for the two settings, or None when it holds no
-    such write. One save's rows share a timestamp in no set order (the
-    session flushes once), so a save's provider is applied before its key.
-    A key re-encrypted by the rewrap tool counts as written then."""
+    the audit log's rows for the two settings; _KEY_OWNER_UNKNOWN when the
+    log can't tell (below); None when it holds no such write. A key
+    re-encrypted by the rewrap tool counts as written then."""
     from itertools import groupby
 
     from app.models.audit import AuditLog
@@ -423,36 +422,42 @@ def _owner_from_audit(db: Session) -> Optional[str]:
         .all()
     )
 
-    def saves(second):
-        """A second's rows, split into saves. A save writes each setting
-        once, so a setting written again begins the next save (rows are in
-        id order, and a later save's come after an earlier one's): a script
-        saving a key and then switching provider in the same second is two
-        saves (gate round 3, NEW-54). A key alone and a switch alone in one
-        second still read as one save, as the commonest save looks: a
-        provider picked and its key entered together."""
-        save, seen = [], set()
-        for rid, values in second:
-            if rid in seen:
-                yield save
-                save, seen = [], set()
-            save.append((rid, values))
-            seen.add(rid)
-        if save:
-            yield save
-
+    # A save's rows are contiguous and share a timestamp, but within a save
+    # their order is the session's, not the save's: a key inserted for the
+    # first time is logged ahead of its own provider. So a second that holds
+    # one provider write and one key write is one save (the commonest save:
+    # a provider picked and its key entered together). A second that holds
+    # more is several saves; the key's provider is then the one in effect
+    # before it, unless a different provider is written straight after it,
+    # which may have been its own save's or the next one's. That can't be
+    # told, so the key is nobody's (gate round 3, NEW-54: a script's Custom
+    # key and its switch to OpenAI in one second read as OpenAI's).
     provider, owner = "", None
     for _when, second in groupby(rows, key=lambda r: r[0]):
         second = [
             (rid, v) for _t, rid, v in second if isinstance(v, dict) and "value" in v
         ]
-        for save in saves(second):
-            for rid, values in save:
-                if rid == provider_id:
-                    provider = values["value"] or ""
-            for rid, values in save:
-                if rid == key_id:
-                    owner = provider if values["value"] else None
+        ps = [
+            (i, v["value"] or "")
+            for i, (rid, v) in enumerate(second)
+            if rid == provider_id
+        ]
+        ks = [(i, v["value"]) for i, (rid, v) in enumerate(second) if rid == key_id]
+        if ks:
+            at, written = ks[-1]
+            before = [p for i, p in ps if i < at]
+            after = [p for i, p in ps if i > at]
+            in_effect = before[-1] if before else provider
+            if not written:
+                owner = None
+            elif len(ps) <= 1 and len(ks) == 1:
+                owner = ps[0][1] if ps else provider
+            elif not after or after[0] == in_effect:
+                owner = in_effect
+            else:
+                owner = _KEY_OWNER_UNKNOWN
+        if ps:
+            provider = ps[-1][1]
     return owner or None
 
 
@@ -464,7 +469,7 @@ def _key_provider(db: Session, settings: dict, api_key: str) -> str:
     if recorded or not api_key:
         return recorded
     owner = _owner_from_audit(db)
-    if owner:
+    if owner and owner != _KEY_OWNER_UNKNOWN:
         return owner
     current = settings.get(_AI_PROVIDER_KEY, "") or ""
     for prefix, vendor in _AI_KEY_PREFIXES:
