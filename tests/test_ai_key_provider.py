@@ -279,3 +279,75 @@ def test_test_refreshes_the_saved_mark_from_what_it_saved():
     test = src[src.index("testBtn.addEventListener('click'") :]
     test = test[: test.index("testRes.textContent = 'Testing…'")]
     assert "Object.assign(cfg, updated);" in test and "syncKeyMark();" in test
+
+
+# ── gate round 3: W-3 / NEW-55, NEW-54 ─────────────────────────────────────
+
+
+@pytest.mark.parametrize("new_key", [OPENAI_KEY, ""], ids=["a new key", "Remove"])
+def test_the_first_key_change_over_an_old_key_saves(client, db_session, new_key):
+    """W-3 / NEW-55: on a company whose key predates 2.22.1, the first save
+    that entered a key, or Remove, was a 500: the old key's provider and the
+    new one were each written as a new row in one save. The save goes
+    through, and the key is the new provider's or gone."""
+    _history(
+        db_session,
+        {
+            "ai_provider": "custom",
+            "ai_endpoint_url": "https://api.example.com/v1",
+            "ai_api_key": "sk-qa-custom-dummy-0000",
+        },
+        {"ai_provider": "openai"},
+    )
+    cfg = _put(client, "openai", api_key=new_key)
+    assert cfg["has_api_key"] is bool(new_key)
+    assert cfg["api_key_provider"] == ("openai" if new_key else "")
+    db_session.expire_all()
+    assert _read_ai_config(db_session)["api_key"] == new_key
+
+
+def test_a_setting_written_twice_before_a_flush_is_one_row(db_session):
+    from app.models.settings import Settings
+
+    set_setting(db_session, "ai_api_key_provider", "custom")
+    set_setting(db_session, "ai_api_key_provider", "openai")
+    db_session.commit()
+    rows = (
+        db_session.query(Settings).filter(Settings.key == "ai_api_key_provider").all()
+    )
+    assert [r.value for r in rows] == ["openai"]
+
+
+@pytest.mark.parametrize(
+    "key_first", [False, True], ids=["provider first", "key first"]
+)
+def test_two_saves_in_one_second_are_two_saves(db_session, key_first):
+    """NEW-54: a script saved a Custom key and then switched to OpenAI in the
+    same second; the second's rows were read as one save, so the key was
+    OpenAI's. A setting written again begins the next save."""
+    from datetime import datetime
+
+    from app.models.audit import AuditLog
+    from app.models.settings import Settings
+    from app.routes.analytics import _owner_from_audit
+
+    _history(db_session, {"ai_provider": "anthropic", "ai_api_key": ANT_KEY})
+    _forget_history(db_session)
+    ids = dict(db_session.query(Settings.key, Settings.id))
+    custom = (ids["ai_provider"], {"value": "custom"})
+    key = (ids["ai_api_key"], {"value": "fernet:v1:x"})
+    first_save = [key, custom] if key_first else [custom, key]
+    when = datetime(2026, 9, 2, 9, 0, 0)
+    for record, values in first_save + [(ids["ai_provider"], {"value": "openai"})]:
+        db_session.add(
+            AuditLog(
+                table_name="settings",
+                record_id=record,
+                action="UPDATE",
+                new_values=values,
+                timestamp=when,
+            )
+        )
+        db_session.flush()  # ids in the order the saves wrote them
+    db_session.commit()
+    assert _owner_from_audit(db_session) == "custom"

@@ -116,7 +116,15 @@ def set_setting(db: Session, key: str, value: str) -> None:
     """Upsert a single setting row (caller must db.commit())."""
     if key in ENCRYPTED_SETTINGS_KEYS and value and not is_encrypted(value):
         value = encrypt_value(value)
-    row = db.query(Settings).filter(Settings.key == key).first()
+    # A row added earlier in this session and not yet flushed is the row to
+    # update: the session doesn't autoflush, so the query below can't see
+    # it, and a second insert broke the commit on the unique key (2.22.1
+    # gate round 3, W-3 / NEW-55: the first key saved over a pre-2.22.1 AI
+    # key was a 500, its provider written twice in one save).
+    row = (
+        next((o for o in db.new if isinstance(o, Settings) and o.key == key), None)
+        or db.query(Settings).filter(Settings.key == key).first()
+    )
     if row:
         row.value = value
     else:

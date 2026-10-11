@@ -422,15 +422,37 @@ def _owner_from_audit(db: Session) -> Optional[str]:
         .order_by(AuditLog.timestamp, AuditLog.id)
         .all()
     )
+
+    def saves(second):
+        """A second's rows, split into saves. A save writes each setting
+        once, so a setting written again begins the next save (rows are in
+        id order, and a later save's come after an earlier one's): a script
+        saving a key and then switching provider in the same second is two
+        saves (gate round 3, NEW-54). A key alone and a switch alone in one
+        second still read as one save, as the commonest save looks: a
+        provider picked and its key entered together."""
+        save, seen = [], set()
+        for rid, values in second:
+            if rid in seen:
+                yield save
+                save, seen = [], set()
+            save.append((rid, values))
+            seen.add(rid)
+        if save:
+            yield save
+
     provider, owner = "", None
-    for _when, group in groupby(rows, key=lambda r: r[0]):
-        group = [(rid, v) for _t, rid, v in group if isinstance(v, dict)]
-        for rid, values in group:
-            if rid == provider_id and "value" in values:
-                provider = values["value"] or ""
-        for rid, values in group:
-            if rid == key_id and "value" in values:
-                owner = provider if values["value"] else None
+    for _when, second in groupby(rows, key=lambda r: r[0]):
+        second = [
+            (rid, v) for _t, rid, v in second if isinstance(v, dict) and "value" in v
+        ]
+        for save in saves(second):
+            for rid, values in save:
+                if rid == provider_id:
+                    provider = values["value"] or ""
+            for rid, values in save:
+                if rid == key_id:
+                    owner = provider if values["value"] else None
     return owner or None
 
 
@@ -654,7 +676,13 @@ def put_ai_config(
     # under it (NEW-46).
     current = get_all_settings(db)
     stored = current.get(_AI_API_KEY, "") or ""
-    if stored and not current.get(_AI_KEY_PROVIDER):
+    # (not when this save replaces or removes the key: the new key's
+    # provider is written below, once)
+    if (
+        stored
+        and not current.get(_AI_KEY_PROVIDER)
+        and not (should_update_key or should_clear_key)
+    ):
         set_setting(
             db, _AI_KEY_PROVIDER, _key_provider(db, current, _decrypt_key(stored))
         )
