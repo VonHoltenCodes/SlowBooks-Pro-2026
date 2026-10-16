@@ -100,6 +100,9 @@ DEFAULT_SETTINGS = {
     "simplefin_account_map": "{}",  # JSON {simplefin id: bank_account_id}
     "simplefin_accounts_cache": "[]",  # last-seen bridge accounts, for the UI
     "simplefin_last_sync": "",
+    # Mercury read-only feed; mapping and sync state are managed by its routes.
+    "mercury_api_token": "",
+    "mercury_webhook_secret": "",
     # Class tracking (#243): "true" starts every entry form with no class
     # chosen and asks before a transaction is saved without one (it would
     # be reported under Uncategorized); "false" starts the picker on

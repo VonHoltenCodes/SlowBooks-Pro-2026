@@ -28,10 +28,11 @@ const BankingPage = {
     // Overview
     // ------------------------------------------------------------------
     async render() {
-        const [rows, feed, feeds] = await Promise.all([
+        const [rows, feed, feeds, mercury] = await Promise.all([
             API.get('/banking/overview'),
             API.get('/simplefin/status'),
             API.get('/banking/accounts'),
+            API.get('/mercury/status'),
         ]);
         let html = `
             <div class="page-header">
@@ -70,7 +71,199 @@ const BankingPage = {
             html += `</div>`;
         }
         html += BankingPage._renderFeedSection(feed, feeds);
+        html += BankingPage._renderMercurySection(mercury, feeds);
         return html;
+    },
+
+    _renderMercurySection(feed, feeds) {
+        let body;
+        if (!feed.connected) {
+            body = `<p>See payments arriving in your Mercury account in SlowBooks.
+                Create a <strong>Read Only</strong> token in
+                <a href="https://app.mercury.com/settings/tokens" target="_blank" rel="noopener">Mercury’s API token settings</a>,
+                then connect here. Your token is stored encrypted on this server.</p>
+                <form onsubmit="BankingPage.connectMercury(event)" data-admin>
+                    <div class="form-group">
+                        <label for="mercury-token">Mercury read-only API token</label>
+                        <input id="mercury-token" type="password" required autocomplete="off" maxlength="4096">
+                    </div>
+                    <button class="btn btn-primary" type="submit">Connect Mercury</button>
+                </form>`;
+        } else {
+            const choices = feeds.filter(a => a.is_active && a.bank_kind === 'bank');
+            const rows = feed.accounts.map(a => `<tr data-mercury-account="${escapeHtml(a.id)}">
+                <td>${escapeHtml(a.name)} ${a.last_four ? '••••' + escapeHtml(a.last_four) : ''}</td>
+                <td class="amount mercury-current">${escapeHtml(a.balance)} USD</td>
+                <td class="amount mercury-available">${escapeHtml(a.available_balance)} USD</td>
+                <td class="amount mercury-inflight">${a.in_flight_balance === undefined ? '—' : escapeHtml(a.in_flight_balance) + ' USD'}</td>
+                <td><select class="mercury-map" data-mercury-id="${escapeHtml(a.id)}" data-write
+                    aria-label="Import ${escapeHtml(a.name)} into">
+                    <option value="">— not imported —</option>
+                    ${choices.map(b => `<option value="${b.id}" ${feed.account_map[a.id] === b.id ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('')}
+                </select></td></tr>`).join('');
+            body = `<p>Sync posted deposits and withdrawals into <em>To review</em>.
+                Match them to payments already recorded, or review and add them to your books.
+                Syncing does not mark invoices paid.</p>
+                ${!choices.length ? '<p>Add a bank account using <strong>+ New Bank Account</strong> above, then map it here.</p>' : ''}
+                <p>${feed.last_sync ? 'Last successful sync: ' + escapeHtml(feed.last_sync.replace('T', ' ')) : 'Not synced yet.'}</p>
+                <div class="table-container"><table id="mercury-balances">
+                    <thead><tr><th scope="col">Mercury account</th><th scope="col" class="amount">Current balance</th><th scope="col" class="amount">Available</th><th scope="col" class="amount">Incoming transfers</th><th scope="col">Imports into</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>
+                <p id="mercury-balance-status" aria-live="polite">${escapeHtml(BankingPage._mercuryBalanceStatus(feed))}</p>
+                <form onsubmit="BankingPage.syncMercury(event)" data-write>
+                    <div class="form-group" style="margin-top:12px;">
+                        <label for="mercury-since">Import transactions posted since</label>
+                        <input type="date" id="mercury-since" value="${escapeHtml(feed.since)}" max="${todayISO()}" required>
+                    </div>
+                    <p>Each sync checks this date range again and skips transactions already imported.
+                        Choose an earlier date to bring in more history. Use one feed source per bank account to avoid duplicates from other imports.</p>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Sync Mercury</button>
+                        <button type="button" class="btn btn-secondary" onclick="BankingPage.refreshMercury(this)">Refresh accounts</button>
+                        <button type="button" class="btn btn-secondary" data-admin onclick="BankingPage.disconnectMercury(this)">Disconnect</button>
+                    </div>
+                </form>
+                ${BankingPage._renderMercuryWebhook(feed.webhook)}`;
+        }
+        clearTimeout(BankingPage._mercuryBalanceTimer);
+        if (feed.connected) BankingPage._mercuryBalanceTimer = setTimeout(() => BankingPage.pollMercuryBalances(), 15000);
+        return `<div class="card" style="margin-top:16px;"><div class="card-header">Bank Feed (Mercury)</div>${body}</div>`;
+    },
+
+    _mercuryBalanceStatus(feed) {
+        const updated = feed.accounts.map(a => a.balance_updated_at || '').sort().pop();
+        return (updated ? `Balances updated: ${updated.replace('T', ' ')}. ` : '') +
+            (feed.webhook.last_received ? `Last webhook received: ${feed.webhook.last_received.replace('T', ' ')}.` :
+                feed.webhook.configured ? 'Waiting for the first webhook.' : 'Balance webhooks are not configured.');
+    },
+
+    async pollMercuryBalances() {
+        clearTimeout(BankingPage._mercuryBalanceTimer);
+        const table = $('#mercury-balances');
+        if (location.hash !== '#/banking' || !table) return;
+        try {
+            if (!document.hidden) {
+                const feed = await API.get('/mercury/status');
+                if ($('#mercury-balances') !== table) return;
+                if (!feed.connected) { BankingPage.go('#/banking'); return; }
+                for (const row of table.querySelectorAll('[data-mercury-account]')) {
+                    const account = feed.accounts.find(a => a.id === row.dataset.mercuryAccount);
+                    if (!account) continue;
+                    for (const [className, field] of [['mercury-current', 'balance'], ['mercury-available', 'available_balance'], ['mercury-inflight', 'in_flight_balance']]) {
+                        row.querySelector('.' + className).textContent = account[field] === undefined ? '—' : account[field] + ' USD';
+                    }
+                }
+                $('#mercury-balance-status').textContent = BankingPage._mercuryBalanceStatus(feed);
+            }
+        } catch (err) {
+            if ($('#mercury-balances') === table) $('#mercury-balance-status').textContent = 'Could not refresh balance updates. Retrying shortly.';
+        } finally {
+            if ($('#mercury-balances') === table && location.hash === '#/banking')
+                BankingPage._mercuryBalanceTimer = setTimeout(() => BankingPage.pollMercuryBalances(), 15000);
+        }
+    },
+
+    _renderMercuryWebhook(webhook) {
+        const url = location.origin + webhook.path;
+        const registration = JSON.stringify({ url, eventTypes: webhook.event_types }, null, 2);
+        return `<details style="margin-top:16px;"><summary>Balance webhooks</summary>
+            <p>Receive current, available, and incoming-transfer balance updates automatically.
+                The balances above refresh every 15 seconds while Banking is open. These updates do not post ledger entries.</p>
+            <p>Register the HTTPS URL below with Mercury for checking and savings balance events.
+                <a href="https://docs.mercury.com/reference/createwebhook" target="_blank" rel="noopener">Mercury webhook registration</a>
+                returns a signing secret; save it here. Registering requires Mercury permission to manage webhooks.</p>
+            ${location.protocol !== 'https:' ? '<p>Open SlowBooks at your public HTTPS address before copying this registration. Mercury cannot deliver to a LAN address.</p>' : ''}
+            <div class="form-group"><label for="mercury-webhook-url">Webhook URL</label>
+                <input id="mercury-webhook-url" readonly value="${escapeHtml(url)}"></div>
+            <div class="form-group"><label for="mercury-webhook-registration">Mercury registration JSON</label>
+                <textarea id="mercury-webhook-registration" rows="7" readonly>${escapeHtml(registration)}</textarea></div>
+            <form onsubmit="BankingPage.saveMercuryWebhook(event)" data-admin>
+                <div class="form-group"><label for="mercury-webhook-secret">Webhook signing secret</label>
+                    <input type="password" id="mercury-webhook-secret" required autocomplete="off" maxlength="4096"
+                        placeholder="${webhook.configured ? 'Secret saved — enter a new one to replace it' : 'Paste the signing secret returned by Mercury'}"></div>
+                <div class="form-actions"><button type="submit" class="btn btn-primary">Save webhook secret</button>
+                    ${webhook.configured ? '<button type="button" class="btn btn-secondary" onclick="BankingPage.disableMercuryWebhook(this)">Disable webhooks</button>' : ''}</div>
+            </form></details>`;
+    },
+
+    async saveMercuryWebhook(e) {
+        e.preventDefault();
+        const button = e.target.querySelector('button[type=submit]');
+        button.disabled = true;
+        try {
+            await API.post('/mercury/webhook-settings', { signing_secret: $('#mercury-webhook-secret').value.trim() });
+            $('#mercury-webhook-secret').value = '';
+            toast('Webhook secret saved. Use Mercury’s Verify endpoint to send a test event.');
+            BankingPage.go('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+        finally { button.disabled = false; }
+    },
+
+    async disableMercuryWebhook(button) {
+        if (!confirm('Stop accepting Mercury webhooks? Also pause or delete the endpoint in Mercury.')) return;
+        button.disabled = true;
+        try {
+            await API.del('/mercury/webhook-settings');
+            BankingPage.go('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+        finally { button.disabled = false; }
+    },
+
+    async connectMercury(e) {
+        e.preventDefault();
+        const input = $('#mercury-token');
+        const button = e.target.querySelector('button[type=submit]');
+        button.disabled = true;
+        button.textContent = 'Connecting…';
+        try {
+            await API.post('/mercury/connect', { api_token: input.value.trim() });
+            input.value = '';
+            toast('Mercury connected. Choose which bank account to import into.');
+            BankingPage.go('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+        finally { button.disabled = false; button.textContent = 'Connect Mercury'; }
+    },
+
+    async syncMercury(e) {
+        e.preventDefault();
+        const button = e.target.querySelector('button[type=submit]');
+        const since = $('#mercury-since').value;
+        const mapping = {};
+        document.querySelectorAll('.mercury-map').forEach(sel => {
+            if (sel.value) mapping[sel.dataset.mercuryId] = Number(sel.value);
+        });
+        button.disabled = true;
+        button.textContent = 'Syncing…';
+        try {
+            await API.post('/mercury/map', { mapping });
+            const r = await API.post('/mercury/sync', { since });
+            toast(`Mercury: ${r.imported} new, ${r.skipped} already imported, ${r.matched} matched`);
+            BankingPage.go('#/banking');
+            if (r.warnings.length) openModal('Mercury sync — review needed',
+                r.warnings.map(w => `<p>${escapeHtml(w)}</p>`).join(''));
+        } catch (err) { toast(err.message, 'error'); }
+        finally { button.disabled = false; button.textContent = 'Sync Mercury'; }
+    },
+
+    async refreshMercury(button) {
+        button.disabled = true;
+        try {
+            await API.post('/mercury/refresh');
+            BankingPage.go('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+        finally { button.disabled = false; }
+    },
+
+    async disconnectMercury(button) {
+        if (!confirm('Disconnect Mercury? Imported transactions stay in your books.')) return;
+        button.disabled = true;
+        try {
+            await API.post('/mercury/disconnect');
+            toast('Mercury disconnected');
+            BankingPage.go('#/banking');
+        } catch (err) { toast(err.message, 'error'); }
+        finally { button.disabled = false; }
     },
 
     _legacyBanners(rows) {

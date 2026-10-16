@@ -66,7 +66,7 @@ from app.routes import csv as csv_routes
 from app.routes import uploads
 
 # Phase 5: Advanced Integration
-from app.routes import bank_import, simplefin, tax, backups
+from app.routes import bank_import, simplefin, mercury, tax, backups
 from app.routes import company_file as company_file_routes
 from app.routes import users as users_routes
 from app.routes import api_tokens as api_tokens_routes
@@ -780,6 +780,7 @@ _AUTH_EXEMPT_EXACT = {
     "/analytics",  # redirect to SPA hash route
     "/favicon.ico",
     "/api/stripe/webhook",  # legacy alias — Stripe auth via signature
+    "/api/mercury/webhook",  # Mercury raw-body HMAC authenticates deliveries
 }
 # Provider payment routes that are public by design:
 #   - webhook: the provider's signature is the authentication
@@ -806,6 +807,9 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/users",
     "/api/tokens",
     "/api/settings",
+    "/api/mercury/connect",
+    "/api/mercury/disconnect",
+    "/api/mercury/webhook-settings",
     "/api/backups",
     # Turning company-file encryption on or off is an administrator's
     # decision (#290); the route asks for the company's name as well.
@@ -1055,6 +1059,7 @@ app.include_router(uploads.router)
 # Phase 5: Advanced Integration
 app.include_router(bank_import.router)
 app.include_router(simplefin.router)
+app.include_router(mercury.router)
 app.include_router(users_routes.router)
 app.include_router(api_tokens_routes.router)
 app.include_router(tax.router)
