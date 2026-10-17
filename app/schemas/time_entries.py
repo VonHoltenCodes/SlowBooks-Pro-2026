@@ -47,6 +47,12 @@ class TimeEntryResponse(BaseModel):
     approved_by: Optional[str] = None
     approved_at: Optional[datetime] = None
     pay_run_id: Optional[int] = None
+    # from QuickBooks (#323): the importer's name, the billing status, the
+    # service item and the customer or job label as printed
+    source: Optional[str] = None
+    billing: Optional[str] = None
+    service: Optional[str] = None
+    customer_job: Optional[str] = None
     model_config = {"from_attributes": True}
 
 

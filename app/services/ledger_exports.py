@@ -46,7 +46,7 @@ def trial_balance_csv(data: dict, company: str) -> str:
         w.writerow(
             [
                 i["account_number"],
-                i["account_name"],
+                i.get("account_path") or i["account_name"],  # W-12
                 i["account_type"],
                 _money(i["total_debit"]),
                 _money(i["total_credit"]),
@@ -104,7 +104,8 @@ def general_ledger_csv(data: dict, company: str, words=None) -> str:
         ]
     )
     for a in data["accounts"]:
-        num, name = a["account_number"] or "", a["account_name"]
+        num = a["account_number"] or ""
+        name = a.get("account_path") or a["account_name"]  # W-12
         w.writerow(
             [
                 data["start_date"],
@@ -171,7 +172,7 @@ def profit_loss_csv(data: dict, company: str, words) -> str:
                 [
                     label,
                     i.get("account_number") or "",
-                    i["account_name"],
+                    i.get("account_path") or i["account_name"],  # W-8
                     _money(i["amount"]),
                 ]
             )
@@ -309,7 +310,7 @@ def balance_sheet_csv(data: dict, company: str, words) -> str:
                 [
                     label,
                     i.get("account_number") or "",
-                    i["account_name"],
+                    i.get("account_path") or i["account_name"],  # W-8
                     _money(i["amount"]),
                 ]
             )

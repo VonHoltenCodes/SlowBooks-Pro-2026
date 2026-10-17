@@ -203,11 +203,16 @@ const DashboardPage = {
             // one (#265), in the ink or white that reads on it — none where
             // neither reaches AA; the legend under the bar has every figure
             const dark = (document.documentElement.getAttribute('data-theme') || 'light') === 'dark';
+            // a 2px seam of the card between slices, so two bands of one
+            // lightness (the deeper orange and the red) still read as two
+            // without their hue (2.23.4 gate, NEW-133)
+            let drawn = 0;
             const seg = (v, key, label) => {
                 if (!(v > 0)) return '';
                 const text = figureTextOn(cssVar(`--aging-${key}`), dark);
                 const figure = v / owed >= 0.14 && text.ratio >= 4.5 ? compactMoney(v) : '';
-                return `<div style="width:${(v / owed * 100).toFixed(1)}%;background:var(--aging-${key});overflow:hidden;white-space:nowrap;text-align:center;font-size:10px;line-height:28px;color:${text.fill}" title="${label}: ${formatCurrency(v)}">${figure}</div>`;
+                const seam = drawn++ ? 'border-left:2px solid var(--panel-bg);box-sizing:border-box;' : '';
+                return `<div style="width:${(v / owed * 100).toFixed(1)}%;${seam}background:var(--aging-${key});overflow:hidden;white-space:nowrap;text-align:center;font-size:10px;line-height:28px;color:${text.fill}" title="${label}: ${formatCurrency(v)}">${figure}</div>`;
             };
             return `<div style="display:flex;height:28px;border-radius:4px;overflow:hidden">${seg(d.current, 'current', 'Current')}${seg(d.d30, '30', '1-30')}${seg(d.d60, '60', '31-60')}${seg(d.d90, '90', '61+')}</div>
                 <div style="display:flex;gap:12px;margin-top:6px;font-size:10px;flex-wrap:wrap">

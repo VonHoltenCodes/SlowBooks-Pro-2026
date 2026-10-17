@@ -1,4 +1,15 @@
 {
+  "2.23.4": {
+    "title": "Every QuickBooks Desktop transaction and timesheet",
+    "items": [
+      "QuickBooks Desktop's Transaction Detail by Account imports under Interoperability, Import from Report CSV: every deposit, check, transfer, journal entry and opening balance as a journal entry.",
+      "The whole file is checked first (accounts, balance, QuickBooks' own totals) and refused whole if anything is off; a second upload posts nothing twice.",
+      "QuickBooks Desktop's Time by Name by Job detail report (or Time by Job by Name) imports under Interoperability, Import from Report CSV, saved as CSV or Excel: every row becomes an approved time entry under its employee, with the hours, notes, service item, billing status and the customer or job label.",
+      "A person not on the Employees list is added from the name and named in the result; imported time is marked as QuickBooks' and a pay run never picks it up.",
+      "The whole file is checked against QuickBooks' own totals first and refused whole if it does not add up; a second upload posts nothing twice.",
+      "The Profit & Loss and Balance Sheet list accounts by number then name, as the Trial Balance does, a sub-account right after its parent and named by its path; Sort by on either lists them by name instead, and the choice rides into the PDF, the CSV and a saved report. The Trial Balance puts accounts with no number last too."
+    ]
+  },
   "2.23.3": {
     "title": "Voids that always post, and imported invoices paid once",
     "items": [

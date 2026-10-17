@@ -150,11 +150,15 @@
     /* The A/R aging bands, for the bar and the key beside each label, so
        the two stay matched. A key is a graphic: 3:1 on the card (WCAG
        1.4.11). Gold #cc9933 was 2.57 and orange #f97316 2.80 (macbase1
-       NEW-11); these are 3.13 and 3.11. */
-    --aging-current:  var(--success);   /* 3.57 */
-    --aging-30:       #b88a2e;
-    --aging-60:       #f36706;
-    --aging-90:       var(--danger);    /* 5.14 */
+       NEW-11); the gold is 3.13. A slice wide enough prints its figure in
+       ink or white, whichever reads better, at 4.5:1 or more: orange
+       #f36706 (3.11 on the card) took ink at 5.53, black on a bright
+       orange that the arithmetic clears and the eye does not (2.23.4 gate,
+       NEW-129); this deeper orange is 5.17 on the card and takes white. */
+    --aging-current:  var(--success);   /* 3.57; its figure in ink, 4.82 */
+    --aging-30:       #b88a2e;          /* 3.13; ink, 5.49 */
+    --aging-60:       #c2410c;          /* 5.17; white, 5.17 */
+    --aging-90:       var(--danger);    /* 5.14; white */
     /* Red and amber for words, as --text-success is green for them: the
        pages wrote #a4242b, #c0392b, #a8761f and #b45309 in by hand, which
        the dark theme could not change (2.22:1 and 4.09 there) */

@@ -65,7 +65,7 @@ function sourceWord(type) {
         qbo_ledger: 'QuickBooks import', qbo_journal: 'QuickBooks journal', qbo_cogs: 'QuickBooks cost of goods',
         qbo_export_import: 'QuickBooks Online export', xero_import: 'Xero import', myob_import: 'MYOB import',
         sage_import: 'Sage 50 import', wave_import: 'Wave import', zoho_import: 'Zoho Books import',
-        gnucash_import: 'GnuCash import',
+        gnucash_import: 'GnuCash import', qb_ledger_import: 'QuickBooks Desktop import',
     };
     const t = String(type || 'journal');
     for (const [end, word] of [['_void', 'void'], ['_edit', 'edit'], ['_apply', 'applied']]) {

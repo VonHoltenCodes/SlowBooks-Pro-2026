@@ -1,0 +1,41 @@
+,,,,,Type,,Date,,Num,,Adj,,Name,,Memo,,Clr,,Split,,Debit,,Credit,,Original Amount,,Balance
+,Operating Checking 4321,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Transfer,,01/01/2024,,,,,,,,Beginning balance for this acct on 1-1-24,,Ö,,Retained Earnings,,"1,000.00",,,,"1,000.00",,"1,000.00"
+,,,,,Deposit,,01/05/2024,,,,,,Card Processor,,Deposit,,Ö,,Card Clearing,,300.00,,,,300.00,,"1,300.00"
+,,,,,Deposit,,01/05/2024,,,,,,Walk-in,,Deposit,,Ö,,Service Income,,120.00,,,,120.00,,"1,420.00"
+,,,,,Check,,01/08/2024,,1001,,,,Office Depot,,,,Ö,,-SPLIT-,,,,75.00,,-75.00,,"1,345.00"
+,,,,,Transfer,,01/15/2024,,,,,,,,Funds Transfer,,Ö,,Owner Draw,,,,200.00,,-200.00,,"1,145.00"
+,,,,,Check,,01/31/2024,,1002,,,,Harbor Properties,,January rent,,Ö,,Rent,,,,"1,000.00",,"-1,000.00",,145.00
+,Total Operating Checking 4321,,,,,,,,,,,,,,,,,,,,"1,420.00",,"1,275.00",,,,145.00
+,Card Clearing,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Deposit,,01/05/2024,,,,,,Card Processor,,Deposit,,Ö,,Operating Checking 4321,,,,300.00,,-300.00,,-300.00
+,,,,,General Journal,,01/10/2024,,7,,,,,,"Card sales, week 2",,Ö,,-SPLIT-,,485.00,,,,485.00,,185.00
+,,,,,General Journal,,02/27/2024,,,,,,,,Chargeback fee,,Ö,,Card Fees,,,,10.00,,-10.00,,175.00
+,Total Card Clearing,,,,,,,,,,,,,,,,,,,,485.00,,310.00,,,,175.00
+,Owner Draw,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Transfer,,01/15/2024,,,,,,,,Funds Transfer,,Ö,,Operating Checking 4321,,200.00,,,,200.00,,200.00
+,Total Owner Draw,,,,,,,,,,,,,,,,,,,,200.00,,0.00,,,,200.00
+,Retained Earnings,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Transfer,,01/01/2024,,,,,,,,Beginning balance for this acct on 1-1-24,,Ö,,Operating Checking 4321,,,,"1,000.00",,"-1,000.00",,"-1,000.00"
+,Total Retained Earnings,,,,,,,,,,,,,,,,,,,,0.00,,"1,000.00",,,,"-1,000.00"
+,Service Income,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Deposit,,01/05/2024,,,,,,Walk-in,,Deposit,,Ö,,Operating Checking 4321,,,,120.00,,-120.00,,-120.00
+,,,,,General Journal,,01/10/2024,,7,,,,,,"Card sales, week 2",,Ö,,-SPLIT-,,,,500.00,,-500.00,,-620.00
+,Total Service Income,,,,,,,,,,,,,,,,,,,,0.00,,620.00,,,,-620.00
+,Card Fees,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,General Journal,,01/10/2024,,7,,,,,,"Card sales, week 2",,Ö,,-SPLIT-,,15.00,,,,15.00,,15.00
+,,,,,General Journal,,02/27/2024,,8,,,,,,Chargeback fee,,Ö,,Card Clearing,,10.00,,,,10.00,,25.00
+,Total Card Fees,,,,,,,,,,,,,,,,,,,,25.00,,0.00,,,,25.00
+,Office Expense,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,Software,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Check,,01/08/2024,,1001,,,,Office Depot,,Scheduling app,,Ö,,-SPLIT-,,30.00,,,,30.00,,30.00
+,,Total Software,,,,,,,,,,,,,,,,,,,30.00,,0.00,,,,30.00
+,,Supplies,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Check,,01/08/2024,,1001,,,,Office Depot,,Paper,,Ö,,-SPLIT-,,45.00,,,,45.00,,45.00
+,,Total Supplies,,,,,,,,,,,,,,,,,,,45.00,,0.00,,,,45.00
+,Total Office Expense,,,,,,,,,,,,,,,,,,,,75.00,,0.00,,,,75.00
+,Rent,,,,,,,,,,,,,,,,,,,,,,,,,,
+,,,,,Check,,01/31/2024,,1002,,,,Harbor Properties,,January rent,,Ö,,Operating Checking 4321,,"1,000.00",,,,"1,000.00",,"1,000.00"
+,Total Rent,,,,,,,,,,,,,,,,,,,,"1,000.00",,0.00,,,,"1,000.00"
+TOTAL,,,,,,,,,,,,,,,,,,,,,"3,205.00",,"3,205.00",,,,0.00
+,,,,,,,,,,,,,,,,,,,,,,,,,,,

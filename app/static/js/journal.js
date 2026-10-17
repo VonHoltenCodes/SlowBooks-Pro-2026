@@ -46,7 +46,7 @@ const JournalPage = {
     async view(id) {
         const entry = await API.get(`/journal/${id}`);
         let linesHtml = entry.lines.map(l =>
-            `<tr><td>${escapeHtml(l.account_number)} - ${escapeHtml(l.account_name)}</td>
+            `<tr><td>${l.account_number ? `${escapeHtml(l.account_number)} - ` : ''}${escapeHtml(l.account_name)}</td>
              <td>${escapeHtml(l.description || '')}</td>
              <td class="amount">${l.debit > 0 ? formatCurrency(l.debit) : ''}</td>
              <td class="amount">${l.credit > 0 ? formatCurrency(l.credit) : ''}</td></tr>`

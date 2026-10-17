@@ -112,6 +112,31 @@ def _last_regular_gross(db: Session, employee_id: int, before: date) -> Decimal:
     return Decimal(str(stub.gross_pay)) if stub else Decimal("0")
 
 
+def _imported_time(db: Session, employee_id: int, start: date, end: date):
+    """(count, hours) of the employee's time in the period that came from
+    QuickBooks (source set): approved history a pay run never pays."""
+    rows = (
+        db.query(TimeEntry)
+        .filter(
+            TimeEntry.employee_id == employee_id,
+            TimeEntry.source.isnot(None),
+            TimeEntry.date >= start,
+            TimeEntry.date <= end,
+        )
+        .all()
+    )
+    hours = sum(
+        (
+            Decimal(str(te.hours_regular or 0))
+            + Decimal(str(te.hours_overtime or 0))
+            + Decimal(str(te.hours_doubletime or 0))
+            for te in rows
+        ),
+        Decimal("0"),
+    )
+    return len(rows), float(hours)
+
+
 def _unapproved_time(db: Session, employee_id: int, start: date, end: date):
     """(count, hours) of the employee's time entries in the period that are
     still waiting for approval — draft or submitted, not yet paid."""
@@ -121,6 +146,9 @@ def _unapproved_time(db: Session, employee_id: int, start: date, end: date):
             TimeEntry.employee_id == employee_id,
             TimeEntry.status.in_([TimeEntryStatus.DRAFT, TimeEntryStatus.SUBMITTED]),
             TimeEntry.pay_run_id.is_(None),
+            TimeEntry.source.is_(
+                None
+            ),  # time imported from QuickBooks is history, never paid here (#323)
             TimeEntry.date >= start,
             TimeEntry.date <= end,
         )
@@ -220,6 +248,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
                         TimeEntry.employee_id == emp.id,
                         TimeEntry.status == TimeEntryStatus.APPROVED,
                         TimeEntry.pay_run_id.is_(None),
+                        TimeEntry.source.is_(None),  # imported history (#323)
                         TimeEntry.date >= data.period_start,
                         TimeEntry.date <= data.period_end,
                     )
@@ -263,11 +292,25 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
                         f"or leave {name} out of this run."
                     )
                 else:
-                    refused.append(
-                        f"{name} has no approved time from {period}. Log and "
-                        f"approve it under Time Entries, or leave {name} out "
-                        "of this run."
+                    imported = _imported_time(
+                        db, emp.id, data.period_start, data.period_end
                     )
+                    if imported[0]:
+                        # the only approved time there is QuickBooks' history,
+                        # which a pay run never pays (2.23.4 gate, NEW-131)
+                        refused.append(
+                            f"{name} has no time to pay from {period}: the "
+                            f"{_entries(imported[0])} there ({imported[1]} hours) "
+                            "came from QuickBooks, which paid them, and a pay "
+                            "run never pays imported time. Log and approve "
+                            f"time here, or leave {name} out of this run."
+                        )
+                    else:
+                        refused.append(
+                            f"{name} has no approved time from {period}. Log and "
+                            f"approve it under Time Entries, or leave {name} out "
+                            "of this run."
+                        )
             else:
                 refused.append(
                     f"{name} would be paid $0.00. Enter hours or an amount, "

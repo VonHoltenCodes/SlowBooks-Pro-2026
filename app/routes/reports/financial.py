@@ -32,10 +32,83 @@ def _in_class(db, class_id):
     return cls, class_attribution(uncat_id) == class_id
 
 
-def _totals_by_account(db, acct_type, date_start=None, date_end=None, in_class=None):
+ACCOUNT_ORDERS = ("number", "name")
+_SORT_QUERY = Query(
+    default="number",
+    pattern="^(number|name)$",
+    description=(
+        "The accounts' order: by number, then name, as the Trial Balance "
+        "lists them, or by name; a sub-account right after its parent either "
+        "way (#326)"
+    ),
+)
+
+
+def _chart_index(db) -> dict:
+    """Every account's number, name and parent, by id."""
+    return {
+        a.id: (a.account_number or "", a.name or "", a.parent_id)
+        for a in db.query(
+            Account.id, Account.account_number, Account.name, Account.parent_id
+        )
+    }
+
+
+def _chain(chart: dict, account_id) -> list:
+    """The account's ids from the root down, the account itself last."""
+    path = []
+    while account_id in chart and len(path) < 32:
+        path.append(account_id)
+        account_id = chart[account_id][2]
+    return list(reversed(path))
+
+
+def _account_order(db, sort="number", chart: dict | None = None):
+    """A sort key for a report's account rows: by number then name (an
+    account with no number after the numbered ones, by name), or by name;
+    a sub-account right after its parent either way. The P&L and Balance
+    Sheet listed accounts in the order they were created (#326,
+    @TigerCoder27): the query had no ORDER BY, so a chart added to after
+    seeding read 6000, 6200, 6600, 6900, 6250, 6410. The Trial Balance and
+    General Ledger take the same key: ORDER BY account_number put the
+    accounts with no number first, in creation order (2.23.4 gate, W-7)."""
+    chart = chart if chart is not None else _chart_index(db)
+
+    def level(account_id):
+        number, name, _ = chart[account_id]
+        name = name.lower()
+        if sort == "name":
+            return (0, name, number)
+        return (0, number, name) if number else (1, "", name)
+
+    def key(row):
+        path = tuple(level(a) for a in _chain(chart, row["account_id"]))
+        return path or ((2, "", ""),)
+
+    return key
+
+
+def _account_words(chart: dict, account_id) -> tuple[str, str]:
+    """(path, label) for a report row: the path names a sub-account under
+    its parents ("Automobile: Insurance"), the label puts the number
+    first ("6310 - Automobile: Insurance"). A statement row read as the
+    bare leaf, so two "Insurance" rows and a "Fuel" with no Automobile
+    above it could not be told apart (2.23.4 gate, W-8)."""
+    chain = _chain(chart, account_id)
+    if not chain:
+        return "", ""
+    path = ": ".join(chart[a][1] for a in chain)
+    number = chart[account_id][0]
+    return path, (f"{number} - {path}" if number else path)
+
+
+def _totals_by_account(
+    db, acct_type, date_start=None, date_end=None, in_class=None, sort="number"
+):
     """Return a list of {account_id, account_name, account_number, amount}
     rows where amount is signed by the account type's natural balance
-    (always positive for a normal-balance ledger).
+    (always positive for a normal-balance ledger), in the chart's order
+    (`sort`: number or name, see _account_order).
 
     `account_id` is included so the SPA can drill into /account-transactions
     for any line — Phase 11 drill-down support.
@@ -61,16 +134,21 @@ def _totals_by_account(db, acct_type, date_start=None, date_end=None, in_class=N
     q = q.group_by(Account.id, Account.name, Account.account_number)
 
     rows = []
+    chart = _chart_index(db)
     for acct_id, name, number, dr, cr in q.all():
         amount = (dr - cr) if acct_type in _DEBIT_NORMAL else (cr - dr)
+        path, label = _account_words(chart, acct_id)
         rows.append(
             {
                 "account_id": acct_id,
                 "account_name": name,
                 "account_number": number,
+                "account_path": path or name,
+                "account_label": label or name,
                 "amount": float(amount),
             }
         )
+    rows.sort(key=_account_order(db, sort, chart))
     return rows
 
 
@@ -84,6 +162,7 @@ def profit_loss(
     class_id: Annotated[
         Optional[int], Query(description="Only this class's lines (#213); omit for all")
     ] = None,
+    sort: str = _SORT_QUERY,
 ):
     if not start_date:
         start_date = date(date.today().year, 1, 1)
@@ -91,10 +170,14 @@ def profit_loss(
         end_date = date.today()
     cls, in_class = _in_class(db, class_id) if class_id is not None else (None, None)
 
-    income = _totals_by_account(db, AccountType.INCOME, start_date, end_date, in_class)
-    cogs = _totals_by_account(db, AccountType.COGS, start_date, end_date, in_class)
+    income = _totals_by_account(
+        db, AccountType.INCOME, start_date, end_date, in_class, sort
+    )
+    cogs = _totals_by_account(
+        db, AccountType.COGS, start_date, end_date, in_class, sort
+    )
     expenses = _totals_by_account(
-        db, AccountType.EXPENSE, start_date, end_date, in_class
+        db, AccountType.EXPENSE, start_date, end_date, in_class, sort
     )
 
     total_income = sum(i["amount"] for i in income)
@@ -106,6 +189,7 @@ def profit_loss(
         "end_date": end_date.isoformat(),
         "class_id": cls.id if cls else None,
         "class_name": cls.name if cls else None,
+        "sort": sort,
         "income": income,
         "cogs": cogs,
         "expenses": expenses,
@@ -119,15 +203,19 @@ def profit_loss(
 
 @router.get("/balance-sheet")
 def balance_sheet(
-    as_of_date: date = Query(default=None), db: Session = Depends(get_db)
+    as_of_date: date = Query(default=None),
+    db: Session = Depends(get_db),
+    sort: str = _SORT_QUERY,
 ):
     t = terms_from_db(db)
     if not as_of_date:
         as_of_date = date.today()
 
-    assets = _totals_by_account(db, AccountType.ASSET, date_end=as_of_date)
-    liabilities = _totals_by_account(db, AccountType.LIABILITY, date_end=as_of_date)
-    equity = _totals_by_account(db, AccountType.EQUITY, date_end=as_of_date)
+    assets = _totals_by_account(db, AccountType.ASSET, date_end=as_of_date, sort=sort)
+    liabilities = _totals_by_account(
+        db, AccountType.LIABILITY, date_end=as_of_date, sort=sort
+    )
+    equity = _totals_by_account(db, AccountType.EQUITY, date_end=as_of_date, sort=sort)
 
     total_assets = sum(a["amount"] for a in assets)
     total_liabilities = sum(liab["amount"] for liab in liabilities)
@@ -153,6 +241,8 @@ def balance_sheet(
                 "account_id": None,
                 "account_name": f"{t('Net Income')} (current period)",
                 "account_number": None,
+                "account_path": f"{t('Net Income')} (current period)",
+                "account_label": f"{t('Net Income')} (current period)",
                 "amount": float(net_income),
             }
         ]
@@ -160,6 +250,7 @@ def balance_sheet(
 
     return {
         "as_of_date": as_of_date.isoformat(),
+        "sort": sort,
         "assets": assets,
         "liabilities": liabilities,
         "equity": equity,
@@ -248,13 +339,17 @@ def general_ledger(
     )
 
     entries_by_account = {}
+    chart = _chart_index(db)
     for tl, txn, acct in results:
         key = acct.id
         if key not in entries_by_account:
+            path, label = _account_words(chart, acct.id)
             entries_by_account[key] = {
                 "account_id": acct.id,
                 "account_number": acct.account_number,
                 "account_name": acct.name,
+                "account_path": path or acct.name,
+                "account_label": label or acct.name,
                 "account_type": acct.account_type.value,
                 "normal_balance": "debit" if _sign(acct) > 0 else "credit",
                 "opening_balance": _sign(acct) * opening.get(acct.id, Decimal(0)),
@@ -282,6 +377,10 @@ def general_ledger(
         a["total_credit"] += tl.credit
 
     accounts_list = list(entries_by_account.values())
+    # the statements' order: by number then name, the unnumbered last, a
+    # sub-account after its parent (ORDER BY account_number put the
+    # unnumbered first: 2.23.4 gate, W-7)
+    accounts_list.sort(key=_account_order(db, chart=chart))
     for a in accounts_list:
         a["closing_balance"] = float(a.pop("_running"))
         a["opening_balance"] = float(a["opening_balance"])
@@ -387,27 +486,34 @@ def trial_balance(
         .group_by(
             Account.id, Account.account_number, Account.name, Account.account_type
         )
-        .order_by(Account.account_number)
         .all()
     )
 
     items = []
     total_debit = Decimal(0)
     total_credit = Decimal(0)
+    chart = _chart_index(db)
     for acct_id, acct_num, acct_name, acct_type, debit, credit in results:
         total_debit += debit
         total_credit += credit
+        path, label = _account_words(chart, acct_id)
         items.append(
             {
                 "account_id": acct_id,
                 "account_number": acct_num or "",
                 "account_name": acct_name,
+                "account_path": path or acct_name,
+                "account_label": label or acct_name,
                 "account_type": acct_type.value,
                 "total_debit": float(debit),
                 "total_credit": float(credit),
                 "net_balance": float(debit - credit),
             }
         )
+    # by number then name, the unnumbered last, a sub-account after its
+    # parent (ORDER BY account_number put the unnumbered first: W-7); each
+    # row named by its path and number, as the statements' are (W-12)
+    items.sort(key=_account_order(db, chart=chart))
 
     return {
         "start_date": start_date.isoformat(),
@@ -933,6 +1039,11 @@ def _money(value) -> str:
     return f"{sign}${abs(amount):,.2f}"
 
 
+def _row_words(item: dict) -> str:
+    """A statement row's words on the PDF: its number and path (W-8)."""
+    return item.get("account_label") or item["account_name"]
+
+
 def _pl_section(data: dict, t=None) -> dict:
     """P&L rows for the PDF; t (Terms) picks the company's words —
     "Statement of Activities" / "Revenue & Support" for a nonprofit. One
@@ -946,9 +1057,7 @@ def _pl_section(data: dict, t=None) -> dict:
     ):
         rows.append({"cells": [label, ""], "style": "subtotal"})
         for item in data[key]:
-            rows.append(
-                {"cells": [f"  {item['account_name']}", _money(item["amount"])]}
-            )
+            rows.append({"cells": [f"  {_row_words(item)}", _money(item["amount"])]})
         rows.append(
             {"cells": [f"Total {label}", _money(data[total_key])], "style": "subtotal"}
         )
@@ -957,7 +1066,7 @@ def _pl_section(data: dict, t=None) -> dict:
     )
     rows.append({"cells": ["Expenses", ""], "style": "subtotal"})
     for item in data["expenses"]:
-        rows.append({"cells": [f"  {item['account_name']}", _money(item["amount"])]})
+        rows.append({"cells": [f"  {_row_words(item)}", _money(item["amount"])]})
     rows.append(
         {
             "cells": ["Total Expenses", _money(data["total_expenses"])],
@@ -1081,9 +1190,7 @@ def _bs_section(data: dict, t=None) -> dict:
     ):
         rows.append({"cells": [label, ""], "style": "subtotal"})
         for item in data[key]:
-            rows.append(
-                {"cells": [f"  {item['account_name']}", _money(item["amount"])]}
-            )
+            rows.append({"cells": [f"  {_row_words(item)}", _money(item["amount"])]})
         rows.append(
             {"cells": [f"Total {label}", _money(data[total_key])], "style": "subtotal"}
         )
@@ -1108,7 +1215,7 @@ def _tb_section(data: dict) -> dict:
     rows = [
         {
             "cells": [
-                f"{item['account_number']} {item['account_name']}".strip(),
+                _row_words(item),  # the number and path, as the statements (W-12)
                 _money(item["total_debit"]),
                 _money(item["total_credit"]),
             ]
@@ -1136,7 +1243,7 @@ def _tb_section(data: dict) -> dict:
 def _gl_section(data: dict) -> dict:
     rows = []
     for a in data["accounts"]:
-        head = f"{a['account_number'] or ''} {a['account_name']}".strip()
+        head = _row_words(a)  # the number and path, as the statements (W-12)
         rows.append({"cells": [head, "", "", "", "", ""], "style": "subtotal"})
         rows.append(
             {
@@ -1229,9 +1336,10 @@ def profit_loss_pdf(
     end_date: date = Query(default=None),
     class_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
+    sort: str = _SORT_QUERY,
 ):
     # class_id is a keyword: profit_loss takes db before it
-    data = profit_loss(start_date, end_date, db, class_id=class_id)
+    data = profit_loss(start_date, end_date, db, class_id=class_id, sort=sort)
     t = terms_from_db(db)
     return _pdf_response([_pl_section(data, t)], db, _pl_filename(data, t, "pdf"))
 
@@ -1372,10 +1480,11 @@ def profit_loss_csv_route(
     end_date: date = Query(default=None),
     class_id: Optional[int] = Query(default=None),
     db: Session = Depends(get_db),
+    sort: str = _SORT_QUERY,
 ):
     from app.services.ledger_exports import profit_loss_csv
 
-    data = profit_loss(start_date, end_date, db, class_id=class_id)
+    data = profit_loss(start_date, end_date, db, class_id=class_id, sort=sort)
     t = terms_from_db(db)
     return _csv_download(
         profit_loss_csv(data, _company_name(db), t),
@@ -1389,10 +1498,11 @@ def balance_sheet_csv_route(
     request: Request,
     as_of_date: date = Query(default=None),
     db: Session = Depends(get_db),
+    sort: str = _SORT_QUERY,
 ):
     from app.services.ledger_exports import balance_sheet_csv
 
-    data = balance_sheet(as_of_date, db)
+    data = balance_sheet(as_of_date, db, sort=sort)
     t = terms_from_db(db)
     return _csv_download(
         balance_sheet_csv(data, _company_name(db), t),
@@ -1403,9 +1513,11 @@ def balance_sheet_csv_route(
 
 @router.get("/balance-sheet/pdf")
 def balance_sheet_pdf(
-    as_of_date: date = Query(default=None), db: Session = Depends(get_db)
+    as_of_date: date = Query(default=None),
+    db: Session = Depends(get_db),
+    sort: str = _SORT_QUERY,
 ):
-    data = balance_sheet(as_of_date, db)
+    data = balance_sheet(as_of_date, db, sort=sort)
     t = terms_from_db(db)
     return _pdf_response(
         [_bs_section(data, t)],

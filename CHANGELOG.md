@@ -5,6 +5,136 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.23.4 — Every QuickBooks Desktop transaction, as journal entries
+
+**QuickBooks Desktop's Transaction Detail by Account imports.** The report a
+bookkeeper exports for everything (Reports > Accountant & Taxes >
+Transaction Detail by Account) lists every deposit, check, transfer, general
+journal entry and opening balance, grouped by account, with the other side
+of each in Split. Import from Report CSV refused it as an unrecognized
+layout, so a Desktop company's transfers and journal entries had no way in.
+It now posts each transaction as one balanced journal entry with its date,
+number, name and memo, on the accounts the lists IIF made, sub-accounts
+included. Before anything is written the whole file is checked: every
+account in the chart, every transaction balanced, and every account's lines
+adding up to the total QuickBooks printed for it; a file that fails is
+refused whole, with the reason. Same-day transactions with no number are
+told apart by name, and a journal entry whose number QuickBooks printed on
+one line only is still one entry. A second upload posts nothing twice. A
+register-style report (no account above its rows) is told which report to
+export instead. Built against a real company's report, a year of a small
+practice's books in which every account matched QuickBooks to the cent; the
+fixture is invented books in that layout, and its sample company, Morden
+Bookkeeping, is named for Kim Morden Bookkeeping, who brought the report.
+
+**Accounts in order on the Profit & Loss and Balance Sheet** (#326,
+@TigerCoder27). Both listed accounts in the order they were created (the
+query grouped by account with no ORDER BY), so a chart added to after
+seeding read 6000, 6200, 6600, 6900, 6250, 6410. They read by number, then
+name, as the Trial Balance and General Ledger do, with an account that has
+no number after the numbered ones and a sub-account right after its parent;
+"Sort by" on either report lists them by name instead, and the choice rides
+into the PDF, the CSV, the address and a saved report (`sort=name` on the
+API). A statement row names a sub-account by its path ("Automobile:
+Insurance") with its number first, so two accounts of one name tell apart
+and a sub-account whose parent has no amount still says where it sits; the
+Trial Balance and General Ledger put the accounts with no number last too
+(they came first, in creation order). A company-wide default for the order
+can follow if it is wanted.
+
+**QuickBooks Desktop's timesheets come across as time entries** (#323,
+@rcheetham). Desktop does not export timesheets to IIF, so a company has a
+report: Reports > Jobs, Time & Mileage > Time by Name by Job detail (or
+Time by Job by Name detail), saved as CSV or Excel, with a heading row per
+person and per customer:job, one row per entry (Date, Item, Billing Status,
+Duration, Notes) and QuickBooks' own Total rows. Import from Report CSV now
+takes it, Excel included: each row becomes an approved time entry under its
+employee, with the hours, the notes, the service item, the billing status
+(not billable, unbilled, billed) and the customer or job label as QuickBooks
+printed it, linked to the job when the label is one on the Jobs list. A
+person not on the Employees list is added from the name and named in the
+result, for their pay to be set. Imported time is history: it is marked as
+QuickBooks' on HR > Time Entries, and a pay run never picks it up. Before
+anything is written the whole file is checked, every group's hours against
+the total QuickBooks printed for it; a file that fails is refused whole. A
+second upload posts nothing twice; a row QuickBooks holds twice is two
+entries. Durations read as 2.25 or 2:15. Built against a real consultancy's
+half-year of timesheets (6,277 entries, every total matched); the fixture
+is invented timesheets in that layout.
+
+**The migration guide says what does not come across yet** (#323): payroll
+history, estimates and purchase orders as documents, inventory on hand,
+memorized transactions and attachments; each gets built around a real
+export someone sends.
+
+**From the gate's first round** (Windows W-1 to W-4; macOS NEW-122 to
+NEW-124): the imported entries list on Journal Entries, and their Type reads
+"QuickBooks Desktop import"; the result counts them ("Imported 8 records",
+not 0); the Import from Report CSV panel names Transaction Detail by
+Account; and a lists IIF's bank and credit card accounts come in as
+registers, so Banking lists them (they came in as plain accounts).
+
+**From the gate's second round** (macOS NEW-125, NEW-126): a lists IIF's
+credit card accounts (CCARD) come in as liabilities; they fell back to
+expense accounts, which the register flag then put on Banking as cards. A
+journal entry's view no longer prints "- " before an account with no
+number.
+
+**From the gate's third round** (Windows W-5, macOS NEW-127, both older):
+the lists IIF import matched an account by its leaf name alone, or by its
+number alone, whatever its type, and merged in silence: an income
+sub-account "Maintenance & Repairs" landed in the expense account of that
+name, "Retained Earnings" (3100 in the file) in the chart's 3100 Owner's
+Draw. An account is its whole path now, matched under the same parents and
+of the same type; a number alone never matches, and a number the chart
+already uses is dropped with a note; QuickBooks' own names the chart knows
+("Inventory Asset" is 1300 Inventory) still match, named in the result; an
+account of another type with the same name is created beside it, with a
+note. And a second upload of the same lists posted every opening balance
+again, doubling them all: a balance an earlier import posted is not posted
+again, and the result says how many were left alone.
+
+**From the gate's fourth round** (macOS NEW-128): lists first imported on
+an older version, whose matching merged accounts wrongly, and imported
+again on this one made the right accounts beside the wrong ones and posted
+their balances a second time, the same debt twice. Opening balances come
+with a company's first import of the lists; a later import posts none, and
+names the accounts it created that carry a balance in the file, for the
+person to enter any that are real by hand.
+
+**From the gate's fifth round** (Windows W-6; macOS NEW-129, older): that
+note names every account it created with a balance in the file, however
+many (it stopped at twelve, "and 15 more", and the rest appeared nowhere);
+the list of accounts matched to the chart by a name it knows is whole too.
+On the dashboard's A/R Aging bar, the light theme's 31-60 slice printed its
+figure in black on a bright orange, which WCAG 2's arithmetic clears and
+the eye does not; the slice is a deeper orange now and its figure prints
+white.
+
+**From the gate's seventh round** (macOS NEW-130 to NEW-135; Windows W-7
+to W-11): a timesheet in QuickBooks' Minutes format imports (0:20 three
+times under a total of 1:00 was refused as short: totals are compared in
+whole minutes now, and a decimal that is minutes shown to two places counts
+as those minutes); a Total the Excel export writes as a formula reads from
+the value Excel computed for it, and a Total that cannot be read refuses
+the file instead of being passed over; the New Pay Run form's time column
+leaves imported time out, and a run with nothing else to pay says the
+approved time there came from QuickBooks; the report file input takes
+.xlsx; the result names the report it read (by Name by Job, or by Job by
+Name); a seam between the aging bar's slices keeps two bands of one
+lightness apart; and What's new says the statements changed their order.
+
+**From the gate's eighth round** (Windows W-12, macOS NEW-137, NEW-138):
+the Trial Balance and General Ledger name a sub-account by its path and
+number too, on the page, in the CSV and in the PDF (they took the
+statements' order and printed "6210 Fuel" after a parent with no balance);
+and a Minutes-format timesheet opened in Excel or Numbers and saved as
+.xlsx, whose durations became times of day (00:20:00), imports.
+
+Schema: five nullable columns on time entries (the import's source and
+row fingerprint, billing status, service item, customer or job label),
+migration `b1c2d3e4f5a6`. 556 API operations.
+
 ### v2.23.3 — Voids that always post, and imported invoices paid once
 
 **Voiding never fails on a long line memo** (#318, PR #319, @Justin-Rezamp).

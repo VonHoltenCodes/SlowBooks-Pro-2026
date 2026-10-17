@@ -112,10 +112,12 @@ const IIFPage = {
                         report's <strong>Open Balance</strong> column — add that column, or every
                         invoice comes in open; upload again with it and the open ones here are marked
                         paid), <strong>Deposit Detail</strong>, or <strong>Check Detail</strong> (both
-                        import as journal entries on your bank account). Keep the report's default
+                        import as journal entries on your bank account), or <strong>Transaction Detail
+                        by Account</strong> with the dates set to All (every transaction of every type
+                        as a journal entry; import the lists IIF first); or, for timesheets, <strong>Time by Name by Job detail</strong> or <strong>Time by Job by Name detail</strong> (Reports > Jobs, Time &amp; Mileage), saved as CSV or Excel: every entry becomes an approved time entry under its employee, marked as QuickBooks' so no pay run picks it up. Keep the report's default
                         columns. Safe to re-upload — what is already here is skipped.
                     </p>
-                    <input type="file" id="qbcsv-file-input" aria-label="QuickBooks report CSV file" accept=".csv" style="font-size:11px; margin-bottom:8px;">
+                    <input type="file" id="qbcsv-file-input" aria-label="QuickBooks report file (CSV or Excel)" accept=".csv,.xlsx" style="font-size:11px; margin-bottom:8px;">
                     <div>
                         <button class="btn btn-primary" onclick="IIFPage.importQbReportCsv()">Import Report CSV</button>
                     </div>
@@ -141,7 +143,7 @@ const IIFPage = {
 
     async importQbReportCsv() {
         const input = $('#qbcsv-file-input');
-        if (!input?.files[0]) { toast('Choose a CSV file first', 'error'); return; }
+        if (!input?.files[0]) { toast('Choose a file first', 'error'); return; }
         const formData = new FormData();
         formData.append('file', input.files[0]);
         try {
@@ -150,12 +152,12 @@ const IIFPage = {
             if (!res.ok) throw new Error(await API.responseError(res, 'Import failed'));
             const result = await res.json();
 
-            const kindLabel = { sales_receipts: 'Sales Receipts', invoices: 'Invoices', sales_and_invoices: 'Sales Receipts and Invoices', deposits: 'Deposits', checks: 'Checks' };
+            const kindLabel = { sales_receipts: 'Sales Receipts', invoices: 'Invoices', sales_and_invoices: 'Sales Receipts and Invoices', deposits: 'Deposits', checks: 'Checks', ledger: 'Transaction Detail by Account', journals: 'Journal entries', time: 'Time by Name by Job detail', time_entries: 'Time entries' };
             let html = '<div class="iif-results"><h4>Results</h4>';
             if (result.detected) {
-                html += `<div class="result-row"><span>Detected report</span><span class="result-count">${kindLabel[result.detected] || result.detected}</span></div>`;
+                html += `<div class="result-row"><span>Detected report</span><span class="result-count">${escapeHtml(result.report || kindLabel[result.detected] || result.detected)}</span></div>`;
             }
-            for (const key of ['sales_receipts', 'invoices', 'deposits', 'checks']) {
+            for (const key of ['sales_receipts', 'invoices', 'deposits', 'checks', 'journals', 'time_entries']) {
                 if (result[key] > 0) {
                     html += `<div class="result-row"><span>${kindLabel[key]}</span><span class="result-count">${result[key]} imported</span></div>`;
                 }
@@ -183,7 +185,7 @@ const IIFPage = {
                 html += '</div>';
             }
             $('#qbcsv-import-result').innerHTML = html;
-            const total = (result.sales_receipts || 0) + (result.invoices || 0) + (result.deposits || 0) + (result.checks || 0);
+            const total = (result.sales_receipts || 0) + (result.invoices || 0) + (result.deposits || 0) + (result.checks || 0) + (result.journals || 0) + (result.time_entries || 0);
             IIFPage._reportImport(total, (result.errors || []).length);
         } catch (err) {
             toast(err.message, 'error');

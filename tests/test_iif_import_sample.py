@@ -73,7 +73,10 @@ def test_sample_opening_balance_journal_is_balanced(db_session, seed_accounts):
     assert total_dr == total_cr
     # Maintainer's closing comment reports $336,050.25 on each side against this
     # exact file. Pin it so any regression in OBAMOUNT parsing/aggregation shows up.
-    assert total_dr == Decimal("336050.25")
+    # the file's positive OBAMOUNTs, un-netted: 336,050.25 while the import
+    # merged accounts by leaf name or number alone (2.23.4 gate, W-5), which
+    # netted an income sub-account against an expense of the same leaf name
+    assert total_dr == Decimal("344179.75")
 
 
 def test_sample_quoted_amount_parsing(db_session, seed_accounts):

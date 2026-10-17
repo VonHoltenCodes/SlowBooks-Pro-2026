@@ -48,14 +48,18 @@ def _source(key: str):
     return entry
 
 
-def _sheet_as_csv(content: bytes) -> str:
+def _sheet_as_csv(content: bytes, computed: bool = False) -> str:
     """An Excel workbook's first sheet as CSV text, cells as they read:
     QuickBooks Online exports its reports and lists as .xlsx, with every
     figure as formula text ("=23683.16") and labels indented by spaces, and
-    both survive this pass for the dialect to read."""
+    both survive this pass for the dialect to read. With `computed`, a
+    formula cell reads as the value Excel last computed for it, when the
+    file carries one (QuickBooks Desktop's timesheet report writes its
+    Total rows as =ROUND(SUM(...),5); 2.23.4 gate, NEW-132); a formula
+    without a computed value stays as its text."""
     import csv
     import io
-    from datetime import date, datetime
+    from datetime import date, datetime, time, timedelta
 
     try:
         import openpyxl
@@ -73,9 +77,31 @@ def _sheet_as_csv(content: bytes) -> str:
             status_code=400, detail="The .xlsx file could not be read as a workbook"
         )
     sheet = book.worksheets[0]
+    computed_rows = None
+    if computed:
+        try:
+            values = openpyxl.load_workbook(
+                io.BytesIO(content), read_only=True, data_only=True
+            )
+            computed_rows = values.worksheets[0].iter_rows(values_only=True)
+        except Exception:
+            computed_rows = None
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     for row in sheet.iter_rows(values_only=True):
+        cached = next(computed_rows, None) if computed_rows is not None else None
+        if cached is not None:
+            row = tuple(
+                (
+                    cached[i]
+                    if isinstance(cell, str)
+                    and cell.startswith("=")
+                    and i < len(cached)
+                    and cached[i] is not None
+                    else cell
+                )
+                for i, cell in enumerate(row)
+            )
         cells = []
         for cell in row:
             if cell is None:
@@ -84,6 +110,14 @@ def _sheet_as_csv(content: bytes) -> str:
                 cells.append(cell.strftime("%m/%d/%Y"))
             elif isinstance(cell, date):
                 cells.append(cell.strftime("%m/%d/%Y"))
+            elif isinstance(cell, time):
+                # a duration Excel took for a time of day ("0:20" in a
+                # Minutes-format timesheet): hours and minutes (NEW-137)
+                cells.append(f"{cell.hour}:{cell.minute:02d}")
+            elif isinstance(cell, timedelta):
+                # a duration past a day, as Excel keeps [h]:mm
+                minutes = int(round(cell.total_seconds() / 60))
+                cells.append(f"{minutes // 60}:{minutes % 60:02d}")
             elif isinstance(cell, float) and cell.is_integer():
                 cells.append(str(int(cell)))
             else:

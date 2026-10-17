@@ -63,12 +63,13 @@ def list_journal_entries(source_type: str = None, db: Session = Depends(get_db))
         # opening balances) are journal entries too, and list here (2.23.2,
         # NEW-118); their Type names the source.
         from app.routes.migration import SOURCES
+        from app.services.qb_ledger_import import SOURCE_TYPE as QB_LEDGER
 
         imported = [source_type for _, _, source_type in SOURCES.values()]
         q = q.filter(
             or_(
                 Transaction.source_type.in_(
-                    ["manual", "qbo_journal", "iif_import", *imported]
+                    ["manual", "qbo_journal", "iif_import", QB_LEDGER, *imported]
                 ),
                 (Transaction.source_type == "qbo_ledger")
                 & Transaction.id.in_(report_journals),

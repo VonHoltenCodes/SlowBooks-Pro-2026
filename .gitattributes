@@ -8,3 +8,7 @@ docker-entrypoint.sh text eol=lf
 
 # Preserve the byte shape of the real Bank of America export fixture.
 tests/fixtures/bofa_detail_real_shape.csv -text whitespace=cr-at-eol
+
+# QuickBooks Desktop report fixtures stay byte for byte as QuickBooks writes
+# them (CRLF, the Windows code page), as the real exports do.
+tests/fixtures/qb_desktop/*.csv -text

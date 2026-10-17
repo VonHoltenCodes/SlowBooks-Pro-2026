@@ -195,5 +195,13 @@ async def csv_import_qb_report(
     Deposit Detail, or Check Detail."""
     from app.services.qb_report_import import import_qb_report
 
-    content = _decode_csv_upload(await read_limited(file, label="CSV file"))
+    raw = await read_limited(file, label="CSV file")
+    if (file.filename or "").lower().endswith(".xlsx"):
+        # a report saved as Excel (the timesheet reports usually are, #323):
+        # its first sheet, cells as they read
+        from app.routes.migration import _sheet_as_csv
+
+        content = _sheet_as_csv(raw, computed=True)
+    else:
+        content = _decode_csv_upload(raw)
     return import_qb_report(db, content)

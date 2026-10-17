@@ -581,7 +581,10 @@ const ReportsPage = {
             const accounts = await ReportsPage._drillAccounts(back, range, params.class_id);
             const data = await API.get(`/reports/account-transactions?${q.toString()}`);
             if (jobOn && !jobName) jobName = data.job_name;
-            $('#modal-title').textContent = title(data.account.name, data.class_name);
+            // the title reads as the row that opened it (a statement's row
+            // says "4000 - Service Income", W-8) while it shows that account;
+            // once the toolbar re-scopes it, the server's name
+            $('#modal-title').textContent = title(accountName && data.account.id === accountId ? accountName : data.account.name, data.class_name);
             // Rebuilt from the address, the class's name arrives now
             if (backToClass && !className && data.class_name) {
                 const btn = $('#modal-body [data-back-to="profit-loss-class"]');
@@ -1032,21 +1035,21 @@ const ReportsPage = {
             await ReportsPage.profitLossOfClass(prefill.class_id, null, prefill);
             return;
         }
-        await ReportsPage.openPeriodModal(T("Profit & Loss"), "this_year_to_date", async (_period, range) => {
-            const data = await API.get(`/reports/profit-loss?start_date=${range.start}&end_date=${range.end}`);
-            const pdfBtn = ReportsPage._exportButtons('profit-loss', `start_date=${range.start}&end_date=${range.end}`);
+        await ReportsPage.openPeriodModal(T("Profit & Loss"), "this_year_to_date", async (_period, range, params) => {
+            const data = await API.get(`/reports/profit-loss?start_date=${range.start}&end_date=${range.end}${ReportsPage._sortQs(params)}`);
+            const pdfBtn = ReportsPage._exportButtons('profit-loss', `start_date=${range.start}&end_date=${range.end}${ReportsPage._sortQs(params)}`);
             // Build the onclick payload outside the template so we can
             // HTML-escape the embedded double quotes from JSON.stringify().
             // Otherwise the inner " breaks the outer onclick="…" attribute.
             const drillCall = (i) => escapeHtml(
-                `ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_name)},${JSON.stringify(range.start)},${JSON.stringify(range.end)},null,null,'profit-loss')`
+                `ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_label || i.account_name)},${JSON.stringify(range.start)},${JSON.stringify(range.end)},null,null,'profit-loss')`
             );
             const section = (items) => {
                 if (!items.length) return `<tr><td colspan="2" style="color:var(--gray-400);">None</td></tr>`;
                 return items.map(i =>
                     `<tr><td style="padding-left:24px;">
                         <a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;"
-                           onclick="${drillCall(i)}">${escapeHtml(i.account_name)}</a>
+                           onclick="${drillCall(i)}">${escapeHtml(i.account_label || i.account_name)}</a>
                         </td><td class="amount">${formatCurrency(i.amount)}</td></tr>`
                 ).join("");
             };
@@ -1067,20 +1070,42 @@ const ReportsPage = {
                         <tr style="font-weight:700; font-size:15px; background:var(--primary-light);"><td>${T('Net Income')}</td><td class="amount">${formatCurrency(data.net_income)}</td></tr>
                     </tbody>
                 </table></div>`;
-        }, "Dates", false, { reportType: 'profit_loss', view: 'profit-loss', prefill });
+        }, "Dates", false, { reportType: 'profit_loss', view: 'profit-loss', prefill, ...ReportsPage._sortOpts(prefill) });
+    },
+
+    // The accounts' order on the two statements (#326): by number, then
+    // name, as the Trial Balance lists them (the server's default), or by
+    // name; a sub-account under its parent either way. The choice is a
+    // report param, so it rides on the address, into a saved report and
+    // into the PDF and CSV, and the toolbar's select is drawn once beside
+    // Dates.
+    _sortOpts(prefill) {
+        const sort = prefill && prefill.sort === 'name' ? 'name' : '';
+        const params = sort ? { sort } : {};
+        const toolbar = `<div class="form-group">
+                    <label for="report-sort-select">Sort by</label>
+                    <select id="report-sort-select" data-no-search onchange="ReportsPage.setParam('sort', this.value === 'name' ? 'name' : '')">
+                        <option value="number" ${sort ? '' : 'selected'}>Account number</option>
+                        <option value="name" ${sort ? 'selected' : ''}>Account name</option>
+                    </select>
+                </div>`;
+        return { params, toolbar };
+    },
+    _sortQs(params) {
+        return params && params.sort === 'name' ? '&sort=name' : '';
     },
 
     async balanceSheet(prefill) {
-        await ReportsPage.openPeriodModal(T("Balance Sheet"), "this_year_to_date", async (_period, params) => {
-            const data = await API.get(`/reports/balance-sheet?as_of_date=${params.as_of_date}`);
-            const pdfBtn = ReportsPage._exportButtons('balance-sheet', `as_of_date=${params.as_of_date}`);
+        await ReportsPage.openPeriodModal(T("Balance Sheet"), "this_year_to_date", async (_period, params, live) => {
+            const data = await API.get(`/reports/balance-sheet?as_of_date=${params.as_of_date}${ReportsPage._sortQs(live)}`);
+            const pdfBtn = ReportsPage._exportButtons('balance-sheet', `as_of_date=${params.as_of_date}${ReportsPage._sortQs(live)}`);
             const drillCall = (i) => escapeHtml(
-                `ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_name)},null,${JSON.stringify(params.as_of_date)},null,null,'balance-sheet')`
+                `ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_label || i.account_name)},null,${JSON.stringify(params.as_of_date)},null,null,'balance-sheet')`
             );
             const section = (items) => items.map(i =>
                 `<tr><td style="padding-left:24px;">
                     <a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;"
-                       onclick="${drillCall(i)}">${escapeHtml(i.account_name)}</a>
+                       onclick="${drillCall(i)}">${escapeHtml(i.account_label || i.account_name)}</a>
                     </td><td class="amount">${formatCurrency(i.amount)}</td></tr>`
             ).join("") || `<tr><td colspan="2" style="color:var(--gray-400);">None</td></tr>`;
             return `${pdfBtn}
@@ -1099,7 +1124,7 @@ const ReportsPage = {
                         <tr style="font-weight:600; background:var(--gray-50);"><td>${T('Total Equity')}</td><td class="amount">${formatCurrency(data.total_equity)}</td></tr>
                     </tbody>
                 </table></div>`;
-        }, "As Of", true, { reportType: 'balance_sheet', view: 'balance-sheet', prefill });
+        }, "As Of", true, { reportType: 'balance_sheet', view: 'balance-sheet', prefill, ...ReportsPage._sortOpts(prefill) });
     },
 
     async salesTax(prefill) {
@@ -1196,13 +1221,17 @@ const ReportsPage = {
                 // one is. The onclick payload is built outside the template and
                 // HTML-escaped, as profitLoss does, so JSON.stringify's quotes
                 // can't break the attribute.
+                // each account's heading: its number, then its path, a
+                // sub-account under its parents ("8610 — Automobile: Fuel"),
+                // as the statements' rows read (2.23.4 gate, W-12)
                 const drillCall = (acct) => escapeHtml(
-                    `ReportsPage.openDrillDown(${acct.account_id},${JSON.stringify(acct.account_name)},${JSON.stringify(range.start)},${JSON.stringify(range.end)},${data.class_id || null},${JSON.stringify(cls || null)},'general-ledger')`
+                    `ReportsPage.openDrillDown(${acct.account_id},${JSON.stringify(acct.account_path || acct.account_name)},${JSON.stringify(range.start)},${JSON.stringify(range.end)},${data.class_id || null},${JSON.stringify(cls || null)},'general-ledger')`
                 );
                 for (const acct of data.accounts) {
+                    const words = acct.account_path || acct.account_name;
                     const name = acct.account_id
-                        ? `<a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${drillCall(acct)}">${escapeHtml(acct.account_name)}</a>`
-                        : escapeHtml(acct.account_name);
+                        ? `<a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${drillCall(acct)}">${escapeHtml(words)}</a>`
+                        : escapeHtml(words);
                     html += `<h3 style="margin:12px 0 4px; font-size:12px; color:var(--qb-navy);">${escapeHtml(acct.account_number)} &mdash; ${name}</h3>`;
                     html += `<div class="table-container"><table>
                         <thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th><th scope="col">Source</th><th scope="col">${T('Class')}</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th><th scope="col" class="amount">Balance</th></tr></thead><tbody>`;
@@ -1397,8 +1426,8 @@ const ReportsPage = {
             // An account's name opens its register for the report's dates
             // (R9), with "Back to Trial Balance"
             const drill = (i) => i.account_id
-                ? ReportsPage._rowLink(`ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_name)},${JSON.stringify(range.start)},${JSON.stringify(range.end)},null,null,'trial-balance')`, i.account_name, `drill:${i.account_id}`)
-                : escapeHtml(i.account_name);
+                ? ReportsPage._rowLink(`ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_path || i.account_name)},${JSON.stringify(range.start)},${JSON.stringify(range.end)},null,null,'trial-balance')`, i.account_path || i.account_name, `drill:${i.account_id}`)
+                : escapeHtml(i.account_path || i.account_name);
             let rows = data.items.map(i =>
                 `<tr>
                     <td>${escapeHtml(i.account_number)}</td>

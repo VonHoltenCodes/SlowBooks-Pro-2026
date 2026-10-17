@@ -96,9 +96,58 @@ books is renamed. Look over the examples first: a name that should stay in
 capitals (a company's initials) may not. A transactions file imported later
 still finds each name, whichever way it spells it.
 
-### Transactions need one extra step
+Opening balances come with the **first** import of the lists. Importing the
+lists again later (to pick up new customers or vendors, say) posts none; the
+result names any account it created that carries a balance in the file, so
+you can enter the real ones by hand.
 
-Desktop does not export transactions to IIF natively. Two options:
+### Transactions: the Transaction Detail by Account report
+
+The simplest way to bring every transaction across: in QuickBooks Desktop,
+**Reports > Accountant & Taxes > Transaction Detail by Account**, set the
+dates to **All**, and save it as CSV (keep the report's default columns).
+Import your lists IIF first, then upload the report under
+**Interoperability → Import from Report CSV**. Every deposit, check,
+transfer, general journal entry and opening balance comes across as a
+journal entry with its date, number, name and memo, and each account ends
+with the balance QuickBooks shows. The file is checked first and refused
+whole if anything is off, and uploading it again posts nothing twice.
+
+Journal entries carry the history; the A/R and A/P aging read invoices and
+bills, so a company that invoices in QuickBooks brings its open invoices in
+from the invoice report below.
+
+### Time: the Time by Name by Job detail report
+
+QuickBooks Desktop does not export timesheets to IIF (it only imports them),
+so the way across is a report: **Reports > Jobs, Time & Mileage > Time by
+Name by Job detail** (Time by Job by Name detail reads the same), with the
+dates set to **All**, saved as CSV or Excel. Upload it under
+Interoperability → Import from Report CSV. Every row becomes an approved
+time entry under its employee, with the hours (2.25 or 2:15; QuickBooks'
+minutes are kept exact, and an Excel file's Total rows read from the values
+Excel computed), the notes, the
+service item, the billing status (not billable, unbilled, billed) and the
+customer or job label as QuickBooks printed it; the entry links to the job
+when the label is one on the Jobs list, so import the lists IIF first for
+the customer:jobs. A person who is not on the Employees list is added from
+the name and named in the result; set their pay type and rate on the
+Employees page. Imported time is history: HR → Time Entries shows it marked
+as QuickBooks', and a pay run never picks it up. The whole file is checked
+against QuickBooks' own Total rows before anything is written, and refused
+whole if it does not add up; a second upload posts nothing twice.
+
+### What does not come across yet
+
+Payroll history (pay stubs and liabilities), estimates and purchase orders
+as documents, inventory on hand, memorized transactions and attachments.
+Each importer here was built around a real export someone sent; if one of
+these is in your way, open an issue with a sample export (change the names)
+and it gets built in.
+
+### Other transaction reports
+
+Desktop does not export transactions to IIF natively. Two other options:
 
 - **A third-party IIF transaction exporter** (several exist for QB
   Desktop). The importer understands `INVOICE`, `PAYMENT`,

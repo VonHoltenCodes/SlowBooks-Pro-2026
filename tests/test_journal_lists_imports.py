@@ -37,6 +37,9 @@ def test_every_migration_sources_journals_list(client, db_session, seed_accounts
     for key, (_label, _module, source_type) in SOURCES.items():
         posted[source_type] = _journal(db_session, source_type, f"{key} journal").id
     posted["iif_import"] = _journal(db_session, "iif_import", "IIF opening").id
+    posted["qb_ledger_import"] = _journal(
+        db_session, "qb_ledger_import", "Desktop ledger"
+    ).id
     posted["manual"] = _journal(db_session, "manual", "by hand").id
     # a document's own posting stays off the list, as before
     invoice_posting = _journal(db_session, "invoice", "an invoice's posting").id

@@ -51,6 +51,18 @@ class TimeEntry(Base):
     job_cost_id = Column(Integer, ForeignKey("job_costs.id"), nullable=True)
     notes = Column(Text, nullable=True)
 
+    # Time that came from QuickBooks Desktop's Time by Name by Job detail
+    # report (#323): the importer's name (a pay run never sweeps imported
+    # history; a second upload posts nothing twice, by source_ref), the
+    # report's billing status (not_billable, unbilled, billed), its service
+    # item and the customer or job label as QuickBooks printed it, kept
+    # even when it is no job on the Jobs list. NULL on time entered here.
+    source = Column(String(40), nullable=True)
+    source_ref = Column(String(64), nullable=True, index=True)
+    billing = Column(String(20), nullable=True)
+    service = Column(String(200), nullable=True)
+    customer_job = Column(String(300), nullable=True)
+
     status = Column(Enum(TimeEntryStatus), default=TimeEntryStatus.DRAFT)
     approved_by = Column(String(200), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)

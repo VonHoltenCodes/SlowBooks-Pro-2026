@@ -267,6 +267,7 @@ _WELL_KNOWN_ACCOUNTS = {
     "a/r": "1100",
     "trade receivables": "1100",
     "undeposited funds": "1200",
+    "inventory asset": "1300",  # QuickBooks' name for the inventory account
     "accounts payable": "2000",
     "a/p": "2000",
     "trade payables": "2000",
@@ -333,6 +334,32 @@ def _find_account(db: Session, name: str) -> Account:
             return candidates[0]
 
     return None
+
+
+def _account_at_path(db: Session, segments: list, acct_type=None):
+    """The account whose name is the last of ``segments`` (in any case) and
+    which sits under exactly the parents before it (none for a top-level
+    name); of the type given, when several share the path."""
+    if not segments:
+        return None
+    leaf, parents = segments[-1], segments[:-1]
+    candidates = (
+        db.query(Account)
+        .filter(func.lower(Account.name) == leaf.lower())
+        .order_by(Account.id)
+        .all()
+    )
+    found = [
+        acct
+        for acct in candidates
+        if (_under(acct, parents) if parents else acct.parent_id is None)
+    ]
+    if acct_type is not None:
+        typed = [acct for acct in found if acct.account_type == acct_type]
+        if typed:
+            return typed[0]
+        return None if found else None
+    return found[0] if found else None
 
 
 def _under(acct: Account, parents: list) -> bool:
@@ -444,6 +471,32 @@ def import_accounts(db: Session, rows: list) -> dict:
     # Sort so parents come before children (fewer colons first)
     rows.sort(key=lambda r: r.get("NAME", "").count(":"))
 
+    # Opening balances an earlier import of the lists already posted: an
+    # account's balance is posted once. A second upload of the same lists
+    # posted every balance again (2.23.4 gate, NEW-127).
+    from app.models.transactions import Transaction, TransactionLine
+
+    already_opened = {
+        aid
+        for (aid,) in db.query(TransactionLine.account_id)
+        .join(Transaction, Transaction.id == TransactionLine.transaction_id)
+        .filter(
+            Transaction.source_type == "iif_import",
+            Transaction.reference == "IIF-OPENING",
+        )
+    }
+    # Opening balances come with a company's FIRST import of the lists. A
+    # later import posts none: lists imported on an older version, whose
+    # matching merged accounts wrongly, and imported again here would make
+    # the right accounts beside the wrong ones and post their balances a
+    # second time, the same debt twice (2.23.4 gate, NEW-128). Accounts
+    # created now that carry a balance in the file are named instead, for
+    # the person to enter any that are real.
+    opened_before = bool(already_opened)
+    not_again = 0
+    unposted: list[str] = []
+    merged: list[str] = []
+
     for i, row in enumerate(rows):
         sp = db.begin_nested()  # savepoint — isolate per-row failures
         try:
@@ -457,41 +510,56 @@ def import_accounts(db: Session, rows: list) -> dict:
             acct_type = IIF_TO_ACCOUNT_TYPE.get(iif_type, AccountType.EXPENSE)
             acct_num = row.get("ACCNUM", "").strip() or None
 
-            # Handle parent:child names
-            parent_id = None
-            if ":" in full_name:
-                parts = full_name.split(":")
-                name = parts[-1].strip()
-                parent_name = parts[-2].strip()
-                parent = _named(db, Account, parent_name)
-                if parent:
-                    parent_id = parent.id
-            else:
-                name = full_name
-
-            # Check duplicates by name OR account_number (account_number has a
-            # unique constraint, so a name-only check misses cases where the
-            # seeded chart-of-accounts uses a slightly different label,
-            # e.g. "Opening Balance Equity" vs IIF's "Opening Bal Equity").
-            dup_q = db.query(Account).filter(Account.name == name)
-            if acct_num:
-                dup_q = db.query(Account).filter(
-                    (Account.name == name) | (Account.account_number == acct_num)
-                )
-            existing = dup_q.first()
+            # An account is its whole path. "Job Expenses:Job Materials:
+            # Fountains & Garden Lighting" (an expense) and "Landscaping
+            # Services:Job Materials:Fountains & Garden Lighting" (income)
+            # share a leaf and a parent's name and are two accounts; the
+            # import matched by the leaf alone, or by the number alone, and
+            # merged them in silence (2.23.4 gate, W-5). The match is the
+            # same leaf under the same parents, of the same type; a
+            # top-level QuickBooks name the chart knows by another name
+            # (_WELL_KNOWN_ACCOUNTS) is that account; a number is never a
+            # match by itself.
+            segments = [part.strip() for part in full_name.split(":") if part.strip()]
+            name = segments[-1]
+            parent = _account_at_path(db, segments[:-1]) if len(segments) > 1 else None
+            parent_id = parent.id if parent is not None else None
+            existing = _account_at_path(db, segments, acct_type)
+            if existing is None and len(segments) == 1:
+                known = _WELL_KNOWN_ACCOUNTS.get(name.lower())
+                if known:
+                    candidate = (
+                        db.query(Account)
+                        .filter(Account.account_number == known)
+                        .first()
+                    )
+                    if candidate is not None and candidate.account_type == acct_type:
+                        existing = candidate
+                        if candidate.name.lower() != name.lower():
+                            merged.append(
+                                f"'{full_name}' is the chart's "
+                                f"{candidate.account_number} {candidate.name}"
+                            )
             if existing is None:
-                # the same name in another case is the same account (_named)
-                existing = _named(db, Account, name)
+                other = _account_at_path(db, segments)
+                if other is not None:
+                    warnings.append(
+                        f"'{full_name}' is a{'n' if acct_type.value[0] in 'aeiou' else ''} "
+                        f"{acct_type.value} account in the file, and the chart's "
+                        f"'{other.name}' is a{'n' if other.account_type.value[0] in 'aeiou' else ''} "
+                        f"{other.account_type.value} account: the file's was created "
+                        f"beside it, not merged into it"
+                    )
 
             # Parse OBAMOUNT (QB convention: positive = debit-side).
-            # Applied to either the newly-created account or an existing
-            # duplicate that still has a zero balance.
             obamount = _parse_decimal(row.get("OBAMOUNT", ""))
 
             if existing:
                 sp.rollback()
                 if obamount != 0:
-                    if existing.id in ob_map:
+                    if opened_before:
+                        not_again += 1
+                    elif existing.id in ob_map:
                         warnings.append(
                             f"IIF account '{full_name}' deduplicated onto existing "
                             f"'{existing.name}' which already received an opening "
@@ -504,6 +572,18 @@ def import_accounts(db: Session, rows: list) -> dict:
                         ob_first_source[existing.id] = full_name
                 continue
 
+            if acct_num:
+                clash = (
+                    db.query(Account).filter(Account.account_number == acct_num).first()
+                )
+                if clash is not None:
+                    warnings.append(
+                        f"'{full_name}' keeps its name; its number {acct_num} is the "
+                        f"chart's {clash.account_number} {clash.name}, so it comes in "
+                        f"without a number"
+                    )
+                    acct_num = None
+
             acct = Account(
                 name=name,
                 account_type=acct_type,
@@ -511,18 +591,49 @@ def import_accounts(db: Session, rows: list) -> dict:
                 description=row.get("DESC", "").strip() or None,
                 parent_id=parent_id,
                 is_active=True,
+                # QuickBooks' BANK and CCARD accounts are registers here too,
+                # so Banking lists them (they came in as plain assets and
+                # liabilities: 2.23.4 gate, W-4)
+                bank_kind={"BANK": "bank", "CCARD": "credit_card"}.get(iif_type),
             )
             db.add(acct)
             db.flush()
             if obamount != 0:
-                ob_map[acct.id] = obamount
-                ob_first_source[acct.id] = full_name
+                if opened_before:
+                    unposted.append(
+                        f"'{full_name}' {abs(obamount):,.2f} "
+                        f"{'debit' if obamount > 0 else 'credit'}"
+                    )
+                else:
+                    ob_map[acct.id] = obamount
+                    ob_first_source[acct.id] = full_name
             sp.commit()
             imported += 1
 
         except Exception as e:
             sp.rollback()
             errors.append({"row": i + 1, "message": safe_message(e, "IIF import")})
+
+    # Both lists whole, however long: the person works from them (they
+    # stopped at twelve, "and 15 more", and the rest appeared nowhere:
+    # 2.23.4 gate, W-6)
+    if merged:
+        warnings.append("Matched to the chart by a name it knows: " + "; ".join(merged))
+    if opened_before and (not_again or unposted):
+        text = (
+            "This company's opening balances came with an earlier import of the "
+            "lists, so none were posted this time"
+        )
+        if not_again:
+            text += f": {not_again} account(s) already here keep the balance they have"
+        if unposted:
+            text += (
+                f"; {len(unposted)} account(s) created now carry a balance in the "
+                "file, not posted: "
+                + "; ".join(unposted)
+                + ". Enter any that are real as an opening balance by hand"
+            )
+        warnings.append(text + ".")
 
     # Build a single opening-balance journal entry from OBAMOUNT values
     # (dropping any that summed to exactly zero after merging).

@@ -62,12 +62,12 @@ const TimeEntriesPage = {
                 html += `<tr>
                     <td>${formatDate(en.date)}</td>
                     <td>${empName}</td>
-                    <td>${escapeHtml(en.job_name || '')}${en.cost_code_label ? ` <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(en.cost_code_label)}</span>` : ''}${en.job_cost_id ? ' <span class="badge" style="font-size:9px">posted</span>' : ''}</td>
+                    <td>${escapeHtml(en.job_name || en.customer_job || '')}${en.cost_code_label ? ` <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(en.cost_code_label)}</span>` : ''}${en.service ? ` <span style="font-size:10px;color:var(--text-muted)">${escapeHtml(en.service)}${en.billing ? ` · ${escapeHtml(en.billing.replace('_', ' '))}` : ''}</span>` : ''}${en.job_cost_id ? ' <span class="badge" style="font-size:9px">posted</span>' : ''}</td>
                     <td class="amount">${hrs(en.hours_regular)}</td>
                     <td class="amount">${hrs(en.hours_overtime)}</td>
                     <td class="amount">${hrs(en.hours_doubletime)}</td>
                     <td>${escapeHtml(en.notes || '')}</td>
-                    <td>${statusBadge(en.status)}${en.pay_run_id ? ' <span class="badge" style="font-size:9px">paid</span>' : ''}</td>
+                    <td>${statusBadge(en.status)}${en.pay_run_id ? ' <span class="badge" style="font-size:9px">paid</span>' : ''}${en.source ? ' <span class="badge" style="font-size:9px" title="Imported from QuickBooks; never paid by a pay run">QuickBooks</span>' : ''}</td>
                     <td class="actions">
                         ${undecided ? `<button class="btn btn-sm btn-primary" onclick="TimeEntriesPage.approve(${en.id})">Approve</button>` : ''}
                         ${undecided ? `<button class="btn btn-sm btn-secondary" onclick="TimeEntriesPage.reject(${en.id})">Reject</button>` : ''}

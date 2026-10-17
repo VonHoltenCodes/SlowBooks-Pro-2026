@@ -251,8 +251,10 @@ def pay_period_summary(
     """Hours-by-employee summary for an upcoming pay period.
 
     The hours are approved entries that haven't been swept into a pay run
-    yet (pay_run_id IS NULL) — same filter the pay-run create flow applies
-    when `use_time_entries=true`. `pending_count` / `pending_hours` are the
+    yet (pay_run_id IS NULL) and were entered here — same filter the
+    pay-run create flow applies when `use_time_entries=true`; time imported
+    from QuickBooks (source set) is history it never pays, so the form
+    never shows it (2.23.4 gate, W-11 / NEW-131). `pending_count` / `pending_hours` are the
     entries in the period still waiting for approval (draft or submitted),
     which that flow will not pay. The SPA uses this to pre-fill / preview
     the "Calculate Payroll" form and to warn before a run leaves time unpaid.
@@ -272,6 +274,7 @@ def pay_period_summary(
                 ]
             ),
             TimeEntry.pay_run_id.is_(None),
+            TimeEntry.source.is_(None),
             TimeEntry.date >= period_start,
             TimeEntry.date <= period_end,
         )

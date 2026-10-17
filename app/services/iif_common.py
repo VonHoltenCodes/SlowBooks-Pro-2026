@@ -22,6 +22,9 @@ IIF_TO_ACCOUNT_TYPE = {
     "OASSET": AccountType.ASSET,
     "FIXASSET": AccountType.ASSET,
     "AP": AccountType.LIABILITY,
+    # a credit card is what is owed on it (it fell back to EXPENSE: 2.23.4
+    # gate, NEW-125)
+    "CCARD": AccountType.LIABILITY,
     "OCLIAB": AccountType.LIABILITY,
     "LTLIAB": AccountType.LIABILITY,
     "EQUITY": AccountType.EQUITY,
