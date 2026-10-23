@@ -56,24 +56,57 @@ def _refuse_duplicate_name(db: Session, name, exclude_id=None) -> None:
         )
 
 
+def item_code_key(code) -> str:
+    """An item code as the uniqueness check compares it: trimmed, capitals
+    ignored (#445). Compared in Python for the reason names are."""
+    return str(code or "").strip().casefold()
+
+
+def find_item_with_code(db: Session, code, exclude_id=None):
+    """The item, active or not, that already carries this code, or None.
+    Inactive items count: the unique index covers them too."""
+    key = item_code_key(code)
+    if not key:
+        return None
+    q = db.query(Item).filter(Item.code.isnot(None))
+    if exclude_id is not None:
+        q = q.filter(Item.id != exclude_id)
+    return next((it for it in q.all() if item_code_key(it.code) == key), None)
+
+
+def _refuse_duplicate_code(db: Session, code, exclude_id=None) -> None:
+    """One code finds one item (#445), so a second is refused before the
+    index would turn it into a 500."""
+    clash = find_item_with_code(db, code, exclude_id)
+    if clash:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Item code {code} is already used by {clash.name}.",
+        )
+
+
 @router.get("", response_model=list[ItemResponse])
 def list_items(
     active_only: bool = False,
     inactive_only: bool = False,
     item_type: str = None,
     search: str = None,
+    q: str = None,
     db: Session = Depends(get_db),
 ):
-    q = db.query(Item)
+    term = (q or search or "").strip()
+    query = db.query(Item)
     if active_only:
-        q = q.filter(Item.is_active)
+        query = query.filter(Item.is_active)
     if inactive_only:  # the list page's Inactive view (#210)
-        q = q.filter(Item.is_active.is_(False))
+        query = query.filter(Item.is_active.is_(False))
     if item_type:
-        q = q.filter(Item.item_type == item_type)
-    if search:
-        q = q.filter(Item.name.ilike(f"%{search}%"))
-    return _flag_discounts(db, q.order_by(Item.name).all())
+        query = query.filter(Item.item_type == item_type)
+    if term:
+        # name or code (#445): "2x6" finds "2x6-16 — 2x6x16 SPF" either way
+        like = f"%{term}%"
+        query = query.filter(sqla_or_(Item.name.ilike(like), Item.code.ilike(like)))
+    return _flag_discounts(db, query.order_by(Item.name).all())
 
 
 def _flag_discounts(db: Session, items):
@@ -199,6 +232,7 @@ def adjust_inventory(
 @router.post("", response_model=ItemResponse, status_code=201)
 def create_item(data: ItemCreate, db: Session = Depends(get_db)):
     _refuse_duplicate_name(db, data.name)
+    _refuse_duplicate_code(db, data.code)
     item = Item(**data.model_dump())
     db.add(item)
     db.commit()
@@ -226,6 +260,8 @@ def update_item(item_id: int, data: ItemUpdate, db: Session = Depends(get_db)):
     reactivating = update_data.get("is_active") is True and not item.is_active
     if update_data.get("is_active", item.is_active) and (renaming or reactivating):
         _refuse_duplicate_name(db, new_name, item.id)
+    if update_data.get("code"):
+        _refuse_duplicate_code(db, update_data["code"], item.id)
     for key, val in update_data.items():
         setattr(item, key, val)
     db.commit()

@@ -1,18 +1,26 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Annotated, Optional
 
-from pydantic import BaseModel
-from app.schemas.common import NonBlankName, StrictModel
+from pydantic import BaseModel, BeforeValidator, StringConstraints
+from app.schemas.common import NonBlankName, StrictModel, _blank_to_none
 from app.schemas.invoices import RateOut
 
 from app.models.items import ItemType, MovementType
+
+# An item's code (#445): trimmed, and a blank one is no code, so an empty
+# form field clears it rather than storing "".
+ItemCode = Annotated[
+    Optional[Annotated[str, StringConstraints(strip_whitespace=True, max_length=50)]],
+    BeforeValidator(_blank_to_none),
+]
 
 
 class ItemCreate(StrictModel):
     # Trimmed and never blank, as a customer's or vendor's name is: the
     # duplicate check compares trimmed names.
     name: NonBlankName
+    code: ItemCode = None
     item_type: ItemType
     description: Optional[str] = None
     rate: Decimal = Decimal("0")
@@ -29,6 +37,7 @@ class ItemCreate(StrictModel):
 
 class ItemUpdate(StrictModel):
     name: Optional[NonBlankName] = None
+    code: ItemCode = None
     item_type: Optional[ItemType] = None
     description: Optional[str] = None
     rate: Optional[Decimal] = None
@@ -45,6 +54,7 @@ class ItemUpdate(StrictModel):
 class ItemResponse(BaseModel):
     id: int
     name: str
+    code: Optional[str] = None
     item_type: ItemType
     description: Optional[str]
     rate: RateOut

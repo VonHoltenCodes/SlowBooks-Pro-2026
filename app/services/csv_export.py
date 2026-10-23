@@ -164,12 +164,16 @@ def export_items(db: Session) -> str:
     items = db.query(Item).filter(Item.is_active).all()
     output = io.StringIO()
     writer = _SafeWriter(output)
-    writer.writerow(["ID", "Name", "Type", "Description", "Rate", "Cost", "Taxable"])
+    # Code after Name (#445), as the item form shows it
+    writer.writerow(
+        ["ID", "Name", "Code", "Type", "Description", "Rate", "Cost", "Taxable"]
+    )
     for i in items:
         writer.writerow(
             [
                 i.id,
                 i.name,
+                i.code or "",
                 i.item_type.value,
                 i.description or "",
                 _rate_text(i.rate or 0),

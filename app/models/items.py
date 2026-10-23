@@ -50,6 +50,9 @@ class Item(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(200), nullable=False)
+    # A short code the item is found by ("2x6-16"), optional and unique when
+    # set (#445). The routes also refuse one that differs only in capitals.
+    code = Column(String(50), nullable=True, unique=True, index=True)
     item_type = Column(Enum(ItemType), nullable=False)
     description = Column(Text, nullable=True)
     rate = Column(Numeric(17, 4), default=0)  # unit price, to 4 places

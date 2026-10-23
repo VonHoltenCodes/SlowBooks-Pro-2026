@@ -342,10 +342,9 @@ const SalesReceiptsPage = {
     },
 
     lineRowHtml(idx, line, items) {
-        const itemOpts = items.map(i => `<option value="${i.id}" ${line.item_id==i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
         return `<tr data-line="${idx}">
             <td><select class="line-item" onchange="SalesReceiptsPage.itemSelected(${idx})">
-                <option value="">--</option>${itemOpts}</select></td>
+                ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="SalesReceiptsPage.recalc()"></td>
             <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="SalesReceiptsPage.recalc()"></td>
@@ -370,6 +369,7 @@ const SalesReceiptsPage = {
 
     itemSelected(idx) {
         const row = $(`[data-line="${idx}"]`);
+        if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), SalesReceiptsPage._items, () => SalesReceiptsPage.itemSelected(idx))) return;
         if (row && SalesLines.fillFromItem(row, SalesReceiptsPage._items)) SalesReceiptsPage.recalc();
     },
 
@@ -390,9 +390,8 @@ const SalesReceiptsPage = {
         }
         const lines = [];
         $$('#sr-lines tr').forEach((row, i) => {
-            const item_id = row.querySelector('.line-item')?.value;
             lines.push({
-                item_id: item_id ? parseInt(item_id) : null,
+                item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,

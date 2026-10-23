@@ -8,6 +8,21 @@ const ItemsPage = {
     // by default, and not drawn at all when nothing is short, so a company
     // that doesn't track stock sees nothing new.
     _reorderOnly: false,
+    // The search box (#445): name or code, over the list already loaded.
+    _query: '',
+
+    _matches(item, query) {
+        const q = (query || '').trim().toLowerCase();
+        return !q || `${item.name || ''} ${item.code || ''}`.toLowerCase().includes(q);
+    },
+
+    filter(query) {
+        ItemsPage._query = query;
+        const q = (query || '').trim().toLowerCase();
+        $$('#items-table tbody tr').forEach(row => {
+            row.style.display = !q || (row.dataset.search || '').includes(q) ? '' : 'none';
+        });
+    },
 
     toggleReorder() {
         ItemsPage._reorderOnly = !ItemsPage._reorderOnly;
@@ -30,7 +45,8 @@ const ItemsPage = {
                 <h2>Items & Services</h2>
                 <button class="btn btn-primary" onclick="ItemsPage.showForm()">+ New Item</button>
             </div>
-            <div class="toolbar">${ActiveLists.pickerHtml('items')} ${reorderBtn}</div>`;
+            <div class="toolbar">${ActiveLists.pickerHtml('items')} ${reorderBtn}
+                <input type="search" id="items-search" placeholder="Search name or code" aria-label="Search items by name or code" value="${escapeHtml(ItemsPage._query)}" oninput="ItemsPage.filter(this.value)"></div>`;
 
         if (reorderOnly && items.length === 0) {
             html += `<div class="empty-state"><p>Nothing to reorder in this list.</p></div>`;
@@ -42,9 +58,9 @@ const ItemsPage = {
                 <button class="btn btn-primary" onclick="ItemsPage.showForm()" style="margin-top:10px;">+ Create your first item</button>
             </div>`;
         } else {
-            html += `<div class="table-container"><table>
+            html += `<div class="table-container"><table id="items-table">
                 <thead><tr>
-                    <th scope="col">Name</th><th scope="col">Type</th><th scope="col">Description</th>
+                    <th scope="col">Name</th><th scope="col">Code</th><th scope="col">Type</th><th scope="col">Description</th>
                     <th scope="col" class="amount">Rate</th><th scope="col" class="amount">Cost</th>
                     <th scope="col" class="amount">Qty on Hand</th>${reorderOnly ? '<th scope="col" class="amount">Reorder point</th><th scope="col" class="amount">Short by</th>' : ''}<th scope="col">Actions</th>
                 </tr></thead><tbody>`;
@@ -63,8 +79,11 @@ const ItemsPage = {
                 // An inactive item stays in the list, marked, so it can be
                 // opened and made active again; the pickers leave it out.
                 const inactive = item.is_active === false;
-                html += `<tr${inactive ? ' class="row--dim"' : ''}>
+                const search = escapeHtml(`${item.name || ''} ${item.code || ''}`.toLowerCase());
+                const hide = ItemsPage._matches(item, ItemsPage._query) ? '' : ' style="display:none"';
+                html += `<tr${inactive ? ' class="row--dim"' : ''} data-search="${search}"${hide}>
                     <td><strong>${escapeHtml(item.name)}</strong>${inactive ? ' <span class="badge badge-draft">inactive</span>' : ''}</td>
+                    <td>${escapeHtml(item.code || '')}</td>
                     <td>${statusBadge(item.item_type)}</td>
                     <td>${escapeHtml(item.description) || ''}</td>
                     <td class="amount">${formatCurrency(item.rate)}</td>
@@ -83,7 +102,7 @@ const ItemsPage = {
     },
 
     async showForm(id = null) {
-        let item = { name:'', item_type:'service', description:'', rate:0, cost:0,
+        let item = { name:'', code:'', item_type:'service', description:'', rate:0, cost:0,
             income_account_id:'', expense_account_id:'', is_taxable:true,
             track_inventory:false, quantity_on_hand:0, reorder_point:0,
             asset_account_id:'', avg_cost:0 };
@@ -109,6 +128,8 @@ const ItemsPage = {
                 <div class="form-grid">
                     <div class="form-group"><label>Name *</label>
                         <input name="name" required maxlength="200" value="${escapeHtml(item.name)}"></div>
+                    <div class="form-group"><label>Code</label>
+                        <input name="code" maxlength="50" placeholder="Optional, e.g. 2x6-16" value="${escapeHtml(item.code || '')}"></div>
                     <div class="form-group"><label>Type *</label>
                         <select name="item_type" id="item-type-sel">
                             ${['service','product','material','labor'].map(t =>
@@ -198,6 +219,8 @@ const ItemsPage = {
         const trackInv = form.track_inventory ? form.track_inventory.checked : false;
         const data = {
             name: form.name.value,
+            // blank clears it; the server trims and keeps it unique (#445)
+            code: form.code.value.trim() || null,
             item_type: form.item_type.value,
             description: form.description.value,
             rate: parseFloat(form.rate.value) || 0,

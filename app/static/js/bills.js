@@ -306,10 +306,9 @@ const BillsPage = {
         const l = line || {};
         const item = l.item_id ? BillsPage._items.find(i => i.id == l.item_id) : null;
         const stock = !!(item && item.track_inventory);
-        const itemOpts = BillsPage._items.map(i => `<option value="${i.id}"${l.item_id == i.id ? ' selected' : ''}>${escapeHtml(i.name)}</option>`).join('');
         const acctOpts = PurchaseAccounts.options(BillsPage._accounts, stock ? null : (l.account_id || BillsPage._defaultExpenseAccountId));
         return `<tr data-billline="${idx}">
-                <td><select class="line-item" onchange="BillsPage.itemSelected(this)"><option value="">--</option>${itemOpts}</select></td>
+                <td><select class="line-item" onchange="BillsPage.itemSelected(this)">${ItemQuickAdd.options(BillsPage._items, l.item_id)}</select></td>
                 <td><select class="line-account"${stock ? ' disabled title="Stock items are recorded in Inventory"' : ''}><option value="">Choose...</option>${acctOpts}</select></td>
                 <td><input class="line-desc" value="${escapeHtml(l.description || '')}"></td>
                 ${CostCodes.cellHtml('line-cost-code', l.cost_code_id)}${Nonprofit.cellHtml('line-function', l.function, l.class_id)}
@@ -323,6 +322,7 @@ const BillsPage = {
     // Picking an item fills what it costs and where it is recorded; a stock
     // item is recorded in Inventory, so its account is not a choice.
     itemSelected(select) {
+        if (ItemQuickAdd.selected(select, BillsPage._items, () => BillsPage.itemSelected(select))) return;
         const row = select.closest('tr');
         const item = BillsPage._items.find(i => i.id == select.value);
         const acct = row.querySelector('.line-account');
@@ -494,7 +494,7 @@ const BillsPage = {
                 missing = { n: i + 1, sel: acct };
             }
             lines.push({
-                item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
+                item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 account_id: accountId,
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,

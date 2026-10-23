@@ -762,7 +762,6 @@ const InvoicesPage = {
     // came in with (a discount item, or a negative line of its own): its
     // price box takes a negative number, so the invoice saves as it is.
     lineRowHtml(idx, line, items) {
-        const itemOpts = items.map(i => `<option value="${i.id}" ${line.item_id==i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
         // The form has no job / cost-code cells, but a line may carry them
         // (job costing, the API). Keep them on the row so an edit sends them
         // back instead of stripping them from the line and its posting. The
@@ -771,7 +770,7 @@ const InvoicesPage = {
         const dim = (v) => (v == null ? '' : escapeHtml(String(v)));
         return `<tr data-line="${idx}" data-job-id="${dim(line.job_id)}" data-class-id="${dim(line.class_id)}" data-cost-code-id="${dim(line.cost_code_id)}">
             <td><select class="line-item" onchange="InvoicesPage.itemSelected(${idx})">
-                <option value="">--</option>${itemOpts}</select></td>
+                ${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             ${InvoicesPage.lineClasses() ? Nonprofit.classCellHtml('line-class', line.class_id) : ''}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="InvoicesPage.recalc()"></td>
@@ -797,6 +796,8 @@ const InvoicesPage = {
 
     itemSelected(idx) {
         const row = $(`[data-line="${idx}"]`);
+        // "+ Add item" opens the quick add; its save picks the item here (#445)
+        if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), InvoicesPage._items, () => InvoicesPage.itemSelected(idx))) return;
         if (row && SalesLines.fillFromItem(row, InvoicesPage._items)) InvoicesPage.recalc();
     },
 
@@ -851,9 +852,8 @@ const InvoicesPage = {
         const form = e.target;
         const lines = [];
         $$('#inv-lines tr').forEach((row, i) => {
-            const item_id = row.querySelector('.line-item')?.value;
             lines.push({
-                item_id: item_id ? parseInt(item_id) : null,
+                item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,

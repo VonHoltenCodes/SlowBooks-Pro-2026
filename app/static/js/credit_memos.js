@@ -145,9 +145,8 @@ const CreditMemosPage = {
 
     // One credit line, priced from the item the way an invoice line is.
     lineRowHtml(idx) {
-        const itemOpts = CreditMemosPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
         return `<tr data-cmline="${idx}">
-                <td><select class="line-item" onchange="CreditMemosPage.itemSelected(${idx})"><option value="">--</option>${itemOpts}</select></td>
+                <td><select class="line-item" onchange="CreditMemosPage.itemSelected(${idx})">${ItemQuickAdd.options(CreditMemosPage._items)}</select></td>
                 <td><input class="line-desc"></td>
                 <td><input class="line-qty" type="number" step="0.0001" value="1" oninput="CreditMemosPage.recalc()"></td>
                 <td><input class="line-rate" type="number" step="0.0001" min="0" value="0" oninput="CreditMemosPage.recalc()"></td>
@@ -171,6 +170,7 @@ const CreditMemosPage = {
 
     itemSelected(idx) {
         const row = $(`[data-cmline="${idx}"]`);
+        if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), CreditMemosPage._items, () => CreditMemosPage.itemSelected(idx))) return;
         if (row && SalesLines.fillFromItem(row, CreditMemosPage._items)) CreditMemosPage.recalc();
     },
 
@@ -212,7 +212,7 @@ const CreditMemosPage = {
         const lines = [];
         $$('#cm-lines tr').forEach((row, i) => {
             lines.push({
-                item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
+                item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,

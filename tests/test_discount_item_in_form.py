@@ -83,6 +83,7 @@ const items = [{ id: 5, name: 'Discount', rate: '0.00', is_discount: true },
 const ctx = { console, window: {}, document: { addEventListener: () => {} }, App: { settings: {} },
   escapeHtml: (s) => String(s), formatCurrency: (n) => '$' + (Number(n) || 0).toFixed(2) };
 vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('app/static/js/item_quick_add.js', 'utf8'), ctx);  // the picker (#445)
 vm.runInContext(fs.readFileSync('app/static/js/invoices.js', 'utf8')
   + '\nthis.SalesLines = SalesLines; this.InvoicesPage = InvoicesPage;', ctx);
 ctx.SalesLines.fillFromItem(row, items);

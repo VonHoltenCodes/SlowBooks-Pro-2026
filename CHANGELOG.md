@@ -5,6 +5,26 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.28.0 — Items: quick-add from any line, and an item code
+
+An item can be added from the line being typed (#445). The item picker on
+an invoice, estimate, sales receipt, credit memo, recurring invoice,
+purchase order, vendor credit, bill or Quick Entry line offers **+ Add
+item**, which opens a small form in the line: name, code, type, rate and
+an income account that follows the type (4000 to 4300 in the seeded
+chart). Save creates the item and picks it on that line, filled in as a
+pick would be, and nothing else on the document changes; a name typed in
+the picker before taking **+ Add item** comes along. A picker value that
+is not an item (`--`, `+ Add item`) saves as no item. Items also take an
+optional code (`items.code`, migration `c4e5d6f7a8b9`), unique when set
+without regard to capitals (409 "Item code X is already used by ..."),
+shown before the name in every line picker so typing either finds it, on
+the Items page with a search box over name and code, in
+`GET /api/items?q=`, and as a Code column in the items CSV export and
+import (a code already used is left off that row, with a note). The IIF
+export is unchanged: QuickBooks 2003's `!INVITEM` header has no field for
+a code.
+
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
 The sentence a Server Edition server answers for a company it cannot open
