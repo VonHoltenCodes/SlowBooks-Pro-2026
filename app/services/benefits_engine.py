@@ -278,7 +278,14 @@ def bump_ytd(
 
 def rebuild_ytd(db: Session, year: int) -> int:
     """Repair path: recompute the accumulators for a year from the stub
-    snapshots (non-void runs). Returns the number of rows written."""
+    snapshots (non-void runs) and the year's opening balances (#433: what
+    the old system withheld per code counts toward the annual caps).
+    Returns the number of rows written."""
+    from app.models.payroll_opening import (
+        PayrollOpeningBalance,
+        PayrollOpeningBenefit,
+    )
+
     db.query(BenefitYTD).filter(BenefitYTD.year == year).delete()
     rows = (
         db.query(
@@ -298,20 +305,39 @@ def rebuild_ytd(db: Session, year: int) -> int:
         .group_by(PayStub.employee_id, PayStubBenefit.benefit_code_id)
         .all()
     )
-    n = 0
+    totals: dict[tuple[int, int], list[Decimal]] = {}
     for emp_id, code_id, emp_amt, er_amt in rows:
+        totals[(emp_id, code_id)] = [_d(emp_amt), _d(er_amt)]
+    opening_rows = (
+        db.query(
+            PayrollOpeningBalance.employee_id,
+            PayrollOpeningBenefit.benefit_code_id,
+            PayrollOpeningBenefit.employee_amount,
+            PayrollOpeningBenefit.employer_amount,
+        )
+        .join(
+            PayrollOpeningBalance,
+            PayrollOpeningBenefit.opening_id == PayrollOpeningBalance.id,
+        )
+        .filter(PayrollOpeningBalance.year == year)
+        .all()
+    )
+    for emp_id, code_id, emp_amt, er_amt in opening_rows:
+        t = totals.setdefault((emp_id, code_id), [ZERO, ZERO])
+        t[0] += _d(emp_amt)
+        t[1] += _d(er_amt)
+    for (emp_id, code_id), (emp_amt, er_amt) in sorted(totals.items()):
         db.add(
             BenefitYTD(
                 employee_id=emp_id,
                 benefit_code_id=code_id,
                 year=year,
-                employee_amount=_q(_d(emp_amt)),
-                employer_amount=_q(_d(er_amt)),
+                employee_amount=_q(emp_amt),
+                employer_amount=_q(er_amt),
             )
         )
-        n += 1
     db.flush()
-    return n
+    return len(totals)
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, model_validator
 from app.schemas.common import StrictModel
@@ -241,6 +242,54 @@ class YTDResponse(BaseModel):
     medicare: float = 0
     pretax_deductions: float = 0
     net: float = 0
+
+
+# ---------------------------------------------------------------------------
+# Opening YTD balances (#433) — what was paid before the first SlowBooks run
+# ---------------------------------------------------------------------------
+class OpeningStateInput(StrictModel):
+    state: str
+    wages: Decimal = Decimal("0")
+    withholding: Decimal = Decimal("0")
+    other_employee: Decimal = Decimal("0")
+    other_employer: Decimal = Decimal("0")
+
+
+class OpeningBenefitInput(StrictModel):
+    benefit_code_id: int
+    employee_amount: Decimal = Decimal("0")
+    employer_amount: Decimal = Decimal("0")
+
+
+class PayrollOpeningInput(StrictModel):
+    """An employee's opening balance for a year. Amounts are the old
+    system's year-to-date figures as of `as_of`, the day before the first
+    SlowBooks pay run. Once a run in the year is processed for the
+    employee a change needs `reason` (it is a correction, and the audit
+    trail keeps it)."""
+
+    year: int
+    as_of: date
+    gross: Decimal = Decimal("0")
+    federal_tax: Decimal = Decimal("0")
+    ss_wages: Decimal = Decimal("0")
+    ss_tax: Decimal = Decimal("0")
+    employer_ss_tax: Decimal = Decimal("0")
+    medicare_wages: Decimal = Decimal("0")
+    medicare_tax: Decimal = Decimal("0")
+    employer_medicare_tax: Decimal = Decimal("0")
+    futa_wages: Decimal = Decimal("0")
+    futa_tax: Decimal = Decimal("0")
+    suta_wages: Decimal = Decimal("0")
+    suta_tax: Decimal = Decimal("0")
+    pretax_deductions: Decimal = Decimal("0")
+    posttax_deductions: Decimal = Decimal("0")
+    garnishments: Decimal = Decimal("0")
+    net: Decimal = Decimal("0")
+    note: Optional[str] = None
+    states: list[OpeningStateInput] = []
+    benefits: list[OpeningBenefitInput] = []
+    reason: Optional[str] = None
 
 
 class BankAccountCreate(StrictModel):

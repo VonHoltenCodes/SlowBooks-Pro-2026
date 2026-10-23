@@ -149,6 +149,7 @@ from app.models import (  # noqa: F401,E402
     nonprofit as nonprofit_model,
     payments,
     payroll,
+    payroll_opening,
     pto,
     purchase_orders,
     qbo_mapping,

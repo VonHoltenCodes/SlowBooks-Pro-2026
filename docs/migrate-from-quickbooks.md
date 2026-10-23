@@ -205,10 +205,28 @@ or amount cannot be read. A row already in the books posts nothing twice.
 Payees not on the Vendors (money out) or Customers (money in) list are added
 and named in the result. CSV or Excel.
 
+### Payroll year to date
+
+Each employee's year-to-date payroll comes across as an **opening balance**
+(#433): what the old payroll paid this year, dated the day before the first
+SlowBooks pay run. The year's W-2s, the 941 for that quarter, the 940 and
+the Social Security, FUTA and SUTA wage bases all count it. Enter it on the
+employee's page (Opening YTD), or for everyone at once from Payroll →
+**Import opening balances**: fill in the template linked there, or save
+QuickBooks Desktop's *Payroll Summary* report (by employee, January 1
+through the last pay date) as CSV. The Payroll Summary is read best-effort:
+it has no taxable-wage lines, so Social Security, Medicare, FUTA, SUTA and
+state wages come in as 0 and the preview says so, and every item it could
+not place is named beside the employee. Fill those in on the employee's
+page before filing anything. No journal entry is made; the opening balance
+sheet carries what was still owed. Once a pay run in the year is processed,
+a change is a correction with a reason.
+
 ### What does not come across yet
 
-Payroll history (pay stubs and liabilities), estimates and purchase orders
-as documents, inventory on hand, memorized transactions and attachments.
+Individual pay stubs and payroll liabilities as documents (year-to-date
+totals do, above), estimates and purchase orders as documents, inventory on
+hand, memorized transactions and attachments.
 Each importer here was built around a real export someone sent; if one of
 these is in your way, open an issue with a sample export (change the names)
 and it gets built in.

@@ -235,6 +235,43 @@ rest of payroll.
 
 ---
 
+## Opening YTD balances (#433)
+
+A company that switches to SlowBooks mid-year enters what the old payroll
+paid that year, once per employee, dated the day before the first SlowBooks
+pay run (`app/models/payroll_opening.py`, `app/services/payroll_opening.py`).
+No pay run and no journal entry: the old system booked that payroll, and the
+opening balance sheet carries what it still owes.
+
+Counted, each on purpose: `employee_ytd` (so the Social Security, FUTA and
+SUTA wage bases and the benefits engine's wage-base ceiling start from it),
+the pay stub's YTD, the 941 for the quarter `as_of` falls in (later quarters
+start the wage base from it), the 940's FUTA wages, the W-2/W-3 (box 16 from
+its state rows) and the benefit accumulators' annual caps. Not counted: the
+tax liability / deposit schedule, the state SUI report, benefit remittances,
+the pay-run list, NACHA and the payroll journal.
+
+Locked once a pay run in the year is processed for the employee: a change or
+a delete then needs a reason, written to the audit trail as `CORRECT` with
+the before and after.
+
+| Method + Path | Purpose |
+|---------------|---------|
+| `GET /api/payroll/opening-ytd?year=` | Every employee's opening balance for the year |
+| `GET /api/employees/{id}/opening-ytd?year=` | One employee's, with `locked` and `first_pay_date` |
+| `PUT /api/employees/{id}/opening-ytd` | Create or replace (`reason` once locked) |
+| `DELETE /api/employees/{id}/opening-ytd?year=&reason=` | Remove (`reason` once locked) |
+| `GET /api/payroll/opening-ytd/template` | The CSV template |
+| `POST /api/payroll/opening-ytd/import?dry_run=1\|0&as_of=&reason=` | Import the template or a QuickBooks Desktop Payroll Summary: the plan, then the same plan applied |
+
+The Payroll Summary is read best-effort. It has no taxable-wage lines, so
+Social Security, Medicare, FUTA, SUTA and state wages come in as 0 and the
+row's note says so; items it cannot place (an employer 401(k) match, a local
+tax) are named in the note; a report whose first column it cannot read is
+refused with a sentence pointing at the template.
+
+---
+
 ## Pending items
 
 The major Tier 3 work has shipped — tax PDFs with audit hashes, the

@@ -34,8 +34,10 @@ def _year_stubs(db, year: int, employee_id: int | None = None) -> list[PayStub]:
     return query.all()
 
 
-def _employee_box_totals(stubs: list[PayStub]) -> dict:
-    """Sum a single employee's pay stubs into W-2 box amounts."""
+def _employee_box_totals(stubs: list[PayStub], opening=None) -> dict:
+    """Sum a single employee's pay stubs into W-2 box amounts, with the
+    opening balance (#433) when there is one: the old system's wages and
+    withholding for the part of the year before the switch."""
     gross = Decimal("0")
     pretax = Decimal("0")
     federal_tax = Decimal("0")
@@ -53,12 +55,36 @@ def _employee_box_totals(stubs: list[PayStub]) -> dict:
         state_tax += Decimal(str(s.state_tax or 0))
         medicare_wages += Decimal(str(s.gross_pay or 0))
 
+    # The stubs' state wages are their federal wages, as before.
+    state_wages = max(Decimal("0"), gross - pretax)
+    ss_wages = gross
+    if opening is not None:
+        from app.services.payroll_opening import amount, state_total
+
+        o_gross = amount(opening, "gross")
+        o_pretax = amount(opening, "pretax_deductions")
+        gross += o_gross
+        pretax += o_pretax
+        federal_tax += amount(opening, "federal_tax")
+        ss_tax += amount(opening, "ss_tax")
+        medicare_tax += amount(opening, "medicare_tax")
+        state_tax += state_total(opening, "withholding")
+        # the old system's taxable wages, as it figured them
+        ss_wages += amount(opening, "ss_wages")
+        medicare_wages += amount(opening, "medicare_wages")
+        # box 16 from its state rows; with none, its federal wages, as a
+        # stub's would be
+        if opening.states:
+            state_wages += state_total(opening, "wages")
+        else:
+            state_wages += max(Decimal("0"), o_gross - o_pretax)
+
     # Box 1 — federal wages are gross less pre-tax deductions.
     box1 = gross - pretax
     if box1 < 0:
         box1 = Decimal("0")
     # Box 3 — Social Security wages are capped at the annual wage base.
-    box3 = min(gross, SS_WAGE_BASE)
+    box3 = min(ss_wages, SS_WAGE_BASE)
 
     return {
         "box1_federal_wages": _q(box1),
@@ -67,7 +93,7 @@ def _employee_box_totals(stubs: list[PayStub]) -> dict:
         "box4_ss_tax_withheld": _q(ss_tax),
         "box5_medicare_wages": _q(medicare_wages),
         "box6_medicare_tax_withheld": _q(medicare_tax),
-        "box16_state_wages": _q(box1),
+        "box16_state_wages": _q(state_wages),
         "box17_state_income_tax": _q(state_tax),
         "gross_pay": _q(gross),
         "pretax_deductions": _q(pretax),
@@ -94,24 +120,32 @@ def _employee_dict(employee: Employee | None) -> dict | None:
 
 
 def _build_w2(
-    year: int, employee_id: int, employee: Employee | None, stubs: list
+    year: int,
+    employee_id: int,
+    employee: Employee | None,
+    stubs: list,
+    opening=None,
 ) -> dict:
-    """Assemble one W-2 result dict from already-fetched stubs."""
+    """Assemble one W-2 result dict from already-fetched stubs (and the
+    employee's opening balance for the year, #433)."""
     result: dict = {
         "year": year,
         "employee_id": employee_id,
         "num_stubs": len(stubs),
         "employee": _employee_dict(employee),
     }
-    result.update(_employee_box_totals(stubs))
+    result.update(_employee_box_totals(stubs, opening))
     return result
 
 
 def compute_w2(db, year: int, employee_id: int) -> dict:
     """Annual W-2 wage statement for one employee."""
+    from app.services.payroll_opening import opening_for
+
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
     stubs = _year_stubs(db, year, employee_id)
-    return _build_w2(year, employee_id, employee, stubs)
+    opening = opening_for(db, employee_id, year)
+    return _build_w2(year, employee_id, employee, stubs, opening)
 
 
 def compute_all_w2(db, year: int) -> list[dict]:
@@ -133,8 +167,24 @@ def compute_all_w2(db, year: int) -> list[dict]:
         if s.employee_id not in employees and s.employee is not None:
             employees[s.employee_id] = s.employee
 
+    # An employee paid only before the switch (left in March) has an
+    # opening balance and no stub, and still gets a W-2 (#433).
+    from app.services.payroll_opening import openings_for_year
+
+    openings = openings_for_year(db, year)
+    for emp_id, o in openings.items():
+        by_employee.setdefault(emp_id, [])
+        if emp_id not in employees and o.employee is not None:
+            employees[emp_id] = o.employee
+
     w2s = [
-        _build_w2(year, emp_id, employees.get(emp_id), by_employee[emp_id])
+        _build_w2(
+            year,
+            emp_id,
+            employees.get(emp_id),
+            by_employee[emp_id],
+            openings.get(emp_id),
+        )
         for emp_id in sorted(by_employee)
     ]
     # No wages, no W-2: a $0.00 stub is not a wage statement, and the W-3

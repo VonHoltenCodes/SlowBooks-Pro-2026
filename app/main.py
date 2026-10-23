@@ -945,11 +945,11 @@ _ADMIN_ONLY_PREFIXES = (
 # The parts of an employee record that are a credential or a bank account:
 # the self-service portal token (a full login as that employee —
 # GHSA-rh68-48w8-pj8r), direct-deposit accounts, I-9 and other documents,
-# E-Verify, year-to-date pay. The record itself stays listable by every
-# role (time entries and job costing need the names) but is redacted for
-# non-admins in the employees router.
+# E-Verify, year-to-date pay and its opening balance (#433). The record
+# itself stays listable by every role (time entries and job costing need
+# the names) but is redacted for non-admins in the employees router.
 _ADMIN_ONLY_EMPLOYEE_RE = _re.compile(
-    r"^/api/employees/[^/]+/(portal-token|portal-access|everify|bank-accounts|documents|ytd)(/|$)"
+    r"^/api/employees/[^/]+/(portal-token|portal-access|everify|bank-accounts|documents|ytd|opening-ytd)(/|$)"
 )
 _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 # An outside accountant's sign-in (#340) writes journal entries only: it
@@ -1345,6 +1345,7 @@ app.include_router(system_routes.router)
 app.include_router(companies.router)
 app.include_router(employees.router)
 app.include_router(payroll.router)
+app.include_router(payroll.opening_employee_router)  # opening YTD (#433)
 # Phase 7: Online Payments
 app.include_router(provider_payments.router)
 app.include_router(provider_payments.legacy_stripe_router)

@@ -1,0 +1,31 @@
+,,,,Dutch Built LLC,,,
+,,,,Payroll Summary,,,
+,,,,"January 1 through June 30, 2026",,,
+,,,"Ortiz, Sam",,"Lee, Hana",,TOTAL
+,,,Hours,Jan - Jun 26,Hours,Jan - Jun 26,Jan - Jun 26
+"Employee Wages, Taxes and Adjustments",,,,,,,
+,Gross Pay,,,,,,
+,,Salary,1040,"30,000.00",1040,"20,000.00","50,000.00"
+,,Total Gross Pay,1040,"30,000.00",1040,"20,000.00","50,000.00"
+,Deductions from Gross Pay,,,,,,
+,,401(k) Employee,,"-1,500.00",,"-1,000.00","-2,500.00"
+,,Total Deductions from Gross Pay,,"-1,500.00",,"-1,000.00","-2,500.00"
+,Adjusted Gross Pay,,,"28,500.00",,"19,000.00","47,500.00"
+,Taxes Withheld,,,,,,
+,,Federal Withholding,,"-3,100.00",,"-1,800.00","-4,900.00"
+,,Medicare Employee,,-435.00,,-290.00,-725.00
+,,Social Security Employee,,"-1,860.00",,"-1,240.00","-3,100.00"
+,,GA - Withholding,,-800.00,,-600.00,"-1,400.00"
+,,GA - Special Local Tax,,-10.00,,-5.00,-15.00
+,,Total Taxes Withheld,,"-6,205.00",,"-3,935.00","-10,140.00"
+,Deductions from Net Pay,,,,,,
+,,Health Insurance (taxable),,-200.00,,-100.00,-300.00
+,,Total Deductions from Net Pay,,-200.00,,-100.00,-300.00
+,Net Pay,,,"22,095.00",,"14,965.00","37,060.00"
+Employer Taxes and Contributions,,,,,,,
+,Federal Unemployment,,,42.00,,42.00,84.00
+,Medicare Company,,,435.00,,290.00,725.00
+,Social Security Company,,,"1,860.00",,"1,240.00","3,100.00"
+,GA - Unemployment Company,,,189.00,,189.00,378.00
+,401(k) Company Match,,,750.00,,500.00,"1,250.00"
+,Total Employer Taxes and Contributions,,,"3,276.00",,"2,261.00","5,537.00"

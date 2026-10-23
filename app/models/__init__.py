@@ -80,6 +80,13 @@ from app.models.benefits import (
     PayStubBenefit,
 )
 
+# Opening YTD balances for a mid-year switch (#433)
+from app.models.payroll_opening import (  # noqa: F401 — registers the tables
+    PayrollOpeningBalance,
+    PayrollOpeningBenefit,
+    PayrollOpeningStateBalance,
+)
+
 # Tier 3: HR onboarding
 from app.models.hr import OnboardingTask
 

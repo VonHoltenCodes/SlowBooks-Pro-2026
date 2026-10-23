@@ -10,7 +10,11 @@ const PayrollPage = {
         let html = `
             <div class="page-header">
                 <h2>Payroll</h2>
-                <button class="btn btn-primary" onclick="PayrollPage.showRunForm()">+ New Pay Run</button>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                    <a href="/api/payroll/opening-ytd/template" download style="font-size:12px">Opening balance template</a>
+                    <button class="btn btn-secondary" onclick="PayrollPage.showOpeningImport()">Import opening balances</button>
+                    <button class="btn btn-primary" onclick="PayrollPage.showRunForm()">+ New Pay Run</button>
+                </div>
             </div>${capNote}
             <div style="background:#fef3c7;border:1px solid #fbbf24;padding:6px 10px;margin-bottom:12px;font-size:10px;color:#92400e;">
                 <strong>Disclaimer:</strong> Tax calculations are approximate. Verify with a tax professional before filing.
@@ -39,6 +43,100 @@ const PayrollPage = {
             html += '</tbody></table></div>';
         }
         return html;
+    },
+
+    // ---- Opening YTD import (#433) ----------------------------------------
+    // Every employee's opening balance from one CSV: the template, or
+    // QuickBooks Desktop's Payroll Summary by employee. A dry run first
+    // shows the plan (rows, notes, errors); Apply posts the same file again.
+    showOpeningImport() {
+        openModal('Import opening balances', `
+            <form onsubmit="PayrollPage.previewOpeningImport(event)">
+                <p class="hint" style="margin-bottom:10px;">
+                    What each employee was paid this year before the first SlowBooks pay run: the
+                    <a href="/api/payroll/opening-ytd/template" download>SlowBooks template</a>
+                    (one row per employee; a second state on a row with only the state columns), or a
+                    QuickBooks Desktop <em>Payroll Summary</em> by employee saved as CSV. A Payroll Summary
+                    is read best-effort and has no taxable-wage lines; the plan names every item it could not place.
+                    No journal entry is made.
+                </p>
+                <div class="form-group"><label>File</label>
+                    <input type="file" name="file" accept=".csv,.txt" required></div>
+                <div class="form-group"><label>As of (when the report does not say "through …")</label>
+                    <input type="date" name="as_of"></div>
+                <div class="form-group"><label>Reason (only to correct an employee whose balance is locked by a processed pay run)</label>
+                    <input name="reason" maxlength="300"></div>
+                <div id="opening-import-preview"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Preview</button>
+                    <button type="button" class="btn btn-primary" id="opening-import-apply" hidden
+                        onclick="PayrollPage.applyOpeningImport()">Apply</button>
+                </div>
+            </form>`);
+    },
+
+    async _postOpeningImport(form, dryRun) {
+        const fd = new FormData();
+        fd.append('file', form.file.files[0]);
+        const q = new URLSearchParams({ dry_run: dryRun ? '1' : '0' });
+        if (form.as_of.value) q.append('as_of', form.as_of.value);
+        if (form.reason.value.trim()) q.append('reason', form.reason.value.trim());
+        const resp = await fetch(`/api/payroll/opening-ytd/import?${q.toString()}`,
+            { method: 'POST', body: fd, headers: { 'X-Slowbooks-Desktop': '1' } });
+        if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
+        return resp.json();
+    },
+
+    _renderOpeningPlan(plan) {
+        const label = { create: 'Create', replace: 'Replace', error: 'Error' };
+        const rows = plan.rows.map(r => `<tr>
+            <td>${label[r.action] || escapeHtml(r.action)}</td>
+            <td>${escapeHtml(r.employee || '')}</td>
+            <td>${escapeHtml(r.as_of || '')}</td>
+            <td class="amount">${formatCurrency(r.gross)}</td>
+            <td class="amount">${formatCurrency(r.federal_tax)}</td>
+            <td class="amount">${formatCurrency(r.net)}</td>
+            <td style="font-size:11px;color:${r.action === 'error' ? 'var(--danger)' : 'var(--text-muted)'};">${escapeHtml(r.note || '')}</td>
+        </tr>`).join('');
+        const errs = [...(plan.errors || []), ...(plan.warnings || [])].map(x => `<li>${escapeHtml(x)}</li>`).join('');
+        const c = plan.counts || {};
+        return `
+            <p style="margin:8px 0;"><strong>${c.create || 0} to create, ${c.replace || 0} to replace, ${c.error || 0} with errors.</strong>
+            ${plan.dry_run ? 'Nothing has been written yet.' : `${plan.applied} written.`}</p>
+            ${errs ? `<ul style="color:var(--danger);font-size:11px;margin:0 0 8px 16px;">${errs}</ul>` : ''}
+            <div class="table-container" style="max-height:320px;overflow:auto;"><table>
+                <thead><tr><th scope="col">Action</th><th scope="col">Employee</th><th scope="col">As of</th><th scope="col" class="amount">Gross</th><th scope="col" class="amount">Federal</th><th scope="col" class="amount">Net</th><th scope="col">Note</th></tr></thead>
+                <tbody>${rows}</tbody></table></div>`;
+    },
+
+    async previewOpeningImport(e) {
+        e.preventDefault();
+        const form = e.target;
+        PayrollPage._openingImportForm = form;
+        const box = $('#opening-import-preview');
+        box.innerHTML = '<p class="hint">Reading the file…</p>';
+        try {
+            const plan = await PayrollPage._postOpeningImport(form, true);
+            box.innerHTML = PayrollPage._renderOpeningPlan(plan);
+            const writes = (plan.counts.create || 0) + (plan.counts.replace || 0);
+            const apply = $('#opening-import-apply');
+            apply.hidden = writes === 0 || (plan.errors || []).length > 0;
+            apply.textContent = `Apply ${writes} opening balance${writes === 1 ? '' : 's'}`;
+        } catch (err) {
+            box.innerHTML = `<p style="color:var(--danger);">${escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    async applyOpeningImport() {
+        const form = PayrollPage._openingImportForm;
+        if (!form) return;
+        try {
+            const plan = await PayrollPage._postOpeningImport(form, false);
+            $('#opening-import-preview').innerHTML = PayrollPage._renderOpeningPlan(plan);
+            $('#opening-import-apply').hidden = true;
+            toast(`${plan.applied} opening balance${plan.applied === 1 ? '' : 's'} imported`);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async showRunForm() {

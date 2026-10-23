@@ -46,6 +46,22 @@ def compute_940(db, year: int) -> dict:
     # later stubs push an employee over the wage base.
     paid_by_employee: dict[int, Decimal] = {}
     taxable_by_employee: dict[int, Decimal] = {}
+    gross_by_employee: dict[int, Decimal] = {}
+
+    # Opening balances (#433): the old system's FUTA wages are what it
+    # already counted toward each employee's $7,000, so the year's stubs
+    # fill only what is left of it; its payments and FUTA tax are the
+    # year's too.
+    from app.services.payroll_opening import amount, openings_for_year
+
+    for emp_id, o in openings_for_year(db, year).items():
+        gross = amount(o, "gross")
+        futa_wages = min(amount(o, "futa_wages"), FUTA_WAGE_BASE)
+        total_payments += gross
+        futa_tax += amount(o, "futa_tax")
+        paid_by_employee[emp_id] = futa_wages
+        taxable_by_employee[emp_id] = futa_wages
+        gross_by_employee[emp_id] = gross
 
     # Process in pay_date order so the per-employee wage base fills correctly.
     for s in sorted(stubs, key=lambda x: (x.pay_run.pay_date, x.id)):
@@ -62,6 +78,7 @@ def compute_940(db, year: int) -> dict:
         else:
             taxable = gross
         paid_by_employee[emp_id] = prior + gross
+        gross_by_employee[emp_id] = gross_by_employee.get(emp_id, Decimal("0")) + gross
         taxable_by_employee[emp_id] = (
             taxable_by_employee.get(emp_id, Decimal("0")) + taxable
         )
@@ -73,7 +90,7 @@ def compute_940(db, year: int) -> dict:
     return {
         "year": year,
         # Employees who received wages: a $0.00 stub pays no one.
-        "num_employees": sum(1 for paid in paid_by_employee.values() if paid > 0),
+        "num_employees": sum(1 for paid in gross_by_employee.values() if paid > 0),
         "num_stubs": len(stubs),
         # Line 3 — total payments to all employees
         "total_payments": _q(total_payments),

@@ -101,7 +101,7 @@ def compute_941(db, year: int, quarter: int) -> dict:
     what was withheld and matched. Printing the per-paycheck sums on 5a/5c
     showed 12.4% of $3,726.67 as $462.10 (2.17.3, macbase1 F23).
     """
-    start, _ = _quarter_bounds(year, quarter)
+    start, end = _quarter_bounds(year, quarter)
 
     employee_ids: set[int] = set()
     stub_count = 0
@@ -117,6 +117,34 @@ def compute_941(db, year: int, quarter: int) -> dict:
     # Gross paid to each employee earlier in the year: the basis the
     # paycheck used for the wage base and the Additional Medicare threshold.
     ytd_gross: dict[int, Decimal] = {}
+
+    # Opening balances (#433): what the old system paid before the switch.
+    # The quarter its as_of falls in reports it (the old system's own
+    # taxable wages and taxes, as it figured them); every later quarter
+    # starts the employee's wage base and Additional Medicare threshold
+    # from its gross, as the paychecks did.
+    from app.services.payroll_opening import amount, openings_for_year
+
+    for emp_id, o in openings_for_year(db, year).items():
+        if o.as_of > end:
+            continue
+        gross = amount(o, "gross")
+        ytd_gross[emp_id] = gross
+        if o.as_of < start:
+            continue
+        if gross > 0:
+            employee_ids.add(emp_id)
+        total_wages += gross
+        federal_withheld += amount(o, "federal_tax")
+        ss_employee += amount(o, "ss_tax")
+        ss_employer += amount(o, "employer_ss_tax")
+        medicare_employee += amount(o, "medicare_tax")
+        medicare_employer += amount(o, "employer_medicare_tax")
+        ss_wages += amount(o, "ss_wages")
+        medicare_wages += amount(o, "medicare_wages")
+        additional_wages += _additional_medicare_wages(
+            amount(o, "medicare_wages"), Decimal("0")
+        )
 
     for s in _stubs_through_quarter(db, year, quarter):
         gross = Decimal(str(s.gross_pay or 0))

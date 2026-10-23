@@ -32,7 +32,8 @@ def _ytd_stubs(db: Session, employee_id: int, year: int, before: date = None):
 
 
 def employee_ytd(db: Session, employee_id: int, year: int, before: date = None) -> dict:
-    """Aggregate an employee's pay-stub figures for a calendar year."""
+    """Aggregate an employee's pay-stub figures for a calendar year, and
+    the opening balance when there is one (#433)."""
     totals = {
         "gross": Decimal("0"),
         "federal": Decimal("0"),
@@ -52,6 +53,22 @@ def employee_ytd(db: Session, employee_id: int, year: int, before: date = None) 
         totals["medicare"] += s.medicare_tax or 0
         totals["pretax_deductions"] += s.pretax_deductions or 0
         totals["net"] += s.net_pay or 0
+    # What the old system paid before the switch (#433): the wage bases,
+    # the stub's YTD and the employee's YTD all start from it. A run dated
+    # on or before the opening's as_of does not count it (it is what was
+    # paid before that day).
+    from app.services import payroll_opening as po
+
+    opening = po.opening_for(db, employee_id, year)
+    if po.counts_before(opening, before):
+        totals["gross"] += po.amount(opening, "gross")
+        totals["federal"] += po.amount(opening, "federal_tax")
+        totals["state"] += po.state_total(opening, "withholding")
+        totals["state_other"] += po.state_total(opening, "other_employee")
+        totals["ss"] += po.amount(opening, "ss_tax")
+        totals["medicare"] += po.amount(opening, "medicare_tax")
+        totals["pretax_deductions"] += po.amount(opening, "pretax_deductions")
+        totals["net"] += po.amount(opening, "net")
     return totals
 
 
