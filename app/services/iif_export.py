@@ -392,11 +392,15 @@ def export_customers(db: Session) -> str:
                 _iif_text(addr3),
                 _iif_text(city_st_zip),
                 "",  # ADDR5
-                c.phone or "",
-                c.mobile or "",
-                c.email or "",
-                c.terms or "",
-                c.tax_id or "",
+                # Contact fields are text too: a phone, email or terms a
+                # file carries as `=HYPERLINK(...)` would run in Excel the
+                # same as a name would; the importer takes the apostrophe
+                # off again, so "+1 555..." comes back as typed (#410).
+                _iif_text(c.phone),
+                _iif_text(c.mobile),
+                _iif_text(c.email),
+                _iif_text(c.terms),
+                _iif_text(c.tax_id),
                 str(c.credit_limit) if c.credit_limit else "",
             ]
         )
@@ -445,11 +449,11 @@ def export_vendors(db: Session) -> str:
                 _iif_text(addr3),
                 _iif_text(city_st_zip),
                 "",  # ADDR5
-                v.phone or "",
-                v.fax or "",
-                v.email or "",
-                v.terms or "",
-                v.tax_id or "",
+                _iif_text(v.phone),
+                _iif_text(v.fax),
+                _iif_text(v.email),
+                _iif_text(v.terms),
+                _iif_text(v.tax_id),
             ]
         )
 

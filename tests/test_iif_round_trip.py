@@ -194,3 +194,54 @@ def test_invoice_line_totals_survive_round_trip(
     assert abs(trns_total - original_total) < Decimal(
         "0.01"
     ), f"TRNS total {trns_total} != invoice total {original_total}"
+
+
+def test_contact_fields_are_guarded_and_round_trip(client, db_session, seed_accounts):
+    """The CUST and VEND rows' phone, email and terms went out with no guard
+    (#410 follow-up): a vendor whose email is `=HYPERLINK(...)` would run in
+    Excel, the documented way to fix an IIF file. They take the same
+    apostrophe as a name, and the importer takes it off again, so a phone
+    typed with a leading + comes back as typed."""
+    from app.models.contacts import Customer, Vendor
+
+    db_session.add(
+        Customer(
+            name="Guarded Customer",
+            phone="+15551234567",
+            email='=HYPERLINK("http://x")',
+            terms="-0001",
+            is_active=True,
+        )
+    )
+    db_session.add(
+        Vendor(
+            name="Guarded Vendor",
+            phone="+447911123456",
+            email="=cmd|' /C calc'!A0",
+            terms="Net 30",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    cust = client.get("/api/iif/export/customers")
+    vend = client.get("/api/iif/export/vendors")
+    assert cust.status_code == 200 and vend.status_code == 200
+    cust_row = next(l for l in cust.text.splitlines() if "Guarded Customer" in l)
+    vend_row = next(l for l in vend.text.splitlines() if "Guarded Vendor" in l)
+    for field in ("+15551234567", '=HYPERLINK("http://x")', "-0001"):
+        assert "'" + field in cust_row, cust_row
+        assert "\t" + field + "\t" not in cust_row, cust_row
+    for field in ("+447911123456", "=cmd|' /C calc'!A0"):
+        assert "'" + field in vend_row, vend_row
+
+    # Re-import into the same books: the guarded values come back as typed.
+    for text in (cust.text, vend.text):
+        r = _import_iif_text(client, text)
+        assert r.status_code == 200, r.text
+    db_session.expire_all()
+    c = db_session.query(Customer).filter(Customer.name == "Guarded Customer").all()
+    v = db_session.query(Vendor).filter(Vendor.name == "Guarded Vendor").all()
+    assert all(x.phone == "+15551234567" for x in c) and c
+    assert all(x.email == '=HYPERLINK("http://x")' for x in c)
+    assert all(x.phone == "+447911123456" for x in v) and v

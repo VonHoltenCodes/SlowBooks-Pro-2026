@@ -5,6 +5,15 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.27.0
+
+**The IIF export guards the contact fields too.** The CUST and VEND rows'
+phone, mobile or fax, email, terms and tax id went out as typed, so a
+vendor whose email was `=HYPERLINK(...)` would run in Excel, the documented
+way to fix an IIF file before import (noted on #410). They take the same
+leading apostrophe a name does, and the importer takes it off again, so
+`+1 555…` comes back as typed.
+
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
 The sentence a Server Edition server answers for a company it cannot open
