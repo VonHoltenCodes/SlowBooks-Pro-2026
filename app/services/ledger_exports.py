@@ -556,3 +556,205 @@ def adjusting_entries_csv(data: dict, company: str) -> str:
         ]
     )
     return out.getvalue()
+
+
+# ── Sales by Item / Purchases by Item (#435) ────────────────────────────────
+# Flat one-row-per-item reports. The CSV follows the shared pattern (safe
+# writer for the formula guard, four-line preamble); the PDF reuses the
+# report_pdf.html layout via *_sections, so the PDF rows can be tested
+# without WeasyPrint, as the P&L tests do.
+
+
+def _pdf_money(value) -> str:
+    """A money cell for the PDF: "$1,234.56", a negative with a leading
+    minus (the screen's _money in financial.py)."""
+    amount = Decimal(str(value or 0))
+    sign = "-" if amount < 0 else ""
+    return f"{sign}${abs(amount):,.2f}"
+
+
+def _qty_text(value) -> str:
+    """A quantity without trailing zeros: 3, 1.5, 0.25."""
+    d = Decimal(str(value or 0))
+    text = format(d.normalize(), "f")
+    return text if text != "-0" else "0"
+
+
+def sales_by_item_csv(data: dict, company: str) -> str:
+    """Item | Type | Quantity | Amount | Avg price | COGS | Gross margin |
+    Margin %, one row per item with a "No item" row last, then a TOTAL row
+    whose Amount ties to the P&L income for the same period (see the route
+    docstring). COGS, margin and margin % are blank for an untracked item."""
+    out = io.StringIO()
+    w = _SafeWriter(out)
+    _preamble(w, company, "Sales by Item", _range(data))
+    w.writerow(
+        [
+            "Item",
+            "Type",
+            "Quantity",
+            "Amount",
+            "Avg price",
+            "COGS",
+            "Gross margin",
+            "Margin %",
+        ]
+    )
+    for r in data["items"]:
+        w.writerow(
+            [
+                r["item_name"],
+                r.get("item_type") or "",
+                _qty_text(r["quantity"]),
+                _money(r["amount"]),
+                _money(r["average_price"]) if r["average_price"] is not None else "",
+                _money(r["cogs"]) if r["cogs"] is not None else "",
+                _money(r["gross_margin"]) if r["gross_margin"] is not None else "",
+                _Percent(r["margin_pct"]) if r["margin_pct"] is not None else "",
+            ]
+        )
+    w.writerow(
+        [
+            "TOTAL",
+            "",
+            _qty_text(data["total_quantity"]),
+            _money(data["total_amount"]),
+            "",
+            _money(data["total_cogs"]),
+            _money(data["total_margin"]),
+            "",
+        ]
+    )
+    return out.getvalue()
+
+
+def purchases_by_item_csv(data: dict, company: str) -> str:
+    """Item | Type | Quantity | Amount | Avg cost, one row per item with a
+    "No item" row last, then a TOTAL row."""
+    out = io.StringIO()
+    w = _SafeWriter(out)
+    _preamble(w, company, "Purchases by Item", _range(data))
+    w.writerow(["Item", "Type", "Quantity", "Amount", "Avg cost"])
+    for r in data["items"]:
+        w.writerow(
+            [
+                r["item_name"],
+                r.get("item_type") or "",
+                _qty_text(r["quantity"]),
+                _money(r["amount"]),
+                _money(r["average_cost"]) if r["average_cost"] is not None else "",
+            ]
+        )
+    w.writerow(
+        [
+            "TOTAL",
+            "",
+            _qty_text(data["total_quantity"]),
+            _money(data["total_amount"]),
+            "",
+        ]
+    )
+    return out.getvalue()
+
+
+def sales_by_item_sections(data: dict) -> list[dict]:
+    """Sales by Item as report_pdf.html sections (one section)."""
+    columns = [
+        "Item",
+        "Type",
+        "Qty",
+        "Amount",
+        "Avg price",
+        "COGS",
+        "Margin",
+        "Margin %",
+    ]
+    rows = []
+    for r in data["items"]:
+        rows.append(
+            {
+                "cells": [
+                    r["item_name"],
+                    r.get("item_type") or "",
+                    _qty_text(r["quantity"]),
+                    _pdf_money(r["amount"]),
+                    (
+                        _pdf_money(r["average_price"])
+                        if r["average_price"] is not None
+                        else ""
+                    ),
+                    _pdf_money(r["cogs"]) if r["cogs"] is not None else "",
+                    (
+                        _pdf_money(r["gross_margin"])
+                        if r["gross_margin"] is not None
+                        else ""
+                    ),
+                    f"{r['margin_pct']:.1f}%" if r["margin_pct"] is not None else "",
+                ]
+            }
+        )
+    rows.append(
+        {
+            "cells": [
+                "TOTAL",
+                "",
+                _qty_text(data["total_quantity"]),
+                _pdf_money(data["total_amount"]),
+                "",
+                _pdf_money(data["total_cogs"]),
+                _pdf_money(data["total_margin"]),
+                "",
+            ],
+            "style": "grand-total",
+        }
+    )
+    return [
+        {
+            "title": "Sales by Item",
+            "period": f"{data['start_date']} — {data['end_date']}",
+            "columns": columns,
+            "rows": rows,
+        }
+    ]
+
+
+def purchases_by_item_sections(data: dict) -> list[dict]:
+    """Purchases by Item as report_pdf.html sections (one section)."""
+    columns = ["Item", "Type", "Qty", "Amount", "Avg cost"]
+    rows = []
+    for r in data["items"]:
+        rows.append(
+            {
+                "cells": [
+                    r["item_name"],
+                    r.get("item_type") or "",
+                    _qty_text(r["quantity"]),
+                    _pdf_money(r["amount"]),
+                    (
+                        _pdf_money(r["average_cost"])
+                        if r["average_cost"] is not None
+                        else ""
+                    ),
+                ]
+            }
+        )
+    rows.append(
+        {
+            "cells": [
+                "TOTAL",
+                "",
+                _qty_text(data["total_quantity"]),
+                _pdf_money(data["total_amount"]),
+                "",
+            ],
+            "style": "grand-total",
+        }
+    )
+    return [
+        {
+            "title": "Purchases by Item",
+            "period": f"{data['start_date']} — {data['end_date']}",
+            "columns": columns,
+            "rows": rows,
+        }
+    ]

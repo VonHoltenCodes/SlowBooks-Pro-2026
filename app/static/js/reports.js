@@ -26,6 +26,8 @@ const ReportsPage = {
         'sales-tax':            { label: 'Sales Tax Report',   open: (p) => ReportsPage.salesTax(p) },
         'general-ledger':       { label: 'General Ledger',     open: (p) => ReportsPage.generalLedger(p), keep: ['class_id'] },
         'income-by-customer':   { label: () => T('Income by Customer'), open: (p) => ReportsPage.incomeByCustomer(p) },
+        'sales-by-item':        { label: 'Sales by Item',      open: (p) => ReportsPage.salesByItem(p) },
+        'purchases-by-item':    { label: 'Purchases by Item',  open: (p) => ReportsPage.purchasesByItem(p) },
         'trial-balance':        { label: 'Trial Balance',      open: (p) => ReportsPage.trialBalance(p) },
         'adjusting-entries':    { label: 'Adjusting Journal Entries', open: (p) => ReportsPage.adjustingEntries(p) },
         'closing-date-exceptions': { label: 'Closing Date Exceptions', open: (p) => ReportsPage.closingDateExceptions(p) },
@@ -354,6 +356,8 @@ const ReportsPage = {
                 ${card('sales-tax', 'Sales Tax', 'Tax collected by invoice')}
                 ${card('general-ledger', 'General Ledger', 'All journal entries by account')}
                 ${card('income-by-customer', T('Income by Customer'), Terms.isNonprofit() ? 'Contribution totals per donor' : 'Sales totals per customer')}
+                ${card('sales-by-item', 'Sales by Item', 'What sold, by item: quantity, amount, margin')}
+                ${card('purchases-by-item', 'Purchases by Item', 'What was bought, by item: quantity, amount, average cost')}
                 ${card('customer-statement', T('Customer Statement'), Terms.text('Invoice/payment history PDF'))}
                 ${card('trial-balance', 'Trial Balance', 'Debits and credits by account')}
                 ${card('adjusting-entries', 'Adjusting Journal Entries', 'The accountant\'s adjustments for a period, with who posted each')}
@@ -1378,6 +1382,147 @@ const ReportsPage = {
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null }, prefill });
+    },
+
+    // The address of a document behind an item line, by its {type, id}, the
+    // existing openers (bank_register._LINKS): an invoice at #/invoices/<id>,
+    // a credit memo at #/credit-memos/<id>, a bill at #/bills/<id>, a vendor
+    // credit at #/vendor-credits/<id>.
+    _ITEM_DOC: { invoice: '#/invoices/', credit_memo: '#/credit-memos/', bill: '#/bills/', vendor_credit: '#/vendor-credits/' },
+
+    // start/end plus whichever narrowing params the report carries.
+    _itemQs(range, p, idKey) {
+        let qs = `start_date=${range.start}&end_date=${range.end}`;
+        if (p[idKey]) qs += `&${idKey}=${encodeURIComponent(p[idKey])}`;
+        if (p.class_id) qs += `&class_id=${encodeURIComponent(p.class_id)}`;
+        if (p.job_id) qs += `&job_id=${encodeURIComponent(p.job_id)}`;
+        return qs;
+    },
+
+    // An "All / pick one" select for a narrowing dimension.
+    _itemPicker(id, label, listItems, selected, param) {
+        const opts = ['<option value="">All</option>'].concat(
+            listItems.map(o => `<option value="${o.id}" ${String(o.id) === String(selected || '') ? 'selected' : ''}>${escapeHtml(o.name)}</option>`)
+        ).join('');
+        return `<div class="form-group"><label for="${id}">${label}</label>
+            <select id="${id}" onchange="ReportsPage.setParam('${param}', this.value)">${opts}</select></div>`;
+    },
+
+    // The documents behind one item row, in a modal; each line opens its
+    // own document. `kind` is 'sales' or 'purchases', `itemKey` an id or
+    // 'none' (the No item row).
+    async openItemLines(kind, itemKey, name, qs) {
+        const path = kind === 'sales' ? 'sales-by-item' : 'purchases-by-item';
+        const partyHead = kind === 'sales' ? T('Customer') : 'Vendor';
+        const data = await API.get(`/reports/${path}/lines?item_id=${encodeURIComponent(itemKey)}&${qs}`);
+        const rows = (data.lines || []).map(l => {
+            const href = (ReportsPage._ITEM_DOC[l.link.type] || '#/') + l.link.id;
+            const open = escapeHtml(`closeModal();App.navigate(${JSON.stringify(href)})`);
+            return `<tr>
+                <td>${formatDate(l.date)}</td>
+                <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(l.doc_type)} ${escapeHtml(l.number || '')}</a></td>
+                <td>${escapeHtml(l.party || '')}</td>
+                <td>${escapeHtml(l.description || '')}</td>
+                <td class="amount">${l.quantity}</td>
+                <td class="amount">${formatCurrency(l.rate)}</td>
+                <td class="amount">${formatCurrency(l.amount)}</td>
+            </tr>`;
+        }).join('');
+        openModal(escapeHtml(name), `
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Date</th><th scope="col">Document</th><th scope="col">${partyHead}</th><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No lines</td></tr>'}</tbody>
+            </table></div>
+            <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`, { wide: true });
+    },
+
+    async salesByItem(prefill) {
+        prefill = prefill || {};
+        const params = { customer_id: prefill.customer_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null };
+        let customers = [], classes = [], jobs = [];
+        try { customers = await API.get('/customers?active_only=true'); } catch (e) { customers = []; }
+        try { classes = await API.get('/classes?include_archived=true'); } catch (e) { classes = []; }
+        try { jobs = await API.get('/jobs?include_inactive=true'); } catch (e) { jobs = []; }
+        const toolbar =
+            ReportsPage._itemPicker('sbi-customer', T('Customer'), customers, params.customer_id, 'customer_id')
+            + ReportsPage._itemPicker('sbi-class', T('Class'), classes, params.class_id, 'class_id')
+            + ReportsPage._itemPicker('sbi-job', T('Job'), jobs, params.job_id, 'job_id');
+        await ReportsPage.openPeriodModal('Sales by Item', 'this_year_to_date', async (_period, range, p) => {
+            const qs = ReportsPage._itemQs(range, p, 'customer_id');
+            const data = await API.get(`/reports/sales-by-item?${qs}`);
+            const money = (v) => v === null || v === undefined ? '—' : formatCurrency(v);
+            const pct = (v) => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
+            let rows = data.items.map(i => {
+                const key = i.item_id === null ? 'none' : i.item_id;
+                const open = escapeHtml(`ReportsPage.openItemLines('sales', ${JSON.stringify(key)}, ${JSON.stringify(i.item_name)}, ${JSON.stringify(qs)})`);
+                return `<tr>
+                    <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(i.item_name)}</a></td>
+                    <td>${escapeHtml(i.item_type || '')}</td>
+                    <td class="amount">${i.quantity}</td>
+                    <td class="amount">${formatCurrency(i.amount)}</td>
+                    <td class="amount">${money(i.average_price)}</td>
+                    <td class="amount">${money(i.cogs)}</td>
+                    <td class="amount">${money(i.gross_margin)}</td>
+                    <td class="amount">${pct(i.margin_pct)}</td>
+                </tr>`;
+            }).join('');
+            rows += `<tr style="font-weight:700; background:var(--gray-50);">
+                <td>TOTAL</td><td></td>
+                <td class="amount">${data.total_quantity}</td>
+                <td class="amount">${formatCurrency(data.total_amount)}</td>
+                <td class="amount"></td>
+                <td class="amount">${formatCurrency(data.total_cogs)}</td>
+                <td class="amount">${formatCurrency(data.total_margin)}</td>
+                <td class="amount"></td>
+            </tr>`;
+            return `${ReportsPage._exportButtons('sales-by-item', qs)}
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Click an item for the lines behind it.</p>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg price</th><th scope="col" class="amount">COGS</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Margin %</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="8" style="text-align:center; color:var(--gray-400);">No sales in this period</td></tr>'}</tbody>
+                </table></div>`;
+        }, "Dates", false, { reportType: 'sales_by_item', view: 'sales-by-item', params, prefill, toolbar });
+    },
+
+    async purchasesByItem(prefill) {
+        prefill = prefill || {};
+        const params = { vendor_id: prefill.vendor_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null };
+        let vendors = [], classes = [], jobs = [];
+        try { vendors = await API.get('/vendors?active_only=true'); } catch (e) { vendors = []; }
+        try { classes = await API.get('/classes?include_archived=true'); } catch (e) { classes = []; }
+        try { jobs = await API.get('/jobs?include_inactive=true'); } catch (e) { jobs = []; }
+        const toolbar =
+            ReportsPage._itemPicker('pbi-vendor', 'Vendor', vendors, params.vendor_id, 'vendor_id')
+            + ReportsPage._itemPicker('pbi-class', T('Class'), classes, params.class_id, 'class_id')
+            + ReportsPage._itemPicker('pbi-job', T('Job'), jobs, params.job_id, 'job_id');
+        await ReportsPage.openPeriodModal('Purchases by Item', 'this_year_to_date', async (_period, range, p) => {
+            const qs = ReportsPage._itemQs(range, p, 'vendor_id');
+            const data = await API.get(`/reports/purchases-by-item?${qs}`);
+            const money = (v) => v === null || v === undefined ? '—' : formatCurrency(v);
+            let rows = data.items.map(i => {
+                const key = i.item_id === null ? 'none' : i.item_id;
+                const open = escapeHtml(`ReportsPage.openItemLines('purchases', ${JSON.stringify(key)}, ${JSON.stringify(i.item_name)}, ${JSON.stringify(qs)})`);
+                return `<tr>
+                    <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(i.item_name)}</a></td>
+                    <td>${escapeHtml(i.item_type || '')}</td>
+                    <td class="amount">${i.quantity}</td>
+                    <td class="amount">${formatCurrency(i.amount)}</td>
+                    <td class="amount">${money(i.average_cost)}</td>
+                </tr>`;
+            }).join('');
+            rows += `<tr style="font-weight:700; background:var(--gray-50);">
+                <td>TOTAL</td><td></td>
+                <td class="amount">${data.total_quantity}</td>
+                <td class="amount">${formatCurrency(data.total_amount)}</td>
+                <td class="amount"></td>
+            </tr>`;
+            return `${ReportsPage._exportButtons('purchases-by-item', qs)}
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Bills and vendor credits only. Click an item for the lines behind it.</p>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg cost</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No purchases in this period</td></tr>'}</tbody>
+                </table></div>`;
+        }, "Dates", false, { reportType: 'purchases_by_item', view: 'purchases-by-item', params, prefill, toolbar });
     },
 
     async customerStatementPicker() {

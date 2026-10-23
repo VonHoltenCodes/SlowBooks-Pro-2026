@@ -43,6 +43,9 @@ _ALLOWED_TYPES = {
     "adjusting_entries",  # the accountant's adjustments for a period (#341)
     "closing_date_exceptions",  # what moved inside a closed period (#342)
     "income_by_customer",
+    # what sold / was bought, by item (#435)
+    "sales_by_item",
+    "purchases_by_item",
     "account_transactions",
     "cash_flow",
     "analytics_dashboard",

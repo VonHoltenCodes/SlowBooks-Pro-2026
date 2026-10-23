@@ -5,6 +5,10 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.28.0 — Sales by Item and Purchases by Item
+
+Two reports QuickBooks users look for and did not find (#435): Sales by Item, one row per item for a period with quantity, amount, average price and — for an item whose stock is tracked — COGS, gross margin and margin % from the item's own inventory movements, built from posted invoices and sales receipts less credit memos with voids left out; and Purchases by Item, the same shape from bills less vendor credits with an average cost (expense lines carry no item, so purchases are bills and vendor credits only). A line without an item is one "No item" row so the sales total ties to the P&L's income for the same accounts. Both narrow by customer or vendor, class and job (a line's own class or job wins, else the header's), open the documents behind a row, and save as PDF, CSV and a saved report.
+
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
 The sentence a Server Edition server answers for a company it cannot open
