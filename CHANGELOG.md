@@ -5,6 +5,20 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.27.0
+
+**API tokens: never an administrator, and a revoked one says so** (#434).
+The API tokens from 2.11.1 already give a program a role and a key
+(`Authorization: Bearer sbp_…`): a name, a prefix to match it by, the last
+time it was used, revoke, a SHA-256 at rest, and audit rows in the token's
+name. Two gaps closed: a new token can no longer be made with the admin
+role (bookkeeper, accountant or read-only; settings, users and tokens stay
+with a signed-in administrator; a token made as admin before this keeps
+working), and a request with a revoked token is answered with a sentence
+naming the token and where to get a new one, not "Not authenticated",
+which sent an unattended client's operator to the sign-in page. A secret
+that matches nothing is still refused without a word.
+
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
 The sentence a Server Edition server answers for a company it cannot open

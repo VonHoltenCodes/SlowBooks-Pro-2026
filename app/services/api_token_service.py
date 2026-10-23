@@ -27,7 +27,9 @@ def hash_token(token: str) -> str:
 
 
 def resolve(bearer: str) -> dict | None:
-    """Bearer secret → {"label", "role"} for an active token, else None."""
+    """Bearer secret → {"label", "role"} for an active token; {"revoked":
+    True, "label"} for one an administrator turned off (so the 401 can say
+    so, #434); None for a secret that matches nothing."""
     if not bearer or not bearer.startswith(TOKEN_PREFIX):
         return None
     from app.database import SessionLocal
@@ -35,12 +37,12 @@ def resolve(bearer: str) -> dict | None:
     db = SessionLocal()
     try:
         row = (
-            db.query(ApiToken)
-            .filter(ApiToken.token_hash == hash_token(bearer), ApiToken.is_active)
-            .first()
+            db.query(ApiToken).filter(ApiToken.token_hash == hash_token(bearer)).first()
         )
         if row is None:
             return None
+        if not row.is_active:
+            return {"revoked": True, "label": row.label}
         now = datetime.now(timezone.utc)
         last = row.last_used_at
         if last is not None and last.tzinfo is None:

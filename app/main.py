@@ -1080,6 +1080,19 @@ async def _require_session(request: Request, call_next):
         auth_header = request.headers.get("authorization") or ""
         if auth_header.startswith("Bearer "):
             token_principal = _resolve_api_token(auth_header[7:].strip())
+        if token_principal is not None and token_principal.get("revoked"):
+            # A revoked token says so (#434): the client that holds it is
+            # usually unattended, and "Not authenticated" sent its operator
+            # to the sign-in page. A secret that matches nothing stays vague.
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": (
+                        f"The API token \"{token_principal['label']}\" was revoked. "
+                        "Ask an administrator for a new one under Settings, API Tokens."
+                    )
+                },
+            )
         if token_principal is None:
             return JSONResponse(
                 status_code=401,

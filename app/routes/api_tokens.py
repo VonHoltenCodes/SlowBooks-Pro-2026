@@ -76,6 +76,19 @@ def create_token(payload: TokenCreate, request: Request, db: Session = Depends(g
     label = payload.label.strip()
     if payload.role not in VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+    if payload.role == ROLE_ADMIN:
+        # A token is a program, not a person. Roles are its only scope
+        # (#434), and the one that reaches settings, closing dates and
+        # company files stays with a signed-in administrator. Tokens
+        # made as admin before 2.27.0 keep working; none are made now.
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "An API token cannot be an administrator. Choose bookkeeper, "
+                "accountant or read-only; settings, users and tokens stay with "
+                "a signed-in administrator."
+            ),
+        )
     if db.query(ApiToken).filter(ApiToken.label == label).first():
         raise HTTPException(status_code=409, detail="Label already exists")
     secret = generate_token()

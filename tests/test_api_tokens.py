@@ -93,8 +93,32 @@ def test_bookkeeper_token_daily_writes_only(client):
     assert api.put("/api/settings", json={"invoice_prefix": "T-"}).status_code == 403
 
 
-def test_tokens_cannot_manage_identities_even_as_admin(client):
-    tok = _mint(client, "root-bot", "admin")["token"]
+def test_an_admin_token_is_refused(client):
+    """A token is never an administrator (#434): roles are its scope, and
+    the one that reaches settings and identities stays with a person."""
+    r = client.post("/api/tokens", json={"label": "root-bot", "role": "admin"})
+    assert r.status_code == 400, r.text
+    assert "cannot be an administrator" in r.json()["detail"]
+    assert _mint(client, "keeper-bot", "bookkeeper")["role"] == "bookkeeper"
+
+
+def test_tokens_cannot_manage_identities_even_as_admin(client, db_session):
+    # An admin token made before 2.27.0 still works, and still cannot
+    # manage identities; it is made in the database as one would be.
+    from app.services.api_token_service import generate_token, hash_token
+
+    tok = generate_token()
+    db_session.add(
+        ApiToken(
+            label="root-bot",
+            token_hash=hash_token(tok),
+            token_hint=tok[:10],
+            role="admin",
+            is_active=True,
+            created_by="test",
+        )
+    )
+    db_session.commit()
     api = _bearer(tok)
     assert api.put("/api/settings", json={"invoice_prefix": "A-"}).status_code == 200
     # The no-self-escalation wall
@@ -112,7 +136,12 @@ def test_bad_and_revoked_tokens_rejected(client):
     api = _bearer(created["token"])
     assert api.get("/api/customers").status_code == 200
     client.put(f"/api/tokens/{created['id']}", json={"is_active": False})
-    assert api.get("/api/customers").status_code == 401
+    r = api.get("/api/customers")
+    assert r.status_code == 401
+    # a revoked token is told so (#434); a secret that matches nothing is not
+    assert "shortlived" in r.json()["detail"] and "revoked" in r.json()["detail"]
+    fake = _bearer("sbp_totally-fake").get("/api/customers")
+    assert fake.json()["detail"] == "Not authenticated"
 
 
 def test_no_credentials_still_401(client):
