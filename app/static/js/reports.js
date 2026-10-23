@@ -775,11 +775,38 @@ const ReportsPage = {
             ["last_quarter", "Last Quarter"],
             ["last_year", "Last Year"],
             ["last_year_to_date", "Last Year to Date"],
-            ["custom", "Custom Date"],
         ];
+        // Fiscal-year presets only when the company has a non-January fiscal
+        // year set (#444); a January start IS the calendar year, so the
+        // calendar presets already cover it.
+        const fym = App.settings && App.settings.fiscal_year_start_month;
+        if (fym && String(fym) !== "1") {
+            options.push(
+                ["this_fiscal_year", "This Fiscal Year"],
+                ["this_fiscal_year_to_date", "This Fiscal Year to Date"],
+                ["last_fiscal_year", "Last Fiscal Year"],
+                ["last_fiscal_year_to_date", "Last Fiscal Year to Date"],
+            );
+        }
+        options.push(["custom", "Custom Date"]);
         return options.map(([value, label]) =>
             `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`
         ).join("");
+    },
+
+    // First month of the fiscal year, 1-12 (1 = calendar year). Mirrors
+    // app/services/fiscal_year.start_month (#444).
+    _fiscalYearStartMonth() {
+        const m = parseInt((App.settings && App.settings.fiscal_year_start_month) || "1", 10);
+        return (m >= 1 && m <= 12) ? m : 1;
+    },
+
+    // Most recent first-of-start-month on or before `today` (a Date).
+    // Mirrors app/services/fiscal_year._fy_start (#444).
+    _fiscalYearStart(today) {
+        const m0 = ReportsPage._fiscalYearStartMonth() - 1;  // JS 0-based month
+        const year = today.getMonth() >= m0 ? today.getFullYear() : today.getFullYear() - 1;
+        return new Date(year, m0, 1);
     },
 
     _pad(value) {
@@ -839,6 +866,29 @@ const ReportsPage = {
                 start = new Date(year - 1, 0, 1);
                 end = new Date(year - 1, month, Math.min(day, new Date(year - 1, month + 1, 0).getDate()));
                 break;
+            case "this_fiscal_year": {
+                const s = ReportsPage._fiscalYearStart(today);
+                start = s;
+                end = new Date(s.getFullYear() + 1, s.getMonth(), 0);  // day before next FY
+                break;
+            }
+            case "this_fiscal_year_to_date":
+                start = ReportsPage._fiscalYearStart(today);
+                end = today;
+                break;
+            case "last_fiscal_year": {
+                const s = ReportsPage._fiscalYearStart(today);
+                start = new Date(s.getFullYear() - 1, s.getMonth(), 1);
+                end = new Date(s.getFullYear(), s.getMonth(), 0);  // day before this FY
+                break;
+            }
+            case "last_fiscal_year_to_date": {
+                const s = ReportsPage._fiscalYearStart(today);
+                start = new Date(s.getFullYear() - 1, s.getMonth(), 1);
+                // the same point one year earlier, as Last Year to Date does
+                end = new Date(year - 1, month, Math.min(day, new Date(year - 1, month + 1, 0).getDate()));
+                break;
+            }
             case "custom":
                 return {
                     start: customStart || ReportsPage._isoDate(new Date(year, 0, 1)),

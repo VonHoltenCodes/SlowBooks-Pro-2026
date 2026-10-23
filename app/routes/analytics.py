@@ -27,6 +27,7 @@ from app.schemas.common import StrictModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.services.fiscal_year import fiscal_year_start
 from app.routes._roles import require_admin
 from app.services.rate_limit import limiter
 from app.services.analytics import AnalyticsEngine
@@ -93,6 +94,7 @@ def _resolve_period(
     period: Optional[str],
     start_date: Optional[date],
     end_date: Optional[date],
+    db: Optional[Session] = None,
 ) -> Tuple[date, date, str]:
     """Resolve period name or explicit dates to `(start, end, label)`.
 
@@ -102,9 +104,14 @@ def _resolve_period(
     resolved. Default is month-to-date.
     """
     today = date.today()
+    # "year" is the company's fiscal year when one is set (#444); without a
+    # session (direct callers in tests) it is the calendar year.
+    fy_start = (
+        fiscal_year_start(db, today) if db is not None else date(today.year, 1, 1)
+    )
 
     if start_date or end_date:
-        s = start_date or date(today.year, 1, 1)
+        s = start_date or fy_start
         e = end_date or today
         return s, e, "custom"
 
@@ -115,7 +122,7 @@ def _resolve_period(
         q_start_month = ((today.month - 1) // 3) * 3 + 1
         return today.replace(month=q_start_month, day=1), today, "quarter"
     if p in ("year", "ytd"):
-        return today.replace(month=1, day=1), today, "year"
+        return fy_start, today, "year"
     # Unrecognised: fall back to MTD, report the label we actually used.
     return today.replace(day=1), today, "month"
 
@@ -139,7 +146,7 @@ def get_dashboard(
     semantics (trend = last 12 months, aging = open balances as of today,
     cash_forecast = next 90 days).
     """
-    s, e, label = _resolve_period(period, start_date, end_date)
+    s, e, label = _resolve_period(period, start_date, end_date, db)
     payload = AnalyticsEngine(db).get_dashboard(start_date=s, end_date=e)
     payload["period"] = {
         "name": label,
@@ -157,7 +164,7 @@ def get_revenue(
     db: Session = Depends(get_db),
 ):
     """Revenue by customer (windowed) + 12-month trend."""
-    s, e, label = _resolve_period(period, start_date, end_date)
+    s, e, label = _resolve_period(period, start_date, end_date, db)
     engine = AnalyticsEngine(db)
     return {
         "period": {"name": label, "start": s.isoformat(), "end": e.isoformat()},
@@ -174,7 +181,7 @@ def get_expenses(
     db: Session = Depends(get_db),
 ):
     """Expense breakdown by account number (windowed)."""
-    s, e, label = _resolve_period(period, start_date, end_date)
+    s, e, label = _resolve_period(period, start_date, end_date, db)
     return {
         "period": {"name": label, "start": s.isoformat(), "end": e.isoformat()},
         "by_category": AnalyticsEngine(db).expenses_by_category(s, e),
@@ -220,7 +227,7 @@ def export_csv(
     One row per (section, key, subkey, value) tuple. Loads into Excel,
     Google Sheets, or any BI tool without ceremony.
     """
-    s, e, label = _resolve_period(period, start_date, end_date)
+    s, e, label = _resolve_period(period, start_date, end_date, db)
 
     # Single DB round-trip for all metrics (reviewer fix: was 8 separate calls)
     snap = AnalyticsEngine(db).get_dashboard(start_date=s, end_date=e)
@@ -328,7 +335,7 @@ def export_pdf(
     # on `from app.routes import analytics`.
     from app.services.pdf_service import generate_analytics_pdf
 
-    s, e, label = _resolve_period(period, start_date, end_date)
+    s, e, label = _resolve_period(period, start_date, end_date, db)
     engine = AnalyticsEngine(db)
     dashboard = engine.get_dashboard(start_date=s, end_date=e)
 
@@ -899,7 +906,7 @@ def ai_insights(
     _require_model(cfg)
     model = cfg["model"]
 
-    s, e, label = _resolve_period(period, start_date, end_date)
+    s, e, label = _resolve_period(period, start_date, end_date, db)
 
     # Cache check
     # the company's too: a Server Edition server serves several (#358)
@@ -1011,7 +1018,7 @@ def run_ai_action(
     # Period is only meaningful for actions that declared uses_period=True;
     # actions that don't use it just ignore the dates. Always resolve so
     # the response can echo back what window the user was looking at.
-    s, e, label = _resolve_period(period, start_date, end_date)
+    s, e, label = _resolve_period(period, start_date, end_date, db)
 
     try:
         result = ai_run_action(

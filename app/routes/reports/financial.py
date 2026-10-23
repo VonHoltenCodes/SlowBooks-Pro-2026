@@ -10,6 +10,7 @@ from app.database import get_db
 from app.models.accounts import Account, AccountType
 from app.models.transactions import Transaction, TransactionLine
 from app.routes.reports._router import router
+from app.services.fiscal_year import fiscal_year_start
 from app.services.terminology import Terms, terms_from_db
 
 # Debit-normal account types. For these, natural balance = debit - credit.
@@ -197,7 +198,7 @@ def profit_loss(
     exclude_adjusting = _flag(exclude_adjusting)
     sort = sort if isinstance(sort, str) else "number"
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     if compare == "prior_year":
@@ -471,7 +472,7 @@ def general_ledger(
     computed under the same test, or the running balances would be wrong
     (#236)."""
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     cls, in_class = _in_class(db, class_id) if class_id is not None else (None, None)
@@ -616,7 +617,7 @@ def account_transactions(
     if not acct:
         raise HTTPException(status_code=404, detail="Account not found")
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     cls = _in_class(db, class_id)[0] if class_id is not None else None
@@ -661,7 +662,7 @@ def trial_balance(
     """Trial Balance: sum all debits/credits per account for a date range."""
     exclude_adjusting = _flag(exclude_adjusting)
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
 
@@ -734,7 +735,7 @@ def cash_flow(
     from app.services.cash_flow import statement_of_cash_flows
 
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     return statement_of_cash_flows(
@@ -951,9 +952,9 @@ def _pl_pivot(
     }
 
 
-def _period(start_date, end_date):
+def _period(db, start_date, end_date):
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     return start_date, end_date
@@ -989,7 +990,7 @@ def profit_loss_by_class(
     from app.models.classes import TxnClass
     from app.services.classes_service import class_attribution, uncategorized_class_id
 
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     if show not in ("all", "active"):
         raise HTTPException(status_code=400, detail="show must be all or active")
     chosen = _ids_param(class_ids, "class_ids")
@@ -1065,7 +1066,7 @@ def profit_loss_by_job(
     from app.models.jobs import Job
     from app.services.jobs_service import NO_JOB_LABEL, job_attribution
 
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     if show not in ("all", "active"):
         raise HTTPException(status_code=400, detail="show must be all or active")
     chosen = _ids_param(job_ids, "job_ids")
@@ -1209,7 +1210,7 @@ def job_profitability_report(
     from app.services.jobs_service import job_profitability
 
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     rows = job_profitability(db, start_date, end_date, customer_id=customer_id)
@@ -1946,9 +1947,9 @@ def financial_statements_pdf(
 # report QuickBooks accountants ask for by this name.
 
 
-def _range_or_year(start_date, end_date):
+def _range_or_year(db, start_date, end_date):
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     return start_date, end_date
@@ -1966,7 +1967,7 @@ def adjusting_entries(
     from app.routes.journal import _line_dict
     from app.services.qbo_documents import REVERSALS
 
-    start_date, end_date = _range_or_year(start_date, end_date)
+    start_date, end_date = _range_or_year(db, start_date, end_date)
     txns = (
         db.query(Transaction)
         .filter(
@@ -2115,7 +2116,7 @@ def closing_date_exceptions_route(
     time shown are the person's own."""
     from app.services.closing_date_exceptions import closing_date_exceptions
 
-    start_date, end_date = _range_or_year(start_date, end_date)
+    start_date, end_date = _range_or_year(db, start_date, end_date)
     return closing_date_exceptions(db, start_date, end_date, tz_offset)
 
 

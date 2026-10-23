@@ -20,6 +20,7 @@ from app.models.classes import TxnClass
 from app.models.transactions import Transaction, TransactionLine
 from app.schemas.classes import ClassCreate, ClassResponse, ClassUpdate
 from app.services.classes_service import class_attribution, uncategorized_class_id
+from app.services.fiscal_year import fiscal_year_start
 
 router = APIRouter(prefix="/api/classes", tags=["classes"])
 
@@ -44,10 +45,10 @@ def _class_dict(c: TxnClass) -> dict:
     }
 
 
-def _dates(start_date, end_date):
-    # the report defaults: this year to today
+def _dates(db, start_date, end_date):
+    # the report defaults: this fiscal year to today (#444)
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     return start_date, end_date
@@ -81,7 +82,7 @@ def classes_activity(
 ):
     from app.routes.reports.financial import profit_loss_by_class
 
-    start_date, end_date = _dates(start_date, end_date)
+    start_date, end_date = _dates(db, start_date, end_date)
     uncategorized_class_id(db)
     db.commit()
     report = profit_loss_by_class(start_date, end_date, db)
@@ -147,7 +148,7 @@ def class_summary(
     from app.routes.reports.financial import profit_loss
 
     cls = _class_or_404(db, class_id)
-    start_date, end_date = _dates(start_date, end_date)
+    start_date, end_date = _dates(db, start_date, end_date)
     mine = profit_loss(start_date, end_date, db, class_id=class_id)
     company = profit_loss(start_date, end_date, db)
     out = {k: v for k, v in mine.items() if k not in ("class_id", "class_name")}
