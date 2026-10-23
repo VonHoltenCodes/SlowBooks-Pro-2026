@@ -132,21 +132,13 @@ def _class_out(cls: TxnClass | None) -> dict | None:
 
 
 def _voided_ids(db: Session, txn_ids: list[int]) -> set[int]:
-    """The transactions among these that were voided (a reversal names
-    them as its source) or are reversals themselves."""
-    if not txn_ids:
-        return set()
-    voided = set()
-    for (source_id,) in (
-        db.query(Transaction.source_id)
-        .filter(
-            Transaction.source_type.like("%\\_void", escape="\\"),
-            Transaction.source_id.in_(txn_ids),
-        )
-        .all()
-    ):
-        voided.add(source_id)
-    return voided
+    """The transactions among these that a `<type>_void` reversal voided.
+    Routed through app/services/voids.py so a document-keyed void (a payment,
+    a bill) is told from a transaction-keyed one (#448); reversals themselves
+    are caught separately by the endswith("_void") check in verdict()."""
+    from app.services.voids import voided_transaction_ids
+
+    return voided_transaction_ids(db, txn_ids)
 
 
 def _bill_lines_by_bill(db: Session, bill_ids: set[int]) -> dict[int, list[BillLine]]:

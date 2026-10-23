@@ -35,19 +35,14 @@ from app.models.payments import Payment
 from app.models.transactions import Transaction, TransactionLine
 from app.services.control_accounts import MissingControlAccount
 
-ZERO = Decimal("0")
-
-# A reversal whose source_id is the id of the TRANSACTION it reverses (the
+# Reversals whose source_id is the id of the TRANSACTION they reverse (the
 # house void_document() convention and the journal's own void). A payment's
-# reversal points at the payment instead; Payment.is_voided says it.
-_VOIDS_KEYED_BY_TRANSACTION = (
-    "manual_void",
-    "bank_entry_void",
-    "deposit_void",
-    # a QuickBooks Online import posting reversed (services/qbo_documents.py)
-    "qbo_ledger_void",
-    "qbo_journal_void",
-)
+# reversal points at the payment instead; Payment.is_voided says it. The
+# authoritative set now lives in app/services/voids.py (#448); kept under the
+# old name so this module's callers stand.
+from app.services.voids import TRANSACTION_KEYED_VOIDS as _VOIDS_KEYED_BY_TRANSACTION
+
+ZERO = Decimal("0")
 
 
 def uf_account_id(db: Session) -> Optional[int]:

@@ -91,18 +91,12 @@ def balance_as_of(db: Session, account: Account, as_of: date) -> tuple[Decimal, 
 
 
 def voided_transaction_ids(db: Session, txn_ids) -> set[int]:
-    """Ids among `txn_ids` that a `<type>_void` reversal points at. Voided-
-    ness is derived from the ledger, never a flag (the expenses convention)."""
-    ids = [int(i) for i in txn_ids]
-    if not ids:
-        return set()
-    rows = (
-        db.query(Transaction.source_id)
-        .filter(Transaction.source_type.like("%\\_void", escape="\\"))
-        .filter(Transaction.source_id.in_(ids))
-        .all()
-    )
-    return {r[0] for r in rows}
+    """Ids among `txn_ids` a `<type>_void` reversal voided. Thin wrapper on
+    app/services/voids.py, which tells a transaction-keyed void from a
+    document-keyed one (#448); kept as the name callers and tests use."""
+    from app.services.voids import voided_transaction_ids as _lookup
+
+    return _lookup(db, txn_ids)
 
 
 _LINKS = {
