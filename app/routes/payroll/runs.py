@@ -761,6 +761,138 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.post("/{run_id}/void", response_model=PayRunResponse)
+def void_pay_run(run_id: int, db: Session = Depends(get_db)):
+    """Void a processed pay run (#432).
+
+    Reverses the payroll journal entry (a dated mirror; both stay in the
+    register) and the burden Job Cost Entry if the run wrote one, backs the
+    amounts out of each employee's YTD and BenefitYTD, puts the paid time
+    entries back to approved-unpaid, and marks the stubs void. Refused inside
+    a closed period. A run whose NACHA file was already made is still voided,
+    with a warning: the bank may have the file, and the void does not stop
+    the money."""
+    from app.services.closing_date import check_closing_date
+    from app.services.accounting import create_journal_entry, reversing_lines
+    from app.services.job_costing import void_job_cost
+    from app.services.safe_errors import DataProblem
+    from app.models.benefits import BenefitCode, EmployeeBenefit
+    from app.models.job_costing import JobCost
+    from app.models.transactions import Transaction
+    from app.models.audit import AuditLog
+
+    run = (
+        db.query(PayRun)
+        .options(joinedload(PayRun.stubs).joinedload(PayStub.benefits))
+        .filter(PayRun.id == run_id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(status_code=404, detail="Pay run not found")
+    if run.status == PayRunStatus.VOID:
+        raise HTTPException(status_code=400, detail="Pay run is already void")
+    if run.status == PayRunStatus.DRAFT:
+        # A draft has nothing posted to reverse.
+        raise HTTPException(
+            status_code=400,
+            detail="A draft pay run is not voided; delete it or process it",
+        )
+    # The reversing JE is dated to the pay date, so the closing-date rule
+    # applies like it does on process.
+    check_closing_date(db, run.pay_date)
+
+    # Reverse the payroll journal entry, unless the run posted no lines.
+    if run.transaction_id:
+        txn = db.query(Transaction).filter(Transaction.id == run.transaction_id).first()
+        if txn is not None:
+            create_journal_entry(
+                db,
+                run.pay_date,
+                f"VOID Payroll {run.period_start} - {run.period_end}",
+                reversing_lines(txn.lines),
+                source_type="payroll_void",
+                source_id=run.id,
+                reference=txn.reference or "",
+            )
+
+    # Reverse the burden Job Cost Entry if the run wrote one (void_job_cost
+    # also releases the burden's time-entry job_cost links).
+    if run.burden_job_cost_id:
+        jc = db.query(JobCost).filter(JobCost.id == run.burden_job_cost_id).first()
+        if jc is not None and jc.status != "void":
+            try:
+                void_job_cost(db, jc)
+            except DataProblem as e:
+                raise HTTPException(status_code=400, detail=str(e))
+
+    # Put the time entries the run paid back to approved-unpaid so the next
+    # run can take them (status stays APPROVED; only the pay_run link drops).
+    for te in db.query(TimeEntry).filter(TimeEntry.pay_run_id == run.id).all():
+        te.pay_run_id = None
+
+    # Loan balances: record_on_stub ran them down and no rebuild restores
+    # them, so add this run's amounts back to the enrollment by hand.
+    for stub in run.stubs:
+        for b in stub.benefits:
+            if not b.employee_amount or not b.benefit_code_id:
+                continue
+            code = (
+                db.query(BenefitCode)
+                .filter(BenefitCode.id == b.benefit_code_id)
+                .first()
+            )
+            if code is None or not code.tracks_balance:
+                continue
+            enr = (
+                db.query(EmployeeBenefit)
+                .filter(
+                    EmployeeBenefit.employee_id == stub.employee_id,
+                    EmployeeBenefit.benefit_code_id == b.benefit_code_id,
+                    EmployeeBenefit.balance_remaining.isnot(None),
+                )
+                .first()
+            )
+            if enr is not None:
+                enr.balance_remaining = Decimal(str(enr.balance_remaining)) + Decimal(
+                    str(b.employee_amount)
+                )
+
+    # Flip the status, then rebuild BenefitYTD from the surviving snapshots.
+    # Employee YTD backs out on the status change alone — _ytd_stubs excludes
+    # void runs — so nothing else is needed there.
+    run.status = PayRunStatus.VOID
+    db.flush()
+    benefits_engine.rebuild_ytd(db, run.pay_date.year)
+
+    # A NACHA file already made (recorded as an EXPORT audit row by the ACH
+    # export) is a warning, not a block.
+    warnings: list[str] = []
+    exports = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.table_name == "pay_runs",
+            AuditLog.record_id == run.id,
+            AuditLog.action == "EXPORT",
+        )
+        .order_by(AuditLog.timestamp.desc())
+        .all()
+    )
+    for ex in exports:
+        nv = ex.new_values or {}
+        warnings.append(
+            f"A direct deposit file for this run was made on "
+            f"{ex.timestamp:%Y-%m-%d} ({nv.get('total')}, effective "
+            f"{nv.get('effective_date')}); the bank may already have it. "
+            "Voiding the run does not stop the money."
+        )
+
+    db.commit()
+    db.refresh(run)
+    resp = _with_employee_names(run)
+    resp.warnings = warnings
+    return resp
+
+
 @router.post("/gross-up", response_model=GrossUpResponse)
 def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
     """Net-to-gross: reverse-solve the gross pay that yields a target take-home."""

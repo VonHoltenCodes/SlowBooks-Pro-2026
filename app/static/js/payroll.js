@@ -33,6 +33,7 @@ const PayrollPage = {
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PayrollPage.view(${r.id})">View</button>
                         ${r.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.process(${r.id})">Process</button>` : ''}
+                        ${r.status === 'processed' ? `<button class="btn btn-sm btn-secondary" data-destructive onclick="PayrollPage.void(${r.id})">Void</button>` : ''}
                     </td>
                 </tr>`;
             }
@@ -217,6 +218,7 @@ const PayrollPage = {
             ${PayrollPage._directDepositNote(run)}
             <div class="form-actions">
                 ${run.status === 'processed' && run.stubs.some(s => s.direct_deposit) ? `<button class="btn btn-primary" onclick="PayrollPage.downloadDirectDeposit(${run.id})" title="The ACH file to upload to the bank">Direct deposit file</button>` : ''}
+                ${run.status === 'processed' ? `<button class="btn btn-secondary" data-destructive onclick="PayrollPage.void(${run.id})">Void</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`, { wide: true });
     },
@@ -268,6 +270,19 @@ const PayrollPage = {
         try {
             await API.post(`/payroll/${id}/process`);
             toast('Payroll processed');
+            App.navigate('#/payroll');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Void a processed run (#432): reverse the payroll journal entry, free
+    // the time entries, mark the stubs void. Any warning (a NACHA file was
+    // already made) comes back on the response and is toasted after.
+    async void(id) {
+        if (!confirm('Void this pay run? The payroll journal entry is reversed, the time entries go back to approved, and the stubs are marked void.')) return;
+        try {
+            const run = await API.post(`/payroll/${id}/void`);
+            toast('Pay run voided');
+            for (const w of (run.warnings || [])) toast(w, 'warning');
             App.navigate('#/payroll');
         } catch (err) { toast(err.message, 'error'); }
     },

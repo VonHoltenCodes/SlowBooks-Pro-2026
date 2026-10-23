@@ -225,10 +225,16 @@ def generate_paystub_pdf(
     additions = _addition_lines(stub)
     total_additions = sum((a["amount"] for a in additions), Decimal("0"))
 
+    # A void run's stub says VOID, like a void deposit slip (#432). The run's
+    # status may be the enum or its plain value depending on the caller.
+    status = getattr(pay_run, "status", None)
+    void = getattr(status, "value", status) == "void"
+
     ctx = {
         "stub": stub,
         "employee": employee,
         "pay_run": pay_run,
+        "void": void,
         "company": company or {},
         "ytd": ytd or {},
         "deductions": deductions,

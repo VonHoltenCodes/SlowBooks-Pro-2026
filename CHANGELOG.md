@@ -5,6 +5,21 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.27.0 — Void a processed pay run
+
+**A processed pay run can be voided** (#432). `PayRunStatus.VOID` and the
+refusal to process a void run were already there, but nothing set the status:
+there was no route and no button. Void now reverses the payroll journal entry
+the way every other void does — a dated reversing entry, both staying in the
+register — reverses the burden Job Cost Entry when the run wrote one, backs the
+run's amounts out of each employee's YTD and out of `BenefitYTD` (the stub
+snapshots stay, as the rebuild expects), and puts the time entries the run paid
+back to approved-unpaid so the next run can take them. The stubs read VOID, and
+a void stub's PDF says so the way a void deposit slip does. A run whose pay date
+is in a closed period is refused; a run whose NACHA file was already made is
+still voided, with a warning naming the file's date and total, because the bank
+may already have it and the void does not stop the money.
+
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
 The sentence a Server Edition server answers for a company it cannot open

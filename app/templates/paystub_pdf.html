@@ -10,6 +10,7 @@
     .company-info { font-size: 9pt; color: #4a4a6a; }
     .stub-title { text-align: right; }
     .stub-title h1 { font-size: 20pt; font-weight: 700; color: #003366; margin: 0; letter-spacing: 0.05em; }
+    .stub-title .void { color: #b00020; }
     .stub-title .sub { font-size: 9pt; color: #666; margin-top: 4px; }
     .meta-table { width: 100%; margin-bottom: 16px; }
     .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; }
@@ -46,7 +47,7 @@
             </div>
         </div>
         <div class="stub-title">
-            <h1>PAY STATEMENT</h1>
+            <h1>PAY STATEMENT{% if void %} <span class="void">VOID</span>{% endif %}</h1>
             <div class="sub">Pay Date: {{ pay_run.pay_date | fdate }}</div>
         </div>
     </div>
