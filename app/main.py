@@ -40,6 +40,7 @@ from app.routes import (
     dashboard,
     accounts,
     customers,
+    customers_past,
     vendors,
     items,
     invoices,
@@ -1303,6 +1304,8 @@ app.include_router(fx_routes.router)
 app.include_router(fixed_assets_routes.router)
 app.include_router(migration_routes.router)
 app.include_router(opening_balances_routes.router)
+# before customers.router so /past* is not swallowed by /{customer_id} (#436)
+app.include_router(customers_past.router)
 app.include_router(customers.router)
 app.include_router(vendors.router)
 app.include_router(items.router)

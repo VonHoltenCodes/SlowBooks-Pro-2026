@@ -43,6 +43,7 @@ _ALLOWED_TYPES = {
     "adjusting_entries",  # the accountant's adjustments for a period (#341)
     "closing_date_exceptions",  # what moved inside a closed period (#342)
     "income_by_customer",
+    "past_customers",  # a mailing list by service address and last job (#436)
     "account_transactions",
     "cash_flow",
     "analytics_dashboard",

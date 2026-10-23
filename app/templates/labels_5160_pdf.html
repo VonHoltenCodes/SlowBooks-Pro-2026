@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Mailing labels</title>
+<style>
+    /* Avery 5160: Letter, 0.5in top margin, 0.1875in sides; 3 columns of
+       2.625in with 0.125in gutters, 10 rows of 1in (#436). No borders. */
+    @page { size: letter; margin: 0.5in 0.1875in; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; font-size: 10pt; color: #000; }
+    .sheet { font-size: 0; }               /* kill inline-block whitespace */
+    .sheet.page-break { page-break-after: always; }
+    .label {
+        display: inline-block;
+        width: 2.625in;
+        height: 1in;
+        margin-right: 0.125in;
+        padding: 0.12in 0.18in;
+        vertical-align: top;
+        overflow: hidden;
+        font-size: 10pt;
+        line-height: 1.2;
+    }
+    .label:nth-child(3n) { margin-right: 0; }
+    .label .name { font-weight: 700; }
+</style>
+</head>
+<body>
+    {% for page in pages %}
+    <div class="sheet{% if not loop.last %} page-break{% endif %}">
+        {% for lb in page %}
+        <div class="label">
+            <div class="name">{{ lb.line1 }}</div>
+            {% if lb.line2 %}<div>{{ lb.line2 }}</div>{% endif %}
+            {% if lb.address1 %}<div>{{ lb.address1 }}</div>{% endif %}
+            {% if lb.address2 %}<div>{{ lb.address2 }}</div>{% endif %}
+            {% if lb.city_line %}<div>{{ lb.city_line }}</div>{% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    {% endfor %}
+</body>
+</html>

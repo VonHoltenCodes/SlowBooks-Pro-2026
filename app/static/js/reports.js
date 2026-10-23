@@ -26,6 +26,7 @@ const ReportsPage = {
         'sales-tax':            { label: 'Sales Tax Report',   open: (p) => ReportsPage.salesTax(p) },
         'general-ledger':       { label: 'General Ledger',     open: (p) => ReportsPage.generalLedger(p), keep: ['class_id'] },
         'income-by-customer':   { label: () => T('Income by Customer'), open: (p) => ReportsPage.incomeByCustomer(p) },
+        'past-customers':       { label: () => Terms.text('Past customers'), open: (p) => ReportsPage.pastCustomers(p) },
         'trial-balance':        { label: 'Trial Balance',      open: (p) => ReportsPage.trialBalance(p) },
         'adjusting-entries':    { label: 'Adjusting Journal Entries', open: (p) => ReportsPage.adjustingEntries(p) },
         'closing-date-exceptions': { label: 'Closing Date Exceptions', open: (p) => ReportsPage.closingDateExceptions(p) },
@@ -354,6 +355,7 @@ const ReportsPage = {
                 ${card('sales-tax', 'Sales Tax', 'Tax collected by invoice')}
                 ${card('general-ledger', 'General Ledger', 'All journal entries by account')}
                 ${card('income-by-customer', T('Income by Customer'), Terms.isNonprofit() ? 'Contribution totals per donor' : 'Sales totals per customer')}
+                ${card('past-customers', Terms.text('Past customers'), Terms.text('Past customers: a mailing list by service address and last job date'))}
                 ${card('customer-statement', T('Customer Statement'), Terms.text('Invoice/payment history PDF'))}
                 ${card('trial-balance', 'Trial Balance', 'Debits and credits by account')}
                 ${card('adjusting-entries', 'Adjusting Journal Entries', 'The accountant\'s adjustments for a period, with who posted each')}
@@ -1378,6 +1380,117 @@ const ReportsPage = {
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null }, prefill });
+    },
+
+    // Past Customers (#436): a mailing list built from the books — one row
+    // per customer, the service address (the job's site_address, else
+    // ship-to, else bill-to) and the last job date, filterable, with a
+    // mail-merge CSV and Avery 5160 labels. Not a period report: the filter
+    // bar is the whole of it, so it does not go through openPeriodModal; the
+    // address carries every filter so a view can be bookmarked and saved (R7).
+    _pastFilters: null,
+
+    async pastCustomers(prefill) {
+        const p = prefill || {};
+        ReportsPage._pastFilters = {
+            last_job_from: p.last_job_from || '',
+            last_job_to: p.last_job_to || '',
+            city: p.city || '',
+            zip: p.zip || '',
+            state: p.state || '',
+            job_type: p.job_type || '',
+            customer_type: p.customer_type || '',
+            min_sales: p.min_sales || '',
+            active: ['all', 'active', 'inactive'].includes(p.active) ? p.active : 'all',
+            include_do_not_contact: ['1', 'true'].includes(String(p.include_do_not_contact)) ? '1' : '',
+        };
+        ReportsPage.setAddress('past-customers', ReportsPage._pastFilters);
+        const f = ReportsPage._pastFilters;
+        openModal(Terms.text('Past customers'), `
+            <p style="margin-bottom:10px; color:var(--gray-500); font-size:12px;">${Terms.text('A mailing list by service address and last job date. A customer marked Do not contact in their notes is flagged here and left out of the export.')}</p>
+            <div class="form-grid" style="grid-template-columns: repeat(4, minmax(0,1fr)); gap:8px; margin-bottom:12px;">
+                <div class="form-group"><label for="pc-from">Last job from</label>
+                    <input id="pc-from" type="date" value="${escapeHtml(f.last_job_from)}" onchange="ReportsPage.setPastParam('last_job_from', this.value)"></div>
+                <div class="form-group"><label for="pc-to">Last job to</label>
+                    <input id="pc-to" type="date" value="${escapeHtml(f.last_job_to)}" onchange="ReportsPage.setPastParam('last_job_to', this.value)"></div>
+                <div class="form-group"><label for="pc-city">City</label>
+                    <input id="pc-city" type="text" value="${escapeHtml(f.city)}" placeholder="one or several, comma-joined" onchange="ReportsPage.setPastParam('city', this.value)"></div>
+                <div class="form-group"><label for="pc-zip">Zip</label>
+                    <input id="pc-zip" type="text" value="${escapeHtml(f.zip)}" placeholder="prefix, e.g. 787" onchange="ReportsPage.setPastParam('zip', this.value)"></div>
+                <div class="form-group"><label for="pc-state">State</label>
+                    <input id="pc-state" type="text" value="${escapeHtml(f.state)}" onchange="ReportsPage.setPastParam('state', this.value)"></div>
+                <div class="form-group"><label for="pc-jtype">${Terms.text('Job type')}</label>
+                    <input id="pc-jtype" type="text" value="${escapeHtml(f.job_type)}" onchange="ReportsPage.setPastParam('job_type', this.value)"></div>
+                <div class="form-group"><label for="pc-ctype">${Terms.text('Customer type')}</label>
+                    <input id="pc-ctype" type="text" value="${escapeHtml(f.customer_type)}" onchange="ReportsPage.setPastParam('customer_type', this.value)"></div>
+                <div class="form-group"><label for="pc-min">Lifetime sales at least</label>
+                    <input id="pc-min" type="number" step="0.01" value="${escapeHtml(f.min_sales)}" onchange="ReportsPage.setPastParam('min_sales', this.value)"></div>
+                <div class="form-group"><label for="pc-active">Status</label>
+                    <select id="pc-active" data-no-search onchange="ReportsPage.setPastParam('active', this.value)">
+                        <option value="all"${f.active === 'all' ? ' selected' : ''}>All</option>
+                        <option value="active"${f.active === 'active' ? ' selected' : ''}>Active only</option>
+                        <option value="inactive"${f.active === 'inactive' ? ' selected' : ''}>Inactive only</option>
+                    </select></div>
+                <div class="form-group" style="align-self:end;"><label style="display:inline-flex; gap:6px; align-items:center; font-weight:normal; text-transform:none;">
+                    <input type="checkbox" ${f.include_do_not_contact ? 'checked' : ''} onchange="ReportsPage.setPastParam('include_do_not_contact', this.checked ? '1' : '')"> Include do-not-contact in export</label></div>
+            </div>
+            <div id="pc-content"><div style="font-size:11px; color:var(--gray-500);">Loading…</div></div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`, { wide: true });
+        await ReportsPage.loadPastCustomers();
+    },
+
+    setPastParam(key, value) {
+        if (!ReportsPage._pastFilters) return;
+        ReportsPage._pastFilters[key] = value;
+        ReportsPage.setAddress('past-customers', ReportsPage._pastFilters);
+        ReportsPage.loadPastCustomers();
+    },
+
+    _pastQs() {
+        const qs = new URLSearchParams();
+        for (const [k, v] of Object.entries(ReportsPage._pastFilters || {})) {
+            if (v !== '' && v != null) qs.set(k, v);
+        }
+        return qs.toString();
+    },
+
+    async loadPastCustomers() {
+        const content = $('#pc-content');
+        if (!content) return;
+        content.innerHTML = '<div style="font-size:11px; color:var(--gray-500);">Loading…</div>';
+        try {
+            const qs = ReportsPage._pastQs();
+            const data = await API.get(`/customers/past${qs ? '?' + qs : ''}`);
+            if (!data.rows.length) {
+                content.innerHTML = '<div class="empty-state"><p>Nothing in the books matches these filters.</p></div>';
+                return;
+            }
+            const rows = data.rows.map(r => `<tr>
+                <td>${ReportsPage._rowLink(`ReportsPage.openCustomer(${r.customer_id}, this)`, r.name, `customer:${r.customer_id}`)}${r.do_not_contact ? ` <span class="badge badge-draft" title="Marked from the customer's notes">do not contact</span>` : ''}</td>
+                <td>${escapeHtml(r.company)}</td>
+                <td>${escapeHtml(r.phone)}</td>
+                <td>${escapeHtml(r.service_address)}</td>
+                <td>${r.first_job ? formatDate(r.first_job) : ''}</td>
+                <td>${r.last_job ? formatDate(r.last_job) : ''}</td>
+                <td class="amount">${r.job_count}</td>
+                <td class="amount">${formatCurrency(r.lifetime_sales)}</td>
+                <td>${escapeHtml(r.last_job_name)}${r.last_job_type ? ` (${escapeHtml(r.last_job_type)})` : ''}</td>
+            </tr>`).join('');
+            content.innerHTML = `
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                    <span style="color:var(--gray-500); font-size:12px;">${data.total_rows} rows · ${formatCurrency(data.total_sales)} lifetime</span>
+                    <span style="margin-left:auto;"></span>
+                    <button class="btn btn-sm btn-secondary" onclick="window.open('/api/customers/past.csv${qs ? '?' + qs : ''}','_blank')">Save CSV</button>
+                    <button class="btn btn-sm btn-secondary" onclick="window.open('/api/customers/past/labels.pdf${qs ? '?' + qs : ''}','_blank')">Labels PDF</button>
+                </div>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">Company</th><th scope="col">Phone</th><th scope="col">Service address</th><th scope="col">First job</th><th scope="col">Last job</th><th scope="col" class="amount">${T('Jobs')}</th><th scope="col" class="amount">Lifetime sales</th><th scope="col">Last job</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>`;
+            ReportsPage._refocusRow(content);
+        } catch (err) {
+            content.innerHTML = `<div style="color:var(--danger);">${escapeHtml(err.message)}</div>`;
+        }
     },
 
     async customerStatementPicker() {

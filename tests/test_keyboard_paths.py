@@ -754,8 +754,10 @@ def test_every_row_hop_passes_the_element_clicked():
     assert reports.count("ReportsPage.openCustomer(${i.customer_id}, this)") == 2
     assert reports.count("ReportsPage.openVendor(${i.vendor_id}, this)") == 2
     assert "ReportsPage.openCustomer(${j.customer_id}, this)" in reports
+    # the Past customers row (#436) passes the element too
+    assert "ReportsPage.openCustomer(${r.customer_id}, this)" in reports
     calls = re.findall(r"ReportsPage\.open(?:Customer|Vendor)\(([^)]*)\)", reports)
-    assert len(calls) == 5 and all(c.endswith(", this") for c in calls), calls
+    assert len(calls) == 6 and all(c.endswith(", this") for c in calls), calls
     # Job Profitability: the job's link passes itself, the row its job's link
     assert "`ReportsPage._leaveFrom(${from});App.navigate(" in reports
     assert """jobCall(j, "this.querySelector('[data-row-key^=job]')")""" in reports

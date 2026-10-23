@@ -5,6 +5,23 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.28.0 — Past customers: a mailing list from the books
+
+**Pulling past customers by service address and last job date** (#436,
+@ContractorKeith), the thing a trade asked for as what would move it off
+QuickBooks — a ready-made mail list built from what is already in the books,
+nothing re-entered. A **Past Customers** view, on the Customers page and in
+the Report Center, puts one row per customer with their name, contact, the
+service address (the job's `site_address`, else the ship-to, else the
+bill-to), the first and last job dates, the job count, lifetime sales, and
+the last job's type and name. Filter by last job date, city or zip, state,
+job type, customer type, lifetime sales, and active or inactive; a customer
+whose notes say "do not contact" is marked and left out of the export.
+Export a mail-merge **CSV** (address parts in their own columns, the usual
+formula guard and BOM) or a **labels PDF** on Avery 5160 (30 up) with the
+service address. A row opens the customer's page, and the view carries its
+filter in the address so it can be bookmarked and saved as a report.
+
 ### v2.26.0 — Direct deposit from the page, and last year beside this one
 
 The sentence a Server Edition server answers for a company it cannot open
