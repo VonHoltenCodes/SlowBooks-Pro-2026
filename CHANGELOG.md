@@ -5,6 +5,18 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+A late fee now carries the invoice's job, and voiding the invoice takes the
+fee with it (#500). A late fee posts its own A/R debit on top of the
+invoice; it used to carry no job even on a job-costed invoice, so the job's
+A/R came up short, and a void reversed only the invoice and left the fee's
+A/R debit stranded with nothing to apply it to. The fee's lines and its
+journal entry now take the invoice's job the same way the invoice's own
+posting and void reversal do, and the invoice void reverses every late-fee
+posting for the invoice in the same transaction, so the customer balance,
+A/R and the job's A/R all return to zero.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

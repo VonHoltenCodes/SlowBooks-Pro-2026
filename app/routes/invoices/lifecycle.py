@@ -101,6 +101,51 @@ def void_invoice(invoice_id: int, db: Session = Depends(get_db)):
                 reference=invoice.invoice_number,
             )
 
+    # A late fee posts its own A/R debit (source_type="late_fee") on top of
+    # the invoice, so the void above leaves it open with nothing to apply it
+    # to. Reverse every late-fee posting for this invoice in the same
+    # transaction, with the invoice-void audit shape, so A/R (and the job's
+    # A/R) tie back to zero.
+    from app.models.transactions import Transaction, TransactionLine
+
+    fee_txns = (
+        db.query(Transaction)
+        .filter(
+            Transaction.source_type == "late_fee",
+            Transaction.source_id == invoice.id,
+        )
+        .all()
+    )
+    for fee_txn in fee_txns:
+        fee_lines = (
+            db.query(TransactionLine)
+            .filter(TransactionLine.transaction_id == fee_txn.id)
+            .all()
+        )
+        reverse_fee_lines = [
+            {
+                "account_id": fl.account_id,
+                "debit": fl.credit,  # swap debit/credit
+                "credit": fl.debit,
+                "description": void_line_memo(fl.description),
+            }
+            for fl in fee_lines
+        ]
+        if reverse_fee_lines:
+            # On the fee's own date, as the invoice's reversal sits on the
+            # invoice's: the fee came off the day it went on.
+            create_journal_entry(
+                db,
+                fee_txn.date,
+                f"VOID late fee - {document_label(invoice, terms_from_db(db))} #{invoice.invoice_number}",
+                reverse_fee_lines,
+                source_type="invoice_void",
+                source_id=invoice.id,
+                class_id=invoice.class_id,
+                job_id=invoice.job_id,
+                reference=invoice.invoice_number,
+            )
+
     # ---- Phase 11: reverse inventory movements ----
     # Pass the ORIGINAL (invoice, id) so reverse_sale looks up the sale's
     # historical unit_cost — this keeps the reversal balanced even if
@@ -223,19 +268,26 @@ def apply_late_fees(db: Session = Depends(get_db)):
         if fee_amount <= 0:
             continue
 
-        # Create journal entry: DR A/R, CR Late Fee Income
+        # Create journal entry: DR A/R, CR Late Fee Income. A fee on a
+        # job-costed invoice carries that job on both lines (and the header),
+        # so the job's A/R ties out and the void can reverse it cleanly —
+        # the same way the invoice's own posting and void reversal do.
         journal_lines = [
             {
                 "account_id": ar_id,
                 "debit": fee_amount,
                 "credit": Decimal("0"),
                 "description": f"Late fee - {document_label(inv, words)} #{inv.invoice_number}",
+                "job_id": inv.job_id,
+                "class_id": inv.class_id,
             },
             {
                 "account_id": late_fee_account.id,
                 "debit": Decimal("0"),
                 "credit": fee_amount,
                 "description": f"Late fee - {document_label(inv, words)} #{inv.invoice_number}",
+                "job_id": inv.job_id,
+                "class_id": inv.class_id,
             },
         ]
         create_journal_entry(
@@ -246,6 +298,7 @@ def apply_late_fees(db: Session = Depends(get_db)):
             source_type="late_fee",
             source_id=inv.id,
             class_id=inv.class_id,
+            job_id=inv.job_id,
         )
 
         # Update invoice totals (add to subtotal too so total == subtotal + tax_amount)
