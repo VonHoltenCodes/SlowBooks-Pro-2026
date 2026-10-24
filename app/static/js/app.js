@@ -1626,12 +1626,16 @@ const App = {
         box.innerHTML = '<p class="hint">Reading the file…</p>';
         try {
             const plan = await App._postChartImport(form, true);
+            // each row as the import will write it (#461): the detail type
+            // it gets and the parent it sits under, then the change notes
             const label = { create: 'Create', update: 'Update', skip: 'Skip', deactivate: 'Deactivate', keep: 'Keep', error: 'Error' };
             const rows = plan.rows.map(r => `<tr>
                 <td>${label[r.action] || r.action}</td>
                 <td style="font-family:var(--font-mono);">${escapeHtml(r.number || '')}</td>
                 <td>${escapeHtml(r.name)}</td>
                 <td>${escapeHtml(r.type || '')}</td>
+                <td>${escapeHtml(r.detail_type_label || '')}</td>
+                <td>${escapeHtml([r.parent_number, r.parent_name].filter(Boolean).join(' '))}</td>
                 <td style="font-size:11px; color:var(--text-muted);">${escapeHtml([...(r.changes || []), r.note].filter(Boolean).join('; '))}</td>
             </tr>`).join('');
             const errs = plan.errors.map(x => `<li>${escapeHtml(x)}</li>`).join('');
@@ -1642,7 +1646,7 @@ const App = {
                 Nothing has been written yet.</p>
                 ${errs ? `<ul style="color:var(--danger); font-size:11px; margin:0 0 8px 16px;">${errs}</ul>` : ''}
                 <div class="table-container" style="max-height:320px; overflow:auto;"><table>
-                    <thead><tr><th scope="col">Action</th><th scope="col">Number</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Detail</th></tr></thead>
+                    <thead><tr><th scope="col">Action</th><th scope="col">Number</th><th scope="col">Name</th><th scope="col">Type</th><th scope="col">Detail type</th><th scope="col">Parent</th><th scope="col">Notes</th></tr></thead>
                     <tbody>${rows}</tbody></table></div>`;
             const apply = $('#chart-import-apply');
             apply.hidden = writes === 0;

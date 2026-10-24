@@ -679,8 +679,10 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
     _flag_parent_loops(db, plan)
     _flag_moves(db, plan)
     _flag_inherited_detail(db, plan)
+    _describe_rows(db, plan)
 
     if replace:
+        label = _parent_labeler(db, plan)
         for a in existing:
             if a.id in matched or not a.is_active:
                 continue
@@ -695,6 +697,7 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
                         "note": "control account not named in the file — kept, "
                         "the software posts to it by number",
                         "existing_id": a.id,
+                        **_as_it_stands(a, label),
                     }
                 )
                 continue
@@ -709,6 +712,7 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
                         "action": "keep",
                         "note": f"not in the file but carries {n} posted line(s) — kept",
                         "existing_id": a.id,
+                        **_as_it_stands(a, label),
                     }
                 )
                 continue
@@ -722,9 +726,68 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
                     "note": "not in the file, never used — hidden from new entries "
                     "(Reactivate on the chart page brings it back)",
                     "existing_id": a.id,
+                    **_as_it_stands(a, label),
                 }
             )
+    _note_balance_sheet_group(db, plan)
     return plan
+
+
+def _as_it_stands(a: Account, label) -> dict:
+    """A kept or deactivated account the file does not name: the detail type
+    and parent it already has, which the import leaves alone (#461). The
+    parent is labelled as _describe_rows labels one, so a parent the file
+    renames shows its new name."""
+    number, name = label("existing", a.parent_id) if a.parent_id else (None, None)
+    return {
+        "detail_type": a.detail_type,
+        "parent_number": number,
+        "parent_name": name,
+    }
+
+
+def _parent_labeler(db: Session, plan: Plan):
+    """(number, name) of a parent node as the import leaves it: a new row's,
+    an existing account the plan updates (or skips) by the file's name, else
+    the chart's own."""
+    by_existing = {
+        e["existing_id"]: e for e in plan.rows if "existing_id" in e and "_row" in e
+    }
+
+    def label(kind, ref):
+        if kind == "new":
+            pe = plan.rows[ref]
+            return pe.get("number"), pe["name"]
+        pe = by_existing.get(ref)
+        acct = db.get(Account, ref)
+        if acct is None:
+            return None, None
+        if pe is not None and pe["action"] in ("update", "skip"):
+            return pe.get("number"), pe["name"]
+        return acct.account_number, acct.name
+
+    return label
+
+
+def _describe_rows(db: Session, plan: Plan) -> None:
+    """Put on each row the parent it will sit under (#461), by number and
+    name as the import leaves them: the link the plan sets, else, for an
+    account already in the chart, the parent it has now (the apply never
+    unlinks one). A parent the plan renames shows the file's name. Runs
+    after every link check, so a link left off shows no parent."""
+    label = _parent_labeler(db, plan)
+    for entry in plan.rows:
+        number = name = None
+        if entry["action"] != "error":
+            hit = entry.get("_parent")
+            if hit is None and "existing_id" in entry:
+                acct = db.get(Account, entry["existing_id"])
+                if acct is not None and acct.parent_id:
+                    hit = ("existing", acct.parent_id)
+            if hit is not None:
+                number, name = label(*hit)
+        entry["parent_number"] = number
+        entry["parent_name"] = name
 
 
 def _note_detail_fallback(entry: dict, declared: str, actual: str) -> None:
@@ -745,31 +808,42 @@ def _planned_detail(r: Row, target: Account | None, entry: dict) -> str:
     takes its parent's when applied. A file detail type the account cannot
     carry (Accounts Receivable away from 1100, Bank without a bank kind)
     falls back to the default here exactly as the apply path does, so the
-    preview shows what the import will actually write, with the same note."""
+    preview shows what the import will actually write, with the same note.
+
+    The apply writes exactly this value on an updated account (#461 review),
+    so a retyped account given none takes the number and name rule here and
+    there alike, not the plain default the model's update hook would pick. An
+    account the file marks as a bank or card takes that kind's detail type
+    (Bank, Credit Card) when its own no longer fits."""
     retyped = any(c.startswith("type ") for c in entry.get("changes", []))
+    kind = (target.bank_kind if target is not None else None) or r.bank_kind
+    number = entry.get("number")
     if target is not None and not retyped:
-        if r.detail_type and r.detail_type != target.detail_type:
-            entry["note"] = (entry["note"] + "; " if entry["note"] else "") + (
-                f"detail type stays {detail_label(target.detail_type)} (the "
-                f"chart's), not {detail_label(r.detail_type)}"
-            )
-        return target.detail_type
+        keep = target.detail_type
+        if detail_type_problem(keep, target.account_type, kind, number) is not None:
+            # marked as a bank or card: the old one cannot stand
+            keep = default_detail_type(target.account_type, kind, number).value
+        if r.detail_type and r.detail_type != keep:
+            if keep == target.detail_type:
+                entry["note"] = (entry["note"] + "; " if entry["note"] else "") + (
+                    f"detail type stays {detail_label(keep)} (the "
+                    f"chart's), not {detail_label(r.detail_type)}"
+                )
+            else:
+                _note_detail_fallback(entry, r.detail_type, keep)
+        if keep != target.detail_type:
+            entry["changes"].append(f"detail type → {detail_label(keep)}")
+        return keep
     if r.detail_type:
-        problem = detail_type_problem(
-            r.detail_type, r.type, r.bank_kind, entry.get("number")
-        )
+        problem = detail_type_problem(r.detail_type, r.type, kind, number)
         if problem is None:
             return r.detail_type
-        fell_back = default_detail_type(
-            r.type, r.bank_kind, entry.get("number"), name=r.name
-        ).value
+        fell_back = default_detail_type(r.type, kind, number, name=r.name).value
         _note_detail_fallback(entry, r.detail_type, fell_back)
         return fell_back
     # none in the file: the default a new account gets, by 2.27.0's number
     # and name rule (default_detail_type), as the model gives it on apply
-    return default_detail_type(
-        r.type, r.bank_kind, entry.get("number"), name=r.name
-    ).value
+    return default_detail_type(r.type, kind, number, name=r.name).value
 
 
 def _flag_parent_types(db: Session, plan: Plan) -> None:
@@ -857,9 +931,8 @@ def _flag_parent_types(db: Session, plan: Plan) -> None:
             label = " ".join(p for p in (parent[4], parent[0]) if p)
             # the planned detail type of a parent row is its default when the
             # file names none; the rule reads the one it will have
-            pdetail = parent[2] or (
-                plan.rows[hit[1]].get("detail_type") if hit[0] == "new" else None
-            )
+            pe = plan.rows[hit[1]] if hit[0] == "new" else by_existing.get(hit[1])
+            pdetail = (pe or {}).get("detail_type") or parent[2]
             problem = parent_link_problem(
                 label, parent[1], pdetail, child[1], child[2], child[3], child[4]
             )
@@ -982,7 +1055,13 @@ def _flag_inherited_detail(db: Session, plan: Plan) -> None:
     the roots, not the rows top to bottom (Trent, #416): a file can list a
     grandchild above its parent, so settle each parent's inherited type —
     however deep — before any child reads it, and the dry run and the apply
-    then agree on the detail type and its note."""
+    then agree on the detail type and its note.
+
+    A "skip" row (already in the chart, same parent, nothing to change) is
+    not settled: the apply writes nothing to it, and a sub-account keeps the
+    detail type it has, as the account API leaves one whose parent does not
+    change. Where 2.28.0's display rule prints it in its parent's Balance
+    Sheet group, _note_balance_sheet_group says so on the row."""
 
     # the plan entry that is each parent node, for a parent that is a plan row
     entry_of: dict[tuple, dict] = {}
@@ -997,6 +1076,7 @@ def _flag_inherited_detail(db: Session, plan: Plan) -> None:
             "error",
             "deactivate",
             "keep",
+            "skip",
         )
 
     def parent_detail(hit):
@@ -1032,6 +1112,105 @@ def _flag_inherited_detail(db: Session, plan: Plan) -> None:
     for entry in plan.rows:
         if eligible(entry):
             settle(entry)
+
+
+_BS_NOTE = "_bs_note"
+
+
+def _bs_group_heading(detail) -> str:
+    from app.services.statement_layout import BS_GROUPS
+
+    for groups in BS_GROUPS.values():
+        for heading, _key, details in groups:
+            if detail in details:
+                return heading
+    return detail_label(detail)
+
+
+def _plan_keys(plan: Plan, created: dict | None = None) -> dict[int, object]:
+    """{row index: the account's key in a chart index}: its id, or, in the
+    dry run, ("new", i) for a row still to be created."""
+    keys = {}
+    for i, e in enumerate(plan.rows):
+        if e["action"] == "error":
+            continue
+        if e["action"] == "create":
+            if created is None:
+                keys[i] = ("new", i)
+            elif i in created:
+                keys[i] = created[i].id
+        elif "existing_id" in e:
+            keys[i] = e["existing_id"]
+    return keys
+
+
+def _planned_chart(db: Session, plan: Plan, keys: dict) -> dict:
+    """The chart as the plan will leave it, in bs_print_details' index shape
+    ({key: (number, name, parent, account type, detail type)})."""
+    index = {
+        a.id: (
+            a.account_number or "",
+            a.name or "",
+            a.parent_id,
+            a.account_type,
+            a.detail_type,
+        )
+        for a in db.query(Account)
+    }
+    for i, key in keys.items():
+        e = plan.rows[i]
+        r = e.get("_row")
+        old = index.get(key)
+        writes = r is not None and e["action"] in ("create", "update")
+        hit = e.get("_parent") if writes else None
+        if hit:
+            parent = hit if hit[0] == "new" else hit[1]
+        else:
+            parent = old[2] if old else None
+        retyped = any(c.startswith("type ") for c in e.get("changes", []))
+        atype = r.type if writes and (old is None or retyped) else old[3]
+        index[key] = (
+            e.get("number") or "",
+            r.name if writes else old[1],
+            parent,
+            atype,
+            e.get("detail_type"),
+        )
+    return index
+
+
+def _note_balance_sheet_group(
+    db: Session, plan: Plan, created: dict | None = None
+) -> None:
+    """Say on a row when the Balance Sheet prints the account in its
+    parent's group rather than by its own detail type: 2.28.0's display rule
+    (statement_layout.bs_print_details) for a sub-account still at its
+    default. Display only, so the row's detail type stays what is written.
+    The dry run reads the chart as planned, the apply the chart as written
+    (`created`), and the apply's note replaces the dry run's."""
+    from app.services.statement_layout import bs_print_details
+
+    keys = _plan_keys(plan, created)
+    if created is None:
+        placed = bs_print_details(index=_planned_chart(db, plan, keys))
+    else:
+        placed = bs_print_details(db)
+    for i, key in keys.items():
+        entry = plan.rows[i]
+        old = entry.pop(_BS_NOTE, None)
+        if old:
+            parts = [p for p in (entry.get("note") or "").split("; ") if p != old]
+            entry["note"] = "; ".join(parts)
+        group = placed.get(key)
+        if not group or entry["action"] == "deactivate":
+            continue
+        note = (
+            f"on the Balance Sheet it prints with its parent under "
+            f"{_bs_group_heading(group)} (display only, its detail type "
+            f"stays {detail_label(entry.get('detail_type'))})"
+        )
+        entry["note"] = (entry["note"] + "; " if entry.get("note") else "") + note
+        entry[_BS_NOTE] = note
 
 
 # --- applying ---------------------------------------------------------------
@@ -1108,9 +1287,6 @@ def apply_chart_import(db: Session, plan: Plan) -> None:
                     a.name = r.name
                 elif change.startswith("type "):
                     a.account_type = AccountType(r.type)
-                    # the old detail type cannot stand under a new type; the
-                    # file's, else the default (Account._settle_detail_type)
-                    a.detail_type = r.detail_type
                 elif change.startswith("number "):
                     a.account_number = r.number
                 elif change == "description":
@@ -1121,6 +1297,11 @@ def apply_chart_import(db: Session, plan: Plan) -> None:
                     a.is_active = False
                 elif change == "reactivate":
                     a.is_active = True
+            # the detail type the dry run planned (#461 review): for a retype
+            # with none in the file the number and name rule, for a new bank
+            # kind that kind's, else the chart's own. Left to the model's
+            # update hook, a retype took the plain default instead.
+            a.detail_type = entry["detail_type"]
         elif entry["action"] == "deactivate":
             db.get(Account, entry["existing_id"]).is_active = False
             continue
@@ -1156,14 +1337,32 @@ def apply_chart_import(db: Session, plan: Plan) -> None:
             continue
         if a.detail_type != r.detail_type:
             _note_detail_fallback(entry, r.detail_type, a.detail_type)
+    # the response reports what was written, not what was planned: every
+    # row's detail type and parent read back from the chart
+    for i, entry in enumerate(plan.rows):
+        if entry["action"] == "error":
+            continue
+        a = created.get(i) if entry["action"] == "create" else None
+        if a is None and "existing_id" in entry:
+            a = db.get(Account, entry["existing_id"])
+        if a is None:
+            continue
         entry["detail_type"] = a.detail_type
+        p = db.get(Account, a.parent_id) if a.parent_id else None
+        entry["parent_number"] = p.account_number if p else None
+        entry["parent_name"] = p.name if p else None
+    _note_balance_sheet_group(db, plan, created)
     db.commit()
 
 
 def _public(plan: Plan, applied: bool) -> dict:
     rows = []
     for e in plan.rows:
-        rows.append({k: v for k, v in e.items() if not k.startswith("_")})
+        row = {k: v for k, v in e.items() if not k.startswith("_")}
+        # the label the chart shows for the detail type the row is written
+        # with (#461) — read after an apply, which may settle it again
+        row["detail_type_label"] = detail_label(e.get("detail_type"))
+        rows.append(row)
     return {
         "format": plan.format,
         "dry_run": not applied,
