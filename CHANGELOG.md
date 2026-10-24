@@ -5,6 +5,13 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+- QuickBooks Desktop import: an account the report lists as two sections no
+  longer trips the cut-short check. Each "Total" row is measured against its
+  own section's lines (sub-accounts included) rather than every line posted to
+  that account path.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

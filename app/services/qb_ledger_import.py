@@ -126,8 +126,9 @@ def parse_ledger(rows: list[list[str]], header_at: int, cols: dict):
     lines: list[dict] = []
     errors: list[str] = []
     notes: list[str] = []
-    stack: list[tuple[int, str]] = []
-    totals: list[tuple[str, Decimal, Decimal]] = []
+    # each open section: (depth, name, [debit, credit] of the lines under it
+    # so far, its sub-accounts' included)
+    stack: list[tuple[int, str, list[Decimal]]] = []
 
     def cell(row, name):
         i = cols.get(name)
@@ -153,24 +154,33 @@ def parse_ledger(rows: list[list[str]], header_at: int, cols: dict):
                 while stack and stack[-1][0] > depth:
                     stack.pop()
                 if stack and stack[-1][0] == depth:
-                    path = ":".join(name for _, name in stack)
+                    # QuickBooks' own total: the section's lines (and its
+                    # sub-accounts') add up to it, or the file is not what
+                    # it says. Checked against the section being closed, so
+                    # an account the report lists as two sections has each
+                    # total measured against its own lines.
+                    path = ":".join(name for _, name, _ in stack)
+                    got_d, got_c = stack[-1][2]
                     try:
-                        totals.append(
-                            (
-                                path,
-                                _money(cell(row, "Debit")),
-                                _money(cell(row, "Credit")),
-                            )
-                        )
+                        debit = _money(cell(row, "Debit"))
+                        credit = _money(cell(row, "Credit"))
                     except Exception:
                         notes.append(
                             f"Row {n}: the total for {text[6:]} could not be read"
                         )
+                    else:
+                        if (got_d, got_c) != (debit, credit):
+                            errors.append(
+                                f"The lines under {path} come to {got_d:,.2f} debit "
+                                f"and {got_c:,.2f} credit, and QuickBooks' total says "
+                                f"{debit:,.2f} and {credit:,.2f}: the file looks cut "
+                                "short or edited. Export it again."
+                            )
                     stack.pop()
                 continue
             while stack and stack[-1][0] >= depth:
                 stack.pop()
-            stack.append((depth, text))
+            stack.append((depth, text, [Decimal("0"), Decimal("0")]))
             continue
         if not stack:
             errors.append(
@@ -190,9 +200,12 @@ def parse_ledger(rows: list[list[str]], header_at: int, cols: dict):
             continue
         if debit == 0 and credit == 0:
             continue
+        for _, _, sums in stack:
+            sums[0] += debit
+            sums[1] += credit
         lines.append(
             {
-                "path": ":".join(name for _, name in stack),
+                "path": ":".join(name for _, name, _ in stack),
                 "type": ttype,
                 "date": day,
                 "num": cell(row, "Num"),
@@ -203,22 +216,6 @@ def parse_ledger(rows: list[list[str]], header_at: int, cols: dict):
                 "row": n,
             }
         )
-    # QuickBooks' own totals: a section's lines (and its sub-accounts') add
-    # up to the total it printed, or the file is not what it says
-    for path, debit, credit in totals:
-        mine = [
-            ln
-            for ln in lines
-            if ln["path"] == path or ln["path"].startswith(path + ":")
-        ]
-        got_d = sum((ln["debit"] for ln in mine), Decimal("0"))
-        got_c = sum((ln["credit"] for ln in mine), Decimal("0"))
-        if (got_d, got_c) != (debit, credit):
-            errors.append(
-                f"The lines under {path} come to {got_d:,.2f} debit and "
-                f"{got_c:,.2f} credit, and QuickBooks' total says {debit:,.2f} and "
-                f"{credit:,.2f}: the file looks cut short or edited. Export it again."
-            )
     return lines, errors, notes
 
 

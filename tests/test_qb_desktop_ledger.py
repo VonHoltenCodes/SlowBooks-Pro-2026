@@ -201,6 +201,93 @@ def test_a_section_that_does_not_add_up_refuses_the_file(
     )
 
 
+def _two_sections_report(second_rent_total: str = "327.96") -> bytes:
+    """A report that lists Rent as two separate sections, each with its own
+    Total row (a real 2019 export did this), one label column before Type."""
+
+    def row(ttype, date, num, name, memo, split, debit, credit):
+        return f",{ttype},{date},{num},{name},{memo},{split},{debit},{credit},"
+
+    def total(text, debit, credit):
+        return f"{text},,,,,,,{debit},{credit},"
+
+    lines = [
+        ",Type,Date,Num,Name,Memo,Split,Debit,Credit,Balance",
+        "Operating Checking 4321,,,,,,,,,",
+        row("Check", "01/05/2026", "101", "Landlord", "Jan rent", "Rent", "", "150.00"),
+        row("Check", "02/05/2026", "102", "Landlord", "Feb rent", "Rent", "", "207.96"),
+        row("Check", "02/20/2026", "103", "Landlord", "Late fee", "Rent", "", "120.00"),
+        total("Total Operating Checking 4321", "0.00", "477.96"),
+        "Rent,,,,,,,,,",
+        row(
+            "Check",
+            "01/05/2026",
+            "101",
+            "Landlord",
+            "Jan rent",
+            "Operating Checking 4321",
+            "150.00",
+            "",
+        ),
+        total("Total Rent", "150.00", "0.00"),
+        "Rent,,,,,,,,,",
+        row(
+            "Check",
+            "02/05/2026",
+            "102",
+            "Landlord",
+            "Feb rent",
+            "Operating Checking 4321",
+            "207.96",
+            "",
+        ),
+        row(
+            "Check",
+            "02/20/2026",
+            "103",
+            "Landlord",
+            "Late fee",
+            "Operating Checking 4321",
+            "120.00",
+            "",
+        ),
+        total("Total Rent", second_rent_total, "0.00"),
+        total("TOTAL", "477.96", "477.96"),
+    ]
+    return ("\r\n".join(lines) + "\r\n").encode("cp1252")
+
+
+def test_an_account_listed_as_two_sections_is_checked_section_by_section(
+    client, db_session, seed_accounts
+):
+    _chart(db_session)
+    data = _upload(client, _two_sections_report())
+    assert data["errors"] == [], data["errors"]
+    assert data["journals"] == 3
+    assert _net(db_session, "Rent") == Decimal("477.96")
+    assert _net(db_session, "Operating Checking 4321") == Decimal("-477.96")
+
+
+def test_one_of_two_same_named_sections_that_does_not_add_up_still_refuses(
+    client, db_session, seed_accounts
+):
+    _chart(db_session)
+    data = _upload(client, _two_sections_report(second_rent_total="300.00"))
+    assert data["journals"] == 0
+    cut_short = [e for e in data["errors"] if "cut short or edited" in e]
+    assert len(cut_short) == 1, data["errors"]
+    # that section's own figures, not the two sections added together
+    assert "Rent" in cut_short[0]
+    assert "327.96" in cut_short[0] and "300.00" in cut_short[0]
+    assert "477.96" not in cut_short[0]
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.source_type == SOURCE_TYPE)
+        .count()
+        == 0
+    )
+
+
 def test_the_page_counts_the_journal_entries():
     js = (Path(__file__).resolve().parents[1] / "app/static/js/iif.js").read_text(
         encoding="utf-8"
