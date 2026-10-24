@@ -124,11 +124,15 @@ def active_customers(db: Session) -> dict:
 
 
 def payables(db: Session) -> dict:
-    total = (
-        db.query(func.coalesce(func.sum(Bill.balance_due), 0))
-        .filter(Bill.status.in_(OPEN_BILL))
-        .scalar()
-    )
+    # What is owed net of vendor credits and unapplied bill-payment balances:
+    # the A/P Aging report's TOTAL row, the same source the report page shows,
+    # so the card can't disagree with it. Summing raw Bill.balance_due ignored
+    # the credits the aging nets, reading high against a 2000 of less. The
+    # import is local because ap_aging_report lives in a route module (as
+    # _ar_aging_totals reaches ar_aging_report), which would otherwise cycle.
+    from app.routes.reports.payables_tax import ap_aging_report
+
+    total = ap_aging_report(db, date.today())["totals"]["total"]
     overdue = (
         db.query(func.count(Bill.id))
         .filter(*_bills_owing(), _past_due(Bill.due_date))

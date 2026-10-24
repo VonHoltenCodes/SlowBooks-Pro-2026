@@ -5,6 +5,15 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**The Payables card nets vendor credits** (#495). The dashboard's Payables
+card summed open bill balances by itself, so a $100 bill with a $30 unapplied
+vendor credit read $100 against an A/P Aging total of $70. The card now reads
+the A/P Aging report's TOTAL row, the same source the report page shows and
+the way the Receivables card already reads A/R Aging, so the two can no longer
+disagree.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every
