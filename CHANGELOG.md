@@ -5,6 +5,25 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**A bank entry's row says what its link opens.** In the register, a bank
+entry (posted with + Entry, the quick-entry row or Add from the bank feed)
+showed its memo as a link to `#/journal/…`, which read as "this is a
+journal entry", the kind that cannot be edited, when Edit on the same row
+is where it changes. The memo is now words, with a small Posting link
+beside it that says what it is (the journal posting behind this bank
+entry; use Edit to change it), and the posting's own page says "Posted
+from the bank register of <account>; edit it there" with the account
+linked. A void bank entry keeps the plain link. `GET /api/journal/{id}`
+carries `register_account_id` and `register_account_name` for a bank
+entry, empty for everything else.
+
+- The register's Memo cell for an editable bank entry: the memo as text and
+  a Posting link named for what it opens; the journal page for a bank
+  entry names the register it came from and links back
+  (`register_account_id`, `register_account_name` on `GET /api/journal/{id}`).
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

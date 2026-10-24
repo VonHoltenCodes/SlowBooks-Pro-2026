@@ -76,3 +76,7 @@ class JournalEntryResponse(BaseModel):
     # The page may offer Void: a journal of its own (hand-typed, imported,
     # the opening balances), not a reversal, not voided. The route decides.
     voidable: bool = False
+    # A bank entry's register: the bank or card account it was posted
+    # from, so the page can say where it is edited. Empty for the rest.
+    register_account_id: Optional[int] = None
+    register_account_name: str = ""

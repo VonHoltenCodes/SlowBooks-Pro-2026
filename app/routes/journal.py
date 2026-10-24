@@ -185,6 +185,20 @@ def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
     lines_data = []
     for line in txn.lines:
         lines_data.append(_line_dict(line, accounts.get(line.account_id)))
+    # A bank entry is edited in its register, not here: the page says so
+    # and links back to the bank or card account it was posted from (the
+    # line on an account with a bank kind; the entry's other lines are its
+    # categories).
+    register = next(
+        (
+            accounts[line.account_id]
+            for line in txn.lines
+            if txn.source_type == "bank_entry"
+            and accounts.get(line.account_id) is not None
+            and accounts[line.account_id].bank_kind
+        ),
+        None,
+    )
     return JournalEntryResponse(
         id=txn.id,
         date=txn.date,
@@ -198,6 +212,8 @@ def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
         total_credit=float(sum(line.credit for line in txn.lines)),
         voided=reversed_already(db, txn),
         voidable=_voidable(txn, reversed_already(db, txn)),
+        register_account_id=register.id if register is not None else None,
+        register_account_name=register.name if register is not None else "",
     )
 
 

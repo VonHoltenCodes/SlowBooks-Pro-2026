@@ -527,7 +527,7 @@ const BankingPage = {
                 <tr style="${e.voided ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                     <td>${formatDate(e.date)}</td>
                     <td>${escapeHtml(e.payee || '')}</td>
-                    <td><a href="${escapeHtml(BankingPage._entryHref(e))}">${escapeHtml(e.description || 'View entry')}</a></td>
+                    <td>${BankingPage._memoCell(e)}</td>
                     <td>${escapeHtml(e.reference || '')}</td>
                     <td style="font-size:10px; color:var(--gray-500);">${escapeHtml(sourceWord(e.source_type))}</td>
                     <td class="amount">${e.payment > 0 ? formatCurrency(e.payment) : ''}</td>
@@ -556,6 +556,21 @@ const BankingPage = {
     // an import) — its journal entry. Every line opens something.
     _entryHref(e) {
         return e.source_link || `#/journal/${e.transaction_id}`;
+    },
+
+    // The Memo cell: the memo, linking to what the line opens. A bank entry
+    // (posted here, or from the bank feed) is edited with its row's Edit,
+    // so its memo stays words and the link beside it is named for what it
+    // opens — the journal posting behind the entry. A memo that itself
+    // linked to #/journal/… read as "this is a journal entry", the kind
+    // that cannot be edited, and testers went looking for a way to change
+    // it. A void bank entry keeps the plain link: there is nothing to edit.
+    _memoCell(e) {
+        const href = escapeHtml(BankingPage._entryHref(e));
+        if (e.source_type !== 'bank_entry' || !e.editable) {
+            return `<a href="${href}">${escapeHtml(e.description || 'View entry')}</a>`;
+        }
+        return `${e.description ? `${escapeHtml(e.description)} ` : ''}<a href="${href}" style="font-size:10px;" title="The journal posting behind this bank entry; use Edit to change it">Posting</a>`;
     },
 
     // A register entry opens for editing (#388); the register says which
