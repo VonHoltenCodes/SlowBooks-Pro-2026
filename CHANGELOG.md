@@ -5,6 +5,12 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**What a bank import needs first, written down.** `docs/banking.md` says a
+CSV or OFX import needs only the bank account you import into, linked to its
+ledger account: no vendors, no expense accounts (#446).
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every
