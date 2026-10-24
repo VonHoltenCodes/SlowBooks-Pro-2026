@@ -108,6 +108,22 @@ def email_invoice(
     inv = db.query(Invoice).filter(Invoice.id == invoice_id).first()
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
+    # Settle the recipient before anything is logged: the typed address, else
+    # the customer's email on file. EmailLog.recipient is NOT NULL, so an
+    # empty recipient would crash send_email() on its own log row — and the
+    # outer except would crash again logging the same None — instead of a
+    # clean bounce (#496).
+    recipient = (data.recipient or "").strip() or (
+        (inv.customer.email or "").strip() if inv.customer else ""
+    )
+    if not recipient:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This invoice has no email address to send to. Add one to the "
+                "customer or type one here."
+            ),
+        )
     company = get_settings(db)
     try:
         from app.services.email_service import send_email, render_invoice_email_parts
@@ -140,7 +156,7 @@ def email_invoice(
         # or every send produces two rows.
         sent = send_email(
             db=db,
-            to_email=data.recipient,
+            to_email=recipient,
             subject=subject,
             html_body=html_body,
             attachment_bytes=pdf_bytes,
@@ -174,7 +190,7 @@ def email_invoice(
         log = EmailLog(
             entity_type="invoice",
             entity_id=inv.id,
-            recipient=data.recipient,
+            recipient=recipient,
             subject=subject,
             status="failed",
             error_message=message,

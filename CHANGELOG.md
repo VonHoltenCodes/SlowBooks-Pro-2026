@@ -5,6 +5,18 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Emailing an invoice with no recipient is a clean 400** (#496). The Email
+Invoice request let the recipient default to nothing, but EmailLog.recipient
+is NOT NULL, so a send with no address crashed on its own log row — and the
+route's own error handler crashed a second time logging the same empty
+address — leaving the operator an unhandled 500. The route now settles the
+recipient first (the typed address, else the customer's email on file) and,
+with neither, answers 400 asking for one before anything is logged. The
+statement and collection-letter sends already skipped a customer with no
+email, so they were left as they were.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every
