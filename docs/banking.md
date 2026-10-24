@@ -148,6 +148,11 @@ import as a `mapping` form field (JSON: column indexes for `date`,
 `description`, `payee`, `amount` or `debit`/`credit`, `check_number`, plus
 `date_format` and `has_header`).
 
+Nothing has to exist before the import: the payee on a line is free text
+until it is matched or a rule names a vendor, and a line with no category
+arrives uncategorised and is categorised in the review queue. You do not
+set up vendors or accounts first.
+
 1. **Duplicates are skipped** (bank transaction id / FITID, or a
    content-derived id for CSV).
 2. **Bank rules suggest a category** for lines whose payee matches a rule.
