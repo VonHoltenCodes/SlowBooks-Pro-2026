@@ -130,8 +130,9 @@
 [data-theme="dark"] .sidebar-edition { color: var(--qb-gold); }
 [data-theme="dark"] .nav-section { color: #7a8498; }
 [data-theme="dark"] .nav-link { color: #b0bcc8; }
-[data-theme="dark"] .open-screens__close, [data-theme="dark"] .open-screens__clear { color: #b0bcc8; }
-[data-theme="dark"] .open-screens__close:hover { color: #e0e4ec; background: rgba(255,255,255,0.08); }
+[data-theme="dark"] .recent-screens__toggle, [data-theme="dark"] .recent-screens__link, [data-theme="dark"] .recent-screens__clear { color: #b0bcc8; }
+[data-theme="dark"] .recent-screens__toggle:hover, [data-theme="dark"] .recent-screens__link:hover { color: #e0e4ec; background: rgba(255,255,255,0.05); }
+[data-theme="dark"] .recent-screens__link[aria-current="page"] { color: #ffffff; background: rgba(90,155,213,0.2); }
 [data-theme="dark"] .nav-link:hover { color: #e0e4ec; background: rgba(255,255,255,0.05); }
 [data-theme="dark"] .nav-link.active { color: #ffffff; background: rgba(90,155,213,0.2); }
 /* #505868 measured 2.53:1 against the sidebar — the footer carries the

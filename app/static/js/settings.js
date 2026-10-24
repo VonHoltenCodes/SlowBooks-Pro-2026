@@ -468,8 +468,9 @@ const SettingsPage = {
                 <div class="settings-section" role="group" aria-labelledby="settings-h-menu">
                     <h3 id="settings-h-menu">Sidebar</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Hide the menu items this company doesn't use (payroll done elsewhere, no inventory, …).
-                        A hidden page still opens by its address, and this page keeps the list.
+                        A ticked item shows in the menu; untick the ones this company doesn't use (payroll done
+                        elsewhere, no inventory, …) to hide them. A hidden page still opens by its address, and
+                        this list always has every item, so a hidden one can be ticked to show it again.
                     </div>
                     <div id="hidden-menu-choices" style="columns:2; font-size:12px; margin-bottom:12px;">
                         ${SettingsPage._hiddenMenuChoices(s.hidden_menu)}
@@ -1205,31 +1206,61 @@ const SettingsPage = {
     },
 
     // One checkbox per sidebar section and per link (#334), read from the
-    // sidebar itself so the list is always the menu as shipped; the ones
-    // the setting names are ticked.
+    // sidebar itself so the list is always the menu as shipped. A ticked box
+    // means "show it"; untick to hide (#457). The setting itself still lists
+    // the HIDDEN keys, so a list saved by an earlier version keeps working.
+    //
+    // An item the menu setting hid is still offered, unticked, so it can be
+    // shown again: the list used to skip every hidden <li>, the hidden items
+    // fell off it, and the next save wrote only what was on the page, which
+    // showed the first batch again (#457). Only an item hidden for another
+    // reason (the nonprofit pages on a business company, NEW-145; the admin
+    // pages for a clerk) is left out, and Save keeps its stored choice.
+    _hiddenMenuStored: [],
+
     _hiddenMenuChoices(raw) {
         let hidden = [];
         try { hidden = JSON.parse(raw || '[]'); } catch (err) { hidden = []; }
-        const set = new Set((Array.isArray(hidden) ? hidden : []).map(String));
+        hidden = (Array.isArray(hidden) ? hidden : []).map(String);
+        SettingsPage._hiddenMenuStored = hidden;
+        const set = new Set(hidden);
         const box = (key, label, indent) => `<label style="display:block; font-weight:normal; ${indent ? 'margin-left:18px;' : 'margin-top:6px;'}">
-                <input type="checkbox" name="hide-menu:${escapeHtml(key)}" data-hide-menu="${escapeHtml(key)}" ${set.has(key) ? 'checked' : ''} style="width:auto; vertical-align:middle; margin-right:6px;">
+                <input type="checkbox" name="show-menu:${escapeHtml(key)}" data-show-menu="${escapeHtml(key)}" ${set.has(key) ? '' : 'checked'} style="width:auto; vertical-align:middle; margin-right:6px;">
                 ${escapeHtml(label)}</label>`;
         let html = '';
         const items = (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') ? [...document.querySelectorAll('#sidebar li')] : [];
+        // A link hidden for its company's kind or the sign-in's role carries
+        // its own mark (App.syncSidebarHidden), so what is offered does not
+        // hang on which of the start-up steps finished first; a section is
+        // offered when at least one of its links is.
+        let section = '';
         items.forEach(li => {
-            // an item the company's kind hides (the nonprofit pages on a
-            // business company) is not on offer (2.23.5 round 2, NEW-145)
-            if (li.hidden || (typeof li.closest === 'function' && li.closest('[hidden]'))) return;
+            if (li.closest && li.closest('#recent-screens')) return;
+            const parent = li.parentElement;
+            if (parent && typeof parent.closest === 'function' && parent.closest('[hidden]')) return;
             if (li.classList.contains('nav-section')) {
                 const name = li.textContent.trim();
-                if (name) html += box(`section:${name}`, `${name} (the whole section)`, false);
+                section = name ? box(`section:${name}`, `${name} (the whole section)`, false) : '';
                 return;
             }
+            const d = li.dataset || {};
+            if (d.hiddenKind || d.hiddenRole) return;
             const link = li.querySelector('.nav-link[data-page]');
             if (!link || link.dataset.page === 'settings') return;
-            html += box(link.dataset.page, link.textContent.trim(), true);
+            html += section + box(link.dataset.page, link.textContent.trim(), true);
+            section = '';
         });
         return html || '<span style="color:var(--text-muted);">The sidebar is not on this page.</span>';
+    },
+
+    // The hidden list Save writes: every unticked box on the page, plus the
+    // stored keys this page did not offer (an item hidden for another reason
+    // keeps the choice made for it) (#457).
+    _hiddenMenuToSave(boxes) {
+        const offered = new Set(boxes.map(b => b.dataset.showMenu));
+        const keep = (SettingsPage._hiddenMenuStored || []).filter(k => !offered.has(k));
+        const hide = boxes.filter(b => !b.checked).map(b => b.dataset.showMenu);
+        return [...new Set([...keep, ...hide])];
     },
 
     async save(e) {
@@ -1243,15 +1274,19 @@ const SettingsPage = {
         const classWarn = e.target.querySelector('[name="class_warn_blank"]');
         if (classWarn) data.class_warn_blank = classWarn.checked ? 'true' : 'false';
         // the hidden menu items, as a list (#334); the boxes are not form fields
-        const hiddenBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-hide-menu]')] : [];
-        if (hiddenBoxes.length) {
-            data.hidden_menu = JSON.stringify(hiddenBoxes.filter(b => b.checked).map(b => b.dataset.hideMenu));
-            for (const key of Object.keys(data)) if (key.startsWith('hide-menu:')) delete data[key];
+        const menuBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-show-menu]')] : [];
+        if (menuBoxes.length) {
+            const hidden = SettingsPage._hiddenMenuToSave(menuBoxes);
+            data.hidden_menu = JSON.stringify(hidden);
+            for (const key of Object.keys(data)) if (key.startsWith('show-menu:')) delete data[key];
         }
         const btn = document.getElementById('settings-save-btn');
         if (btn) btn.disabled = true;
         try {
             const saved = await API.put('/settings', data);
+            if (data.hidden_menu !== undefined) {
+                try { SettingsPage._hiddenMenuStored = JSON.parse(data.hidden_menu); } catch (err) { /* keep */ }
+            }
             SettingsPage._savedClosingDate = saved && typeof saved.closing_date === 'string'
                 ? saved.closing_date : (data.closing_date || '');
             SettingsPage._markClean();

@@ -175,7 +175,9 @@ jobs:
           # (CI 40031366864): each PR raised it from 126 on its own base.
           # 146 for 2.28.0, the count on the integrated tree's own Windows run:
           # the account detail types add Postgres-only migration tests.
-          MAX_SKIPS: "146"
+          # 147 for #457: tests/test_browser_hidden_menu.py skips as a module
+          # where playwright is not installed.
+          MAX_SKIPS: "147"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

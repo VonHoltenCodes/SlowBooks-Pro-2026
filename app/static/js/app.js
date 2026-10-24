@@ -362,17 +362,20 @@ const App = {
     // the view was pushed onto becomes the page it opened over, and a
     // refresh (App.navigate(location.hash) after a save), a reload or
     // Back cannot bring the closed view back (NEW-23).
-    // ---- Open screens (#336) -------------------------------------------------
+    // ---- Recent screens (#336, #462) -----------------------------------------
     // Working a close means moving between a Profit & Loss, a bank register
     // and a payroll register over and over, each move a scroll through the
     // whole sidebar. The screens opened in this browser session (pages,
     // registers, documents, and the dialog reports with their dates) are
-    // listed under "Open" at the top of the sidebar, each a link back and
-    // each closable; sessionStorage keeps the list for the session, by
-    // address, so a reload keeps it and a new window starts clean.
+    // kept by address in sessionStorage, so a reload keeps them and a new
+    // window starts clean. Since #462 they are one line at the top of the
+    // sidebar, "Recent: <the screen showing> ▾", a disclosure button that
+    // opens the last seven, most recent first; it used to be a growing list
+    // of lines, each with an ×, that pushed the menu down.
     OPEN_TABS_KEY: 'slowbooks-open-screens',
-    OPEN_TABS_MAX: 12,
+    OPEN_TABS_MAX: 7,
     _openTabs: null,
+    _recentOpen: false,
     // this page load: a history entry's number (entryState) means
     // something only within one load, so a tab remembers which load
     // numbered it (NEW-164: a stored number matched a fresh entry's)
@@ -407,7 +410,10 @@ const App = {
         try { stored = JSON.parse(sessionStorage.getItem(App.OPEN_TABS_KEY) || 'null'); } catch (e) { stored = null; }
         const list = Array.isArray(stored) ? [] : ((stored && Array.isArray(stored.tabs)) ? stored.tabs : []);
         if (stored && !Array.isArray(stored) && typeof stored.owner === 'string' && !App._tabsOwner) App._tabsOwner = stored.owner;
-        App._openTabs = list.filter(t => t && typeof t.key === 'string' && typeof t.label === 'string');
+        // kept oldest first; a list stored before #462 held up to twelve,
+        // so only the newest seven are kept
+        App._openTabs = list.filter(t => t && typeof t.key === 'string' && typeof t.label === 'string')
+            .slice(-App.OPEN_TABS_MAX);
         return App._openTabs;
     },
 
@@ -482,70 +488,134 @@ const App = {
         const n = history.state && typeof history.state.n === 'number' ? history.state.n : null;
         const found = tabs.find(t => t.key === key)
             || (n !== null ? tabs.find(t => t.n === n && t.load === App._loadId) : null);
-        if (found) { found.key = key; found.label = label; found.n = n; found.load = App._loadId; }
-        else {
-            tabs.push({ key, label, n, load: App._loadId });
-            while (tabs.length > App.OPEN_TABS_MAX) tabs.shift();
-        }
+        // kept oldest first; the screen shown moves to the end, so the
+        // dropdown (newest first) leads with it and the oldest drops off
+        if (found) tabs.splice(tabs.indexOf(found), 1);
+        tabs.push({ key, label, n, load: App._loadId });
+        while (tabs.length > App.OPEN_TABS_MAX) tabs.shift();
         App._saveOpenTabs();
         App.renderOpenTabs();
     },
 
-    closeTab(key) {
-        const tabs = App.openTabs();
-        const i = tabs.findIndex(t => t.key === key);
-        if (i < 0) return;
-        tabs.splice(i, 1);
-        App._saveOpenTabs();
-        if (App._screenKey() === key) {
-            // the screen closed is the one showing: the one before it in
-            // the list, else the Dashboard
-            const next = tabs[i - 1] || tabs[i] || null;
-            const overlay = $('#modal-overlay');
-            if (overlay && !overlay.classList.contains('hidden')) closeModal({ keepAddress: true });
-            App.navigate(next ? `#${next.key}` : '#/');
-            return;
-        }
-        App.renderOpenTabs();
-    },
-
+    // Clear, at the foot of the dropdown: the list empties and the control
+    // goes; the keyboard lands on the menu's first link.
     closeAllTabs() {
+        const had = document.activeElement && document.activeElement.closest
+            && document.activeElement.closest('#recent-screens');
         App._openTabs = [];
+        App._recentOpen = false;
         App._saveOpenTabs();
         App.renderOpenTabs();
+        if (had) {
+            const first = document.querySelector('#sidebar .nav-links .nav-link');
+            if (first) first.focus();
+        }
     },
 
     renderOpenTabs() {
         const list = $('#sidebar .nav-links');
         if (!list) return;
-        let group = $('#open-screens');
+        let group = $('#recent-screens');
         const tabs = App.openTabs();
-        if (!tabs.length) { if (group) group.remove(); return; }
+        if (!tabs.length) { if (group) group.remove(); App._recentOpen = false; return; }
         if (!group) {
             group = document.createElement('li');
-            group.id = 'open-screens';
-            group.className = 'open-screens';
+            group.id = 'recent-screens';
+            group.className = 'recent-screens';
             list.insertBefore(group, list.firstElementChild);
+            App._wireRecent(group);
         }
         const here = App._screenKey();
-        const focused = document.activeElement && document.activeElement.closest('#open-screens');
-        const keep = focused ? focused.dataset.key : null;
+        const current = tabs.find(t => t.key === here);
+        const focused = document.activeElement && group.contains(document.activeElement) ? document.activeElement : null;
+        const keep = focused ? (focused.dataset.key || focused.dataset.recent || '') : null;
+        const open = App._recentOpen;
+        const newest = tabs.slice().reverse();
         group.innerHTML = `
-            <div class="nav-section open-screens__head"><span id="open-screens-label">Open</span>
-                ${tabs.length > 1 ? `<button type="button" class="open-screens__clear" onclick="App.closeAllTabs()" aria-label="Close every open screen">Close all</button>` : ''}
-            </div>
-            <ul class="open-screens__list" aria-labelledby="open-screens-label">${tabs.map(t => `
-                <li class="open-screens__item${t.key === here ? ' open-screens__item--here' : ''}">
-                    <a href="#${escapeHtml(t.key)}" class="nav-link open-screens__link${t.key === here ? ' active' : ''}" data-key="${escapeHtml(t.key)}"${t.key === here ? ' aria-current="page"' : ''}
-                        title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</a>
-                    <button type="button" class="open-screens__close" data-key="${escapeHtml(t.key)}" onclick="App.closeTab(this.dataset.key)"
-                        aria-label="Close ${escapeHtml(t.label)}">&times;</button>
-                </li>`).join('')}
+            <button type="button" id="recent-toggle" class="recent-screens__toggle" data-recent="toggle"
+                aria-expanded="${open ? 'true' : 'false'}" aria-controls="recent-menu"${current ? ` title="${escapeHtml(current.label)}"` : ''}>
+                <span class="recent-screens__word">Recent${current ? ':' : ''}</span>
+                ${current ? `<span class="recent-screens__here">${escapeHtml(current.label)}</span>` : ''}
+                <span class="recent-screens__caret" aria-hidden="true">&#9662;</span>
+            </button>
+            <ul id="recent-menu" class="recent-screens__list" aria-label="Recent screens"${open ? '' : ' hidden'}>${newest.map(t => `
+                <li class="recent-screens__item${t.key === here ? ' recent-screens__item--here' : ''}">
+                    <a href="#${escapeHtml(t.key)}" class="recent-screens__link" data-key="${escapeHtml(t.key)}"${t.key === here ? ' aria-current="page"' : ''}
+                        title="${escapeHtml(t.label)}">${escapeHtml(t.label)}</a></li>`).join('')}
+                <li class="recent-screens__foot"><button type="button" class="recent-screens__clear" data-recent="clear">Clear</button></li>
             </ul>`;
-        if (keep) {
-            const again = group.querySelector(`.open-screens__close[data-key="${CSS.escape(keep)}"]`) || group.querySelector('.open-screens__link');
+        if (keep !== null) {
+            // a screen picked from the list closes it: the link that had the
+            // keyboard is now inside the hidden list, so the button takes it
+            // (focus on a hidden link drops to <body>)
+            let again = keep ? group.querySelector(`[data-key="${CSS.escape(keep)}"], [data-recent="${CSS.escape(keep)}"]`) : null;
+            if (again && !open && again.closest('#recent-menu')) again = null;
+            again = again || group.querySelector('#recent-toggle');
             if (again) again.focus();
         }
+    },
+
+    // Open or close the dropdown; `focus` is 'first', 'last' or 'toggle'
+    // (where the keyboard goes once it has opened or closed).
+    setRecentOpen(open, focus) {
+        App._recentOpen = !!open;
+        const group = $('#recent-screens');
+        if (!group) return;
+        const btn = group.querySelector('#recent-toggle');
+        const menu = group.querySelector('#recent-menu');
+        if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (menu) menu.hidden = !open;
+        const items = App._recentItems();
+        if (focus === 'first' && items[0]) items[0].focus();
+        else if (focus === 'last' && items.length) items[items.length - 1].focus();
+        else if (focus === 'toggle' && btn) btn.focus();
+    },
+
+    _recentItems() {
+        return [...$$('#recent-menu .recent-screens__link, #recent-menu .recent-screens__clear')];
+    },
+
+    // The control's handlers, once, on its <li>: the button opens and
+    // closes; arrows, Home and End move through the screens and Clear; Esc
+    // closes and gives the button the focus; Tab moves on and the dropdown
+    // closes behind it; a click outside closes it too.
+    _wireRecent(group) {
+        group.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-recent]');
+            const link = e.target.closest('.recent-screens__link');
+            if (btn && btn.dataset.recent === 'toggle') App.setRecentOpen(!App._recentOpen);
+            else if (btn && btn.dataset.recent === 'clear') App.closeAllTabs();
+            else if (link) App._recentOpen = false;
+        });
+        group.addEventListener('keydown', (e) => {
+            if (!App._recentOpen && e.target.id === 'recent-toggle' && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+                e.preventDefault();
+                App.setRecentOpen(true, e.key === 'ArrowDown' ? 'first' : 'last');
+                return;
+            }
+            if (!App._recentOpen) return;
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                App.setRecentOpen(false, 'toggle');
+                return;
+            }
+            const items = App._recentItems();
+            const i = items.indexOf(document.activeElement);
+            let to = null;
+            if (e.key === 'ArrowDown') to = i < 0 ? 0 : (i + 1) % items.length;
+            else if (e.key === 'ArrowUp') to = i < 0 ? items.length - 1 : (i - 1 + items.length) % items.length;
+            else if (e.key === 'Home') to = 0;
+            else if (e.key === 'End') to = items.length - 1;
+            if (to !== null && items[to]) { e.preventDefault(); items[to].focus(); }
+        });
+        group.addEventListener('focusout', (e) => {
+            if (App._recentOpen && e.relatedTarget && !group.contains(e.relatedTarget)) App.setRecentOpen(false);
+        });
+        document.addEventListener('click', (e) => {
+            const g = $('#recent-screens');
+            if (App._recentOpen && g && !g.contains(e.target)) App.setRecentOpen(false);
+        });
     },
 
     dialogClosed() {
@@ -2058,32 +2128,43 @@ const App = {
         try { hidden = JSON.parse((s && s.hidden_menu) || '[]'); } catch (e) { hidden = []; }
         if (!Array.isArray(hidden)) hidden = [];
         const set = new Set(hidden.map(String));
-        let section = null;
         let sectionHidden = false;
         $$('#sidebar li').forEach(li => {
             if (li.classList.contains('nav-section')) {
-                section = li;
                 sectionHidden = set.has(`section:${li.textContent.trim()}`);
-                li.hidden = sectionHidden;
                 li.dataset.hiddenByMenu = sectionHidden ? '1' : '';
                 return;
             }
             const link = li.querySelector('.nav-link[data-page]');
             if (!link) return;
-            const hide = sectionHidden || set.has(link.dataset.page);
-            if (hide) { li.hidden = true; li.dataset.hiddenByMenu = '1'; }
-            else if (li.dataset.hiddenByMenu) { li.hidden = false; li.dataset.hiddenByMenu = ''; }
+            li.dataset.hiddenByMenu = (sectionHidden || set.has(link.dataset.page)) ? '1' : '';
         });
-        // a section with every link hidden hides too
+        App.syncSidebarHidden();
+    },
+
+    // Three things hide a sidebar item, each with its own mark on the <li>,
+    // so the order they run in does not matter (#457): the menu setting
+    // (data-hidden-by-menu), the company's kind (data-hidden-kind: the
+    // nonprofit pages on a business company, set in index.html and by
+    // applyTerminology) and the sign-in's role (data-hidden-role: the admin
+    // pages for a clerk, set by initSystemInfo). An item shows when none is
+    // set; a section shows unless the menu hid it or every link under it is
+    // hidden. Settings → Sidebar offers what the kind and the role leave.
+    syncSidebarHidden() {
         const items = [...$$('#sidebar li')];
+        items.forEach(li => {
+            if (li.classList.contains('nav-section') || !li.querySelector('.nav-link[data-page]')) return;
+            const d = li.dataset;
+            li.hidden = !!(d.hiddenByMenu || d.hiddenKind || d.hiddenRole);
+        });
         items.forEach((li, i) => {
-            if (!li.classList.contains('nav-section') || li.hidden) return;
+            if (!li.classList.contains('nav-section')) return;
             let j = i + 1, any = false;
             while (j < items.length && !items[j].classList.contains('nav-section')) {
                 if (!items[j].hidden) any = true;
                 j++;
             }
-            if (!any) { li.hidden = true; li.dataset.hiddenByMenu = '1'; }
+            li.hidden = !!li.dataset.hiddenByMenu || !any;
         });
     },
 
@@ -2166,8 +2247,14 @@ const App = {
         const search = $('#global-search');
         if (search) search.placeholder = Terms.text(search.placeholder);
         const np = Terms.isNonprofit();
-        $$('[data-nonprofit]').forEach(el => { el.hidden = !np; });
-        $$('[data-business-only]').forEach(el => { el.hidden = np; });
+        // a sidebar item keeps its own mark for this (see syncSidebarHidden)
+        const kind = (el, hide) => {
+            if (el.matches('#sidebar li')) el.dataset.hiddenKind = hide ? '1' : '';
+            else el.hidden = hide;
+        };
+        $$('[data-nonprofit]').forEach(el => kind(el, !np));
+        $$('[data-business-only]').forEach(el => kind(el, np));
+        App.syncSidebarHidden();
     },
 
     init() {
@@ -2385,8 +2472,9 @@ const App = {
                     // them for other roles, so do not offer the pages.
                     App.ADMIN_ONLY_PAGES.forEach(page => {
                         const link = document.querySelector(`#sidebar .nav-link[data-page="${page}"]`);
-                        if (link && link.parentElement) link.parentElement.hidden = true;
+                        if (link && link.parentElement) link.parentElement.dataset.hiddenRole = '1';
                     });
+                    App.syncSidebarHidden();
                 }
                 if (a.multi_user && a.user) {
                     const right = document.querySelector('.topbar-right');

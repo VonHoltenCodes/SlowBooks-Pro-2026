@@ -174,13 +174,14 @@ def test_the_reconcile_day_box_refilters_and_keeps_its_day():
 
 def test_a_business_companys_sidebar_choices_leave_out_the_nonprofit_pages():
     js = _js("settings.js")
-    body = js[js.index("_hiddenMenuChoices(raw) {") :][:1600]
-    assert (
-        "if (li.hidden || (typeof li.closest === 'function' && li.closest('[hidden]'))) return;"
-        in body
-    )
+    body = js[js.index("_hiddenMenuChoices(raw) {") :][:3200]
+    # an item hidden for another reason is left out; one the menu setting
+    # hid stays on the list so it can be shown again (#457)
+    assert "if (d.hiddenKind || d.hiddenRole) return;" in body
+    assert "parent.closest('[hidden]')" in body
     app = _js("app.js")
-    assert "$$('[data-nonprofit]').forEach(el => { el.hidden = !np; });" in app
+    assert "$$('[data-nonprofit]').forEach(el => kind(el, !np));" in app
+    assert "el.dataset.hiddenKind = hide ? '1' : '';" in app
 
 
 def test_a_pay_run_with_nowhere_to_post_says_so_instead_of_a_500(
