@@ -526,6 +526,16 @@ async def lifespan(app: FastAPI):
                 print(
                     "Repaired invoices the QuickBooks Online import counted as paid twice"
                 )
+            # #490: before 2.29.0 a reclassify moved the line and left the
+            # stored balance on the old account. The totals are recomputed
+            # from the ledger once here; books that agree have nothing to do.
+            from app.services.accounting import rebuild_stored_balances
+
+            fixed = rebuild_stored_balances(_db)
+            if fixed:
+                print(
+                    f"Recomputed {len(fixed)} stored account balance(s) from the ledger"
+                )
         finally:
             _db.close()
     except Exception:

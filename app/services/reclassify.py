@@ -548,9 +548,26 @@ def reclassify(
     for day in sorted({m["_line"].transaction.date for m in moved}):
         check_closing_date(db, day)
 
+    # The stored balances follow the lines (#490): each moved line comes
+    # off the account it leaves and goes onto the one it lands on, in each
+    # account's own direction (an expense line moved onto an income account
+    # reads as negative income there), applied as one atomic update per
+    # account after the lines are flushed. The ledger reports read the
+    # lines; the Chart of Accounts, the accounts export and the AI tools
+    # read this total, and used to keep showing the old account.
+    from app.services.accounting import apply_balance_deltas, natural_delta
+
+    balance_deltas: dict = {}
     for m in moved:
         line, bill_line = m["_line"], m["_bill_line"]
         if to_account is not None and line.account_id != to_account.id:
+            from_account = line.account
+            balance_deltas[from_account.id] = balance_deltas.get(
+                from_account.id, Decimal("0")
+            ) - natural_delta(from_account, line.debit, line.credit)
+            balance_deltas[to_account.id] = balance_deltas.get(
+                to_account.id, Decimal("0")
+            ) + natural_delta(to_account, line.debit, line.credit)
             line.account_id = to_account.id
             if bill_line is not None:
                 bill_line.account_id = to_account.id
@@ -563,6 +580,7 @@ def reclassify(
             if bill_line is not None:
                 bill_line.class_id = to_class.id
     db.flush()
+    apply_balance_deltas(db, balance_deltas)
 
     # One event for the move, every line named, beside the change the
     # audit hook writes for each line.

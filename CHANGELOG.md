@@ -5,6 +5,25 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Reclassify updates the stored account balances** (#490). Reclassify
+moved a line to its new account and left the running total the Chart of
+Accounts shows on the old one, so the Balance column, the accounts CSV
+export and the AI tools' totals kept the amount on the account the line
+had left while the P&L and General Ledger, which read the lines, showed
+it where it went. The move now carries each line's amount off the account
+it leaves and onto the one it lands on, in each account's own direction,
+and moving the lines back restores both. Books already touched are
+repaired on upgrade: the stored balances are recomputed from the ledger
+once at start, and an administrator can run the same repair any time
+(`POST /api/accounts/rebuild-balances` answers with the accounts it
+corrected, none when the books agree).
+
+- Reclassify applies the balance change to the from- and to-account with
+  the move; the stored balances are recomputed from the ledger at start,
+  and on request (`POST /api/accounts/rebuild-balances`, admin) (#490).
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

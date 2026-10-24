@@ -1,6 +1,6 @@
 import re
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import nullslast
@@ -35,6 +35,7 @@ from app.schemas.accounts import (
     RetypedSubAccount,
 )
 from app.routes._helpers import get_or_404, reject_null_updates
+from app.routes._roles import require_admin
 
 router = APIRouter(prefix="/api/accounts", tags=["accounts"])
 
@@ -576,6 +577,23 @@ def remove_unused_seeded(db: Session = Depends(get_db)):
             kept.append({**row, "reason": "still referenced"})
     db.commit()
     return {"removed": removed, "kept": kept}
+
+
+@router.post("/rebuild-balances")
+def rebuild_balances(request: Request, db: Session = Depends(get_db)):
+    """Recompute every account's stored balance from its ledger lines
+    (#490) and say which were off. An administrator's call: the ledger is
+    the record and nothing posted changes, but a total shown on the Chart
+    of Accounts does, and the one who runs it should be the one who can
+    read why in the answer. The same repair runs once at every start, so
+    this is for a company opened after the server started, or to check.
+    Idempotent: books whose totals agree with the ledger answer with no
+    corrections."""
+    require_admin(request)
+    from app.services.accounting import rebuild_stored_balances
+
+    corrected = rebuild_stored_balances(db)
+    return {"count": len(corrected), "corrected": corrected}
 
 
 @router.get("/{account_id}", response_model=AccountResponse)
