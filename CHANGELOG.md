@@ -5,6 +5,15 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+Starting a reconciliation while one is already open for the account no longer
+quietly throws away the statement date and ending balance you just typed
+(#497). The server still answers that only one session can be open at a time,
+but the screen now says which statement is open and offers to move it onto the
+date and balance you just entered; confirm and it does, cancel and the open
+session is reopened unchanged.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

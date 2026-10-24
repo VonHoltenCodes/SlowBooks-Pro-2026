@@ -300,3 +300,22 @@ def test_the_reconcile_screen_offers_the_change():
     assert "BankingPage.changeStatement(${reconId}" in src
     assert "API.put(`/banking/reconciliations/${reconId}`" in src
     assert 'name="statement_balance" type="number" step="0.01" required value=' in src
+
+
+def test_starting_over_an_open_session_puts_the_typed_values(client, statement):
+    """Starting a reconciliation while one is open (409) offers the typed date
+    and balance to the open session via PUT, rather than dropping them (#497)."""
+    src = open("app/static/js/banking.js", encoding="utf-8").read()
+    # The 409 handler PUTs the just-typed values to the existing session.
+    assert "await API.put(`/banking/reconciliations/${existing}`, {" in src
+    assert "statement_date: typedDate" in src
+    assert "statement_balance: typedBalance" in src
+
+    # The server accepts that PUT on the open session (both fields at once).
+    r = _put(
+        client, statement["id"], statement_date="2026-09-22", statement_balance="810.00"
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["statement_date"] == "2026-09-22"
+    assert float(body["statement_balance"]) == 810.0

@@ -470,7 +470,7 @@ const BankingPage = {
         let review = [];
         // the whole queue: a year fetched from a feed can be more than a page
         if (feed) review = await fetchAllPages(`/banking/transactions?bank_account_id=${feed.bank_account_id}&status=unmatched`);
-        BankingPage._ctx = { accountId: id, feedId: feed ? feed.bank_account_id : null, kind, lastReconciled: info.last_reconciled || null };
+        BankingPage._ctx = { accountId: id, accountName: reg.account_name, feedId: feed ? feed.bank_account_id : null, kind, lastReconciled: info.last_reconciled || null };
 
         let html = `
             <div class="page-header">
@@ -1431,18 +1431,41 @@ const BankingPage = {
     async createReconciliation(e, accountId) {
         e.preventDefault();
         const form = e.target;
+        const typedDate = form.statement_date.value;
+        const typedBalance = form.statement_balance.value;
         try {
             const recon = await API.post('/banking/reconciliations', {
                 account_id: accountId,
-                statement_date: form.statement_date.value,
-                statement_balance: form.statement_balance.value,
+                statement_date: typedDate,
+                statement_balance: typedBalance,
             });
             closeModal();
             BankingPage.showReconcileView(recon.id);
         } catch (err) {
             const existing = err && err.detail && err.detail.existing_id;
-            if (existing) { closeModal(); BankingPage.showReconcileView(existing); return; }
-            toast(err.message, 'error');
+            if (!existing) { toast(err.message, 'error'); return; }
+            closeModal();
+            // One session per account (409). Rather than drop the date and
+            // balance just typed and reopen the old figures (#497), offer to
+            // move the open session onto them (PUT, #389/#400).
+            try {
+                const open = await API.get(`/banking/reconciliations/${existing}/transactions`);
+                const ctx = BankingPage._ctx || {};
+                const acct = ctx.accountId === accountId && ctx.accountName ? ctx.accountName : 'this account';
+                const msg = `A reconciliation of ${acct} through ${formatDate(open.statement_date)} is already open `
+                    + `with an ending balance of ${formatCurrency(open.statement_balance)}.\n\n`
+                    + `Use the date and balance you just typed (${formatCurrency(Number(typedBalance))} through ${formatDate(typedDate)})? `
+                    + `Cancel keeps the open one as it is.`;
+                if (confirm(msg)) {
+                    await API.put(`/banking/reconciliations/${existing}`, {
+                        statement_date: typedDate,
+                        statement_balance: typedBalance,
+                    });
+                }
+            } catch (putErr) {
+                toast(putErr.message, 'error');
+            }
+            BankingPage.showReconcileView(existing);
         }
     },
 
