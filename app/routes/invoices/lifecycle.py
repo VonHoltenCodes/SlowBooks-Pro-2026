@@ -603,7 +603,8 @@ def duplicate_invoice(
     txn = _post_invoice_journal(
         db, new_invoice, new_lines, customer.name if customer else ""
     )
-    new_invoice.transaction_id = txn.id
+    # A duplicated $0.00 invoice posts no journal, so it keeps no transaction.
+    new_invoice.transaction_id = txn.id if txn is not None else None
 
     # Phase 11 (audit fix): a duplicated invoice is a FRESH sale, so it
     # must hit the inventory ledger just like create_invoice does.

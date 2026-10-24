@@ -234,7 +234,9 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
         db.add(line)
 
     txn = _post_invoice_journal(db, invoice, data.lines, cust_name)
-    invoice.transaction_id = txn.id
+    # A $0.00 invoice posts no journal, so it keeps transaction_id NULL.
+    if txn is not None:
+        invoice.transaction_id = txn.id
 
     # ---- Phase 11: inventory/COGS posting ----
     # For each line with an inventory-tracked item, decrement qty and post
@@ -493,20 +495,30 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         invoice.total = total
         invoice.balance_due = total - invoice.amount_paid
 
-        # Keep the existing journal identity while reusing create's posting path.
-        if invoice.transaction_id:
-            from app.models.transactions import Transaction
+        # Keep the existing journal identity while reusing create's posting
+        # path. An edit crossing $0 in either direction is handled: an invoice
+        # that had no journal (a $0 one) gets a fresh one when it gains a
+        # total, and one edited down to $0 drops its now-empty header rather
+        # than leave a husk behind.
+        from app.models.transactions import Transaction
 
-            txn = db.get(Transaction, invoice.transaction_id)
-            if txn:
-                _reverse_and_delete_journal(db, txn.id)
-                _post_invoice_journal(
-                    db,
-                    invoice,
-                    effective_lines,
-                    invoice.customer.name if invoice.customer else "",
-                    existing_transaction=txn,
-                )
+        old_txn = (
+            db.get(Transaction, invoice.transaction_id)
+            if invoice.transaction_id
+            else None
+        )
+        if old_txn:
+            _reverse_and_delete_journal(db, old_txn.id)
+        new_txn = _post_invoice_journal(
+            db,
+            invoice,
+            effective_lines,
+            invoice.customer.name if invoice.customer else "",
+            existing_transaction=old_txn,
+        )
+        if new_txn is None and old_txn is not None:
+            db.delete(old_txn)
+        invoice.transaction_id = new_txn.id if new_txn is not None else None
 
         # Phase 11 (audit fix): post compensating inventory movements for
         # lines that changed. No-op if nothing was inventory-tracked.
@@ -526,7 +538,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             invoice.customer.name if invoice.customer else "",
             balance_on_income=True,
         )
-        invoice.transaction_id = txn.id
+        invoice.transaction_id = txn.id if txn is not None else None
 
     # One payment-derived decision for total edits and status-only requests.
     # Unpaid invoices retain the explicitly supported draft/sent lifecycle.

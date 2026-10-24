@@ -386,6 +386,18 @@ def _post_invoice_journal(
                 invoice.total,
                 short,
             )
+    # A $0.00 invoice (allowed with allow_zero_total) builds a journal whose
+    # every line is zero: the A/R debit is 0 and each income/tax line was
+    # skipped. create_journal_entry would write a header with no splits — an
+    # empty journal entry. Post nothing instead and let the caller leave
+    # transaction_id NULL; the void and edit paths tolerate an unposted
+    # invoice. A document whose lines net to zero but carry real amounts (a
+    # full discount) still has non-zero splits and posts as before.
+    if not any(
+        _q(line.get("debit", 0)) != 0 or _q(line.get("credit", 0)) != 0
+        for line in journal_lines
+    ):
+        return None
     return create_journal_entry(
         db,
         invoice.date,

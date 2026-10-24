@@ -431,7 +431,8 @@ def convert_to_invoice(
     txn = _post_invoice_journal(
         db, invoice, new_lines, customer.name if customer else ""
     )
-    invoice.transaction_id = txn.id
+    # A $0.00 conversion posts no journal, so it keeps no transaction.
+    invoice.transaction_id = txn.id if txn is not None else None
 
     # Phase 11 (audit fix): estimate→invoice conversion is a NEW sale from
     # an accounting standpoint. Post inventory movements for each inventory
