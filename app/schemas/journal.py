@@ -55,6 +55,16 @@ class JournalEntryCreate(StrictModel):
     lines: list[JournalLineCreate]
 
 
+class JournalEntryUpdate(JournalEntryCreate):
+    """The journal form's fields again, to rewrite a hand-entered entry in
+    place from the register (#388). An entry a completed reconciliation
+    holds keeps its amount and date; a change that moves an amount between
+    accounts in that period is refused with 409 until `confirm_reconciled`
+    is true."""
+
+    confirm_reconciled: bool = False
+
+
 class JournalEntryResponse(BaseModel):
     id: int
     date: dt_date
@@ -63,6 +73,15 @@ class JournalEntryResponse(BaseModel):
     class_id: Optional[int] = None
     job_id: Optional[int] = None
     source_type: str = ""
+    # Whether a hand-entered entry opens for editing from the register
+    # (#388), the statement date of the completed reconciliation that holds
+    # it when one does, the sentence the form shows about it, and — after an
+    # edit — the lines that lost their cleared mark and a note that says so.
+    editable: bool = False
+    reconciled_on: Optional[dt_date] = None
+    reconciled_note: Optional[str] = None
+    uncleared: list[dict] = []
+    note: Optional[str] = None
     # An accountant's adjustment, and the sign-in that posted the entry
     # (#340, #341); documents' postings carry neither.
     is_adjusting: bool = False

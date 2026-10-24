@@ -559,11 +559,17 @@ const BankingPage = {
     },
 
     // A register entry opens for editing (#388); the register says which
-    // (`editable`: a bank entry that is not void — a reconciled one too,
-    // its amount and date locked).
+    // (`editable`: a bank entry, a hand-entered journal entry or a deposit
+    // that is not void — a reconciled one too, its amount and date locked).
+    // Each opens its own editor: the + Entry form, the journal form, the
+    // deposit form.
     _editButton(e, accountId) {
         if (!e.editable) return '';
-        return `<button class="btn btn-sm btn-secondary" onclick="BankingPage.editEntry(${e.transaction_id}, ${accountId})">Edit</button>`;
+        let onclick;
+        if (e.source_type === 'manual') onclick = `JournalPage.editEntry(${e.transaction_id})`;
+        else if (e.source_type === 'deposit') onclick = `DepositsPage.editDeposit(${e.transaction_id})`;
+        else onclick = `BankingPage.editEntry(${e.transaction_id}, ${accountId})`;
+        return `<button class="btn btn-sm btn-secondary" onclick="${onclick}">Edit</button>`;
     },
 
     // A check written here, or an expense paid from this account, prints

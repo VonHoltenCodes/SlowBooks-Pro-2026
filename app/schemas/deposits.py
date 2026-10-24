@@ -61,3 +61,18 @@ class DepositCreate(StrictModel):
     class_id: Optional[int] = None
     job_id: Optional[int] = None
     line_ids: list[int] = []
+
+
+class DepositUpdate(StrictModel):
+    """Edit a deposit in place from the register (#388): its date, slip
+    reference, class and job, and which undeposited payments it takes
+    (`line_ids` — the ones it holds now plus any still waiting). A field
+    left out keeps what the deposit has. A deposit on a reconciled bank
+    statement keeps its amount and date; only its reference, class and job
+    can change then."""
+
+    date: Optional[dt_date] = None
+    reference: Optional[str] = None
+    class_id: Optional[int] = None
+    job_id: Optional[int] = None
+    line_ids: Optional[list[int]] = None

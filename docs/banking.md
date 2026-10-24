@@ -87,8 +87,20 @@ stays linked to it; when its amount changes, the statement line goes back
 to review without its category, so **Add all categorised** doesn't post it
 again. A void entry is not edited; an edit that would make the entry a
 transfer is refused (void it and post the transfer). Read-only and
-accountant sign-ins don't see Edit. Journal entries and deposits open
-their own views from the row.
+accountant sign-ins don't see Edit.
+
+A hand-entered journal entry and a deposit open for editing from their rows
+the same way (the rest of #388): the journal entry opens the journal form
+and the deposit opens the deposit form, each filled in, and Save rewrites
+it on the same journal entry (`PUT /api/journal/{id}`, `PUT
+/api/deposits/{id}`). A deposit's form lists the payments it took and any
+still waiting, so Save can swap which ones it includes — the dropped
+payments go back on the Make Deposits list. Both keep their amount and date
+when a completed reconciliation holds them, as a register entry does; a
+journal entry asks first before moving an amount to a different account in
+that period, and its reconciled line keeps its own account. An accountant's
+sign-in posts and voids journal entries but does not edit them, so it is
+offered no Edit on these rows.
 
 The entry row at the foot of the register posts the same way (Enter or
 Post). A payee typed there, or in + Entry, that is not already a customer's

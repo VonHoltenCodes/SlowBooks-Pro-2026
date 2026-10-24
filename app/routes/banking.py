@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from typing import Optional
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -1055,6 +1055,7 @@ def check_register(
     end_date: date = None,
     class_id: int = None,
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
     """The register: every ledger line on a bank or card account, natural-
     balance running balance (a card shows the amount owed positive), with
@@ -1086,6 +1087,10 @@ def check_register(
             raise HTTPException(status_code=404, detail="Class not found")
     reg = account_register(db, account, start_date, end_date, class_id=class_id)
     entries = []
+    from app.routes._roles import current_role
+    from app.models.users import ROLE_ACCOUNTANT
+
+    is_accountant = current_role(request) == ROLE_ACCOUNTANT if request else False
     for e in reg["entries"]:
         row = dict(e)
         row["payment"] = e["credit"] if e["credit"] > 0 else 0
@@ -1096,9 +1101,19 @@ def check_register(
             and not e["voided"]
             and e["reconciliation_id"] is None
         )
-        # a register entry opens for editing (#388), a reconciled one too
-        # (its amount and date stay as they are); a void one does not
-        row["editable"] = e["source_type"] == "bank_entry" and not e["voided"]
+        # a register entry, a hand-entered journal entry and a deposit open
+        # for editing (#388), a reconciled one too (its amount and date stay
+        # as they are); a void one does not. The row's editor follows its
+        # source: the + Entry form, the journal form, the deposit form. The
+        # accountant's sign-in does not edit journal entries (#340, #388),
+        # so a manual row is not editable it; a bank entry and a deposit keep
+        # #408's behaviour (editable as before, the write-action gating hides
+        # the button client-side).
+        row["editable"] = (
+            e["source_type"] in ("bank_entry", "manual", "deposit")
+            and not e["voided"]
+            and not (is_accountant and e["source_type"] == "manual")
+        )
         # a check written here or as an expense prints (discussion #354):
         # money out of a bank account, not a card, not void
         row["printable"] = (

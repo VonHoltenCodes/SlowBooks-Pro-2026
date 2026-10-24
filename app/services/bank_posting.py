@@ -515,6 +515,159 @@ def replace_bank_entry(
     ]
 
 
+def replace_journal_lines(
+    db: Session,
+    txn: Transaction,
+    txn_date: date,
+    description: str,
+    lines: list[dict],
+    *,
+    source_type: str,
+    reference: str | None = None,
+    class_id: int | None = None,
+    job_id: int | None = None,
+    is_adjusting: bool = False,
+    posted_by: str | None = None,
+) -> list[dict]:
+    """Rewrite a journal entry in place (#388), the way `replace_bank_entry`
+    rewrites a register entry — for a manual journal entry or a deposit
+    opened from the register. The Transaction keeps its id (so its links,
+    attachments, statement matches and audit trail stay on the one record);
+    its lines are replaced the way a bill's are on edit (#289): balances
+    reversed, each old line a DELETE in the audit log, each new line an
+    INSERT, the header an UPDATE. A line whose account and amount did not
+    change keeps its cleared mark and its reconciliation, and the statement
+    line matched to it follows to the new row; one that changed loses them,
+    its statement line going back to review. `lines` are the new line dicts
+    (account_id, debit, credit, and any description/class/job the caller
+    sets). Returns the old lines that lost a cleared or reconciled mark."""
+    from app.models.transactions import TransactionLine
+    from app.routes.invoices.helpers import _reverse_and_delete_journal
+    from app.services.classes_service import default_function_of
+
+    old_lines = list(txn.lines)
+    pairs = _pair_lines(old_lines, lines)
+    # A dimension the caller left off a line keeps what the paired old line
+    # had (its counterpart by account, else by order): a class or job of its
+    # own, else the entry's; the billable flag; the cost code; the nonprofit
+    # function (#388 review — the same carry-over replace_bank_entry does).
+    for n, o in zip(lines, pairs):
+        for key, header_old, header_new in (
+            ("class_id", txn.class_id, class_id),
+            ("job_id", txn.job_id, job_id),
+        ):
+            if key in n:
+                continue
+            own = getattr(o, key) if o is not None else None
+            n[key] = own if own is not None and own != header_old else header_new
+        if "is_billable" not in n:
+            n["is_billable"] = bool(o.is_billable) if o is not None else False
+        if "cost_code_id" not in n:
+            n["cost_code_id"] = o.cost_code_id if o is not None else None
+        if "function" not in n and o is not None:
+            n["function"] = o.function
+
+    if all(_same_money(o, n) for o, n in zip(pairs, lines)) and len(lines) == len(
+        old_lines
+    ):
+        # nothing moves: update the header and the lines where they are, so
+        # a save that changes nothing writes nothing and the reconciled
+        # lines keep their marks without a DELETE/INSERT churn (#388)
+        check_closing_date(db, txn_date)
+        txn.date = txn_date
+        txn.description = description
+        txn.reference = reference or ""
+        txn.class_id = class_id
+        txn.job_id = job_id
+        txn.is_adjusting = bool(is_adjusting)
+        if posted_by is not None:
+            txn.posted_by = posted_by
+        fn_cache: dict = {}
+        for n, o in zip(lines, pairs):
+            o.description = n.get("description") or ""
+            o.is_billable = bool(n.get("is_billable"))
+            o.cost_code_id = n.get("cost_code_id")
+            o.job_id = n.get("job_id")
+            if o.class_id != n.get("class_id"):
+                o.class_id = n.get("class_id")
+                o.function = default_function_of(db, n.get("class_id"), fn_cache)
+            elif "function" in n:
+                o.function = n["function"]
+        db.flush()
+        return []
+
+    old = [
+        {
+            "id": o.id,
+            "account_id": o.account_id,
+            "account_name": o.account.name if o.account else "",
+            "debit": _q(o.debit or 0),
+            "credit": _q(o.credit or 0),
+            "cleared": bool(o.cleared),
+            "reconciliation_id": o.reconciliation_id,
+        }
+        for o in old_lines
+    ]
+    keep = {
+        i: next(x for x in old if x["id"] == o.id)
+        for i, (o, n) in enumerate(zip(pairs, lines))
+        if _same_money(o, n)
+    }
+    # Detach the statement lines matched to this entry before the old lines
+    # go (a referenced row cannot be deleted), and relink the kept ones.
+    links = {
+        bt.transaction_line_id: bt
+        for bt in db.query(BankTransaction).filter(
+            BankTransaction.transaction_line_id.in_([o["id"] for o in old])
+        )
+    }
+    for bt in links.values():
+        bt.transaction_line_id = None
+    db.flush()
+    _reverse_and_delete_journal(db, txn.id)
+    db.expire(txn, ["lines"])
+    create_journal_entry(
+        db,
+        txn_date,
+        description,
+        lines,
+        source_type=source_type,
+        source_id=txn.source_id,
+        reference=reference or "",
+        class_id=class_id,
+        job_id=job_id,
+        existing_transaction=txn,
+        is_adjusting=bool(is_adjusting),
+        posted_by=posted_by if posted_by is not None else txn.posted_by,
+    )
+    db.flush()
+    new_rows = (
+        db.query(TransactionLine)
+        .filter(TransactionLine.transaction_id == txn.id)
+        .order_by(TransactionLine.id)
+        .all()
+    )
+    for i, same in keep.items():
+        ln = new_rows[i]
+        ln.cleared = same["cleared"]
+        ln.reconciliation_id = same["reconciliation_id"]
+        bt = links.pop(same["id"], None)
+        if bt is not None:
+            bt.transaction_line_id = ln.id
+    for bt in links.values():
+        bt.transaction_id = None
+        bt.match_status = "unmatched"
+        bt.category_account_id = None
+    db.flush()
+    db.refresh(txn)
+    kept = {v["id"] for v in keep.values()}
+    return [
+        o
+        for o in old
+        if o["id"] not in kept and (o["cleared"] or o["reconciliation_id"])
+    ]
+
+
 def assert_not_reconciled(txn: Transaction) -> None:
     if any(ln.reconciliation_id for ln in txn.lines):
         raise HTTPException(

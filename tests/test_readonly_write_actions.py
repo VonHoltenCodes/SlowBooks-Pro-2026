@@ -51,6 +51,14 @@ buttons[6].parentElement = row;
 const lone = button('Edit', 'VendorsPage.showForm(3)');
 lone.parentElement = { querySelectorAll: () => [lone] };
 buttons.push(lone);
+// a lone Edit that calls a write action (the register's journal and
+// deposit edits, #388) is hidden, unlike one that opens a form locked
+const loneJe = button('Edit JE', 'JournalPage.editEntry(7)');
+loneJe.parentElement = { querySelectorAll: () => [loneJe] };
+buttons.push(loneJe);
+const loneDep = button('Edit Dep', 'DepositsPage.editDeposit(7)');
+loneDep.parentElement = { querySelectorAll: () => [loneDep] };
+buttons.push(loneDep);
 const root = { querySelectorAll: () => buttons };
 const ctx = { console, window: {}, document: { addEventListener: () => {}, body: { classList: { toggle() {} } },
   getElementById: () => null, querySelectorAll: () => [] } };
@@ -82,4 +90,6 @@ def test_a_read_only_sign_in_sees_only_what_it_can_do():
     # Edit beside View is hidden (View shows it); a lone Edit opens the
     # record's form locked, and stays
     assert got["shown"] == ["Save PDF", "Print", "Close", "View", "Export All", "Edit"]
+    # the register's journal/deposit Edit (a write action) is hidden
+    assert "Edit JE" not in got["shown"] and "Edit Dep" not in got["shown"]
     assert got["adminHidden"] == 0

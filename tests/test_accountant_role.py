@@ -130,6 +130,13 @@ def test_every_other_write_is_refused_with_the_sentence(
                 "category_account_id": seed_accounts["6300"].id,
             },
         ),
+        # the accountant posts and voids journal entries but does not edit
+        # them: the PUT is refused by the middleware (#388)
+        (
+            "put",
+            "/api/journal/1",
+            {"date": "2026-03-01", "description": "x", "lines": []},
+        ),
         ("put", "/api/settings", {"invoice_prefix": "X-"}),
         ("post", "/api/backups", {}),
         (
@@ -251,3 +258,39 @@ def test_the_guide_exists_and_the_server_doc_names_the_role():
     server = (ROOT / "docs/server-edition.md").read_text(encoding="utf-8")
     assert "accountant (reads everything" in server
     assert "working-with-your-accountant.md" in server
+
+
+def test_the_accountant_sees_edit_on_a_bank_entry_but_not_a_journal_entry(
+    client, db_session, seed_accounts
+):
+    """#388 review: the role gate only takes Edit off a manual journal row;
+    a bank entry keeps #408's behaviour (editable, hidden client-side)."""
+    je = client.post(
+        "/api/journal",
+        json={
+            "date": "2026-03-01",
+            "description": "Owner draw",
+            "lines": [
+                {"account_id": seed_accounts["1000"].id, "debit": 0, "credit": 100},
+                {"account_id": seed_accounts["6900"].id, "debit": 100, "credit": 0},
+            ],
+        },
+    ).json()
+    be = client.post(
+        "/api/banking/transactions",
+        json={
+            "account_id": seed_accounts["1000"].id,
+            "date": "2026-03-02",
+            "amount": "-25.00",
+            "category_account_id": seed_accounts["6900"].id,
+        },
+    ).json()
+    _as_cpa(client, db_session)
+    reg = client.get(
+        f"/api/banking/check-register?account_id={seed_accounts['1000'].id}"
+    ).json()
+    by_id = {e["transaction_id"]: e for e in reg["entries"]}
+    assert by_id[je["id"]]["editable"] is False  # a manual JE: not the accountant's
+    assert by_id[be["id"]]["editable"] is True  # a bank entry: #408, hidden client-side
+    # the journal GET agrees the accountant does not edit this entry
+    assert client.get(f"/api/journal/{je['id']}").json()["editable"] is False

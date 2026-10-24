@@ -5,6 +5,34 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Journal entries and deposits open for editing from the register** (#388).
+The bank-entry edit shipped in 2.27.0 left two register rows still opening
+only their own view: a hand-entered journal entry and a deposit. Now each
+has **Edit** too. A journal entry opens the journal form filled in, and
+Save rewrites it in place (`GET` and `PUT /api/journal/{id}`) — the same
+journal entry, so its attachments, statement match and audit trail stay
+with it, its lines replaced the way a bill's are on edit (each old line a
+DELETE in the audit log, each new one an INSERT). A deposit opens the
+deposit form with its date, slip reference and the payments it took, plus
+any still waiting; Save reposts it through the posting helpers (`PUT
+/api/deposits/{id}`), moving the payments it no longer takes back onto the
+Make Deposits list and stamping the new ones with it, the register, the GL
+and the Undeposited Funds balance tying.
+
+Both follow the rules the bank-entry edit set. An entry a completed
+reconciliation holds keeps its amount and date — a change is refused with
+the same sentence ("…so its amount and date cannot be changed, just as it
+cannot be voided. Correct the difference with a new entry.") — while its
+memo, reference, class and job can still be corrected. For a journal entry,
+a change that moves an amount to a different account in a reconciled period
+warns first, with **Change it anyway** in the form, and the audit log
+records that the edit moved past that reconciliation. A line whose account
+and amount did not change keeps its cleared mark; one that changed loses
+it. A void entry is not edited, and only a hand-entered journal entry opens
+this way (an imported one keeps to its own correction path).
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

@@ -596,7 +596,7 @@ All payroll, HR, tax-form, and self-service portal endpoints are documented with
 | `/api/banking/check-register` | GET | The register: ledger lines on a bank/card account with running balance, links, cleared state; `start_date`, `end_date`, `class_id` (v2.22.0) |
 | `/api/deposits/pending` | GET | Pending deposits in Undeposited Funds |
 | `/api/deposits` | GET, POST | List and create deposits (move funds to bank; `line_ids` are the payments taken) |
-| `/api/deposits/{id}` | GET | One deposit with its payments |
+| `/api/deposits/{id}` | GET, PUT | One deposit with its payments; PUT edits it in place from the register (date, reference, class, job, and which payments it takes via `line_ids`; a reconciled deposit's amount and date are refused) (part of #388) |
 | `/api/deposits/{id}/pdf · /print-preview` | GET | The deposit slip (v2.22.2): the account, the date, each payment taken and the total; VOID when void |
 | `/api/deposits/{id}/void` | POST | Void a deposit (its payments wait to be deposited again) |
 | `/api/cc-charges` | GET, POST | Credit card charge entry (`card_account_id`, `…/{id}/void`) |
@@ -606,7 +606,7 @@ All payroll, HR, tax-form, and self-service portal endpoints are documented with
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/journal` | GET, POST | Manual journal entry CRUD |
-| `/api/journal/{id}` | GET | Get journal entry with lines |
+| `/api/journal/{id}` | GET, PUT | Get a journal entry with lines; PUT rewrites a hand-entered one in place from the register (a reconciled line's amount, account and the date refused, a non-reconciled account move 409 until `confirm_reconciled`; the accountant's sign-in does not edit) (part of #388) |
 | `/api/journal/{id}/void` | POST | Void with reversing entry |
 | `/api/fixed-assets` | GET, POST, PUT | Fixed asset register (`acquisition` posts the purchase) |
 | `/api/fixed-assets/{id}/post-purchase` | POST | Post the purchase of an asset registered without one |

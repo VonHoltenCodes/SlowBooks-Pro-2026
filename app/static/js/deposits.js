@@ -161,6 +161,76 @@ const DepositsPage = {
         if (App.documentAddress) App.documentAddress(`#/deposits/${Number(id)}`);
     },
 
+    // Edit (#388): a deposit opens from its register row in a form filled
+    // in — its date, slip reference, and the payments it takes (the ones it
+    // holds now, ticked, plus any still waiting). Save sends a PUT that
+    // reposts the deposit and moves the payments. A deposit on a reconciled
+    // bank statement keeps its amount and date; only its reference changes.
+    async editDeposit(id) {
+        const [d, pending] = await Promise.all([
+            API.get(`/deposits/${id}`),
+            API.get('/deposits/pending').catch(() => []),
+        ]);
+        if (d.voided) { toast('A void deposit is not edited.', 'error'); return; }
+        const held = d.payments || [];
+        const heldIds = new Set(held.map(p => p.transaction_line_id));
+        const rows = held.concat(pending.filter(p => !heldIds.has(p.transaction_line_id)));
+        const locked = d.reconciled;
+        const rowsHtml = rows.map(p => `<tr>
+                <td><input type="checkbox" class="dep-edit-check" data-lineid="${p.transaction_line_id}" data-amount="${p.amount}" ${heldIds.has(p.transaction_line_id) ? 'checked' : ''} ${locked ? 'disabled' : 'onchange="DepositsPage.recalcEdit()"'} aria-label="Include ${escapeHtml(p.description || '')}"></td>
+                <td>${formatDate(p.date)}</td>
+                <td>${escapeHtml(p.received_from || '')}</td>
+                <td>${escapeHtml(p.description || '')}</td>
+                <td class="amount">${formatCurrency(p.amount)}</td>
+            </tr>`).join('');
+        openModal(`Edit deposit — ${formatDate(d.date)}`, `
+            <form onsubmit="event.preventDefault();DepositsPage.saveEdit(${d.id})">
+                <div class="form-grid">
+                    <div class="form-group"><label>Date</label>
+                        <input name="date" type="date" value="${escapeHtml(d.date)}" ${locked ? 'disabled' : ''}></div>
+                    <div class="form-group"><label>Reference</label>
+                        <input name="reference" value="${escapeHtml(d.reference || '')}" placeholder="Deposit slip #"></div>
+                </div>
+                ${locked ? `<div class="form-group full-width" role="status" style="font-size:11px; color:var(--text-muted);">This deposit was reconciled with a bank statement, so its amount and date stay as they are; its reference can still be corrected.</div>` : ''}
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col"></th><th scope="col">Date</th><th scope="col">Received From</th><th scope="col">Description</th><th scope="col" class="amount">Amount</th></tr></thead>
+                    <tbody>${rowsHtml || '<tr><td colspan="5">No payments to show</td></tr>'}</tbody>
+                </table></div>
+                <div style="margin-top:8px; display:flex; justify-content:space-between; align-items:center;">
+                    <div id="dep-edit-total" style="font-weight:700;">Selected: ${formatCurrency(d.amount)}</div>
+                    <div class="form-actions" style="margin:0;">
+                        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                        <button type="submit" class="btn btn-primary">Save</button>
+                    </div>
+                </div>
+            </form>`);
+    },
+
+    recalcEdit() {
+        let cents = 0;
+        $$('.dep-edit-check').forEach(cb => { if (cb.checked) cents += Math.round((parseFloat(cb.dataset.amount) || 0) * 100); });
+        const el = $('#dep-edit-total');
+        if (el) el.textContent = `Selected: ${formatCurrency(cents / 100)}`;
+    },
+
+    async saveEdit(id) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        const lineIds = [];
+        $$('.dep-edit-check').forEach(cb => { if (cb.checked) lineIds.push(parseInt(cb.dataset.lineid, 10)); });
+        const body = {
+            reference: form.reference.value || null,
+            line_ids: lineIds,
+        };
+        if (!form.date.disabled) body.date = form.date.value;
+        try {
+            await API.put(`/deposits/${id}`, body);
+            toast('Deposit saved');
+            closeModal();
+            App.navigate(location.hash.startsWith('#/banking') ? location.hash : '#/deposits');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     toggleAll() {
         const checked = $('#dep-select-all').checked;
         $$('.dep-check').forEach(cb => { cb.checked = checked; });

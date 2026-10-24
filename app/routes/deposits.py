@@ -23,10 +23,16 @@ from app.schemas.deposits import (
     DepositCreate,
     DepositDetailResponse,
     DepositResponse,
+    DepositUpdate,
     PendingDepositResponse,
 )
 from app.services.accounting import _q, create_journal_entry, get_undeposited_funds_id
-from app.services.bank_posting import void_document
+from app.services.bank_posting import (
+    reconciled_on,
+    replace_journal_lines,
+    void_document,
+)
+from app.services.bank_register import date_text
 from app.services.closing_date import check_closing_date
 from app.services.donor_documents import document_label
 from app.services.terminology import document_reference, terms_from_db
@@ -100,6 +106,32 @@ def _payment_line(tl: TransactionLine, txn: Transaction, d: dict):
         method=d.get("method", ""),
         document=d.get("document", ""),
     )
+
+
+def _lock_taken(db: Session, chosen, allow_deposit_id: int = None) -> None:
+    """Row-lock the chosen Undeposited Funds lines (no-op on SQLite) and
+    refuse (409) if any was taken by another deposit since the page loaded
+    — so two deposits at once can't both take the same payment. A line this
+    deposit already holds (`allow_deposit_id`) is fine when editing."""
+    if not chosen:
+        return
+    locked = (
+        db.query(TransactionLine)
+        .filter(TransactionLine.id.in_([ln.id for ln in chosen]))
+        .with_for_update()
+        .all()
+    )
+    if any(
+        ln.deposit_transaction_id and ln.deposit_transaction_id != allow_deposit_id
+        for ln in locked
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "One of the payments you ticked was deposited a moment ago. "
+                "Reload Make Deposits and tick them again."
+            ),
+        )
 
 
 @router.get("/pending", response_model=list[PendingDepositResponse])
@@ -269,22 +301,7 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
                     ),
                 )
             chosen.append(line)
-        # Row-lock the chosen lines so two deposits at once can't both take
-        # the same payment (no-op on SQLite).
-        locked = (
-            db.query(TransactionLine)
-            .filter(TransactionLine.id.in_([ln.id for ln in chosen]))
-            .with_for_update()
-            .all()
-        )
-        if any(ln.deposit_transaction_id for ln in locked):
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    "One of the payments you ticked was deposited a moment ago. "
-                    "Reload Make Deposits and tick them again."
-                ),
-            )
+        _lock_taken(db, chosen)
         total = _q(sum((Decimal(str(ln.debit)) for ln in chosen), Decimal("0")))
         if data.total is not None and _q(data.total) != total:
             raise HTTPException(
@@ -335,6 +352,131 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
         "amount": float(total),
         "items": len(chosen),
     }
+
+
+@router.put("/{deposit_id}", response_model=DepositDetailResponse)
+def update_deposit(deposit_id: int, data: DepositUpdate, db: Session = Depends(get_db)):
+    """Edit a deposit in place from the register (#388), the way the
+    bank-entry edit rewrites a register entry: the same journal entry, its
+    date, slip reference, class and job, and which undeposited payments it
+    takes. The two ledger lines (DR bank / CR Undeposited Funds) are
+    reposted through `replace_journal_lines` — not mutated by hand — so the
+    deposit's statement match and audit trail stay with it; the payments it
+    no longer takes go back on the Make Deposits list and the new ones are
+    stamped with it. A deposit on a reconciled bank statement keeps its
+    amount and date (a change is refused with 400, as its void is)."""
+    txn = (
+        db.query(Transaction)
+        .options(selectinload(Transaction.lines))
+        .filter(Transaction.id == deposit_id, Transaction.source_type == "deposit")
+        .with_for_update()
+        .first()
+    )
+    if not txn:
+        raise HTTPException(status_code=404, detail="Deposit not found")
+    if txn.id in dead_transaction_ids(db, [txn]):
+        raise HTTPException(
+            status_code=400,
+            detail="This deposit is void; a void deposit is not edited.",
+        )
+    bank_line = next((ln for ln in txn.lines if ln.debit > 0), None)
+    if bank_line is None:
+        raise HTTPException(status_code=400, detail="This deposit has no bank line")
+    bank_account = db.get(Account, bank_line.account_id)
+    old_total = _q(bank_line.debit)
+
+    uf_id = get_undeposited_funds_id(db)
+    held = (
+        db.query(TransactionLine)
+        .filter(TransactionLine.deposit_transaction_id == txn.id)
+        .all()
+    )
+    # An empty or omitted `line_ids` leaves the payments alone — a legacy
+    # deposit that named none (imported, or an amount posted by hand) can
+    # still have its date or reference fixed, and the form omits `line_ids`
+    # when nothing was re-ticked (#388 review). A non-empty list sets which
+    # payments it takes: the ones it holds now plus any still waiting.
+    if data.line_ids:
+        pool = {ln.id: ln for ln in held}
+        for ln, _ in waiting_items(db, uf_id):
+            pool.setdefault(ln.id, ln)
+        chosen = []
+        for line_id in dict.fromkeys(data.line_ids):
+            line = pool.get(line_id)
+            if line is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "One of the payments you ticked is not on this deposit "
+                        "and is no longer waiting. Reload and tick them again."
+                    ),
+                )
+            chosen.append(line)
+        _lock_taken(db, chosen, allow_deposit_id=txn.id)
+        new_total = _q(sum((Decimal(str(ln.debit)) for ln in chosen), Decimal("0")))
+        if new_total <= 0:
+            raise HTTPException(
+                status_code=400, detail="A deposit takes at least one payment"
+            )
+    else:
+        chosen = held
+        new_total = old_total
+
+    new_date = data.date if data.date is not None else txn.date
+    new_ref = data.reference if "reference" in data.model_fields_set else txn.reference
+    new_class = data.class_id if "class_id" in data.model_fields_set else txn.class_id
+    new_job = data.job_id if "job_id" in data.model_fields_set else txn.job_id
+
+    recon = reconciled_on(db, txn)
+    if recon is not None and (new_date != txn.date or new_total != old_total):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This deposit was reconciled on the "
+                f"{date_text(recon.statement_date)} statement, so its amount "
+                "and date cannot be changed, just as it cannot be voided. "
+                "Correct the difference with a new deposit."
+            ),
+        )
+    check_closing_date(db, txn.date)
+    check_closing_date(db, new_date)
+
+    label = (
+        f"Deposit to {bank_account.name}" if bank_account else (txn.description or "")
+    )
+    lines = [
+        {
+            "account_id": bank_line.account_id,
+            "debit": new_total,
+            "credit": Decimal("0"),
+            "description": label,
+        },
+        {
+            "account_id": uf_id,
+            "debit": Decimal("0"),
+            "credit": new_total,
+            "description": label,
+        },
+    ]
+    replace_journal_lines(
+        db,
+        txn,
+        new_date,
+        label,
+        lines,
+        source_type="deposit",
+        reference=new_ref or "",
+        class_id=new_class,
+        job_id=new_job,
+    )
+    chosen_ids = {ln.id for ln in chosen}
+    for ln in held:
+        if ln.id not in chosen_ids:
+            ln.deposit_transaction_id = None
+    for ln in chosen:
+        ln.deposit_transaction_id = txn.id
+    db.commit()
+    return get_deposit(txn.id, db)
 
 
 @router.post("/{deposit_id}/void", response_model=DepositResponse)

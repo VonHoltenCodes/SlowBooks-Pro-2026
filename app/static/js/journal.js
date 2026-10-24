@@ -169,10 +169,20 @@ const JournalPage = {
     _lineCount: 0,
     _accounts: [],
 
-    async showForm() {
+    // Edit (#388): a hand-entered journal entry opens in the journal form,
+    // filled in, from its register row; Save sends it back as a PUT.
+    async editEntry(entryId) {
+        try {
+            const entry = await API.get(`/journal/${entryId}`);
+            if (!entry.editable) { toast('Only a hand-entered journal entry can be edited here.', 'error'); return; }
+            await JournalPage.showForm(entry);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async showForm(entry = null) {
         const accounts = await API.get('/accounts');
-        const classGroup = await classFormGroupHtml();
-        const jobGroup = await jobFormGroupHtml(null);
+        const classGroup = await classFormGroupHtml(entry ? entry.class_id : undefined);
+        const jobGroup = await jobFormGroupHtml(entry ? entry.job_id : null);
         await CostCodes.load();
         await Nonprofit.loadFunds();
         JournalPage._accounts = accounts;
@@ -182,7 +192,7 @@ const JournalPage = {
             `<option value="${a.id}">${accountLabel(a)}</option>`
         ).join('');
 
-        openModal('New Journal Entry', `
+        openModal(entry ? `Edit Journal Entry #${entry.id}` : 'New Journal Entry', `
             <form aria-labelledby="modal-title" data-accountant-ok data-skip-to="#je-lines" data-skip-text="Skip to the lines" onsubmit="JournalPage.save(event)">
                 <div class="form-grid">
                     <div class="form-group"><label>Date *</label>
@@ -234,6 +244,46 @@ const JournalPage = {
                     </div>
                 </div>
             </form>`);
+        if (entry) JournalPage._fillForm(entry);
+    },
+
+    // The form as "Edit entry": the entry's header in the boxes, a row per
+    // line, and the entry id on the form so save() sends a PUT. A reconciled
+    // entry shows the note that its amount and date are locked (#388).
+    _fillForm(entry) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        form.dataset.entryId = entry.id;
+        form.date.value = entry.date;
+        if (form.reference) form.reference.value = entry.reference || '';
+        form.description.value = entry.description || '';
+        if (form.is_adjusting) form.is_adjusting.checked = !!entry.is_adjusting;
+        const submit = $('#je-submit');
+        if (submit) submit.textContent = 'Save';
+        const body = $('#je-lines');
+        if (body) body.innerHTML = '';
+        JournalPage._lineCount = 0;
+        (entry.lines || []).forEach(l => {
+            JournalPage.addLine();
+            const row = body ? body.lastElementChild : null;
+            if (!row) return;
+            row.querySelector('.je-account').value = l.account_id;
+            row.querySelector('.je-desc').value = l.description || '';
+            row.querySelector('.je-debit').value = Number(l.debit || 0).toFixed(2);
+            row.querySelector('.je-credit').value = Number(l.credit || 0).toFixed(2);
+            const cc = row.querySelector('.je-cost-code');
+            if (cc && l.cost_code_id != null) cc.value = l.cost_code_id;
+            const fund = row.querySelector('.je-function-fund');
+            if (fund && l.class_id != null) fund.value = l.class_id;
+            const fn = row.querySelector('.je-function');
+            if (fn && l.function) fn.value = l.function;
+        });
+        JournalPage.recalc();
+        if (entry.reconciled_note) {
+            const grid = form.querySelector('.form-grid');
+            if (grid) grid.insertAdjacentHTML('beforeend',
+                `<div class="form-group full-width" role="status" style="font-size:11px; color:var(--text-muted);">${escapeHtml(entry.reconciled_note)}</div>`);
+        }
     },
 
     addLine() {
@@ -322,20 +372,70 @@ const JournalPage = {
         if (lines.length < 2) { toast('At least 2 lines required', 'error'); return; }
         if (!(await ClassWarn.ok(form, { rows: '#je-lines tr', cls: 'je-function' }))) return;
 
+        const data = {
+            date: form.date.value,
+            description: form.description.value,
+            reference: form.reference.value || null,
+            class_id: classIdFromForm(form),
+            job_id: jobIdFromForm(form),
+            is_adjusting: !!(form.is_adjusting && form.is_adjusting.checked),
+            lines,
+        };
+        const entryId = form.dataset.entryId ? parseInt(form.dataset.entryId, 10) : null;
+        if (entryId) { await JournalPage._putEntry(entryId, data); return; }
         try {
-            await API.post('/journal', {
-                date: form.date.value,
-                description: form.description.value,
-                reference: form.reference.value || null,
-                class_id: classIdFromForm(form),
-                job_id: jobIdFromForm(form),
-                is_adjusting: !!(form.is_adjusting && form.is_adjusting.checked),
-                lines,
-            });
-            toast(form.is_adjusting && form.is_adjusting.checked ? 'Adjusting entry created' : 'Journal entry created');
+            await API.post('/journal', data);
+            toast(data.is_adjusting ? 'Adjusting entry created' : 'Journal entry created');
             closeModal();
             App.navigate('#/journal');
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // The edit's save (#388). An amount or date change on a reconciled
+    // entry comes back 400 (its amount and date are locked); a change that
+    // moves an amount between accounts in a reconciled period comes back
+    // 409, shown in the form with "Change it anyway".
+    async _putEntry(entryId, data) {
+        try {
+            const saved = await API.put(`/journal/${entryId}`, data);
+            toast(saved.note ? `Entry saved. ${saved.note}` : 'Entry saved');
+            closeModal();
+            App.navigate(location.hash.startsWith('#/banking') ? location.hash : '#/journal');
+        } catch (err) {
+            if (err.status === 409 && err.detail && err.detail.code === 'reconciled' && !data.confirm_reconciled) {
+                JournalPage._askReconciled(entryId, data, err.detail.message);
+                return;
+            }
+            toast(err.message, 'error');
+        }
+    },
+
+    _askReconciled(entryId, data, message) {
+        const form = document.querySelector('#modal-body form');
+        if (!form) { toast(message, 'error'); return; }
+        JournalPage._pendingEdit = { entryId, data };
+        let box = document.getElementById('je-reconciled-warning');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'je-reconciled-warning';
+            box.setAttribute('role', 'alert');
+            box.className = 'form-group full-width';
+            box.style.cssText = 'display:block; padding:8px 10px; border:1px solid var(--warning, #b7791f); border-radius:4px; font-size:12px;';
+            const actions = form.querySelector('.form-actions');
+            if (actions) actions.before(box); else form.appendChild(box);
+        }
+        box.innerHTML = `<p style="margin:0 0 8px;">${escapeHtml(message)}</p>
+            <button type="button" class="btn btn-sm btn-primary" onclick="JournalPage.saveAnyway()">Change it anyway</button>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('je-reconciled-warning').remove()">Keep it as it is</button>`;
+        const first = box.querySelector('button');
+        if (first) first.focus();
+    },
+
+    async saveAnyway() {
+        const pending = JournalPage._pendingEdit;
+        if (!pending) return;
+        JournalPage._pendingEdit = null;
+        await JournalPage._putEntry(pending.entryId, { ...pending.data, confirm_reconciled: true });
     },
 
     async void(id) {

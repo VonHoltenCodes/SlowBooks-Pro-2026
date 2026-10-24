@@ -931,10 +931,12 @@ def test_the_register_row_opens_the_entry_for_editing():
     js = (ROOT / "app/static/js/banking.js").read_text(encoding="utf-8")
     assert "${BankingPage._printCheckButton(e)}${BankingPage._editButton(e, id)}" in js
     assert "if (!e.editable) return '';" in js
+    # the bank-entry branch still routes to the + Entry editor
     assert (
-        'onclick="BankingPage.editEntry(${e.transaction_id}, ${accountId})">Edit</button>'
+        "else onclick = `BankingPage.editEntry(${e.transaction_id}, ${accountId})`"
         in js
     )
+    assert ">Edit</button>" in js
     assert "async showEntryForm(accountId, entry = null)" in js
     assert "if (entry) BankingPage._fillEntryForm(entry);" in js
     assert "title.textContent = 'Edit entry'" in js
