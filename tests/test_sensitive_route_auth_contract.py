@@ -27,6 +27,7 @@ _AUTH_EXEMPT_RE = getattr(main_module, "_AUTH_EXEMPT_RE", None)
 _PUBLIC_JUSTIFIED = [
     (re.compile(r"^/api/auth/"), "the auth endpoints themselves"),
     (re.compile(r"^/api/stripe/webhook$"), "provider signature is the auth"),
+    (re.compile(r"^/api/mercury/webhook$"), "raw-body HMAC and timestamp authenticate"),
     (
         re.compile(r"^/api/payments/[^/]+/webhook$"),
         "provider signature is the auth",

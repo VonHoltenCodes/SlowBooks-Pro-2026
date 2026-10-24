@@ -31,6 +31,8 @@ const SettingsPage = {
         square_access_token: 'the Square access token, under Online Payments',
         square_webhook_signature_key: 'the Square webhook signature key, under Online Payments',
         simplefin_access_url: 'the SimpleFIN bank feed: connect again on Banking',
+        mercury_api_token: 'the Mercury bank feed: connect again on Banking',
+        mercury_webhook_secret: 'the Mercury webhook signing secret, on Banking',
         closing_date_password: 'the closing-date password, under Closing Date',
         ai_api_key: 'the AI Insights API key, under AI Insights',
     },
