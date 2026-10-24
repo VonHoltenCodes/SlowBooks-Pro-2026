@@ -124,22 +124,43 @@ def recheck(db: Session, audit: DocumentAudit) -> dict:
                 f"{parsed['year']} was for is no longer on file."
             )
             return out
-        data = compute_w2(db, parsed["year"], parsed["employee_id"])
-    elif audit.doc_type == "w3":
-        data = compute_w3(db, parsed["year"])
-    elif audit.doc_type == "940":
-        data = compute_940(db, parsed["year"])
-    else:
-        data = compute_941(db, parsed["year"], parsed["quarter"])
 
-    current = form_content_hash(employer_block(db), data)
+    def figure(legacy: bool) -> dict:
+        if "employee_id" in parsed:
+            return compute_w2(db, parsed["year"], parsed["employee_id"], legacy=legacy)
+        if audit.doc_type == "w3":
+            return compute_w3(db, parsed["year"], legacy=legacy)
+        if audit.doc_type == "940":
+            return compute_940(db, parsed["year"], legacy=legacy)
+        return compute_941(db, parsed["year"], parsed["quarter"], legacy=legacy)
+
+    company = employer_block(db)
+    current = form_content_hash(company, figure(False))
+    matches = current == audit.content_hash
+    # A form generated before 2.29.0 was figured the earlier way (each
+    # paycheck's gross toward the wage bases, one state line, the 2026
+    # Social Security base for every year). Figured that way from today's
+    # books it still matches when nothing behind it changed; the sentence
+    # then says today's figures differ, which may call for a corrected form.
+    figured_then = False
+    if not matches and form_content_hash(company, figure(True)) == audit.content_hash:
+        matches = figured_then = True
     voided = _voided_runs(db, parsed)
-    out.update(
-        current_hash=current, matches=current == audit.content_hash, voided_runs=voided
-    )
+    out.update(current_hash=current, matches=matches, voided_runs=voided)
+    out["figured_before_2_29"] = figured_then
     # the row says when, in the reader's own time; the sentence says who
     by = f" by {audit.username}" if audit.username else ""
-    if out["matches"]:
+    if figured_then:
+        out["message"] = (
+            f"Matches the books: the pay runs behind the {form} for {subject} are "
+            f"as they were when it was generated{by}. SlowBooks figures this form "
+            "differently now (each paycheck's taxable wages, after Section 125 "
+            "and the like, toward the wage bases; the year's own Social Security "
+            "wage base; one state line per state), and re-figured today it comes "
+            "out differently. If it was filed, check whether a corrected form is "
+            "needed."
+        )
+    elif out["matches"]:
         out["message"] = (
             f"Matches the books: re-figured today, the {form} for {subject} comes "
             f"out the same as when it was generated{by}."

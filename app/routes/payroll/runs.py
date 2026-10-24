@@ -2,14 +2,14 @@ import json
 from datetime import date
 from decimal import Decimal
 
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import get_db
 from app.routes._helpers import clamp_pagination
 from app.routes.payroll._router import router
 from app.services.direct_deposit import pays_by_direct_deposit
-from app.routes.payroll.ytd import _ytd_supplemental, employee_ytd
+from app.routes.payroll.ytd import _ytd_supplemental, employee_ytd, wage_base_ytd
 from app.models.payroll import (
     PayRun,
     PayStub,
@@ -23,7 +23,7 @@ from app.models.deductions import GarnishmentOrder
 from app.models.accounts import Account
 from app.schemas.payroll import PayRunCreate, PayRunResponse
 from app.schemas.deductions import GrossUpRequest, GrossUpResponse
-from app.services.payroll_service import _q, calculate_withholdings
+from app.services.payroll_service import _q, calculate_withholdings, wage_base_note
 from app.services.accounting import create_journal_entry
 from app.services.garnishment import (
     GarnishmentSpec,
@@ -345,6 +345,8 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             regular_wages = _last_regular_gross(db, emp.id, data.pay_date)
 
         ytd = employee_ytd(db, emp.id, year, before=data.pay_date)
+        # the caps measure the opening's taxable wages, SUTA per state (#433)
+        bases = wage_base_ytd(db, emp.id, year, work_state, before=data.pay_date)
         ytd_suppl = (
             _ytd_supplemental(db, emp.id, year, before=data.pay_date)
             if stub_input.supplemental
@@ -395,6 +397,8 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             supplemental_method=stub_input.supplemental_method or "flat",
             regular_wages=regular_wages,
             ytd_supplemental=ytd_suppl,
+            ytd_bases=bases,
+            year=year,
         )
 
         # Garnishments are applied to disposable earnings (gross less the
@@ -522,6 +526,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     if refused:
         # Nothing is written: the session is never committed.
         raise HTTPException(status_code=422, detail=" ".join(refused))
+    note = wage_base_note(year)
+    if note:
+        warnings.append(note)
 
     run.total_gross = total_gross
     run.total_taxes = total_taxes
@@ -537,7 +544,11 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/{run_id}/process")
-def process_pay_run(run_id: int, db: Session = Depends(get_db)):
+def process_pay_run(
+    run_id: int,
+    acknowledge_stale: bool = Query(False),
+    db: Session = Depends(get_db),
+):
     """Process a pay run — posts the payroll journal entry."""
     from app.services.closing_date import check_closing_date
 
@@ -553,6 +564,13 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Pay run already processed")
     if run.status == PayRunStatus.VOID:
         raise HTTPException(status_code=400, detail="Pay run is void")
+    if run.stale_reason and not acknowledge_stale:
+        # an opening YTD changed after the draft was figured (#433)
+        raise HTTPException(
+            status_code=409,
+            detail=run.stale_reason
+            + " To process it as figured, send acknowledge_stale=1.",
+        )
     # Pay-run processing posts a dated JE; subject to closing-date enforcement
     # like every other JE-posting route. Without this, an operator can process
     # a backdated pay run into a closed period.
@@ -761,6 +779,115 @@ def process_pay_run(run_id: int, db: Session = Depends(get_db)):
     }
 
 
+def _discard_flag(run: PayRun, names: list[str]) -> str:
+    who = ", ".join(names)
+    return (
+        f"Figured while draft pay run #{run.id} ({run.pay_date.isoformat()}) "
+        f"counted toward the year-to-date for {who}; that draft was discarded, "
+        "so this run's Social Security, Medicare, FUTA and SUTA wage bases and "
+        "benefit caps counted pay that was never made. Create the run again "
+        "to use the right ones."
+    )
+
+
+@router.delete("/{run_id}")
+def discard_pay_run(run_id: int, db: Session = Depends(get_db)):
+    """Discard a draft pay run: delete it and its stubs, and undo everything
+    creating it changed — the benefit accumulators (BenefitYTD) and loan
+    balances its stubs moved, and the time entries it took (they are free
+    for the next run again). A processed run posted its journal entry and
+    counts in the year's forms: it is voided, never discarded.
+
+    A later draft that was figured while this one counted toward the
+    year-to-date (its wage bases, or its benefit caps) is flagged, as an
+    opening YTD change flags one (stale_reason)."""
+    run = (
+        db.query(PayRun)
+        .options(
+            joinedload(PayRun.stubs).joinedload(PayStub.benefits),
+            joinedload(PayRun.stubs).joinedload(PayStub.employee),
+        )
+        .filter(PayRun.id == run_id)
+        .first()
+    )
+    if not run:
+        raise HTTPException(status_code=404, detail="Pay run not found")
+    if run.status == PayRunStatus.PROCESSED:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Pay run #{run.id} is processed: its journal entry is posted "
+                "and its stubs count in the year's tax forms, so it cannot be "
+                "discarded. Only a draft is discarded; a processed run is voided."
+            ),
+        )
+    if run.status == PayRunStatus.VOID:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Pay run #{run.id} is void; there is nothing to discard.",
+        )
+
+    year = run.pay_date.year
+    # who the later drafts' figures counted this one for: its wage bases
+    # (a later pay date), or its benefit caps (any draft created after it)
+    by_employee: dict[int, tuple[str, bool]] = {}
+    for stub in run.stubs:
+        name = (
+            stub.employee.full_name if stub.employee else f"Employee {stub.employee_id}"
+        )
+        moved_caps = any(b.employee_amount or b.employer_amount for b in stub.benefits)
+        _, before = by_employee.get(stub.employee_id, (name, False))
+        by_employee[stub.employee_id] = (name, before or moved_caps)
+        benefits_engine.unrecord_stub(db, stub, year)
+
+    # the time it paid is free for the next run (one at a time, so the
+    # audit trail records each)
+    entries = db.query(TimeEntry).filter(TimeEntry.pay_run_id == run.id).all()
+    for te in entries:
+        te.pay_run_id = None
+    released = len(entries)
+    db.flush()
+
+    flagged = []
+    if by_employee:
+        later = (
+            db.query(PayRun)
+            .options(joinedload(PayRun.stubs))
+            .filter(
+                PayRun.id != run.id,
+                PayRun.status == PayRunStatus.DRAFT,
+                PayRun.pay_date >= date(year, 1, 1),
+                PayRun.pay_date <= date(year, 12, 31),
+            )
+            .all()
+        )
+        for other in later:
+            names = []
+            for st in other.stubs:
+                hit = by_employee.get(st.employee_id)
+                if hit is None or hit[0] in names:
+                    continue
+                counted_bases = other.pay_date > run.pay_date
+                counted_caps = hit[1] and other.id > run.id
+                if counted_bases or counted_caps:
+                    names.append(hit[0])
+            if names:
+                msg = _discard_flag(run, names)
+                other.stale_reason = (
+                    f"{other.stale_reason} {msg}" if other.stale_reason else msg
+                )[:500]
+                flagged.append(other.id)
+
+    db.delete(run)
+    db.commit()
+    return {
+        "status": "discarded",
+        "pay_run_id": run_id,
+        "released_time_entries": released,
+        "flagged_runs": flagged,
+    }
+
+
 @router.post("/gross-up", response_model=GrossUpResponse)
 def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
     """Net-to-gross: reverse-solve the gross pay that yields a target take-home."""
@@ -777,6 +904,7 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
     )
     work_state = (emp.work_state or "WA").upper()
     wh_state = withholding_state(work_state, emp.residence_state)
+    bases = wage_base_ytd(db, emp.id, year, work_state)
 
     def net_of(g: Decimal) -> Decimal:
         return calculate_withholdings(
@@ -798,6 +926,8 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
             local_tax_rate=emp.local_tax_rate,
             supplemental=bool(data.supplemental),
             ytd_supplemental=ytd_suppl,
+            ytd_bases=bases,
+            year=year,
         )["net"]
 
     target = Decimal(str(data.target_net))

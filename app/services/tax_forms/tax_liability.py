@@ -63,46 +63,72 @@ def compute_tax_liability(db, year: int, quarter: int) -> dict:
         Decimal("0"),
     )
 
+    # Opening balances (#433): the old system's share of this quarter. The
+    # 941 for the quarter reports it (line 12), so the schedule carries it
+    # too, and names it: it was deposited through the old system, or the
+    # opening balance sheet carries it, so it is not due through SlowBooks.
+    from app.services.payroll_opening import amount, openings_for_year, state_total
+
+    q = {quarter}
+    prior = {k: Decimal("0") for k in ("941", "940", "sui", "wh", "other")}
+    for o in openings_for_year(db, year).values():
+        prior["941"] += sum(
+            (
+                amount(o, f, q)
+                for f in (
+                    "federal_tax",
+                    "ss_tax",
+                    "employer_ss_tax",
+                    "medicare_tax",
+                    "employer_medicare_tax",
+                )
+            ),
+            Decimal("0"),
+        )
+        prior["940"] += amount(o, "futa_tax", q)
+        prior["sui"] += state_total(o, "suta_tax", q)
+        prior["wh"] += state_total(o, "withholding", q)
+        prior["other"] += state_total(o, "other_employee", q) + state_total(
+            o, "other_employer", q
+        )
+    prior = {k: _q(v) for k, v in prior.items()}
+
     federal_941 = _q(federal_income + ss + medicare)
 
+    def line(form, agency, description, ours, key):
+        total = _q(ours) + prior[key]
+        return {
+            "form": form,
+            "agency": agency,
+            "description": description,
+            "amount": float(total),
+            # the old payroll's part (#433), and what is left to deposit
+            "prior_system": float(prior[key]),
+            "due": float(_q(ours)),
+            "due_date": due.isoformat(),
+        }
+
     liabilities = [
-        {
-            "form": "941",
-            "agency": "IRS",
-            "description": "Federal employment tax (income tax withheld + Social Security + Medicare)",
-            "amount": float(federal_941),
-            "due_date": due.isoformat(),
-        },
-        {
-            "form": "940",
-            "agency": "IRS",
-            "description": "Federal unemployment tax (FUTA)",
-            "amount": float(_q(futa)),
-            "due_date": due.isoformat(),
-        },
-        {
-            "form": "State SUI",
-            "agency": "State",
-            "description": "State unemployment insurance",
-            "amount": float(_q(suta)),
-            "due_date": due.isoformat(),
-        },
-        {
-            "form": "State WH",
-            "agency": "State",
-            "description": "State income tax withheld",
-            "amount": float(_q(state_income)),
-            "due_date": due.isoformat(),
-        },
-        {
-            "form": "State Other",
-            "agency": "State",
-            "description": "State disability / paid-leave / L&I premiums",
-            "amount": float(_q(state_other)),
-            "due_date": due.isoformat(),
-        },
+        line(
+            "941",
+            "IRS",
+            "Federal employment tax (income tax withheld + Social Security + Medicare)",
+            federal_941,
+            "941",
+        ),
+        line("940", "IRS", "Federal unemployment tax (FUTA)", futa, "940"),
+        line("State SUI", "State", "State unemployment insurance", suta, "sui"),
+        line("State WH", "State", "State income tax withheld", state_income, "wh"),
+        line(
+            "State Other",
+            "State",
+            "State disability / paid-leave / L&I premiums",
+            state_other,
+            "other",
+        ),
     ]
     total_due = _q(federal_941 + futa + suta + state_income + state_other)
+    total_prior = _q(sum(prior.values(), Decimal("0")))
 
     return {
         "year": year,
@@ -111,5 +137,9 @@ def compute_tax_liability(db, year: int, quarter: int) -> dict:
         "quarter_end": end.isoformat(),
         "num_stubs": len(stubs),
         "liabilities": liabilities,
+        # what is left to deposit through SlowBooks
         "total_due": float(total_due),
+        # the old payroll's share of the quarter (#433), and both together
+        "total_prior_system": float(total_prior),
+        "total_liability": float(_q(total_due + total_prior)),
     }

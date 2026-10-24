@@ -962,6 +962,7 @@ const App = {
         'ReportsPage.applyLateFees', 'ReportsPage.deleteSaved', 'ReportsPage.voidDuplicate',
         'ReportsPage.dismissDuplicate', 'ReportsPage.restoreDuplicate', 'IIFPage.importFile',
         'IIFPage.importQbReportCsv', 'MigrationPage.doImport', 'OpeningBalancesPage.save', 'BudgetsPage.saveAll',
+        'PayrollPage.showOpeningImport', 'PayrollPage.applyOpeningImport', 'EmployeesPage.deleteOpening',
     ]),
 
     // "+ New Invoice", "+ Record Payment", "New Account": a create button is

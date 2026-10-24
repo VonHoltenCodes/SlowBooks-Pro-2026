@@ -18,12 +18,22 @@ from app.services.state_tax import get_engine
 
 # --- FICA -------------------------------------------------------------------
 SS_RATE = Decimal("0.062")  # Social Security 6.2% (employee & employer each)
-SS_WAGE_BASE = Decimal("184500")  # 2026 SS wage base (approximate)
+# The Social Security wage base changes every year (SSA announces the next
+# year's in October). A pay run, an opening balance and a form use the base
+# for their own year: ss_wage_base(year).
+SS_WAGE_BASES = {
+    2023: Decimal("160200"),
+    2024: Decimal("168600"),
+    2025: Decimal("176100"),
+    2026: Decimal("184500"),
+}
+SS_WAGE_BASE = SS_WAGE_BASES[max(SS_WAGE_BASES)]  # the newest year's
 MEDICARE_RATE = Decimal("0.0145")  # Medicare 1.45% (employee & employer each)
 MEDICARE_ADDITIONAL_RATE = Decimal("0.009")  # extra 0.9% (employee only)
 MEDICARE_ADDITIONAL_THRESHOLD = Decimal("200000")  # withhold the extra above this
 
 # --- Federal unemployment (FUTA) -------------------------------------------
+# $7,000 by statute (26 U.S.C. 3306(b)(1)) since 1983: the same every year.
 FUTA_WAGE_BASE = Decimal("7000")
 FUTA_EFFECTIVE_RATE = Decimal("0.006")  # 6.0% gross less the standard 5.4% state credit
 
@@ -233,6 +243,71 @@ def supplemental_aggregate_tax(
     return _q(max(Decimal("0"), combined - base))
 
 
+def has_wage_base_table(year: int | None) -> bool:
+    """Whether SlowBooks has the year's Social Security wage base."""
+    return year in SS_WAGE_BASES
+
+
+def ss_wage_base(year: int | None = None) -> Decimal:
+    """The Social Security wage base for `year`. A year SlowBooks has no
+    base for uses the nearest one it has (a pay run in January, before the
+    release with the new year's base, still runs); wage_base_note says so."""
+    if year is None or year in SS_WAGE_BASES:
+        return SS_WAGE_BASES.get(year, SS_WAGE_BASE)
+    nearest = max(SS_WAGE_BASES) if year > max(SS_WAGE_BASES) else min(SS_WAGE_BASES)
+    return SS_WAGE_BASES[nearest]
+
+
+def wage_base_note(year: int | None) -> str | None:
+    """The sentence a pay run or an opening balance carries when its year
+    has no Social Security wage base here; None when it has one."""
+    if year is None or has_wage_base_table(year):
+        return None
+    nearest = max(SS_WAGE_BASES) if year > max(SS_WAGE_BASES) else min(SS_WAGE_BASES)
+    return (
+        f"SlowBooks has the Social Security wage base for {min(SS_WAGE_BASES)} "
+        f"through {max(SS_WAGE_BASES)}, not for {year}: {year} was measured "
+        f"against {nearest}'s (${SS_WAGE_BASES[nearest]:,}). Update SlowBooks "
+        f"before filing {year}'s forms."
+    )
+
+
+def stub_taxable_wages(stub) -> dict:
+    """A pay stub's wages as each tax measured them, from what the stub
+    recorded: its gross less the pre-tax amounts that reduce that tax.
+
+    "federal" (income-tax wages, W-2 box 1) and "state" (state income-tax
+    wages, box 16) drop every pre-tax benefit code that reduces them plus
+    the ad-hoc pre-tax amount typed on the run (which reduces both).
+    "fica" (Social Security, Medicare, FUTA and SUTA wages) drops only the
+    codes that reduce FICA (Section 125, HSA): a 401(k) does not. This is
+    the same arithmetic calculate_withholdings did when the stub was
+    figured, so the caps, the paychecks and the forms agree."""
+    gross = Decimal(str(stub.gross_pay or 0))
+    pretax = Decimal(str(stub.pretax_deductions or 0))
+    codes = [
+        b
+        for b in (getattr(stub, "benefits", None) or [])
+        if b.category == "pretax" and b.employee_amount
+    ]
+    coded = sum((Decimal(str(b.employee_amount)) for b in codes), Decimal("0"))
+    adhoc = max(Decimal("0"), pretax - coded)
+
+    def less(flag: str, extra: Decimal) -> Decimal:
+        reduced = sum(
+            (Decimal(str(b.employee_amount)) for b in codes if getattr(b, flag)),
+            Decimal("0"),
+        )
+        return max(Decimal("0"), gross - reduced - extra)
+
+    return {
+        "gross": gross,
+        "federal": less("reduces_federal", adhoc),
+        "state": less("reduces_state", adhoc),
+        "fica": less("reduces_fica", Decimal("0")),
+    }
+
+
 def _capped_wages(gross: Decimal, ytd_gross: Decimal, wage_base: Decimal) -> Decimal:
     """Portion of `gross` that is still below an annual wage-base cap."""
     if ytd_gross >= wage_base:
@@ -242,9 +317,14 @@ def _capped_wages(gross: Decimal, ytd_gross: Decimal, wage_base: Decimal) -> Dec
     return gross
 
 
-def social_security(gross: Decimal, ytd_gross: Decimal = Decimal("0")) -> tuple:
-    """Return (employee_ss, employer_ss) honouring the annual wage-base cap."""
-    taxable = _capped_wages(Decimal(str(gross)), Decimal(str(ytd_gross)), SS_WAGE_BASE)
+def social_security(
+    gross: Decimal, ytd_gross: Decimal = Decimal("0"), year: int | None = None
+) -> tuple:
+    """Return (employee_ss, employer_ss) honouring the annual wage-base cap
+    for `year` (the newest SlowBooks has when None)."""
+    taxable = _capped_wages(
+        Decimal(str(gross)), Decimal(str(ytd_gross)), ss_wage_base(year)
+    )
     amt = _q(taxable * SS_RATE)
     return amt, amt
 
@@ -314,8 +394,17 @@ def calculate_withholdings(
     state_extra_withholding=Decimal("0"),
     state_rate_override=None,
     local_tax_rate=None,
+    ytd_bases: dict | None = None,
+    year: int | None = None,
 ) -> dict:
     """Compute a full set of payroll taxes for one employee for one pay period.
+
+    ``ytd_bases`` is what already counts toward each annual wage base
+    (routes.payroll.ytd.wage_base_ytd): "ss", "medicare" (the Additional
+    Medicare threshold), "futa", "suta" (the work state's own) and "state"
+    (the work state's capped taxes). Any key left out is measured by
+    ``ytd_gross``, as before. ``year`` is the pay date's: the Social
+    Security wage base is that year's (ss_wage_base).
 
     ``pretax_deductions`` is the total of pre-tax deductions that reduce
     federal income-tax wages; ``pretax_fica`` is the subset of those that
@@ -392,12 +481,17 @@ def calculate_withholdings(
             extra_withholding,
         )
 
+    bases = {k: ytd for k in ("ss", "medicare", "futa", "suta", "state")}
+    for k, v in (ytd_bases or {}).items():
+        if k in bases and v is not None:
+            bases[k] = Decimal(str(v))
+
     # --- FICA (on FICA wages — Section 125 / HSA reduce these) ---
-    ss_emp, ss_empr = social_security(fica_wages, ytd)
-    med_emp, med_empr = medicare(fica_wages, ytd)
+    ss_emp, ss_empr = social_security(fica_wages, bases["ss"], year)
+    med_emp, med_empr = medicare(fica_wages, bases["medicare"])
 
     # --- Employer unemployment taxes ---
-    futa_tax = futa(fica_wages, ytd)
+    futa_tax = futa(fica_wages, bases["futa"])
 
     # --- State engine ---
     # The work-state engine drives SUTA situs and state disability/leave
@@ -413,7 +507,7 @@ def calculate_withholdings(
     state = engine.calculate(
         gross=gross,
         taxable=state_taxable,
-        ytd_gross=ytd,
+        ytd_gross=bases["state"],
         pay_periods=pay_periods,
         hours=Decimal(str(hours)),
         filing_status=filing_status,
@@ -429,7 +523,7 @@ def calculate_withholdings(
         wh = get_engine(withholding_state).calculate(
             gross=gross,
             taxable=state_taxable,
-            ytd_gross=ytd,
+            ytd_gross=bases["state"],
             pay_periods=pay_periods,
             hours=Decimal(str(hours)),
             filing_status=filing_status,
@@ -447,7 +541,7 @@ def calculate_withholdings(
                 state.detail[k] = v
 
     rate = Decimal(str(suta_rate)) if suta_rate is not None else Decimal(str(SUTA_RATE))
-    suta_tax = suta(fica_wages, ytd, rate, engine.suta_wage_base)
+    suta_tax = suta(fica_wages, bases["suta"], rate, engine.suta_wage_base)
 
     total_employee = federal + state_income + state.employee_other + ss_emp + med_emp
     total_employer = ss_empr + med_empr + futa_tax + suta_tax + state.employer_other

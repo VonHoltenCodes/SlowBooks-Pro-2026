@@ -5,6 +5,88 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+#### Opening payroll YTD for a mid-year switch
+
+**A mid-year switch carries the year's payroll over** (#433). Year-to-date
+pay was summed from SlowBooks' own stubs only, so a company that switched in
+May had every W-2, 941 and wage-base cutoff (Social Security, FUTA, SUTA)
+wrong for the rest of the year. Each employee now has an opening balance per
+year, entered quarter by quarter the way QuickBooks takes year-to-date
+adjustments, through the day before the first SlowBooks pay run: gross,
+federal withholding, Social Security, Medicare and FUTA wages and tax (both
+sides), deductions, garnishments and net for each quarter; per state and
+quarter the state wages, withholding, SUTA wages and tax and other state
+taxes; benefit amounts by code for the year. Enter it on the employee's page
+(Opening YTD) or import it for everyone from Payroll → Import opening
+balances, using the template there (a Quarter column, one row per employee
+per quarter, a further state on a row with only the state columns).
+
+- **Each quarter's 941 carries only that quarter.** The old system filed the
+  941 for every quarter it finished, so a May switch's Q1 941 is exactly the
+  Q1 figures, and the Q2 941 is April and May plus SlowBooks' June runs. The
+  tax liability schedule carries the same figures, so its 941 line agrees
+  with line 12, and names the old payroll's share (`prior_system`) apart
+  from what is left to deposit (`due`).
+- **The wage bases come from the wage fields.** The paycheck's Social
+  Security cap, the Additional Medicare threshold, the FUTA $7,000 and each
+  state's SUTA base start from the old system's own taxable wages, not its
+  gross, and the 941, 940 and W-2 measure the same way, so the runs and the
+  forms agree. The SUTA base is a state's own: wages paid in another state
+  do not fill it, and the state SUI report counts a stub in the state it was
+  worked in.
+- **Every form reads it.** The 941 by quarter, the 940 (the FUTA base is not
+  handed out again), the W-2 and W-3 (every box, 3 and 5 from the taxable
+  wages, 16 and 17 from the state rows), the state SUI report for each
+  quarter, the employee's YTD and the stub's YTD.
+- **Locked once a pay run in the year is processed:** a change or a delete
+  is then a correction with a reason, kept in the audit trail, and the as-of
+  date stays before that run.
+- **A draft run figured from the old figures says so.** Changing or deleting
+  an opening marks the employee's draft runs for the year; processing one
+  asks first, and offers to discard it instead.
+- **The Social Security wage base is the year's own.** A 2025 opening,
+  paycheck, 941 and W-2 are measured against 2025's $176,100, not 2026's
+  $184,500 (2023 through 2026 are known). A year SlowBooks has no base for
+  is measured against the nearest one, and the opening and the pay run say
+  so rather than refusing.
+
+**Discard draft.** A draft pay run can now be discarded, from the Payroll
+list or the run's view (`DELETE /api/payroll/{id}`, admin only like the rest
+of payroll). Its stubs go, and so does everything creating it changed: the
+benefit year-to-date its stubs added (a row only it made is removed), the
+loan balances it paid down, the time entries it took, which the next run can
+pay. A later draft figured while it counted toward the year-to-date is
+flagged, as an opening change flags one. A processed run is never discarded.
+
+**Paychecks count their taxable wages toward the caps.** Each stub counted
+its gross toward the Social Security base, the Additional Medicare
+threshold, FUTA and SUTA, so an employee with a Section 125 plan reached
+them early and the next check was short-taxed. A stub now counts what it
+was taxed on, gross less Section 125 and HSA (a 401(k) still counts), the
+same way the openings do, and the 941, 940 and state SUI report measure the
+same way. The W-2 follows each tax's treatment too: box 1 and 16 drop the
+pre-tax amounts that reduce income tax, boxes 3 and 5 those that reduce
+FICA (they were gross).
+
+**A W-2 line per state.** Boxes 15 to 17 were one total under the
+employee's work state. They are now one line per state the employee had
+wages or state withholding in (stubs by the state worked in, the opening's
+state rows by theirs), two to a form; a third state prints on an additional
+W-2 that carries only the state lines, as the IRS instructions say. The
+W-3's boxes 16 and 17 still total every line. Form history keeps every
+earlier record: a one-state W-2 has the shape (and hash) it always had, and
+Check re-figures a form generated before this release the way it was
+figured then, so it still matches when the pay runs behind it have not
+changed, and says when today's figures differ.
+
+It is not a pay run and not a journal entry: the old system booked that
+payroll and the opening balance sheet carries what it still owed, so benefit
+remittances, the pay-run list, direct-deposit files and the payroll journal
+never see it. A reader for QuickBooks Desktop's Payroll Summary report waits
+for a real export to build against.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

@@ -16,6 +16,7 @@ from app.services.tax_forms.form_940 import compute_940, generate_940_pdf
 from app.services.tax_forms.form_941 import compute_941, generate_941_pdf
 from app.services.tax_forms.w2_w3 import (
     compute_w2,
+    w2_state_lines,
     compute_w3,
     generate_w2_pdf,
     generate_w3_pdf,
@@ -62,6 +63,15 @@ def generate_w2_form(
         "employer_name": company["name"],
         "tax_year": str(year),
     }
+    # boxes 15-17 one line per state (box_16/box_17 above are the totals)
+    w2_data["states"] = [
+        {
+            "box_15": line["state"],
+            "box_16": str(line["box16_state_wages"]),
+            "box_17": str(line["box17_state_income_tax"]),
+        }
+        for line in w2_state_lines(db, year, emp_id)
+    ]
 
     return JSONResponse(content=w2_data, status_code=200)
 

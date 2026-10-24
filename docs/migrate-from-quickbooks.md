@@ -209,10 +209,33 @@ or amount cannot be read. A row already in the books posts nothing twice.
 Payees not on the Vendors (money out) or Customers (money in) list are added
 and named in the result. CSV or Excel.
 
+### Payroll year to date
+
+Each employee's year-to-date payroll comes across as an **opening balance**
+(#433): what the old payroll paid this year, quarter by quarter, through the
+day before the first SlowBooks pay run. Enter it the way QuickBooks takes a
+YTD adjustment: for each quarter, gross, federal withholding, the Social
+Security, Medicare and FUTA wages and tax, deductions and net, and for each
+state the wages, withholding, SUTA wages and SUTA tax. The 941s and state
+returns the old system filed, and its payroll reports run for each quarter,
+have these figures. Each quarter's 941 then carries only that quarter, and the Social
+Security, FUTA and SUTA wage bases start from the taxable wages. Enter it on
+the employee's page (Opening YTD), or for everyone at once from Payroll →
+**Import opening balances** with the template linked there (one row per
+employee per quarter). No journal entry is made; the opening balance sheet
+carries what was still owed. Once a pay run in the year is processed, a
+change is a correction with a reason.
+
+SlowBooks does not read the Payroll Summary report itself yet: every
+importer here was built around a real export, and that one is waiting for
+one. If you can share a Payroll Summary export (change the names), open an
+issue with it.
+
 ### What does not come across yet
 
-Payroll history (pay stubs and liabilities), estimates and purchase orders
-as documents, inventory on hand, memorized transactions and attachments.
+Individual pay stubs and payroll liabilities as documents (year-to-date
+totals do, above), estimates and purchase orders as documents, inventory on
+hand, memorized transactions and attachments.
 Each importer here was built around a real export someone sent; if one of
 these is in your way, open an issue with a sample export (change the names)
 and it gets built in.

@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, model_validator
 from app.schemas.common import StrictModel
@@ -221,6 +222,8 @@ class PayRunResponse(BaseModel):
     total_employer_taxes: float = 0
     total_employer_benefits: float = 0
     burden_job_cost_id: Optional[int] = None
+    # A draft figured before an employee's opening YTD changed (#433).
+    stale_reason: Optional[str] = None
     stubs: list[PayStubResponse] = []
     # Set on create only: time left unapproved in the period, not paid.
     warnings: list[str] = []
@@ -241,6 +244,65 @@ class YTDResponse(BaseModel):
     medicare: float = 0
     pretax_deductions: float = 0
     net: float = 0
+
+
+# ---------------------------------------------------------------------------
+# Opening YTD balances (#433) — what was paid before the first SlowBooks run
+# ---------------------------------------------------------------------------
+class OpeningStateInput(StrictModel):
+    """One state's figures for one quarter. SUTA is a state's own: its
+    wage base fills from its own wages."""
+
+    state: str
+    wages: Decimal = Decimal("0")
+    withholding: Decimal = Decimal("0")
+    suta_wages: Decimal = Decimal("0")
+    suta_tax: Decimal = Decimal("0")
+    other_employee: Decimal = Decimal("0")
+    other_employer: Decimal = Decimal("0")
+
+
+class OpeningBenefitInput(StrictModel):
+    benefit_code_id: int
+    employee_amount: Decimal = Decimal("0")
+    employer_amount: Decimal = Decimal("0")
+
+
+class OpeningQuarterInput(StrictModel):
+    """What the old system paid in one calendar quarter (1-4), as its
+    payroll reports show it: the 941 for the quarter carries these."""
+
+    quarter: int
+    gross: Decimal = Decimal("0")
+    federal_tax: Decimal = Decimal("0")
+    ss_wages: Decimal = Decimal("0")
+    ss_tax: Decimal = Decimal("0")
+    employer_ss_tax: Decimal = Decimal("0")
+    medicare_wages: Decimal = Decimal("0")
+    medicare_tax: Decimal = Decimal("0")
+    employer_medicare_tax: Decimal = Decimal("0")
+    futa_wages: Decimal = Decimal("0")
+    futa_tax: Decimal = Decimal("0")
+    pretax_deductions: Decimal = Decimal("0")
+    posttax_deductions: Decimal = Decimal("0")
+    garnishments: Decimal = Decimal("0")
+    net: Decimal = Decimal("0")
+    states: list[OpeningStateInput] = []
+
+
+class PayrollOpeningInput(StrictModel):
+    """An employee's opening balance for a year: the old system's figures
+    quarter by quarter through `as_of`, the day before the first SlowBooks
+    pay run. Benefit amounts are for the year. Once a run in the year is
+    processed for the employee a change needs `reason` (it is a
+    correction, and the audit trail keeps it)."""
+
+    year: int
+    as_of: date
+    note: Optional[str] = None
+    quarters: list[OpeningQuarterInput] = []
+    benefits: list[OpeningBenefitInput] = []
+    reason: Optional[str] = None
 
 
 class BankAccountCreate(StrictModel):
