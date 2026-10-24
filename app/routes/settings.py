@@ -48,6 +48,23 @@ _redact_secrets = redact_secrets
 # this is the server-side twin so an API token cannot store "banana".
 ENUM_SETTINGS = {
     "company_type": frozenset({"business", "nonprofit"}),
+    # Legal entity type (#488) — "" is unset and allowed (an existing company
+    # that has not chosen yet). llc_tax_election is only meaningful for an LLC.
+    "entity_type": frozenset(
+        {
+            "",
+            "sole_proprietor",
+            "general_partnership",
+            "limited_partnership",
+            "llp",
+            "llc",
+            "c_corp",
+            "s_corp",
+        }
+    ),
+    "llc_tax_election": frozenset(
+        {"", "disregarded", "partnership", "s_corp", "c_corp"}
+    ),
     "ocr_engine": frozenset({"auto", "tesseract"}),
     "ask_password_on_start": frozenset({"true", "false"}),
     "invoice_show_logo": frozenset({"true", "false"}),

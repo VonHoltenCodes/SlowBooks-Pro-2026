@@ -171,6 +171,11 @@ SETTINGS_TAKEN = {
         "/api/settings",
         {"company_type": "nonprofit"},
     ),
+    "Company Information › entity_type": (
+        "PUT",
+        "/api/settings",
+        {"entity_type": "s_corp"},
+    ),
     "Closing Date › Clear": ("PUT", "/api/settings", {"closing_date": ""}),
     "Email (SMTP) › Send Test Email": ("POST", "/api/settings/test-email", None),
     "Receipt Scanning › #ocr-engine-pref": (

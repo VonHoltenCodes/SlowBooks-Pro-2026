@@ -337,3 +337,94 @@ def is_nonprofit(db: Session) -> bool:
     """True when the company file is set to nonprofit mode (Settings ->
     company_type). Gates the nonprofit documents, reports and vocabulary."""
     return get_setting_raw(db, "company_type") == "nonprofit"
+
+
+# Legal entity type (#488) — the one table that maps an entity type (and, for
+# an LLC, its tax election) to a human label and the federal return it files.
+# The Schedule C gate (routes/tax.py) and the settings/tax UI read entity_info
+# rather than matching strings; nothing else computes this.
+# Labels carry their own article ("an LLC", "an S corporation") because the
+# right one depends on how the acronym is read, not its first letter — the
+# letter-based _article in control_accounts.py would get "a LLC"/"a S corp"
+# wrong — so the sentence that uses a label adds no article of its own.
+_ENTITY_LABELS = {
+    "sole_proprietor": "a sole proprietor",
+    "general_partnership": "a general partnership",
+    "limited_partnership": "a limited partnership",
+    "llp": "a limited liability partnership",
+    "llc": "an LLC",
+    "c_corp": "a C corporation",
+    "s_corp": "an S corporation",
+}
+
+# entity_type -> (return_form, schedule_c); the non-LLC entities.
+_ENTITY_RETURNS = {
+    "sole_proprietor": ("Schedule C", True),
+    "general_partnership": ("Form 1065", False),
+    "limited_partnership": ("Form 1065", False),
+    "llp": ("Form 1065", False),
+    "c_corp": ("Form 1120", False),
+    "s_corp": ("Form 1120-S", False),
+}
+
+# llc_tax_election -> (label, return_form, schedule_c).
+_LLC_ELECTIONS = {
+    "disregarded": ("an LLC taxed as a sole proprietor", "Schedule C", True),
+    "partnership": ("an LLC taxed as a partnership", "Form 1065", False),
+    "s_corp": ("an LLC taxed as an S corporation", "Form 1120-S", False),
+    "c_corp": ("an LLC taxed as a C corporation", "Form 1120", False),
+}
+
+
+def entity_info(settings) -> dict:
+    """The company's legal entity type as one record: the stored value, the
+    LLC tax election, a human `label`, the `return_form` it files, and whether
+    Schedule C is its form (`schedule_c`).
+
+    `return_form` is "Schedule C" for a sole proprietor and a disregarded
+    single-member LLC; "Form 1065" for the partnerships and an LLC taxed as
+    one; "Form 1120-S" for an S corp (or LLC-as-S-corp); "Form 1120" for a C
+    corp (or LLC-as-C-corp); and "" when the entity type is unset, or an LLC
+    whose election has not been chosen yet. An empty `return_form` is the
+    signal to leave Schedule C exactly as before (#488)."""
+    settings = settings or {}
+    entity_type = (settings.get("entity_type") or "").strip()
+    election = (settings.get("llc_tax_election") or "").strip()
+    unset = {
+        "entity_type": "",
+        "election": "",
+        "label": "",
+        "return_form": "",
+        "schedule_c": False,
+    }
+    if entity_type == "":
+        return unset
+    if entity_type == "llc":
+        if election in _LLC_ELECTIONS:
+            label, return_form, schedule_c = _LLC_ELECTIONS[election]
+            return {
+                "entity_type": "llc",
+                "election": election,
+                "label": label,
+                "return_form": return_form,
+                "schedule_c": schedule_c,
+            }
+        # LLC with no election chosen yet: we cannot say which return applies,
+        # so Schedule C stays as it was (return_form left empty, no gate).
+        return {
+            "entity_type": "llc",
+            "election": "",
+            "label": "an LLC",
+            "return_form": "",
+            "schedule_c": False,
+        }
+    if entity_type not in _ENTITY_RETURNS:
+        return unset
+    return_form, schedule_c = _ENTITY_RETURNS[entity_type]
+    return {
+        "entity_type": entity_type,
+        "election": "",
+        "label": _ENTITY_LABELS[entity_type],
+        "return_form": return_form,
+        "schedule_c": schedule_c,
+    }

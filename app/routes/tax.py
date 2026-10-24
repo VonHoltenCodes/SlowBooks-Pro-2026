@@ -5,16 +5,37 @@
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.tax import TaxCategoryMapping
 from app.models.accounts import Account
 from app.schemas.tax import TaxMappingCreate, TaxMappingResponse
+from app.services.settings_service import entity_info, get_all_settings
 from app.services.tax_export import get_schedule_c_data, export_schedule_c_csv
 
 router = APIRouter(prefix="/api/tax", tags=["tax"])
+
+
+def _require_schedule_c(db: Session) -> None:
+    """Schedule C is a sole-proprietor form (#488). A company with a legal
+    entity type that files something else is refused with 409 and the one
+    sentence the page shows, so a partnership or corporation never exports a
+    form it does not file. An unset entity type is left exactly as before."""
+    info = entity_info(get_all_settings(db))
+    if info["entity_type"] and not info["schedule_c"] and info["return_form"]:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "not_schedule_c",
+                "message": (
+                    f"This company is {info['label']}; it files "
+                    f"{info['return_form']}, not Schedule C. Change the entity "
+                    "type under Settings → Company if that is wrong."
+                ),
+            },
+        )
 
 
 @router.get("/schedule-c")
@@ -23,6 +44,7 @@ def schedule_c_report(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    _require_schedule_c(db)
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:
@@ -36,6 +58,7 @@ def schedule_c_csv(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
+    _require_schedule_c(db)
     if not start_date:
         start_date = date(date.today().year, 1, 1)
     if not end_date:

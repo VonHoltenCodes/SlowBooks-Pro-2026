@@ -138,6 +138,19 @@ const SettingsPage = {
                             </select>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Nonprofit shows donors, pledges, donations and funds in place of customers, invoices, sales receipts and classes, and adds the net-asset accounts and statements. Your data does not change; switch back any time.</div>
                         </div>
+                        <div class="form-group"><label for="entity-type">Entity type</label>
+                            <select id="entity-type" name="entity_type" onchange="SettingsPage._onEntityTypeChange(this)">
+                                ${SettingsPage._entityOptions(s.entity_type)}
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Your company's legal form. It decides which tax return applies (and, later, the equity accounts). It never changes your books.</div>
+                        </div>
+                        <div class="form-group" id="llc-election-group" ${s.entity_type === 'llc' ? '' : 'hidden'}>
+                            <label for="llc-tax-election">Taxed as</label>
+                            <select id="llc-tax-election" name="llc_tax_election">
+                                ${SettingsPage._llcElectionOptions(s.llc_tax_election)}
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">How this LLC is taxed. A single-member LLC taxed as a sole proprietor files Schedule C; the others file a partnership or corporate return.</div>
+                        </div>
                     </div>
                 </div>
 
@@ -1384,6 +1397,49 @@ const SettingsPage = {
             await API.post('/settings/test-email');
             toast('Test email sent');
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Legal entity type (#488) — a plain form field saved with Save Settings,
+    // not its own switch like company type. The <select> for it and the LLC
+    // "Taxed as" picker, the "Not set" default first.
+    _ENTITY_TYPES: [
+        ['sole_proprietor', 'Sole proprietor'],
+        ['general_partnership', 'General partnership'],
+        ['limited_partnership', 'Limited partnership'],
+        ['llp', 'Limited liability partnership'],
+        ['llc', 'LLC'],
+        ['c_corp', 'C corporation'],
+        ['s_corp', 'S corporation'],
+    ],
+
+    _LLC_ELECTIONS: [
+        ['disregarded', 'A sole proprietor (single-member)'],
+        ['partnership', 'A partnership'],
+        ['s_corp', 'An S corporation'],
+        ['c_corp', 'A C corporation'],
+    ],
+
+    _entityOptions(current) {
+        const opts = [`<option value="" ${!current ? 'selected' : ''}>Not set</option>`];
+        for (const [value, label] of SettingsPage._ENTITY_TYPES) {
+            opts.push(`<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`);
+        }
+        return opts.join('');
+    },
+
+    _llcElectionOptions(current) {
+        const opts = [`<option value="" ${!current ? 'selected' : ''}>Not set</option>`];
+        for (const [value, label] of SettingsPage._LLC_ELECTIONS) {
+            opts.push(`<option value="${value}" ${current === value ? 'selected' : ''}>${label}</option>`);
+        }
+        return opts.join('');
+    },
+
+    // The "Taxed as" picker only applies to an LLC: show it only then.
+    _onEntityTypeChange(sel) {
+        const group = document.getElementById('llc-election-group');
+        if (group) group.hidden = sel.value !== 'llc';
+        SettingsPage._updateDirty();
     },
 
     // Company type saves on its own and reloads: the vocabulary and the

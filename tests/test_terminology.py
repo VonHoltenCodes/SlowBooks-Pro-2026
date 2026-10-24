@@ -150,6 +150,28 @@ def test_company_type_round_trips_and_rejects_unknown_values(client):
     assert r.json()["company_type"] == "business"
 
 
+def test_entity_type_round_trips_and_rejects_unknown_values(client):
+    # unset by default so existing companies see no change (#488)
+    assert client.get("/api/settings").json()["entity_type"] == ""
+    r = client.put("/api/settings", json={"entity_type": "s_corp"})
+    assert r.status_code == 200, r.text
+    assert r.json()["entity_type"] == "s_corp"
+    # the empty string is a valid value: it clears the setting
+    assert client.put("/api/settings", json={"entity_type": ""}).status_code == 200
+    r = client.put("/api/settings", json={"entity_type": "sole_prop"})
+    assert r.status_code == 422
+
+
+def test_llc_tax_election_round_trips_and_rejects_unknown_values(client):
+    assert client.get("/api/settings").json()["llc_tax_election"] == ""
+    r = client.put("/api/settings", json={"llc_tax_election": "disregarded"})
+    assert r.status_code == 200, r.text
+    assert r.json()["llc_tax_election"] == "disregarded"
+    assert client.put("/api/settings", json={"llc_tax_election": ""}).status_code == 200
+    r = client.put("/api/settings", json={"llc_tax_election": "banana"})
+    assert r.status_code == 422
+
+
 def test_terms_from_db_follow_the_setting(client, db_session):
     assert not terminology.terms_from_db(db_session).is_nonprofit
     client.put("/api/settings", json={"company_type": "nonprofit"})

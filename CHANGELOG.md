@@ -5,6 +5,22 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**A legal entity type on the company** (#488). Settings → Company now asks for
+the company's legal form — sole proprietor, general partnership, limited
+partnership, limited liability partnership, LLC (with its tax election), C
+corporation or S corporation — kept separate from company type (business /
+nonprofit), which stays a vocabulary mode. It is unset by default, so an
+existing company sees no change until it chooses. The entity type decides
+which federal return the company files, and Schedule C is now offered only to
+the ones that file it: a sole proprietor and a single-member LLC taxed as one.
+A company set to anything else sees one sentence on the Tax Reports page
+saying which return applies (Form 1065 for the partnerships and an LLC taxed
+as one, Form 1120-S for an S corp, Form 1120 for a C corp), and the Schedule C
+API answers 409 with the same sentence. An unset entity type leaves Schedule C
+exactly as before. The books never change; this is a tax-form matter only.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every
