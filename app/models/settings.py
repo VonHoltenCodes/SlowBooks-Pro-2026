@@ -76,6 +76,17 @@ DEFAULT_SETTINGS = {
     "invoice_show_logo": "true",
     # Report PDF paper size: letter | a4
     "pdf_paper_size": "letter",
+    # Pre-printed check stock (#440, from discussion #354). "plain" prints
+    # the full voucher — labels, lines, borders and the two stubs — as it
+    # always has. "preprinted" prints only the values (payee, amount, amount
+    # in words, date, memo) onto stock that already carries "PAY TO THE ORDER
+    # OF", the MEMO and signature lines and the borders; the stubs are
+    # unchanged. The nudge shifts the check portion only (not the stubs) to
+    # line the values up with the pre-printed boxes, in inches from -0.5 to
+    # +0.5. Stored as a decimal string.
+    "check_stock": "plain",
+    "check_nudge_x_in": "0",
+    "check_nudge_y_in": "0",
     # Opening-balance wizard readiness metadata
     "chart_setup_source": "",
     "chart_setup_ready_at": "",

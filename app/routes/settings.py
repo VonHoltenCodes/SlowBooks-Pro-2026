@@ -52,6 +52,7 @@ ENUM_SETTINGS = {
     "ask_password_on_start": frozenset({"true", "false"}),
     "invoice_show_logo": frozenset({"true", "false"}),
     "class_warn_blank": frozenset({"true", "false"}),
+    "check_stock": frozenset({"plain", "preprinted"}),
 }
 
 

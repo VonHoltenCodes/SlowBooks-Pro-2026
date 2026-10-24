@@ -2,6 +2,7 @@
 # Check Printing — Generate check PDFs (standard 3-per-page format)
 # ============================================================================
 
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -101,6 +102,28 @@ def register_check_data(db: Session, txn_id: int) -> dict:
         "memo": "" if memo == payee else memo,
         "details": details,
     }
+
+
+@router.get("/test-print")
+def test_print_check(db: Session = Depends(get_db)):
+    """A sample check with placeholder values (#440), printed through the
+    same renderer and the same check-stock settings as a real check, so the
+    alignment nudge can be set by holding the sheet against the stock."""
+    check_data = {
+        "payee": "Sample Payee",
+        "date": date.today(),
+        "amount": Decimal("1234.56"),
+        "check_number": "0000",
+        "memo": "Alignment test",
+        "details": [{"description": "Alignment test", "amount": Decimal("1234.56")}],
+    }
+    company = get_settings(db)
+    pdf_bytes = generate_check_pdf(check_data, company)
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": content_disposition("Check_test_print.pdf")},
+    )
 
 
 @router.get("/print")

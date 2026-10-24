@@ -89,6 +89,56 @@ def test_the_other_numeric_settings_are_checked_the_same_way(
     assert sentence in r.json()["detail"]
 
 
+@pytest.mark.parametrize("value", ["plain", "preprinted"])
+def test_check_stock_accepts_the_two_choices(client, value):
+    r = client.put("/api/settings", json={"check_stock": value})
+    assert r.status_code == 200, r.text
+    assert _settings(client)["check_stock"] == value
+
+
+def test_check_stock_refuses_anything_else(client):
+    r = client.put("/api/settings", json={"check_stock": "glossy"})
+    assert r.status_code == 422, r.text
+    assert "check_stock must be one of: plain, preprinted" in r.json()["detail"]
+    assert _settings(client)["check_stock"] == "plain"
+
+
+@pytest.mark.parametrize("key", ["check_nudge_x_in", "check_nudge_y_in"])
+@pytest.mark.parametrize(
+    "typed, stored",
+    [
+        ("0.1", "0.1"),
+        ("-0.5", "-0.5"),
+        ("0.5", "0.5"),
+        ("0", "0"),
+        ("", "0"),
+        ("0.25", "0.25"),
+        ("-0.03", "-0.03"),
+    ],
+)
+def test_a_check_nudge_within_half_an_inch_saves(client, key, typed, stored):
+    r = client.put("/api/settings", json={key: typed})
+    assert r.status_code == 200, r.text
+    assert _settings(client)[key] == stored
+
+
+@pytest.mark.parametrize("key", ["check_nudge_x_in", "check_nudge_y_in"])
+@pytest.mark.parametrize("bad", ["0.6", "-0.51", "1", "abc", "NaN", "Infinity"])
+def test_a_check_nudge_outside_half_an_inch_is_refused(client, key, bad):
+    before = _settings(client)[key]
+    r = client.put("/api/settings", json={key: bad})
+    assert r.status_code == 422, r.text
+    assert "must be a number of inches from -0.5 to 0.5" in r.json()["detail"]
+    assert _settings(client)[key] == before
+
+
+@pytest.mark.parametrize("key", ["check_nudge_x_in", "check_nudge_y_in"])
+def test_a_check_nudge_finer_than_a_hundredth_is_refused(client, key):
+    r = client.put("/api/settings", json={key: "0.005"})
+    assert r.status_code == 422, r.text
+    assert "up to two decimal places" in r.json()["detail"]
+
+
 def test_a_closing_date_that_is_not_a_date_does_not_switch_the_lock_off(client):
     """An unparseable closing date used to be stored as typed and then read
     as "no closing date"."""
@@ -183,3 +233,6 @@ def test_the_settings_inputs_carry_the_same_limits():
     assert 'min="1" max="65535"' in tag("smtp_port")
     assert 'min="0" max="100"' in tag("late_fee_rate")
     assert 'min="0" step="1"' in tag("late_fee_grace_days")
+    for key in ("check_nudge_x_in", "check_nudge_y_in"):
+        n = tag(key)
+        assert 'min="-0.5"' in n and 'max="0.5"' in n and 'step="0.01"' in n

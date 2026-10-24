@@ -423,14 +423,43 @@ def generate_giving_statement_pdf(
     )
 
 
-def generate_check_pdf(check_data: dict, company_settings: dict) -> bytes:
-    """Checks print on pre-printed stock that already carries the bank's
-    and the company's marks, so this is the one document that deliberately
-    bypasses _render() and gets no logo."""
+def check_print_options(company_settings: dict) -> dict:
+    """The one reading of the check-printing settings (#440), shared by every
+    check print path so none of them drift. `stock` is "plain" (the full
+    voucher) or "preprinted" (values only, onto stock that carries the labels
+    and lines); `nudge_x`/`nudge_y` are the inch shifts of the check portion,
+    as floats so a zero nudge is falsy in the template (and emits no
+    transform, keeping plain stock byte-for-byte unchanged)."""
+
+    def _inches(key):
+        try:
+            return float(company_settings.get(key) or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    stock = company_settings.get("check_stock") or "plain"
+    return {
+        "stock": "preprinted" if stock == "preprinted" else "plain",
+        "nudge_x": _inches("check_nudge_x_in"),
+        "nudge_y": _inches("check_nudge_y_in"),
+    }
+
+
+def render_check_html(check_data: dict, company_settings: dict, options=None) -> str:
+    """The check face as HTML. Checks print on stock that already carries the
+    bank's and the company's marks, so this is the one document that
+    deliberately bypasses _render() and gets no logo. The stock choice and
+    alignment nudge come from check_print_options(); pass ``options={}`` to
+    render with none of that context (the pre-#440 face, for a byte-for-byte
+    comparison)."""
     template = _jinja_env.get_template("check_pdf.html")
     check_data["amount_words"] = _amount_to_words(check_data.get("amount", 0))
-    html_str = template.render(check=check_data, company=company_settings)
-    return render_pdf(html_str)
+    opts = check_print_options(company_settings) if options is None else options
+    return template.render(check=check_data, company=company_settings, **opts)
+
+
+def generate_check_pdf(check_data: dict, company_settings: dict) -> bytes:
+    return render_pdf(render_check_html(check_data, company_settings))
 
 
 def generate_report_pdf(

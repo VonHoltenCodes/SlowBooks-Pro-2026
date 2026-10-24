@@ -212,6 +212,15 @@ _KEEP_TYPED_DIGITS = {"invoice_next_number", "estimate_next_number"}
 # read as "no closing date" — the lock silently off.
 _DATE_SETTINGS = {"closing_date": "Closing date"}
 
+# A check-alignment nudge in inches (#440): a small shift of the check
+# portion so the values land on pre-printed stock. Kept to a half inch each
+# way, two decimal places (0.01in steps), stored as a decimal string.
+_INCH_NUDGE_SETTINGS = {
+    "check_nudge_x_in": "Horizontal nudge",
+    "check_nudge_y_in": "Vertical nudge",
+}
+_NUDGE_LIMIT = Decimal("0.5")
+
 _DIGITS = re.compile(r"[0-9]+")
 # The two identifiers a bank prints on its ACH origination sheet: what the
 # bank assigned, letters or digits, in 10-character fields (nacha_export).
@@ -320,6 +329,23 @@ def clean_setting_value(key: str, value) -> str:
                     "characters wraps and counts as two."
                 )
         return text
+    if key in _INCH_NUDGE_SETTINGS:
+        label = _INCH_NUDGE_SETTINGS[key]
+        if text == "":
+            return "0"
+        try:
+            number = Decimal(text)
+        except InvalidOperation:
+            number = None
+        if number is None or not number.is_finite() or abs(number) > _NUDGE_LIMIT:
+            raise SettingValueError(
+                f"{label} must be a number of inches from -0.5 to 0.5."
+            )
+        if number != number.quantize(Decimal("0.01")):
+            raise SettingValueError(
+                f"{label} can have up to two decimal places (0.01in steps)."
+            )
+        return "0" if number == 0 else format(number.normalize(), "f")
     if key in _DATE_SETTINGS:
         if text == "":
             return ""

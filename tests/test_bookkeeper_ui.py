@@ -110,6 +110,11 @@ SETTINGS_KEPT = {
     "Cost Codes › Deactivate": [
         ("PUT", "/api/cost-codes/{cost_code}", {"is_active": False}, 200)
     ],
+    # a bookkeeper prints checks, so the test print is theirs too (#440): a
+    # sample check PDF, like any other GET-a-PDF control
+    "Check Printing › Print a test check": [
+        ("GET", "/api/checks/test-print", None, 200)
+    ],
     "Equipment › Add Equipment": [
         ("POST", "/api/equipment", {"name": "Mini excavator", "hourly_rate": 95}, 201)
     ],

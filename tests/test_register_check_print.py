@@ -65,6 +65,26 @@ def test_a_register_check_prints_with_payee_number_and_category(client, seed_acc
     assert _register_row(client, seed_accounts["1000"], e["id"])["printable"] is True
 
 
+def test_a_register_check_prints_values_only_on_preprinted_stock(
+    client, db_session, seed_accounts
+):
+    # The register/expense path reads the check-stock setting through the
+    # same helper every path does (#440): on pre-printed stock the labels
+    # and the signature rule are gone and the values remain. Rendered to
+    # HTML so it runs without WeasyPrint's native stack.
+    from app.routes.checks import register_check_data
+    from app.services.pdf_service import render_check_html
+
+    e = _entry(client, seed_accounts)
+    data = register_check_data(db_session, e["id"])
+    company = {"company_name": "Acme", "check_stock": "preprinted"}
+    html = render_check_html(data, company)
+    assert "PAY TO THE ORDER OF" not in html
+    assert '<div class="signature-line"></div>' not in html
+    assert "Main Street Properties" in html
+    assert "October rent" in html
+
+
 def test_a_split_check_lists_each_line_on_the_stub(client, seed_accounts):
     e = _entry(
         client,

@@ -130,6 +130,28 @@ split line on the stub. The register marks the rows that print
 (`printable`): money out of a bank account, not a card, not void. A bill
 payment's check prints from its bill.
 
+### Pre-printed check stock
+
+Settings → Check Printing chooses how every check prints, for the whole
+company. **Plain / voucher stock** (the default) prints the full face —
+"Pay to the order of", the memo and signature lines, the amount box and
+borders — and the two stubs, onto blank paper or voucher stock. **Pre-printed
+stock: values only** is for stock that already carries those labels, lines
+and the signature rule: SlowBooks then prints only the values — payee,
+amount, amount in words, date and memo — in their places, with nothing of its
+own on top. The stubs are the same either way.
+
+Because no two batches of stock line up exactly, a **horizontal** and a
+**vertical nudge** (in inches, −0.5 to +0.5 in 0.01 steps) shift the check
+portion only — not the stubs — to line the values up with the pre-printed
+boxes. A positive nudge moves the values right and down. **Print a test
+check** opens a sample check (Sample Payee, $1,234.56, today, "Alignment
+test") in a new tab; print it on plain paper and hold it against your stock
+to see how far to nudge. Save the setting, then print the test check again
+to check the change. This applies to every check print path — a bill
+payment, Pay Bills, a register check and an expense paid from a bank
+account.
+
 ## Transfers
 
 **Transfer** on the Banking page or a register: date, amount, from, to.

@@ -556,6 +556,31 @@ const SettingsPage = {
                     <div id="equipment-list"></div>
                 </div>
 
+                <div class="settings-section" role="group" aria-labelledby="settings-h-check-printing">
+                    <h3 id="settings-h-check-printing">Check Printing</h3>
+                    <div class="form-grid">
+                        <div class="form-group full-width"><label>Check Stock</label>
+                            <select name="check_stock">
+                                <option value="plain" ${s.check_stock !== 'preprinted' ? 'selected' : ''}>Plain / voucher stock</option>
+                                <option value="preprinted" ${s.check_stock === 'preprinted' ? 'selected' : ''}>Pre-printed stock: values only</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Pre-printed stock already carries the "Pay to the order of", memo and signature lines. Choose it to print only the values — payee, amount, amount in words, date and memo — in their places, with no labels, lines or borders. The two stubs are unchanged either way.</div>
+                        </div>
+                        <div class="form-group"><label>Horizontal nudge (in)</label>
+                            <input name="check_nudge_x_in" type="number" min="-0.5" max="0.5" step="0.01"
+                                title="Inches, -0.5 to 0.5, in 0.01 steps"
+                                value="${escapeHtml(s.check_nudge_x_in || '0')}"></div>
+                        <div class="form-group"><label>Vertical nudge (in)</label>
+                            <input name="check_nudge_y_in" type="number" min="-0.5" max="0.5" step="0.01"
+                                title="Inches, -0.5 to 0.5, in 0.01 steps"
+                                value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
+                        <div class="form-group full-width">
+                            <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. Save the setting before printing to see your change.</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="settings-section" id="settings-backups" role="group" aria-labelledby="settings-h-backup-restore">
                     <h3 id="settings-h-backup-restore">Backup / Restore</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -1930,6 +1955,13 @@ const SettingsPage = {
     previewGivingStatement() {
         const year = new Date().getFullYear() - 1;
         window.open(`/api/donors/giving-statement/preview?year=${year}`, '_blank');
+    },
+
+    // Opens a sample check PDF in a new tab, using the saved check-stock
+    // setting and nudge (#440) — so the operator sees the effect of the
+    // values they just saved.
+    testPrintCheck() {
+        window.open('/api/checks/test-print', '_blank');
     },
 
     // ----- AI Insights config (provider/model/key/etc.) ------------------

@@ -175,7 +175,12 @@ jobs:
           # (CI 40031366864): each PR raised it from 126 on its own base.
           # 146 for 2.28.0, the count on the integrated tree's own Windows run:
           # the account detail types add Postgres-only migration tests.
-          MAX_SKIPS: "146"
+          # 148 with the pre-printed check stock (#440): two tests reach
+          # GET /api/checks/test-print, which renders a PDF and so skips here
+          # with the other PDF tests (no WeasyPrint stack on the runner) — the
+          # API sweep, and the bookkeeper "server answers" sweep (the test
+          # print is a control a bookkeeper is offered).
+          MAX_SKIPS: "148"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
