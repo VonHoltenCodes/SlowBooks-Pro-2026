@@ -101,7 +101,8 @@ def test_pnl_ytd_totals_and_cumulative(client, db_session, seed_accounts):
     assert d["income"] == 1000.00
     assert d["expenses"] == 400.00
     assert d["net"] == 600.00
-    assert d["year"] == date.today().year
+    # "year" is the fiscal-year label (#444); a January start is the calendar year
+    assert d["year"] == str(date.today().year)
     # One slot per month of the year so far, ending with the current month.
     assert len(d["months"]) == date.today().month
     assert d["months"][-1]["cumulative"] == 600.00

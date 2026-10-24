@@ -22,6 +22,18 @@ const SettingsPage = {
         return Number.isFinite(n) ? String(+n.toFixed(4)) : '0.0';
     },
 
+    // The fiscal-year start-month options, value "1".."12" (#444). Built with
+    // string concatenation, not a template literal, so this helper adds no
+    // backtick-returning statement ahead of the page's render function (the
+    // unsaved-changes guard test slices the file at the first one).
+    _monthOptions(selected) {
+        const names = ['January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'];
+        const opt = (name, i) => '<option value="' + (i + 1) + '"' +
+            (String(i + 1) === String(selected) ? ' selected' : '') + '>' + name + '</option>';
+        return names.map(opt).join('');
+    },
+
     // Where each encrypted setting is entered again, for the notice below.
     _SECRET_PLACES: {
         smtp_password: 'the email password, under Email (SMTP)',
@@ -31,6 +43,8 @@ const SettingsPage = {
         square_access_token: 'the Square access token, under Online Payments',
         square_webhook_signature_key: 'the Square webhook signature key, under Online Payments',
         simplefin_access_url: 'the SimpleFIN bank feed: connect again on Banking',
+        mercury_api_token: 'the Mercury bank feed: connect again on Banking',
+        mercury_webhook_secret: 'the Mercury webhook signing secret, on Banking',
         closing_date_password: 'the closing-date password, under Closing Date',
         ai_api_key: 'the AI Insights API key, under AI Insights',
     },
@@ -137,6 +151,12 @@ const SettingsPage = {
                                 <option value="nonprofit" ${s.company_type === 'nonprofit' ? 'selected' : ''}>Nonprofit</option>
                             </select>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Nonprofit shows donors, pledges, donations and funds in place of customers, invoices, sales receipts and classes, and adds the net-asset accounts and statements. Your data does not change; switch back any time.</div>
+                        </div>
+                        <div class="form-group full-width"><label for="fiscal-year-start-month">First month of fiscal year</label>
+                            <select id="fiscal-year-start-month" name="fiscal_year_start_month">
+                                ${SettingsPage._monthOptions(s.fiscal_year_start_month || '1')}
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Reports' This/Last Fiscal Year presets, the dashboard's profit and nonprofit mode's year to date follow it. Payroll forms stay on the calendar year.</div>
                         </div>
                     </div>
                 </div>
@@ -468,8 +488,9 @@ const SettingsPage = {
                 <div class="settings-section" role="group" aria-labelledby="settings-h-menu">
                     <h3 id="settings-h-menu">Sidebar</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        Hide the menu items this company doesn't use (payroll done elsewhere, no inventory, …).
-                        A hidden page still opens by its address, and this page keeps the list.
+                        A ticked item shows in the menu; untick the ones this company doesn't use (payroll done
+                        elsewhere, no inventory, …) to hide them. A hidden page still opens by its address, and
+                        this list always has every item, so a hidden one can be ticked to show it again.
                     </div>
                     <div id="hidden-menu-choices" style="columns:2; font-size:12px; margin-bottom:12px;">
                         ${SettingsPage._hiddenMenuChoices(s.hidden_menu)}
@@ -613,8 +634,13 @@ const SettingsPage = {
                         service, scripts. A token wears a role just like a user —
                         give read-only to anything that only reports, and every
                         change it makes is attributed in the audit log as
-                        <code>token:&lt;label&gt;</code>. Tokens can never manage
-                        users or other tokens, whatever their role.
+                        <code>token:&lt;label&gt;</code>. A token is never an
+                        administrator: it cannot manage users or other tokens,
+                        change settings or restore a backup. Tick
+                        <em>Can make backups</em> for a program that takes a backup
+                        before it writes (an import tool); the token may then make,
+                        list and download this company's backups. A revoked token
+                        stays revoked: make a new one instead.
                     </p>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
@@ -632,8 +658,10 @@ const SettingsPage = {
                                 <option value="readonly">Read-only — reports and lookups</option>
                                 <option value="accountant">Accountant — reads everything, posts journal entries</option>
                                 <option value="bookkeeper">Bookkeeper — daily books, no admin</option>
-                                <option value="admin">Admin — everything except identity management</option>
                             </select></div>
+                        <div class="form-group"><label style="font-weight:normal;">
+                            <input type="checkbox" id="token-new-backups" name="token_new_allow_backups" style="width:auto; vertical-align:middle; margin-right:6px;">
+                            Can make backups (make, list and download; never restore)</label></div>
                     </div>
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
                 </div>
@@ -1048,14 +1076,17 @@ const SettingsPage = {
                 <td>${escapeHtml(t.label)}</td>
                 <td style="font-family:var(--font-mono); font-size:10px;">${escapeHtml(t.token_hint)}&hellip;</td>
                 <td>${escapeHtml(t.role)}</td>
+                <td>${t.is_active
+                    ? `<input type="checkbox" name="token-backups:${t.id}" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
+                    : (t.allow_backups ? 'Yes' : 'No')}</td>
                 <td>${t.last_used_at ? formatDate(t.last_used_at) : '—'}</td>
                 <td>${t.is_active
-                    ? `<button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.updateApiToken(${t.id}, {is_active: false})">Revoke</button>`
-                    : `<button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.updateApiToken(${t.id}, {is_active: true})">Reactivate</button>`}
+                    ? `<button type="button" class="btn btn-sm btn-secondary" onclick="if (confirm('Revoke this token? A revoked token stays revoked.')) SettingsPage.updateApiToken(${t.id}, {is_active: false})" aria-label="Revoke ${escapeHtml(t.label)}">Revoke</button>`
+                    : 'Revoked'}
                 </td>
             </tr>`).join('');
             $('#api-token-list').innerHTML = `<div class="table-container"><table>
-                <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
+                <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Backups</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
     },
@@ -1065,10 +1096,12 @@ const SettingsPage = {
             const created = await API.post('/tokens', {
                 label: $('#token-new-label').value.trim(),
                 role: $('#token-new-role').value,
+                allow_backups: $('#token-new-backups').checked,
             });
             $('#api-token-secret').textContent = created.token;
             $('#api-token-reveal').style.display = '';
             $('#token-new-label').value = '';
+            $('#token-new-backups').checked = false;
             toast('Token created — press Copy below, it will not be shown again');
             SettingsPage.loadApiTokens();
         } catch (err) { toast(err.message, 'error'); }
@@ -1205,31 +1238,61 @@ const SettingsPage = {
     },
 
     // One checkbox per sidebar section and per link (#334), read from the
-    // sidebar itself so the list is always the menu as shipped; the ones
-    // the setting names are ticked.
+    // sidebar itself so the list is always the menu as shipped. A ticked box
+    // means "show it"; untick to hide (#457). The setting itself still lists
+    // the HIDDEN keys, so a list saved by an earlier version keeps working.
+    //
+    // An item the menu setting hid is still offered, unticked, so it can be
+    // shown again: the list used to skip every hidden <li>, the hidden items
+    // fell off it, and the next save wrote only what was on the page, which
+    // showed the first batch again (#457). Only an item hidden for another
+    // reason (the nonprofit pages on a business company, NEW-145; the admin
+    // pages for a clerk) is left out, and Save keeps its stored choice.
+    _hiddenMenuStored: [],
+
     _hiddenMenuChoices(raw) {
         let hidden = [];
         try { hidden = JSON.parse(raw || '[]'); } catch (err) { hidden = []; }
-        const set = new Set((Array.isArray(hidden) ? hidden : []).map(String));
+        hidden = (Array.isArray(hidden) ? hidden : []).map(String);
+        SettingsPage._hiddenMenuStored = hidden;
+        const set = new Set(hidden);
         const box = (key, label, indent) => `<label style="display:block; font-weight:normal; ${indent ? 'margin-left:18px;' : 'margin-top:6px;'}">
-                <input type="checkbox" name="hide-menu:${escapeHtml(key)}" data-hide-menu="${escapeHtml(key)}" ${set.has(key) ? 'checked' : ''} style="width:auto; vertical-align:middle; margin-right:6px;">
+                <input type="checkbox" name="show-menu:${escapeHtml(key)}" data-show-menu="${escapeHtml(key)}" ${set.has(key) ? '' : 'checked'} style="width:auto; vertical-align:middle; margin-right:6px;">
                 ${escapeHtml(label)}</label>`;
         let html = '';
         const items = (typeof document !== 'undefined' && typeof document.querySelectorAll === 'function') ? [...document.querySelectorAll('#sidebar li')] : [];
+        // A link hidden for its company's kind or the sign-in's role carries
+        // its own mark (App.syncSidebarHidden), so what is offered does not
+        // hang on which of the start-up steps finished first; a section is
+        // offered when at least one of its links is.
+        let section = '';
         items.forEach(li => {
-            // an item the company's kind hides (the nonprofit pages on a
-            // business company) is not on offer (2.23.5 round 2, NEW-145)
-            if (li.hidden || (typeof li.closest === 'function' && li.closest('[hidden]'))) return;
+            if (li.closest && li.closest('#recent-screens')) return;
+            const parent = li.parentElement;
+            if (parent && typeof parent.closest === 'function' && parent.closest('[hidden]')) return;
             if (li.classList.contains('nav-section')) {
                 const name = li.textContent.trim();
-                if (name) html += box(`section:${name}`, `${name} (the whole section)`, false);
+                section = name ? box(`section:${name}`, `${name} (the whole section)`, false) : '';
                 return;
             }
+            const d = li.dataset || {};
+            if (d.hiddenKind || d.hiddenRole) return;
             const link = li.querySelector('.nav-link[data-page]');
             if (!link || link.dataset.page === 'settings') return;
-            html += box(link.dataset.page, link.textContent.trim(), true);
+            html += section + box(link.dataset.page, link.textContent.trim(), true);
+            section = '';
         });
         return html || '<span style="color:var(--text-muted);">The sidebar is not on this page.</span>';
+    },
+
+    // The hidden list Save writes: every unticked box on the page, plus the
+    // stored keys this page did not offer (an item hidden for another reason
+    // keeps the choice made for it) (#457).
+    _hiddenMenuToSave(boxes) {
+        const offered = new Set(boxes.map(b => b.dataset.showMenu));
+        const keep = (SettingsPage._hiddenMenuStored || []).filter(k => !offered.has(k));
+        const hide = boxes.filter(b => !b.checked).map(b => b.dataset.showMenu);
+        return [...new Set([...keep, ...hide])];
     },
 
     async save(e) {
@@ -1243,15 +1306,19 @@ const SettingsPage = {
         const classWarn = e.target.querySelector('[name="class_warn_blank"]');
         if (classWarn) data.class_warn_blank = classWarn.checked ? 'true' : 'false';
         // the hidden menu items, as a list (#334); the boxes are not form fields
-        const hiddenBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-hide-menu]')] : [];
-        if (hiddenBoxes.length) {
-            data.hidden_menu = JSON.stringify(hiddenBoxes.filter(b => b.checked).map(b => b.dataset.hideMenu));
-            for (const key of Object.keys(data)) if (key.startsWith('hide-menu:')) delete data[key];
+        const menuBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-show-menu]')] : [];
+        if (menuBoxes.length) {
+            const hidden = SettingsPage._hiddenMenuToSave(menuBoxes);
+            data.hidden_menu = JSON.stringify(hidden);
+            for (const key of Object.keys(data)) if (key.startsWith('show-menu:')) delete data[key];
         }
         const btn = document.getElementById('settings-save-btn');
         if (btn) btn.disabled = true;
         try {
             const saved = await API.put('/settings', data);
+            if (data.hidden_menu !== undefined) {
+                try { SettingsPage._hiddenMenuStored = JSON.parse(data.hidden_menu); } catch (err) { /* keep */ }
+            }
             SettingsPage._savedClosingDate = saved && typeof saved.closing_date === 'string'
                 ? saved.closing_date : (data.closing_date || '');
             SettingsPage._markClean();

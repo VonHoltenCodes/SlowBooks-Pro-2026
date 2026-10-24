@@ -31,6 +31,11 @@ DEFAULT_SETTINGS = {
     # changes name; only what is rendered. business | nonprofit
     "company_type": "business",
     "company_name": "My Company",
+    # First month of the fiscal year, "1"-"12" (#444). "1" = the calendar
+    # year (the default) and changes nothing. Moves reports' fiscal-year
+    # presets and default periods, the dashboard's profit card and nonprofit
+    # FY-to-date; payroll forms (W-2, 941) stay on the calendar year by law.
+    "fiscal_year_start_month": "1",
     "company_address1": "",
     "company_address2": "",
     "company_city": "",
@@ -110,6 +115,9 @@ DEFAULT_SETTINGS = {
     "simplefin_reversed": "[]",
     "simplefin_accounts_cache": "[]",  # last-seen bridge accounts, for the UI
     "simplefin_last_sync": "",
+    # Mercury read-only feed; mapping and sync state are managed by its routes.
+    "mercury_api_token": "",
+    "mercury_webhook_secret": "",
     # Class tracking (#243): "true" starts every entry form with no class
     # chosen and asks before a transaction is saved without one (it would
     # be reported under Uncategorized); "false" starts the picker on

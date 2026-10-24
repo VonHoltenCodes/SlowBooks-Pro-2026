@@ -13,7 +13,7 @@ from app.schemas.common import StrictModel
 from typing import Optional
 
 from app.database import get_db
-from app.routes._roles import require_admin
+from app.routes._roles import may_download_backups
 from app.services import backup_service
 from app.services.backup_service import (
     PRE_RESTORE_TAG,
@@ -76,9 +76,23 @@ def download_backup(filename: str, request: Request, db: Session = Depends(get_d
     # A backup is the whole company: every record, the sign-ins' password
     # hashes, the encrypted keys, and the payroll and HR records only an
     # administrator may read. Any role could download it (2.18.0 gate: a
-    # read-only sign-in took the whole database).
-    require_admin(request)
+    # read-only sign-in took the whole database). An API token an
+    # administrator let make backups may take its copy too (#434).
+    if not may_download_backups(request):
+        raise HTTPException(status_code=403, detail="Admin role required")
     filepath = _company_backup_path(db, filename)
+    # The whole company left the server: the audit log says who took it
+    # ("token:<label>" for a program, #434).
+    from app.services.audit import log_event
+
+    log_event(
+        db,
+        table_name="backups",
+        record_id=0,
+        action="EXPORT",
+        new_values={"filename": filepath.name},
+    )
+    db.commit()
     return FileResponse(
         str(filepath), filename=filepath.name, media_type="application/octet-stream"
     )

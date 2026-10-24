@@ -55,16 +55,20 @@ Details, known gaps and how to report a barrier:
 
 ## What's New
 
-**v2.28 — Account types and sub-accounts.** Every account carries one of QuickBooks'
-detail types (#390), picked on the account form; a new account gets a sensible
-one from its number and name, and it can be changed. The Balance Sheet groups
-current and long-term assets and liabilities, and the Profit & Loss puts Other
-Income and Other Expense below Net Operating Income. Sub-accounts nest under
-their parents on the Chart of Accounts and on the statements, with family
-subtotals, and move from the account form (#416). Upgrading moves no figure:
-every statement shows the same numbers as before, only grouped.
+**v2.29 — A mid-year payroll switch, the fiscal year, and reports by item.** Payroll
+takes a mid-year switch: each employee's opening year-to-date, entered quarter
+by quarter and read by every form, wage base and stub (#433), and a processed
+pay run can be voided (#432). Settings sets the first month of the fiscal year;
+the reports' presets and default period, the dashboard and the nonprofit year
+to date follow it (#444). New reports: Past Customers, a mailing list by service
+address and last job date (#436), and Sales by Item and Purchases by Item
+(#435). An item can be added from any line as it is typed, and found by a code
+as well as its name (#445). API tokens are never administrators and can be
+allowed backups (#434), a Mercury bank feed joins SimpleFIN (#356), the
+sidebar's Open list is a Recent dropdown (#462), and the chart import preview
+shows the detail type and parent each row will get (#461).
 
-Patch releases and everything before 2.28 are in [CHANGELOG.md](CHANGELOG.md).
+Patch releases and everything before 2.29 are in [CHANGELOG.md](CHANGELOG.md).
 
 ## Wait — it does *that*?
 
@@ -79,7 +83,7 @@ against any of eight providers (Anthropic Claude and xAI Grok first, then
 Groq, Cloudflare Workers AI, OpenAI, Google Gemini, a Cloudflare Worker you
 host yourself, or any OpenAI-compatible endpoint you name) — keys encrypted at rest with versioned, rotatable ciphertext.
 And the whole app is agent-operable: every install serves a
-self-documenting local REST API (603 operations in v2.28.0) — built for Claude
+self-documenting local REST API (632 operations in v2.29.0) — built for Claude
 Code and Grok first, and any agentic CLI works; the
 [AI setup guide](https://www.slowbookspro.com/ai/) has the paste-prompt.
 What stays on your machine is the company file and the API. A cloud-backed
@@ -112,7 +116,7 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
 - **Double-entry core** — auto + manual journals, closing-date
   enforcement, automatic audit log, 50-account contractor chart
 - **Banking** — the register is the ledger (entries post, feeds are a review queue, reconciliation over ledger lines), transfers, deposits, check printing,
-  OFX/QFX + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN bank feeds,
+  OFX/QFX + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN and Mercury bank feeds,
   shared auto-categorization rules
 - **Reports & tax** — P&L (plain & by Class), Balance Sheet, Trial
   Balance, agings, GL, Cash Flow, Sales Tax with pay-to-government flow,
@@ -129,7 +133,9 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   ([docs/server-edition.md](docs/server-edition.md))
 - **Bank feeds** — [SimpleFIN](https://www.simplefin.org/): you hold the
   bank credential, no middleman server
-  ([docs/setup-bank-feeds.md](docs/setup-bank-feeds.md))
+  ([docs/setup-bank-feeds.md](docs/setup-bank-feeds.md));
+  [Mercury](docs/setup-mercury.md) connects directly with a read-only API token,
+  with optional signed webhooks for bank balance updates
 - **Jobs & job costing** — Customer:Job on every form, cost codes and
   types with burden, time posted at loaded rates, budget vs actual
 - **Receipt intake** — scan a photo or PDF into a Bill, Expense or Sales
@@ -238,6 +244,7 @@ Production checklist: **[docs/release-checklist.md](docs/release-checklist.md)**
 | [docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md) | QuickBooks Desktop (IIF) and QuickBooks Online (its Export data zip, no Intuit app) migration, sales receipts included |
 | [docs/state-withholding.md](docs/state-withholding.md) | State income-tax withholding tables and their sources |
 | [docs/setup-bank-feeds.md](docs/setup-bank-feeds.md) | SimpleFIN bank feeds |
+| [docs/setup-mercury.md](docs/setup-mercury.md) | Mercury read-only bank feed and signed balance webhooks |
 | [Stripe](docs/setup-stripe.md) · [PayPal](docs/setup-paypal.md) · [Square](docs/setup-square.md) | Payment integrations |
 | [docs/migrate-from-myob.md](docs/migrate-from-myob.md) | MYOB migration walkthrough |
 | [SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md) | Policy, contributing, history |

@@ -40,6 +40,8 @@ ENCRYPTED_SETTINGS_KEYS = frozenset(
         "square_access_token",
         "square_webhook_signature_key",
         "simplefin_access_url",
+        "mercury_api_token",
+        "mercury_webhook_secret",
         # the bank account an ACH file debits (discussion #211)
         "ach_company_account",
     }
@@ -307,6 +309,14 @@ def clean_setting_value(key: str, value) -> str:
                 "as the bank assigned it."
             )
         return text
+    if key == "fiscal_year_start_month":
+        # The month a fiscal year starts, 1-12 (#444). "1" is the calendar year.
+        number = int(text) if _DIGITS.fullmatch(text) else None
+        if number is None or not 1 <= number <= 12:
+            raise SettingValueError(
+                "First month of the fiscal year must be a month, 1 to 12."
+            )
+        return str(number)
     if key in _MAX_LENGTH_SETTINGS:
         label, cap = _MAX_LENGTH_SETTINGS[key]
         if len(text) > cap:

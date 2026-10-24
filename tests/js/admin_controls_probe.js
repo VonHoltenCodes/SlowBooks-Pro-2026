@@ -73,12 +73,21 @@ class El {
     return this.getAttribute('value') ?? '';
   }
   set value(v) { this._value = String(v); }
+  // Reads and writes go to the data-* attributes, as a browser's dataset does:
+  // the sidebar marks a role-hidden item with li.dataset.hiddenRole (#457).
   get dataset() {
-    const out = {};
-    for (const [k, v] of Object.entries(this.attrs)) {
-      if (k.startsWith('data-')) out[k.slice(5).replace(/-(\w)/g, (_m, c) => c.toUpperCase())] = v;
-    }
-    return out;
+    const attrs = this.attrs;
+    const key = (k) => 'data-' + String(k).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
+    return new Proxy({}, {
+      get: (_t, k) => (typeof k === 'string' && key(k) in attrs ? attrs[key(k)] : undefined),
+      set: (_t, k, v) => { attrs[key(k)] = String(v); return true; },
+      has: (_t, k) => typeof k === 'string' && key(k) in attrs,
+      deleteProperty: (_t, k) => { delete attrs[key(k)]; return true; },
+      ownKeys: () => Object.keys(attrs).filter(k => k.startsWith('data-'))
+        .map(k => k.slice(5).replace(/-(\w)/g, (_m, c) => c.toUpperCase())),
+      getOwnPropertyDescriptor: (_t, k) => (typeof k === 'string' && key(k) in attrs
+        ? { value: attrs[key(k)], enumerable: true, configurable: true, writable: true } : undefined),
+    });
   }
   getAttribute(k) { return k in this.attrs ? String(this.attrs[k]) : null; }
   setAttribute(k, v) { this.attrs[k] = String(v); }

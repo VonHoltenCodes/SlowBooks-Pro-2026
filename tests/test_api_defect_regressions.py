@@ -18,7 +18,7 @@ def _bearer(token):
     return c
 
 
-def _mint(client, label="sweep", role="admin"):
+def _mint(client, label="sweep", role="readonly"):
     r = client.post("/api/tokens", json={"label": label, "role": role})
     assert r.status_code == 201, r.text
     return r.json()["token"]
@@ -131,15 +131,17 @@ def test_delete_unused_account_still_works(client):
 
 # ---------------------------------------------------------------------------
 # The closing-date lock could be switched off by the principal it constrains.
+# Only an admin-role token reaches settings at all, and none are made since
+# #434; the ones made before still work, so the guard is pinned on one.
 # ---------------------------------------------------------------------------
 
 
-def test_token_cannot_clear_or_roll_back_closing_date(client):
+def test_token_cannot_clear_or_roll_back_closing_date(client, legacy_admin_token):
     assert (
         client.put("/api/settings", json={"closing_date": "2026-06-30"}).status_code
         == 200
     )
-    tc = _bearer(_mint(client))
+    tc = _bearer(legacy_admin_token())
 
     cleared = tc.put("/api/settings", json={"closing_date": ""})
     assert cleared.status_code == 403, cleared.text
@@ -150,15 +152,15 @@ def test_token_cannot_clear_or_roll_back_closing_date(client):
     assert client.get("/api/settings").json()["closing_date"] == "2026-06-30"
 
 
-def test_token_may_still_tighten_the_closing_date(client):
+def test_token_may_still_tighten_the_closing_date(client, legacy_admin_token):
     client.put("/api/settings", json={"closing_date": "2026-06-30"})
-    tc = _bearer(_mint(client))
+    tc = _bearer(legacy_admin_token())
     r = tc.put("/api/settings", json={"closing_date": "2026-07-31"})
     assert r.status_code == 200, r.text
 
 
-def test_token_cannot_set_closing_date_password(client):
-    tc = _bearer(_mint(client))
+def test_token_cannot_set_closing_date_password(client, legacy_admin_token):
+    tc = _bearer(legacy_admin_token())
     r = tc.put("/api/settings", json={"closing_date_password": "agent-set-this"})
     assert r.status_code == 403, r.text
 
@@ -169,10 +171,10 @@ def test_session_user_may_still_clear_closing_date(client):
     assert r.status_code == 200, r.text
 
 
-def test_token_settings_writes_are_otherwise_unaffected(client):
+def test_token_settings_writes_are_otherwise_unaffected(client, legacy_admin_token):
     """The guard must not block unrelated settings updates once a lock is set."""
     client.put("/api/settings", json={"closing_date": "2026-06-30"})
-    tc = _bearer(_mint(client))
+    tc = _bearer(legacy_admin_token())
     r = tc.put("/api/settings", json={"company_name": "Still Editable LLC"})
     assert r.status_code == 200, r.text
 

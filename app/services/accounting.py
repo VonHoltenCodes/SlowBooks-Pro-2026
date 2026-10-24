@@ -221,6 +221,69 @@ def apply_balance_deltas(db: Session, deltas: dict) -> None:
             db.expire(obj, ["balance"])
 
 
+def natural_delta(account: Account, debit, credit) -> Decimal:
+    """What a posted line adds to its account's stored balance, in the
+    account's natural direction: debit - credit on an asset, expense or
+    cost of goods account, credit - debit on the rest. The same rule the
+    posting path applies line by line; here for the code that moves or
+    recomputes lines after they are posted (#490)."""
+    debit = Decimal(str(debit or 0))
+    credit = Decimal(str(credit or 0))
+    if account.account_type.value in ("asset", "expense", "cogs"):
+        return debit - credit
+    return credit - debit
+
+
+def rebuild_stored_balances(db: Session) -> list[dict]:
+    """Recompute every account's stored balance from its ledger lines and
+    write back the ones that were off, committing when any were.
+
+    The lines are the record; `Account.balance` is a running total kept
+    beside them for the Chart of Accounts, the accounts export and the AI
+    tools. Before 2.29.0 a reclassify moved the line and left the total on
+    the old account (#490), so the books it touched carry totals that
+    disagree with the ledger. This puts them back: one grouped sum over
+    the lines, one UPDATE per account that differs. Nothing to do on books
+    that agree, so it runs at every start and can be asked for any time
+    (`POST /api/accounts/rebuild-balances`). Returns the corrections, each
+    naming the account, what was stored and what the ledger says.
+    """
+    totals = {
+        account_id: (Decimal(str(dr)), Decimal(str(cr)))
+        for account_id, dr, cr in db.query(
+            TransactionLine.account_id,
+            func.coalesce(func.sum(TransactionLine.debit), 0),
+            func.coalesce(func.sum(TransactionLine.credit), 0),
+        ).group_by(TransactionLine.account_id)
+    }
+    corrected = []
+    for acct in db.query(Account).order_by(Account.id).all():
+        dr, cr = totals.get(acct.id, (Decimal("0"), Decimal("0")))
+        ledger = _q(natural_delta(acct, dr, cr))
+        stored = _q(acct.balance or 0)
+        if ledger == stored:
+            continue
+        db.execute(
+            update(Account)
+            .where(Account.id == acct.id)
+            .values(balance=ledger)
+            .execution_options(synchronize_session=False)
+        )
+        db.expire(acct, ["balance"])
+        corrected.append(
+            {
+                "account_id": acct.id,
+                "account_number": acct.account_number,
+                "name": acct.name,
+                "was": str(stored),
+                "now": str(ledger),
+            }
+        )
+    if corrected:
+        db.commit()
+    return corrected
+
+
 def create_journal_entry(
     db: Session,
     txn_date: date,

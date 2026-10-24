@@ -118,10 +118,9 @@ const VendorCreditsPage = {
     },
 
     lineHtml(idx) {
-        const itemOpts = VendorCreditsPage._items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
         const acctOpts = PurchaseAccounts.options(VendorCreditsPage._accounts);
         return `<tr data-vcline="${idx}">
-                <td><select class="line-item" onchange="VendorCreditsPage.itemSelected(this)"><option value="">--</option>${itemOpts}</select></td>
+                <td><select class="line-item" onchange="VendorCreditsPage.itemSelected(this)">${ItemQuickAdd.options(VendorCreditsPage._items)}</select></td>
                 <td><select class="line-account" title="Blank: the item's expense account, else the vendor's default"><option value="">Item / vendor default</option>${acctOpts}</select></td>
                 <td><input class="line-desc"></td>
                 <td><input class="line-qty" type="number" step="0.0001" value="1" oninput="VendorCreditsPage.recalc()"></td>
@@ -136,6 +135,7 @@ const VendorCreditsPage = {
 
     // Picking an item fills what it cost (the rate stayed 0 — W-M1).
     itemSelected(select) {
+        if (ItemQuickAdd.selected(select, VendorCreditsPage._items, () => VendorCreditsPage.itemSelected(select), 'purchase')) return;
         const row = select.closest('tr');
         const item = VendorCreditsPage._items.find(i => i.id == select.value);
         if (item) {
@@ -173,12 +173,12 @@ const VendorCreditsPage = {
         let missing = 0;
         $$('#vc-lines tr').forEach((row, i) => {
             const acct = row.querySelector('.line-account')?.value;
-            const itemId = row.querySelector('.line-item')?.value;
+            const itemId = ItemQuickAdd.itemId(row.querySelector('.line-item'));
             const item = itemId ? VendorCreditsPage._items.find(it => it.id == itemId) : null;
             const named = acct || (item && (item.track_inventory || item.expense_account_id)) || (vendor && vendor.default_expense_account_id);
             if (!missing && !named && PurchaseLines.lineAmount(row) > 0) missing = i + 1;
             lines.push({
-                item_id: itemId ? parseInt(itemId) : null,
+                item_id: itemId,
                 account_id: acct ? parseInt(acct) : null,
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,

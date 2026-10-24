@@ -9,11 +9,11 @@
 from datetime import date
 from decimal import Decimal
 
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.models.payroll import PayRun, PayStub, PayRunStatus
 from app.services.accounting import _q
-from app.services.payroll_service import FUTA_WAGE_BASE
+from app.services.payroll_service import FUTA_WAGE_BASE, stub_taxable_wages
 from app.services.pdf_service import _jinja_env, render_pdf
 
 
@@ -24,7 +24,11 @@ def _year_stubs(db, year: int) -> list[PayStub]:
     return (
         db.query(PayStub)
         .join(PayRun, PayStub.pay_run_id == PayRun.id)
-        .options(joinedload(PayStub.pay_run), joinedload(PayStub.employee))
+        .options(
+            joinedload(PayStub.pay_run),
+            joinedload(PayStub.employee),
+            selectinload(PayStub.benefits),
+        )
         .filter(PayRun.status == PayRunStatus.PROCESSED)
         .filter(PayRun.pay_date >= start)
         .filter(PayRun.pay_date <= end)
@@ -32,20 +36,41 @@ def _year_stubs(db, year: int) -> list[PayStub]:
     )
 
 
-def compute_940(db, year: int) -> dict:
+def compute_940(db, year: int, legacy: bool = False) -> dict:
     """Aggregate annual Form 940 (FUTA) totals.
 
     FUTA taxable wages are computed per employee, capped at the $7,000 wage
-    base; payments above the cap are exempt.
+    base; payments above the cap are exempt. A stub's FUTA wages are what
+    the paycheck taxed: gross less Section 125 and the like (which are
+    exempt payments, line 4), never a 401(k).
+
+    `legacy` measures each stub's gross instead, as SlowBooks did before
+    2.29.0: Form history's Check uses it (document_check).
     """
     stubs = _year_stubs(db, year)
 
     total_payments = Decimal("0")
     futa_tax = Decimal("0")
-    # Running gross-paid per employee so the $7,000 cap can be applied as
+    # Running FUTA wages per employee so the $7,000 cap can be applied as
     # later stubs push an employee over the wage base.
     paid_by_employee: dict[int, Decimal] = {}
     taxable_by_employee: dict[int, Decimal] = {}
+    gross_by_employee: dict[int, Decimal] = {}
+
+    # Opening balances (#433): the old system's FUTA wages are what it
+    # already counted toward each employee's $7,000, so the year's stubs
+    # fill only what is left of it; its payments and FUTA tax are the
+    # year's too.
+    from app.services.payroll_opening import amount, openings_for_year
+
+    for emp_id, o in openings_for_year(db, year).items():
+        gross = amount(o, "gross")
+        futa_wages = min(amount(o, "futa_wages"), FUTA_WAGE_BASE)
+        total_payments += gross
+        futa_tax += amount(o, "futa_tax")
+        paid_by_employee[emp_id] = futa_wages
+        taxable_by_employee[emp_id] = futa_wages
+        gross_by_employee[emp_id] = gross
 
     # Process in pay_date order so the per-employee wage base fills correctly.
     for s in sorted(stubs, key=lambda x: (x.pay_run.pay_date, x.id)):
@@ -54,14 +79,16 @@ def compute_940(db, year: int) -> dict:
         total_payments += gross
         futa_tax += Decimal(str(s.futa_tax or 0))
 
+        futa_wages = gross if legacy else stub_taxable_wages(s)["fica"]
         prior = paid_by_employee.get(emp_id, Decimal("0"))
         if prior >= FUTA_WAGE_BASE:
             taxable = Decimal("0")
-        elif prior + gross > FUTA_WAGE_BASE:
+        elif prior + futa_wages > FUTA_WAGE_BASE:
             taxable = FUTA_WAGE_BASE - prior
         else:
-            taxable = gross
-        paid_by_employee[emp_id] = prior + gross
+            taxable = futa_wages
+        paid_by_employee[emp_id] = prior + futa_wages
+        gross_by_employee[emp_id] = gross_by_employee.get(emp_id, Decimal("0")) + gross
         taxable_by_employee[emp_id] = (
             taxable_by_employee.get(emp_id, Decimal("0")) + taxable
         )
@@ -73,7 +100,7 @@ def compute_940(db, year: int) -> dict:
     return {
         "year": year,
         # Employees who received wages: a $0.00 stub pays no one.
-        "num_employees": sum(1 for paid in paid_by_employee.values() if paid > 0),
+        "num_employees": sum(1 for paid in gross_by_employee.values() if paid > 0),
         "num_stubs": len(stubs),
         # Line 3 — total payments to all employees
         "total_payments": _q(total_payments),

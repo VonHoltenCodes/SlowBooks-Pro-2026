@@ -175,7 +175,16 @@ jobs:
           # (CI 40031366864): each PR raised it from 126 on its own base.
           # 146 for 2.28.0, the count on the integrated tree's own Windows run:
           # the account detail types add Postgres-only migration tests.
-          MAX_SKIPS: "146"
+          # 153 for 2.29.0, the count on the integrated tree's own Windows run
+          # (CI 40105648413: 4,964 passed, 153 skipped): opening YTD by
+          # quarter's Postgres-only migration test, the past-customers labels
+          # PDF without WeasyPrint, item quick-add's and #457's Playwright
+          # modules, each PR having raised it from 146 on its own base.
+          # 154 with PR #470's fix commit (CI 40109192190: 4,988 passed, 154
+          # skipped): tests/test_past_customers.py's five-line label test
+          # renders the labels PDF, which skips here with the other PDF tests
+          # (no WeasyPrint stack on the runner).
+          MAX_SKIPS: "154"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

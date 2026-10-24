@@ -194,3 +194,123 @@ def test_invoice_line_totals_survive_round_trip(
     assert abs(trns_total - original_total) < Decimal(
         "0.01"
     ), f"TRNS total {trns_total} != invoice total {original_total}"
+
+
+def test_contact_fields_are_guarded_and_round_trip(client, db_session, seed_accounts):
+    """The CUST and VEND rows' phone, email, terms and tax id went out with
+    no guard (#410 follow-up): a vendor whose email is `=HYPERLINK(...)`
+    would run in Excel, the documented way to fix an IIF file. A leading =
+    or @ takes the apostrophe; a leading + or - does not, because QuickBooks
+    Desktop keeps the apostrophe, and "+15551234567" or "-0001" terms must
+    reach it clean (#449). The importer takes the apostrophe off again."""
+    from app.models.contacts import Customer, Vendor
+
+    db_session.add(
+        Customer(
+            name="Guarded Customer",
+            phone="+15551234567",
+            email='=HYPERLINK("http://x")',
+            terms="-0001",
+            tax_id="@SUM(1)",
+            is_active=True,
+        )
+    )
+    db_session.add(
+        Vendor(
+            name="Guarded Vendor",
+            phone="+447911123456",
+            fax="-555-0100",
+            email="=cmd|' /C calc'!A0",
+            terms="Net 30",
+            tax_id="12-3456789",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    cust = client.get("/api/iif/export/customers")
+    vend = client.get("/api/iif/export/vendors")
+    assert cust.status_code == 200 and vend.status_code == 200
+    cust_row = next(l for l in cust.text.splitlines() if "Guarded Customer" in l)
+    vend_row = next(l for l in vend.text.splitlines() if "Guarded Vendor" in l)
+    cust_fields = cust_row.split("\t")
+    vend_fields = vend_row.split("\t")
+
+    # A formula lead (= or @) is guarded.
+    assert """'=HYPERLINK("http://x")""" in cust_fields, cust_row
+    assert "'@SUM(1)" in cust_fields, cust_row
+    assert "'=cmd|' /C calc'!A0" in vend_fields, vend_row
+    # A + or - phone, fax or terms goes out exactly as typed.
+    for field in ("+15551234567", "-0001"):
+        assert field in cust_fields, cust_row
+        assert "'" + field not in cust_row, cust_row
+    for field in ("+447911123456", "-555-0100", "Net 30", "12-3456789"):
+        assert field in vend_fields, vend_row
+        assert "'" + field not in vend_row, vend_row
+
+    # Re-import into books without them: every value comes back as typed.
+    db_session.query(Customer).filter(Customer.name == "Guarded Customer").delete()
+    db_session.query(Vendor).filter(Vendor.name == "Guarded Vendor").delete()
+    db_session.commit()
+    for text in (cust.text, vend.text):
+        r = _import_iif_text(client, text)
+        assert r.status_code == 200, r.text
+    db_session.expire_all()
+    c = db_session.query(Customer).filter(Customer.name == "Guarded Customer").one()
+    v = db_session.query(Vendor).filter(Vendor.name == "Guarded Vendor").one()
+    assert c.phone == "+15551234567"
+    assert c.email == '=HYPERLINK("http://x")'
+    assert c.terms == "-0001"
+    assert c.tax_id == "@SUM(1)"
+    assert v.phone == "+447911123456"
+    assert v.fax == "-555-0100"
+    assert v.email == "=cmd|' /C calc'!A0"
+    assert v.terms == "Net 30"
+    assert v.tax_id == "12-3456789"
+
+
+def test_invoice_and_bill_terms_take_the_same_guard(client, db_session, seed_accounts):
+    """TERMS on an invoice or bill TRNS row is the same value as the
+    customer's terms, so it takes the same rule: "-0001" goes out as typed,
+    a leading = is guarded (#449)."""
+    from datetime import date
+
+    from app.models.bills import Bill
+    from app.models.contacts import Customer, Vendor
+    from app.models.invoices import Invoice
+
+    cust = Customer(name="Terms Customer", is_active=True)
+    vend = Vendor(name="Terms Vendor", is_active=True)
+    db_session.add_all([cust, vend])
+    db_session.flush()
+    db_session.add(
+        Invoice(
+            invoice_number="T-1",
+            customer_id=cust.id,
+            date=date(2026, 1, 5),
+            terms="-0001",
+            subtotal=0,
+            total=0,
+        )
+    )
+    db_session.add(
+        Bill(
+            bill_number="B-1",
+            vendor_id=vend.id,
+            date=date(2026, 1, 5),
+            terms="=1+1",
+            subtotal=0,
+            total=0,
+        )
+    )
+    db_session.commit()
+
+    inv = client.get("/api/iif/export/invoices")
+    assert inv.status_code == 200, inv.text
+    row = next(l for l in inv.text.splitlines() if l.startswith("TRNS") and "T-1" in l)
+    assert "-0001" in row.split("\t") and "'-0001" not in row, row
+
+    bill = client.get("/api/iif/export/bills")
+    assert bill.status_code == 200, bill.text
+    row = next(l for l in bill.text.splitlines() if l.startswith("TRNS") and "B-1" in l)
+    assert "'=1+1" in row.split("\t"), row

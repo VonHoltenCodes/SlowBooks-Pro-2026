@@ -40,6 +40,7 @@ from app.routes import (
     dashboard,
     accounts,
     customers,
+    customers_past,
     vendors,
     items,
     invoices,
@@ -67,7 +68,7 @@ from app.routes import csv as csv_routes
 from app.routes import uploads
 
 # Phase 5: Advanced Integration
-from app.routes import bank_import, simplefin, tax, backups
+from app.routes import bank_import, simplefin, mercury, tax, backups
 from app.routes import company_file as company_file_routes
 from app.routes import accountants_copy as accountants_copy_routes
 from app.routes import reclassify as reclassify_routes
@@ -526,6 +527,16 @@ async def lifespan(app: FastAPI):
                 print(
                     "Repaired invoices the QuickBooks Online import counted as paid twice"
                 )
+            # #490: before 2.29.0 a reclassify moved the line and left the
+            # stored balance on the old account. The totals are recomputed
+            # from the ledger once here; books that agree have nothing to do.
+            from app.services.accounting import rebuild_stored_balances
+
+            fixed = rebuild_stored_balances(_db)
+            if fixed:
+                print(
+                    f"Recomputed {len(fixed)} stored account balance(s) from the ledger"
+                )
         finally:
             _db.close()
     except Exception:
@@ -891,6 +902,7 @@ _AUTH_EXEMPT_EXACT = {
     "/analytics",  # redirect to SPA hash route
     "/favicon.ico",
     "/api/stripe/webhook",  # legacy alias — Stripe auth via signature
+    "/api/mercury/webhook",  # Mercury raw-body HMAC authenticates deliveries
 }
 # Provider payment routes that are public by design:
 #   - webhook: the provider's signature is the authentication
@@ -917,6 +929,12 @@ _ADMIN_WRITE_PREFIXES = (
     "/api/users",
     "/api/tokens",
     "/api/settings",
+    "/api/mercury/connect",
+    # which Mercury account feeds which bank account wires the books, as
+    # SimpleFIN's mapping is admin-only since 2.26.0 (#384)
+    "/api/mercury/map",
+    "/api/mercury/disconnect",
+    "/api/mercury/webhook-settings",
     "/api/backups",
     # Turning company-file encryption on or off is an administrator's
     # decision (#290); the route asks for the company's name as well.
@@ -949,11 +967,11 @@ _ADMIN_ONLY_PREFIXES = (
 # The parts of an employee record that are a credential or a bank account:
 # the self-service portal token (a full login as that employee —
 # GHSA-rh68-48w8-pj8r), direct-deposit accounts, I-9 and other documents,
-# E-Verify, year-to-date pay. The record itself stays listable by every
-# role (time entries and job costing need the names) but is redacted for
-# non-admins in the employees router.
+# E-Verify, year-to-date pay and its opening balance (#433). The record
+# itself stays listable by every role (time entries and job costing need
+# the names) but is redacted for non-admins in the employees router.
 _ADMIN_ONLY_EMPLOYEE_RE = _re.compile(
-    r"^/api/employees/[^/]+/(portal-token|portal-access|everify|bank-accounts|documents|ytd)(/|$)"
+    r"^/api/employees/[^/]+/(portal-token|portal-access|everify|bank-accounts|documents|ytd|opening-ytd)(/|$)"
 )
 _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 # An outside accountant's sign-in (#340) writes journal entries only: it
@@ -1003,6 +1021,22 @@ def _role_allows(role: str, method: str, path: str) -> bool:
     return not path.startswith(_ADMIN_WRITE_PREFIXES)
 
 
+# What a token's "Can make backups" permission reaches (#434): make one,
+# list them, download one. Restore is not here, and is refused to every
+# token before the role is asked.
+_TOKEN_BACKUP_DOWNLOAD_RE = _re.compile(r"^/api/backups/download/[^/]+$")
+TOKEN_RESTORE_REFUSAL = (
+    "An API token cannot restore a backup: restoring replaces the whole "
+    "company, so it stays with an administrator signed in to SlowBooks Pro."
+)
+
+
+def _is_token_backup_route(method: str, path: str) -> bool:
+    if path == "/api/backups":
+        return method in ("GET", "HEAD", "POST")
+    return method in ("GET", "HEAD") and bool(_TOKEN_BACKUP_DOWNLOAD_RE.match(path))
+
+
 def _role_refusal(role: str) -> str:
     """The sentence a refused write gets: the accountant's says what the
     role is for (#340); the others keep the one the pages pin."""
@@ -1030,6 +1064,7 @@ async def _require_session(request: Request, call_next):
     ):
         return await call_next(request)
     token_principal = None
+    backup_grant = False
     if request.session.get("authenticated") is True:
         if _signed_in_before_this_start(request.session):
             # Settings -> "Ask for the password each time SlowBooks Pro
@@ -1084,6 +1119,19 @@ async def _require_session(request: Request, call_next):
         auth_header = request.headers.get("authorization") or ""
         if auth_header.startswith("Bearer "):
             token_principal = _resolve_api_token(auth_header[7:].strip())
+        if token_principal is not None and token_principal.get("revoked"):
+            # A revoked token says so (#434): the client that holds it is
+            # usually unattended, and "Not authenticated" sent its operator
+            # to the sign-in page. A secret that matches nothing stays vague.
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": (
+                        f"The API token \"{token_principal['label']}\" was revoked. "
+                        "Ask an administrator for a new one under Settings, API Tokens."
+                    )
+                },
+            )
         if token_principal is None:
             return JSONResponse(
                 status_code=401,
@@ -1096,14 +1144,26 @@ async def _require_session(request: Request, call_next):
                 status_code=403,
                 content={"detail": "API tokens cannot manage users or tokens"},
             )
+        # Restoring a backup replaces the whole company: a signed-in
+        # administrator's, never a token's, whatever its role (#434).
+        if path.startswith("/api/backups/restore"):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": TOKEN_RESTORE_REFUSAL},
+            )
         role = token_principal["role"]
+        allow_backups = bool(token_principal.get("allow_backups"))
         # get_db reads this to stamp audit attribution ("token:<label>")
         request.state.token_principal = {
             "username": "token:" + token_principal["label"],
             "role": role,
+            "allow_backups": allow_backups,
         }
+        # "Can make backups" (#434), set by an administrator on the token:
+        # make, list and download this company's backups on top of the role.
+        backup_grant = allow_backups and _is_token_backup_route(request.method, path)
 
-    if not _role_allows(role, request.method, path):
+    if not backup_grant and not _role_allows(role, request.method, path):
         return JSONResponse(
             status_code=403,
             content={"detail": _role_refusal(role)},
@@ -1307,6 +1367,8 @@ app.include_router(fx_routes.router)
 app.include_router(fixed_assets_routes.router)
 app.include_router(migration_routes.router)
 app.include_router(opening_balances_routes.router)
+# before customers.router so /past* is not swallowed by /{customer_id} (#436)
+app.include_router(customers_past.router)
 app.include_router(customers.router)
 app.include_router(vendors.router)
 app.include_router(items.router)
@@ -1337,6 +1399,7 @@ app.include_router(uploads.router)
 # Phase 5: Advanced Integration
 app.include_router(bank_import.router)
 app.include_router(simplefin.router)
+app.include_router(mercury.router)
 app.include_router(users_routes.router)
 app.include_router(api_tokens_routes.router)
 app.include_router(tax.router)
@@ -1349,6 +1412,7 @@ app.include_router(system_routes.router)
 app.include_router(companies.router)
 app.include_router(employees.router)
 app.include_router(payroll.router)
+app.include_router(payroll.opening_employee_router)  # opening YTD (#433)
 # Phase 7: Online Payments
 app.include_router(provider_payments.router)
 app.include_router(provider_payments.legacy_stripe_router)

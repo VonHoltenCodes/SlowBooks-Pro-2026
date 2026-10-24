@@ -28,3 +28,12 @@ def is_admin(request: Request) -> bool:
 def require_admin(request: Request) -> None:
     if not is_admin(request):
         raise HTTPException(status_code=403, detail="Admin role required")
+
+
+def may_download_backups(request: Request) -> bool:
+    """An administrator, or an API token an administrator let make backups
+    (#434). A backup is the whole company, so no other role reads one."""
+    if is_admin(request):
+        return True
+    tp = getattr(getattr(request, "state", None), "token_principal", None)
+    return bool(tp and tp.get("allow_backups"))

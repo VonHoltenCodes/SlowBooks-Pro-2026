@@ -278,7 +278,14 @@ def bump_ytd(
 
 def rebuild_ytd(db: Session, year: int) -> int:
     """Repair path: recompute the accumulators for a year from the stub
-    snapshots (non-void runs). Returns the number of rows written."""
+    snapshots (non-void runs) and the year's opening balances (#433: what
+    the old system withheld per code counts toward the annual caps).
+    Returns the number of rows written."""
+    from app.models.payroll_opening import (
+        PayrollOpeningBalance,
+        PayrollOpeningBenefit,
+    )
+
     db.query(BenefitYTD).filter(BenefitYTD.year == year).delete()
     rows = (
         db.query(
@@ -298,20 +305,39 @@ def rebuild_ytd(db: Session, year: int) -> int:
         .group_by(PayStub.employee_id, PayStubBenefit.benefit_code_id)
         .all()
     )
-    n = 0
+    totals: dict[tuple[int, int], list[Decimal]] = {}
     for emp_id, code_id, emp_amt, er_amt in rows:
+        totals[(emp_id, code_id)] = [_d(emp_amt), _d(er_amt)]
+    opening_rows = (
+        db.query(
+            PayrollOpeningBalance.employee_id,
+            PayrollOpeningBenefit.benefit_code_id,
+            PayrollOpeningBenefit.employee_amount,
+            PayrollOpeningBenefit.employer_amount,
+        )
+        .join(
+            PayrollOpeningBalance,
+            PayrollOpeningBenefit.opening_id == PayrollOpeningBalance.id,
+        )
+        .filter(PayrollOpeningBalance.year == year)
+        .all()
+    )
+    for emp_id, code_id, emp_amt, er_amt in opening_rows:
+        t = totals.setdefault((emp_id, code_id), [ZERO, ZERO])
+        t[0] += _d(emp_amt)
+        t[1] += _d(er_amt)
+    for (emp_id, code_id), (emp_amt, er_amt) in sorted(totals.items()):
         db.add(
             BenefitYTD(
                 employee_id=emp_id,
                 benefit_code_id=code_id,
                 year=year,
-                employee_amount=_q(_d(emp_amt)),
-                employer_amount=_q(_d(er_amt)),
+                employee_amount=_q(emp_amt),
+                employer_amount=_q(er_amt),
             )
         )
-        n += 1
     db.flush()
-    return n
+    return len(totals)
 
 
 # ---------------------------------------------------------------------------
@@ -596,7 +622,19 @@ def record_on_stub(db: Session, stub: PayStub, result: CalcResult, year: int) ->
             ),
             "taxable_base_before": str(ln.base_before),
             "employer_taxable": bool(code.employer_taxable),
+            # The enrollment this line came from, so a void restores a
+            # loan's balance to the very assignment it ran down (#432), and
+            # discarding the draft gives it back (unrecord_stub).
+            "assignment_id": r.assignment.id if r.assignment is not None else None,
         }
+        reduces_balance = bool(
+            code.tracks_balance
+            and r.assignment is not None
+            and r.assignment.balance_remaining is not None
+            and ln.employee_amount
+        )
+        if reduces_balance:
+            rule["balance_reduced"] = str(ln.employee_amount)
         db.add(
             PayStubBenefit(
                 pay_stub_id=stub.id,
@@ -630,16 +668,103 @@ def record_on_stub(db: Session, stub: PayStub, result: CalcResult, year: int) ->
                 ln.employee_amount,
                 ln.employer_amount,
             )
-        if (
-            code.tracks_balance
-            and r.assignment is not None
-            and r.assignment.balance_remaining is not None
-            and ln.employee_amount
-        ):
+        if reduces_balance:
             r.assignment.balance_remaining = _q(
                 max(ZERO, _d(r.assignment.balance_remaining) - ln.employee_amount)
             )
     db.flush()
+
+
+def unrecord_stub(db: Session, stub: PayStub, year: int) -> None:
+    """Undo what record_on_stub did for a draft stub being discarded: take
+    its amounts back out of the year's accumulators (a row only this stub
+    made goes away), and give a loan's balance back what the stub paid
+    down. The stub's own PayStubBenefit rows go with the stub."""
+    for b in stub.benefits:
+        if b.benefit_code_id is None:
+            continue
+        emp_amt = _d(b.employee_amount)
+        er_amt = _d(b.employer_amount)
+        if emp_amt or er_amt:
+            row = get_ytd(db, stub.employee_id, b.benefit_code_id, year)
+            if row is not None:
+                row.employee_amount = _q(_d(row.employee_amount) - emp_amt)
+                row.employer_amount = _q(_d(row.employer_amount) - er_amt)
+                if (
+                    not row.employee_amount
+                    and not row.employer_amount
+                    and not _other_ytd_sources(db, stub, b.benefit_code_id, year)
+                ):
+                    db.delete(row)
+        try:
+            rule = json.loads(b.rule_json or "{}")
+        except (ValueError, TypeError):
+            rule = {}
+        if "balance_reduced" in rule:
+            assignment = (
+                db.query(EmployeeBenefit)
+                .filter(EmployeeBenefit.id == rule.get("assignment_id"))
+                .first()
+            )
+            back = _d(rule["balance_reduced"])
+        elif "assignment_id" not in rule and emp_amt:
+            # a stub recorded before the snapshot named its assignment: the
+            # one the engine resolves for the period, as record_on_stub did
+            assignment = None
+            code = b.benefit_code
+            if code is not None and code.tracks_balance and stub.pay_run:
+                emp = db.query(Employee).filter(Employee.id == stub.employee_id).first()
+                for r in resolve_for_employee(
+                    db, emp, stub.pay_run.period_start, stub.pay_run.period_end
+                ):
+                    if r.code.id == code.id:
+                        assignment = r.assignment
+            back = emp_amt
+        else:
+            assignment = None
+        if assignment is not None and assignment.balance_remaining is not None:
+            assignment.balance_remaining = _q(_d(assignment.balance_remaining) + back)
+    db.flush()
+
+
+def _other_ytd_sources(db: Session, stub: PayStub, code_id: int, year: int) -> bool:
+    """Whether anything besides `stub` feeds the employee's accumulator for
+    the code and year (another non-void stub, or the opening balance)."""
+    from app.models.payroll_opening import (
+        PayrollOpeningBalance,
+        PayrollOpeningBenefit,
+    )
+
+    other_stub = (
+        db.query(PayStubBenefit.id)
+        .join(PayStub, PayStubBenefit.pay_stub_id == PayStub.id)
+        .join(PayRun, PayStub.pay_run_id == PayRun.id)
+        .filter(
+            PayStub.employee_id == stub.employee_id,
+            PayStub.id != stub.id,
+            PayStubBenefit.benefit_code_id == code_id,
+            PayRun.status != PayRunStatus.VOID,
+            PayRun.pay_date >= date(year, 1, 1),
+            PayRun.pay_date <= date(year, 12, 31),
+        )
+        .first()
+    )
+    if other_stub is not None:
+        return True
+    opening = (
+        db.query(PayrollOpeningBenefit.id)
+        .join(
+            PayrollOpeningBalance,
+            PayrollOpeningBenefit.opening_id == PayrollOpeningBalance.id,
+        )
+        .filter(
+            PayrollOpeningBalance.employee_id == stub.employee_id,
+            PayrollOpeningBalance.year == year,
+            PayrollOpeningBenefit.benefit_code_id == code_id,
+        )
+        .first()
+    )
+    return opening is not None
 
 
 # ---------------------------------------------------------------------------

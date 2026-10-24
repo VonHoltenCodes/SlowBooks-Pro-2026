@@ -312,6 +312,39 @@ def test_each_pay_run_row_says_whose_stub_it_is(browser):
             page.close()
 
 
+OPENING_IMPORT_BUTTONS = """() => {
+    const shown = (el) => el.checkVisibility() && el.getBoundingClientRect().width > 0;
+    const actions = document.querySelector('#modal-body .form-actions');
+    return { apply: shown(document.getElementById('opening-import-apply')),
+        preview: shown(actions.querySelector('button[type=submit]')),
+        buttons: [...actions.querySelectorAll('button')].filter(shown).map(b => b.textContent.trim()) }; }"""
+
+
+def test_the_opening_import_offers_apply_only_after_preview(browser):
+    """Payroll -> Import opening balances opens with Cancel and Preview; Apply
+    is drawn `hidden` until a Preview says what there is to write. The
+    attribute lost to .btn's display and the button showed, inviting a press
+    that did nothing (2.29.0 gate, macbase1 NEW-175)."""
+    page = _open(browser, 1280, 800, "#/payroll")
+    try:
+        _open_dialog(
+            page, "PayrollPage.showOpeningImport()", "#modal-body button[type=submit]"
+        )
+        seen = page.evaluate(OPENING_IMPORT_BUTTONS)
+        assert seen == {
+            "apply": False,
+            "preview": True,
+            "buttons": ["Cancel", "Preview"],
+        }
+        # a preview with something to write shows it
+        page.evaluate(
+            "() => { document.getElementById('opening-import-apply').hidden = false; }"
+        )
+        assert page.evaluate(OPENING_IMPORT_BUTTONS)["apply"] is True
+    finally:
+        page.close()
+
+
 def test_a_sidebar_link_works_after_a_toolbar_button(browser):
     page = _open(browser, 1280, 800, "#/settings")
     try:

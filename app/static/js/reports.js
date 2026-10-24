@@ -26,6 +26,9 @@ const ReportsPage = {
         'sales-tax':            { label: 'Sales Tax Report',   open: (p) => ReportsPage.salesTax(p) },
         'general-ledger':       { label: 'General Ledger',     open: (p) => ReportsPage.generalLedger(p), keep: ['class_id'] },
         'income-by-customer':   { label: () => T('Income by Customer'), open: (p) => ReportsPage.incomeByCustomer(p) },
+        'past-customers':       { label: () => Terms.text('Past customers'), open: (p) => ReportsPage.pastCustomers(p) },
+        'sales-by-item':        { label: 'Sales by Item',      open: (p) => ReportsPage.salesByItem(p) },
+        'purchases-by-item':    { label: 'Purchases by Item',  open: (p) => ReportsPage.purchasesByItem(p) },
         'trial-balance':        { label: 'Trial Balance',      open: (p) => ReportsPage.trialBalance(p) },
         'adjusting-entries':    { label: 'Adjusting Journal Entries', open: (p) => ReportsPage.adjustingEntries(p) },
         'closing-date-exceptions': { label: 'Closing Date Exceptions', open: (p) => ReportsPage.closingDateExceptions(p) },
@@ -378,6 +381,9 @@ const ReportsPage = {
             card('sales-tax', 'Sales Tax', 'Tax collected by invoice'),
             card('general-ledger', 'General Ledger', 'All journal entries by account'),
             card('income-by-customer', T('Income by Customer'), Terms.isNonprofit() ? 'Contribution totals per donor' : 'Sales totals per customer'),
+            card('past-customers', Terms.text('Past customers'), Terms.text('Past customers: a mailing list by service address and last job date')),
+            card('sales-by-item', 'Sales by Item', 'What sold, by item: quantity, amount, margin'),
+            card('purchases-by-item', 'Purchases by Item', 'What was bought, by item: quantity, amount, average cost'),
             card('customer-statement', T('Customer Statement'), Terms.text('Invoice/payment history PDF')),
             card('trial-balance', 'Trial Balance', 'Debits and credits by account'),
             card('adjusting-entries', 'Adjusting Journal Entries', 'The accountant\'s adjustments for a period, with who posted each'),
@@ -585,10 +591,13 @@ const ReportsPage = {
         accountId = parseInt(accountId, 10);
         if (!accountId) { toast('No account_id on this row', 'error'); return; }
         // A Balance Sheet line gives only its as-of date: the list starts on
-        // January 1 of that date's year, not of this year — a date in an
-        // earlier year (a prior-year comparison) otherwise has its start
-        // after its end, and the dates are refused.
-        if (!startDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate || '')) startDate = `${endDate.slice(0, 4)}-01-01`;
+        // the first day of that date's fiscal year (#444), not of this year —
+        // a date in an earlier year (a prior-year comparison) otherwise has
+        // its start after its end, and the dates are refused.
+        if (!startDate && /^\d{4}-\d{2}-\d{2}$/.test(endDate || '')) {
+            const [y, m, d] = endDate.split('-').map(Number);
+            startDate = ReportsPage._isoDate(ReportsPage._fiscalYearStart(new Date(y, m - 1, d)));
+        }
         classId = classId ? parseInt(classId, 10) || null : null;
         const jobGiven = extra && extra.job_id !== undefined && extra.job_id !== null && extra.job_id !== '';
         const jobId = jobGiven ? parseInt(extra.job_id, 10) : null;
@@ -657,7 +666,7 @@ const ReportsPage = {
                 <span id="drill-position" class="grid-live" role="status" aria-live="polite" style="font-size:11px; color:var(--text-muted);"></span>
             </div>`;
 
-        await ReportsPage.openPeriodModal(title(accountName, className), 'this_year_to_date', async (_period, range) => {
+        await ReportsPage.openPeriodModal(title(accountName, className), ReportsPage.defaultPeriod(), async (_period, range) => {
             const q = new URLSearchParams({ account_id: params.account_id, start_date: range.start, end_date: range.end });
             if (params.class_id) q.set('class_id', params.class_id);
             if (params.job_id !== undefined && params.job_id !== null && params.job_id !== '') q.set('job_id', params.job_id);
@@ -844,11 +853,92 @@ const ReportsPage = {
             ["last_quarter", "Last Quarter"],
             ["last_year", "Last Year"],
             ["last_year_to_date", "Last Year to Date"],
-            ["custom", "Custom Date"],
         ];
+        // Fiscal-year presets only when the company has a non-January fiscal
+        // year set (#444); a January start IS the calendar year, so the
+        // calendar presets already cover it.
+        const fym = App.settings && App.settings.fiscal_year_start_month;
+        if (fym && String(fym) !== "1") {
+            options.push(
+                ["this_fiscal_year", "This Fiscal Year"],
+                ["this_fiscal_year_to_date", "This Fiscal Year to Date"],
+                ["last_fiscal_year", "Last Fiscal Year"],
+                ["last_fiscal_year_to_date", "Last Fiscal Year to Date"],
+            );
+        }
+        options.push(["custom", "Custom Date"]);
         return options.map(([value, label]) =>
             `<option value="${value}" ${value === selected ? "selected" : ""}>${label}</option>`
         ).join("");
+    },
+
+    // First month of the fiscal year, 1-12 (1 = calendar year). Mirrors
+    // app/services/fiscal_year.start_month (#444).
+    _fiscalYearStartMonth() {
+        const m = parseInt((App.settings && App.settings.fiscal_year_start_month) || "1", 10);
+        return (m >= 1 && m <= 12) ? m : 1;
+    },
+
+    // Most recent first-of-start-month on or before `today` (a Date).
+    // Mirrors app/services/fiscal_year._fy_start (#444).
+    _fiscalYearStart(today) {
+        const m0 = ReportsPage._fiscalYearStartMonth() - 1;  // JS 0-based month
+        const year = today.getMonth() >= m0 ? today.getFullYear() : today.getFullYear() - 1;
+        return new Date(year, m0, 1);
+    },
+
+    // The period a report opens on: the fiscal year to date (#444). A
+    // January start is the calendar year, whose own preset says so.
+    defaultPeriod() {
+        return ReportsPage._fiscalYearStartMonth() === 1 ? "this_year_to_date" : "this_fiscal_year_to_date";
+    },
+
+    // How far Previous / Next period move a preset, in months: a month, a
+    // quarter, or a year — the fiscal presets a fiscal year, which from a
+    // fiscal-year start is twelve months to the next one (#444). Custom
+    // has none of its own (see _rangeStep).
+    _PERIOD_MONTHS: {
+        this_month: 1, last_month: 1,
+        this_quarter: 3, last_quarter: 3,
+        this_year: 12, this_year_to_date: 12, last_year: 12, last_year_to_date: 12,
+        this_fiscal_year: 12, this_fiscal_year_to_date: 12,
+        last_fiscal_year: 12, last_fiscal_year_to_date: 12,
+    },
+
+    _parseIso(text) {
+        const [y, m, d] = String(text).split('-').map(Number);
+        return new Date(y, m - 1, d);
+    },
+
+    _isMonthEnd(dt) {
+        return new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + 1).getDate() === 1;
+    },
+
+    // A custom range's own step: whole months (first of a month to the end
+    // of one) step by their count of months, any other range by its days.
+    _rangeStep(range) {
+        const s = ReportsPage._parseIso(range.start), e = ReportsPage._parseIso(range.end);
+        if (s.getDate() === 1 && ReportsPage._isMonthEnd(e)) {
+            return { months: (e.getFullYear() - s.getFullYear()) * 12 + e.getMonth() - s.getMonth() + 1 };
+        }
+        return { days: Math.round((e - s) / 86400000) + 1 };
+    },
+
+    // One date moved by a step; a month end stays a month end and a day
+    // past the shorter month's last is its last (Aug 31 back a month is
+    // Jul 31, Mar 31 back is Feb 28).
+    _shiftDate(iso, step, dir) {
+        const dt = ReportsPage._parseIso(iso);
+        if (step.days) return ReportsPage._isoDate(new Date(dt.getFullYear(), dt.getMonth(), dt.getDate() + dir * step.days));
+        const first = new Date(dt.getFullYear(), dt.getMonth() + dir * step.months, 1);
+        const last = new Date(first.getFullYear(), first.getMonth() + 1, 0).getDate();
+        const day = ReportsPage._isMonthEnd(dt) ? last : Math.min(dt.getDate(), last);
+        return ReportsPage._isoDate(new Date(first.getFullYear(), first.getMonth(), day));
+    },
+
+    // Previous / Next period on the open report (-1 / 1).
+    stepPeriod(dir) {
+        if (ReportsPage._live && ReportsPage._live.step) ReportsPage._live.step(dir);
     },
 
     _pad(value) {
@@ -908,13 +998,36 @@ const ReportsPage = {
                 start = new Date(year - 1, 0, 1);
                 end = new Date(year - 1, month, Math.min(day, new Date(year - 1, month + 1, 0).getDate()));
                 break;
+            case "this_fiscal_year": {
+                const s = ReportsPage._fiscalYearStart(today);
+                start = s;
+                end = new Date(s.getFullYear() + 1, s.getMonth(), 0);  // day before next FY
+                break;
+            }
+            case "this_fiscal_year_to_date":
+                start = ReportsPage._fiscalYearStart(today);
+                end = today;
+                break;
+            case "last_fiscal_year": {
+                const s = ReportsPage._fiscalYearStart(today);
+                start = new Date(s.getFullYear() - 1, s.getMonth(), 1);
+                end = new Date(s.getFullYear(), s.getMonth(), 0);  // day before this FY
+                break;
+            }
+            case "last_fiscal_year_to_date": {
+                const s = ReportsPage._fiscalYearStart(today);
+                start = new Date(s.getFullYear() - 1, s.getMonth(), 1);
+                // the same point one year earlier, as Last Year to Date does
+                end = new Date(year - 1, month, Math.min(day, new Date(year - 1, month + 1, 0).getDate()));
+                break;
+            }
             case "custom":
                 return {
-                    start: customStart || ReportsPage._isoDate(new Date(year, 0, 1)),
+                    start: customStart || ReportsPage._isoDate(ReportsPage._fiscalYearStart(today)),
                     end: customEnd || ReportsPage._isoDate(today),
                 };
             default:
-                start = new Date(year, 0, 1);
+                start = ReportsPage._fiscalYearStart(today);
                 end = today;
                 break;
         }
@@ -984,8 +1097,7 @@ const ReportsPage = {
         const params = () => (paramsObj ? paramsObj : opts.params());
         ReportsPage._params = paramsObj;
 
-        const currentYear = new Date().getFullYear();
-        const defaultCustomStart = prefill.start_date || `${currentYear}-01-01`;
+        const defaultCustomStart = prefill.start_date || ReportsPage._isoDate(ReportsPage._fiscalYearStart(new Date()));
         const defaultCustomEnd = prefill.end_date || prefill.as_of_date || todayISO();
         const known = ReportsPage.periodOptions('').includes(`value="${prefill.period}"`);
         const dated = !!(prefill.start_date || prefill.end_date || prefill.as_of_date);
@@ -999,7 +1111,11 @@ const ReportsPage = {
             <div class="form-grid report-toolbar" style="margin-bottom:4px;">
                 <div class="form-group">
                     <label for="report-period-select">${label}</label>
-                    <select id="report-period-select">${ReportsPage.periodOptions(startingPeriod)}</select>
+                    <span style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
+                        <select id="report-period-select">${ReportsPage.periodOptions(startingPeriod)}</select>
+                        ${opts.step === false ? '' : `<button type="button" class="btn btn-sm btn-secondary" id="report-period-prev" aria-label="Previous period" onclick="ReportsPage.stepPeriod(-1)">&lsaquo; Prev</button>
+                        <button type="button" class="btn btn-sm btn-secondary" id="report-period-next" aria-label="Next period" onclick="ReportsPage.stepPeriod(1)">Next &rsaquo;</button>`}
+                    </span>
                 </div>
                 ${opts.toolbar || ''}
             </div>
@@ -1080,13 +1196,42 @@ const ReportsPage = {
             }
             first = false;
         };
+        // Previous / Next period: the dates in use moved by the period's
+        // own length (a fiscal year on a fiscal preset, #444), shown as a
+        // Custom range, or as the preset it lands on (This Fiscal Year back
+        // one is Last Fiscal Year). Stepped once, a Custom range keeps
+        // stepping by the preset's length until its dates are typed.
+        let stepUnit = null;
+        const step = (dir) => {
+            const months = ReportsPage._PERIOD_MONTHS[select.value];
+            if (months) stepUnit = { months };
+            if (useAsOfOnly) {
+                const asOf = ReportsPage.getAsOfDate(select.value, endInput.value || todayISO());
+                endInput.value = ReportsPage._shiftDate(asOf, stepUnit || { months: 12 }, dir);
+            } else {
+                const range = lastRange || ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
+                const unit = stepUnit || ReportsPage._rangeStep(range);
+                stepUnit = unit;
+                const next = { start: ReportsPage._shiftDate(range.start, unit, dir), end: ReportsPage._shiftDate(range.end, unit, dir) };
+                startInput.value = next.start;
+                endInput.value = next.end;
+                const preset = Array.from(select.options).map(o => o.value).find(v => {
+                    if (v === 'custom') return false;
+                    const r = ReportsPage.getDateRange(v);
+                    return r.start === next.start && r.end === next.end;
+                });
+                if (preset) { select.value = preset; render(); return; }
+            }
+            select.value = 'custom';
+            render();
+        };
         // The open report, for its toolbar's controls (ReportsPage.setParam,
         // ReportsPage.refresh): one period dialog is open at a time.
-        ReportsPage._live = { view, params: paramsObj, render, select };
+        ReportsPage._live = { view, params: paramsObj, render, select, step };
 
-        select.addEventListener("change", render);
-        startInput.addEventListener("change", () => { if (select.value === "custom" && !useAsOfOnly) render(); });
-        endInput.addEventListener("change", () => { if (select.value === "custom") render(); });
+        select.addEventListener("change", () => { stepUnit = null; render(); });
+        startInput.addEventListener("change", () => { stepUnit = null; if (select.value === "custom" && !useAsOfOnly) render(); });
+        endInput.addEventListener("change", () => { stepUnit = null; if (select.value === "custom") render(); });
 
         if (reportType) {
             const sb = $("#report-save-btn");
@@ -1130,7 +1275,7 @@ const ReportsPage = {
         // the address, saved reports and the PDF / CSV links.
         const opts = { ...ReportsPage._statementOpts(prefill) };
         const plParams = { ...opts.params, ...ReportsPage._compareParams(prefill) };
-        await ReportsPage.openPeriodModal(T("Profit & Loss"), "this_year_to_date", async (_period, range, params) => {
+        await ReportsPage.openPeriodModal(T("Profit & Loss"), ReportsPage.defaultPeriod(), async (_period, range, params) => {
             const cmp = params.compare === 'prior_year';
             const show = !params.hide_changes;
             ReportsPage._cmpSync(params);
@@ -1271,7 +1416,7 @@ const ReportsPage = {
         // Compare to the same date a year earlier, as the P&L does.
         const opts = { ...ReportsPage._sortOpts(prefill) };
         const bsParams = { ...opts.params, ...ReportsPage._compareParams(prefill) };
-        await ReportsPage.openPeriodModal(T("Balance Sheet"), "this_year_to_date", async (_period, params, live) => {
+        await ReportsPage.openPeriodModal(T("Balance Sheet"), ReportsPage.defaultPeriod(), async (_period, params, live) => {
             const cmp = live.compare === 'prior_year';
             const show = !live.hide_changes;
             ReportsPage._cmpSync(live);
@@ -1330,7 +1475,7 @@ const ReportsPage = {
     },
 
     async salesTax(prefill) {
-        await ReportsPage.openPeriodModal("Sales Tax Report", "this_year_to_date", async (_period, range) => {
+        await ReportsPage.openPeriodModal("Sales Tax Report", ReportsPage.defaultPeriod(), async (_period, range) => {
             const data = await API.get(`/reports/sales-tax?start_date=${range.start}&end_date=${range.end}`);
             // Credit memos come back as negative rows; a document with
             // nothing taxable shows no rate rather than "8.25%, $0.00".
@@ -1391,7 +1536,7 @@ const ReportsPage = {
             class_id: /^\d+$/.test(p.class_id || '') ? p.class_id : '',
         };
         ReportsPage._glLists = null;
-        await ReportsPage.openPeriodModal("General Ledger", "this_year_to_date", async (_period, range) => {
+        await ReportsPage.openPeriodModal("General Ledger", ReportsPage.defaultPeriod(), async (_period, range) => {
             if (!ReportsPage._glLists) {
                 const [accounts, classes] = await Promise.all([
                     API.get('/accounts').catch(() => []),
@@ -1472,7 +1617,7 @@ const ReportsPage = {
     },
 
     async incomeByCustomer(prefill) {
-        await ReportsPage.openPeriodModal(T("Income by Customer"), "this_year_to_date", async (_period, range) => {
+        await ReportsPage.openPeriodModal(T("Income by Customer"), ReportsPage.defaultPeriod(), async (_period, range) => {
             const data = await API.get(`/reports/income-by-customer?start_date=${range.start}&end_date=${range.end}`);
             // Sales before tax, the tax beside it; Paid includes money not
             // yet applied to an invoice, and Balance is net of it.
@@ -1502,6 +1647,259 @@ const ReportsPage = {
                     <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No sales data</td></tr>'}</tbody>
                 </table></div>`;
         }, "Dates", false, { reportType: 'income_by_customer', view: 'income-by-customer', params: { customer_id: (prefill || {}).customer_id || null }, prefill });
+    },
+
+    // Past Customers (#436): a mailing list built from the books — one row
+    // per customer, the service address (the job's site_address, else
+    // ship-to, else bill-to) and the last job date, filterable, with a
+    // mail-merge CSV and Avery 5160 labels. Not a period report: the filter
+    // bar is the whole of it, so it does not go through openPeriodModal; the
+    // address carries every filter so a view can be bookmarked and saved (R7).
+    _pastFilters: null,
+
+    async pastCustomers(prefill) {
+        const p = prefill || {};
+        ReportsPage._pastFilters = {
+            last_job_from: p.last_job_from || '',
+            last_job_to: p.last_job_to || '',
+            city: p.city || '',
+            zip: p.zip || '',
+            state: p.state || '',
+            job_type: p.job_type || '',
+            customer_type: p.customer_type || '',
+            min_sales: p.min_sales || '',
+            active: ['all', 'active', 'inactive'].includes(p.active) ? p.active : 'all',
+            include_do_not_contact: ['1', 'true'].includes(String(p.include_do_not_contact)) ? '1' : '',
+        };
+        ReportsPage.setAddress('past-customers', ReportsPage._pastFilters);
+        const f = ReportsPage._pastFilters;
+        openModal(Terms.text('Past customers'), `
+            <p style="margin-bottom:10px; color:var(--gray-500); font-size:12px;">${Terms.text('A mailing list by service address and last job date. A customer marked Do not contact in their notes is flagged here and left out of the export.')}</p>
+            <div class="form-grid" style="grid-template-columns: repeat(4, minmax(0,1fr)); gap:8px; margin-bottom:12px;">
+                <div class="form-group"><label for="pc-from">Last job from</label>
+                    <input id="pc-from" type="date" value="${escapeHtml(f.last_job_from)}" onchange="ReportsPage.setPastParam('last_job_from', this.value)"></div>
+                <div class="form-group"><label for="pc-to">Last job to</label>
+                    <input id="pc-to" type="date" value="${escapeHtml(f.last_job_to)}" onchange="ReportsPage.setPastParam('last_job_to', this.value)"></div>
+                <div class="form-group"><label for="pc-city">City</label>
+                    <input id="pc-city" type="text" value="${escapeHtml(f.city)}" placeholder="one or several, comma-joined" onchange="ReportsPage.setPastParam('city', this.value)"></div>
+                <div class="form-group"><label for="pc-zip">Zip</label>
+                    <input id="pc-zip" type="text" value="${escapeHtml(f.zip)}" placeholder="prefix, e.g. 787" onchange="ReportsPage.setPastParam('zip', this.value)"></div>
+                <div class="form-group"><label for="pc-state">State</label>
+                    <input id="pc-state" type="text" value="${escapeHtml(f.state)}" onchange="ReportsPage.setPastParam('state', this.value)"></div>
+                <div class="form-group"><label for="pc-jtype">${Terms.text('Job type')}</label>
+                    <input id="pc-jtype" type="text" value="${escapeHtml(f.job_type)}" onchange="ReportsPage.setPastParam('job_type', this.value)"></div>
+                <div class="form-group"><label for="pc-ctype">${Terms.text('Customer type')}</label>
+                    <input id="pc-ctype" type="text" value="${escapeHtml(f.customer_type)}" onchange="ReportsPage.setPastParam('customer_type', this.value)"></div>
+                <div class="form-group"><label for="pc-min">Lifetime sales at least</label>
+                    <input id="pc-min" type="number" step="0.01" value="${escapeHtml(f.min_sales)}" onchange="ReportsPage.setPastParam('min_sales', this.value)"></div>
+                <div class="form-group"><label for="pc-active">Status</label>
+                    <select id="pc-active" data-no-search onchange="ReportsPage.setPastParam('active', this.value)">
+                        <option value="all"${f.active === 'all' ? ' selected' : ''}>All</option>
+                        <option value="active"${f.active === 'active' ? ' selected' : ''}>Active only</option>
+                        <option value="inactive"${f.active === 'inactive' ? ' selected' : ''}>Inactive only</option>
+                    </select></div>
+                <div class="form-group" style="align-self:end;"><label style="display:inline-flex; gap:6px; align-items:center; font-weight:normal; text-transform:none;">
+                    <input type="checkbox" ${f.include_do_not_contact ? 'checked' : ''} onchange="ReportsPage.setPastParam('include_do_not_contact', this.checked ? '1' : '')"> Include do-not-contact in export</label></div>
+            </div>
+            <div id="pc-content"><div style="font-size:11px; color:var(--gray-500);">Loading…</div></div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`, { wide: true });
+        await ReportsPage.loadPastCustomers();
+    },
+
+    setPastParam(key, value) {
+        if (!ReportsPage._pastFilters) return;
+        ReportsPage._pastFilters[key] = value;
+        ReportsPage.setAddress('past-customers', ReportsPage._pastFilters);
+        ReportsPage.loadPastCustomers();
+    },
+
+    _pastQs() {
+        const qs = new URLSearchParams();
+        for (const [k, v] of Object.entries(ReportsPage._pastFilters || {})) {
+            if (v !== '' && v != null) qs.set(k, v);
+        }
+        return qs.toString();
+    },
+
+    async loadPastCustomers() {
+        const content = $('#pc-content');
+        if (!content) return;
+        content.innerHTML = '<div style="font-size:11px; color:var(--gray-500);">Loading…</div>';
+        try {
+            const qs = ReportsPage._pastQs();
+            const data = await API.get(`/customers/past${qs ? '?' + qs : ''}`);
+            if (!data.rows.length) {
+                content.innerHTML = '<div class="empty-state"><p>Nothing in the books matches these filters.</p></div>';
+                return;
+            }
+            const rows = data.rows.map(r => `<tr>
+                <td>${ReportsPage._rowLink(`ReportsPage.openCustomer(${r.customer_id}, this)`, r.name, `customer:${r.customer_id}`)}${r.do_not_contact ? ` <span class="badge badge-draft" title="Marked from the customer's notes">do not contact</span>` : ''}</td>
+                <td>${escapeHtml(r.company)}</td>
+                <td>${escapeHtml(r.phone)}</td>
+                <td>${escapeHtml(r.service_address)}</td>
+                <td>${r.first_job ? formatDate(r.first_job) : ''}</td>
+                <td>${r.last_job ? formatDate(r.last_job) : ''}</td>
+                <td class="amount">${r.job_count}</td>
+                <td class="amount">${formatCurrency(r.lifetime_sales)}</td>
+                <td>${escapeHtml(r.last_job_name)}${r.last_job_type ? ` (${escapeHtml(r.last_job_type)})` : ''}</td>
+            </tr>`).join('');
+            content.innerHTML = `
+                <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+                    <span style="color:var(--gray-500); font-size:12px;">${data.total_rows} rows · ${formatCurrency(data.total_sales)} lifetime</span>
+                    <span style="margin-left:auto;"></span>
+                    <button class="btn btn-sm btn-secondary" onclick="window.open('/api/customers/past.csv${qs ? '?' + qs : ''}','_blank')">Save CSV</button>
+                    <button class="btn btn-sm btn-secondary" onclick="window.open('/api/customers/past/labels.pdf${qs ? '?' + qs : ''}','_blank')">Labels PDF</button>
+                </div>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">Company</th><th scope="col">Phone</th><th scope="col">Service address</th><th scope="col">First job</th><th scope="col">Last job</th><th scope="col" class="amount">${T('Jobs')}</th><th scope="col" class="amount">Lifetime sales</th><th scope="col">Last job</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table></div>`;
+            ReportsPage._refocusRow(content);
+        } catch (err) {
+            content.innerHTML = `<div style="color:var(--danger);">${escapeHtml(err.message)}</div>`;
+        }
+    },
+
+    // The address of a document behind an item line, by its {type, id}, the
+    // existing openers (bank_register._LINKS): an invoice at #/invoices/<id>,
+    // a credit memo at #/credit-memos/<id>, a bill at #/bills/<id>, a vendor
+    // credit at #/vendor-credits/<id>.
+    _ITEM_DOC: { invoice: '#/invoices/', credit_memo: '#/credit-memos/', bill: '#/bills/', vendor_credit: '#/vendor-credits/' },
+
+    // start/end plus whichever narrowing params the report carries.
+    _itemQs(range, p, idKey) {
+        let qs = `start_date=${range.start}&end_date=${range.end}`;
+        if (p[idKey]) qs += `&${idKey}=${encodeURIComponent(p[idKey])}`;
+        if (p.class_id) qs += `&class_id=${encodeURIComponent(p.class_id)}`;
+        if (p.job_id) qs += `&job_id=${encodeURIComponent(p.job_id)}`;
+        return qs;
+    },
+
+    // An "All / pick one" select for a narrowing dimension.
+    _itemPicker(id, label, listItems, selected, param) {
+        const opts = ['<option value="">All</option>'].concat(
+            listItems.map(o => `<option value="${o.id}" ${String(o.id) === String(selected || '') ? 'selected' : ''}>${escapeHtml(o.name)}</option>`)
+        ).join('');
+        return `<div class="form-group"><label for="${id}">${label}</label>
+            <select id="${id}" onchange="ReportsPage.setParam('${param}', this.value)">${opts}</select></div>`;
+    },
+
+    // The documents behind one item row, in a modal; each line opens its
+    // own document. `kind` is 'sales' or 'purchases', `itemKey` an id or
+    // 'none' (the No item row).
+    async openItemLines(kind, itemKey, name, qs) {
+        const path = kind === 'sales' ? 'sales-by-item' : 'purchases-by-item';
+        const partyHead = kind === 'sales' ? T('Customer') : 'Vendor';
+        const data = await API.get(`/reports/${path}/lines?item_id=${encodeURIComponent(itemKey)}&${qs}`);
+        const rows = (data.lines || []).map(l => {
+            const href = (ReportsPage._ITEM_DOC[l.link.type] || '#/') + l.link.id;
+            const open = escapeHtml(`closeModal();App.navigate(${JSON.stringify(href)})`);
+            return `<tr>
+                <td>${formatDate(l.date)}</td>
+                <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(l.doc_type)} ${escapeHtml(l.number || '')}</a></td>
+                <td>${escapeHtml(l.party || '')}</td>
+                <td>${escapeHtml(l.description || '')}</td>
+                <td class="amount">${l.quantity}</td>
+                <td class="amount">${formatCurrency(l.rate)}</td>
+                <td class="amount">${formatCurrency(l.amount)}</td>
+            </tr>`;
+        }).join('');
+        // openModal sets the title as text: the name as it is ("Nuts & Bolts")
+        openModal(name, `
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Date</th><th scope="col">Document</th><th scope="col">${partyHead}</th><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No lines</td></tr>'}</tbody>
+            </table></div>
+            <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`, { wide: true });
+    },
+
+    async salesByItem(prefill) {
+        prefill = prefill || {};
+        const params = { customer_id: prefill.customer_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null };
+        let customers = [], classes = [], jobs = [];
+        try { customers = await API.get('/customers?active_only=true'); } catch (e) { customers = []; }
+        try { classes = await API.get('/classes?include_archived=true'); } catch (e) { classes = []; }
+        try { jobs = await API.get('/jobs?include_inactive=true'); } catch (e) { jobs = []; }
+        const toolbar =
+            ReportsPage._itemPicker('sbi-customer', T('Customer'), customers, params.customer_id, 'customer_id')
+            + ReportsPage._itemPicker('sbi-class', T('Class'), classes, params.class_id, 'class_id')
+            + ReportsPage._itemPicker('sbi-job', T('Job'), jobs, params.job_id, 'job_id');
+        await ReportsPage.openPeriodModal('Sales by Item', ReportsPage.defaultPeriod(), async (_period, range, p) => {
+            const qs = ReportsPage._itemQs(range, p, 'customer_id');
+            const data = await API.get(`/reports/sales-by-item?${qs}`);
+            const money = (v) => v === null || v === undefined ? '—' : formatCurrency(v);
+            const pct = (v) => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
+            let rows = data.items.map(i => {
+                const key = i.item_id === null ? 'none' : i.item_id;
+                const open = escapeHtml(`ReportsPage.openItemLines('sales', ${JSON.stringify(key)}, ${JSON.stringify(i.item_name)}, ${JSON.stringify(qs)})`);
+                return `<tr>
+                    <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(i.item_name)}</a></td>
+                    <td>${escapeHtml(i.item_type || '')}</td>
+                    <td class="amount">${i.quantity}</td>
+                    <td class="amount">${formatCurrency(i.amount)}</td>
+                    <td class="amount">${money(i.average_price)}</td>
+                    <td class="amount">${money(i.cogs)}</td>
+                    <td class="amount">${money(i.gross_margin)}</td>
+                    <td class="amount">${pct(i.margin_pct)}</td>
+                </tr>`;
+            }).join('');
+            rows += `<tr style="font-weight:700; background:var(--gray-50);">
+                <td>TOTAL</td><td></td>
+                <td class="amount">${data.total_quantity}</td>
+                <td class="amount">${formatCurrency(data.total_amount)}</td>
+                <td class="amount"></td>
+                <td class="amount">${formatCurrency(data.total_cogs)}</td>
+                <td class="amount">${formatCurrency(data.total_margin)}</td>
+                <td class="amount"></td>
+            </tr>`;
+            return `${ReportsPage._exportButtons('sales-by-item', qs)}
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Click an item for the lines behind it.</p>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg price</th><th scope="col" class="amount">COGS</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Margin %</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="8" style="text-align:center; color:var(--gray-400);">No sales in this period</td></tr>'}</tbody>
+                </table></div>`;
+        }, "Dates", false, { reportType: 'sales_by_item', view: 'sales-by-item', params, prefill, toolbar });
+    },
+
+    async purchasesByItem(prefill) {
+        prefill = prefill || {};
+        const params = { vendor_id: prefill.vendor_id || null, class_id: prefill.class_id || null, job_id: prefill.job_id || null };
+        let vendors = [], classes = [], jobs = [];
+        try { vendors = await API.get('/vendors?active_only=true'); } catch (e) { vendors = []; }
+        try { classes = await API.get('/classes?include_archived=true'); } catch (e) { classes = []; }
+        try { jobs = await API.get('/jobs?include_inactive=true'); } catch (e) { jobs = []; }
+        const toolbar =
+            ReportsPage._itemPicker('pbi-vendor', 'Vendor', vendors, params.vendor_id, 'vendor_id')
+            + ReportsPage._itemPicker('pbi-class', T('Class'), classes, params.class_id, 'class_id')
+            + ReportsPage._itemPicker('pbi-job', T('Job'), jobs, params.job_id, 'job_id');
+        await ReportsPage.openPeriodModal('Purchases by Item', ReportsPage.defaultPeriod(), async (_period, range, p) => {
+            const qs = ReportsPage._itemQs(range, p, 'vendor_id');
+            const data = await API.get(`/reports/purchases-by-item?${qs}`);
+            const money = (v) => v === null || v === undefined ? '—' : formatCurrency(v);
+            let rows = data.items.map(i => {
+                const key = i.item_id === null ? 'none' : i.item_id;
+                const open = escapeHtml(`ReportsPage.openItemLines('purchases', ${JSON.stringify(key)}, ${JSON.stringify(i.item_name)}, ${JSON.stringify(qs)})`);
+                return `<tr>
+                    <td><a href="javascript:void(0)" style="color:var(--text-link); text-decoration:none;" onclick="${open}">${escapeHtml(i.item_name)}</a></td>
+                    <td>${escapeHtml(i.item_type || '')}</td>
+                    <td class="amount">${i.quantity}</td>
+                    <td class="amount">${formatCurrency(i.amount)}</td>
+                    <td class="amount">${money(i.average_cost)}</td>
+                </tr>`;
+            }).join('');
+            rows += `<tr style="font-weight:700; background:var(--gray-50);">
+                <td>TOTAL</td><td></td>
+                <td class="amount">${data.total_quantity}</td>
+                <td class="amount">${formatCurrency(data.total_amount)}</td>
+                <td class="amount"></td>
+            </tr>`;
+            return `${ReportsPage._exportButtons('purchases-by-item', qs)}
+                <p style="margin-bottom:12px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)}. Bills and vendor credits only. Click an item for the lines behind it.</p>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Item</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Amount</th><th scope="col" class="amount">Avg cost</th></tr></thead>
+                    <tbody>${rows || '<tr><td colspan="5" style="text-align:center; color:var(--gray-400);">No purchases in this period</td></tr>'}</tbody>
+                </table></div>`;
+        }, "Dates", false, { reportType: 'purchases_by_item', view: 'purchases-by-item', params, prefill, toolbar });
     },
 
     async customerStatementPicker() {
@@ -1537,7 +1935,7 @@ const ReportsPage = {
     },
 
     async arAging(prefill) {
-        await ReportsPage.openPeriodModal(T("Accounts Receivable Aging"), "this_year_to_date", async (_period, params) => {
+        await ReportsPage.openPeriodModal(T("Accounts Receivable Aging"), ReportsPage.defaultPeriod(), async (_period, params) => {
             const data = await API.get(`/reports/ar-aging?as_of_date=${params.as_of_date}`);
             // Save CSV writes the file the Accountant's Package carries (#393):
             // the whole company, as the screen shows it.
@@ -1591,7 +1989,7 @@ const ReportsPage = {
     },
 
     async apAging(prefill) {
-        await ReportsPage.openPeriodModal("Accounts Payable Aging", "this_year_to_date", async (_period, params) => {
+        await ReportsPage.openPeriodModal("Accounts Payable Aging", ReportsPage.defaultPeriod(), async (_period, params) => {
             const data = await API.get(`/reports/ap-aging?as_of_date=${params.as_of_date}`);
             const csvQs = `as_of_date=${params.as_of_date}`;
             // A vendor's name opens the vendor's page (R9)
@@ -1627,7 +2025,7 @@ const ReportsPage = {
     },
 
     async trialBalance(prefill) {
-        await ReportsPage.openPeriodModal("Trial Balance", "this_year_to_date", async (_period, range, live) => {
+        await ReportsPage.openPeriodModal("Trial Balance", ReportsPage.defaultPeriod(), async (_period, range, live) => {
             const data = await API.get(`/reports/trial-balance?start_date=${range.start}&end_date=${range.end}${ReportsPage._adjQs(live)}`);
             // An account's name opens its register for the report's dates
             // (R9), with "Back to Trial Balance"
@@ -1663,7 +2061,7 @@ const ReportsPage = {
     // The accountant's adjusting entries for a period (#341): each with its
     // lines and who posted it; the totals tie to the General Ledger.
     async adjustingEntries(prefill) {
-        await ReportsPage.openPeriodModal("Adjusting Journal Entries", "this_year_to_date", async (_period, range) => {
+        await ReportsPage.openPeriodModal("Adjusting Journal Entries", ReportsPage.defaultPeriod(), async (_period, range) => {
             const qs = `start_date=${range.start}&end_date=${range.end}`;
             const data = await API.get(`/reports/adjusting-entries?${qs}`);
             const entries = data.entries.map(e => {
@@ -1695,7 +2093,7 @@ const ReportsPage = {
     // What moved inside a closed period (#342): each use of the
     // closing-date password, with the rows it changed before and after.
     async closingDateExceptions(prefill) {
-        await ReportsPage.openPeriodModal("Closing Date Exceptions", "this_year_to_date", async (_period, range) => {
+        await ReportsPage.openPeriodModal("Closing Date Exceptions", ReportsPage.defaultPeriod(), async (_period, range) => {
             // the period's days and every time shown are the page's clock's:
             // the log keeps UTC, and an evening override was dated tomorrow
             // and missing from "this year to date" (NEW-152 / W-19)
@@ -1753,7 +2151,7 @@ const ReportsPage = {
         if (/^\d+$/.test(p.vendor_id || '')) params.vendor_id = p.vendor_id;
         if (p.payee) params.payee = p.payee;
         ReportsPage._rc = { lists: null, lines: [], ticked: new Set(), plan: null, range: null };
-        await ReportsPage.openPeriodModal('Reclassify Transactions', 'this_year_to_date', async (_period, range, prm) => {
+        await ReportsPage.openPeriodModal('Reclassify Transactions', ReportsPage.defaultPeriod(), async (_period, range, prm) => {
             const rc = ReportsPage._rc;
             rc.range = range;
             rc.plan = null;
@@ -1916,7 +2314,7 @@ const ReportsPage = {
     },
 
     async cashFlow(prefill) {
-        await ReportsPage.openPeriodModal("Cash Flow Statement", "this_year_to_date", async (_period, range) => {
+        await ReportsPage.openPeriodModal("Cash Flow Statement", ReportsPage.defaultPeriod(), async (_period, range) => {
             const data = await API.get(`/reports/cash-flow?start_date=${range.start}&end_date=${range.end}`);
             // Indirect method (banking, exploratory 2.17.3 W-M6/F18): net
             // income, what moved no cash, the change in working capital;
@@ -2436,7 +2834,7 @@ ReportsPage.profitLossByClass = async function (prefill) {
         kind: 'class', key: 'class_ids', noun: T('class'), nouns: T('classes'), Nouns: T('Classes'), inactiveWord: 'archived',
         items: classes.map(c => ({ id: c.id, name: c.name, inactive: !!c.is_archived })), params,
     });
-    await ReportsPage.openPeriodModal(T("P&L by Class"), "this_year_to_date", async (period, range, p) => {
+    await ReportsPage.openPeriodModal(T("P&L by Class"), ReportsPage.defaultPeriod(), async (period, range, p) => {
         const qs = `start_date=${range.start}&end_date=${range.end}${ReportsPage._columnQs(p, 'class_ids')}`;
         const data = await API.get(`/reports/profit-loss-by-class?${qs}`);
         const columns = data.classes;
@@ -2489,7 +2887,7 @@ ReportsPage.profitLossByJob = async function (prefill) {
         kind: 'job', key: 'job_ids', noun: T('job'), nouns: T('jobs'), Nouns: T('Jobs'), inactiveWord: 'inactive',
         items, params,
     });
-    await ReportsPage.openPeriodModal(`${T('P&L')} by ${T('Job')}`, "this_year_to_date", async (period, range, p) => {
+    await ReportsPage.openPeriodModal(`${T('P&L')} by ${T('Job')}`, ReportsPage.defaultPeriod(), async (period, range, p) => {
         const qs = `start_date=${range.start}&end_date=${range.end}${ReportsPage._columnQs(p, 'job_ids')}`;
         const data = await API.get(`/reports/profit-loss-by-job?${qs}`);
         const columns = data.jobs;
@@ -2567,7 +2965,7 @@ ReportsPage.profitLossOfClass = async function (classId, className, prefill, fro
             </span>
         </div>`;
     const params = { class_id: classId, from: back || undefined };
-    await ReportsPage.openPeriodModal(`${T('Profit & Loss')} — ${className || T('Class')}`, "this_year_to_date", async (period, range, p) => {
+    await ReportsPage.openPeriodModal(`${T('Profit & Loss')} — ${className || T('Class')}`, ReportsPage.defaultPeriod(), async (period, range, p) => {
         const id = parseInt(p.class_id, 10) || classId;
         const qs = `start_date=${range.start}&end_date=${range.end}&class_id=${id}`;
         const data = await API.get(`/reports/profit-loss?${qs}`);
@@ -2732,7 +3130,7 @@ ReportsPage.reconciliationReports = async function () {
 
 // Financial statements pack — one PDF with P&L, Balance Sheet, Trial Balance.
 ReportsPage.financialStatementsPdf = async function (prefill) {
-    await ReportsPage.openPeriodModal("Financial Statements Pack", "this_year_to_date", async (_period, range) => {
+    await ReportsPage.openPeriodModal("Financial Statements Pack", ReportsPage.defaultPeriod(), async (_period, range) => {
         window.open(`/api/reports/financial-statements/pdf?start_date=${range.start}&end_date=${range.end}`, '_blank');
         // Said for both: a browser opens a tab, the desktop app saves the PDF,
         // opens it in a window of its own and says where it saved it (F24).
@@ -2748,7 +3146,7 @@ ReportsPage.financialStatementsPdf = async function (prefill) {
 // customer's, and "all jobs" drops the filter in place (address replaced).
 ReportsPage.jobProfitability = async function (prefill) {
     const params = { customer_id: parseInt((prefill || {}).customer_id, 10) || null };
-    await ReportsPage.openPeriodModal(T("Job Profitability"), "this_year_to_date", async (_period, range) => {
+    await ReportsPage.openPeriodModal(T("Job Profitability"), ReportsPage.defaultPeriod(), async (_period, range) => {
         const filter = params.customer_id ? `&customer_id=${params.customer_id}` : '';
         const [data, customer] = await Promise.all([
             API.get(`/reports/job-profitability?start_date=${range.start}&end_date=${range.end}${filter}`),
@@ -2809,7 +3207,7 @@ ReportsPage.jobProfitability = async function (prefill) {
 };
 
 ReportsPage.jobBudgetVsActual = async function (prefill) {
-    await ReportsPage.openPeriodModal(T("Job Budget vs Actual"), "this_year_to_date", async (_period, range) => {
+    await ReportsPage.openPeriodModal(T("Job Budget vs Actual"), ReportsPage.defaultPeriod(), async (_period, range) => {
         const data = await API.get(`/jobs/budget-vs-actual?start_date=${range.start}&end_date=${range.end}`);
         const pct = v => v === null || v === undefined ? '—' : `${v.toFixed(1)}%`;
         const t = { revised: 0, committed: 0, actual: 0, projected: 0, variance: 0, act_revenue: 0 };
@@ -2894,7 +3292,7 @@ ReportsPage.emailGivingStatements = async function () {
 };
 
 ReportsPage.pledges = async function (prefill) {
-    await ReportsPage.openPeriodModal("Pledge Report", "this_year_to_date", async (_period, range) => {
+    await ReportsPage.openPeriodModal("Pledge Report", ReportsPage.defaultPeriod(), async (_period, range) => {
         const qs = `start_date=${range.start}&end_date=${range.end}`;
         const d = await API.get(`/reports/pledges?${qs}`);
         const cols = ['pledged', 'invoiced', 'not_yet_invoiced', 'received', 'written_off', 'outstanding'];
@@ -2937,7 +3335,7 @@ ReportsPage.possibleDuplicates = async function (prefill) {
         <div class="form-group" style="justify-content:flex-end;">
             <label style="${box}"><input type="checkbox" id="dup-show-dismissed" ${params.include_dismissed ? 'checked' : ''}
                 onchange="ReportsPage.setParam('include_dismissed', this.checked ? '1' : '')"> Show groups marked not a duplicate</label></div>`;
-    await ReportsPage.openPeriodModal("Possible Duplicates", "this_year_to_date", async (_period, range, prm) => {
+    await ReportsPage.openPeriodModal("Possible Duplicates", ReportsPage.defaultPeriod(), async (_period, range, prm) => {
         if (!prm.account_id) return '<div class="empty-state"><p>There is no bank or credit-card account.</p></div>';
         const qs = `account_id=${encodeURIComponent(prm.account_id)}&start_date=${range.start}&end_date=${range.end}${prm.include_dismissed ? '&include_dismissed=true' : ''}`;
         const data = await API.get(`/reports/possible-duplicates?${qs}`);
@@ -3100,7 +3498,7 @@ ReportsPage.compareToggleHtml = function (key) {
 };
 
 ReportsPage.statementOfActivities = async function (prefill) {
-    await ReportsPage.openPeriodModal("Statement of Activities", "this_year_to_date", async (_period, range) => {
+    await ReportsPage.openPeriodModal("Statement of Activities", ReportsPage.defaultPeriod(), async (_period, range) => {
         const cmp = ReportsPage._compare.statement_of_activities;
         const qs = `start_date=${range.start}&end_date=${range.end}${cmp ? '&compare=prior_year' : ''}`;
         const d = await API.get(`/reports/statement-of-activities?${qs}`);
@@ -3140,7 +3538,7 @@ ReportsPage.statementOfActivities = async function (prefill) {
 };
 
 ReportsPage.statementOfFinancialPosition = async function (prefill) {
-    await ReportsPage.openPeriodModal("Statement of Financial Position", "this_year_to_date", async (_period, params) => {
+    await ReportsPage.openPeriodModal("Statement of Financial Position", ReportsPage.defaultPeriod(), async (_period, params) => {
         const qs = `as_of_date=${params.as_of_date}`;
         const d = await API.get(`/reports/statement-of-financial-position?${qs}`);
         const drillCall = (i) => escapeHtml(`ReportsPage.openDrillDown(${i.account_id},${JSON.stringify(i.account_name)},null,${JSON.stringify(params.as_of_date)},null,null,'statement-of-financial-position')`);
@@ -3174,7 +3572,7 @@ ReportsPage.statementOfFinancialPosition = async function (prefill) {
 };
 
 ReportsPage.fundBalances = async function (prefill) {
-    await ReportsPage.openPeriodModal("Fund Balances", "this_year_to_date", async (_period, range) => {
+    await ReportsPage.openPeriodModal("Fund Balances", ReportsPage.defaultPeriod(), async (_period, range) => {
         const qs = `start_date=${range.start}&end_date=${range.end}`;
         const d = await API.get(`/reports/fund-balances?${qs}`);
         const keys = ['beginning', 'contributions', 'expenses', 'releases', 'ending', 'unreleased'];
@@ -3196,7 +3594,7 @@ ReportsPage.fundBalances = async function (prefill) {
 };
 
 ReportsPage.functionalExpenses = async function (prefill) {
-    await ReportsPage.openPeriodModal("Statement of Functional Expenses", "this_year_to_date", async (_period, range) => {
+    await ReportsPage.openPeriodModal("Statement of Functional Expenses", ReportsPage.defaultPeriod(), async (_period, range) => {
         const cmp = ReportsPage._compare.functional_expenses;
         const qs = `start_date=${range.start}&end_date=${range.end}${cmp ? '&compare=prior_year' : ''}`;
         const d = await API.get(`/reports/functional-expenses?${qs}`);

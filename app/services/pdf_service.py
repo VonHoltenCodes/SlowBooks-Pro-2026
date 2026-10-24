@@ -252,6 +252,19 @@ def generate_deposit_pdf(deposit: dict, company_settings: dict) -> bytes:
     return render_pdf(render_deposit_html(deposit, company_settings))
 
 
+def render_labels_html(labels: list) -> str:
+    """Avery 5160 labels, 30 to a Letter page (#436). `labels` is a flat
+    list of {line1, line2, address1, address2, city_line}; the template
+    breaks a page every 30 so a long list prints across sheets."""
+    pages = [labels[i : i + 30] for i in range(0, len(labels), 30)] or [[]]
+    template = _jinja_env.get_template("labels_5160_pdf.html")
+    return template.render(pages=pages)
+
+
+def generate_labels_pdf(labels: list) -> bytes:
+    return render_pdf(render_labels_html(labels))
+
+
 def generate_credit_memo_pdf(credit_memo, company_settings: dict) -> bytes:
     """A credit memo, printed the way an invoice is (credit memos had no
     PDF at all, so one could not be sent: 2.17.3 exploratory W-L19)."""

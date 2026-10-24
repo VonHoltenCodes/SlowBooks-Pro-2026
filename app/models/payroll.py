@@ -244,6 +244,10 @@ class PayRun(Base):
     # The Job Cost Entry that distributed this run's actual labor burden
     # to jobs (labor cost type burden_method = "payroll")
     burden_job_cost_id = Column(Integer, ForeignKey("job_costs.id"), nullable=True)
+    # Set on a draft when an employee's opening YTD (#433) changed after the
+    # draft was figured: its wage bases came from the old figures, so it is
+    # not processed until it is figured again.
+    stale_reason = Column(String(500), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

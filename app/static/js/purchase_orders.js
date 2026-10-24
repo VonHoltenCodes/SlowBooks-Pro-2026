@@ -134,9 +134,8 @@ const PurchaseOrdersPage = {
     },
 
     lineHtml(idx, line, items) {
-        const opts = items.map(i => `<option value="${i.id}" ${line.item_id==i.id?'selected':''}>${escapeHtml(i.name)}</option>`).join('');
         return `<tr data-poline="${idx}">
-            <td><select class="line-item" onchange="PurchaseOrdersPage.itemSel(${idx})"><option value="">--</option>${opts}</select></td>
+            <td><select class="line-item" onchange="PurchaseOrdersPage.itemSel(${idx})">${ItemQuickAdd.options(items, line.item_id)}</select></td>
             <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
             ${CostCodes.cellHtml('line-cost-code', line.cost_code_id || null)}
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="PurchaseOrdersPage.recalc()"></td>
@@ -154,6 +153,7 @@ const PurchaseOrdersPage = {
 
     itemSel(idx) {
         const row = $(`[data-poline="${idx}"]`);
+        if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), PurchaseOrdersPage._items, () => PurchaseOrdersPage.itemSel(idx), 'purchase')) return;
         const item = PurchaseOrdersPage._items.find(i => i.id == row.querySelector('.line-item').value);
         if (item) {
             row.querySelector('.line-desc').value = item.description || item.name;
@@ -186,7 +186,7 @@ const PurchaseOrdersPage = {
         const lines = [];
         $$('#po-lines tr').forEach((row, i) => {
             lines.push({
-                item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
+                item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,

@@ -377,7 +377,7 @@ def test_only_an_admin_writes_the_words_but_anyone_may_preview(
 
     keeper = _bearer(_mint(client, "keeper-bot", "bookkeeper"))
     reader = _bearer(_mint(client, "read-bot", "readonly"))
-    admin = _bearer(_mint(client, "admin-bot", "admin"))
+    admin = client  # signed in: no API token is an administrator (#434)
 
     footer = {"giving_statement_footer": "y"}
     msg = {"name": "n", "body": "x", "kind": "giving_statement"}

@@ -12,6 +12,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, Column, DateTime, Integer, String
+from sqlalchemy import false as sa_false
 
 from app.database import Base
 
@@ -34,6 +35,12 @@ class ApiToken(Base):
     token_hint = Column(String(12), nullable=False)
     role = Column(String(20), nullable=False)  # same values as users.role
     is_active = Column(Boolean, nullable=False, default=True)
+    # Make, list and download this company's backups on top of the role
+    # (#434). Off unless an administrator ticks it; restore is never a
+    # token's.
+    allow_backups = Column(
+        Boolean, nullable=False, default=False, server_default=sa_false()
+    )
     created_by = Column(String(100), nullable=False, default="")
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     last_used_at = Column(DateTime, nullable=True)

@@ -149,6 +149,7 @@ from app.models import (  # noqa: F401,E402
     nonprofit as nonprofit_model,
     payments,
     payroll,
+    payroll_opening,
     pto,
     purchase_orders,
     qbo_mapping,
@@ -366,6 +367,33 @@ def db_session(TestSession):
         yield session
     finally:
         session.close()
+
+
+@pytest.fixture
+def legacy_admin_token(db_session):
+    """make(label) → the secret of an admin-role API token, written to the
+    database the way one made before 2.29.0 is. None are made now (#434),
+    but those that exist keep working until they are revoked, so the rules
+    an admin token still meets are tested on one of these."""
+    from app.models.api_tokens import ApiToken
+    from app.services.api_token_service import generate_token, hash_token
+
+    def make(label="legacy-admin"):
+        secret = generate_token()
+        db_session.add(
+            ApiToken(
+                label=label,
+                token_hash=hash_token(secret),
+                token_hint=secret[:10],
+                role="admin",
+                is_active=True,
+                created_by="test",
+            )
+        )
+        db_session.commit()
+        return secret
+
+    return make
 
 
 @pytest.fixture

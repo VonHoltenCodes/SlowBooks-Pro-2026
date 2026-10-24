@@ -147,21 +147,13 @@ def _class_out(cls: TxnClass | None) -> dict | None:
 
 
 def _voided_ids(db: Session, txn_ids: list[int]) -> set[int]:
-    """The transactions among these that were voided (a reversal names
-    them as its source) or are reversals themselves."""
-    if not txn_ids:
-        return set()
-    voided = set()
-    for (source_id,) in (
-        db.query(Transaction.source_id)
-        .filter(
-            Transaction.source_type.like("%\\_void", escape="\\"),
-            Transaction.source_id.in_(txn_ids),
-        )
-        .all()
-    ):
-        voided.add(source_id)
-    return voided
+    """The transactions among these that a `<type>_void` reversal voided.
+    Routed through app/services/voids.py so a document-keyed void (a payment,
+    a bill) is told from a transaction-keyed one (#448); reversals themselves
+    are caught separately by the endswith("_void") check in verdict()."""
+    from app.services.voids import voided_transaction_ids
+
+    return voided_transaction_ids(db, txn_ids)
 
 
 def _bill_lines_by_bill(db: Session, bill_ids: set[int]) -> dict[int, list[BillLine]]:
@@ -548,9 +540,26 @@ def reclassify(
     for day in sorted({m["_line"].transaction.date for m in moved}):
         check_closing_date(db, day)
 
+    # The stored balances follow the lines (#490): each moved line comes
+    # off the account it leaves and goes onto the one it lands on, in each
+    # account's own direction (an expense line moved onto an income account
+    # reads as negative income there), applied as one atomic update per
+    # account after the lines are flushed. The ledger reports read the
+    # lines; the Chart of Accounts, the accounts export and the AI tools
+    # read this total, and used to keep showing the old account.
+    from app.services.accounting import apply_balance_deltas, natural_delta
+
+    balance_deltas: dict = {}
     for m in moved:
         line, bill_line = m["_line"], m["_bill_line"]
         if to_account is not None and line.account_id != to_account.id:
+            from_account = line.account
+            balance_deltas[from_account.id] = balance_deltas.get(
+                from_account.id, Decimal("0")
+            ) - natural_delta(from_account, line.debit, line.credit)
+            balance_deltas[to_account.id] = balance_deltas.get(
+                to_account.id, Decimal("0")
+            ) + natural_delta(to_account, line.debit, line.credit)
             line.account_id = to_account.id
             if bill_line is not None:
                 bill_line.account_id = to_account.id
@@ -563,6 +572,7 @@ def reclassify(
             if bill_line is not None:
                 bill_line.class_id = to_class.id
     db.flush()
+    apply_balance_deltas(db, balance_deltas)
 
     # One event for the move, every line named, beside the change the
     # audit hook writes for each line.

@@ -17,6 +17,9 @@ const CustomersPage = {
                 <input type="text" placeholder="${Terms.text('Search customers...')}" id="customer-search"
                     oninput="CustomersPage.filter(this.value)">
                 ${ActiveLists.pickerHtml('customers')}
+                <!-- #436: the Past Customers report, opened unfiltered; the
+                     report is the one view, a link here is the honest tab. -->
+                <button class="btn btn-secondary" onclick="App.navigate('#/reports/past-customers')">${Terms.text('Past customers')}</button>
             </div>`;
 
         if (customers.length === 0 && ActiveLists.emptyText('customers')) {

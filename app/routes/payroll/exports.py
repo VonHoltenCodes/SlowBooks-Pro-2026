@@ -51,6 +51,14 @@ def download_paystub(run_id: int, stub_id: int, db: Session = Depends(get_db)):
     ytd = employee_ytd(db, stub.employee_id, run.pay_date.year)
     for key, attr in (("gross", "gross_pay"), ("net", "net_pay")):
         ytd[key] = sum((getattr(s, attr) or 0 for s in ytd_stubs), Decimal("0"))
+    # and what the old system paid before the switch, as employee_ytd
+    # counts it, so the stub's YTD gross and net agree with it (#433)
+    from app.services import payroll_opening as po
+
+    opening = po.opening_for(db, stub.employee_id, run.pay_date.year)
+    if po.counts_before(opening, run.pay_date):
+        ytd["gross"] += po.amount(opening, "gross")
+        ytd["net"] += po.amount(opening, "net")
     pdf = generate_paystub_pdf(
         stub,
         emp,

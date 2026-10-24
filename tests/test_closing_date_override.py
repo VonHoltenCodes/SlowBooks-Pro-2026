@@ -128,17 +128,21 @@ def test_without_a_password_set_the_refusal_is_unchanged(client, seed_accounts):
     )
 
 
-def test_an_api_token_cannot_use_the_override(client, seed_accounts):
+def test_an_api_token_cannot_use_the_override(
+    client, seed_accounts, legacy_admin_token
+):
+    """Not the daily-books token, and not an admin one made before #434."""
     _close(client, OVERRIDE_PW)
     cid = _customer(client)
-    minted = client.post("/api/tokens", json={"label": "agent", "role": "admin"})
+    minted = client.post("/api/tokens", json={"label": "agent", "role": "bookkeeper"})
     assert minted.status_code == 201, minted.text
-    agent = TestClient(app)
-    agent.headers["Authorization"] = f"Bearer {minted.json()['token']}"
-    r = agent.post(
-        "/api/invoices", json=_invoice(cid), headers=_with_password(OVERRIDE_PW)
-    )
-    assert r.status_code == 403, r.text
+    for secret in (minted.json()["token"], legacy_admin_token()):
+        agent = TestClient(app)
+        agent.headers["Authorization"] = f"Bearer {secret}"
+        r = agent.post(
+            "/api/invoices", json=_invoice(cid), headers=_with_password(OVERRIDE_PW)
+        )
+        assert r.status_code == 403, r.text
 
 
 def test_the_other_closed_period_paths_take_the_override_too(client, seed_accounts):

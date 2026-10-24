@@ -185,6 +185,20 @@ def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
     lines_data = []
     for line in txn.lines:
         lines_data.append(_line_dict(line, accounts.get(line.account_id)))
+    # A bank entry is edited in its register, not here: the page says so
+    # and links back to the bank or card account it was posted from (the
+    # line on an account with a bank kind; the entry's other lines are its
+    # categories).
+    register = next(
+        (
+            accounts[line.account_id]
+            for line in txn.lines
+            if txn.source_type == "bank_entry"
+            and accounts.get(line.account_id) is not None
+            and accounts[line.account_id].bank_kind
+        ),
+        None,
+    )
     return JournalEntryResponse(
         id=txn.id,
         date=txn.date,
@@ -198,6 +212,8 @@ def get_journal_entry(entry_id: int, db: Session = Depends(get_db)):
         total_credit=float(sum(line.credit for line in txn.lines)),
         voided=reversed_already(db, txn),
         voidable=_voidable(txn, reversed_already(db, txn)),
+        register_account_id=register.id if register is not None else None,
+        register_account_name=register.name if register is not None else "",
     )
 
 
@@ -278,6 +294,16 @@ def void_journal_entry(
         raise HTTPException(status_code=404, detail="Journal entry not found")
     if txn.source_type and txn.source_type.endswith("_void"):
         raise HTTPException(status_code=400, detail="Cannot void a reversal entry")
+    if txn.source_type == "payroll":
+        # A pay run's posting is reversed by voiding the run (#432), which
+        # also frees its time entries, backs out YTD and marks the stubs.
+        # Reversing it here too would take wages, liabilities and cash off
+        # a second time.
+        raise HTTPException(
+            status_code=400,
+            detail="This is a pay run's payroll entry. Void the pay run "
+            "instead (Payroll, open the run, Void).",
+        )
     if txn.source_type == "item_opening":
         # Voiding would remove the value but leave the movement, quantity and
         # average cost, so valuation would say stock the GL no longer shows.

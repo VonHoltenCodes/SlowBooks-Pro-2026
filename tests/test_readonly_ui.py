@@ -114,7 +114,9 @@ MARKED = {
         r'data-write>\s*<button type="submit" class="btn btn-primary">Apply Batch Payment',
     ],
     "banking.js": [
-        r'<form onsubmit="BankingPage\.connectSimpleFIN\(event\)" data-write>',
+        # Connect is an administrator's since 2.29.0 (data-admin hides it
+        # for a read-only sign-in as data-write did, and for a bookkeeper too)
+        r'<form onsubmit="BankingPage\.connectSimpleFIN\(event\)" data-admin>',
         r'class="review-cat" data-write',
         r"data-write>\s*<button[^>]*BankingPage\.addLine\(",
     ],

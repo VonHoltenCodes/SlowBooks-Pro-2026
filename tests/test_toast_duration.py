@@ -3,8 +3,11 @@
 Every toast was removed after three seconds whatever it said, so a two-line
 refusal (the closing-date lock) was gone before it was read. A toast now
 stays three seconds for a few words and longer for more, at least six for
-an error and never more than fifteen; hovering holds it and a click
-dismisses it."""
+an error and never more than fifteen. It takes no clicks: the container has
+pointer-events: none, so a click where a toast sits reaches what is under it
+("Settings saved" over Save Settings swallowed the next save, 2.29.0 gate,
+skytech W-35); with no pointer events there is no hover to hold it, so its
+whole stay is the timer."""
 
 import json
 import shutil
@@ -20,9 +23,9 @@ const fs = require('fs'), vm = require('vm');
 const timers = [];
 function node() {
   const listeners = {};
-  return { className: '', textContent: '', removed: false,
+  return { className: '', textContent: '', removed: false, listeners,
     remove() { this.removed = true; },
-    addEventListener(t, fn) { listeners[t] = fn; }, fire(t) { listeners[t](); } };
+    addEventListener(t, fn) { listeners[t] = fn; } };
 }
 const shown = [];
 const container = { appendChild: (el) => shown.push(el) };
@@ -46,12 +49,9 @@ const ms = {
 ctx.toast(lock, 'error');
 const el = shown[0];
 const first = timers[0].ms;
-el.fire('mouseenter');
-const heldCleared = !!timers[0].cleared;
-el.fire('mouseleave');
-const after = timers[1].ms;
-el.fire('click');
-console.log(JSON.stringify({ ms, first, heldCleared, after, removed: el.removed }));
+timers[0].fn();
+console.log(JSON.stringify({ ms, first, listeners: Object.keys(el.listeners),
+  timers: timers.length, removed: el.removed }));
 """
 
 
@@ -72,5 +72,15 @@ def test_a_toast_stays_long_enough_to_read():
     assert 12000 <= got["ms"]["lock"] <= 15000  # the two-line lock refusal
     assert got["ms"]["huge"] == 15000
     assert got["first"] == got["ms"]["lock"]
-    assert got["heldCleared"] is True and got["after"] == 2000
+    # no mouse handlers: the toast is not in the pointer's way at all
+    assert got["listeners"] == [] and got["timers"] == 1
     assert got["removed"] is True
+
+
+def test_a_toast_takes_no_clicks():
+    css = (ROOT / "app/static/css/style.css").read_text(encoding="utf-8")
+    container = css[css.index("#toast-container {") :]
+    container = container[: container.index("}")]
+    assert "pointer-events: none;" in container
+    # a toast question's buttons (toastAction) take their own
+    assert ".toast .btn { pointer-events: auto; }" in css

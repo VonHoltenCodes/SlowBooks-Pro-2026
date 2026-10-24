@@ -13,11 +13,12 @@ from app.database import get_db
 from app.routes.reports._router import router
 from app.routes.reports.financial import _money, _pdf_response
 from app.services import nonprofit_reports as svc
+from app.services.fiscal_year import fiscal_year_start
 
 
-def _period(start_date, end_date):
+def _period(db, start_date, end_date):
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     return start_date, end_date
@@ -142,7 +143,7 @@ def statement_of_activities(
     ),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     return _soa(db, start_date, end_date, compare)
 
 
@@ -248,7 +249,7 @@ def statement_of_activities_pdf(
     compare: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = _soa(db, start_date, end_date, compare)
     return _pdf_response(
         [_soa_section(data)],
@@ -264,7 +265,7 @@ def statement_of_activities_csv(
     compare: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = _soa(db, start_date, end_date, compare)
     return _csv_response(
         svc.activities_csv(data),
@@ -281,7 +282,7 @@ def fund_balances(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     return svc.fund_balances(db, start_date, end_date)
 
 
@@ -329,7 +330,7 @@ def fund_balances_pdf(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = svc.fund_balances(db, start_date, end_date)
     return _pdf_response(
         [_funds_section(data)], db, f"fund-balances_{start_date}_{end_date}.pdf"
@@ -342,7 +343,7 @@ def fund_balances_csv(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = svc.fund_balances(db, start_date, end_date)
     return _csv_response(
         svc.fund_balances_csv(data), f"fund-balances_{start_date}_{end_date}.csv"
@@ -361,7 +362,7 @@ def functional_expenses(
     ),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     return _sfe(db, start_date, end_date, compare)
 
 
@@ -430,7 +431,7 @@ def functional_expenses_pdf(
     compare: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = _sfe(db, start_date, end_date, compare)
     return _pdf_response(
         [_sfe_section(data)], db, f"functional-expenses_{start_date}_{end_date}.pdf"
@@ -444,7 +445,7 @@ def functional_expenses_csv(
     compare: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = _sfe(db, start_date, end_date, compare)
     return _csv_response(
         svc.functional_expenses_csv(data),

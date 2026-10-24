@@ -186,12 +186,18 @@ def _amount(row: dict, key: str) -> Decimal | None:
 
 
 def import_items(db: Session, csv_text: str) -> dict:
-    from app.routes.items import item_name_key
+    from app.routes.items import item_code_key, item_name_key
 
     # Names already taken by an active item — the same name in other
     # capitals included, as the item form refuses it (W-M16) — plus the
     # rows this file adds, so a name twice in the file imports once.
     taken = {item_name_key(n) for (n,) in db.query(Item.name).filter(Item.is_active)}
+    # Codes already used, by any item (the unique index covers inactive ones
+    # too), compared as the item form compares them (#445).
+    codes = {
+        item_code_key(c): n
+        for (c, n) in db.query(Item.code, Item.name).filter(Item.code.isnot(None))
+    }
     reader = UnguardedDictReader(io.StringIO(csv_text))
     created = 0
     skipped = 0
@@ -227,9 +233,20 @@ def import_items(db: Session, csv_text: str) -> dict:
             item_type = type_map.get(
                 (row.get("Type") or "service").strip().lower(), ItemType.SERVICE
             )
+            # An optional Code column (#445). A code another item already
+            # has is left off, and the row says so: the item still comes in.
+            code = (row.get("Code") or "").strip()[:50] or None
+            if code and item_code_key(code) in codes:
+                errors.append(
+                    f"Row {i}: Item code {code} is already used by "
+                    f"{codes[item_code_key(code)]}; {name} was imported "
+                    "without a code."
+                )
+                code = None
             db.add(
                 Item(
                     name=name,
+                    code=code,
                     item_type=item_type,
                     description=row.get("Description", ""),
                     rate=rate,
@@ -237,6 +254,8 @@ def import_items(db: Session, csv_text: str) -> dict:
                 )
             )
             taken.add(item_name_key(name))
+            if code:
+                codes[item_code_key(code)] = name
             created += 1
         except Exception:
             logger.exception("Failed to import item row %d", i)

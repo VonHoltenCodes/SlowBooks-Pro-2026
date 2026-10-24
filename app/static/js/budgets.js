@@ -112,6 +112,6 @@ const BudgetsPage = {
             }
             html += '</div>';
             return html;
-        }, "Dates", false, { view: 'budget-vs-actual', params: { year }, prefill });
+        }, "Dates", false, { view: 'budget-vs-actual', params: { year }, prefill, step: false });
     },
 };

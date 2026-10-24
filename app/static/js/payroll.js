@@ -10,7 +10,11 @@ const PayrollPage = {
         let html = `
             <div class="page-header">
                 <h2>Payroll</h2>
-                <button class="btn btn-primary" onclick="PayrollPage.showRunForm()">+ New Pay Run</button>
+                <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                    <a href="/api/payroll/opening-ytd/template" download style="font-size:12px">Opening balance template</a>
+                    <button class="btn btn-secondary" onclick="PayrollPage.showOpeningImport()">Import opening balances</button>
+                    <button class="btn btn-primary" onclick="PayrollPage.showRunForm()">+ New Pay Run</button>
+                </div>
             </div>${capNote}
             <div style="background:#fef3c7;border:1px solid #fbbf24;padding:6px 10px;margin-bottom:12px;font-size:10px;color:#92400e;">
                 <strong>Disclaimer:</strong> Tax calculations are approximate. Verify with a tax professional before filing.
@@ -26,19 +30,111 @@ const PayrollPage = {
                 html += `<tr>
                     <td>${formatDate(r.period_start)} - ${formatDate(r.period_end)}</td>
                     <td>${formatDate(r.pay_date)}</td>
-                    <td>${statusBadge(r.status)}</td>
+                    <td>${statusBadge(r.status)}${r.status === 'draft' && r.stale_reason
+                        ? ` <span style="color:var(--text-warning);font-size:11px" title="${escapeHtml(r.stale_reason)}">figured before its year-to-date changed: process as figured, or discard it</span>` : ''}</td>
                     <td class="amount">${formatCurrency(r.total_gross)}</td>
                     <td class="amount">${formatCurrency(r.total_taxes)}</td>
                     <td class="amount">${formatCurrency(r.total_net)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PayrollPage.view(${r.id})">View</button>
-                        ${r.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.process(${r.id})">Process</button>` : ''}
+                        ${r.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.process(${r.id})">Process</button>
+                        <button class="btn btn-sm btn-danger" onclick="PayrollPage.discard(${r.id})" title="Delete this draft and its stubs, and undo what creating it changed">Discard draft</button>` : ''}
+                        ${r.status === 'processed' ? `<button class="btn btn-sm btn-secondary" data-destructive onclick="PayrollPage.void(${r.id})">Void</button>` : ''}
                     </td>
                 </tr>`;
             }
             html += '</tbody></table></div>';
         }
         return html;
+    },
+
+    // ---- Opening YTD import (#433) ----------------------------------------
+    // Every employee's opening balance from one CSV, the template. A dry
+    // run first shows the plan (rows, notes, errors); Apply posts the same
+    // file again.
+    showOpeningImport() {
+        openModal('Import opening balances', `
+            <form onsubmit="PayrollPage.previewOpeningImport(event)">
+                <p class="hint" style="margin-bottom:10px;">
+                    What each employee was paid this year before the first SlowBooks pay run: the
+                    <a href="/api/payroll/opening-ytd/template" download>SlowBooks template</a>
+                    (one row per employee; a second state on a row with only the state columns).
+                    No journal entry is made.
+                </p>
+                <div class="form-group"><label>File</label>
+                    <input type="file" name="file" accept=".csv,.txt" required></div>
+                <div class="form-group"><label>Reason (only to correct an employee whose balance is locked by a processed pay run)</label>
+                    <input name="reason" maxlength="300"></div>
+                <div id="opening-import-preview"></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Preview</button>
+                    <button type="button" class="btn btn-primary" id="opening-import-apply" hidden
+                        onclick="PayrollPage.applyOpeningImport()">Apply</button>
+                </div>
+            </form>`);
+    },
+
+    async _postOpeningImport(form, dryRun) {
+        const fd = new FormData();
+        fd.append('file', form.file.files[0]);
+        const q = new URLSearchParams({ dry_run: dryRun ? '1' : '0' });
+        if (form.reason.value.trim()) q.append('reason', form.reason.value.trim());
+        const resp = await fetch(`/api/payroll/opening-ytd/import?${q.toString()}`,
+            { method: 'POST', body: fd, headers: { 'X-Slowbooks-Desktop': '1' } });
+        if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
+        return resp.json();
+    },
+
+    _renderOpeningPlan(plan) {
+        const label = { create: 'Create', replace: 'Replace', error: 'Error' };
+        const rows = plan.rows.map(r => `<tr>
+            <td>${label[r.action] || escapeHtml(r.action)}</td>
+            <td>${escapeHtml(r.employee || '')}</td>
+            <td>${escapeHtml(r.as_of || '')}</td>
+            <td class="amount">${formatCurrency(r.gross)}</td>
+            <td class="amount">${formatCurrency(r.federal_tax)}</td>
+            <td class="amount">${formatCurrency(r.net)}</td>
+            <td style="font-size:11px;color:${r.action === 'error' ? 'var(--danger)' : 'var(--text-muted)'};">${escapeHtml(r.note || '')}</td>
+        </tr>`).join('');
+        const errs = [...(plan.errors || []), ...(plan.warnings || [])].map(x => `<li>${escapeHtml(x)}</li>`).join('');
+        const c = plan.counts || {};
+        return `
+            <p style="margin:8px 0;"><strong>${c.create || 0} to create, ${c.replace || 0} to replace, ${c.error || 0} with errors.</strong>
+            ${plan.dry_run ? 'Nothing has been written yet.' : `${plan.applied} written.`}</p>
+            ${errs ? `<ul style="color:var(--danger);font-size:11px;margin:0 0 8px 16px;">${errs}</ul>` : ''}
+            <div class="table-container" style="max-height:320px;overflow:auto;"><table>
+                <thead><tr><th scope="col">Action</th><th scope="col">Employee</th><th scope="col">As of</th><th scope="col" class="amount">Gross</th><th scope="col" class="amount">Federal</th><th scope="col" class="amount">Net</th><th scope="col">Note</th></tr></thead>
+                <tbody>${rows}</tbody></table></div>`;
+    },
+
+    async previewOpeningImport(e) {
+        e.preventDefault();
+        const form = e.target;
+        PayrollPage._openingImportForm = form;
+        const box = $('#opening-import-preview');
+        box.innerHTML = '<p class="hint">Reading the file…</p>';
+        try {
+            const plan = await PayrollPage._postOpeningImport(form, true);
+            box.innerHTML = PayrollPage._renderOpeningPlan(plan);
+            const writes = (plan.counts.create || 0) + (plan.counts.replace || 0);
+            const apply = $('#opening-import-apply');
+            apply.hidden = writes === 0 || (plan.errors || []).length > 0;
+            apply.textContent = `Apply ${writes} opening balance${writes === 1 ? '' : 's'}`;
+        } catch (err) {
+            box.innerHTML = `<p style="color:var(--danger);">${escapeHtml(err.message)}</p>`;
+        }
+    },
+
+    async applyOpeningImport() {
+        const form = PayrollPage._openingImportForm;
+        if (!form) return;
+        try {
+            const plan = await PayrollPage._postOpeningImport(form, false);
+            $('#opening-import-preview').innerHTML = PayrollPage._renderOpeningPlan(plan);
+            $('#opening-import-apply').hidden = true;
+            toast(`${plan.applied} opening balance${plan.applied === 1 ? '' : 's'} imported`);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async showRunForm() {
@@ -147,10 +243,11 @@ const PayrollPage = {
             toast('Pay run created');
             closeModal();
             App.navigate('#/payroll');
-            // Time left unapproved in the period was not paid; a toast is
+            // Time left unapproved in the period was not paid, or the pay
+            // date's year has no Social Security wage base here; a toast is
             // gone before it can be read, so this waits to be closed.
             if (run.warnings && run.warnings.length) {
-                openModal('Pay run created: some time was not paid', `
+                openModal('Pay run created: read this before processing', `
                     <ul>${run.warnings.map(w => `<li>${escapeHtml(w)}</li>`).join('')}</ul>
                     <div class="form-actions"><button class="btn btn-primary" onclick="closeModal()">OK</button></div>`);
             }
@@ -217,6 +314,8 @@ const PayrollPage = {
             ${PayrollPage._directDepositNote(run)}
             <div class="form-actions">
                 ${run.status === 'processed' && run.stubs.some(s => s.direct_deposit) ? `<button class="btn btn-primary" onclick="PayrollPage.downloadDirectDeposit(${run.id})" title="The ACH file to upload to the bank">Direct deposit file</button>` : ''}
+                ${run.status === 'processed' ? `<button class="btn btn-secondary" data-destructive onclick="PayrollPage.void(${run.id})">Void</button>` : ''}
+                ${run.status === 'draft' ? `<button class="btn btn-danger" onclick="PayrollPage.discard(${run.id})">Discard draft</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`, { wide: true });
     },
@@ -256,18 +355,69 @@ const PayrollPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // Discard a draft (never a processed run): its stubs go, and what
+    // creating it changed — benefit year-to-date, loan balances, the time
+    // entries it paid — is undone.
+    async discard(id, question) {
+        if (!confirm(question || 'Discard this draft pay run? Its stubs are deleted, and the benefit year-to-date, loan balances and time entries it took are put back as they were.')) return;
+        try {
+            const res = await API.del(`/payroll/${id}`);
+            const flagged = (res && res.flagged_runs) || [];
+            toast(flagged.length
+                ? `Draft discarded. ${flagged.length === 1 ? 'A later draft was' : `${flagged.length} later drafts were`} figured while it counted and ${flagged.length === 1 ? 'is' : 'are'} flagged.`
+                : 'Draft discarded');
+            closeModal();
+            App.navigate('#/payroll');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     async process(id) {
         if (!confirm('Process this pay run? This will create journal entries.')) return;
         // Net pay leaves the bank account (1000) when the run is processed;
         // ask first if that would overdraw it, as expenses and Pay Bills do
         // (macbase1: payroll took Checking to -$2,986.90 without a word).
+        let stale = null;
         try {
             const run = await API.get(`/payroll/${id}`);
+            stale = run.stale_reason;
             if (!(await Overdraft.confirm(null, Number(run.total_net) || 0, '1000', 'Process'))) return;
         } catch (e) { /* a failed lookup never blocks processing */ }
+        // A draft figured before an employee's opening YTD changed (#433):
+        // say so, and process it as figured only when asked to; otherwise
+        // offer to discard it, so the run can be created again.
+        if (stale && !confirm(`${stale}\n\nProcess it as figured anyway?`)) {
+            PayrollPage.discard(id, 'Discard this draft instead, so the run can be created again with the new figures?');
+            return;
+        }
         try {
-            await API.post(`/payroll/${id}/process`);
+            await (stale
+                ? API.post(`/payroll/${id}/process?acknowledge_stale=1`)
+                : API.post(`/payroll/${id}/process`));
             toast('Payroll processed');
+            App.navigate('#/payroll');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Void a processed run (#432): reverse the payroll journal entry, free
+    // the time entries, mark the stubs void. When the server needs a second
+    // look (a NACHA file was made, the run's liabilities were since paid,
+    // its quarter's 941 or year's W-2s were generated) it answers 409 with
+    // the warnings; they are shown and the void is sent again with
+    // confirm=true only if the user says so.
+    async void(id) {
+        if (!confirm('Void this pay run? The payroll journal entry is reversed, the time entries go back to approved, and the stubs are marked void.')) return;
+        try {
+            let run;
+            try {
+                run = await API.post(`/payroll/${id}/void`);
+            } catch (err) {
+                if (!(err.status === 409 && err.detail && err.detail.code === 'confirm_void')) throw err;
+                const list = (err.detail.warnings || []).map(w => '\u2022 ' + w).join('\n\n');
+                if (!confirm('Before voiding this pay run:\n\n' + list + '\n\nVoid it anyway?')) return;
+                run = await API.post(`/payroll/${id}/void`, undefined, { query: { confirm: true } });
+            }
+            toast('Pay run voided');
+            for (const w of (run.warnings || [])) toast(w, 'warning');
             App.navigate('#/payroll');
         } catch (err) { toast(err.message, 'error'); }
     },

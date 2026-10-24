@@ -96,6 +96,7 @@ const JournalPage = {
                 ${entry.reference ? `<strong>Reference:</strong> ${escapeHtml(entry.reference)}<br>` : ''}
                 <strong>Type:</strong> ${escapeHtml(sourceWord(entry.source_type))}${entry.is_adjusting ? ' · <strong>Adjusting entry</strong>' : ''}<br>
                 ${entry.posted_by ? `<strong>Posted by:</strong> ${escapeHtml(entry.posted_by)}` : ''}
+                ${entry.register_account_id ? `<div id="journal-register-note" style="margin-top:6px; color:var(--gray-500);">Posted from the bank register of <a href="#/banking/${Number(entry.register_account_id)}">${escapeHtml(entry.register_account_name)}</a>; edit it there.</div>` : ''}
                 ${entry.voided ? '<div class="journal-voided" style="color:var(--danger);font-weight:700;margin-top:6px;">Voided</div>' : ''}
             </div>
             <div class="table-container"><table>

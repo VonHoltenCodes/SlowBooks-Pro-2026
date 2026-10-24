@@ -235,6 +235,89 @@ rest of payroll.
 
 ---
 
+## Opening YTD balances (#433)
+
+A company that switches to SlowBooks mid-year enters what the old payroll
+paid that year, once per employee, quarter by quarter through `as_of`, the
+day before the first SlowBooks pay run (`app/models/payroll_opening.py`,
+`app/services/payroll_opening.py`). No pay run and no journal entry: the old
+system booked that payroll, and the opening balance sheet carries what it
+still owes.
+
+| Table | Holds |
+|-------|-------|
+| `payroll_opening_balances` | employee, year, `as_of`, note |
+| `payroll_opening_quarters` | per quarter (1 to the quarter of `as_of`): gross, federal withholding, SS / Medicare / FUTA wages and tax both sides, pre- and post-tax deductions, garnishments, net |
+| `payroll_opening_state_balances` | per quarter and state: wages, withholding, SUTA wages and tax, other employee / employer state taxes |
+| `payroll_opening_benefits` | per benefit code, for the year: employee and employer amounts (the annual caps count them) |
+
+Who reads it, each on purpose:
+
+- **The paycheck's caps** (`ytd.wage_base_ytd`): Social Security from the
+  opening's SS wages, the Additional Medicare threshold from its Medicare
+  wages, FUTA from its FUTA wages, SUTA and the state's capped taxes from
+  the work state's SUTA and state wages (no state rows: its gross stands in
+  for the work state). A stub counts its FICA wages (gross less Section
+  125 / HSA, `payroll_service.stub_taxable_wages`) toward Social Security,
+  Additional Medicare, FUTA and SUTA (SUTA in the state it was worked in),
+  and its gross toward the state's capped taxes, which the state engines
+  measure on gross. `employee_ytd` and the stub's YTD count every quarter.
+- **The Social Security wage base is the year's** (`SS_WAGE_BASES`,
+  `ss_wage_base(year)`: 2023 $160,200, 2024 $168,600, 2025 $176,100, 2026
+  $184,500) for the opening's check, the paycheck and the 941 and W-2. A
+  year with no base here is measured against the nearest one; the opening
+  (`warnings`) and the pay run (`warnings`) say so. FUTA's $7,000 is
+  statutory and the same every year.
+- **941**: the quarter's own opening figures (the old system filed its
+  finished quarters); earlier quarters fill the wage base and the Additional
+  Medicare threshold.
+- **Tax liability schedule**: the quarter's opening amounts, as
+  `prior_system` on each line beside `due` (what is left to deposit), so the
+  941 line equals line 12.
+- **940**: payments and FUTA tax for the year; FUTA wages fill the $7,000
+  first.
+- **W-2 / W-3**: every quarter; boxes 3 and 5 from the taxable wages, 16 and
+  17 from the state rows. Boxes 15-17 go one line per state (stubs by the
+  state they were worked in, the opening's state rows by theirs; no state
+  rows: the work state). With two or more, `compute_w2` carries `states`;
+  with one it keeps its old shape, so its Form history hash is unchanged.
+  The PDF prints two states per form; a third goes on an additional W-2
+  with only the identifying boxes and the state lines (`w2_forms`).
+- **State SUI report**: the quarter's state rows, by their own state (stubs
+  by the state they were worked in); a stub's SUTA-taxable wages are its
+  FICA wages up to what is left of that state's base.
+- **Form history Check**: a W-2, W-3, 940 or 941 generated before 2.29.0
+  was figured with each stub's gross toward the bases, one state line and
+  the 2026 base for every year. When today's figures differ, Check
+  re-figures it that way too (`legacy=True`); the same hash means the pay
+  runs are as they were (`matches`, `figured_before_2_29`), and the
+  sentence says the form comes out differently now.
+- Not counted: benefit remittances, the pay-run list, NACHA and the payroll
+  journal.
+
+Locked once a pay run in the year is processed for the employee: a change or
+a delete then needs a reason, written to the audit trail as `CORRECT` with
+the before and after, and `as_of` stays before that run. A change or a
+delete sets `stale_reason` on the employee's draft runs for the year;
+processing one is refused (409) until `acknowledge_stale=1` is sent, or it
+is discarded (`DELETE /api/payroll/{id}`) and created again.
+
+| Method + Path | Purpose |
+|---------------|---------|
+| `GET /api/payroll/opening-ytd?year=` | Every employee's opening balance for the year |
+| `GET /api/employees/{id}/opening-ytd?year=` | One employee's (year totals, `states` summed, `quarters` as entered), with `locked` and `first_pay_date` |
+| `PUT /api/employees/{id}/opening-ytd` | Create or replace: `year`, `as_of`, `quarters[]` (each with `states[]`), `benefits[]`, `reason` once locked |
+| `DELETE /api/employees/{id}/opening-ytd?year=&reason=` | Remove (`reason` once locked) |
+| `GET /api/payroll/opening-ytd/template` | The CSV template |
+| `POST /api/payroll/opening-ytd/import?dry_run=1\|0&reason=` | Import the template: the plan, then the same plan applied |
+| `POST /api/payroll/{id}/process?acknowledge_stale=1` | Process a draft flagged by an opening change, as figured |
+| `DELETE /api/payroll/{id}` | Discard a draft: delete it and its stubs; take its benefit amounts back out of `benefit_ytd` (a row only it made goes), give loan balances back what it paid down, release its time entries; flag later drafts that counted it. 409 for a processed or void run |
+
+A reader for QuickBooks Desktop's Payroll Summary waits for a real export to
+build against.
+
+---
+
 ## Pending items
 
 The major Tier 3 work has shipped — tax PDFs with audit hashes, the

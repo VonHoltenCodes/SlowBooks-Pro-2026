@@ -550,3 +550,196 @@ def test_csv_import_restores_the_control_account_itself(
     assert "5900" in created
     assert created["5900"].name == "Inventory Adjustments"
     assert created["5900"].account_type.value == "expense"
+
+
+# --- the preview names the detail type and parent each row gets (#461) ------
+
+PREVIEW_CSV = (
+    "Number,Name,Type,Detail type,Parent\n"
+    "4960,Rebates Earned,income,Other Income,\n"
+    "7010,Late Penalties,expense,Other Expense,\n"
+    "1610,Shop Tools,asset,,\n"
+    "2650,Truck Loan,liability,,\n"
+    "7110,Fuel,expense,,7100\n"
+    "7111,Diesel,expense,,7110\n"
+    "7100,Vehicle Costs,expense,Other Expense,\n"
+    "1611,Saws,asset,,Shop Tools\n"
+)
+
+
+def test_preview_detail_type_and_parent_equal_what_the_import_writes(
+    client, db_session, seed_accounts
+):
+    from app.models.accounts import detail_label
+
+    dry = _upload(client, PREVIEW_CSV, dry_run=1)
+    assert dry.status_code == 200, dry.text
+    plan = dry.json()
+    assert plan["errors"] == [] and plan["row_errors"] == 0
+    preview = {r["name"]: r for r in plan["rows"] if r["row"] is not None}
+    # what the screen will show, read straight off the plan
+    shown = {
+        n: (r["detail_type_label"], r["parent_number"], r["parent_name"])
+        for n, r in preview.items()
+    }
+    assert shown["Rebates Earned"] == ("Other Income", None, None)
+    assert shown["Late Penalties"] == ("Other Expense", None, None)
+    # 2.27.0's number/name rule: a 16xx asset, a loan by its name
+    assert shown["Shop Tools"] == ("Fixed Asset", None, None)
+    assert shown["Truck Loan"] == ("Long Term Liability", None, None)
+    # listed before its parent, and a grandchild: both take Other Expense
+    assert shown["Fuel"] == ("Other Expense", "7100", "Vehicle Costs")
+    assert shown["Diesel"] == ("Other Expense", "7110", "Fuel")
+    assert shown["Vehicle Costs"] == ("Other Expense", None, None)
+    assert shown["Saws"] == ("Fixed Asset", "1610", "Shop Tools")
+
+    done = _upload(client, PREVIEW_CSV, dry_run=0)
+    assert done.status_code == 200, done.text
+    applied = {r["name"]: r for r in done.json()["rows"] if r["row"] is not None}
+    accts = _by_number(db_session)
+    for name, r in preview.items():
+        a = accts[r["number"]]
+        assert a.name == name
+        written = (
+            detail_label(a.detail_type),
+            a.parent.account_number if a.parent else None,
+            a.parent.name if a.parent else None,
+        )
+        assert shown[name] == written, name
+        # the apply's own answer says the same
+        assert (
+            applied[name]["detail_type_label"],
+            applied[name]["parent_number"],
+            applied[name]["parent_name"],
+        ) == written, name
+
+
+def test_preview_keeps_an_existing_parent_and_shows_a_renamed_one(
+    client, db_session, seed_accounts
+):
+    first = (
+        "Number,Name,Type,Parent\n7300,Shop Costs,expense,\n7310,Rags,expense,7300\n"
+    )
+    assert _upload(client, first, dry_run=0).status_code == 200
+    # the second file renames the parent and lists the child with no parent
+    again = "Number,Name,Type\n7300,Workshop Costs,expense\n7310,Rags,expense\n"
+    rows = {r["name"]: r for r in _upload(client, again, dry_run=1).json()["rows"]}
+    assert (rows["Rags"]["parent_number"], rows["Rags"]["parent_name"]) == (
+        "7300",
+        "Workshop Costs",
+    )
+    assert rows["Rags"]["detail_type_label"] == "Expense"
+
+
+# --- the dry run and the apply agree on every row (#461 review) -------------
+
+
+def _add(db, number, name, atype, detail=None, parent=None, bank_kind=None):
+    from app.models.accounts import AccountType
+
+    a = Account(
+        account_number=number,
+        name=name,
+        account_type=AccountType(atype),
+        detail_type=detail,
+        bank_kind=bank_kind,
+        parent_id=parent.id if parent else None,
+    )
+    db.add(a)
+    db.commit()
+    return a
+
+
+def _dry_equals_written(client, db, text, **params):
+    """Preview the file, apply it, and check that each row's detail type,
+    parent and note in the preview equal the apply's answer and the chart as
+    written. Returns the preview rows by number."""
+    from app.models.accounts import detail_label
+
+    dry = _upload(client, text, dry_run=1, **params)
+    assert dry.status_code == 200, dry.text
+    done = _upload(client, text, dry_run=0, **params)
+    assert done.status_code == 200, done.text
+    preview, applied = dry.json()["rows"], done.json()["rows"]
+    assert [r["number"] for r in preview] == [r["number"] for r in applied]
+    accts = _by_number(db)
+    for shown, answer in zip(preview, applied):
+        a = accts[shown["number"]]
+        written = (
+            detail_label(a.detail_type),
+            a.parent.account_number if a.parent else None,
+            a.parent.name if a.parent else None,
+        )
+        for row in (shown, answer):
+            assert (
+                row["detail_type_label"],
+                row["parent_number"],
+                row["parent_name"],
+            ) == written, (shown["number"], row)
+        assert shown["note"] == answer["note"], shown["number"]
+        assert shown["action"] == answer["action"], shown["number"]
+    return {r["number"]: r for r in preview}
+
+
+def test_a_retyped_account_given_no_detail_type_is_written_as_previewed(
+    client, db_session, seed_accounts
+):
+    loan = _add(db_session, "2650", "Truck Loan", "expense")
+    _add(db_session, "2651", "Truck Loan Interest", "expense", parent=loan)
+    text = (
+        "Number,Name,Type,Parent\n"
+        "2650,Truck Loan,liability,\n"
+        "2651,Truck Loan Interest,liability,2650\n"
+    )
+    rows = _dry_equals_written(client, db_session, text)
+    # the number and name rule picks it, not the plain Other Current Liability,
+    # and the sub-account follows its parent
+    assert rows["2650"]["detail_type_label"] == "Long Term Liability"
+    assert rows["2651"]["detail_type_label"] == "Long Term Liability"
+
+
+def test_an_account_marked_as_a_bank_previews_bank(client, db_session, seed_accounts):
+    _add(db_session, "1050", "Cash box", "asset")
+    rows = _dry_equals_written(
+        client, db_session, "Number,Name,Type\n1050,Cash box,bank\n"
+    )
+    assert rows["1050"]["detail_type_label"] == "Bank"
+    assert "detail type → Bank" in rows["1050"]["changes"]
+    assert _by_number(db_session)["1050"].bank_kind == "bank"
+
+
+def test_a_skipped_sub_account_keeps_its_detail_type_and_says_where_it_prints(
+    client, db_session, seed_accounts
+):
+    from app.services.statement_layout import bs_print_details
+
+    prepaids = _add(db_session, "1450", "Prepaids", "asset", "other_asset")
+    rent = _add(
+        db_session, "1460", "Prepaid Rent", "asset", "other_current_asset", prepaids
+    )
+    text = (
+        "Number,Name,Type,Parent\n1450,Prepaids,asset,\n1460,Prepaid Rent,asset,1450\n"
+    )
+    rows = _dry_equals_written(client, db_session, text)
+    # nothing is written to a skipped row: the preview no longer claims the
+    # parent's Other Asset for it ...
+    assert rows["1460"]["action"] == "skip"
+    assert rows["1460"]["detail_type_label"] == "Other Current Asset"
+    # ... and says where 2.28.0's display rule prints it
+    assert "prints with its parent under Other Assets" in rows["1460"]["note"]
+    assert bs_print_details(db_session)[rent.id] == "other_asset"
+
+
+def test_replace_shows_a_kept_rows_parent_by_its_new_name(
+    client, db_session, seed_accounts
+):
+    shop = _add(db_session, "7300", "Shop Costs", "expense")
+    _add(db_session, "7310", "Rags", "expense", parent=shop)
+    rows = _dry_equals_written(
+        client, db_session, "Number,Name,Type\n7300,Workshop Costs,expense\n", replace=1
+    )
+    assert rows["7310"]["action"] == "deactivate"
+    assert (rows["7310"]["parent_number"], rows["7310"]["parent_name"]) == (
+        "7300",
+        "Workshop Costs",
+    )

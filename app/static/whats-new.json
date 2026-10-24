@@ -1,4 +1,15 @@
 {
+  "2.29.0": {
+    "title": "A mid-year payroll switch, the fiscal year, and reports by item",
+    "items": [
+      "Payroll takes a mid-year switch: enter each employee's opening year-to-date quarter by quarter, and every form, wage base and stub reads it.",
+      "A processed pay run can be voided, and a draft one discarded.",
+      "Settings sets the first month of the fiscal year; the reports' presets and default period, the dashboard and the nonprofit year to date follow it.",
+      "New reports: Past Customers (a mailing list by service address and last job date), Sales by Item and Purchases by Item.",
+      "Add an item from any line as you type, and find it by a code as well as its name.",
+      "API tokens are never administrators and can be allowed backups; a Mercury bank feed; the sidebar's Open list is a Recent dropdown."
+    ]
+  },
   "2.28.0": {
     "title": "Account types and sub-accounts",
     "items": [

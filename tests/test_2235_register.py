@@ -160,6 +160,33 @@ def test_hidden_menu_items_are_a_setting_the_shell_applies(client, db_session):
     assert "section:${li.textContent.trim()}" in app_js
     settings_js = (ROOT / "app/static/js/settings.js").read_text(encoding="utf-8")
     assert (
-        "data-hide-menu" in settings_js
+        "data-show-menu" in settings_js
         and "hidden_menu = JSON.stringify" in settings_js
     )
+
+
+def test_the_hidden_list_round_trips_and_a_save_keeps_earlier_choices(
+    client, db_session
+):
+    """#457: the setting is the list of HIDDEN keys (its meaning since #334, so
+    a list saved before the upgrade still works); a second save with more
+    items stores the whole list the Settings page now sends, and showing one
+    again takes only that one off."""
+    first = ["reseller-permits", "estimates", "purchase-orders", "hr-deductions"]
+    r = client.put("/api/settings", json={"hidden_menu": json.dumps(first)})
+    assert r.status_code == 200, r.text
+    assert json.loads(client.get("/api/settings").json()["hidden_menu"]) == first
+    both = first + ["vendor-credits", "batch-payments"]
+    r = client.put("/api/settings", json={"hidden_menu": json.dumps(both)})
+    assert r.status_code == 200, r.text
+    assert json.loads(client.get("/api/settings").json()["hidden_menu"]) == both
+    less = [k for k in both if k != "estimates"]
+    client.put("/api/settings", json={"hidden_menu": json.dumps(less)})
+    assert json.loads(client.get("/api/settings").json()["hidden_menu"]) == less
+    client.put("/api/settings", json={"hidden_menu": "[]"})
+    settings_js = (ROOT / "app/static/js/settings.js").read_text(encoding="utf-8")
+    # the list offers the menu-hidden items (unticked: a tick means shown),
+    # and Save keeps the stored keys the page did not offer
+    assert "if (d.hiddenKind || d.hiddenRole) return;" in settings_js
+    assert "_hiddenMenuToSave(menuBoxes)" in settings_js
+    assert "set.has(key) ? '' : 'checked'" in settings_js

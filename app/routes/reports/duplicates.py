@@ -27,7 +27,7 @@ from app.services import possible_duplicates as pd
 
 def _report(db, account_id, start_date, end_date, include_dismissed):
     account = pd.require_register_account(db, account_id)
-    start_date, end_date = _range_or_year(start_date, end_date)
+    start_date, end_date = _range_or_year(db, start_date, end_date)
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="From is after To")
     return pd.possible_duplicates(db, account, start_date, end_date, include_dismissed)

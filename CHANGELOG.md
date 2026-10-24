@@ -5,6 +5,378 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.29.0 — A mid-year payroll switch, the fiscal year, and reports by item
+
+**A company whose fiscal year does not start in January can say so** (#444, @ContractorKeith).
+Settings → Company Information has a "First month of fiscal year" choice. Set
+it to July or October and the reports' new This / Last Fiscal Year presets and
+their default period, the dashboard's profit card and nonprofit mode's year to
+date all run from that month instead of January 1. A January start is the
+calendar year and nothing changes. Payroll forms (W-2, 941) stay on the
+calendar year, as the law requires.
+
+Every report screen opens on the fiscal year to date: the Profit & Loss,
+Balance Sheet, Trial Balance, General Ledger, Income by Customer, the cash
+flow statement and the rest, the Classes page and the dashboard's "Full P&L"
+link with them. Custom starts on the fiscal year's first day, and a Balance
+Sheet line's drill-down on the first day of its date's fiscal year. New
+Previous / Next period buttons beside the period step by the period shown:
+a fiscal year on a fiscal preset (This Fiscal Year back one is Last Fiscal
+Year), a month or a quarter on those, and a Custom range by its own length.
+The Schedule C and the 1099 Summary stay on the calendar year. The Possible
+Duplicates report, asked with no dates, opens on the fiscal year to date too.
+
+The Balance Sheet's Net Income line is still every period's to date: the app
+has never posted a year-end close into retained earnings, and this release
+does not add one.
+
+**Pulling past customers by service address and last job date** (#436,
+@ContractorKeith), the thing a trade asked for as what would move it off
+QuickBooks — a ready-made mail list built from what is already in the books,
+nothing re-entered. A **Past Customers** view, on the Customers page and in
+the Report Center, puts one row per customer with their name, contact, the
+service address (the job's `site_address`, else the ship-to, else the
+bill-to), the first and last job dates, the job count, lifetime sales (net of credit
+memos; a write-off is not a sale given back), and the last job's type and
+name. A site address typed on one line ("123 Main St, Austin, TX 78701")
+splits into its street, city, state and ZIP like a multi-line one, a ZIP+4
+is kept whole, and a third street line goes into Address 2 rather than
+being dropped. Filter by last job date, city or zip, state, job type,
+customer type, lifetime sales, and active or inactive; a customer whose
+notes say "do not contact" ("don't contact", "do-not-contact", "do not
+mail", DNC) is marked and left out of the export, and "No contact person on
+site" is not read as one. Export a mail-merge **CSV** (address parts in
+their own columns, the usual formula guard and BOM) or a **labels PDF** on
+Avery 5160 (30 up) with the service address, where a full five-line label
+(company, name, two street lines, city/state/ZIP) prints its last line
+inside the label. A row opens the customer's page, and the view carries its
+filter in the address so it can be bookmarked and saved as a report. The
+figures are summed per customer in the database, so a very large customer
+list does not run past SQLite's query parameter limit.
+
+**Sales by Item and Purchases by Item** (#435, @ContractorKeith). Two reports
+QuickBooks users look for and did not find: Sales by Item, one row per item
+for a period with quantity, amount, average price and — for an item whose
+stock is tracked — COGS, gross margin and margin % from the item's own
+inventory movements, built from posted invoices and sales receipts less credit
+memos with voids left out; and Purchases by Item, the same shape from bills
+less vendor credits with an average cost (expense lines carry no item, so
+purchases are bills and vendor credits only). A line without an item is one
+"No item" row so the sales total ties to the P&L's income for the same
+accounts. Both narrow by customer or vendor, class and job (a line's own class
+or job wins, else the header's), open the documents behind a row, and save as
+PDF, CSV and a saved report.
+
+Sales by Item counts only the lines that post to an income account, the
+item's own or the default income account, so an item pointed at a liability
+(a deposit held, say) is not a sale and the total ties to the P&L's income
+from sales; a write-off credit memo, which posts to bad debt, is not a
+return. COGS follows an edited invoice: sell 5 and edit it to 3 and the
+COGS is the cost of 3, the P&L's figure. A credit memo's return puts stock
+back without a COGS entry, so it leaves the COGS column alone as it leaves
+the P&L's. Foreign-currency lines count at their invoice's rate, rounded per
+line as the invoice's journal is. Both reports open on the fiscal year to
+date, and an item's lines open under its name as it is ("Nuts & Bolts").
+
+**Items: quick-add from any line, and an item code** (#445, @ContractorKeith).
+An item can be added from the line being typed. The item picker on
+an invoice, estimate, sales receipt, credit memo, recurring invoice,
+purchase order, vendor credit, bill or Quick Entry line offers **+ Add
+item**, which opens a small form in the line: name, code, type, and on a
+sale a rate and an income account that follows the type (4000 to 4300 in
+the seeded chart). On a bill, purchase order or vendor credit it asks
+instead for what the item costs and the cost of goods account it is
+recorded in (5000 to 5300 by type; only cost of goods accounts are
+offered, since an item bought for a job or resale is never an operating
+expense), and whether a product or material is
+stock (the box and its label on one line inside the panel, however narrow
+the cell), so the new item posts that line where it was asked to and a stock
+item is received into Inventory. Save creates the item and picks it on
+that line, filled in as a pick would be, and nothing else on the document
+changes; a name typed in the picker before taking **+ Add item** comes
+along. The form opens only when **+ Add item** is chosen (arrowed to and
+taken, or clicked): Enter or Tab on a name that matches no item opens
+nothing, and Tab goes on to the next cell. Cancel, Escape and Save put the
+focus back on the line's item picker, Save with the new item in it. A
+read-only or accountant sign-in is not offered **+ Add item**, since the
+server would refuse the save. A picker value that
+is not an item (`--`, `+ Add item`) saves as no item. Items also take an
+optional code (`items.code`, migration `c4e5d6f7a8b9`), unique when set
+without regard to capitals (409 "Item code X is already used by ..."),
+shown before the name in every line picker so typing either finds it, on
+the Items page with a search box over name and code, in
+`GET /api/items?q=` (a typed `%` or `_` is that character, not a
+wildcard), and as a Code column in the items CSV export and
+import (a code already used is left off that row, with a note). The IIF
+export is unchanged: QuickBooks 2003's `!INVITEM` header has no field for
+a code.
+
+**A processed pay run can be voided** (#432, @ContractorKeith). `PayRunStatus.VOID` and the
+refusal to process a void run were already there, but nothing set the status:
+there was no route and no button. Void now reverses the payroll journal entry
+the way every other void does — a dated reversing entry, both staying in the
+register — reverses the burden Job Cost Entry when the run wrote one, backs the
+run's amounts out of each employee's YTD and out of `BenefitYTD` (the stub
+snapshots stay, as the rebuild expects), and puts the time entries the run paid
+back to approved-unpaid so the next run can take them. The stubs read VOID, and
+a void stub's PDF says so the way a void deposit slip does. A run whose pay date
+is in a closed period is refused; a run whose NACHA file was already made is
+voided only after a second look: the void asks first, naming the file's date
+and total, because the bank may already have it and the void does not stop the
+money.
+
+A run's posting is reversed once. The Journal page no longer voids a payroll
+entry (it says to void the pay run instead), and voiding a run whose entry was
+already reversed there — a company file from before this may hold one — is
+refused and names that reversal, so wages, liabilities and cash never come
+off twice. A run whose posting has a line in a
+completed reconciliation (net pay that cleared the bank) is refused with the
+account and statement date, so a reconciled balance never moves; otherwise the
+void gives its matched bank-feed lines back to review and un-clears its bank
+lines, as every other void does. Besides the NACHA file, two more things ask
+first: liabilities the run accrued that have had payments out of them since
+the pay date (a 941 deposit out of 2310 Federal Withholding, a benefit
+remittance), since the void would leave what was paid as a balance the agency
+owes back; and a Form 941 for the run's quarter, or W-2s for its employees, a
+W-3 or a 940 for its year, generated after the run posted, since the run drops
+off them (file a 941-X or W-2c if they were filed). The page lists the reasons
+and voids only on OK; `POST /api/payroll/{id}/void` answers 409 with the
+warnings and changes nothing until `?confirm=true`. A loan's balance goes back
+to the enrollment the run deducted from — the stub records which one — so with
+an ended loan and a new one on the same code, the new one gets it back.
+
+**A mid-year switch carries the year's payroll over** (#433, @ContractorKeith). Year-to-date
+pay was summed from SlowBooks' own stubs only, so a company that switched in
+May had every W-2, 941 and wage-base cutoff (Social Security, FUTA, SUTA)
+wrong for the rest of the year. Each employee now has an opening balance per
+year, entered quarter by quarter the way QuickBooks takes year-to-date
+adjustments, through the day before the first SlowBooks pay run: gross,
+federal withholding, Social Security, Medicare and FUTA wages and tax (both
+sides), deductions, garnishments and net for each quarter; per state and
+quarter the state wages, withholding, SUTA wages and tax and other state
+taxes; benefit amounts by code for the year. Enter it on the employee's page
+(Opening YTD) or import it for everyone from Payroll → Import opening
+balances, using the template there (a Quarter column, one row per employee
+per quarter, a further state on a row with only the state columns); the
+import's Apply button appears only after a Preview says what there is to
+write.
+
+- **Each quarter's 941 carries only that quarter.** The old system filed the
+  941 for every quarter it finished, so a May switch's Q1 941 is exactly the
+  Q1 figures, and the Q2 941 is April and May plus SlowBooks' June runs. The
+  tax liability schedule carries the same figures, so its 941 line agrees
+  with line 12, and names the old payroll's share (`prior_system`) apart
+  from what is left to deposit (`due`).
+- **The wage bases come from the wage fields.** The paycheck's Social
+  Security cap, the Additional Medicare threshold, the FUTA $7,000 and each
+  state's SUTA base start from the old system's own taxable wages, not its
+  gross, and the 941, 940 and W-2 measure the same way, so the runs and the
+  forms agree. The SUTA base is a state's own: wages paid in another state
+  do not fill it, and the state SUI report counts a stub in the state it was
+  worked in.
+- **Every form reads it.** The 941 by quarter, the 940 (the FUTA base is not
+  handed out again), the W-2 and W-3 (every box, 3 and 5 from the taxable
+  wages, 16 and 17 from the state rows), the state SUI report for each
+  quarter, the employee's YTD and the stub's YTD.
+- **Locked once a pay run in the year is processed:** a change or a delete
+  is then a correction with a reason, kept in the audit trail, and the as-of
+  date stays before that run.
+- **A draft run figured from the old figures says so.** Changing or deleting
+  an opening marks the employee's draft runs for the year; processing one
+  asks first, and offers to discard it instead.
+- **The Social Security wage base is the year's own.** A 2025 opening,
+  paycheck, 941 and W-2 are measured against 2025's $176,100, not 2026's
+  $184,500 (2023 through 2026 are known). A year SlowBooks has no base for
+  is measured against the nearest one, and the opening and the pay run say
+  so rather than refusing.
+
+It is not a pay run and not a journal entry: the old system booked that
+payroll and the opening balance sheet carries what it still owed, so benefit
+remittances, the pay-run list, direct-deposit files and the payroll journal
+never see it. A reader for QuickBooks Desktop's Payroll Summary report waits
+for a real export to build against.
+
+**Discard draft.** A draft pay run can now be discarded, from the Payroll
+list or the run's view (`DELETE /api/payroll/{id}`, admin only like the rest
+of payroll). Its stubs go, and so does everything creating it changed: the
+benefit year-to-date its stubs added (a row only it made is removed), the
+loan balances it paid down, the time entries it took, which the next run can
+pay. A later draft figured while it counted toward the year-to-date is
+flagged, as an opening change flags one. A processed run is never discarded.
+
+**Paychecks count their taxable wages toward the caps.** Each stub counted
+its gross toward the Social Security base, the Additional Medicare
+threshold, FUTA and SUTA, so an employee with a Section 125 plan reached
+them early and the next check was short-taxed. A stub now counts what it
+was taxed on, gross less Section 125 and HSA (a 401(k) still counts), the
+same way the openings do, and the 941, 940 and state SUI report measure the
+same way. The W-2 follows each tax's treatment too: box 1 and 16 drop the
+pre-tax amounts that reduce income tax, boxes 3 and 5 those that reduce
+FICA (they were gross).
+
+**A W-2 line per state.** Boxes 15 to 17 were one total under the
+employee's work state. They are now one line per state the employee had
+wages or state withholding in (stubs by the state worked in, the opening's
+state rows by theirs), two to a form; a third state prints on an additional
+W-2 that carries only the state lines, as the IRS instructions say. The
+W-3's boxes 16 and 17 still total every line. Form history keeps every
+earlier record: a one-state W-2 has the shape (and hash) it always had, and
+Check re-figures a form generated before this release the way it was
+figured then, so it still matches when the pay runs behind it have not
+changed, and says when today's figures differ.
+
+**API tokens: never an administrator, a backups permission, and revoking
+that sticks** (#434, #443, @ContractorKeith). The API tokens from 2.11.1
+already give a program a role and a key (`Authorization: Bearer sbp_…`): a
+name, a prefix to match it by, the last time it was used, revoke, a SHA-256
+at rest, and audit rows in the token's name. Now:
+
+- A new token can no longer be made with the admin role: bookkeeper,
+  accountant or read-only. Settings, users, tokens and restoring a backup
+  stay with a signed-in administrator.
+- **Can make backups**, a box an administrator ticks on a token (when making
+  it, or later in the token list, which shows it): the token may make, list
+  and download this company's backups on top of its role, so an import
+  tool's safety net works without an admin token. The download is in the
+  audit log too, as the token.
+- No token restores a backup, whatever its role or permission. Restoring
+  replaces the whole company; an administrator does it signed in.
+- Revoking is final. Switching a revoked token back on is refused (the
+  Reactivate button is gone); make a new token instead. A request with a
+  revoked token is answered with a sentence naming the token and where to
+  get a new one, not "Not authenticated", which sent an unattended client's
+  operator to the sign-in page. A secret that matches nothing is still
+  refused without a word.
+- An admin token made before 2.29.0 keeps working, except that it cannot
+  restore a backup and stays revoked once revoked. A tool that restored with
+  one (resetting the books between runs) takes its backups with a token
+  allowed them and leaves the restore to an administrator. See
+  [docs/server-edition.md](docs/server-edition.md#api-tokens-programs-not-people)
+  for what a token can and cannot do.
+
+**Mercury bank feed** (PR #356, @yapishu). Connect a Mercury account with a
+read-only API token (Banking → Bank Feed (Mercury)), map each Mercury account
+to a bank account, and **Sync Mercury** brings posted deposits and withdrawals
+into the account's *To review* list, deduplicated by Mercury's transaction id
+and matched like any other feed. Optional signed balance webhooks keep the
+displayed balances current. The token and the webhook secret are encrypted at
+rest; connecting, disconnecting, mapping and webhook settings are an
+administrator's; disconnecting keeps imported transactions. A bookkeeper's
+card, connected or not, says an administrator does those, as SimpleFIN's does.
+SlowBooks Pro is not affiliated with Mercury; see `docs/setup-mercury.md`.
+
+**A Recent dropdown instead of the Open list** (#462). Since 2.24.0 every
+screen opened added a line with an × at the top of the sidebar, up to
+twelve, pushing the menu down. It is one line now, "Recent: <the screen
+showing> ▾", a button that opens the last seven screens, most recent first,
+the one showing marked, each a link back with its report period, register
+account or document title as before; a screen opened again moves to the
+top rather than listing twice, and Clear at the foot empties the list. The
+button says whether it is open to a screen reader, the arrow keys, Home and
+End move through the list, Esc closes it and returns to the button, and Tab
+moves on. The list is still kept for the session, per sign-in and company,
+and survives a reload; it fits a 320 px window in both themes.
+
+**Hidden menu items stay hidden** (#457, reported by tithetaker). Settings →
+Sidebar dropped every item already hidden from its list, so it could not be
+shown again, and the next Save wrote only the items on the page, which
+brought the first batch back. The list now always has every item the
+company can hide, and a box now means "show": everything is ticked to start
+with, untick an item to hide it, tick it again to bring it back, one at a
+time or in batches. An item hidden for another reason (a nonprofit page on a
+business company, an administrator's page for another role) keeps the choice
+made for it, and a nonprofit page unticked on a nonprofit company no longer
+comes back on the next reload. The stored setting is
+unchanged (`hidden_menu` lists the hidden items), so a list saved by an
+earlier version keeps working. A toast no longer takes the click meant for
+what is under it: "Settings saved" sat on Save Settings for its few seconds,
+and a second save in that time saved nothing.
+
+**Chart import preview: the detail type and parent each row will get**
+(#461). The dry run of a chart CSV showed each row's base type only
+(`4960 Rebates Earned · income`) though the import creates it as Other
+Income, and the same for Fixed Asset and Long Term Liability; the parent a
+row would be linked under was not shown, and the change notes sat under a
+column titled "Detail". Each preview row now shows the detail type it will
+be written with (the file's, the parent's for a sub-account, the number and
+name rule for an account given none, the chart's own for a control account)
+and the parent's number and name, in their own "Detail type" and "Parent"
+columns; the notes column is titled "Notes". The preview and the import read
+the same plan, so what the preview shows is what the import writes. An
+account the file retypes is written with the detail type the preview shows
+(a "Truck Loan" moved to liability is a Long Term Liability, and so are its
+sub-accounts), an account the file marks as a bank shows Bank, the import's
+answer reads every row back from the chart, and a replace shows a kept
+account's parent under the name the file gives it. A sub-account the file
+lists unchanged keeps its own detail type; when the Balance Sheet prints it
+in its parent's group (2.28.0, display only) its row says so.
+
+**A bookkeeper can sync SimpleFIN again.** Since 2.26.0 saving the SimpleFIN
+mapping is an administrator's, but Sync Now and Fetch older history saved the
+mapping first for every role, so a bookkeeper's sync stopped at "Admin role
+required". A bookkeeper now sees the mapping and the Reverse signs boxes
+locked, with a sentence saying an administrator chooses them, and Sync uses
+the saved mapping. Connect and Disconnect, also an administrator's, are no
+longer offered to other roles.
+
+**The register tells a voided payment from an unrelated posting** (#448,
+@ContractorKeith). The bank register marks a posting void when a `<type>_void` reversal points
+at it. It did that by matching the reversal's `source_id` against the
+transaction id, which is right only for reversals that store the voided
+transaction's id (an expense, a journal entry, a transfer). A payment's and
+a bill payment's reversal stores the document's id instead, whose posting is
+a different transaction, so a customer payment received straight to the bank
+and then voided still showed live, while an unrelated posting whose
+transaction id happened to equal the document id was marked void. One module
+now owns which of a void's two conventions applies (`app/services/voids.py`),
+the register and reclassify route through it, and a test keeps every void
+type classified.
+
+**Reclassify updates the stored account balances** (#490). Reclassify
+moved a line to its new account and left the running total the Chart of
+Accounts shows on the old one, so the Balance column, the accounts CSV
+export and the AI tools' totals kept the amount on the account the line
+had left while the P&L and General Ledger, which read the lines, showed
+it where it went. The move now carries each line's amount off the account
+it leaves and onto the one it lands on, in each account's own direction,
+and moving the lines back restores both. Books already touched are
+repaired on upgrade: the stored balances are recomputed from the ledger
+once at start, and an administrator can run the same repair any time
+(`POST /api/accounts/rebuild-balances` answers with the accounts it
+corrected, none when the books agree).
+
+**A bank entry's row says what its link opens.** In the register, a bank
+entry (posted with + Entry, the quick-entry row or Add from the bank feed)
+showed its memo as a link to `#/journal/…`, which read as "this is a
+journal entry", the kind that cannot be edited, when Edit on the same row
+is where it changes. The memo is now words, with a small Posting link
+beside it that says what it is (the journal posting behind this bank
+entry; use Edit to change it), and the posting's own page says "Posted
+from the bank register of <account>; edit it there" with the account
+linked. A void bank entry keeps the plain link. `GET /api/journal/{id}`
+carries `register_account_id` and `register_account_name` for a bank
+entry, empty for everything else.
+
+**The IIF export guards the contact fields too.** The CUST and VEND rows'
+phone, mobile or fax, email, terms and tax id went out as typed, so a
+vendor whose email was `=HYPERLINK(...)` would run in Excel, the documented
+way to fix an IIF file before import (noted on #410). A value starting with
+`=` or `@` now takes a leading apostrophe; one starting with `+` or `-` does
+not, because QuickBooks Desktop keeps the apostrophe, so an E.164 phone like
+`+15551234567` or `-0001` terms reach it as typed. The terms on an invoice or
+bill row follow the same rule. Names keep the full guard from #410, and the
+importer takes the apostrophe off again (#449, @ContractorKeith).
+
+**What a bank import needs first, written down.** `docs/banking.md` says a
+CSV or OFX import needs only the bank account you import into, linked to its
+ledger account: no vendors, no expense accounts (#446, @ContractorKeith).
+
+Three schema changes, run in every company file one after the other: the
+payroll opening balances (`a4330b1c2d3e`), `api_tokens.allow_backups`
+(`c5e8a1d47b20`) and `items.code` (`c4e5d6f7a8b9`); the head is
+`c4e5d6f7a8b9`. 632 API operations.
+
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

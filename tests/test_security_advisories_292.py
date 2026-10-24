@@ -174,7 +174,7 @@ def test_admin_keeps_the_hr_surface(client):
     assert client.get("/api/tax-forms/w2?year=2026").status_code == 200
 
 
-def test_api_tokens_wear_the_same_rule(client):
+def test_api_tokens_wear_the_same_rule(client, legacy_admin_token):
     """A bookkeeper-scoped token is the reporters' second vector."""
     emp = _create_employee(client)
     keeper = _bearer(_mint(client, "agent-bk", role="bookkeeper")["token"])
@@ -182,7 +182,8 @@ def test_api_tokens_wear_the_same_rule(client):
     assert keeper.post("/api/payroll/1/nacha", json={}).status_code == 403
     assert keeper.get("/api/employees").status_code == 200
     assert keeper.get("/api/employees").json()[0]["pay_rate"] == 0
-    admin = _bearer(_mint(client, "agent-admin", role="admin")["token"])
+    # no admin token is made since #434; one made before still sees it all
+    admin = _bearer(legacy_admin_token("agent-admin"))
     assert admin.get(f"/api/employees/{emp['id']}/portal-token").status_code == 200
     assert admin.get("/api/employees").json()[0]["pay_rate"] == 25
 

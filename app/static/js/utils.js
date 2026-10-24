@@ -143,7 +143,10 @@ function todayISO() {
 // words, more for a longer message, at least six for an error, never more
 // than fifteen. Every toast went after three seconds, so a two-line
 // refusal (the closing-date lock) was gone before it was read (2.18.0
-// gate, macbase1 NEW-13). Hovering holds a toast; a click dismisses it.
+// gate, macbase1 NEW-13). A toast takes no clicks: #toast-container has
+// pointer-events: none, so a click where one sits reaches the button
+// beneath it (W-35: "Settings saved" over Save Settings swallowed the next
+// save). Only a toast question's buttons (toastAction) take their own.
 function toastMs(message, type) {
     const length = String(message == null ? '' : message).length;
     const ms = 3000 + Math.max(0, length - 40) * 60;
@@ -156,10 +159,7 @@ function toast(message, type = 'success') {
     el.className = `toast toast-${type}`;
     el.textContent = message;
     container.appendChild(el);
-    let timer = setTimeout(() => el.remove(), toastMs(message, type));
-    el.addEventListener('mouseenter', () => clearTimeout(timer));
-    el.addEventListener('mouseleave', () => { timer = setTimeout(() => el.remove(), 2000); });
-    el.addEventListener('click', () => el.remove());
+    setTimeout(() => el.remove(), toastMs(message, type));
 }
 
 // Chart colours for the current theme, from the --chart-* colours the
