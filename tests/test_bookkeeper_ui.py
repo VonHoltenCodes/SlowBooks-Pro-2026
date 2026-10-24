@@ -119,6 +119,11 @@ SETTINGS_KEPT = {
     "Equipment › Deactivate": [
         ("PUT", "/api/equipment/{equipment}", {"is_active": False}, 200)
     ],
+    # The post-transaction sound (#476) is a per-user preference, not a
+    # company setting, so a bookkeeper keeps it and sets their own.
+    "Sounds › #post-sound-pref": [
+        ("PUT", "/api/preferences/post_sound", {"value": {"enabled": True}}, 200)
+    ],
 }
 # The page's own reads: what it shows loads for a bookkeeper
 SETTINGS_READS = [

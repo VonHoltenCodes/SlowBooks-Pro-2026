@@ -90,6 +90,7 @@ const SettingsPage = {
             SettingsPage.loadSignInPref();
             SettingsPage.loadOcrStatus();
             SettingsPage.loadOcrEnginePref();
+            SettingsPage.loadPostSoundPref();
             SettingsPage.loadUnreadableSecrets();
             SettingsPage.scrollToFocus();
             SettingsPage._installLeaveGuard();
@@ -394,6 +395,21 @@ const SettingsPage = {
                         <code>brew install tesseract</code> (macOS), or the
                         UB&nbsp;Mannheim build from
                         <code>github.com/UB-Mannheim/tesseract</code> (Windows), then choose it here.
+                    </div>
+                </div>
+
+                <div class="settings-section" role="group" aria-labelledby="settings-h-sounds">
+                    <h3 id="settings-h-sounds">Sounds</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        A personal preference, kept per sign-in: it follows you to another computer, and everyone sets their own.
+                    </div>
+                    <label style="font-weight:normal; font-size:11px;">
+                        <input type="checkbox" id="post-sound-pref" style="width:auto; vertical-align:middle; margin-right:6px;"
+                            onchange="SettingsPage.savePostSound(this.checked)">
+                        Play a sound when a transaction posts
+                    </label>
+                    <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                        A short chime on a successful save, post, payment, or finished reconciliation — the way QuickBooks Desktop beeped. Off by default (#476).
                     </div>
                 </div>
 
@@ -1424,6 +1440,29 @@ const SettingsPage = {
             await API.put('/settings', { ocr_engine: value });
             toast('OCR engine preference saved');
             this.loadOcrStatus();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // #476: the per-user "sound when a transaction posts" toggle. Stored in
+    // the preferences API (post_sound), not the company-settings form, so it
+    // follows a person across machines and each user keeps their own. The
+    // checkbox saves itself on change, like the OCR engine above.
+    async loadPostSoundPref() {
+        const box = $('#post-sound-pref');
+        if (!box) return;
+        try {
+            const pref = await API.get('/preferences/post_sound');
+            box.checked = !!(pref && pref.value && pref.value.enabled);
+        } catch (e) { /* leave it off */ }
+    },
+
+    async savePostSound(on) {
+        try {
+            await API.put('/preferences/post_sound', { value: { enabled: !!on } });
+            // keep utils.js's cache current so toast() rings right away; the
+            // success toast below is the preview when turning it on
+            if (typeof setPostSoundEnabled === 'function') setPostSoundEnabled(!!on);
+            toast(on ? 'Sound on when a transaction posts' : 'Sound off when a transaction posts');
         } catch (err) { toast(err.message, 'error'); }
     },
 

@@ -2219,6 +2219,20 @@ const App = {
         // Load saved theme
         App.loadTheme();
 
+        // The post-transaction chime preference (#476): read once here and
+        // cached in utils.js (setPostSoundEnabled) so toast() can ring it
+        // without an async read. Raw fetch like initSystemInfo below — the
+        // API wrapper's 401 handler would pop the auth prompt, and auth.js
+        // owns that. Best-effort: off before sign-in, and auth.js reloads the
+        // page after sign-in, so this runs again with a session. Guarded so
+        // the probes that load app.js without utils.js or fetch keep working.
+        if (typeof fetch === 'function' && typeof setPostSoundEnabled === 'function') {
+            fetch('/api/preferences/post_sound', { credentials: 'same-origin' })
+                .then(res => (res.ok ? res.json() : null))
+                .then(data => setPostSoundEnabled(!!(data && data.value && data.value.enabled)))
+                .catch(() => { /* no session, or no network: stays off */ });
+        }
+
         // Keyboard shortcuts. The Alt letters go by the key's place
         // (e.code: KeyD is the D key on any layout) with Alt alone held
         // (Ctrl+Alt is AltGr on some layouts, Shift another shortcut), not

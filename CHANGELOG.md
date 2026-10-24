@@ -5,6 +5,18 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**An optional sound when a transaction posts** (#476, asked for by a
+QuickBooks Desktop user). QuickBooks Desktop played a short beep when a
+transaction saved, and the toast is easy to miss when you're keying a stack.
+Settings → Sounds now has a per-user toggle, "Play a sound when a transaction
+posts" — off by default, kept per sign-in so it follows you to another
+machine. When it's on, a short original chime plays on a successful save,
+post, payment, or finished reconciliation; an error or warning stays silent.
+The sound is generated in the browser (Web Audio, no asset) and guarded, so a
+browser or desktop WebView without it carries on quietly.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

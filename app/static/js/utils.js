@@ -150,6 +150,49 @@ function toastMs(message, type) {
     return Math.min(15000, Math.max(type === 'error' ? 6000 : 3000, ms));
 }
 
+// An optional short chime when a transaction posts (#476, asked for by a
+// QuickBooks Desktop user who keys a stack and misses the toast). Off by
+// default, per-user (the preference post_sound, set on the Settings page).
+// toast() rings it on any success toast — save, post, record payment and
+// finish reconcile all end in one — and never on an error or warning.
+// App.init reads the preference once and calls setPostSoundEnabled (the
+// fetch lives in app.js, which already sends its own; this file never does),
+// the Settings toggle keeps the cache current, and playPostSound() reads the
+// cache so toast() stays synchronous.
+let _postSoundOn = false;
+let _postAudioCtx = null;
+
+function setPostSoundEnabled(on) { _postSoundOn = !!on; }
+
+// Two short sine tones, about 120 ms, quiet — an original chime, not the
+// QuickBooks sound, and no audio asset. Guarded for a browser or WebView
+// with no AudioContext and for an autoplay refusal before the first user
+// gesture: both are caught, so a post never throws because of the sound.
+// The context is made on first use (after a gesture).
+function playPostSound() {
+    if (!_postSoundOn) return;
+    try {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!_postAudioCtx) _postAudioCtx = new Ctx();
+        const ctx = _postAudioCtx;
+        const now = ctx.currentTime;
+        // a rising two-note chime; each tone fades in and out so it doesn't click
+        [[880, 0], [1320, 0.06]].forEach(([freq, at]) => {
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+            gain.gain.setValueAtTime(0.0001, now + at);
+            gain.gain.exponentialRampToValueAtTime(0.05, now + at + 0.01);
+            gain.gain.exponentialRampToValueAtTime(0.0001, now + at + 0.06);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(now + at);
+            osc.stop(now + at + 0.06);
+        });
+    } catch (e) { /* no audio, or autoplay refused: silent */ }
+}
+
 function toast(message, type = 'success') {
     const container = $('#toast-container');
     const el = document.createElement('div');
@@ -160,6 +203,7 @@ function toast(message, type = 'success') {
     el.addEventListener('mouseenter', () => clearTimeout(timer));
     el.addEventListener('mouseleave', () => { timer = setTimeout(() => el.remove(), 2000); });
     el.addEventListener('click', () => el.remove());
+    if (type === 'success') playPostSound();  // #476: the post chime, when it's on
 }
 
 // Chart colours for the current theme, from the --chart-* colours the
