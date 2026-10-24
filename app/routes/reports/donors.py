@@ -10,6 +10,7 @@ from app.database import get_db
 from app.routes.reports._router import router
 from app.routes.reports.financial import _money, _pdf_response
 from app.services.csv_export import _SafeWriter
+from app.services.fiscal_year import fiscal_year_start
 from app.services.pledge_report import pledge_report
 
 _COLS = (
@@ -30,9 +31,9 @@ _HEAD = (
 )
 
 
-def _period(start_date, end_date):
+def _period(db, start_date, end_date):
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
     return start_date, end_date
@@ -46,7 +47,7 @@ def pledges(
     customer_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     return pledge_report(db, start_date, end_date, class_id, customer_id)
 
 
@@ -86,7 +87,7 @@ def pledges_pdf(
     end_date: date = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = pledge_report(db, start_date, end_date)
     return _pdf_response(
         [_pledges_section(data)], db, f"pledge-report_{start_date}_{end_date}.pdf"
@@ -101,7 +102,7 @@ def pledges_csv(
 ):
     import io
 
-    start_date, end_date = _period(start_date, end_date)
+    start_date, end_date = _period(db, start_date, end_date)
     data = pledge_report(db, start_date, end_date)
     buf = io.StringIO()
     w = _SafeWriter(buf)

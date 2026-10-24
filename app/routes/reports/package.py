@@ -328,7 +328,7 @@ def accountants_package(
     from app.routes.csv import _DESKTOP_HEADER
     from app.routes.reports.financial import _company_name, _range_or_year
 
-    start_date, end_date = _range_or_year(start_date, end_date)
+    start_date, end_date = _range_or_year(db, start_date, end_date)
     content, manifest = build_package(db, start_date, end_date, tz_offset)
     name = f"accountants-package_{_slug(_company_name(db))}_{manifest['start_date']}_{manifest['end_date']}.zip"
     disposition = "inline" if request.headers.get(_DESKTOP_HEADER) else "attachment"
@@ -353,6 +353,6 @@ def accountants_package_manifest(
     before the download (the zip is built once, to list it)."""
     from app.routes.reports.financial import _range_or_year
 
-    start_date, end_date = _range_or_year(start_date, end_date)
+    start_date, end_date = _range_or_year(db, start_date, end_date)
     _, manifest = build_package(db, start_date, end_date, tz_offset)
     return manifest

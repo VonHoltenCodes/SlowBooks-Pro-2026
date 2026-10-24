@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
+from app.services.fiscal_year import fiscal_year_start
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment
 from app.models.contacts import Customer
@@ -176,7 +177,7 @@ def income_by_customer(
     from app.services.contact_balances import home_amount, unapplied_payments
 
     if not start_date:
-        start_date = date(date.today().year, 1, 1)
+        start_date = fiscal_year_start(db, date.today())
     if not end_date:
         end_date = date.today()
 

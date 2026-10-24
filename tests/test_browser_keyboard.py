@@ -3412,8 +3412,8 @@ def test_every_report_center_card_is_reached_and_opened_by_the_keyboard(
         _visit(page, handled, "#/reports")
         cards = page.evaluate(CARD_LIST)
         assert (
-            len(cards) == 25
-        ), cards  # 2.24.0: four accountant's cards (#341–#343, #337); #395: one; #414: one
+            len(cards) == 27
+        ), cards  # 2.24.0: four accountant's cards (#341–#343, #337); #395: one; #414: one; #435: two
         for c in cards:
             view = c["key"].split(":", 1)[1]
             assert c["href"] == f"#/reports/{view}", c

@@ -302,15 +302,23 @@ def pnl_month(db: Session) -> dict:
 
 
 def pnl_ytd(db: Session) -> dict:
-    """Year-to-date income, expenses and net, plus the cumulative net
-    by month within the year (current month is month-to-date)."""
+    """Fiscal-year-to-date income, expenses and net, plus the cumulative net
+    by month within the fiscal year (current month is month-to-date). Follows
+    the first-month-of-fiscal-year setting (#444); a January start is the
+    calendar year and reads exactly as before."""
+    from app.services.fiscal_year import fiscal_year_bounds, fiscal_year_label
+
     today = date.today()
-    totals = _pl_for(db, date(today.year, 1, 1), today)
+    fy_start, fy_end = fiscal_year_bounds(db, today)
+    totals = _pl_for(db, fy_start, today)
 
     months = []
     running = 0.0
-    for m in range(1, today.month + 1):
-        start, end = _month_bounds(today.year, m)
+    year, month = fy_start.year, fy_start.month
+    while True:
+        start, end = _month_bounds(year, month)
+        if start > today:
+            break
         if end > today:
             end = today
         net = _pl_for(db, start, end)["net"]
@@ -318,8 +326,13 @@ def pnl_ytd(db: Session) -> dict:
         months.append(
             {"month": start.strftime("%b"), "net": net, "cumulative": running}
         )
+        if year == today.year and month == today.month:
+            break
+        month += 1
+        if month == 13:
+            month, year = 1, year + 1
     return {
-        "year": today.year,
+        "year": fiscal_year_label(fy_start, fy_end),
         "income": totals["income"],
         "expenses": totals["expenses"],
         "net": totals["net"],

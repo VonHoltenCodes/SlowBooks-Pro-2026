@@ -73,10 +73,13 @@ def next_allocation_number(db: Session) -> str:
 # ── release from restriction ─────────────────────────────────────────────
 
 
-def default_period(end: Optional[date] = None) -> tuple[date, date]:
-    """Fiscal year to date, ending on `end` (today by default)."""
+def default_period(db: Session, end: Optional[date] = None) -> tuple[date, date]:
+    """Fiscal year to date, ending on `end` (today by default). Follows the
+    first-month-of-fiscal-year setting (#444)."""
+    from app.services.fiscal_year import fiscal_year_start
+
     end = end or date.today()
-    return date(end.year, 1, 1), end
+    return fiscal_year_start(db, end), end
 
 
 def class_expenses(db: Session, class_id: int, start: date, end: date) -> Decimal:
@@ -135,7 +138,7 @@ def suggested_release(
     if fund is None:
         raise ValueError("Fund not found")
     if start is None or end is None:
-        d_start, d_end = default_period(end)
+        d_start, d_end = default_period(db, end)
         start = start or d_start
         end = end or d_end
     expenses = class_expenses(db, class_id, start, end)
