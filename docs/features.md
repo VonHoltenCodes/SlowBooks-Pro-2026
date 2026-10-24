@@ -71,6 +71,7 @@ pass, and the per-integration setup guides ([Stripe](setup-stripe.md),
 Tax calculations are approximate — verify with a tax professional. Full module reference (models, routes, UI pages, pending items) lives at [docs/payroll-hr-module.md](payroll-hr-module.md).
 
 ## Banking
+- **Mercury bank feed** — connect a read-only token, map Mercury accounts to bank feeds, and manually sync posted transactions into the review queue with deduplication and matching. Optional signed webhooks update displayed current, available and incoming-transfer balances without posting to the ledger. [Setup and security](setup-mercury.md).
 - **A register you can type into** (v2.23.5) — a bank or card account's register reads oldest to newest with the running balance down the right, and its last row takes the next entry (date, payee, memo, ref, category, out or in); Enter posts it and the next row is ready. An entry can be **split across accounts** (a loan payment's principal and interest) from the dialog's "Split this entry…". **Reconcile** can show only the lines dated through a day you pick, for several statements worked back to back
 The register is the ledger account (v2.10, issue #114). Full guide: [docs/banking.md](banking.md).
 - **Bank and credit-card accounts** — chart accounts flagged `bank` / `credit_card`; every paid-from, deposit-to and pay-from picker lists exactly those

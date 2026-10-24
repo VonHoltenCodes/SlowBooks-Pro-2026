@@ -5,6 +5,18 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Mercury bank feed** (PR #356, @yapishu). Connect a Mercury account with a
+read-only API token (Banking → Bank Feed (Mercury)), map each Mercury account
+to a bank account, and **Sync Mercury** brings posted deposits and withdrawals
+into the account's *To review* list, deduplicated by Mercury's transaction id
+and matched like any other feed. Optional signed balance webhooks keep the
+displayed balances current. The token and the webhook secret are encrypted at
+rest; connecting, disconnecting, mapping and webhook settings are an
+administrator's; disconnecting keeps imported transactions. SlowBooks Pro is
+not affiliated with Mercury; see `docs/setup-mercury.md`.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

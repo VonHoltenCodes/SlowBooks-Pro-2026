@@ -40,6 +40,8 @@ ENCRYPTED_SETTINGS_KEYS = frozenset(
         "square_access_token",
         "square_webhook_signature_key",
         "simplefin_access_url",
+        "mercury_api_token",
+        "mercury_webhook_secret",
         # the bank account an ACH file debits (discussion #211)
         "ach_company_account",
     }

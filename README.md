@@ -112,7 +112,7 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
 - **Double-entry core** — auto + manual journals, closing-date
   enforcement, automatic audit log, 50-account contractor chart
 - **Banking** — the register is the ledger (entries post, feeds are a review queue, reconciliation over ledger lines), transfers, deposits, check printing,
-  OFX/QFX + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN bank feeds,
+  OFX/QFX + Bank of America/Chase/PayPal CSV import with dedup, SimpleFIN and Mercury bank feeds,
   shared auto-categorization rules
 - **Reports & tax** — P&L (plain & by Class), Balance Sheet, Trial
   Balance, agings, GL, Cash Flow, Sales Tax with pay-to-government flow,
@@ -129,7 +129,9 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   ([docs/server-edition.md](docs/server-edition.md))
 - **Bank feeds** — [SimpleFIN](https://www.simplefin.org/): you hold the
   bank credential, no middleman server
-  ([docs/setup-bank-feeds.md](docs/setup-bank-feeds.md))
+  ([docs/setup-bank-feeds.md](docs/setup-bank-feeds.md));
+  [Mercury](docs/setup-mercury.md) connects directly with a read-only API token,
+  with optional signed webhooks for bank balance updates
 - **Jobs & job costing** — Customer:Job on every form, cost codes and
   types with burden, time posted at loaded rates, budget vs actual
 - **Receipt intake** — scan a photo or PDF into a Bill, Expense or Sales
@@ -238,6 +240,7 @@ Production checklist: **[docs/release-checklist.md](docs/release-checklist.md)**
 | [docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md) | QuickBooks Desktop (IIF) and QuickBooks Online (its Export data zip, no Intuit app) migration, sales receipts included |
 | [docs/state-withholding.md](docs/state-withholding.md) | State income-tax withholding tables and their sources |
 | [docs/setup-bank-feeds.md](docs/setup-bank-feeds.md) | SimpleFIN bank feeds |
+| [docs/setup-mercury.md](docs/setup-mercury.md) | Mercury read-only bank feed and signed balance webhooks |
 | [Stripe](docs/setup-stripe.md) · [PayPal](docs/setup-paypal.md) · [Square](docs/setup-square.md) | Payment integrations |
 | [docs/migrate-from-myob.md](docs/migrate-from-myob.md) | MYOB migration walkthrough |
 | [SECURITY.md](SECURITY.md) · [CONTRIBUTING.md](CONTRIBUTING.md) · [CHANGELOG.md](CHANGELOG.md) | Policy, contributing, history |
