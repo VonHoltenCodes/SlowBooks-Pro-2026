@@ -11,7 +11,7 @@ import re
 from pathlib import Path
 
 from app.services import terminology
-from app.services.terminology import NONPROFIT, PROTECTED_WORDS, Terms
+from app.services.terminology import CONSTRUCTION, NONPROFIT, PROTECTED_WORDS, Terms
 
 ROOT = Path(__file__).resolve().parent.parent
 TERMS_JS = ROOT / "app/static/js/terms.js"
@@ -26,6 +26,13 @@ def _js_dictionary() -> dict:
     src = TERMS_JS.read_text(encoding="utf-8")
     m = re.search(r"const TERMS_NONPROFIT = (\{.*?\});", src, re.S)
     assert m, "TERMS_NONPROFIT literal not found in terms.js"
+    return json.loads(m.group(1))
+
+
+def _js_construction_dictionary() -> dict:
+    src = TERMS_JS.read_text(encoding="utf-8")
+    m = re.search(r"const TERMS_CONSTRUCTION = (\{.*?\});", src, re.S)
+    assert m, "TERMS_CONSTRUCTION literal not found in terms.js"
     return json.loads(m.group(1))
 
 
@@ -49,6 +56,57 @@ def test_keys_are_business_words_and_values_differ():
     for key, value in NONPROFIT.items():
         assert key != value, key
         assert key[0].isupper(), key
+
+
+# ---------------------------------------------------------------------------
+# Construction dictionary — the same rules as the nonprofit one
+# ---------------------------------------------------------------------------
+
+
+def test_js_and_python_construction_dictionaries_agree():
+    assert _js_construction_dictionary() == CONSTRUCTION
+
+
+def test_construction_dictionary_obeys_every_rule():
+    for word in PROTECTED_WORDS:
+        assert word not in CONSTRUCTION, word
+    for key, value in CONSTRUCTION.items():
+        assert key != value, key
+        assert key[0].isupper(), key
+        assert not key.startswith("Sales "), key
+
+
+def test_has_words_gates_every_non_business_mode():
+    assert not Terms("business").has_words
+    assert Terms("nonprofit").has_words
+    assert Terms("construction").has_words
+
+
+def test_construction_mode_speaks_its_words():
+    t = Terms("construction")
+    assert t.is_construction
+    assert not t.is_nonprofit
+    assert t.has_words
+    assert t("Subcontractor") == "Sub"
+    assert t("Subcontractors") == "Subs"
+    assert t("subcontractor") == "sub"
+    # a contractor keeps every other business word
+    assert t("Invoice") == "Invoice"
+    assert t("Customer") == "Customer"
+    assert t("Job") == "Job"
+    # prose swap keeps case and leaves protected words alone
+    assert t.text("Pay the subcontractor") == "Pay the sub"
+    assert t.text("Sales Tax Report") == "Sales Tax Report"
+
+
+def test_company_type_round_trips_construction(client, db_session):
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+    assert r.json()["company_type"] == "construction"
+    assert terminology.terms_from_db(db_session).is_construction
+    r = client.put("/api/settings", json={"company_type": "banana"})
+    assert r.status_code == 422
+    assert client.get("/api/settings").json()["company_type"] == "construction"
 
 
 # ---------------------------------------------------------------------------
@@ -349,7 +407,7 @@ _SWEEP_EXEMPT = {
 }
 _SWEEP_WORDS = re.compile(
     r"\b(Customers?|Invoices?|Sales Receipts?|Class(?:es)?|Jobs?|Net Income|"
-    r"Profit & Loss|P&L|Balance Sheet|Equity|Income|A/R|Receivables?)\b"
+    r"Profit & Loss|P&L|Balance Sheet|Equity|Income|A/R|Receivables?|Subcontractors?)\b"
 )
 
 
@@ -405,7 +463,7 @@ def test_no_unwrapped_business_words_in_spa_text():
     """Every hit must be an App.routes label (rewritten at boot by
     applyTerminology — see test_route_labels_are_rewritten_at_boot); anything
     else is a leak the nonprofit switch will show."""
-    keys = set(NONPROFIT)
+    keys = set(NONPROFIT) | set(CONSTRUCTION)
     # the App.routes table: from "routes: {" to the first line that closes
     # it at the object's indent (the table grows as pages get addresses)
     lines = (ROOT / "app/static/js/app.js").read_text(encoding="utf-8").splitlines()
@@ -424,8 +482,9 @@ def test_no_unwrapped_business_words_in_spa_text():
 def test_every_T_call_resolves_to_a_dictionary_key():
     """T('Job name') is not a key, so it rendered "Job name" for a nonprofit —
     the wrapper looked right and did nothing (2.9.1 audit). Every argument
-    must be a key, or a singular/plural of one, case-insensitively."""
-    keys = {k.lower() for k in NONPROFIT}
+    must be a key, or a singular/plural of one, case-insensitively, in one
+    of the company-type dictionaries (nonprofit or construction)."""
+    keys = {k.lower() for k in {**NONPROFIT, **CONSTRUCTION}}
 
     def resolves(arg):
         a = arg.lower()

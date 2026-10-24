@@ -18,7 +18,7 @@ function fixture(settings = {}) {
             put: async (url, data) => { writes.push({ url, data }); return { ...settings, ...data }; },
         },
         App: { settings: { ...settings } }, window: {},
-        T: value => value, Terms: { text: value => value, isNonprofit: () => false },
+        T: value => value, Terms: { text: value => value, isNonprofit: () => false, isConstruction: () => false },
         escapeHtml: value => String(value ?? '').replace(/[&<>"']/g, character => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
         })[character]),

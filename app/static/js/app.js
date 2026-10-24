@@ -664,6 +664,13 @@ const App = {
             App.setStatus(`${route.label} — nonprofit companies only`);
             return;
         }
+        // The same guard for any construction-only page (none in Phase 1):
+        // a bookmark or a typed URL must not reach it in another company.
+        if (route.construction && !Terms.isConstruction()) {
+            $('#page-content').innerHTML = App._constructionOnlyHtml(route.label);
+            App.setStatus(`${route.label} — construction companies only`);
+            return;
+        }
         // Payroll and HR are the administrator's: the server refuses them to
         // every other role, reads included, and the sidebar leaves them out.
         // A bookmark or a typed address still opened them half loaded, on
@@ -730,6 +737,18 @@ const App = {
             <h3>${escapeHtml(label)} is for nonprofit companies</h3>
             <p>This company is set up as a business, so there is nothing to record here.
                If it is a nonprofit, change its Company Type in Settings first.</p>
+            <p style="margin-top:12px;">
+                <a href="#/" class="btn btn-secondary">Return to Dashboard</a>
+                <a href="#/settings" class="btn btn-secondary">Open Settings</a>
+            </p>
+        </div>`;
+    },
+
+    _constructionOnlyHtml(label) {
+        return `<div class="empty-state">
+            <h3>${escapeHtml(label)} is for construction companies</h3>
+            <p>This company is not set up for construction, so there is nothing to record here.
+               If it is a contractor, change its Company Type in Settings first.</p>
             <p style="margin-top:12px;">
                 <a href="#/" class="btn btn-secondary">Return to Dashboard</a>
                 <a href="#/settings" class="btn btn-secondary">Open Settings</a>
@@ -2166,7 +2185,11 @@ const App = {
         const search = $('#global-search');
         if (search) search.placeholder = Terms.text(search.placeholder);
         const np = Terms.isNonprofit();
+        const con = Terms.isConstruction();
         $$('[data-nonprofit]').forEach(el => { el.hidden = !np; });
+        $$('[data-construction]').forEach(el => { el.hidden = !con; });
+        // [data-business-only] means "not nonprofit": a contractor is a
+        // business, so construction keeps these too — hide only for nonprofit.
         $$('[data-business-only]').forEach(el => { el.hidden = np; });
     },
 

@@ -128,6 +128,15 @@ def test_a_nonprofit_reads_its_own_words(client):
     assert _messages(r)[0] == "Donor is required."
 
 
+def test_a_construction_company_reads_its_own_words(client):
+    # construction messages run through the dictionary too (Terms.has_words,
+    # not is_nonprofit); a contractor keeps "Customer", so the word it reads
+    # here is unchanged, which is the correct contractor wording
+    assert client.put("/api/settings", json={"company_type": "construction"}).is_success
+    r = client.post("/api/invoices", json={"date": "2026-09-01", "lines": []})
+    assert _messages(r)[0] == "Customer is required."
+
+
 def _probe(scenario):
     out = subprocess.run(
         [

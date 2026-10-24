@@ -67,7 +67,7 @@ const ctx = {
   toast: () => {},
   closeModal: () => {},
   T: (s) => s,
-  Terms: { init() {}, text: (s) => s, isNonprofit: () => false },
+  Terms: { init() {}, text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   API: { get: async () => ({ company_name: 'Harbor Light Bakery Two', company_type: 'business' }) },
 };
 ctx.window = { addEventListener(name, fn) { listeners[name] = fn; } };

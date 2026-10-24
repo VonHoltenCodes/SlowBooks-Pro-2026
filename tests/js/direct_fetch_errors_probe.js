@@ -64,7 +64,7 @@ function page(files, extras) {
     openModal() {}, closeModal() {},
     App: { setStatus() {}, navigate() {}, refresh() {} },
     T: (s) => s,
-    Terms: { text: (s) => s, isNonprofit: () => false },
+    Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
     formatCurrency: (n) => '$' + Number(n || 0).toFixed(2),
     formatDate: (s) => s,
   }, extras || {});

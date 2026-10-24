@@ -74,7 +74,7 @@ const ctx = {
   closeModal() {},
   toast() {},
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   App: { navigate() {} },
   API: {
     get: async (path) => {

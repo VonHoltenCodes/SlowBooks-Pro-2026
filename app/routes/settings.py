@@ -47,7 +47,7 @@ _redact_secrets = redact_secrets
 # Settings whose value is one of a fixed set. The SPA renders a <select>;
 # this is the server-side twin so an API token cannot store "banana".
 ENUM_SETTINGS = {
-    "company_type": frozenset({"business", "nonprofit"}),
+    "company_type": frozenset({"business", "nonprofit", "construction"}),
     "ocr_engine": frozenset({"auto", "tesseract"}),
     "ask_password_on_start": frozenset({"true", "false"}),
     "invoice_show_logo": frozenset({"true", "false"}),

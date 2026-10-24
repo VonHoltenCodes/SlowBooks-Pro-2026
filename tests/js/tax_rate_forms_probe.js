@@ -37,7 +37,7 @@ const ctx = {
   todayISO: () => '2026-09-26',
   statusBadge: (s) => s,
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   App: { settings: { home_currency: 'USD' }, navigate() {} },
   toast() {},
   closeModal() {},

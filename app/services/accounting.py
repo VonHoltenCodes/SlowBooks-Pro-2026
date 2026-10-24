@@ -448,12 +448,21 @@ def get_opening_balance_equity_id(db: Session) -> int:
 
 
 def ensure_account(
-    db: Session, number: str, name: str, account_type: AccountType
+    db: Session,
+    number: str,
+    name: str,
+    account_type: AccountType,
+    detail_type: str | None = None,
 ) -> Account:
     """Find-or-create a system account by name, keeping the suggested
     number only if the chart hasn't used it (account_number is unique and
     an imported chart may already own 3300 or 6960). Flushes; the caller
-    commits. Pattern shared with the job-costing offset accounts."""
+    commits. Pattern shared with the job-costing offset accounts.
+
+    ``detail_type`` pins the balance-sheet bucket for an account the number
+    and name rule would guess wrong (a retainage or deposit liability is
+    Other Current, not the type default); omitted, the insert hook settles
+    it from the number and name (``default_detail_type``)."""
     acct = db.query(Account).filter(Account.name == name).first()
     if acct:
         return acct
@@ -464,6 +473,7 @@ def ensure_account(
         account_number=None if taken else number,
         is_system=True,
         balance=Decimal("0"),
+        detail_type=detail_type,
     )
     db.add(acct)
     db.flush()
@@ -504,3 +514,32 @@ def get_in_kind_income_account_id(db: Session) -> int:
 
 def get_bad_debt_account_id(db: Session) -> int:
     return ensure_nonprofit_accounts(db)["6960"].id
+
+
+# Construction accounts, created on demand (Settings -> Company Type, or the
+# /api/construction/setup route). Retainage and customer-deposit balances
+# and the use-tax a contractor self-assesses sit beside the seed chart's
+# own blocks; Construction in Progress holds costs on an unbilled job.
+# Each carries an explicit detail type: the number-and-name rule would call
+# a 1xxx asset or 2xxx liability Other Current anyway, but pinning it keeps
+# these on the right balance-sheet line whatever the rule does later, and a
+# yielded number (the chart already owns 1150) leaves the rule nothing to
+# read.
+CONSTRUCTION_ACCOUNTS = (
+    ("1150", "Retainage Receivable", AccountType.ASSET, "other_current_asset"),
+    ("1350", "Construction in Progress", AccountType.ASSET, "other_current_asset"),
+    ("2050", "Retainage Payable", AccountType.LIABILITY, "other_current_liability"),
+    ("2210", "Customer Deposits", AccountType.LIABILITY, "other_current_liability"),
+    ("2220", "Use Tax Payable", AccountType.LIABILITY, "other_current_liability"),
+    ("5400", "Equipment Cost", AccountType.COGS, "cost_of_goods_sold"),
+    ("5500", "Other Job Costs", AccountType.COGS, "cost_of_goods_sold"),
+)
+
+
+def ensure_construction_accounts(db: Session) -> dict[str, Account]:
+    """Create every construction account that is missing; returns them keyed
+    by their suggested number. Idempotent."""
+    return {
+        number: ensure_account(db, number, name, atype, detail)
+        for number, name, atype, detail in CONSTRUCTION_ACCOUNTS
+    }

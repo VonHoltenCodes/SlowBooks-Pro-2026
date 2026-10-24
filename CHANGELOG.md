@@ -5,6 +5,34 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Construction company type** (#431, Phase 1). Settings → Company Type gains
+a third value, Construction, beside Business and Nonprofit. Switching to it
+works like switching to Nonprofit: it changes no data, and it adds a set of
+contractor accounts and the standard cost codes rather than re-seeding the
+chart. The accounts are Retainage Receivable (1150), Construction in Progress
+(1350), Retainage Payable (2050), Customer Deposits (2210), Use Tax Payable
+(2220), Equipment Cost (5400) and Other Job Costs (5500) — each created only
+if missing, its number yielding to a chart that already owns it, and placed
+on the balance sheet as an Other Current asset or liability (the job-cost
+accounts as Cost of Goods Sold). The switch also loads the 26 standard CSI
+MasterFormat cost codes (the same list the Cost Codes page loads) and the
+labor / material / subcontract / equipment / other cost types they use —
+but only into a company that has no cost codes of its own yet, so a custom
+chart is left alone. Vocabulary is light — a contractor keeps Customer,
+Invoice, Estimate and Job; the one word that changes is "Subcontractor",
+shown as "Sub". Vendors gain a Sub type with a trade license and a
+certificate of insurance (carrier, policy number, expiry); marking a vendor
+a Sub turns on 1099-NEC. The Report Center leads with the contractor reports
+that already exist — Job Profitability, Job Budget vs Actual, P&L by Job.
+
+Not yet: no first-run "what kind of company is this?" prompt (company_type
+still defaults to Business; Construction is chosen in Settings, as Nonprofit
+is), no new accounting, no change orders / draws / pay applications screens,
+no COI-expiry warning in Pay Bills, and the full MasterFormat line-item list
+is not shipped. See [docs/contractor-mode.md](docs/contractor-mode.md).
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

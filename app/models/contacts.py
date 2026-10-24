@@ -9,6 +9,7 @@ from sqlalchemy import (
     String,
     Boolean,
     Numeric,
+    Date,
     DateTime,
     Text,
     ForeignKey,
@@ -96,6 +97,15 @@ class Vendor(Base):
     is_1099_eligible = Column(Boolean, default=False)
     w9_on_file = Column(Boolean, default=False)
     w9_document_id = Column(Integer, ForeignKey("attachments.id"), nullable=True)
+    # Construction mode (#431): "sub" marks a subcontractor; the trade
+    # license and the certificate of insurance a GC collects before the job.
+    # All nullable — an ordinary vendor and a non-construction company leave
+    # them blank. "sub" is vendor_type's only value for now.
+    vendor_type = Column(String(20), nullable=True)
+    license_number = Column(String(100), nullable=True)
+    coi_carrier = Column(String(200), nullable=True)
+    coi_policy_number = Column(String(100), nullable=True)
+    coi_expires = Column(Date, nullable=True)
     notes = Column(Text, nullable=True)
     is_active = Column(Boolean, default=True)
     balance = Column(Numeric(15, 2), default=0)

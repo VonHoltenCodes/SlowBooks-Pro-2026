@@ -154,6 +154,16 @@ The register is the ledger account (v2.10, issue #114). Full guide: [docs/bankin
 - **Pledges** — recurring pledges and their installments (generated invoices link to their template and carry its grant), one-off pledges, write-off to Bad Debt Expense through a credit memo; credit memo void
 - Guide: [nonprofit-module.md](nonprofit-module.md); design: [design/nonprofit.md](design/nonprofit.md)
 
+## Construction mode (Phase 1)
+- **One switch** — Settings → Company Type → Construction, the contractor counterpart to Nonprofit: it changes no data and is reversible. It adds the contractor accounts and the standard cost codes rather than re-seeding the chart
+- **Contractor accounts** (#431) — Retainage Receivable (1150), Construction in Progress (1350), Retainage Payable (2050), Customer Deposits (2210), Use Tax Payable (2220), Equipment Cost (5400), Other Job Costs (5500); each created only if missing, its number yielding to a chart that already owns it, each pinned to an Other Current (job-cost accounts to Cost of Goods Sold) balance-sheet line. Idempotent: switching again or back changes nothing
+- **Standard cost codes** — the 24 CSI MasterFormat divisions plus Labor and Equipment Rental (26 codes) and the labor / material / subcontract / equipment / other cost types, loaded on the switch when the company has no cost codes of its own (the same list the Cost Codes page loads); the full MasterFormat line-item list is not shipped
+- **Light vocabulary** — a contractor keeps Customer, Invoice, Estimate and Job; the one word that changes is Subcontractor → **Sub**, on screens and in prose. The API, database and exports never change name
+- **Subcontractor vendor type** — a vendor can be marked a Sub, revealing a trade License #, and a certificate of insurance (Carrier, Policy #, Expires); a new vendor in construction mode is a 1099 vendor by default (W-9 on file stays a recorded fact, not a default)
+- **Report Center** leads with the contractor reports that exist — Job Profitability, Job Budget vs Actual, P&L by Job
+- **Not yet** — no first-run company-type prompt (Construction is chosen in Settings, as Nonprofit is), no new accounting, no change-order / draw / pay-application screens, no COI-expiry warning in Pay Bills, and Customer:Job still prints with a space
+- Guide: [contractor-mode.md](contractor-mode.md)
+
 ## Dashboard
 - Company Snapshot with Total Receivables, Overdue Invoices, Active Customers, Total Payables
 - **AR Aging Bar Chart** — Color-coded stacked bar (Current/30/60/90+ days); each segment wide enough to hold it carries its figure (v2.22.2)

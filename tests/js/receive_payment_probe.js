@@ -32,7 +32,7 @@ const ctx = {
   $$: (sel) => (sel === '#payment-invoices .alloc-amount' ? allocs
     : sel === '.credit-alloc' ? creditAllocs : []),
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   formatCurrency: (n) => '$' + Number(n || 0).toFixed(2),
   formatDate: (s) => s,
   escapeHtml: (s) => String(s),

@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
-from typing import Annotated, Optional
+from typing import Annotated, Literal, Optional
 
 from pydantic import AfterValidator, BaseModel, Field
 
@@ -151,6 +151,14 @@ class VendorCreate(StrictModel):
     # The W-9 the 1099-NEC prints "on file: Yes/No" for; nothing could set
     # it until 2.22.2 (#257), so every form said No.
     w9_on_file: bool = False
+    # Construction mode (#431): "sub" marks a subcontractor, with its trade
+    # license and certificate of insurance. Blank on an ordinary vendor;
+    # "sub" is the only value for now.
+    vendor_type: Optional[Literal["sub"]] = None
+    license_number: Optional[str] = Field(None, max_length=100)
+    coi_carrier: Optional[str] = Field(None, max_length=200)
+    coi_policy_number: Optional[str] = Field(None, max_length=100)
+    coi_expires: Optional[date] = None
     notes: Optional[str] = None
 
 
@@ -174,6 +182,11 @@ class VendorUpdate(StrictModel):
     is_1099_vendor: Optional[bool] = None
     vendor_1099_type: Optional[str] = Field(None, max_length=10)
     w9_on_file: Optional[bool] = None
+    vendor_type: Optional[Literal["sub"]] = None
+    license_number: Optional[str] = Field(None, max_length=100)
+    coi_carrier: Optional[str] = Field(None, max_length=200)
+    coi_policy_number: Optional[str] = Field(None, max_length=100)
+    coi_expires: Optional[date] = None
     notes: Optional[str] = None
     is_active: Optional[bool] = None
 
@@ -199,6 +212,11 @@ class VendorResponse(BaseModel):
     is_1099_vendor: bool = False
     vendor_1099_type: Optional[str] = None
     w9_on_file: bool = False
+    vendor_type: Optional[str] = None
+    license_number: Optional[str] = None
+    coi_carrier: Optional[str] = None
+    coi_policy_number: Optional[str] = None
+    coi_expires: Optional[date] = None
     notes: Optional[str]
     is_active: bool
     balance: Decimal

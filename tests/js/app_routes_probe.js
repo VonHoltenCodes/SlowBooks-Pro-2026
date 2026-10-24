@@ -12,6 +12,7 @@ const fs = require('fs'), vm = require('vm');
 
 const hashes = JSON.parse(process.argv[2]);
 const nonprofit = process.argv.includes('--nonprofit');
+const construction = process.argv.includes('--construction');
 const src = fs.readFileSync('app/static/js/app.js', 'utf8');
 
 let calls = [];
@@ -41,12 +42,17 @@ const ctx = {
   escapeHtml: (s) => String(s ?? ''),
   toast: (msg) => calls.push(['toast', String(msg)]),
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => nonprofit },
+  Terms: { text: (s) => s, isNonprofit: () => nonprofit, isConstruction: () => construction },
 };
 // every page object app.js names gets a recording stub
 for (const name of new Set(src.match(/\b[A-Z][A-Za-z]*Page\b/g) || [])) ctx[name] = stub(name);
 vm.createContext(ctx);
 vm.runInContext(src + '\nthis.App = App;', ctx);
+// A synthetic construction-only route (Phase 1 ships none) to exercise the
+// route.construction guard: it renders only for a construction company.
+ctx.App.routes['/__ctest'] = {
+  page: 'dashboard', label: 'Contractor Test', construction: true, render: () => '<CTest>',
+};
 
 (async () => {
   const out = {};

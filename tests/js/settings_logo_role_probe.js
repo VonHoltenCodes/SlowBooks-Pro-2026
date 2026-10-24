@@ -10,7 +10,7 @@ const ctx = {
   JSON,
   setTimeout: () => 0,
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   escapeHtml: (s) => String(s == null ? '' : s),
   API: { get: async (path) => (path === '/settings' ? settings : path === '/uploads/logo' ? logo : {}) },
   App: { role: 'admin' },

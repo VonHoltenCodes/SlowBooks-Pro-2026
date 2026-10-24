@@ -8,7 +8,7 @@ function fixture(settings = {}) {
     const writes = [];
     const context = {
         API: { get: async () => settings, put: async (url, data) => { writes.push({ url, data }); } },
-        setTimeout() {}, T: value => value, Terms: { text: value => value, isNonprofit: () => false },
+        setTimeout() {}, T: value => value, Terms: { text: value => value, isNonprofit: () => false, isConstruction: () => false },
         escapeHtml: value => String(value ?? '').replace(/[&<>"']/g, character => ({
             '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
         })[character]),

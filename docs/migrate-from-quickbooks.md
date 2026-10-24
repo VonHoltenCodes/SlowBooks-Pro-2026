@@ -379,3 +379,31 @@ under Uncategorized is a posting QuickBooks had no class on either.
 - Going forward, enter point-of-sale style sales on the **Sales
   Receipts** screen — one form records the sale and the payment
   together.
+
+## Leaving QuickBooks Contractor Edition
+
+If your file is a QuickBooks Desktop **Contractor Edition** company, set
+SlowBooks to the matching mode after you import: **Settings → Company Type →
+Construction**. It changes no data and can be switched back at any time. What
+it does:
+
+- Adds the contractor accounts — Retainage Receivable and Payable,
+  Construction in Progress, Customer Deposits, Use Tax Payable, Equipment
+  Cost and Other Job Costs — each only if your imported chart does not
+  already have one by that name, and each keeping its standard number only
+  where your chart has not already used it. Your own retainage or deposit
+  accounts are left as they are; move their balances by journal entry if you
+  want the standard numbers.
+- Loads the standard CSI MasterFormat cost-code divisions (01–33, plus Labor
+  and Equipment Rental) if you have not built your own. QuickBooks' job
+  "Items" do not come across as cost codes — rebuild the ones you use under
+  the matching division on the Cost Codes page.
+- Shows a subcontractor as a **Sub**, and gives each vendor you mark a
+  Subcontractor a trade-license and certificate-of-insurance record. Mark
+  your subs after the import; QuickBooks does not export the COI.
+
+The seed chart SlowBooks starts a brand-new company with is already the
+Contractor template (Materials, Labor and Subcontractor Costs on the COGS
+side), so a fresh contractor file and an imported one converge on the same
+accounts. QuickBooks' **Customer:Job** list imports as SlowBooks jobs under
+their customers; the name prints as "Customer: Job" here.

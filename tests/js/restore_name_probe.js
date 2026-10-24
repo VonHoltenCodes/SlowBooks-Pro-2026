@@ -36,7 +36,7 @@ const ctx = {
   openModal: (_title, html) => { modal = html; },
   closeModal: () => {},
   T: (s) => s,
-  Terms: { init() {}, text: (s) => s, isNonprofit: () => false },
+  Terms: { init() {}, text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   formatDate: (d) => d,
   API: {
     get: async (url) => {

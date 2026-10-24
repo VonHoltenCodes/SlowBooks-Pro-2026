@@ -40,7 +40,7 @@ const ctx = {
   escapeHtml: (s) => String(s ?? ''),
   toast: (msg) => calls.push(['toast', String(msg)]),
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
 };
 for (const name of new Set(src.match(/\b[A-Z][A-Za-z]*Page\b/g) || [])) ctx[name] = stub(name);
 vm.createContext(ctx);

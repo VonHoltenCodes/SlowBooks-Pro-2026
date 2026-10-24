@@ -79,23 +79,45 @@ NONPROFIT: dict[str, str] = {
     "Revenue by Customer": "Revenue & Support by Donor",
 }
 
+# A contractor keeps every business word (Customer, Invoice, Estimate, Job:
+# QuickBooks' own Contractor Edition renames almost nothing), so the
+# construction dictionary is small — the one shorthand the trade speaks is
+# "Sub" for a subcontractor. Must stay byte-identical with TERMS_CONSTRUCTION
+# in app/static/js/terms.js (tests/test_terminology.py checks).
+CONSTRUCTION: dict[str, str] = {
+    "Subcontractor": "Sub",
+    "Subcontractors": "Subs",
+}
+
 # Words that must never be mapped, whole or as a phrase start.
 PROTECTED_WORDS = ("Sales", "Sales Tax", "Vendor", "Bill", "Estimate", "Payment")
 
-MODES = ("business", "nonprofit")
+MODES = ("business", "nonprofit", "construction")
 
-_WORD_RE = re.compile(
-    r"\b("
-    + "|".join(re.escape(k) for k in sorted(NONPROFIT, key=len, reverse=True))
-    + r")\b",
-    re.IGNORECASE,
-)
+# The dictionary for each non-business mode; business has none (identity).
+_DICTS: dict[str, dict[str, str]] = {
+    "nonprofit": NONPROFIT,
+    "construction": CONSTRUCTION,
+}
+
+
+def _word_re(d: dict[str, str]) -> re.Pattern:
+    return re.compile(
+        r"\b("
+        + "|".join(re.escape(k) for k in sorted(d, key=len, reverse=True))
+        + r")\b",
+        re.IGNORECASE,
+    )
+
+
+_WORD_RES: dict[str, re.Pattern] = {mode: _word_re(d) for mode, d in _DICTS.items()}
 
 
 class Terms:
     """Callable dictionary: ``t("Invoice") -> "Pledge"`` in nonprofit mode,
-    the key itself otherwise. Plurals and lowercase forms of known keys
-    resolve too, so ``t("invoices") -> "pledges"``."""
+    the key itself in business mode. Plurals and lowercase forms of known
+    keys resolve too, so ``t("invoices") -> "pledges"``. Each company_type
+    past "business" carries its own dictionary (see ``_DICTS``)."""
 
     def __init__(self, mode: str = "business"):
         self.mode = mode if mode in MODES else "business"
@@ -104,10 +126,26 @@ class Terms:
     def is_nonprofit(self) -> bool:
         return self.mode == "nonprofit"
 
+    @property
+    def is_construction(self) -> bool:
+        return self.mode == "construction"
+
+    @property
+    def _dict(self) -> dict[str, str] | None:
+        """This mode's word dictionary, or None in business mode."""
+        return _DICTS.get(self.mode)
+
+    @property
+    def has_words(self) -> bool:
+        """True when the mode swaps any words (nonprofit or construction) —
+        the gate for running the dictionary over a message, so a third type
+        is not silently left in business words."""
+        return self._dict is not None
+
     def __call__(self, key: str) -> str:
-        if not self.is_nonprofit or not key:
+        d = self._dict
+        if not d or not key:
             return key
-        d = NONPROFIT
         if key in d:
             return d[key]
         if key.endswith("s") and key[:-1] in d:
@@ -120,13 +158,14 @@ class Terms:
     def text(self, s: str) -> str:
         """Prose helper: swap every whole-word key inside a sentence,
         keeping the case of what was matched."""
-        if not self.is_nonprofit or not s:
+        d = self._dict
+        if not d or not s:
             return s
 
         def _swap(m: re.Match) -> str:
             found = m.group(0)
-            exact = next((k for k in NONPROFIT if k.lower() == found.lower()), None)
-            out = NONPROFIT[exact] if exact else found
+            exact = next((k for k in d if k.lower() == found.lower()), None)
+            out = d[exact] if exact else found
             # "P&L" and "A/R" are upper-case as keys; matching them is
             # not a shouted sentence, so "P&L analysis" must not become
             # "ACTIVITIES analysis".
@@ -142,7 +181,7 @@ class Terms:
                 )
             return out
 
-        return _WORD_RE.sub(_swap, s)
+        return _WORD_RES[self.mode].sub(_swap, s)
 
     def slug(self, key: str) -> str:
         """Filename form: ``profit-loss`` / ``statement-of-activities``."""

@@ -15,6 +15,17 @@ from app.services.form_1099 import clear_type_unless_1099
 router = APIRouter(prefix="/api/vendors", tags=["vendors"])
 
 
+def clear_sub_fields_unless_sub(vendor: Vendor) -> None:
+    """The license and certificate-of-insurance fields describe a
+    subcontractor; on any other vendor they are cleared rather than kept
+    as data the forms would never show (mirrors clear_type_unless_1099)."""
+    if vendor.vendor_type != "sub":
+        vendor.license_number = None
+        vendor.coi_carrier = None
+        vendor.coi_policy_number = None
+        vendor.coi_expires = None
+
+
 def _responses(db: Session, vendors: list[Vendor]) -> list[VendorResponse]:
     """The vendors with what is owed to each, summed from the open bills,
     credits and unapplied payments (Vendor.balance is never written)."""
@@ -82,6 +93,7 @@ def create_vendor(
             )
     vendor = Vendor(**data.model_dump())
     clear_type_unless_1099(vendor)
+    clear_sub_fields_unless_sub(vendor)
     db.add(vendor)
     db.commit()
     db.refresh(vendor)
@@ -95,6 +107,7 @@ def update_vendor(vendor_id: int, data: VendorUpdate, db: Session = Depends(get_
     for key, val in update_data.items():
         setattr(vendor, key, val)
     clear_type_unless_1099(vendor)
+    clear_sub_fields_unless_sub(vendor)
     db.commit()
     db.refresh(vendor)
     return _response(db, vendor)

@@ -35,7 +35,7 @@ function fixture(invoice) {
     const context = {
         API: { get: async url => url === '/settings' ? {} : url === '/invoices/42' ? invoice : [] },
         App: { settings: {} }, window: {},
-        T: value => value, Terms: { text: value => value, isNonprofit: () => false },
+        T: value => value, Terms: { text: value => value, isNonprofit: () => false, isConstruction: () => false },
         escapeHtml: value => String(value ?? ''),
         formatDate: value => value, statusBadge: value => value,
         formatCurrency: value => `$${Number(value || 0).toFixed(2)}`,

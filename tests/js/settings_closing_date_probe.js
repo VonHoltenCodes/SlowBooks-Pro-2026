@@ -55,7 +55,7 @@ const ctx = {
   formatDate: (d) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
   escapeHtml: (s) => String(s ?? ''),
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   toast: (msg, kind) => toasts.push([msg, kind || 'success']),
   setTimeout: () => 0, // the page's loaders are not part of this
   API: {

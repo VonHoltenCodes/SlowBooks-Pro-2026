@@ -109,7 +109,7 @@ const ctx = {
   toast: () => {},
   closeModal: () => {},
   T: s => s,
-  Terms: { isNonprofit: () => false },
+  Terms: { isNonprofit: () => false, isConstruction: () => false },
   PayrollPage: { render: async () => { rendered.push('payroll'); return '<payroll>'; } },
   AuditPage: { render: async () => { rendered.push('audit'); return '<audit>'; } },
 };

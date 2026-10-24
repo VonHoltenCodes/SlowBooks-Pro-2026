@@ -37,7 +37,7 @@ const ctx = {
   formatCurrency: (n) => '$' + Number(n || 0).toFixed(2),
   formatDate: (s) => s || '',
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   toast() {},
   openModal: (_title, html) => { modalHtml = html; },
   closeModal() {},

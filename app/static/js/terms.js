@@ -66,17 +66,36 @@ const TERMS_NONPROFIT = {
     "Revenue by Customer": "Revenue & Support by Donor"
 };
 
+/**
+ * A contractor keeps every business word (QuickBooks' own Contractor
+ * Edition renames almost nothing); the one shorthand the trade speaks is
+ * "Sub" for a subcontractor. Byte-identical with CONSTRUCTION in
+ * app/services/terminology.py (tests/test_terminology.py checks).
+ */
+const TERMS_CONSTRUCTION = {
+    "Subcontractor": "Sub",
+    "Subcontractors": "Subs"
+};
+
+// The dictionary for each non-business company type; business has none.
+const TERMS_DICTS = { nonprofit: TERMS_NONPROFIT, construction: TERMS_CONSTRUCTION };
+
 const Terms = {
     mode: 'business',
-    _re: null,
+    _re: {},
 
     init(settings) {
-        Terms.mode = (settings && settings.company_type === 'nonprofit') ? 'nonprofit' : 'business';
+        const type = settings && settings.company_type;
+        // own-key check: `'constructor' in TERMS_DICTS` is true by prototype
+        const known = type && Object.prototype.hasOwnProperty.call(TERMS_DICTS, type);
+        Terms.mode = known ? type : 'business';
     },
 
     isNonprofit() { return Terms.mode === 'nonprofit'; },
 
-    _dict() { return Terms.mode === 'nonprofit' ? TERMS_NONPROFIT : null; },
+    isConstruction() { return Terms.mode === 'construction'; },
+
+    _dict() { return TERMS_DICTS[Terms.mode] || null; },
 
     /**
      * Prose helper for sentences (empty states, hints, placeholders):
@@ -86,12 +105,12 @@ const Terms = {
     text(s) {
         const d = Terms._dict();
         if (!d || !s) return s;
-        if (!Terms._re) {
-            const keys = Object.keys(TERMS_NONPROFIT).sort((a, b) => b.length - a.length)
+        if (!Terms._re[Terms.mode]) {
+            const keys = Object.keys(d).sort((a, b) => b.length - a.length)
                 .map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-            Terms._re = new RegExp('\\b(' + keys.join('|') + ')\\b', 'gi');
+            Terms._re[Terms.mode] = new RegExp('\\b(' + keys.join('|') + ')\\b', 'gi');
         }
-        return s.replace(Terms._re, (found) => {
+        return s.replace(Terms._re[Terms.mode], (found) => {
             const exact = Object.keys(d).find(k => k.toLowerCase() === found.toLowerCase());
             const out = exact ? d[exact] : found;
             // an all-caps KEY (P&L, A/R) is not a shouted sentence

@@ -23,7 +23,7 @@ const ctx = {
   JSON,
   setTimeout: () => 0,
   T: (s) => s,
-  Terms: { text: (s) => s, isNonprofit: () => false },
+  Terms: { text: (s) => s, isNonprofit: () => false, isConstruction: () => false },
   escapeHtml,
   formatFileSize: (n) => `${n} bytes`,
   toast: (msg, kind) => toasts.push([msg, kind || 'ok']),

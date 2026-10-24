@@ -315,7 +315,7 @@ function newWindow(role, answers = {}) {
     $$: sel => document.querySelectorAll(sel),
     escapeHtml: s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]),
     T: s => s,
-    Terms: { text: s => s, isNonprofit: () => false },
+    Terms: { text: s => s, isNonprofit: () => false, isConstruction: () => false },
     formatDate: s => s,
     formatCurrency: n => `$${Number(n).toFixed(2)}`,
     toast() {},

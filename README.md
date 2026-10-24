@@ -148,6 +148,10 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   with restrictions, releases, functional expenses, donor acknowledgments,
   giving statements, pledges
   ([docs/nonprofit-module.md](docs/nonprofit-module.md))
+- **Construction mode** — one switch adds the contractor accounts
+  (retainage, deposits, use tax, work in progress), the standard CSI cost
+  codes, a Sub vendor type with license and insurance, and the contractor
+  reports ([docs/contractor-mode.md](docs/contractor-mode.md))
 - **Accessibility** — AA contrast in both themes, tagged PDFs, working
   toward WCAG 2.1 AA ([docs/accessibility.md](docs/accessibility.md))
 - **Duplicate detection** — fuzzy customer/vendor matching at create time
@@ -234,6 +238,7 @@ Production checklist: **[docs/release-checklist.md](docs/release-checklist.md)**
 | [docs/wiring-audit.md](docs/wiring-audit.md) | Frontend ↔ backend drift audit methodology |
 | [docs/banking.md](docs/banking.md) | The register is the ledger: entries, feeds as a review queue, transfers, reconciliation |
 | [docs/nonprofit-module.md](docs/nonprofit-module.md) | Nonprofit mode: funds, restrictions, functional expenses, donor documents |
+| [docs/contractor-mode.md](docs/contractor-mode.md) | Construction mode: contractor accounts, cost codes, the Sub vendor type, the report set |
 | [docs/accessibility.md](docs/accessibility.md) | WCAG 2.1 AA conformance, known gaps, how to report a barrier |
 | [docs/migrate-from-quickbooks.md](docs/migrate-from-quickbooks.md) | QuickBooks Desktop (IIF) and QuickBooks Online (its Export data zip, no Intuit app) migration, sales receipts included |
 | [docs/state-withholding.md](docs/state-withholding.md) | State income-tax withholding tables and their sources |
