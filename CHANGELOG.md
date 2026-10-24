@@ -5,6 +5,34 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Recent sends under Settings → Email (SMTP)** (#447, from discussion #422). A
+new user's test email failed with "see the email log for the reason" and there
+was no email log anywhere in the screens, though every send has always written
+one. Settings → Email (SMTP) now shows a Recent sends list: the last 50 emails,
+newest first, with when each went out, who it went to, its subject, what sent
+it (invoice, statement, test, collection letter, portal), and whether it sent.
+A failure shows the reason in a sentence a person can act on, with the raw SMTP
+error underneath; there is a "failed only" filter and a "Show more" for older
+rows. The list is the administrator's, like backups and API tokens
+(`GET /api/email-log?limit=&offset=&status=`, bounded to 200 a page).
+
+A failed test email now says why itself instead of pointing at a log — the
+server rejection ("535 Username and Password not accepted") in the response,
+plus a short hint for the mistakes new users actually hit: Gmail and Google
+Workspace need an app password, and a server that cannot be reached means the
+host, port, or Use TLS setting is wrong. The three "see the email log"
+messages (the test email, an emailed invoice, a collection letter) now point
+at Recent sends, and the collection-letter one names the customer whose send
+failed.
+
+Every saved secret field on Settings — the SMTP and closing-date passwords,
+the payment-provider keys and the ACH account — now says under it "Saved.
+Shown as a placeholder; type a new value only to change it." The placeholder
+stays eight characters so no password length leaks; the same new user had read
+it as a truncated password.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

@@ -22,6 +22,20 @@ const SettingsPage = {
         return Number.isFinite(n) ? String(+n.toFixed(4)) : '0.0';
     },
 
+    // The server echoes a saved secret back as this fixed 8-character string
+    // (settings_service.SECRET_PLACEHOLDER), never the real length, so the
+    // field shows a value is set without leaking how long it is. A new user
+    // read it as a truncated password (#447); the note below says what it is.
+    _SECRET_PLACEHOLDER: '********',
+
+    // Said under a secret field whose value is the placeholder: the value is
+    // there, this is not it, and you only type to replace it.
+    _secretNote(value) {
+        return value === SettingsPage._SECRET_PLACEHOLDER
+            ? `<div class="form-hint" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Saved. Shown as a placeholder; type a new value only to change it.</div>`
+            : '';
+    },
+
     // Where each encrypted setting is entered again, for the notice below.
     _SECRET_PLACES: {
         smtp_password: 'the email password, under Email (SMTP)',
@@ -91,6 +105,7 @@ const SettingsPage = {
             SettingsPage.loadOcrStatus();
             SettingsPage.loadOcrEnginePref();
             SettingsPage.loadUnreadableSecrets();
+            SettingsPage.loadEmailLog(true);
             SettingsPage.scrollToFocus();
             SettingsPage._installLeaveGuard();
             SettingsPage._markClean();
@@ -239,6 +254,7 @@ const SettingsPage = {
                         <div class="form-group"><label>Password (optional)</label>
                             <input name="closing_date_password" type="password" value="${escapeHtml(s.closing_date_password || '')}"
                                 placeholder="Leave blank for no password" autocomplete="new-password">
+                            ${SettingsPage._secretNote(s.closing_date_password)}
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
                                 With a password set, a change dated on or before the closing date asks for it
                                 and goes through when it is right. Without one, such changes are refused.</div></div>
@@ -258,7 +274,7 @@ const SettingsPage = {
                         <div class="form-group"><label>Username</label>
                             <input name="smtp_user" value="${escapeHtml(s.smtp_user || '')}"></div>
                         <div class="form-group"><label>Password</label>
-                            <input name="smtp_password" type="password" value="${escapeHtml(s.smtp_password || '')}"></div>
+                            <input name="smtp_password" type="password" value="${escapeHtml(s.smtp_password || '')}">${SettingsPage._secretNote(s.smtp_password)}</div>
                         <div class="form-group"><label>From Email</label>
                             <input name="smtp_from_email" type="email" value="${escapeHtml(s.smtp_from_email || '')}"></div>
                         <div class="form-group"><label>From Name</label>
@@ -271,6 +287,21 @@ const SettingsPage = {
                     </div>
                     <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.testEmail()" style="margin-top:8px;">
                         Send Test Email</button>
+                </div>
+
+                <div class="settings-section" id="settings-email-recent-sends" data-admin role="group" aria-labelledby="settings-h-email-recent-sends" hidden>
+                    <h3 id="settings-h-email-recent-sends">Recent sends</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Every invoice, statement, collection letter, portal invite and test email, newest first,
+                        with whether it sent and — when it didn't — why.
+                    </div>
+                    <label style="font-size:11px; display:inline-flex; align-items:center; gap:6px; margin-bottom:8px;">
+                        <input type="checkbox" id="email-log-failed-only" onchange="SettingsPage.filterEmailLog(this.checked)">
+                        Show failed only</label>
+                    <div id="email-log-rows"><div style="font-size:11px; color:var(--text-muted);">Loading…</div></div>
+                    <div style="margin-top:8px;">
+                        <button type="button" class="btn btn-sm btn-secondary" id="email-log-more" onclick="SettingsPage.loadEmailLog(false)" hidden>Show more</button>
+                    </div>
                 </div>
 
                 <div class="settings-section" role="group" aria-labelledby="settings-h-direct-deposit">
@@ -287,6 +318,7 @@ const SettingsPage = {
                             <input name="ach_bank_name" maxlength="23" value="${escapeHtml(s.ach_bank_name || '')}"></div>
                         <div class="form-group"><label>Company Account Number</label>
                             <input name="ach_company_account" type="password" inputmode="numeric" maxlength="17" value="${escapeHtml(s.ach_company_account || '')}" autocomplete="off">
+                            ${SettingsPage._secretNote(s.ach_company_account)}
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">The account the net pay is paid from. Stored encrypted.</div></div>
                         <div class="form-group"><label>Immediate Origin</label>
                             <input name="ach_immediate_origin" maxlength="10" value="${escapeHtml(s.ach_immediate_origin || '')}" placeholder="1 + EIN unless the bank says otherwise"></div>
@@ -311,9 +343,9 @@ const SettingsPage = {
                         <div class="form-group"><label>Publishable Key</label>
                             <input name="stripe_publishable_key" value="${escapeHtml(s.stripe_publishable_key || '')}" placeholder="pk_..."></div>
                         <div class="form-group"><label>Secret Key</label>
-                            <input name="stripe_secret_key" type="password" value="${escapeHtml(s.stripe_secret_key || '')}" placeholder="sk_..."></div>
+                            <input name="stripe_secret_key" type="password" value="${escapeHtml(s.stripe_secret_key || '')}" placeholder="sk_...">${SettingsPage._secretNote(s.stripe_secret_key)}</div>
                         <div class="form-group"><label>Webhook Secret</label>
-                            <input name="stripe_webhook_secret" type="password" value="${escapeHtml(s.stripe_webhook_secret || '')}" placeholder="whsec_..."></div>
+                            <input name="stripe_webhook_secret" type="password" value="${escapeHtml(s.stripe_webhook_secret || '')}" placeholder="whsec_...">${SettingsPage._secretNote(s.stripe_webhook_secret)}</div>
                     </div>
                     <h4 id="settings-h-paypal" style="margin:12px 0 4px; font-size:12px;">PayPal</h4>
                     <div class="form-grid" role="group" aria-labelledby="settings-h-paypal">
@@ -330,7 +362,7 @@ const SettingsPage = {
                         <div class="form-group"><label>Client ID</label>
                             <input name="paypal_client_id" value="${escapeHtml(s.paypal_client_id || '')}"></div>
                         <div class="form-group"><label>Client Secret</label>
-                            <input name="paypal_client_secret" type="password" value="${escapeHtml(s.paypal_client_secret || '')}"></div>
+                            <input name="paypal_client_secret" type="password" value="${escapeHtml(s.paypal_client_secret || '')}">${SettingsPage._secretNote(s.paypal_client_secret)}</div>
                         <div class="form-group"><label>Webhook ID</label>
                             <input name="paypal_webhook_id" value="${escapeHtml(s.paypal_webhook_id || '')}"
                                 placeholder="From the PayPal developer dashboard"></div>
@@ -348,11 +380,11 @@ const SettingsPage = {
                                 <option value="production" ${s.square_environment === 'production' ? 'selected' : ''}>Production</option>
                             </select></div>
                         <div class="form-group"><label>Access Token</label>
-                            <input name="square_access_token" type="password" value="${escapeHtml(s.square_access_token || '')}"></div>
+                            <input name="square_access_token" type="password" value="${escapeHtml(s.square_access_token || '')}">${SettingsPage._secretNote(s.square_access_token)}</div>
                         <div class="form-group"><label>Location ID</label>
                             <input name="square_location_id" value="${escapeHtml(s.square_location_id || '')}"></div>
                         <div class="form-group"><label>Webhook Signature Key</label>
-                            <input name="square_webhook_signature_key" type="password" value="${escapeHtml(s.square_webhook_signature_key || '')}"></div>
+                            <input name="square_webhook_signature_key" type="password" value="${escapeHtml(s.square_webhook_signature_key || '')}">${SettingsPage._secretNote(s.square_webhook_signature_key)}</div>
                         <div class="form-group"><label>Webhook Notification URL</label>
                             <input name="square_notification_url" value="${escapeHtml(s.square_notification_url || '')}"
                                 placeholder="Exact URL registered in the Square dashboard"></div>
@@ -660,6 +692,124 @@ const SettingsPage = {
     // ------------------------------------------------------------------
     _snapshot: null,
     _leaving: false,
+
+    // --- Recent sends (the email_log, #447) ------------------------------
+    // How many a page fetches, and the paging state the "Show more" button
+    // advances. `_emailLogStatus` is '' (all) or 'failed'.
+    _EMAIL_LOG_PAGE: 50,
+    _emailLogOffset: 0,
+    _emailLogStatus: '',
+
+    // What sent it, in words. The row stores the raw entity_type the send
+    // passed (invoice, statement, settings_test, …); this is its face.
+    _emailSourceLabel(entityType) {
+        const map = {
+            invoice: T('Invoice'),
+            statement: 'Statement',
+            giving_statement: 'Giving statement',
+            collection: 'Collection letter',
+            settings_test: 'Test',
+            portal: 'Portal',
+            employee: 'Employee',
+        };
+        if (map[entityType]) return map[entityType];
+        if ((entityType || '').startsWith('acknowledgment')) return 'Acknowledgment';
+        return entityType || '—';
+    },
+
+    // A failed row's two lines: a sentence a person can act on, and the raw
+    // SMTP error under it. The sentence prefers the hint the server mapped
+    // (Gmail app password, host/port/TLS), then the cleaned reason, then a
+    // plain fallback. The raw error is always shown so nothing is hidden.
+    _emailLogFailure(row) {
+        const raw = (row.error_message || '').trim();
+        const low = raw.toLowerCase();
+        let sentence;
+        if (/\b53[45]\b/.test(raw)) {
+            sentence = (low.includes('gmail') || low.includes('google'))
+                ? 'Google rejected the sign-in — use a 16-character app password as the SMTP password.'
+                : 'The server rejected the username or password — check both.';
+        } else if (/(refused|timed out|timeout|getaddrinfo|no route to host|network is unreachable|name or service not known)/.test(low)) {
+            sentence = 'The server could not be reached — check the host, port, and the Use TLS setting.';
+        } else if (low.includes('not configured')) {
+            sentence = 'SMTP is not configured — fill in the fields above.';
+        } else {
+            sentence = 'The email could not be sent.';
+        }
+        return { sentence, raw };
+    },
+
+    // A stored send time in the operator's local zone. The server sends ISO
+    // with its zone (+00:00); a bare stamp is read as UTC, as the audit list
+    // does, so a 7 pm Central send never shows tomorrow's date.
+    _emailLogWhen(iso) {
+        if (!iso) return '—';
+        const withZone = /Z|[+-]\d\d:?\d\d$/.test(iso) ? iso : iso + 'Z';
+        return new Date(withZone).toLocaleString();
+    },
+
+    // The rows as a small table; pure so the node suite can assert on it.
+    _emailLogRowsHtml(rows) {
+        if (!rows.length) {
+            return '<div style="font-size:11px; color:var(--text-muted);">No emails have been sent yet.</div>';
+        }
+        return `<table class="data-table" style="font-size:11px;">
+            <thead><tr><th scope="col">When</th><th scope="col">To</th><th scope="col">Subject</th><th scope="col">What</th><th scope="col">Status</th></tr></thead>
+            <tbody>${rows.map(r => {
+                const failed = r.status === 'failed';
+                let statusCell = failed
+                    ? '<span style="color:var(--danger, #b00);">Failed</span>'
+                    : 'Sent';
+                let detail = '';
+                if (failed) {
+                    const f = SettingsPage._emailLogFailure(r);
+                    detail = `<div style="color:var(--danger, #b00); margin-top:2px;">${escapeHtml(f.sentence)}</div>` +
+                        (f.raw ? `<div style="color:var(--text-muted); font-family:var(--font-mono); word-break:break-word;">${escapeHtml(f.raw)}</div>` : '');
+                }
+                return `<tr>
+                    <td style="white-space:nowrap;">${escapeHtml(SettingsPage._emailLogWhen(r.sent_at))}</td>
+                    <td>${escapeHtml(r.recipient || '—')}</td>
+                    <td>${escapeHtml(r.subject || '—')}</td>
+                    <td>${escapeHtml(SettingsPage._emailSourceLabel(r.entity_type))}</td>
+                    <td>${statusCell}${detail}</td>
+                </tr>`;
+            }).join('')}</tbody></table>`;
+    },
+
+    // The "failed only" toggle: reset to the first page under the new filter.
+    filterEmailLog(failedOnly) {
+        SettingsPage._emailLogStatus = failedOnly ? 'failed' : '';
+        SettingsPage.loadEmailLog(true);
+    },
+
+    // Load a page. reset=true replaces the list (first page / filter change);
+    // reset=false appends the next page for "Show more". Admin only — the
+    // route refuses every other role, so the whole section is hidden when the
+    // fetch is refused rather than showing an error to a bookkeeper.
+    async loadEmailLog(reset) {
+        const section = document.getElementById('settings-email-recent-sends');
+        const host = document.getElementById('email-log-rows');
+        if (!section || !host || !SettingsPage._isAdmin()) return;
+        if (reset) SettingsPage._emailLogOffset = 0;
+        const limit = SettingsPage._EMAIL_LOG_PAGE;
+        const params = `?limit=${limit}&offset=${SettingsPage._emailLogOffset}` +
+            (SettingsPage._emailLogStatus ? `&status=${SettingsPage._emailLogStatus}` : '');
+        let data;
+        try {
+            data = await API.get('/email-log' + params);
+        } catch (e) {
+            section.hidden = true;
+            return;
+        }
+        section.hidden = false;
+        const rows = data.rows || [];
+        const html = SettingsPage._emailLogRowsHtml(rows);
+        if (reset) host.innerHTML = html;
+        else host.insertAdjacentHTML('beforeend', html);
+        SettingsPage._emailLogOffset += rows.length;
+        const more = document.getElementById('email-log-more');
+        if (more) more.hidden = SettingsPage._emailLogOffset >= (data.total || 0);
+    },
 
     _formData() {
         const form = document.getElementById('settings-form');
@@ -1383,7 +1533,15 @@ const SettingsPage = {
         try {
             await API.post('/settings/test-email');
             toast('Test email sent');
-        } catch (err) { toast(err.message, 'error'); }
+        } catch (err) {
+            // The failure now carries the reason; the full history is just
+            // below, so point there and refresh it (#447).
+            toast(err.message, 'error');
+            const section = document.getElementById('settings-email-recent-sends');
+            if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } finally {
+            SettingsPage.loadEmailLog(true);
+        }
     },
 
     // Company type saves on its own and reloads: the vocabulary and the

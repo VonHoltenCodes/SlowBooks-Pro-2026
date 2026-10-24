@@ -54,6 +54,7 @@ from app.routes import (
 
 # Phase 1: Foundation
 from app.routes import audit, search
+from app.routes import email_log as email_log_routes
 
 # Phase 2: Accounts Payable
 from app.routes import purchase_orders, bills, bill_payments, credit_memos
@@ -1321,6 +1322,7 @@ app.include_router(iif.router)
 
 # Phase 1: Foundation
 app.include_router(audit.router)
+app.include_router(email_log_routes.router)
 app.include_router(search.router)
 # Phase 2: Accounts Payable
 app.include_router(purchase_orders.router)

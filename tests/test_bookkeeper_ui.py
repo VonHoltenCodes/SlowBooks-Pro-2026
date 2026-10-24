@@ -173,6 +173,13 @@ SETTINGS_TAKEN = {
     ),
     "Closing Date › Clear": ("PUT", "/api/settings", {"closing_date": ""}),
     "Email (SMTP) › Send Test Email": ("POST", "/api/settings/test-email", None),
+    # Recent sends reads the email_log (recipients, raw SMTP errors): admin
+    # only, like backups and tokens (#447).
+    "Recent sends › #email-log-failed-only": (
+        "GET",
+        "/api/email-log?status=failed",
+        None,
+    ),
     "Receipt Scanning › #ocr-engine-pref": (
         "PUT",
         "/api/settings",

@@ -231,18 +231,40 @@ def test_email(db: Session = Depends(get_db)):
             entity_type="settings_test",
         )
         if not sent:
-            raise HTTPException(
-                status_code=502,
-                detail="Test email failed to send. See the email log for the reason.",
+            # send_email() swallows the SMTP error and logs it; read that row
+            # back so the failure can say the reason itself (#447) instead of
+            # sending the user off to find a log that had no UI.
+            from app.models.email_log import EmailLog
+            from app.services.email_errors import explain_send_failure
+
+            row = (
+                db.query(EmailLog)
+                .filter(EmailLog.entity_type == "settings_test")
+                .order_by(EmailLog.id.desc())
+                .first()
             )
+            reason, hint = explain_send_failure(
+                row.error_message if row else "", settings.get("smtp_host", "")
+            )
+            detail = "Test email failed to send."
+            if reason:
+                detail += f" {reason}"
+            if hint:
+                detail += f" {hint}"
+            detail += " The full list is under Settings → Email (SMTP) → Recent sends."
+            raise HTTPException(status_code=502, detail=detail)
         return {"status": "sent"}
     except HTTPException:
         # Don't let the catch-all below rewrite our own 502 into a 500.
         raise
     except Exception:
-        # SMTP errors carry hostnames and server banners: log them, say only
-        # that it failed (the email log has the reason, as the 502 says).
+        # A failure before send_email ran (never SMTP, which it catches): log
+        # the traceback and point at the list without echoing internals.
         logger.exception("Test email failed")
         raise HTTPException(
-            status_code=500, detail="Email failed — see the email log for the reason"
+            status_code=500,
+            detail=(
+                "Email failed — see Settings → Email (SMTP) → Recent sends "
+                "for the reason."
+            ),
         )

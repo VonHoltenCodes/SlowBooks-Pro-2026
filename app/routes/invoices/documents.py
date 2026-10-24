@@ -157,7 +157,8 @@ def email_invoice(
                 status_code=502,
                 detail=(
                     "Email could not be sent. Check the SMTP settings under "
-                    "Settings -> Email; the failure is recorded in the email log."
+                    "Settings → Email (SMTP); the reason is under Recent sends "
+                    "there."
                 ),
             )
         return {"status": "sent"}

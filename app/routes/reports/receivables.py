@@ -602,7 +602,7 @@ def collection_letters(data: CollectionLetterRequest, db: Session = Depends(get_
                 else:
                     errors.append(
                         f"{customer.name}: the letter could not be emailed (the "
-                        "email log has the reason)"
+                        "reason is under Settings → Email (SMTP) → Recent sends)"
                     )
         except Exception:
             logger.exception(

@@ -590,7 +590,14 @@ const InvoicesPage = {
             });
             toast(`${T('Invoice')} emailed`);
             closeModal();
-        } catch (err) { toast(err.message, 'error'); }
+        } catch (err) {
+            // Offer the Recent sends section, where the failure and its reason
+            // are listed (#447).
+            toastAction(err.message, 'Recent sends', () => {
+                try { sessionStorage.setItem('settings_focus', 'settings-h-email-recent-sends'); } catch (e) {}
+                App.navigate('#/settings');
+            });
+        }
     },
 
     lineCount: 0,
