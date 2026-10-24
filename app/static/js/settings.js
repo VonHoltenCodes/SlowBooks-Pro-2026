@@ -22,6 +22,18 @@ const SettingsPage = {
         return Number.isFinite(n) ? String(+n.toFixed(4)) : '0.0';
     },
 
+    // The fiscal-year start-month options, value "1".."12" (#444). Built with
+    // string concatenation, not a template literal, so this helper adds no
+    // backtick-returning statement ahead of the page's render function (the
+    // unsaved-changes guard test slices the file at the first one).
+    _monthOptions(selected) {
+        const names = ['January', 'February', 'March', 'April', 'May', 'June',
+            'July', 'August', 'September', 'October', 'November', 'December'];
+        const opt = (name, i) => '<option value="' + (i + 1) + '"' +
+            (String(i + 1) === String(selected) ? ' selected' : '') + '>' + name + '</option>';
+        return names.map(opt).join('');
+    },
+
     // Where each encrypted setting is entered again, for the notice below.
     _SECRET_PLACES: {
         smtp_password: 'the email password, under Email (SMTP)',
@@ -137,6 +149,12 @@ const SettingsPage = {
                                 <option value="nonprofit" ${s.company_type === 'nonprofit' ? 'selected' : ''}>Nonprofit</option>
                             </select>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Nonprofit shows donors, pledges, donations and funds in place of customers, invoices, sales receipts and classes, and adds the net-asset accounts and statements. Your data does not change; switch back any time.</div>
+                        </div>
+                        <div class="form-group full-width"><label for="fiscal-year-start-month">First month of fiscal year</label>
+                            <select id="fiscal-year-start-month" name="fiscal_year_start_month">
+                                ${SettingsPage._monthOptions(s.fiscal_year_start_month || '1')}
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Reports' This/Last Fiscal Year presets, the dashboard's profit and nonprofit mode's year to date follow it. Payroll forms stay on the calendar year.</div>
                         </div>
                     </div>
                 </div>

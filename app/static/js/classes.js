@@ -24,7 +24,8 @@
  */
 const ClassesPage = {
     TABS: { overview: 'Overview', transactions: 'Transactions' },
-    DEFAULT_PERIOD: 'this_year_to_date',
+    // the fiscal year to date, as the reports open (#444)
+    get DEFAULT_PERIOD() { return ReportsPage.defaultPeriod(); },
 
     // the list's state and the open class's, both from the address
     _list: { period: 'this_year_to_date', start: '', end: '', show: 'active' },

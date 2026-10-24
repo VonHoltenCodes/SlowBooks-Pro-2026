@@ -256,13 +256,13 @@ const DashboardPage = {
                 <div style="width:80%;margin:0 auto;background:${m.cumulative < 0 ? '#a4242b' : 'var(--qb-blue)'};height:${Math.max(2, Math.abs(m.cumulative) / max * 100)}%;border-radius:2px 2px 0 0"></div>
                 <div style="font-size:9px;color:var(--gray-500);margin-top:2px">${m.month}</div></div>`).join('');
             return `<div class="card-value" style="color:${d.net < 0 ? 'var(--text-danger)' : 'var(--text-success)'}">${formatCurrency(d.net)}</div>
-                <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">net · ${d.year} year to date</div>
+                <div style="font-size:11px;color:var(--gray-500);margin-bottom:6px">net · ${String(d.year).startsWith('FY') ? `${d.year} to date` : `${d.year} year to date`}</div>
                 <table class="data-table" style="font-size:12px"><tbody>
                     <tr><td>${T('Income')}</td><td class="amount">${formatCurrency(d.income)}</td></tr>
                     <tr><td>Expenses</td><td class="amount">${formatCurrency(d.expenses)}</td></tr>
                 </tbody></table>
                 <div style="display:flex;align-items:flex-end;gap:4px;height:70px;margin-top:8px">${bars}</div>
-                <div style="font-size:10px;color:var(--gray-500);margin-top:2px">cumulative net by month · <a href="${DashboardPage._reportLink('pnl', 'this_year_to_date')}">Full ${T('P&L')}</a></div>`;
+                <div style="font-size:10px;color:var(--gray-500);margin-top:2px">cumulative net by month · <a href="${DashboardPage._reportLink('pnl', ReportsPage.defaultPeriod())}">Full ${T('P&L')}</a></div>`;
         },
         cash_position(d) {
             return `<div class="card-value">${formatCurrency(d.cash)}</div>

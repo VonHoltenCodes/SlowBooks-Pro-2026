@@ -1256,6 +1256,184 @@ def test_the_apps_own_moves_keep_the_address_and_bring_the_page_back(
         page.close()
 
 
+def test_a_non_january_fiscal_year_offers_the_fiscal_presets(browser, company, books):
+    """With a July fiscal year set, the period picker gains the four fiscal
+    presets after the calendar ones (#444)."""
+    company.put("/api/settings", json={"fiscal_year_start_month": "7"})
+    page, handled = _open_at(browser, company, PL_URL)
+    try:
+        page.wait_for_selector("#report-content table")
+        values = page.evaluate(
+            "() => Array.from(document.querySelectorAll('#report-period-select option'))"
+            ".map(o => o.value)"
+        )
+        for key in (
+            "this_fiscal_year",
+            "this_fiscal_year_to_date",
+            "last_fiscal_year",
+            "last_fiscal_year_to_date",
+        ):
+            assert key in values, key
+        # the fiscal presets fall after the calendar ones and before custom
+        assert values.index("last_year_to_date") < values.index("this_fiscal_year")
+        assert values.index("last_fiscal_year_to_date") < values.index("custom")
+    finally:
+        page.close()
+
+
+# ── #444 finish: the report screens open on the fiscal year ────────────────
+
+
+def _july_fy_start(today):
+    """The first day of a July fiscal year running on `today`."""
+    return dt.date(today.year if today.month >= 7 else today.year - 1, 7, 1)
+
+
+AS_OF = "() => document.getElementById('report-custom-end').value"
+
+
+@pytest.mark.parametrize(
+    "view,title",
+    [
+        ("profit-loss", "Profit & Loss"),
+        ("balance-sheet", "Balance Sheet"),
+        ("trial-balance", "Trial Balance"),
+        ("general-ledger", "General Ledger"),
+        ("income-by-customer", "Income by Customer"),
+        ("cash-flow", "Cash Flow Statement"),
+    ],
+)
+def test_a_july_company_opens_every_report_on_the_fiscal_year_to_date(
+    browser, company, books, view, title
+):
+    """A report opened with no dates (a Report Center card, a bare
+    address) opens on This Fiscal Year to Date, and the address says so;
+    a ranged one runs from July 1 (#444 review)."""
+    company.put("/api/settings", json={"fiscal_year_start_month": "7"})
+    today = dt.date.today()
+    page, handled = _open_at(browser, company, f"#/reports/{view}")
+    try:
+        page.wait_for_function(f"() => ({TITLE})().startsWith({title!r})")
+        page.wait_for_function(
+            "() => /period=this_fiscal_year_to_date/.test(location.hash)"
+        )
+        state = page.evaluate(PERIOD)
+        assert state["period"] == "this_fiscal_year_to_date"
+        q = _query(_hash(page))
+        if "start_date" in q:
+            assert q["start_date"] == _july_fy_start(today).isoformat()
+            assert q["end_date"] == today.isoformat()
+        else:  # an as-of report: the fiscal year to date ends today
+            assert q["as_of_date"] == today.isoformat()
+        # Custom starts from the fiscal year, not January 1
+        assert state["start"] == _july_fy_start(today).isoformat()
+    finally:
+        page.close()
+
+
+def test_a_july_company_steps_by_fiscal_year(browser, company, books):
+    """Previous on This Fiscal Year is Last Fiscal Year (July 1 to June 30),
+    once more a Custom fiscal year before it, and Next comes back; the
+    address follows each step (#444)."""
+    company.put("/api/settings", json={"fiscal_year_start_month": "7"})
+    fy = _july_fy_start(dt.date.today())
+    page, handled = _open_at(browser, company, "#/reports/profit-loss")
+    try:
+        page.wait_for_selector("#report-content table")
+        page.select_option("#report-period-select", "this_fiscal_year")
+        page.wait_for_function("() => /period=this_fiscal_year&/.test(location.hash)")
+        assert page.evaluate(PERIOD)["start"] == fy.isoformat()
+        prev = page.get_by_role("button", name="Previous period")
+        nxt = page.get_by_role("button", name="Next period")
+        prev.click()
+        page.wait_for_function("() => /period=last_fiscal_year&/.test(location.hash)")
+        q = _query(_hash(page))
+        assert q["start_date"] == fy.replace(year=fy.year - 1).isoformat()
+        assert q["end_date"] == dt.date(fy.year, 6, 30).isoformat()
+        prev.click()
+        page.wait_for_function(
+            "() => /period=custom|start_date=[^&]*&end_date/.test(location.hash) && !/period=last_fiscal_year/.test(location.hash)"
+        )
+        assert page.evaluate(PERIOD) == {
+            "period": "custom",
+            "start": fy.replace(year=fy.year - 2).isoformat(),
+            "end": dt.date(fy.year - 1, 6, 30).isoformat(),
+        }
+        page.wait_for_selector("#report-content table")
+        nxt.click()
+        page.wait_for_function("() => /period=last_fiscal_year&/.test(location.hash)")
+        nxt.click()
+        page.wait_for_function("() => /period=this_fiscal_year&/.test(location.hash)")
+    finally:
+        page.close()
+
+
+def test_the_balance_sheet_steps_its_as_of_date_by_fiscal_year(browser, company, books):
+    """An as-of report steps its one date: This Fiscal Year ends June 30
+    next year; Previous is June 30 of this one (#444)."""
+    company.put("/api/settings", json={"fiscal_year_start_month": "7"})
+    fy = _july_fy_start(dt.date.today())
+    page, handled = _open_at(browser, company, "#/reports/balance-sheet")
+    try:
+        page.wait_for_selector("#report-content table")
+        page.select_option("#report-period-select", "this_fiscal_year")
+        page.wait_for_function(
+            f"() => /as_of_date={fy.year + 1}-06-30/.test(location.hash)"
+        )
+        page.get_by_role("button", name="Previous period").click()
+        page.wait_for_function(
+            f"() => /as_of_date={fy.year}-06-30/.test(location.hash)"
+        )
+        assert page.evaluate(PERIOD)["period"] == "custom"
+        assert page.evaluate(AS_OF) == f"{fy.year}-06-30"
+    finally:
+        page.close()
+
+
+def test_a_balance_sheet_line_drills_from_its_fiscal_year_start(
+    browser, company, books
+):
+    """A Balance Sheet line gives only its as-of date; the drill-down starts
+    on the first day of that date's fiscal year: March 31 in a July year is
+    July 1 the year before (#444)."""
+    company.put("/api/settings", json={"fiscal_year_start_month": "7"})
+    accounts = company.get("/api/accounts").json()
+    bank = next(a for a in accounts if a["account_number"] == "1000")
+    page, handled = _open_at(
+        browser,
+        company,
+        f"#/reports/account-transactions?account_id={bank['id']}&end_date=2026-03-31",
+    )
+    try:
+        page.wait_for_function("() => /start_date=2025-07-01/.test(location.hash)")
+        assert page.evaluate(PERIOD) == {
+            "period": "custom",
+            "start": "2025-07-01",
+            "end": "2026-03-31",
+        }
+    finally:
+        page.close()
+
+
+def test_a_january_company_still_opens_on_this_year_to_date_and_steps_by_month(
+    browser, company, books
+):
+    """A January start is the calendar year: the report opens on This Year
+    to Date, and Previous on This Month is Last Month."""
+    today = dt.date.today()
+    page, handled = _open_at(browser, company, "#/reports/profit-loss")
+    try:
+        page.wait_for_selector("#report-content table")
+        assert page.evaluate(PERIOD)["period"] == "this_year_to_date"
+        assert _query(_hash(page))["start_date"] == f"{today.year}-01-01"
+        page.select_option("#report-period-select", "this_month")
+        page.wait_for_function("() => /period=this_month/.test(location.hash)")
+        page.get_by_role("button", name="Previous period").click()
+        page.wait_for_function("() => /period=last_month/.test(location.hash)")
+    finally:
+        page.close()
+
+
 # ── #395: a pinned card is first, and stays so after a reload ──────────────
 
 PIN = '#page-content .card-pin[data-pin="ap-aging"]'
