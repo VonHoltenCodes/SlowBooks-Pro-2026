@@ -1003,6 +1003,22 @@ def _role_allows(role: str, method: str, path: str) -> bool:
     return not path.startswith(_ADMIN_WRITE_PREFIXES)
 
 
+# What a token's "Can make backups" permission reaches (#434): make one,
+# list them, download one. Restore is not here, and is refused to every
+# token before the role is asked.
+_TOKEN_BACKUP_DOWNLOAD_RE = _re.compile(r"^/api/backups/download/[^/]+$")
+TOKEN_RESTORE_REFUSAL = (
+    "An API token cannot restore a backup: restoring replaces the whole "
+    "company, so it stays with an administrator signed in to SlowBooks Pro."
+)
+
+
+def _is_token_backup_route(method: str, path: str) -> bool:
+    if path == "/api/backups":
+        return method in ("GET", "HEAD", "POST")
+    return method in ("GET", "HEAD") and bool(_TOKEN_BACKUP_DOWNLOAD_RE.match(path))
+
+
 def _role_refusal(role: str) -> str:
     """The sentence a refused write gets: the accountant's says what the
     role is for (#340); the others keep the one the pages pin."""
@@ -1030,6 +1046,7 @@ async def _require_session(request: Request, call_next):
     ):
         return await call_next(request)
     token_principal = None
+    backup_grant = False
     if request.session.get("authenticated") is True:
         if _signed_in_before_this_start(request.session):
             # Settings -> "Ask for the password each time SlowBooks Pro
@@ -1084,6 +1101,19 @@ async def _require_session(request: Request, call_next):
         auth_header = request.headers.get("authorization") or ""
         if auth_header.startswith("Bearer "):
             token_principal = _resolve_api_token(auth_header[7:].strip())
+        if token_principal is not None and token_principal.get("revoked"):
+            # A revoked token says so (#434): the client that holds it is
+            # usually unattended, and "Not authenticated" sent its operator
+            # to the sign-in page. A secret that matches nothing stays vague.
+            return JSONResponse(
+                status_code=401,
+                content={
+                    "detail": (
+                        f"The API token \"{token_principal['label']}\" was revoked. "
+                        "Ask an administrator for a new one under Settings, API Tokens."
+                    )
+                },
+            )
         if token_principal is None:
             return JSONResponse(
                 status_code=401,
@@ -1096,14 +1126,26 @@ async def _require_session(request: Request, call_next):
                 status_code=403,
                 content={"detail": "API tokens cannot manage users or tokens"},
             )
+        # Restoring a backup replaces the whole company: a signed-in
+        # administrator's, never a token's, whatever its role (#434).
+        if path.startswith("/api/backups/restore"):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": TOKEN_RESTORE_REFUSAL},
+            )
         role = token_principal["role"]
+        allow_backups = bool(token_principal.get("allow_backups"))
         # get_db reads this to stamp audit attribution ("token:<label>")
         request.state.token_principal = {
             "username": "token:" + token_principal["label"],
             "role": role,
+            "allow_backups": allow_backups,
         }
+        # "Can make backups" (#434), set by an administrator on the token:
+        # make, list and download this company's backups on top of the role.
+        backup_grant = allow_backups and _is_token_backup_route(request.method, path)
 
-    if not _role_allows(role, request.method, path):
+    if not backup_grant and not _role_allows(role, request.method, path):
         return JSONResponse(
             status_code=403,
             content={"detail": _role_refusal(role)},

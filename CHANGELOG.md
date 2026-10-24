@@ -5,6 +5,37 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**API tokens: never an administrator, a backups permission, and revoking
+that sticks** (#434, #443, @ContractorKeith). The API tokens from 2.11.1
+already give a program a role and a key (`Authorization: Bearer sbp_…`): a
+name, a prefix to match it by, the last time it was used, revoke, a SHA-256
+at rest, and audit rows in the token's name. Now:
+
+- A new token can no longer be made with the admin role: bookkeeper,
+  accountant or read-only. Settings, users, tokens and restoring a backup
+  stay with a signed-in administrator.
+- **Can make backups**, a box an administrator ticks on a token (when making
+  it, or later in the token list, which shows it): the token may make, list
+  and download this company's backups on top of its role, so an import
+  tool's safety net works without an admin token. The download is in the
+  audit log too, as the token.
+- No token restores a backup, whatever its role or permission. Restoring
+  replaces the whole company; an administrator does it signed in.
+- Revoking is final. Switching a revoked token back on is refused (the
+  Reactivate button is gone); make a new token instead. A request with a
+  revoked token is answered with a sentence naming the token and where to
+  get a new one, not "Not authenticated", which sent an unattended client's
+  operator to the sign-in page. A secret that matches nothing is still
+  refused without a word.
+- An admin token made before 2.29.0 keeps working, except that it cannot
+  restore a backup and stays revoked once revoked. A tool that restored with
+  one (resetting the books between runs) takes its backups with a token
+  allowed them and leaves the restore to an administrator. See
+  [docs/server-edition.md](docs/server-edition.md#api-tokens-programs-not-people)
+  for what a token can and cannot do.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

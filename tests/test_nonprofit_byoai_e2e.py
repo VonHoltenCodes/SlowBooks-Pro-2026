@@ -1,9 +1,10 @@
 """Nonprofit mode, end to end, the way a bring-your-own-AI agent works it:
 scoped API tokens, the OpenAPI spec for discovery, and the public
-endpoints only — never the session cookie or the database.
+endpoints only — the agents never use the session cookie or the database.
 
-Three agents share one company file:
-  the admin's agent   switches the company to nonprofit and seeds accounts
+An administrator, signed in, switches the company to nonprofit and seeds
+its accounts (settings are a person's: no API token is an administrator,
+#434). Then two agents share the company file:
   the bookkeeper's    runs a condensed Riverbend Community Arts year
   the treasurer's     (readonly) pulls every statement and checks that
                       they reconcile to the cent — and cannot write
@@ -63,8 +64,9 @@ NONPROFIT_PATHS = (
 
 
 def test_nonprofit_year_through_the_api(client, seed_accounts, monkeypatch):
-    # ---- the admin mints the agents' tokens (a session-only power) ----------
-    admin = _bearer(_mint(client, "admin-agent", "admin"))
+    # ---- the admin, signed in, mints the agents' tokens (a session-only
+    # power) and does the setup: a token is never an administrator (#434) ----
+    admin = client
     keeper = _bearer(_mint(client, "bookkeeper-agent", "bookkeeper"))
     reader = _bearer(_mint(client, "treasurer-agent", "readonly"))
 
@@ -77,7 +79,7 @@ def test_nonprofit_year_through_the_api(client, seed_accounts, monkeypatch):
                 "description"
             ), f"{method} {path} has no description"
 
-    # ---- setup, as the admin's agent ----------------------------------------
+    # ---- setup, as the signed-in administrator ------------------------------
     _ok(admin.put("/api/settings", json={"company_type": "nonprofit"}))
     assert admin.get("/api/settings").json()["company_type"] == "nonprofit"
     first = _ok(admin.post("/api/nonprofit/setup-accounts"))

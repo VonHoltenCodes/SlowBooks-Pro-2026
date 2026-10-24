@@ -613,8 +613,13 @@ const SettingsPage = {
                         service, scripts. A token wears a role just like a user —
                         give read-only to anything that only reports, and every
                         change it makes is attributed in the audit log as
-                        <code>token:&lt;label&gt;</code>. Tokens can never manage
-                        users or other tokens, whatever their role.
+                        <code>token:&lt;label&gt;</code>. A token is never an
+                        administrator: it cannot manage users or other tokens,
+                        change settings or restore a backup. Tick
+                        <em>Can make backups</em> for a program that takes a backup
+                        before it writes (an import tool); the token may then make,
+                        list and download this company's backups. A revoked token
+                        stays revoked: make a new one instead.
                     </p>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
                         <strong>Copy this token now — it will never be shown again:</strong>
@@ -632,8 +637,10 @@ const SettingsPage = {
                                 <option value="readonly">Read-only — reports and lookups</option>
                                 <option value="accountant">Accountant — reads everything, posts journal entries</option>
                                 <option value="bookkeeper">Bookkeeper — daily books, no admin</option>
-                                <option value="admin">Admin — everything except identity management</option>
                             </select></div>
+                        <div class="form-group"><label style="font-weight:normal;">
+                            <input type="checkbox" id="token-new-backups" name="token_new_allow_backups" style="width:auto; vertical-align:middle; margin-right:6px;">
+                            Can make backups (make, list and download; never restore)</label></div>
                     </div>
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
                 </div>
@@ -1048,14 +1055,17 @@ const SettingsPage = {
                 <td>${escapeHtml(t.label)}</td>
                 <td style="font-family:var(--font-mono); font-size:10px;">${escapeHtml(t.token_hint)}&hellip;</td>
                 <td>${escapeHtml(t.role)}</td>
+                <td>${t.is_active
+                    ? `<input type="checkbox" name="token-backups:${t.id}" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
+                    : (t.allow_backups ? 'Yes' : 'No')}</td>
                 <td>${t.last_used_at ? formatDate(t.last_used_at) : '—'}</td>
                 <td>${t.is_active
-                    ? `<button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.updateApiToken(${t.id}, {is_active: false})">Revoke</button>`
-                    : `<button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.updateApiToken(${t.id}, {is_active: true})">Reactivate</button>`}
+                    ? `<button type="button" class="btn btn-sm btn-secondary" onclick="if (confirm('Revoke this token? A revoked token stays revoked.')) SettingsPage.updateApiToken(${t.id}, {is_active: false})" aria-label="Revoke ${escapeHtml(t.label)}">Revoke</button>`
+                    : 'Revoked'}
                 </td>
             </tr>`).join('');
             $('#api-token-list').innerHTML = `<div class="table-container"><table>
-                <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
+                <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Backups</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
     },
@@ -1065,10 +1075,12 @@ const SettingsPage = {
             const created = await API.post('/tokens', {
                 label: $('#token-new-label').value.trim(),
                 role: $('#token-new-role').value,
+                allow_backups: $('#token-new-backups').checked,
             });
             $('#api-token-secret').textContent = created.token;
             $('#api-token-reveal').style.display = '';
             $('#token-new-label').value = '';
+            $('#token-new-backups').checked = false;
             toast('Token created — press Copy below, it will not be shown again');
             SettingsPage.loadApiTokens();
         } catch (err) { toast(err.message, 'error'); }

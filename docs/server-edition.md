@@ -94,6 +94,52 @@ trusted networks.
    person's last sign-in. An administrator's password reset works the same
    way: the new password is for one use.
 
+## API tokens (programs, not people)
+
+A program (an AI agent, the receipt service, an import tool, a script) signs
+in with an API token instead of a password. An administrator makes one under
+**Settings → API Tokens**: a label, a role and, if the program needs it,
+**Can make backups**. The secret (`sbp_…`) is shown once and kept only as a
+SHA-256 hash. The program sends it on every request as
+`Authorization: Bearer sbp_…`; no session cookie and no CSRF token are
+involved. Every change it makes is in the audit log as `token:<label>`.
+
+What a token can do:
+
+- Whatever its role allows: **bookkeeper** (daily books), **accountant**
+  (reads everything, posts journal entries) or **read-only** (reports and
+  lookups), exactly as for a person with that role. HR and payroll stay
+  closed to all three.
+- With **Can make backups** ticked: make a backup (`POST /api/backups`), list
+  this company's backups (`GET /api/backups`) and download one
+  (`GET /api/backups/download/<file>`), on top of its role. A backup is the
+  whole company (every record, the sign-ins' password hashes, payroll and HR),
+  so tick it only for a program you would hand the company file to. Only an
+  administrator can tick or clear it, and the token list shows which tokens
+  have it.
+
+What a token cannot do, whatever its role or permission:
+
+- Be an administrator. A new token is bookkeeper, accountant or read-only;
+  settings, users, tokens, companies, migration imports and HR stay with a
+  signed-in administrator.
+- Restore a backup. Restoring replaces the whole company, so it is done by an
+  administrator signed in to SlowBooks Pro (Settings → Backup / Restore, or
+  `POST /api/backups/restore` from that session). A tool that resets the books
+  between runs takes its backups with a token and leaves the restore to a
+  person.
+- Manage users or tokens, its own included.
+- Come back after it is revoked. **Revoke** is final: the token answers
+  `401` with "The API token "<label>" was revoked. Ask an administrator for a
+  new one under Settings, API Tokens.", and it cannot be switched back on.
+  Make a new token for a program that still needs one. A secret that matches
+  no token is answered "Not authenticated", with nothing more.
+
+Admin tokens made before 2.29.0 keep working as they did, with two changes:
+they cannot restore a backup, and once revoked they stay revoked. No new
+admin token can be made; revoke them and give each program a token with the
+role it needs.
+
 ## Several companies on one server
 
 One host serves every company in its list. A bookkeeper who keeps a small
