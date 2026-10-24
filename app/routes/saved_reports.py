@@ -44,6 +44,7 @@ _ALLOWED_TYPES = {
     "closing_date_exceptions",  # what moved inside a closed period (#342)
     "possible_duplicates",  # one bank or card account's (#414)
     "income_by_customer",
+    "past_customers",  # a mailing list by service address and last job (#436)
     "account_transactions",
     "cash_flow",
     "analytics_dashboard",

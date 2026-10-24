@@ -5,6 +5,32 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Pulling past customers by service address and last job date** (#436,
+@ContractorKeith), the thing a trade asked for as what would move it off
+QuickBooks — a ready-made mail list built from what is already in the books,
+nothing re-entered. A **Past Customers** view, on the Customers page and in
+the Report Center, puts one row per customer with their name, contact, the
+service address (the job's `site_address`, else the ship-to, else the
+bill-to), the first and last job dates, the job count, lifetime sales (net of credit
+memos; a write-off is not a sale given back), and the last job's type and
+name. A site address typed on one line ("123 Main St, Austin, TX 78701")
+splits into its street, city, state and ZIP like a multi-line one, a ZIP+4
+is kept whole, and a third street line goes into Address 2 rather than
+being dropped. Filter by last job date, city or zip, state, job type,
+customer type, lifetime sales, and active or inactive; a customer whose
+notes say "do not contact" ("don't contact", "do-not-contact", "do not
+mail", DNC) is marked and left out of the export, and "No contact person on
+site" is not read as one. Export a mail-merge **CSV** (address parts in
+their own columns, the usual formula guard and BOM) or a **labels PDF** on
+Avery 5160 (30 up) with the service address, where a full five-line label
+(company, name, two street lines, city/state/ZIP) prints its last line
+inside the label. A row opens the customer's page, and the view carries its
+filter in the address so it can be bookmarked and saved as a report. The
+figures are summed per customer in the database, so a very large customer
+list does not run past SQLite's query parameter limit.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every
