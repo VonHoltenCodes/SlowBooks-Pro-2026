@@ -101,6 +101,11 @@ def strip_code_suffix(name: str) -> str:
 
 
 def _group_reference(group: list[dict]) -> str | None:
+    """The dedupe key for a journal group, cut to Transaction.reference's
+    column width (String(100)). The import posts the journal with this same
+    value (run_import_bundle), so what is stored equals what already_imported()
+    matches against — a source reference over 100 chars is not re-imported as a
+    new journal (#498)."""
     first = group[0]
     ref = first.get("journal") or first.get("reference") or None
     return str(ref)[:100] if ref else None
@@ -599,7 +604,9 @@ def run_import_bundle(
         if not lines:
             continue
         first = group[0]
-        reference = first.get("journal") or first.get("reference") or None
+        # Store the same value the dedupe key uses (cut to the column width),
+        # so a re-import recognises this journal (#498).
+        reference = _group_reference(group)
         create_journal_entry(
             db,
             first["date"],

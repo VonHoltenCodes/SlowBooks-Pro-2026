@@ -351,6 +351,67 @@ def test_the_dry_run_previews_the_parent_rules(db_session, seed_accounts):
     assert refusal in applied["warnings"]
 
 
+def test_a_long_reference_is_not_re_imported_as_a_duplicate(db_session, seed_accounts):
+    """A source reference over the 100-char column width is cut the same way
+    on the write side and the dedupe key, so a second import recognises it and
+    posts the journal once (#498). The stored reference equals the key."""
+    from datetime import date
+    from decimal import Decimal
+
+    from app.services.migration_common import _group_reference, run_import_bundle
+
+    long_ref = "J" * 120
+    chart = [
+        {
+            "name": "Spare cash",
+            "code": "1850",
+            "type": AccountType.ASSET,
+            "description": "",
+            "bank_kind": "bank",
+            "parent": None,
+        },
+        {
+            "name": "Sales",
+            "code": "4100",
+            "type": AccountType.INCOME,
+            "description": "",
+            "parent": None,
+        },
+    ]
+    gl = [
+        [
+            {
+                "account": "Spare cash",
+                "date": date(2026, 1, 15),
+                "debit": Decimal("100"),
+                "credit": Decimal("0"),
+                "reference": long_ref,
+            },
+            {
+                "account": "Sales",
+                "date": date(2026, 1, 15),
+                "debit": Decimal("0"),
+                "credit": Decimal("100"),
+                "reference": long_ref,
+            },
+        ]
+    ]
+    parsers = {"coa": lambda _t: (chart, []), "gl": lambda _t: (gl, [])}
+    bundle = {"coa": "x", "gl": "x"}
+
+    first = run_import_bundle(db_session, bundle, parsers, "long_ref_src", "Test")
+    assert first["imported_journals"] == 1
+
+    key = _group_reference(gl[0])
+    stored = [t.reference for t in _journals(db_session, "long_ref_src")]
+    assert stored == [key]  # what is stored is exactly the dedupe key
+
+    second = run_import_bundle(db_session, bundle, parsers, "long_ref_src", "Test")
+    assert second["imported_journals"] == 0
+    assert second["duplicate_journals"] == 1
+    assert len(_journals(db_session, "long_ref_src")) == 1  # posted once
+
+
 # ── Readiness metadata via the generic route ─────────────────────────────
 
 

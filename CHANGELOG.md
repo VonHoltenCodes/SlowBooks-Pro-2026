@@ -5,6 +5,15 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+Re-running a migration import no longer posts a journal twice when its source
+reference runs past 100 characters (#498). The dedupe key was cut to the
+reference column's width while the journal was stored with the full reference,
+so the two never matched and a second import booked the entry again. The
+import now stores the same cut value the key uses, so a re-import recognises
+what it already posted.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every
