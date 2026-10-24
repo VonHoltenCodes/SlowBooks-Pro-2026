@@ -5,6 +5,16 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**A bookkeeper can sync SimpleFIN again.** Since 2.26.0 saving the SimpleFIN
+mapping is an administrator's, but Sync Now and Fetch older history saved the
+mapping first for every role, so a bookkeeper's sync stopped at "Admin role
+required". A bookkeeper now sees the mapping and the Reverse signs boxes
+locked, with a sentence saying an administrator chooses them, and Sync uses
+the saved mapping. Connect and Disconnect, also an administrator's, are no
+longer offered to other roles.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

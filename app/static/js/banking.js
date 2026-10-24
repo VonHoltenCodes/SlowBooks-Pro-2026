@@ -125,7 +125,8 @@ const BankingPage = {
                     then paste the <strong>setup token</strong> it gives you below.
                     Your credential stays on this machine; SlowBooks has no middleman server.
                 </p>
-                <form onsubmit="BankingPage.connectSimpleFIN(event)" data-write>
+                <p class="form-hint hidden" data-admin-note>An administrator connects the bank feed.</p>
+                <form onsubmit="BankingPage.connectSimpleFIN(event)" data-admin>
                     <div class="form-group">
                         <label>SimpleFIN setup token</label>
                         <input type="password" id="simplefin-token" required autocomplete="off"
@@ -147,8 +148,9 @@ const BankingPage = {
             const rows = feed.accounts.map(a => `<tr>
                     <td>${escapeHtml(a.name)}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.org || '')}</div></td>
                     <td class="amount">${escapeHtml(a.balance)} ${escapeHtml(a.currency)}</td>
-                    <td><select data-sfid="${escapeHtml(a.id)}" class="simplefin-map" data-write>${options(a.id)}</select></td>
-                    <td><label style="font-size:11px; white-space:nowrap;"><input type="checkbox" data-sfid="${escapeHtml(a.id)}" class="simplefin-reverse" data-write
+                    <td><select data-sfid="${escapeHtml(a.id)}" class="simplefin-map" data-admin
+                        aria-label="Import ${escapeHtml(a.name)} into">${options(a.id)}</select></td>
+                    <td><label style="font-size:11px; white-space:nowrap;"><input type="checkbox" data-sfid="${escapeHtml(a.id)}" class="simplefin-reverse" data-admin
                         ${reversed.has(a.id) ? 'checked' : ''}> Reverse signs</label></td>
                 </tr>`).join('');
             body = `
@@ -162,6 +164,7 @@ const BankingPage = {
                     If a feed shows a bank account's balance as negative and its deposits as withdrawals,
                     tick <em>Reverse signs</em> for it before syncing.
                 </p>
+                <p class="form-hint hidden" data-admin-note>An administrator chooses which bank account each feed imports into and whether its signs are reversed${Object.keys(feed.account_map || {}).length ? '.' : '; until one does, Sync has nothing to import.'}</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Bank feed</th><th scope="col" class="amount">Balance</th><th scope="col">Imports into</th><th scope="col">Amounts</th></tr></thead>
                     <tbody>${rows}</tbody>
@@ -169,7 +172,7 @@ const BankingPage = {
                 <div class="form-actions" style="margin-top:12px;">
                     <button class="btn btn-primary" onclick="BankingPage.syncSimpleFIN()">Sync Now</button>
                     <button class="btn btn-secondary" onclick="BankingPage.showSimpleFINHistory()">Fetch older history…</button>
-                    <button class="btn btn-secondary" onclick="BankingPage.disconnectSimpleFIN()">Disconnect</button>
+                    <button class="btn btn-secondary" data-admin onclick="BankingPage.disconnectSimpleFIN()">Disconnect</button>
                 </div>`;
         }
         return `<div class="card" style="margin-top:16px;">
@@ -199,7 +202,9 @@ const BankingPage = {
 
     async syncSimpleFIN() {
         try {
-            await BankingPage.saveSimpleFINMap();
+            // the mapping is an administrator's to change (#384's rule); a
+            // bookkeeper syncs with the one saved
+            if (App.isAdmin()) await BankingPage.saveSimpleFINMap();
             const r = await API.post('/simplefin/sync');
             toast(`Synced: ${r.imported} new, ${r.skipped} duplicates skipped`);
             if (r.warnings && r.warnings.length) toast(r.warnings[0], 'error');
@@ -240,7 +245,7 @@ const BankingPage = {
         const btn = e.target.querySelector('button[type=submit]');
         if (btn) { btn.disabled = true; btn.textContent = 'Fetching…'; }
         try {
-            await BankingPage.saveSimpleFINMap();
+            if (App.isAdmin()) await BankingPage.saveSimpleFINMap();
             const r = await API.post('/simplefin/sync', { history_months: months });
             closeModal();
             toast(`Fetched back to ${formatDate(r.since)}: ${r.imported} new, ${r.skipped} duplicates skipped`);
