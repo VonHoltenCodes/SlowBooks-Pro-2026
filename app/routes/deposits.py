@@ -295,7 +295,26 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
                 ),
             )
     else:
+        # No payments ticked: a typed lump sum. Cap it at what is actually
+        # waiting in Undeposited Funds, the same balance the line_ids path
+        # checks each ticked payment against — otherwise a number the page
+        # added up can post more than ever came in.
         total = _q(data.total or 0)
+        waiting_total = _q(
+            sum(
+                (Decimal(str(ln.debit)) for ln, _ in waiting_items(db, uf_id)),
+                Decimal("0"),
+            )
+        )
+        if total > waiting_total:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Only ${waiting_total:,.2f} is waiting in Undeposited "
+                    f"Funds; you asked to deposit ${total:,.2f}. Reload Make "
+                    f"Deposits and try again."
+                ),
+            )
 
     if total <= 0:
         raise HTTPException(status_code=400, detail="Deposit amount must be positive")

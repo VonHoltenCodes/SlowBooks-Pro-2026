@@ -5,6 +5,16 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**A typed deposit can't exceed Undeposited Funds** (#494). Make Deposits with
+no payments ticked took the typed total as given and posted it, so a $5,000
+figure went into the bank against a single $100 payment waiting to be
+deposited. The ticked-payments path already refused a total that disagreed
+with what was waiting; the no-ticket path now caps the typed total at the
+Undeposited Funds balance the same way and answers 400 with what is actually
+waiting when it is asked for more.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every
