@@ -80,6 +80,20 @@ def _iif_text(value) -> str:
     return _csv_safe(_Identifier(_iif_clean(value)))
 
 
+def _iif_verbatim(value) -> str:
+    """A phone, fax, email, terms or tax id: a value QuickBooks Desktop
+    stores as typed, or matches against its Terms list, and it does not take
+    Excel's apostrophe off. So only a leading "=" or "@" is guarded, which
+    no real phone, email or terms starts with; "+15551234567" and "-0001"
+    go out as typed and reach QuickBooks clean (owner decision on #449).
+    Names keep _iif_text's full guard (#410). The importer takes the
+    apostrophe off again, as it does for a name."""
+    s = _iif_clean(value)
+    if s[:1] in ("=", "@"):
+        return "'" + s
+    return s
+
+
 # Letters with no Windows-1252 form and no accent to drop (NFKD leaves
 # them whole), spelled the way a person would type them without the key.
 _ANSI_PLAIN = {
@@ -397,11 +411,15 @@ def export_customers(db: Session) -> str:
                 _iif_text(addr3),
                 _iif_text(city_st_zip),
                 "",  # ADDR5
-                c.phone or "",
-                c.mobile or "",
-                c.email or "",
-                c.terms or "",
-                c.tax_id or "",
+                # Contact fields: a phone or email a file carries as
+                # `=HYPERLINK(...)` would run in Excel the same as a name
+                # would, so a leading = or @ is guarded; "+1 555..." and
+                # "-0001" reach QuickBooks as typed (see _iif_verbatim).
+                _iif_verbatim(c.phone),
+                _iif_verbatim(c.mobile),
+                _iif_verbatim(c.email),
+                _iif_verbatim(c.terms),
+                _iif_verbatim(c.tax_id),
                 str(c.credit_limit) if c.credit_limit else "",
             ]
         )
@@ -450,11 +468,11 @@ def export_vendors(db: Session) -> str:
                 _iif_text(addr3),
                 _iif_text(city_st_zip),
                 "",  # ADDR5
-                v.phone or "",
-                v.fax or "",
-                v.email or "",
-                v.terms or "",
-                v.tax_id or "",
+                _iif_verbatim(v.phone),
+                _iif_verbatim(v.fax),
+                _iif_verbatim(v.email),
+                _iif_verbatim(v.terms),
+                _iif_verbatim(v.tax_id),
             ]
         )
 
@@ -547,7 +565,7 @@ def export_invoices(db: Session, date_from: date = None, date_to: date = None) -
                 str(total_home),
                 inv.invoice_number or "",
                 due_date,
-                inv.terms or "",
+                _iif_verbatim(inv.terms),
                 "",
                 cls,
             ]
@@ -886,7 +904,7 @@ def _row(
             str(amount),
             _iif_clean(docnum),
             due,
-            terms,
+            _iif_verbatim(terms),
             _iif_text(memo),
             cls,
         ]
