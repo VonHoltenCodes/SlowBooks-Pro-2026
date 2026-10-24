@@ -5,6 +5,41 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Items: quick-add from any line, and an item code.**
+
+An item can be added from the line being typed (#445). The item picker on
+an invoice, estimate, sales receipt, credit memo, recurring invoice,
+purchase order, vendor credit, bill or Quick Entry line offers **+ Add
+item**, which opens a small form in the line: name, code, type, and on a
+sale a rate and an income account that follows the type (4000 to 4300 in
+the seeded chart). On a bill, purchase order or vendor credit it asks
+instead for what the item costs and the cost of goods account it is
+recorded in (5000 to 5300 by type; only cost of goods accounts are
+offered, since an item bought for a job or resale is never an operating
+expense), and whether a product or material is
+stock, so the new item posts that line where it was asked to and a stock
+item is received into Inventory. Save creates the item and picks it on
+that line, filled in as a pick would be, and nothing else on the document
+changes; a name typed in the picker before taking **+ Add item** comes
+along. The form opens only when **+ Add item** is chosen (arrowed to and
+taken, or clicked): Enter or Tab on a name that matches no item opens
+nothing, and Tab goes on to the next cell. Cancel, Escape and Save put the
+focus back on the line's item picker, Save with the new item in it. A
+read-only or accountant sign-in is not offered **+ Add item**, since the
+server would refuse the save. A picker value that
+is not an item (`--`, `+ Add item`) saves as no item. Items also take an
+optional code (`items.code`, migration `c4e5d6f7a8b9`), unique when set
+without regard to capitals (409 "Item code X is already used by ..."),
+shown before the name in every line picker so typing either finds it, on
+the Items page with a search box over name and code, in
+`GET /api/items?q=` (a typed `%` or `_` is that character, not a
+wildcard), and as a Code column in the items CSV export and
+import (a code already used is left off that row, with a note). The IIF
+export is unchanged: QuickBooks 2003's `!INVITEM` header has no field for
+a code.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

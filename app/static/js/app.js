@@ -1893,8 +1893,6 @@ const App = {
         App._qeCustomers = customers;
         App._qeItems = items;
         const custOpts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-        const itemOpts = items.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
-
         return `
             <div class="page-header">
                 <h2>Quick Entry Mode</h2>
@@ -1924,7 +1922,7 @@ const App = {
                     <thead><tr><th scope="col">Item</th><th scope="col">Description</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="qe-lines">
                         <tr data-qeline="0">
-                            <td><select class="line-item" onchange="App.qeItemSelected(0)"><option value="">--</option>${itemOpts}</select></td>
+                            <td><select class="line-item" onchange="App.qeItemSelected(0)">${ItemQuickAdd.options(items)}</select></td>
                             <td><input class="line-desc" value=""></td>
                             <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
                             <td><input class="line-rate" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>
@@ -1946,10 +1944,9 @@ const App = {
     _qeLineCount: 1,
     qeAddLine() {
         const idx = App._qeLineCount++;
-        const itemOpts = App._qeItems.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('');
         $('#qe-lines').insertAdjacentHTML('beforeend', `
             <tr data-qeline="${idx}">
-                <td><select class="line-item" onchange="App.qeItemSelected(${idx})"><option value="">--</option>${itemOpts}</select></td>
+                <td><select class="line-item" onchange="App.qeItemSelected(${idx})">${ItemQuickAdd.options(App._qeItems)}</select></td>
                 <td><input class="line-desc" value=""></td>
                 <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
                 <td><input class="line-rate" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>
@@ -1959,6 +1956,7 @@ const App = {
 
     qeItemSelected(idx) {
         const row = $(`[data-qeline="${idx}"]`);
+        if (ItemQuickAdd.selected(row.querySelector('.line-item'), App._qeItems, () => App.qeItemSelected(idx))) return;
         const itemId = row.querySelector('.line-item').value;
         const item = App._qeItems.find(i => i.id == itemId);
         if (item) {
@@ -1987,12 +1985,12 @@ const App = {
         const form = e.target;
         const lines = [];
         $$('#qe-lines tr').forEach((row, i) => {
-            const item_id = row.querySelector('.line-item')?.value;
+            const item_id = ItemQuickAdd.itemId(row.querySelector('.line-item'));
             const qty = parseFloat(row.querySelector('.line-qty')?.value) || 1;
             const rate = parseFloat(row.querySelector('.line-rate')?.value) || 0;
             if (rate > 0 || row.querySelector('.line-desc')?.value) {
                 lines.push({
-                    item_id: item_id ? parseInt(item_id) : null,
+                    item_id,
                     description: row.querySelector('.line-desc')?.value || '',
                     quantity: qty, rate: rate, line_order: i,
                 });
@@ -2020,7 +2018,7 @@ const App = {
             form.po_number.value = '';
             $('#qe-lines').innerHTML = `
                 <tr data-qeline="0">
-                    <td><select class="line-item" onchange="App.qeItemSelected(0)"><option value="">--</option>${App._qeItems.map(i => `<option value="${i.id}">${escapeHtml(i.name)}</option>`).join('')}</select></td>
+                    <td><select class="line-item" onchange="App.qeItemSelected(0)">${ItemQuickAdd.options(App._qeItems)}</select></td>
                     <td><input class="line-desc" value=""></td>
                     <td><input class="line-qty" type="number" step="0.01" value="1" oninput="App.qeRecalc()"></td>
                     <td><input class="line-rate" type="number" step="0.01" value="0" oninput="App.qeRecalc()"></td>

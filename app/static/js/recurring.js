@@ -121,9 +121,8 @@ const RecurringPage = {
 
     // One schedule line, priced from the item the way an invoice line is.
     lineRowHtml(idx, line) {
-        const opts = RecurringPage._items.map(it => `<option value="${it.id}" ${line.item_id==it.id?'selected':''}>${escapeHtml(it.name)}</option>`).join('');
         return `<tr data-recline="${idx}">
-                <td><select class="line-item" onchange="RecurringPage.itemSelected(${idx})"><option value="">--</option>${opts}</select></td>
+                <td><select class="line-item" onchange="RecurringPage.itemSelected(${idx})">${ItemQuickAdd.options(RecurringPage._items, line.item_id)}</select></td>
                 <td><input class="line-desc" value="${escapeHtml(line.description || '')}"></td>
                 <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="RecurringPage.recalc()"></td>
                 <td><input class="line-rate" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" oninput="RecurringPage.recalc()"></td>
@@ -156,6 +155,7 @@ const RecurringPage = {
 
     itemSelected(idx) {
         const row = $(`[data-recline="${idx}"]`);
+        if (row && ItemQuickAdd.selected(row.querySelector('.line-item'), RecurringPage._items, () => RecurringPage.itemSelected(idx))) return;
         if (row && SalesLines.fillFromItem(row, RecurringPage._items)) RecurringPage.recalc();
     },
 
@@ -172,7 +172,7 @@ const RecurringPage = {
         const lines = [];
         $$('#rec-lines tr').forEach((row, i) => {
             lines.push({
-                item_id: row.querySelector('.line-item')?.value ? parseInt(row.querySelector('.line-item').value) : null,
+                item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 description: row.querySelector('.line-desc')?.value || '',
                 quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,

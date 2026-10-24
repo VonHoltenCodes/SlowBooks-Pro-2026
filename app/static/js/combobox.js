@@ -246,6 +246,11 @@ class ComboBox {
                 words: text.toLowerCase().split(/[^a-z0-9]+/).filter(Boolean),
                 group: group ? group.label : '',
                 action: /^__/.test(opt.value),  // "+ New Vendor" and the like
+                // an action taken only when chosen (an arrow and Enter, or a
+                // click), never as what an unmatched name falls to: "+ Add
+                // item" (#445), whose form would take the focus from a
+                // keyboard user tabbing past the cell
+                explicit: opt.hasAttribute('data-explicit'),
                 blank: opt.value === '',        // "Select...": no choice
             });
         }
@@ -352,9 +357,10 @@ class ComboBox {
         note.hidden = !note.textContent;
         this._say(q ? (total ? `${total} match${total === 1 ? '' : 'es'}` : 'No match') : '');
         // Typing: the top match is highlighted, so Enter or Tab takes it (or,
-        // with nothing found, "+ New Vendor"). Opening: the current choice.
+        // with nothing found, "+ New Vendor"; an explicit action such as
+        // "+ Add item" waits to be chosen). Opening: the current choice.
         let i = q ? shown.findIndex(it => !it.action) : shown.findIndex(it => it.opt.selected && !it.blank);
-        if (i < 0 && q) i = shown.findIndex(it => it.action);
+        if (i < 0 && q) i = shown.findIndex(it => it.action && !it.explicit);
         if (i < 0 && !q && shown.length) i = 0;
         this._setActive(i, true);
         this._place();

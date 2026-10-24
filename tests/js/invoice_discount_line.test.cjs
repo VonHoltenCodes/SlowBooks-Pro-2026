@@ -16,6 +16,8 @@ function page() {
         formatCurrency: value => `$${Number(value || 0).toFixed(2)}`,
     };
     vm.createContext(context);
+    // the line's item picker (#445)
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/item_quick_add.js'), 'utf8'), context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/invoices.js'), 'utf8'), context);
     return context.window.InvoicesPage;
 }
