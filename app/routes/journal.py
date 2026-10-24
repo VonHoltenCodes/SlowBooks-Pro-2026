@@ -278,6 +278,16 @@ def void_journal_entry(
         raise HTTPException(status_code=404, detail="Journal entry not found")
     if txn.source_type and txn.source_type.endswith("_void"):
         raise HTTPException(status_code=400, detail="Cannot void a reversal entry")
+    if txn.source_type == "payroll":
+        # A pay run's posting is reversed by voiding the run (#432), which
+        # also frees its time entries, backs out YTD and marks the stubs.
+        # Reversing it here too would take wages, liabilities and cash off
+        # a second time.
+        raise HTTPException(
+            status_code=400,
+            detail="This is a pay run's payroll entry. Void the pay run "
+            "instead (Payroll, open the run, Void).",
+        )
     if txn.source_type == "item_opening":
         # Voiding would remove the value but leave the movement, quantity and
         # average cost, so valuation would say stock the GL no longer shows.

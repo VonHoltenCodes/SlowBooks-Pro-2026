@@ -33,6 +33,7 @@ const PayrollPage = {
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PayrollPage.view(${r.id})">View</button>
                         ${r.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PayrollPage.process(${r.id})">Process</button>` : ''}
+                        ${r.status === 'processed' ? `<button class="btn btn-sm btn-secondary" data-destructive onclick="PayrollPage.void(${r.id})">Void</button>` : ''}
                     </td>
                 </tr>`;
             }
@@ -217,6 +218,7 @@ const PayrollPage = {
             ${PayrollPage._directDepositNote(run)}
             <div class="form-actions">
                 ${run.status === 'processed' && run.stubs.some(s => s.direct_deposit) ? `<button class="btn btn-primary" onclick="PayrollPage.downloadDirectDeposit(${run.id})" title="The ACH file to upload to the bank">Direct deposit file</button>` : ''}
+                ${run.status === 'processed' ? `<button class="btn btn-secondary" data-destructive onclick="PayrollPage.void(${run.id})">Void</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`, { wide: true });
     },
@@ -268,6 +270,30 @@ const PayrollPage = {
         try {
             await API.post(`/payroll/${id}/process`);
             toast('Payroll processed');
+            App.navigate('#/payroll');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Void a processed run (#432): reverse the payroll journal entry, free
+    // the time entries, mark the stubs void. When the server needs a second
+    // look (a NACHA file was made, the run's liabilities were since paid,
+    // its quarter's 941 or year's W-2s were generated) it answers 409 with
+    // the warnings; they are shown and the void is sent again with
+    // confirm=true only if the user says so.
+    async void(id) {
+        if (!confirm('Void this pay run? The payroll journal entry is reversed, the time entries go back to approved, and the stubs are marked void.')) return;
+        try {
+            let run;
+            try {
+                run = await API.post(`/payroll/${id}/void`);
+            } catch (err) {
+                if (!(err.status === 409 && err.detail && err.detail.code === 'confirm_void')) throw err;
+                const list = (err.detail.warnings || []).map(w => '\u2022 ' + w).join('\n\n');
+                if (!confirm('Before voiding this pay run:\n\n' + list + '\n\nVoid it anyway?')) return;
+                run = await API.post(`/payroll/${id}/void`, undefined, { query: { confirm: true } });
+            }
+            toast('Pay run voided');
+            for (const w of (run.warnings || [])) toast(w, 'warning');
             App.navigate('#/payroll');
         } catch (err) { toast(err.message, 'error'); }
     },

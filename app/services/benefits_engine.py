@@ -596,6 +596,9 @@ def record_on_stub(db: Session, stub: PayStub, result: CalcResult, year: int) ->
             ),
             "taxable_base_before": str(ln.base_before),
             "employer_taxable": bool(code.employer_taxable),
+            # The enrollment this line came from, so a void restores a
+            # loan's balance to the very assignment it ran down (#432).
+            "assignment_id": r.assignment.id if r.assignment is not None else None,
         }
         db.add(
             PayStubBenefit(

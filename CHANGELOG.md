@@ -5,6 +5,42 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**A processed pay run can be voided** (#432). `PayRunStatus.VOID` and the
+refusal to process a void run were already there, but nothing set the status:
+there was no route and no button. Void now reverses the payroll journal entry
+the way every other void does — a dated reversing entry, both staying in the
+register — reverses the burden Job Cost Entry when the run wrote one, backs the
+run's amounts out of each employee's YTD and out of `BenefitYTD` (the stub
+snapshots stay, as the rebuild expects), and puts the time entries the run paid
+back to approved-unpaid so the next run can take them. The stubs read VOID, and
+a void stub's PDF says so the way a void deposit slip does. A run whose pay date
+is in a closed period is refused; a run whose NACHA file was already made is
+voided only after a second look: the void asks first, naming the file's date
+and total, because the bank may already have it and the void does not stop the
+money.
+
+A run's posting is reversed once. The Journal page no longer voids a payroll
+entry (it says to void the pay run instead), and voiding a run whose entry was
+already reversed there — a company file from before this may hold one — is
+refused and names that reversal, so wages, liabilities and cash never come
+off twice. A run whose posting has a line in a
+completed reconciliation (net pay that cleared the bank) is refused with the
+account and statement date, so a reconciled balance never moves; otherwise the
+void gives its matched bank-feed lines back to review and un-clears its bank
+lines, as every other void does. Besides the NACHA file, two more things ask
+first: liabilities the run accrued that have had payments out of them since
+the pay date (a 941 deposit out of 2310 Federal Withholding, a benefit
+remittance), since the void would leave what was paid as a balance the agency
+owes back; and a Form 941 for the run's quarter, or W-2s for its employees, a
+W-3 or a 940 for its year, generated after the run posted, since the run drops
+off them (file a 941-X or W-2c if they were filed). The page lists the reasons
+and voids only on OK; `POST /api/payroll/{id}/void` answers 409 with the
+warnings and changes nothing until `?confirm=true`. A loan's balance goes back
+to the enrollment the run deducted from — the stub records which one — so with
+an ended loan and a new one on the same code, the new one gets it back.
+
 ### v2.28.0 — Account types and sub-accounts
 
 **Account detail types** (#390, from Kim Morden Bookkeeping's notes). Every

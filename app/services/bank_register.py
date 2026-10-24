@@ -130,6 +130,7 @@ _LINKS = {
     "job_cost": "/#/job-costs/{id}",
     "job_cost_void": "/#/job-costs/{id}",
     "payroll": "/#/payroll/{id}",
+    "payroll_void": "/#/payroll/{id}",
     "credit_memo": "/#/credit-memos/{id}",
     "credit_memo_void": "/#/credit-memos/{id}",
     "in_kind_gift": "/#/in-kind-gifts/{id}",
