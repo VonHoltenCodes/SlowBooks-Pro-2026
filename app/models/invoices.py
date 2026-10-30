@@ -51,6 +51,11 @@ class Invoice(Base):
     date = Column(Date, nullable=False, index=True)
     due_date = Column(Date, nullable=True)
     terms = Column(String(50), default="Net 30")
+    # The list entry these terms named when the invoice was saved (#664),
+    # whose rule gives its discount; NULL for text that named none then
+    # (free text, or a invoice from before the list), which keeps the old
+    # reading of "Net N" and nothing more, however the list changes later.
+    payment_term_id = Column(Integer, ForeignKey("payment_terms.id"), nullable=True)
     po_number = Column(String(100), nullable=True)
 
     bill_address1 = Column(String(200), nullable=True)

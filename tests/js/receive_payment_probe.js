@@ -42,7 +42,19 @@ const ctx = {
   App: { navigate: () => {} },
   // the date question (#481) has tests of its own
   TxnWarn: { ok: async () => true },
-  API: { post: async (path, body) => { posts.push([path, body]); return {}; }, get: async () => [] },
+  API: {
+    post: async (path, body) => {
+      posts.push([path, JSON.parse(JSON.stringify(body))]);
+      if (ctx.refuseOnce) {
+        const msg = ctx.refuseOnce;
+        ctx.refuseOnce = null;
+        throw new Error(msg);
+      }
+      return {};
+    },
+    get: async () => [],
+  },
+  confirm: (q) => { ctx.asked = q; return true; },
   location: { hash: '#/payments' },
 };
 vm.createContext(ctx);
@@ -138,4 +150,26 @@ out('edited');
   posts.length = 0;
   await P.save({ preventDefault() {}, target: { ...form, amount: { value: '806.25' } } });
   out('discount-save', { body: posts[0] && posts[0][1] });
+
+  // Omarchy B3: two invoices in their discount window and a payment that
+  // covers only the first. The second gets no Apply, so no discount: a
+  // discount comes with a payment on its invoice.
+  P._invoices[1].discount_date = '2026-09-30';
+  amount.value = '306.25';
+  P._suggestDiscounts();
+  out('discount-unreached', { discounts: discs.map((d) => d.value) });
+  posts.length = 0;
+  await P.save({ preventDefault() {}, target: { ...form, amount: { value: '306.25' } } });
+  out('discount-unreached-save', { body: posts[0] && posts[0][1] });
+
+  // A discount the terms don't offer: the server's sentence is asked as a
+  // question, and a yes sends it again with the override.
+  posts.length = 0;
+  ctx.refuseOnce = "Invoice 1001's discount had to be taken by Sep 30, 2026; this payment is dated Oct 2, 2026. Send allow_discount_override to take it anyway.";
+  P._requestKey = null;
+  await P.save({ preventDefault() {}, target: { ...form, amount: { value: '306.25' } } });
+  out('discount-override', {
+    asked: ctx.asked,
+    sent: posts.map((p) => !!p[1].allow_discount_override),
+  });
 })();

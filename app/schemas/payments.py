@@ -2,7 +2,7 @@ from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 from app.schemas.common import StrictModel
 
 
@@ -40,6 +40,10 @@ class PaymentCreate(StrictModel):
     # Where the allocations' discounts post (#664): required when one takes
     # a discount, refused when none does.
     discount_account_id: Optional[int] = None
+    # Take a discount the invoice's terms don't offer: none at all, after
+    # its date, more than its percent, or a second one (#664). Each refusal
+    # names this field.
+    allow_discount_override: StrictBool = False
 
 
 class PaymentApply(StrictModel):

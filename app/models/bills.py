@@ -55,6 +55,11 @@ class Bill(Base):
     date = Column(Date, nullable=False)
     due_date = Column(Date, nullable=True)
     terms = Column(String(50), default="Net 30")
+    # The list entry these terms named when the bill was saved (#664),
+    # whose rule gives its discount; NULL for text that named none then
+    # (free text, or a bill from before the list), which keeps the old
+    # reading of "Net N" and nothing more, however the list changes later.
+    payment_term_id = Column(Integer, ForeignKey("payment_terms.id"), nullable=True)
     ref_number = Column(String(100), nullable=True)
 
     subtotal = Column(Numeric(15, 2), default=0)

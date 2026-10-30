@@ -1,7 +1,13 @@
 from datetime import date as dt_date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
-from pydantic import BaseModel, field_validator, model_validator, field_serializer
+from pydantic import (
+    BaseModel,
+    StrictBool,
+    field_validator,
+    model_validator,
+    field_serializer,
+)
 
 from app.schemas.common import (
     StrictModel,
@@ -269,6 +275,10 @@ class BillPaymentCreate(StrictModel):
     # Where the allocations' discounts post (#664): required when one takes
     # a discount, refused when none does.
     discount_account_id: Optional[int] = None
+    # Take a discount the bill's terms don't offer: none at all, after its
+    # date, more than its percent, or a second one (#664). Each refusal
+    # names this field.
+    allow_discount_override: StrictBool = False
 
 
 class BillPaymentMemoUpdate(StrictModel):

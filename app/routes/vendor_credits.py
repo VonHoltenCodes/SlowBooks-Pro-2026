@@ -38,6 +38,7 @@ from app.schemas.vendor_credits import (
 )
 from app.services.accounting import (
     _q,
+    all_lines,
     compute_line_totals,
     create_journal_entry,
     get_ap_account_id,
@@ -450,7 +451,8 @@ def void_vendor_credit_unchecked(db: Session, vc: VendorCredit) -> None:
                 db,
                 vc.date,
                 f"VOID Vendor Credit {vc.credit_number}",
-                reversing_lines(txn.lines),
+                # every line, an early-payment discount's cash ones too
+                reversing_lines(all_lines(db, txn.id)),
                 source_type="vendor_credit_void",
                 source_id=vc.id,
                 class_id=vc.class_id,

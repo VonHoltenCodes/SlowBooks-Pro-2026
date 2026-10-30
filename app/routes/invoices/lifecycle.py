@@ -386,6 +386,7 @@ def post_applied_credit(
         CreditMemoLine,
         CreditMemoStatus,
     )
+    from app.services import cash_basis
     from app.services.numbering import next_credit_memo_number
 
     balance = Decimal(str(inv.balance_due or 0))
@@ -455,7 +456,14 @@ def post_applied_credit(
                 "credit": amount,
                 "description": memo,
             },
-        ],
+        ]
+        # An early-payment discount reads on the cash basis too (#664):
+        # it settles that part of the invoice as a payment would.
+        + (
+            cash_basis.discount_cash_lines(db, ar_id, inv, amount, account_id, memo)
+            if discount_payment_id is not None
+            else []
+        ),
         source_type="credit_memo",
         source_id=cm.id,
         class_id=inv.class_id,

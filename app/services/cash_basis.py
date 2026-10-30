@@ -419,6 +419,69 @@ def retainage_release_cash_lines(
     return _balanced_on(lines, ensure_construction_accounts(db)["2050"].id, memo)
 
 
+def discount_cash_lines(
+    db: Session,
+    control_id: int,
+    document,
+    amount_home,
+    discount_account_id: int,
+    memo: str,
+    invoice: bool = True,
+) -> list[dict]:
+    """The cash lines of an early-payment discount's entry (#664). The
+    discount settles part of the document with no cash, so on the cash basis
+    it recognizes that part as a payment would (an invoice's income and tax
+    lines prorated, a bill's expense lines) against the discount account.
+    A settled document then reads the same on both bases: its income less
+    the discount, and all of its tax. An invoice the QuickBooks ledger import
+    posted already counts its income on cash, so only the discount moves."""
+    amount_home = _q(amount_home)
+    if amount_home == 0:
+        return []
+    if invoice and _ledger_posted(db, document):
+        return [
+            _cash_line(
+                {"account_id": discount_account_id, "amount": -amount_home}, memo
+            ),
+            {
+                "account_id": control_id,
+                "debit": Decimal("0"),
+                "credit": amount_home,
+                "description": memo,
+                "basis": BASIS_CASH,
+            },
+        ]
+    if invoice:
+        lines = _recognition(
+            db,
+            INVOICE_SOURCE_TYPES,
+            document.id,
+            control_id,
+            amount_home,
+            memo,
+            unapplied_income_id,
+            INVOICE_LINK,
+        )
+    else:
+        lines = _recognition(
+            db,
+            BILL_SOURCE_TYPES,
+            document.id,
+            control_id,
+            -amount_home,
+            memo,
+            unapplied_expense_id,
+            BILL_LINK,
+            _retainage_ids(db),
+        )
+    net = sum((ln["credit"] - ln["debit"] for ln in lines), Decimal("0"))
+    if net == 0:
+        return lines
+    return lines + [
+        _cash_line({"account_id": discount_account_id, "amount": -net}, memo)
+    ]
+
+
 def _balanced_on(lines: list[dict], control_id: int, memo: str) -> list[dict]:
     """Add the control-account cash line that balances the recognition
     lines: Dr A/R when they are net credits (income), Cr A/P when net

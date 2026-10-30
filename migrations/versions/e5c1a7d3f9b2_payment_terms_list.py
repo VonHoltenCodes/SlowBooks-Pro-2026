@@ -11,10 +11,16 @@ entry for any other Net N a customer, vendor, document or the default
 terms already use. Text that is not Net N is left as it is: it keeps the
 old 30 days, and the document now says so.
 
+An invoice and a bill name the list entry their terms named when saved
+(payment_term_id), and its rule gives their discount. A document whose text
+names one of the entries made here is tied to it: the entry's rule is the
+one the old parser gave that text, so nothing about it changes. Any other
+document keeps NULL, and a term added to the list later never reaches it.
+
 A discount taken in Receive Payments is a credit memo, and one taken in
 Pay Bills a vendor credit, tied to the payment that took it
 (discount_payment_id, discount_bill_payment_id) so voiding the payment
-voids its discount. downgrade drops the table and the two columns.
+voids its discount. downgrade drops the table and the four columns.
 
 Revision ID: e5c1a7d3f9b2
 Revises: d7b3f9a1c5e2
@@ -53,7 +59,17 @@ NET_N = re.compile(r"^net\s+(\d{1,4})$")
 LINKS = (
     ("credit_memos", "discount_payment_id", "payments"),
     ("vendor_credits", "discount_bill_payment_id", "bill_payments"),
+    ("invoices", "payment_term_id", "payment_terms"),
+    ("bills", "payment_term_id", "payment_terms"),
 )
+# The documents tied to the entries made here, by their exact text.
+TIED = ("invoices", "bills")
+
+
+def _key(text):
+    """Terms as the parser matches them: single-spaced (any whitespace),
+    lower case (app/services/payment_terms.py _key)."""
+    return " ".join((text or "").split()).lower()
 
 
 def _fk(table, column):
@@ -120,7 +136,7 @@ def upgrade() -> None:
 
         rows = {name.lower(): (name, days) for name, days in SEED}
         for text in _texts(bind, insp):
-            match = NET_N.match(" ".join(text.split()).lower())
+            match = NET_N.match(_key(text))
             if match and int(match.group(1)) <= 3650:
                 days = int(match.group(1))
                 rows.setdefault(f"net {days}", (f"Net {days}", days))
@@ -140,6 +156,27 @@ def upgrade() -> None:
         with op.batch_alter_table(table) as batch:
             batch.add_column(sa.Column(column, sa.Integer(), nullable=True))
             batch.create_foreign_key(_fk(table, column), target, [column], ["id"])
+
+    # Tie each document to the entry its text names, matched in Python so
+    # tabs and doubled spaces match as the parser matches them.
+    ids = {
+        _key(name): term_id
+        for term_id, name in bind.execute(sa.text("SELECT id, name FROM payment_terms"))
+    }
+    for table in TIED:
+        if table not in tables:
+            continue
+        for (text,) in bind.execute(
+            sa.text(f"SELECT DISTINCT terms FROM {table} WHERE terms IS NOT NULL")
+        ).all():
+            term_id = ids.get(_key(text))
+            if term_id is not None:
+                bind.execute(
+                    sa.text(
+                        f"UPDATE {table} SET payment_term_id = :id WHERE terms = :text"
+                    ),
+                    {"id": term_id, "text": text},
+                )
 
 
 def downgrade() -> None:

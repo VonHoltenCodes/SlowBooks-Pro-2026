@@ -246,7 +246,12 @@ def test_the_forms_send_a_key_and_guard_the_submit():
     assert "if (PaymentsPage._saving) return;" in pay
     assert "PaymentsPage._requestKey = null; // a new form, a new key (#292)" in pay
     bills = (ROOT / "app" / "static" / "js" / "bills.js").read_text(encoding="utf-8")
-    assert "{ 'Idempotency-Key': `${BillsPage._payKey}:${vendorId}` }" in bills
+    # one key per vendor; a discount sent again with the override (#664) is
+    # another request, so it takes its own
+    assert (
+        "{ 'Idempotency-Key': `${BillsPage._payKey}:${vendorId}"
+        "${body.allow_discount_override ? ':override' : ''}` }" in bills
+    )
     assert "if (BillsPage._paying) return;" in bills
     app = (ROOT / "app" / "static" / "js" / "app.js").read_text(encoding="utf-8")
     assert "requestKey() {" in app and "crypto.randomUUID()" in app

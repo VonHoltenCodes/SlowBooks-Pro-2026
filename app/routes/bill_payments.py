@@ -170,8 +170,21 @@ def create_bill_payment(
     from app.services import early_pay_discounts
 
     discount_acct = early_pay_discounts.discount_account(
-        db, data.discount_account_id, [a.discount for a in data.allocations]
+        db,
+        data.discount_account_id,
+        [a.discount for a in data.allocations],
+        data.allow_discount_override,
     )
+    # a discount comes with a payment on its bill, said by the bill's number
+    for a in data.allocations:
+        if a.discount > 0 and a.amount <= 0:
+            row = db.get(Bill, a.bill_id)
+            early_pay_discounts.refuse_unpaid_discount(
+                "bill",
+                row.bill_number if row else str(a.bill_id),
+                Decimal(str(a.amount)),
+                a.discount,
+            )
 
     # The accounts the journal needs, resolved before anything is written:
     # a missing one is a 409 naming it, with no payment, allocations or
@@ -238,6 +251,17 @@ def create_bill_payment(
                     f"due on bill {bill.bill_number}."
                 ),
             )
+        # the discount the bill's own terms offer, or the override
+        early_pay_discounts.check_against_terms(
+            db,
+            bill,
+            "bill",
+            bill.bill_number,
+            discount,
+            bill.balance_due,
+            data.date,
+            data.allow_discount_override,
+        )
 
         bill_currency = document_currency(bill, db)
         if bill_currency != pay_currency:

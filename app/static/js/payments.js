@@ -257,7 +257,7 @@ const PaymentsPage = {
                 <td><input class="alloc-discount money" data-invoice="${inv.id}"
                     type="number" step="0.01" min="0" max="${inv.balance_due}"
                     aria-label="Discount on ${escapeHtml(inv.invoice_number)}"
-                    oninput="PaymentsPage._discountChanged()"
+                    oninput="PaymentsPage._discountChanged(this)"
                     style="width:80px;"></td>
                 <td><input class="alloc-amount money" data-invoice="${inv.id}" data-max="${inv.balance_due}"
                     type="number" step="0.01" min="0" max="${inv.balance_due}"
@@ -339,12 +339,19 @@ const PaymentsPage = {
         const inputs = host ? [...host.querySelectorAll('.alloc-amount')] : [];
         let left = PaymentsPage._cents($('[name="amount"]')?.value);
         for (const input of inputs) {
-            // what is left to pay once the discount on it is taken (#664)
-            const owed = PaymentsPage._cents(input.dataset.max) - PaymentsPage._discountCents(input.dataset.invoice);
+            // what is left to pay once the discount on it is taken (#664):
+            // the one the person typed, else the one the terms suggest
+            const disc = $(`#payment-invoices .alloc-discount[data-invoice="${input.dataset.invoice}"]`);
+            const planned = disc ? PaymentsPage._cents(disc.dataset.edited ? disc.value : disc.dataset.suggested) : 0;
+            const owed = PaymentsPage._cents(input.dataset.max) - planned;
             const take = Math.max(0, Math.min(left, owed));
             input.value = take > 0 ? (take / 100).toFixed(2) : '';
+            // a discount comes with a payment: none on a row this one doesn't reach
+            if (disc) disc.value = take > 0 && planned > 0 ? (planned / 100).toFixed(2) : '';
             left -= take;
         }
+        const row = $('#discount-account-row');
+        if (row) row.hidden = !PaymentsPage._anyDiscount();
         PaymentsPage._updateAllocStatus();
     },
 
@@ -358,9 +365,9 @@ const PaymentsPage = {
         for (const input of host.querySelectorAll('.alloc-discount')) {
             const inv = (PaymentsPage._invoices || []).find(i => String(i.id) === input.dataset.invoice);
             const cents = inv ? PaymentTerms.suggestedCents(inv, payDate) : 0;
-            input.value = cents > 0 ? (cents / 100).toFixed(2) : '';
+            input.dataset.suggested = cents > 0 ? (cents / 100).toFixed(2) : '';
+            delete input.dataset.edited;
         }
-        PaymentsPage._discountChanged();
         PaymentsPage._autoApply();
     },
 
@@ -373,8 +380,10 @@ const PaymentsPage = {
         return [...$$('#payment-invoices .alloc-discount')].some(i => PaymentsPage._cents(i.value) > 0);
     },
 
-    // The discount account shows while a discount is taken.
-    _discountChanged() {
+    // The discount account shows while a discount is taken. A discount the
+    // person typed stays what they typed when Apply is filled again.
+    _discountChanged(input) {
+        if (input && input.dataset) input.dataset.edited = '1';
         const row = $('#discount-account-row');
         if (row) row.hidden = !PaymentsPage._anyDiscount();
         PaymentsPage._updateAllocStatus();
@@ -594,16 +603,24 @@ const PaymentsPage = {
             return;
         }
         const allocations = [];
+        let unpaid = null;
         $$('#payment-invoices .alloc-amount').forEach(input => {
             const cents = PaymentsPage._cents(input.value);
             const discount = PaymentsPage._discountCents(input.dataset.invoice);
+            if (discount > 0 && cents === 0) unpaid = unpaid || input;
             if (cents > 0 || discount > 0) {
                 const row = { invoice_id: parseInt(input.dataset.invoice), amount: cents / 100 };
                 if (discount > 0) row.discount = discount / 100;
                 allocations.push(row);
             }
         });
-        // the discounts post to the account picked beside them (#664)
+        // a discount comes with a payment on its invoice (#664)
+        if (unpaid) {
+            const inv = (PaymentsPage._invoices || []).find(i => String(i.id) === String(unpaid.dataset.invoice));
+            toast(`Invoice #${inv ? inv.invoice_number : unpaid.dataset.invoice} has a discount but nothing applied to it. Apply some of the payment to it, or clear its discount.`, 'error');
+            return;
+        }
+        // the discounts post to the account picked beside them
         let discountAccountId = null;
         if (allocations.some(a => a.discount)) {
             discountAccountId = parseInt($('#discount-account')?.value) || null;
@@ -643,7 +660,16 @@ const PaymentsPage = {
         if (button) button.disabled = true;
         if (!PaymentsPage._requestKey) PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
         try {
-            await API.post('/payments', data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
+            try {
+                await API.post('/payments', data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
+            } catch (err) {
+                // a discount the terms don't offer is the person's call:
+                // asked, and sent again with the override (#664)
+                if (!PaymentTerms.asksOverride(err, data)) throw err;
+                data.allow_discount_override = true;
+                PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
+                await API.post('/payments', data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
+            }
             PaymentsPage._requestKey = null;
             toastPosted('Payment recorded');
             App.refresh();

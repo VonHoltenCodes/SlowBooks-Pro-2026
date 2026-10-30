@@ -222,3 +222,7 @@ from app.models.pay_applications import PayApplication  # noqa: E402,F401
 from app.models.pay_applications import PayApplicationLine  # noqa: E402,F401
 from app.models.lien_waivers import LienWaiver  # noqa: E402,F401
 from app.models.job_deposits import JobDeposit  # noqa: E402,F401
+
+# Every new invoice and bill is tied to the payment term its text names
+# (#664); the listener lives with the terms parser.
+import app.services.payment_terms  # noqa: F401,E402

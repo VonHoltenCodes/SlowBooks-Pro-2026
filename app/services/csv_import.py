@@ -29,6 +29,9 @@ from app.services.csv_export import strip_formula_guard
 
 logger = logging.getLogger(__name__)
 
+# How many terms a row's refusal names.
+TERMS_SHOWN = 10
+
 
 def form_terms(db: Session) -> tuple[str, ...]:
     """The terms the customer and vendor forms offer: the active entries
@@ -74,8 +77,12 @@ def _terms(row: dict, default: str, choices) -> tuple[str | None, str | None]:
     for option in choices:
         if " ".join(raw.split()).lower() == " ".join(option.split()).lower():
             return option, None
+    # the list named, but not without end: a long list ends "and N more"
+    shown = ", ".join(choices[:TERMS_SHOWN])
+    if len(choices) > TERMS_SHOWN:
+        shown += f" and {len(choices) - TERMS_SHOWN} more"
     return None, (
-        f'Terms "{raw}" isn\'t on the terms list ({", ".join(choices)}). '
+        f'Terms "{raw[:50]}" isn\'t on the terms list ({shown}). '
         "Use one of those, add it under Settings > Payment Terms, or leave "
         "Terms blank for the default."
     )

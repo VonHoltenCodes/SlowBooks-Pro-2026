@@ -532,6 +532,9 @@ def _purchases_by_item(
         .options(joinedload(VendorCredit.lines))
         .filter(VendorCredit.date >= start_date, VendorCredit.date <= end_date)
         .filter(VendorCredit.status != VendorCreditStatus.VOID)
+        # an early-payment discount is no purchase returned (#664), as the
+        # customer's is no sale reversed on Sales by Item
+        .filter(VendorCredit.discount_bill_payment_id.is_(None))
     )
     if vendor_id is not None:
         credits = credits.filter(VendorCredit.vendor_id == vendor_id)
@@ -645,6 +648,9 @@ def _purchases_lines(
         .options(joinedload(VendorCredit.lines), joinedload(VendorCredit.vendor))
         .filter(VendorCredit.date >= start_date, VendorCredit.date <= end_date)
         .filter(VendorCredit.status != VendorCreditStatus.VOID)
+        # an early-payment discount is no purchase returned (#664), as the
+        # customer's is no sale reversed on Sales by Item
+        .filter(VendorCredit.discount_bill_payment_id.is_(None))
     )
     if vendor_id is not None:
         credits = credits.filter(VendorCredit.vendor_id == vendor_id)

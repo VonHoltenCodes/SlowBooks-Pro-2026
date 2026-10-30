@@ -90,12 +90,17 @@ column holds, so free text from before the list still reads), `kind`
 the date), `due_day` and `cutoff_days` (date-driven: due on that day of the
 month, the next month's when the document is dated fewer than `cutoff_days`
 before it), `discount_percent` (Numeric(5,2)) with `discount_days`
-(standard) or `discount_day` (date-driven), and `is_active`. A discount taken
+(standard) or `discount_day` (date-driven), and `is_active`. `invoices` and
+`bills` gain `payment_term_id` (FK payment_terms, nullable): the entry their
+terms named when saved, whose rule gives their discount; NULL for free text,
+read as "Net N" or nothing, so a term added later never reaches it. A
+discount taken
 in Receive Payments is a credit memo with `credit_memos.discount_payment_id`
 (FK payments) and one taken in Pay Bills a vendor credit with
 `vendor_credits.discount_bill_payment_id` (FK bill_payments). Migration
 `e5c1a7d3f9b2_payment_terms_list` (seeds the five form terms and any other
-Net N in use; downgrade drops the table and the two columns).
+Net N in use, and ties the invoices and bills whose text names one of them;
+downgrade drops the table and the four columns).
 
 ## jobs (Customer:Job / Projects)
 

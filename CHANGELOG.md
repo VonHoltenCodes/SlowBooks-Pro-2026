@@ -12,20 +12,33 @@ on what the software does, not on what sprint shipped what.
 "15th of following month" were all quietly due 30 days out. Settings now
 keeps a terms list, the QuickBooks shape: a standard term is due a number of
 days after the date, a date-driven term on a day of the month (the next
-month's when the document is dated within a set number of days of it), and
-either can offer an early-payment discount. Every form that takes terms
-offers the list, and every document's due date (invoices, bills, recurring
-invoices, memorized bills, an estimate's or a PO's conversion, a duplicate)
-comes from one parser. Existing books don't change: Due on Receipt, Net 15,
-30, 45 and 60 are on the list with the rules they always had, any other
-Net N in use is added, and other text keeps its 30 days, with a sentence on
-the invoice or bill saying so. A recurring invoice on Due on Receipt is now
-due the day it is made; its generator had its own parser, which read it as
-30 days. The discount shows on the invoice and bill and on their PDFs, and
-Receive Payments and Pay Bills suggest it until its date: the customer's is
-a credit memo, ours a vendor credit, applied to the document, posted to the
-account you pick and voided with the payment. Migration `e5c1a7d3f9b2`
-(the list, seeded; two nullable columns tying a discount to its payment).
+month's when the document is dated fewer than a set number of days before
+it), and either can offer an early-payment discount. Every form that takes
+terms offers the list, and every document's due date (invoices, bills,
+recurring invoices, memorized bills, an estimate's or a PO's conversion, a
+duplicate) comes from one parser. An invoice or bill is tied to the term its
+terms named when it was saved, and keeps that term's rule; a term added to
+the list later never reaches what was saved before it, and a term an
+invoice or bill was saved under keeps its rule and name. Existing books
+don't change: Due on Receipt, Net 15, 30, 45 and 60 are on the list with the
+rules they always had, any other Net N in use is added, documents carrying
+those are tied to them, and other text keeps its due date, with a sentence
+on the invoice or bill saying what that date is. A name the app already
+reads ("Net 30", "COD") keeps its meaning. A recurring invoice on Due on
+Receipt is now due the day it is made; its generator had its own parser,
+which read it as 30 days. The discount shows on the invoice and bill and on
+their PDFs (a foreign-currency one offers none), and Receive Payments and
+Pay Bills suggest it until its date, on what the payment applies to: the
+customer's is a credit memo, ours a vendor credit, applied to the document,
+posted to the account you pick and voided with the payment. A discount the
+terms don't offer (none, after its date, more than the percent, or a second
+one) is refused unless the payment says `allow_discount_override`; the
+forms ask first. On the cash basis a discount settles its share of the
+document as a payment does, so a settled invoice reads the same on both
+bases and its tax stays whole on the Sales Tax report. An invoice or bill
+with a discount taken keeps its terms and date. Migration `e5c1a7d3f9b2`
+(the list, seeded; nullable columns tying an invoice or bill to its term
+and a discount to its payment).
 
 ### v2.31.4 — Class and job wherever money moves, and payments that cannot double up
 

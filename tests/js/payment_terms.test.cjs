@@ -9,8 +9,9 @@ const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 
-function helper(list) {
+function helper(list, answer = true) {
     const context = {
+        confirm: () => answer,
         window: {},
         escapeHtml: value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;'),
         API: { get: async () => list },
@@ -63,4 +64,21 @@ test('a discount posts to an income, expense or cost of goods account', () => {
         { id: 3, name: 'Old', account_type: 'expense', is_active: false },
     ], 'sales');
     assert.deepEqual(options(html), [['', false], ['2', true]]);
+});
+
+test('blank terms stay blank, not the first term on the list', async () => {
+    const pt = helper(LIST);
+    await pt.load();
+    const opts = options(pt.optionsHtml(''));
+    assert.deepEqual(opts[0], ['', true]);
+    assert.ok(pt.optionsHtml('').includes('No terms (due in 30 days)'));
+});
+
+test('only a refusal that names the override is asked about, once', () => {
+    const pt = helper(LIST);
+    const named = { message: 'Its discount had to be taken by Oct 15. Send allow_discount_override to take it anyway.' };
+    assert.equal(pt.asksOverride(named, {}), true);
+    assert.equal(pt.asksOverride(named, { allow_discount_override: true }), false);
+    assert.equal(pt.asksOverride({ message: 'Allocation exceeds bill balance' }, {}), false);
+    assert.equal(helper(LIST, false).asksOverride(named, {}), false);
 });

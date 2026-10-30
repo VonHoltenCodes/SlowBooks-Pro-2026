@@ -34,7 +34,12 @@ from app.services.accounting import (
 )
 from app.services.audit import audited_bulk_delete
 from app.services.compliance import vendor_compliance
-from app.services.payment_terms import DocumentTerms
+from app.services.early_pay_discounts import discounted_on
+from app.services.payment_terms import (
+    DocumentTerms,
+    document_due_date,
+    link_terms,
+)
 from app.services.closing_date import check_closing_date
 from app.services.job_costing import line_cost_type
 from app.services.request_utils import content_disposition
@@ -600,6 +605,10 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         data.model_dump(exclude_unset=True, exclude={"lines"}),
         allow_null=("bill_number",),
     )
+    # a discount taken under its terms and date keeps them (#664)
+    from app.services.early_pay_discounts import refuse_moving_its_terms
+
+    refuse_moving_its_terms(db, bill, update_data, "bill")
     # A retainage the request names is set by hand from here on: later edits
     # of the lines, tax or date keep it instead of re-deriving it (#597).
     if "retainage_held" in update_data:
@@ -719,7 +728,8 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
                 status_code=400,
                 detail=(
                     f"Bill total cannot be less than the amount already paid "
-                    f"({amount_paid:.2f}). Void the payment first, or keep the "
+                    f"({amount_paid:.2f}{discounted_on(db, bill, 'bill')}). Void the "
+                    "payment first, or keep the "
                     "total at least that much."
                 ),
             )
@@ -823,15 +833,19 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         setattr(bill, key, val)
     if renumbered:
         _flush_number(db, number)
+    # New terms tie the bill to the entry they name now (#664).
+    if "terms" in update_data:
+        link_terms(db, bill)
 
     # Terms or date changed without a due date: the due date follows the
-    # terms, as on create; a cleared due date is derived the same way.
+    # bill's own rule, as on create; a cleared due date is derived the same
+    # way. A blank terms text is the default Net 30, as it always was.
     if (
         "terms" in update_data or "date" in update_data
     ) and "due_date" not in update_data:
-        bill.due_date = _due_date_from_terms(db, bill.date, bill.terms or "Net 30")
+        bill.due_date = document_due_date(db, bill)
     if "due_date" in update_data and bill.due_date is None:
-        bill.due_date = _due_date_from_terms(db, bill.date, bill.terms or "Net 30")
+        bill.due_date = document_due_date(db, bill)
 
     if needs_repost:
         from app.routes.invoices.helpers import _reverse_and_delete_journal

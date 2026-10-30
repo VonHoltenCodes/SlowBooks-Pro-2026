@@ -186,17 +186,30 @@ def create_payment(
             status_code=400,
             detail="Payment amount must be positive; use a credit memo for refunds",
         )
+    # The early-payment discounts the customer took (#664): a discount
+    # comes with a payment on its invoice, said by the invoice's number.
+    from app.services import early_pay_discounts
+
+    for a in data.allocations:
+        if a.amount <= 0 and a.discount > 0:
+            inv = db.get(Invoice, a.invoice_id)
+            early_pay_discounts.refuse_unpaid_discount(
+                "invoice",
+                inv.invoice_number if inv else str(a.invoice_id),
+                a.amount,
+                a.discount,
+            )
     if any(a.amount <= 0 for a in data.allocations):
         raise HTTPException(
             status_code=400,
             detail="Allocation amounts must be positive",
         )
-    # The early-payment discounts the customer took (#664) and where they
-    # post, checked before anything is written.
-    from app.services import early_pay_discounts
-
+    # and where they post, checked before anything is written
     discount_acct = early_pay_discounts.discount_account(
-        db, data.discount_account_id, [a.discount for a in data.allocations]
+        db,
+        data.discount_account_id,
+        [a.discount for a in data.allocations],
+        data.allow_discount_override,
     )
 
     # Validate allocations don't exceed payment
@@ -265,6 +278,17 @@ def create_payment(
                     f"due on invoice {invoice.invoice_number}."
                 ),
             )
+        # the discount the invoice's own terms offer, or the override
+        early_pay_discounts.check_against_terms(
+            db,
+            invoice,
+            "invoice",
+            invoice.invoice_number,
+            discount,
+            invoice.balance_due,
+            data.date,
+            data.allow_discount_override,
+        )
 
         inv_currency = document_currency(invoice, db)
         if inv_currency != pay_currency:

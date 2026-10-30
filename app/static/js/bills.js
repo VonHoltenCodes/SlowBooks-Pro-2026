@@ -1051,6 +1051,13 @@ const BillsPage = {
             }
         });
         if (byVendor.size === 0) { toast('Select bills to pay', 'error'); return; }
+        // a discount comes with a payment on its bill (#664)
+        const unpaid = [...byVendor.values()].flatMap(v => v.allocations).find(a => a.discount && !(a.amount > 0));
+        if (unpaid) {
+            const bill = (BillsPage._payBills || []).find(b => b.id === unpaid.bill_id);
+            toast(`Bill ${bill ? bill.bill_number : unpaid.bill_id} has a discount but no payment. Pay some of it, or clear its discount.`, 'error');
+            return;
+        }
         // the discounts post to the account picked under the list (#664)
         let discountAccountId = null;
         if ([...byVendor.values()].some(v => v.discounted)) {
@@ -1101,10 +1108,18 @@ const BillsPage = {
                 if (v.coiExpires && v.coiExpires < form.date.value) body.coi_override = true;
                 // a check number the paying account already has (#481):
                 // keep it, or go back to the form with nothing paid
-                const done = await CheckNumberWarn.send(
-                    q => API.post('/bill-payments', body, q ? { query: q } : null,
-                        { 'Idempotency-Key': `${BillsPage._payKey}:${vendorId}` }),
-                    form.check_number);
+                const post = q => API.post('/bill-payments', body, q ? { query: q } : null,
+                    { 'Idempotency-Key': `${BillsPage._payKey}:${vendorId}${body.allow_discount_override ? ':override' : ''}` });
+                // a discount the vendor's terms don't offer is the person's
+                // call: asked, and sent again with the override (#664)
+                const send = async q => {
+                    try { return await post(q); } catch (err) {
+                        if (!PaymentTerms.asksOverride(err, body)) throw err;
+                        body.allow_discount_override = true;
+                        return post(q);
+                    }
+                };
+                const done = await CheckNumberWarn.send(send, form.check_number);
                 if (!done) return;
                 paid.push(v.name);
                 written.push(done.id);

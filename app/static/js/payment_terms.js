@@ -38,6 +38,9 @@ const PaymentTerms = {
         const match = names.find(n => key(n) === key(selected));
         const choices = selected && !match ? [...names, selected] : names;
         const current = match || selected || '';
+        // blank terms stay blank (due in 30 days, as always) rather than
+        // the first term on the list
+        if (blank === null && !current) blank = 'No terms (due in 30 days)';
         return (blank !== null ? `<option value="" ${!current ? 'selected' : ''}>${escapeHtml(blank)}</option>` : '')
             + choices.map(t => `<option value="${escapeHtml(t)}" ${t === current ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
     },
@@ -81,6 +84,17 @@ const PaymentTerms = {
         if (doc.discount_line) return `<strong>Discount:</strong> ${escapeHtml(doc.discount_line)}<br>`;
         return '';
     },
+
+    // A refused discount the terms don't offer (no discount, after its
+    // date, more than its percent, a second one): the server's sentence,
+    // asked as a question; true when the person says take it anyway.
+    asksOverride(err, body) {
+        const msg = String((err && err.message) || '');
+        if (body.allow_discount_override || !msg.includes(PaymentTerms.OVERRIDE)) return false;
+        const why = msg.replace(` Send ${PaymentTerms.OVERRIDE} to take it anyway.`, '');
+        return confirm(`${why}\n\nTake the discount anyway?`);
+    },
+    OVERRIDE: 'allow_discount_override',
 
     // The early-payment discount suggested for an open document paid on
     // `payDate`: its percent of the balance, in cents, while the discount

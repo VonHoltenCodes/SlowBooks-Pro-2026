@@ -66,6 +66,27 @@ def test_the_early_payment_discount_is_suggested_and_sent(probe):
     assert body["discount_account_id"] == 41
 
 
+def test_no_discount_goes_on_an_invoice_the_payment_does_not_reach(probe):
+    """Omarchy B3: both invoices were in their window, the payment covered
+    the first, and the save sent the second as {amount: 0, discount: 10},
+    which the server refused in a sentence naming neither."""
+    got = probe["discount-unreached"]
+    assert got["apply"] == ["306.25", ""]
+    assert got["discounts"] == ["6.25", ""]
+    assert probe["discount-unreached-save"]["body"]["allocations"] == [
+        {"invoice_id": 11, "amount": 306.25, "discount": 6.25}
+    ]
+
+
+def test_a_refused_discount_is_asked_and_sent_with_the_override(probe):
+    got = probe["discount-override"]
+    assert got["asked"] == (
+        "Invoice 1001's discount had to be taken by Sep 30, 2026; this payment "
+        "is dated Oct 2, 2026.\n\nTake the discount anyway?"
+    )
+    assert got["sent"] == [False, True]
+
+
 def test_typing_the_amount_applies_it_oldest_first(probe):
     assert probe["partial"]["apply"] == ["312.30", "87.70"]
     assert probe["partial"]["keepShown"] is False

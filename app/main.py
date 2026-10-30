@@ -641,9 +641,11 @@ app = FastAPI(
         "to six places (0.08875 = 8.875%); `default_tax_rate` in settings is "
         'a percent string ("8.9"). Divide by 100.\n'
         "- **`terms` names an entry on `/api/payment-terms`** (its rule gives "
-        "the due date and any early-payment discount); text that is neither "
-        "on the list nor `Net N` is due in 30 days and the document's "
-        "`terms_note` says so.\n"
+        "the due date and any early-payment discount; the document keeps the "
+        "term it was saved under); text that is neither on the list nor "
+        "`Net N` is due in 30 days and the document's `terms_note` says so. "
+        "A payment's `allocations[].discount` must be one the document's "
+        "terms offer, else send `allow_discount_override`.\n"
         "- Enumerated fields are enums in this spec; read the allowed values "
         "here rather than guessing."
     ),

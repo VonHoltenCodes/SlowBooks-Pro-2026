@@ -405,7 +405,7 @@ def void_credit_memo(cm_id: int, db: Session = Depends(get_db)):
 def void_credit_memo_unchecked(db: Session, cm: CreditMemo) -> None:
     """The void itself, flushed and not committed; a payment voiding the
     discount it took calls this."""
-    from app.services.accounting import reversing_lines
+    from app.services.accounting import all_lines, reversing_lines
     from app.services.inventory_hooks import reverse_return_for_credit_memo
 
     check_closing_date(db, cm.date)
@@ -434,7 +434,8 @@ def void_credit_memo_unchecked(db: Session, cm: CreditMemo) -> None:
                 db,
                 cm.date,
                 f"VOID Credit Memo {cm.memo_number}",
-                reversing_lines(txn.lines),
+                # every line, an early-payment discount's cash ones too
+                reversing_lines(all_lines(db, txn.id)),
                 source_type="credit_memo_void",
                 source_id=cm.id,
                 class_id=cm.class_id,

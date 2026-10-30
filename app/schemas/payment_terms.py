@@ -2,7 +2,7 @@ from datetime import date as dt_date
 from decimal import Decimal
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, StringConstraints
+from pydantic import BaseModel, StrictBool, StrictInt, StringConstraints
 
 from app.schemas.common import StrictModel
 
@@ -16,13 +16,14 @@ TermKind = Literal["standard", "date_driven"]
 class PaymentTermCreate(StrictModel):
     name: TermName
     kind: TermKind = "standard"
-    net_days: Optional[int] = None
-    due_day: Optional[int] = None
-    cutoff_days: int = 0
+    # Whole numbers only: true is not one day (StrictInt refuses a bool).
+    net_days: Optional[StrictInt] = None
+    due_day: Optional[StrictInt] = None
+    cutoff_days: StrictInt = 0
     discount_percent: Optional[Decimal] = None
-    discount_days: Optional[int] = None
-    discount_day: Optional[int] = None
-    is_active: bool = True
+    discount_days: Optional[StrictInt] = None
+    discount_day: Optional[StrictInt] = None
+    is_active: StrictBool = True
 
 
 class PaymentTermUpdate(StrictModel):
@@ -31,13 +32,13 @@ class PaymentTermUpdate(StrictModel):
 
     name: Optional[TermName] = None
     kind: Optional[TermKind] = None
-    net_days: Optional[int] = None
-    due_day: Optional[int] = None
-    cutoff_days: Optional[int] = None
+    net_days: Optional[StrictInt] = None
+    due_day: Optional[StrictInt] = None
+    cutoff_days: Optional[StrictInt] = None
     discount_percent: Optional[Decimal] = None
-    discount_days: Optional[int] = None
-    discount_day: Optional[int] = None
-    is_active: Optional[bool] = None
+    discount_days: Optional[StrictInt] = None
+    discount_day: Optional[StrictInt] = None
+    is_active: Optional[StrictBool] = None
 
 
 class PaymentTermResponse(BaseModel):
@@ -53,8 +54,13 @@ class PaymentTermResponse(BaseModel):
     is_active: bool = True
     # The rule in words ("Due in 30 days; 2% off if paid within 10 days").
     description: str = ""
-    # How many invoices and bills carry it; a term in use keeps its rule.
+    # How many invoices and bills were saved under it; a term in use keeps
+    # its rule and name.
     documents: int = 0
+    # How many customers, vendors, recurring invoices and memorized bills
+    # carry its name, and the default terms setting: what a change of its
+    # rule reaches from here on (their next documents), not what it changes.
+    elsewhere: int = 0
 
     model_config = {"from_attributes": True}
 
