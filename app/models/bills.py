@@ -175,6 +175,12 @@ class BillPayment(Base):
         Boolean, nullable=False, default=False, server_default=false()
     )
     coi_override_note = Column(String(200), nullable=True)
+    # An early-payment discount taken against the terms (#664): the payment
+    # said allow_discount_override, and the note says who and on what.
+    discount_override = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    discount_override_note = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

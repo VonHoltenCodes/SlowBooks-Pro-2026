@@ -37,6 +37,7 @@ from app.schemas.memorized import (
 )
 from app.services import scheduler
 from app.services.accounting import compute_line_totals
+from app.services.payment_terms import retie, term_id_for
 from app.services.memorized_service import (
     OccurrenceTaken,
     amount_of,
@@ -229,6 +230,8 @@ def create_memorized(data: MemorizedCreate, db: Session = Depends(get_db)):
         vendor_id=data.vendor_id if data.kind == KIND_BILL else None,
         bill_number=(data.bill_number or "").strip() or None,
         terms=data.terms,
+        # its bills follow the term these terms name now (#664)
+        payment_term_id=term_id_for(db, data.terms),
         tax_rate=data.tax_rate,
         notes=data.notes,
         description=data.description,
@@ -308,9 +311,13 @@ def update_memorized(mem_id: int, data: MemorizedUpdate, db: Session = Depends(g
         raise HTTPException(status_code=422, detail=str(e))
     _check_with_books(db, checked)
 
+    terms_before = mem.terms
     for key in _HEADER_FIELDS:
         if key in changes:
             setattr(mem, key, getattr(checked, key))
+    # terms the person changed tie the schedule anew; the same terms sent
+    # back leave it as it was saved (#664)
+    retie(db, mem, terms_before)
     mem.frequency, mem.interval = checked.frequency, checked.interval
     if "bill_number" in changes:
         mem.bill_number = (checked.bill_number or "").strip() or None

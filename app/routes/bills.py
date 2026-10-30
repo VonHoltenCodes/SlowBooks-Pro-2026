@@ -38,7 +38,8 @@ from app.services.early_pay_discounts import discounted_on
 from app.services.payment_terms import (
     DocumentTerms,
     document_due_date,
-    link_terms,
+    retie,
+    term_id_for,
 )
 from app.services.closing_date import check_closing_date
 from app.services.job_costing import line_cost_type
@@ -526,6 +527,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         date=data.date,
         due_date=due_date,
         terms=terms,
+        payment_term_id=term_id_for(db, terms),
         ref_number=data.ref_number,
         po_id=data.po_id,
         subtotal=subtotal,
@@ -829,20 +831,19 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         )
 
     renumbered = number != bill.bill_number or vendor.id != bill.vendor_id
+    terms_before = bill.terms
     for key, val in update_data.items():
         setattr(bill, key, val)
     if renumbered:
         _flush_number(db, number)
-    # New terms tie the bill to the entry they name now (#664).
-    if "terms" in update_data:
-        link_terms(db, bill)
+    # Terms the person changed tie the bill to the entry they name now
+    # (#664); the same terms sent back leave it as it was saved.
+    terms_changed = retie(db, bill, terms_before)
 
     # Terms or date changed without a due date: the due date follows the
     # bill's own rule, as on create; a cleared due date is derived the same
     # way. A blank terms text is the default Net 30, as it always was.
-    if (
-        "terms" in update_data or "date" in update_data
-    ) and "due_date" not in update_data:
+    if (terms_changed or "date" in update_data) and "due_date" not in update_data:
         bill.due_date = document_due_date(db, bill)
     if "due_date" in update_data and bill.due_date is None:
         bill.due_date = document_due_date(db, bill)

@@ -12,13 +12,13 @@
 from __future__ import annotations
 
 import calendar
-import re
+import unicodedata
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import event, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.payment_terms import DATE_DRIVEN, STANDARD, PaymentTerm
@@ -39,19 +39,26 @@ SEED = (
 # The text the old parser read as due the same day.
 RECEIPT_WORDS = ("due on receipt", "due upon receipt", "cod", "net 0")
 
-# "Net 30", "net  30" or a bare "30", as the old parser took them; a signed
-# count too, so "-0001" still makes a due date before the document's date,
-# which the save refuses (docs/features.md). Up to five digits, as long as
-# main read them (Net 5000 is due in 5000 days); past that the date would
-# leave the calendar, so the text is not read.
-_NET_N = re.compile(r"^(?:net\s+)?([+-]?\d{1,5})$")
+# Past this many days a date leaves the calendar (main's parser raised a
+# 500 there); such text reads as nothing.
+MAX_TEXT_DAYS = 99999
 # The longest a term on the list may run.
 MAX_DAYS = 3650
 
 
+def clean_name(text: Optional[str]) -> str:
+    """A term name as stored: NFKC-normalized (a full-width "Ｎｅｔ" is
+    "Net"), invisible format characters (a zero-width space, a BOM) taken
+    out, so no two names on the list look the same and differ unseen."""
+    text = unicodedata.normalize("NFKC", text or "")
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+
+
 def _key(text: Optional[str]) -> str:
-    """The text as terms are matched: trimmed, single-spaced, lower case."""
-    return " ".join((text or "").split()).lower()
+    """The text as a list name is matched: cleaned (clean_name), trimmed,
+    single-spaced, lower case. Matching to the list only; text is READ as
+    the old parser read it (read_text), which is stricter."""
+    return " ".join(clean_name(text).split()).lower()
 
 
 @dataclass(frozen=True)
@@ -142,16 +149,32 @@ def find_term(db: Session, text: Optional[str]) -> Optional[PaymentTerm]:
     return None
 
 
+def main_days(text: Optional[str]) -> Optional[int]:
+    """The days main's parser gave the text, exactly as it read it, or None
+    where it fell back to 30: trimmed and lower-cased, the four receipt
+    words are 0, else int() of the text with "net " (one space) taken out,
+    so "net\t45" and "net\u00a045" were 30 days, "Net 1_0" was 10 and a
+    bare "30" was 30."""
+    if not text:
+        return None
+    t = text.strip().lower()
+    if t in RECEIPT_WORDS:
+        return 0
+    try:
+        days = int(t.replace("net ", "").strip())
+    except ValueError:
+        return None
+    return days if abs(days) <= MAX_TEXT_DAYS else None
+
+
 def read_text(text: Optional[str]) -> Optional[Rule]:
-    """The rule the old parser read from the text, or None when it read
-    none: "Net N" (or a bare N), and the due-on-receipt words."""
-    key = _key(text)
-    if key in RECEIPT_WORDS:
-        return Rule(name=text.strip(), net_days=0)
-    match = _NET_N.match(key)
-    if match:
-        return Rule(name=text.strip(), net_days=int(match.group(1)))
-    return None
+    """The rule the old parser read from the text (main_days), or None when
+    it read none. Every reader of a document not tied to a term uses this,
+    never the list, so a term added later can't reach it."""
+    days = main_days(text)
+    if days is None:
+        return None
+    return Rule(name=text.strip(), net_days=days)
 
 
 def rule_for(db: Session, text: Optional[str]) -> Optional[Rule]:
@@ -292,35 +315,56 @@ def ensure_seeded(db: Session) -> None:
     db.flush()
 
 
-def document_rule(db: Session, doc) -> Optional[Rule]:
-    """The rule a saved invoice or bill was made under: the list entry it
-    was tied to when saved (payment_term_id), else what the old parser read
-    from its text. A term added to the list later never reaches it."""
-    term_id = getattr(doc, "payment_term_id", None)
+def rule_from(db: Session, term_id: Optional[int], text: Optional[str]):
+    """The rule of something tied to a term (term_id), else the old
+    parser's reading of its text, never the list: an invoice, a bill, or
+    a recurring or memorized template."""
     if term_id is not None:
         term = db.get(PaymentTerm, term_id)
         if term is not None:
             return rule_of(term)
-    return read_text(doc.terms)
+    return read_text(text)
+
+
+def due_for(db: Session, on: date, term_id: Optional[int], text) -> date:
+    """The due date that rule gives a document dated `on`; blank or unread
+    text is the old 30 days."""
+    rule = rule_from(db, term_id, text) if _key(text) else None
+    if rule is None:
+        return on + timedelta(days=FALLBACK_DAYS)
+    return rule.due_date(on)
+
+
+def document_rule(db: Session, doc) -> Optional[Rule]:
+    """The rule a saved invoice or bill was made under: the list entry it
+    was tied to when saved (payment_term_id), else what the old parser read
+    from its text. A term added to the list later never reaches it."""
+    return rule_from(db, getattr(doc, "payment_term_id", None), doc.terms)
 
 
 def document_due_date(db: Session, doc) -> date:
     """A saved document's due date from its own rule (an edit that moves
     its date, or clears its due date)."""
-    if not _key(doc.terms):
-        return doc.date + timedelta(days=FALLBACK_DAYS)
-    rule = document_rule(db, doc)
-    if rule is None:
-        return doc.date + timedelta(days=FALLBACK_DAYS)
-    return rule.due_date(doc.date)
+    return due_for(db, doc.date, getattr(doc, "payment_term_id", None), doc.terms)
 
 
 def link_terms(db: Session, doc) -> None:
-    """Tie the document to the list entry its terms name now, or to none.
-    Called when it is saved with terms (new, or its terms changed)."""
+    """Tie the document (or template) to the list entry its terms name now,
+    or to none: when the person picks them, on a new one or an edit that
+    changes them (retie)."""
     with db.no_autoflush:
         term = find_term(db, doc.terms)
     doc.payment_term_id = term.id if term is not None else None
+
+
+def retie(db: Session, doc, before: Optional[str]) -> bool:
+    """After an edit: tie anew only when the terms changed, compared by the
+    list's key, so a form that sends the same terms back (or a case shift
+    of them) leaves an untied document untied. True when it re-tied."""
+    if _key(before) == _key(doc.terms):
+        return False
+    link_terms(db, doc)
+    return True
 
 
 def _foreign(db: Session, doc) -> bool:
@@ -386,18 +430,11 @@ def document_discount_line(doc) -> Optional[str]:
     return discount_line(rule.discount_percent, rule.discount_date(doc.date))
 
 
-def _tie_new_documents(session, flush_context, instances) -> None:
-    """Every new invoice and bill is tied to the term its text names, by
-    whichever route made it (the forms, a conversion, a duplicate, a
-    recurring or memorized entry, an import). An edit that changes terms
-    re-ties through link_terms in its route."""
-    from app.models.bills import Bill
-    from app.models.invoices import Invoice
-
-    for obj in session.new:
-        if isinstance(obj, (Invoice, Bill)) and obj.payment_term_id is None:
-            if _key(obj.terms):
-                link_terms(session, obj)
-
-
-event.listen(Session, "before_flush", _tie_new_documents)
+def term_id_for(db: Session, text: Optional[str]) -> Optional[int]:
+    """The list entry the terms of a document made now name, picked by the
+    person (a form, the API) or given by its customer or vendor: what a new
+    invoice or bill is tied to. A copy (duplicate, a template's next
+    document) takes its source's tie instead; an import takes none."""
+    with db.no_autoflush:
+        term = find_term(db, text)
+    return term.id if term is not None else None

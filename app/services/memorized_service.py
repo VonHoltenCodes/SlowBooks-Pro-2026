@@ -316,7 +316,7 @@ def _bill_number_for(db: Session, vendor: Vendor, wanted, on: date) -> str:
 
 def _enter_bill(db: Session, mem: MemorizedTransaction, on: date) -> Bill:
     from app.routes.bills import _post_bill_lines
-    from app.routes.invoices.helpers import _due_date_from_terms
+    from app.services.payment_terms import due_for, term_id_for
     from app.services.currency import resolve_rate
 
     vendor = db.query(Vendor).filter(Vendor.id == mem.vendor_id).first()
@@ -336,14 +336,21 @@ def _enter_bill(db: Session, mem: MemorizedTransaction, on: date) -> Bill:
                 "was entered. Open it and enter an amount on at least one line."
             ),
         )
-    terms = (mem.terms or "").strip() or vendor.terms or "Net 30"
+    # The template's own terms keep the term it was saved under (#664);
+    # blank, the bill takes the vendor's, tied as a new bill's are.
+    if (mem.terms or "").strip():
+        terms, term_id = mem.terms.strip(), mem.payment_term_id
+    else:
+        terms = vendor.terms or "Net 30"
+        term_id = term_id_for(db, terms)
     _, doc_rate = resolve_rate(db, None, None)
     bill = Bill(
         bill_number=_bill_number_for(db, vendor, mem.bill_number, on),
         vendor_id=vendor.id,
         date=on,
-        due_date=_due_date_from_terms(db, on, terms),
+        due_date=due_for(db, on, term_id, terms),
         terms=terms,
+        payment_term_id=term_id,
         subtotal=subtotal,
         tax_rate=tax_rate,
         tax_amount=tax_amount,

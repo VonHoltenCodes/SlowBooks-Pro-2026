@@ -111,56 +111,108 @@ def refuse_unpaid_discount(noun: str, number: str, amount, discount) -> None:
 
 
 def check_against_terms(
-    db: Session, doc, noun: str, number: str, discount, balance, pay_date, override
-) -> None:
+    db: Session,
+    doc,
+    noun: str,
+    number: str,
+    discount,
+    balance,
+    pay_date,
+    override,
+    may_override: bool = True,
+) -> Optional[str]:
     """The discount the document's own terms offer, checked before it is
     taken: terms that offer one, a payment dated by its last day, no more
     than its percent of the balance (to the cent, as the forms suggest it),
-    and none taken on the document before. `override` (allow_discount_override
-    on the request) takes it anyway, as the person decided; every refusal
-    names that field."""
+    and none taken on the document before.
+
+    A discount that fails is refused, the sentence naming
+    allow_discount_override. With the override it is taken, by an
+    administrator only (`may_override`; another role is refused in a
+    sentence), and the reason is returned so the payment and the memo
+    record it. None when the terms offer it."""
     from app.services.accounting import _q
     from app.services.payment_terms import document_rule
 
-    if override or discount <= 0:
-        return
-    anyway = f"Send {OVERRIDE} to take it anyway."
+    if discount <= 0:
+        return None
     what = f"{noun.capitalize()} {number}"
     rule = document_rule(db, doc)
     by = rule.discount_date(doc.date) if rule is not None else None
     terms = (doc.terms or "").strip() or "no terms"
+    reason = None
     if by is None:
-        raise HTTPException(
-            status_code=400,
-            detail=f"{what}'s terms ({terms}) offer no early-payment discount. {anyway}",
+        reason = f"{what}'s terms ({terms}) offer no early-payment discount."
+    elif pay_date > by:
+        reason = (
+            f"{what}'s discount had to be taken by {_day(by)}; this payment is "
+            f"dated {_day(pay_date)}."
         )
-    if pay_date > by:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"{what}'s discount had to be taken by {_day(by)}; this payment is "
-                f"dated {_day(pay_date)}. {anyway}"
-            ),
-        )
-    most = _q(Decimal(str(balance)) * rule.discount_percent / Decimal("100"))
-    if discount > most:
-        raise HTTPException(
-            status_code=400,
-            detail=(
+    else:
+        most = _q(Decimal(str(balance)) * rule.discount_percent / Decimal("100"))
+        if discount > most:
+            reason = (
                 f"{what}'s terms offer {rule.discount_percent.normalize():f}% of its "
                 f"${Decimal(str(balance)):,.2f} balance, ${most:,.2f}; "
-                f"${discount:,.2f} is more. {anyway}"
-            ),
-        )
-    earlier = _earlier_discount(db, doc, noun)
-    if earlier is not None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
+                f"${discount:,.2f} is more."
+            )
+    if reason is None:
+        earlier = _earlier_discount(db, doc, noun)
+        if earlier is not None:
+            reason = (
                 f"An early-payment discount ({earlier}) was already taken on "
-                f"{noun} {number}. {anyway}"
+                f"{noun} {number}."
+            )
+    if reason is None:
+        return None
+    if not override:
+        raise HTTPException(
+            status_code=400, detail=f"{reason} Send {OVERRIDE} to take it anyway."
+        )
+    if not may_override:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"{reason} Only an administrator can take a discount the terms "
+                "don't offer; ask one to record it."
             ),
         )
+    return reason
+
+
+def refuse_doubled(allocations, key: str, number_of) -> None:
+    """One document twice on a payment with a discount: refused before any
+    memo or credit is numbered, naming the document, never a number that
+    was rolled back (#665)."""
+    seen: dict = {}
+    for a in allocations:
+        doc_id = getattr(a, key)
+        seen.setdefault(doc_id, []).append(a)
+    for doc_id, rows in seen.items():
+        if len(rows) > 1 and any(r.discount > 0 for r in rows):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"{number_of(doc_id)} is on this payment more than once with a "
+                    "discount. Put it on one row, with its whole payment and its "
+                    "discount."
+                ),
+            )
+
+
+def record_override(payment, reasons: list[str], actor: str) -> None:
+    """Note on the payment that a discount was taken against the terms,
+    by whom and why (#665), as a COI override is noted on a bill payment."""
+    if not reasons:
+        return
+    payment.discount_override = True
+    said = " ".join(reasons)
+    note = f"Discount taken against the terms by {actor}: {said}"
+    payment.discount_override_note = (
+        f"{payment.discount_override_note} {note}"
+        if payment.discount_override_note
+        else note
+    )
 
 
 def _day(d) -> str:
@@ -213,7 +265,9 @@ def _terms_words(doc) -> str:
     return f" ({doc.terms.strip()})" if (doc.terms or "").strip() else ""
 
 
-def post_customer_discount(db: Session, payment, invoice, amount: Decimal, account):
+def post_customer_discount(
+    db: Session, payment, invoice, amount: Decimal, account, override=None
+):
     """The credit memo for a discount the customer took on `invoice` with
     `payment`, applied to the invoice. Flushed; the caller commits."""
     from app.routes.invoices.lifecycle import post_applied_credit
@@ -222,19 +276,26 @@ def post_customer_discount(db: Session, payment, invoice, amount: Decimal, accou
         f"Early-payment discount on invoice {invoice.invoice_number}"
         f"{_terms_words(invoice)}"
     )
-    return post_applied_credit(
+    if override:
+        memo = (memo + f" (taken against its terms: {override})")[:300]
+    cm = post_applied_credit(
         db,
         invoice,
         payment.date,
         amount,
-        memo,
+        # a journal line's memo is at most 300 characters
+        memo[:300],
         account.id,
         "early-payment discount on",
         discount_payment_id=payment.id,
     )
+    cm.discount_override = bool(override)
+    return cm
 
 
-def post_vendor_discount(db: Session, payment, bill, amount: Decimal, account):
+def post_vendor_discount(
+    db: Session, payment, bill, amount: Decimal, account, override=None
+):
     """The vendor credit for a discount we took on `bill` with `payment`,
     applied to the bill: DR A/P / CR the discount account. Flushed; the
     caller commits."""
@@ -250,6 +311,8 @@ def post_vendor_discount(db: Session, payment, bill, amount: Decimal, account):
     from app.services.numbering import next_vendor_credit_number
 
     memo = f"Early-payment discount on bill {bill.bill_number}{_terms_words(bill)}"
+    if override:
+        memo = (memo + f" (taken against its terms: {override})")[:300]
     vc = None
     for _ in range(10):
         vc = VendorCredit(
@@ -268,6 +331,7 @@ def post_vendor_discount(db: Session, payment, bill, amount: Decimal, account):
             job_id=bill.job_id,
             status=VendorCreditStatus.APPLIED,
             discount_bill_payment_id=payment.id,
+            discount_override=bool(override),
         )
         try:
             # a savepoint: a taken number rolls back this credit only

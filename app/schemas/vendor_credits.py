@@ -101,6 +101,8 @@ class VendorCreditResponse(BaseModel):
     # Set on an early-payment discount (#664): the bill payment it was
     # taken with.
     discount_bill_payment_id: Optional[int] = None
+    # taken against the bill's terms, with allow_discount_override (#665)
+    discount_override: bool = False
     lines: list[VendorCreditLineResponse] = []
     created_at: Optional[datetime] = None
     # Set by create only (W-74, the shape of an invoice's #642 warnings): a

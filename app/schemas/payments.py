@@ -63,6 +63,8 @@ class PaymentDiscountResponse(BaseModel):
     credit_memo_id: int
     memo_number: str
     account_id: Optional[int] = None
+    # taken against the terms, with allow_discount_override (#665)
+    override: bool = False
 
 
 class PaymentResponse(BaseModel):
@@ -93,5 +95,19 @@ class PaymentResponse(BaseModel):
     has_provider_fee: bool = False
     # The early-payment discounts taken with it (#664); empty when none.
     discounts: list[PaymentDiscountResponse] = []
+    # A discount taken against the terms (#665): who, on what, and why.
+    discount_override: bool = False
+    discount_override_note: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class PaymentDiscountAdd(StrictModel):
+    """An early-payment discount taken after the payment that paid the rest
+    (#665): the customer paid 98 of 100 within the window, and the 2 is
+    recorded against that payment, dated as it is."""
+
+    invoice_id: int
+    discount: Decimal
+    discount_account_id: int
+    allow_discount_override: StrictBool = False

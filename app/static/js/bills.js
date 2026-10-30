@@ -150,7 +150,7 @@ const BillsPage = {
                 <td>${escapeHtml(b.bill_number || '')}</td>
                 <td>${formatDate(b.date)}</td>
                 <td class="amount">${formatCurrency(a.amount)}</td>
-                <td class="actions"><button class="btn btn-sm btn-secondary" onclick="BillsPage.view(${a.bill_id})">View Bill</button></td>
+                <td class="actions"><button class="btn btn-sm btn-secondary" onclick="BillsPage.view(${a.bill_id})">View Bill</button>${!p.is_voided && !(p.discounts || []).some(d => d.bill_id === a.bill_id) ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BillsPage.showTakeDiscount(${p.id}, ${a.bill_id})">Take discount</button>` : ''}</td>
             </tr>`;
         }).join('');
         const applied = allocations.reduce((sum, a) => sum + Number(a.amount), 0);
@@ -170,7 +170,8 @@ const BillsPage = {
                 <thead><tr><th scope="col">Bill #</th><th scope="col">Date</th><th scope="col" class="amount">Applied</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>` : ''}
             ${(p.discounts || []).length ? `<p style="font-size:12px; margin:8px 0;"><strong>Discounts taken:</strong> ${p.discounts.map(d =>
-                `${formatCurrency(d.amount)} on bill ${escapeHtml(d.bill_number || String(d.bill_id))} (vendor credit ${escapeHtml(d.credit_number)})`).join('; ')}</p>` : ''}
+                `${formatCurrency(d.amount)} on bill ${escapeHtml(d.bill_number || String(d.bill_id))} (vendor credit ${escapeHtml(d.credit_number)}${d.override ? ', against the terms' : ''})`).join('; ')}</p>` : ''}
+            ${p.discount_override_note ? `<div class="terms-note" style="margin:8px 0; padding:6px 10px; border-radius:4px; background:#fff4d6; color:#7a5500;">${escapeHtml(p.discount_override_note)}</div>` : ''}
             ${BillsPage._checkMemoHtml(p)}
             ${!p.is_voided && ahead > 0 ? `<p style="font-size:11px; color:var(--text-muted);">${formatCurrency(ahead)} paid ahead, not applied to a bill.</p>` : ''}
             <div class="form-actions">
@@ -1144,6 +1145,56 @@ const BillsPage = {
             BillsPage._paying = false;
             if (payButton) payButton.disabled = false;
         }
+    },
+
+    // A vendor's discount we took that wasn't recorded with the payment
+    // (#665), suggested from the bill's terms on the payment's date.
+    async showTakeDiscount(paymentId, billId) {
+        const [p, bill, accounts] = await Promise.all([
+            API.get(`/bill-payments/${paymentId}`),
+            API.get(`/bills/${billId}`),
+            API.get('/accounts'),
+        ]);
+        const alloc = (p.allocations || []).find(a => a.bill_id === billId) || { amount: 0 };
+        const before = { ...bill, balance_due: (parseFloat(bill.balance_due) || 0) + (parseFloat(alloc.amount) || 0) };
+        const cents = Math.min(PaymentTerms.suggestedCents(before, p.date),
+            Math.round((parseFloat(bill.balance_due) || 0) * 100));
+        openModal(`Take a discount on bill ${escapeHtml(bill.bill_number)}`, `
+            <form id="take-bill-discount-form" onsubmit="BillsPage.saveTakeDiscount(event, ${paymentId}, ${billId})">
+                <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(bill.discount_line || 'Its terms offer no early-payment discount.')}
+                    ${formatCurrency(bill.balance_due)} is still due on it; the discount is dated ${formatDate(p.date)}, as the payment is.</p>
+                <div class="form-grid">
+                    <div class="form-group"><label for="take-bill-discount-amount">Discount</label>
+                        <input id="take-bill-discount-amount" name="discount" class="money" type="number" step="0.01" min="0.01" required value="${cents > 0 ? (cents / 100).toFixed(2) : ''}"></div>
+                    <div class="form-group"><label for="take-bill-discount-account">Discount account</label>
+                        <select id="take-bill-discount-account" name="account" data-no-search required>${PaymentTerms.discountAccountOptions(accounts, 'purchases')}</select></div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="BillsPage.viewPayment(${paymentId})">Back</button>
+                    <button type="submit" class="btn btn-primary">Take Discount</button>
+                </div>
+            </form>`);
+    },
+
+    async saveTakeDiscount(e, paymentId, billId) {
+        e.preventDefault();
+        const form = e.target;
+        const body = {
+            bill_id: billId,
+            discount: Math.round((parseFloat(form.discount.value) || 0) * 100) / 100,
+            discount_account_id: parseInt(form.account.value) || null,
+        };
+        const send = () => API.post(`/bill-payments/${paymentId}/discount`, body);
+        try {
+            try { await send(); } catch (err) {
+                if (!PaymentTerms.asksOverride(err, body)) throw err;
+                body.allow_discount_override = true;
+                await send();
+            }
+            PaymentTerms.rememberDiscountAccount('purchases', body.discount_account_id);
+            toastPosted('Discount taken');
+            BillsPage.viewPayment(paymentId);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     // From the bill's view: the payment is reversed and every bill it paid

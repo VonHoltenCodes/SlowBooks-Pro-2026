@@ -16,14 +16,19 @@ month's when the document is dated fewer than a set number of days before
 it), and either can offer an early-payment discount. Every form that takes
 terms offers the list, and every document's due date (invoices, bills,
 recurring invoices, memorized bills, an estimate's or a PO's conversion, a
-duplicate) comes from one parser. An invoice or bill is tied to the term its
-terms named when it was saved, and keeps that term's rule; a term added to
-the list later never reaches what was saved before it, and a term an
-invoice or bill was saved under keeps its rule and name. Existing books
-don't change: Due on Receipt, Net 15, 30, 45 and 60 are on the list with the
-rules they always had, any other Net N in use is added, documents carrying
-those are tied to them, and other text keeps its due date, with a sentence
-on the invoice or bill saying what that date is. A name the app already
+duplicate) comes from one parser. An invoice, a bill and a recurring or
+memorized schedule are tied to the term their terms named when the person
+picked them, and keep that term's rule; a term added to the list later
+never reaches what was saved before it, even when it is saved again with
+the same terms (only picking other terms ties it anew), and a term an
+invoice or bill was saved under keeps its rule and name. A duplicate and a
+schedule's next document keep their source's tie; an import ties nothing.
+Existing books don't change: Due on Receipt, Net 15, 30, 45 and 60 are on
+the list with the rules they always had, an entry is added for any other
+number of days the old parser read from text in use, and only the text the
+old parser read as exactly those days is tied to them ("net<TAB>45" was 30
+days and stays untied). Anything untied is read as the old parser read it,
+everywhere (A/P aging included); a document says what its due date is. A name the app already
 reads ("Net 30", "COD") keeps its meaning. A recurring invoice on Due on
 Receipt is now due the day it is made; its generator had its own parser,
 which read it as 30 days. The discount shows on the invoice and bill and on
@@ -32,10 +37,13 @@ Pay Bills suggest it until its date, on what the payment applies to: the
 customer's is a credit memo, ours a vendor credit, applied to the document,
 posted to the account you pick and voided with the payment. A discount the
 terms don't offer (none, after its date, more than the percent, or a second
-one) is refused unless the payment says `allow_discount_override`; the
-forms ask first. On the cash basis a discount settles its share of the
-document as a payment does, so a settled invoice reads the same on both
-bases and its tax stays whole on the Sales Tax report. An invoice or bill
+one) is refused unless the payment says `allow_discount_override`, which is
+an administrator's; the forms ask first, and the payment, the memo or
+credit and the audit log record who took it and why. A discount the
+customer took after a short payment is taken with that payment later
+(`POST /api/payments/{id}/discount`, and `/api/bill-payments/{id}/discount`). On the cash basis a discount settles its share of the
+document as a payment does, and is recomputed with the payments when the
+document is edited, so the cash Sales Tax report agrees with its ledger. An invoice or bill
 with a discount taken keeps its terms and date. Migration `e5c1a7d3f9b2`
 (the list, seeded; nullable columns tying an invoice or bill to its term
 and a discount to its payment).

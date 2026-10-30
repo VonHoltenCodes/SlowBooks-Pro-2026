@@ -717,7 +717,7 @@ def recompute_invoice_cash_lines(
         )
         return n == 1 and Decimal(str(payment.amount)) == Decimal(str(alloc.amount))
 
-    return _recompute(
+    rewritten = _recompute(
         db,
         invoice,
         link_key=INVOICE_LINK,
@@ -728,6 +728,7 @@ def recompute_invoice_cash_lines(
         fully_applied=fully_applied,
         adopted=adopted,
     )
+    return rewritten + recompute_discount_cash_lines(db, invoice, invoice=True)
 
 
 def recompute_bill_cash_lines(db: Session, bill: Bill) -> int:
@@ -745,7 +746,7 @@ def recompute_bill_cash_lines(db: Session, bill: Bill) -> int:
         )
         return n == 1 and Decimal(str(payment.amount)) == Decimal(str(alloc.amount))
 
-    return _recompute(
+    rewritten = _recompute(
         db,
         bill,
         link_key=BILL_LINK,
@@ -756,6 +757,94 @@ def recompute_bill_cash_lines(db: Session, bill: Bill) -> int:
         fully_applied=fully_applied,
         adopted=False,
     )
+    return rewritten + recompute_discount_cash_lines(db, bill, invoice=False)
+
+
+def recompute_discount_cash_lines(db: Session, document, invoice: bool = True) -> int:
+    """After an invoice's or bill's journal is reposted (#665): rewrite the
+    cash lines of each early-payment discount standing on it from its lines
+    as they now stand, as its payments' are, so the cash basis and the cash
+    Sales Tax report (which prorates the discount from the document as it
+    is) agree to the cent. A discount on or before the closing date keeps
+    what it has. Returns the discounts rewritten."""
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
+    from app.services.accounting import get_ap_account_id, get_ar_account_id
+    from app.services.audit import audited_bulk_delete
+    from app.services.closing_date import get_closing_date
+
+    if invoice:
+        control_id = get_ar_account_id(db)
+        standing = (
+            db.query(CreditMemo)
+            .filter(
+                CreditMemo.original_invoice_id == document.id,
+                CreditMemo.discount_payment_id.isnot(None),
+                CreditMemo.status != CreditMemoStatus.VOID,
+            )
+            .all()
+        )
+    else:
+        control_id = get_ap_account_id(db)
+        standing = (
+            db.query(VendorCredit)
+            .filter(
+                VendorCredit.original_bill_id == document.id,
+                VendorCredit.discount_bill_payment_id.isnot(None),
+                VendorCredit.status != VendorCreditStatus.VOID,
+            )
+            .all()
+        )
+    closing = get_closing_date(db)
+    rewritten = 0
+    for credit in standing:
+        txn = (
+            db.get(Transaction, credit.transaction_id)
+            if credit.transaction_id
+            else None
+        )
+        if txn is None or (closing is not None and txn.date <= closing):
+            continue
+        # the discount account: the accrual line that is not the control's
+        account_id = next(
+            (
+                ln.account_id
+                for ln in db.query(TransactionLine)
+                .filter(
+                    TransactionLine.transaction_id == txn.id,
+                    TransactionLine.basis == BASIS_ACCRUAL,
+                    TransactionLine.account_id != control_id,
+                )
+                .execution_options(**reading(READ_ALL))
+            ),
+            None,
+        )
+        if account_id is None:
+            continue
+        old = _cash_lines_of(db, txn.id)
+        if old:
+            audited_bulk_delete(
+                db,
+                db.query(TransactionLine)
+                .filter(TransactionLine.id.in_([ln.id for ln in old]))
+                .execution_options(**reading(READ_ALL)),
+            )
+        _insert_cash_lines(
+            db,
+            txn,
+            discount_cash_lines(
+                db,
+                control_id,
+                document,
+                Decimal(str(credit.total)),
+                account_id,
+                txn.description or "Early-payment discount",
+                invoice=invoice,
+            ),
+        )
+        rewritten += 1
+    db.flush()
+    return rewritten
 
 
 # ---------------------------------------------------------------------------

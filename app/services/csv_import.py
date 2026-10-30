@@ -77,14 +77,21 @@ def _terms(row: dict, default: str, choices) -> tuple[str | None, str | None]:
     for option in choices:
         if " ".join(raw.split()).lower() == " ".join(option.split()).lower():
             return option, None
+    # text the terms parser reads ("Net 99", "COD") keeps its meaning and is
+    # kept as typed; the forms offer a record's own terms beside the list
+    # (#665), so only text nothing reads is refused
+    from app.services.payment_terms import read_text
+
+    if read_text(raw) is not None:
+        return raw, None
     # the list named, but not without end: a long list ends "and N more"
     shown = ", ".join(choices[:TERMS_SHOWN])
     if len(choices) > TERMS_SHOWN:
         shown += f" and {len(choices) - TERMS_SHOWN} more"
     return None, (
-        f'Terms "{raw[:50]}" isn\'t on the terms list ({shown}). '
-        "Use one of those, add it under Settings > Payment Terms, or leave "
-        "Terms blank for the default."
+        f"Terms \"{raw[:50]}\" isn't on the terms list ({shown}) and isn't "
+        '"Net" and a number of days. Use one of those, add it under Settings > '
+        "Payment Terms, or leave Terms blank for the default."
     )
 
 

@@ -281,6 +281,16 @@ class BillPaymentCreate(StrictModel):
     allow_discount_override: StrictBool = False
 
 
+class BillPaymentDiscountAdd(StrictModel):
+    """An early-payment discount taken after the payment that paid the rest
+    of the bill (#665), recorded against that payment."""
+
+    bill_id: int
+    discount: Decimal
+    discount_account_id: int
+    allow_discount_override: StrictBool = False
+
+
 class BillPaymentMemoUpdate(StrictModel):
     notes: Optional[str] = None
 
@@ -311,6 +321,9 @@ class BillPaymentResponse(BaseModel):
     allocations: list[BillPaymentAllocationResponse] = []
     # The early-payment discounts taken with it (#664); empty when none.
     discounts: list["BillPaymentDiscountResponse"] = []
+    # A discount taken against the terms (#665): who, on what, and why.
+    discount_override: bool = False
+    discount_override_note: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
@@ -324,6 +337,8 @@ class BillPaymentDiscountResponse(BaseModel):
     vendor_credit_id: int
     credit_number: str
     account_id: Optional[int] = None
+    # taken against the terms, with allow_discount_override (#665)
+    override: bool = False
 
 
 BillPaymentResponse.model_rebuild()

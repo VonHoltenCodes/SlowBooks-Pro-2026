@@ -2,13 +2,30 @@ from datetime import date as dt_date
 from decimal import Decimal
 from typing import Annotated, Literal, Optional
 
-from pydantic import BaseModel, StrictBool, StrictInt, StringConstraints
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    StrictBool,
+    StrictInt,
+    StringConstraints,
+)
 
 from app.schemas.common import StrictModel
 
+
+def _clean(value: str) -> str:
+    """NFKC, invisible format characters out (a zero-width space made a
+    second "Net 30" on every list), then trimmed (#665)."""
+    from app.services.payment_terms import clean_name
+
+    return clean_name(value).strip()
+
+
 # The documents' terms column is String(50), so a name fits it.
 TermName = Annotated[
-    str, StringConstraints(strip_whitespace=True, min_length=1, max_length=50)
+    str,
+    BeforeValidator(lambda v: _clean(v) if isinstance(v, str) else v),
+    StringConstraints(min_length=1, max_length=50),
 ]
 TermKind = Literal["standard", "date_driven"]
 

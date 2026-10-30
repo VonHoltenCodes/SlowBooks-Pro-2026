@@ -30,8 +30,12 @@ test('the select offers the list and keeps the selected term', async () => {
     assert.deepEqual(options(pt.optionsHtml('Net 30')), [
         ['Due on Receipt', false], ['Net 30', true], ['2% 10 Net 30', false],
     ]);
-    // matched as the server matches it
-    assert.deepEqual(options(pt.optionsHtml('net  30')).find(o => o[1]), ['Net 30', true]);
+    // a record's own text is offered and sent back exactly as stored, not
+    // swapped for the list name it resembles (#665: a memo-only save of a
+    // "net30" invoice saved it as "NET30" and tied it to a later term)
+    const own = options(pt.optionsHtml('net  30'));
+    assert.deepEqual(own.find(o => o[1]), ['net  30', true]);
+    assert.deepEqual(own.find(o => o[0] === 'Net 30'), ['Net 30', false]);
 });
 
 test('terms off the list stay offered, and a blank choice can lead', async () => {
@@ -81,4 +85,14 @@ test('only a refusal that names the override is asked about, once', () => {
     assert.equal(pt.asksOverride(named, { allow_discount_override: true }), false);
     assert.equal(pt.asksOverride({ message: 'Allocation exceeds bill balance' }, {}), false);
     assert.equal(helper(LIST, false).asksOverride(named, {}), false);
+});
+
+test('the discount account picked is the one for the side', () => {
+    const pt = helper(LIST);
+    const accounts = [
+        { id: 1, name: 'Purchase Discounts Earned', account_type: 'income', account_number: '4800' },
+        { id: 2, name: 'Sales Discounts', account_type: 'income', account_number: '4900' },
+    ];
+    assert.equal(options(pt.discountAccountOptions(accounts, 'sales')).find(o => o[1])[0], '2');
+    assert.equal(options(pt.discountAccountOptions(accounts, 'purchases')).find(o => o[1])[0], '1');
 });

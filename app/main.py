@@ -645,7 +645,8 @@ app = FastAPI(
         "term it was saved under); text that is neither on the list nor "
         "`Net N` is due in 30 days and the document's `terms_note` says so. "
         "A payment's `allocations[].discount` must be one the document's "
-        "terms offer, else send `allow_discount_override`.\n"
+        "terms offer, else an administrator sends `allow_discount_override`, "
+        "which the payment records.\n"
         "- Enumerated fields are enums in this spec; read the allowed values "
         "here rather than guessing."
     ),

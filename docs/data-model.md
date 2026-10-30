@@ -90,17 +90,21 @@ column holds, so free text from before the list still reads), `kind`
 the date), `due_day` and `cutoff_days` (date-driven: due on that day of the
 month, the next month's when the document is dated fewer than `cutoff_days`
 before it), `discount_percent` (Numeric(5,2)) with `discount_days`
-(standard) or `discount_day` (date-driven), and `is_active`. `invoices` and
-`bills` gain `payment_term_id` (FK payment_terms, nullable): the entry their
-terms named when saved, whose rule gives their discount; NULL for free text,
-read as "Net N" or nothing, so a term added later never reaches it. A
+(standard) or `discount_day` (date-driven), and `is_active`. `invoices`,
+`bills`, `recurring_invoices` and `memorized_transactions` gain
+`payment_term_id` (FK payment_terms, nullable): the entry their terms named
+when the person picked them, whose rule gives their discount; NULL for text
+that named none then, read as the old parser read it, so a term added later
+never reaches it. `payments` and `bill_payments` gain `discount_override`
+and `discount_override_note`, and `credit_memos` and `vendor_credits`
+`discount_override`: a discount taken against the terms. A
 discount taken
 in Receive Payments is a credit memo with `credit_memos.discount_payment_id`
 (FK payments) and one taken in Pay Bills a vendor credit with
 `vendor_credits.discount_bill_payment_id` (FK bill_payments). Migration
-`e5c1a7d3f9b2_payment_terms_list` (seeds the five form terms and any other
-Net N in use, and ties the invoices and bills whose text names one of them;
-downgrade drops the table and the four columns).
+`e5c1a7d3f9b2_payment_terms_list` (seeds the five form terms and an entry for any other number of days the
+old parser read from text in use, and ties what that parser read as exactly
+those days; downgrade drops the table and every column it added).
 
 ## jobs (Customer:Job / Projects)
 

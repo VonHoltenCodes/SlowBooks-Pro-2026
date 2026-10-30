@@ -24,6 +24,7 @@ from app.routes.invoices.helpers import (
 from app.routes._helpers import clamp_pagination, reject_null_updates
 from app.routes.invoice_messages import default_message_body
 from app.services.audit import audited_bulk_delete
+from app.services.payment_terms import DocumentTerms, term_id_for
 from app.services.job_costing import line_cost_type, budgets_from_estimate
 from app.services.estimating import (
     estimate_totals,
@@ -736,6 +737,7 @@ def convert_to_invoice(
         date=today,
         due_date=due_date,
         terms=terms,
+        payment_term_id=term_id_for(db, terms),
         subtotal=subtotal,
         tax_rate=estimate.tax_rate,
         tax_amount=tax_amount,
@@ -822,6 +824,7 @@ def convert_to_invoice(
     db.commit()
     db.refresh(invoice)
     resp = InvoiceResponse.model_validate(invoice)
+    DocumentTerms(db, "invoice").fill(resp, invoice)
     if invoice.customer:
         resp.customer_name = invoice.customer.name
     resp.jobs_left_off = left_off

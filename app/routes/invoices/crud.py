@@ -19,7 +19,8 @@ from app.services.numbering import next_invoice_number
 from app.services.payment_terms import (
     DocumentTerms,
     document_due_date,
-    link_terms,
+    retie,
+    term_id_for,
 )
 from app.services.closing_date import check_closing_date
 
@@ -205,6 +206,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             date=data.date,
             due_date=due_date,
             terms=data.terms,
+            payment_term_id=term_id_for(db, data.terms),
             po_number=data.po_number,
             subtotal=subtotal,
             tax_rate=data.tax_rate,
@@ -516,13 +518,15 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 posting.date = data.date
 
     previous_customer_id = invoice.customer_id
+    terms_before = invoice.terms
     for key, val in update_data.items():
         if key == "is_pledge" and val is None:
             continue
         setattr(invoice, key, val)
-    # New terms tie the invoice to the entry they name now (#664).
-    if "terms" in update_data:
-        link_terms(db, invoice)
+    # Terms the person changed tie the invoice to the entry they name now
+    # (#664); the same terms sent back (the form always sends them) leave
+    # it as it was saved, tied or not.
+    retie(db, invoice, terms_before)
     # Moved to another customer: the Bill To whole is the new customer's
     # payer's as of now, as create makes it, the street with the name and
     # country, and the ship-to the new customer's with its country; an

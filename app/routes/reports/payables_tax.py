@@ -14,7 +14,7 @@ from app.models.accounts import Account
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Vendor
 from app.routes.reports._router import router
-from app.routes.invoices.helpers import _due_date_from_terms
+from app.services.payment_terms import document_due_date
 from app.services import cash_basis
 
 # accrual, cash, or the company default (#483), as the statements take it
@@ -422,7 +422,9 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
         r = row(bill.vendor_id)
         # A bill with no due date (bills made from a PO before 2.18
         # never got one) ages from its date and terms, not as current.
-        due = bill.due_date or _due_date_from_terms(db, bill.date, bill.terms)
+        # by the bill's own rule (#664): its term if it was saved under one,
+        # else the old reading of its text, never a term added since
+        due = bill.due_date or document_due_date(db, bill)
         days = (as_of_date - due).days
         bal = home_amount(bill.balance_due, bill.exchange_rate)
         if days <= 0:

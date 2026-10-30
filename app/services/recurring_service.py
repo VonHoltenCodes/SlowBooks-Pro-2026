@@ -588,11 +588,12 @@ def _post_installment(
     ar_id, default_income_id, tax_account_id = accounts
     tax_rate = rec.tax_rate or Decimal("0")
 
-    # The due date by the one terms parser (#664): its own copy read "Due
-    # on Receipt" as 30 days.
-    from app.services.payment_terms import due_date_for
+    # The due date by the one terms parser (#664), from the term the
+    # schedule was saved under, or the old reading of its text; its own
+    # copy read "Due on Receipt" as 30 days.
+    from app.services.payment_terms import due_for
 
-    due_date = due_date_for(db, on, rec.terms)
+    due_date = due_for(db, on, rec.payment_term_id, rec.terms)
 
     # MAX+1 numbering races against concurrent manual creates (same as
     # the invoices route). Retry under a SAVEPOINT so a collision rolls
@@ -630,6 +631,7 @@ def _post_installment(
             date=on,
             due_date=due_date,
             terms=rec.terms,
+            payment_term_id=rec.payment_term_id,
             subtotal=subtotal,
             tax_rate=tax_rate,
             tax_amount=tax_amount,

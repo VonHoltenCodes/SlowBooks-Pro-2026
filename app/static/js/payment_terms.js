@@ -34,10 +34,11 @@ const PaymentTerms = {
     // them silently. `blank` adds a first option with that label and value "".
     optionsHtml(selected, blank = null) {
         const names = PaymentTerms.names();
-        const key = s => String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
-        const match = names.find(n => key(n) === key(selected));
-        const choices = selected && !match ? [...names, selected] : names;
-        const current = match || selected || '';
+        // the record's own text exactly as stored, never a list name that
+        // only matches it case- or space-blind: sent back unchanged, it
+        // leaves a document saved before that term untied (#665)
+        const current = selected || '';
+        const choices = current && !names.includes(current) ? [...names, current] : names;
         // blank terms stay blank (due in 30 days, as always) rather than
         // the first term on the list
         if (blank === null && !current) blank = 'No terms (due in 30 days)';
@@ -113,7 +114,11 @@ const PaymentTerms = {
             && a.is_active !== false);
         let last = null;
         try { last = localStorage.getItem(`slowbooks-discount-account-${side}`); } catch (e) { /* none */ }
-        const named = usable.find(a => /discount/i.test(a.name));
+        // a discount account for this side: sales discounts given on
+        // Receive Payments, purchase discounts taken on Pay Bills (#665)
+        const other = side === 'sales' ? /purchase|taken|earned|vendor/i : /sales|given|allowed|customer/i;
+        const named = usable.find(a => /discount/i.test(a.name) && !other.test(a.name))
+            || usable.find(a => /discount/i.test(a.name));
         const pick = usable.find(a => String(a.id) === last) || named || null;
         return '<option value="">Select...</option>' + usable.map(a =>
             `<option value="${a.id}" ${pick && pick.id === a.id ? 'selected' : ''}>${escapeHtml((a.account_number ? a.account_number + ' ' : '') + a.name)}</option>`).join('');

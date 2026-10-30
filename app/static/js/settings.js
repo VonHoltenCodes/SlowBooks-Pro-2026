@@ -834,7 +834,7 @@ const SettingsPage = {
                         The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
                         the date; a date-driven term is due on a day of the month. Either can offer an early-payment discount, which Receive Payments and Pay Bills
                         suggest until its date passes. An ${T('invoice')} or bill keeps the term it was saved under; a term on one keeps its rule, so make it inactive and add a new one to change it.
-                        A term added later never reaches what was saved before it. A date-driven term moves to the next month when the document is dated fewer than the given number of days before the due day.
+                        A term added later never reaches what was saved before it: saving one again with the same terms leaves it as it was, and only picking other terms for it ties it to a term. A date-driven term moves to the next month when the document is dated fewer than the given number of days before the due day.
                     </div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-admin data-write>
                         <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.editPaymentTerm()">+ Add Term</button>

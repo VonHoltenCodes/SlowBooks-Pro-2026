@@ -60,8 +60,12 @@ const PaymentsPage = {
             allocHtml = `<h4 style="margin:12px 0 8px;">Applied to ${T('Invoices')}</h4>
                 <div class="table-container"><table><thead><tr>
                 <th scope="col">${T('Invoice')}</th><th scope="col" class="amount">Amount</th></tr></thead><tbody>`;
+            const discounted = new Set((p.discounts || []).map(d => d.invoice_id));
             for (const a of p.allocations) {
-                allocHtml += `<tr><td>#${escapeHtml(a.invoice_number || String(a.invoice_id))}</td><td class="amount">${formatCurrency(a.amount)}</td></tr>`;
+                // a discount not taken with the payment can be taken now (#665)
+                const take = !p.is_voided && !discounted.has(a.invoice_id)
+                    ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="PaymentsPage.showTakeDiscount(${p.id}, ${a.invoice_id})">Take discount</button>` : '';
+                allocHtml += `<tr><td>#${escapeHtml(a.invoice_number || String(a.invoice_id))}</td><td class="amount">${formatCurrency(a.amount)}${take}</td></tr>`;
             }
             allocHtml += `</tbody></table></div>`;
         }
@@ -70,8 +74,12 @@ const PaymentsPage = {
             allocHtml += `<h4 style="margin:12px 0 8px;">Discounts taken</h4>
                 <div class="table-container"><table><thead><tr>
                 <th scope="col">${T('Invoice')}</th><th scope="col">Credit memo</th><th scope="col" class="amount">Discount</th></tr></thead><tbody>
-                ${p.discounts.map(d => `<tr><td>#${escapeHtml(d.invoice_number || String(d.invoice_id))}</td><td>${escapeHtml(d.memo_number)}</td><td class="amount">${formatCurrency(d.amount)}</td></tr>`).join('')}
+                ${p.discounts.map(d => `<tr><td>#${escapeHtml(d.invoice_number || String(d.invoice_id))}</td><td>${escapeHtml(d.memo_number)}${d.override ? ' (against the terms)' : ''}</td><td class="amount">${formatCurrency(d.amount)}</td></tr>`).join('')}
                 </tbody></table></div>`;
+        }
+        // a discount taken against the terms says who and why (#665)
+        if (p.discount_override_note) {
+            allocHtml += `<div class="terms-note" style="margin:8px 0; padding:6px 10px; border-radius:4px; background:#fff4d6; color:#7a5500;">${escapeHtml(p.discount_override_note)}</div>`;
         }
         const unapplied = p.is_voided ? 0 : (parseFloat(p.unapplied) || 0);
 
@@ -102,6 +110,57 @@ const PaymentsPage = {
             </div>`);
         // the document's own address, so Back returns to the list and the Open group lists it (NEW-164)
         if (App.documentAddress) App.documentAddress(`#/payments/${Number(id)}`);
+    },
+
+    // A discount the customer took that wasn't recorded with the payment
+    // (#665): suggested from the invoice's terms on the payment's date and
+    // its balance before the payment, posted against this payment.
+    async showTakeDiscount(paymentId, invoiceId) {
+        const [p, inv, accounts] = await Promise.all([
+            API.get(`/payments/${paymentId}`),
+            API.get(`/invoices/${invoiceId}`),
+            API.get('/accounts'),
+        ]);
+        const alloc = p.allocations.find(a => a.invoice_id === invoiceId) || { amount: 0 };
+        const before = { ...inv, balance_due: (parseFloat(inv.balance_due) || 0) + (parseFloat(alloc.amount) || 0) };
+        const cents = Math.min(PaymentTerms.suggestedCents(before, p.date),
+            Math.round((parseFloat(inv.balance_due) || 0) * 100));
+        openModal(`Take a discount on ${T('Invoice')} #${escapeHtml(inv.invoice_number)}`, `
+            <form id="take-discount-form" onsubmit="PaymentsPage.saveTakeDiscount(event, ${paymentId}, ${invoiceId})">
+                <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(inv.discount_line || 'Its terms offer no early-payment discount.')}
+                    ${formatCurrency(inv.balance_due)} is still due on it; the discount is dated ${formatDate(p.date)}, as the payment is.</p>
+                <div class="form-grid">
+                    <div class="form-group"><label for="take-discount-amount">Discount</label>
+                        <input id="take-discount-amount" name="discount" class="money" type="number" step="0.01" min="0.01" required value="${cents > 0 ? (cents / 100).toFixed(2) : ''}"></div>
+                    <div class="form-group"><label for="take-discount-account">Discount account</label>
+                        <select id="take-discount-account" name="account" data-no-search required>${PaymentTerms.discountAccountOptions(accounts, 'sales')}</select></div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="PaymentsPage.view(${paymentId})">Back</button>
+                    <button type="submit" class="btn btn-primary">Take Discount</button>
+                </div>
+            </form>`);
+    },
+
+    async saveTakeDiscount(e, paymentId, invoiceId) {
+        e.preventDefault();
+        const form = e.target;
+        const body = {
+            invoice_id: invoiceId,
+            discount: Math.round((parseFloat(form.discount.value) || 0) * 100) / 100,
+            discount_account_id: parseInt(form.account.value) || null,
+        };
+        const send = () => API.post(`/payments/${paymentId}/discount`, body);
+        try {
+            try { await send(); } catch (err) {
+                if (!PaymentTerms.asksOverride(err, body)) throw err;
+                body.allow_discount_override = true;
+                await send();
+            }
+            PaymentTerms.rememberDiscountAccount('sales', body.discount_account_id);
+            toastPosted('Discount taken');
+            PaymentsPage.view(paymentId);
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     // An online payment with a booked processing fee asks one more thing:

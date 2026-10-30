@@ -112,12 +112,20 @@ def test_an_email_the_form_refuses_is_refused_by_the_import(client):
     assert names == ["Good Co"]
 
 
-def test_terms_the_form_does_not_offer_are_refused(client):
+def test_terms_nothing_reads_are_refused(client):
+    # Net 99 is read as 99 days by the terms parser, and the forms keep a
+    # record's own terms beside the list (#665), so it comes in as typed
     out = _upload(
-        client, "customers", "Name,Terms\nOdd Terms Co,Net 99\nOk Co,net 45\n"
+        client,
+        "customers",
+        "Name,Terms\nOdd Terms Co,15th of the month\nOk Co,net 45\nNinety Co,Net 99\n",
     )
-    assert out["created"] == 1
-    assert "Net 99" in out["errors"][0] and "Net 30" in out["errors"][0]
+    assert out["created"] == 2
+    assert "15th of the month" in out["errors"][0] and "Net 30" in out["errors"][0]
+    ninety = next(
+        c for c in client.get("/api/customers").json() if c["name"] == "Ninety Co"
+    )
+    assert ninety["terms"] == "Net 99"
     ok = next(c for c in client.get("/api/customers").json() if c["name"] == "Ok Co")
     assert ok["terms"] == "Net 45"  # the form's spelling
 
