@@ -617,7 +617,7 @@ const PaymentsPage = {
         // a discount comes with a payment on its invoice (#664)
         if (unpaid) {
             const inv = (PaymentsPage._invoices || []).find(i => String(i.id) === String(unpaid.dataset.invoice));
-            toast(`Invoice #${inv ? inv.invoice_number : unpaid.dataset.invoice} has a discount but nothing applied to it. Apply some of the payment to it, or clear its discount.`, 'error');
+            toast(Terms.text(`Invoice #${inv ? inv.invoice_number : unpaid.dataset.invoice} has a discount but nothing applied to it. Apply some of the payment to it, or clear its discount.`), 'error');
             return;
         }
         // the discounts post to the account picked beside them
