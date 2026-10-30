@@ -218,6 +218,10 @@ const CustomersPage = {
                         ${customer.credit_limit ? ` · Credit limit: ${formatCurrency(customer.credit_limit)}` : ''}
                         ${customer.tax_id ? ` · Tax ID: <code>${escapeHtml(customer.tax_id)}</code>` : ''}
                     </div>
+                    <div style="margin-top:4px;font-size:12px;color:var(--text-muted)">
+                        ${T('Invoice')} reminders: ${customer.invoice_reminders_enabled === false ? 'Off' : 'Enabled'}
+                        &nbsp;·&nbsp; Monthly statement: ${customer.monthly_statement ? 'Enabled' : 'Off'}
+                    </div>
                 </div>
                 <div style="text-align:right">
                     <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">${balance < 0 ? 'Credit' : 'Balance'}</div>
@@ -507,6 +511,8 @@ const CustomersPage = {
                     ${id ? `<div class="form-group"><label>Status</label>
                         <label style="font-weight:normal;"><input type="checkbox" name="is_active" ${c.is_active === false ? '' : 'checked'}>
                             Active (an inactive one is left out of the lists you pick from)</label></div>` : ''}
+                    <div class="form-group full-width"><label style="font-weight:normal;"><input type="checkbox" name="invoice_reminders_enabled" ${c.invoice_reminders_enabled === false ? '' : 'checked'}> Send ${T('invoice')} reminders</label></div>
+                    <div class="form-group full-width"><label style="font-weight:normal;"><input type="checkbox" name="monthly_statement" ${c.monthly_statement ? 'checked' : ''}> Send a monthly statement</label></div>
                     ${Terms.isNonprofit() ? `
                     <div class="form-group"><label>${T('Customer')} type</label>
                         <select name="donor_type">
@@ -555,6 +561,9 @@ const CustomersPage = {
             delete data.parent_customer_id;
         }
         if (e.target.send_year_end_statement) data.send_year_end_statement = e.target.send_year_end_statement.checked;
+        // always both booleans: an unchecked box is left out of FormData
+        data.invoice_reminders_enabled = !!(e.target.invoice_reminders_enabled && e.target.invoice_reminders_enabled.checked);
+        data.monthly_statement = !!(e.target.monthly_statement && e.target.monthly_statement.checked);
         if ('donor_type' in data && !data.donor_type) data.donor_type = null;
         // Checkboxes: "Tax exempt" is the customer's is_taxable, inverted;
         // "Active" is on the edit form only.

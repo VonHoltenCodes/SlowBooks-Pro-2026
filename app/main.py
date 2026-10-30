@@ -63,6 +63,7 @@ from app.routes import vendor_credits
 
 # Phase 3: Productivity
 from app.routes import recurring, batch_payments, memorized
+from app.routes import collections as collections_routes
 
 # Phase 4: Communication & Export
 from app.routes import csv as csv_routes
@@ -1476,6 +1477,7 @@ app.include_router(vendor_credits.router)
 # Phase 3: Productivity
 app.include_router(recurring.router)
 app.include_router(memorized.router)
+app.include_router(collections_routes.router)
 app.include_router(batch_payments.router)
 # Phase 4: Communication & Export
 app.include_router(csv_routes.router)

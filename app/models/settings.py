@@ -243,4 +243,13 @@ DEFAULT_SETTINGS = {
     "late_fee_enabled": "false",
     "late_fee_rate": "1.5",
     "late_fee_grace_days": "15",
+    # Collections (#653): "true" lets the app send the due payment reminders
+    # itself, once a day, when someone opens it. last_run is the ISO date of
+    # that automatic run, so it happens once however often the app loads.
+    "invoice_reminders_auto": "false",
+    "invoice_reminders_last_run": "",
+    # Who is reminded about a sub-customer billed with its parent (a tenant
+    # billed with its property): property, tenant or both. The property,
+    # whose A/R the invoice sits on, unless chosen otherwise.
+    "invoice_reminders_billed_sub_to": "property",
 }

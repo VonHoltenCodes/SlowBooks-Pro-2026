@@ -254,6 +254,23 @@ SETTINGS_TAKEN = {
         {"is_default": True},
     ),
     "Invoice Messages › Delete": ("DELETE", "/api/invoice-messages/{message}", None),
+    # Reminder rules (#653): the schedule and wording are the administrator's;
+    # a bookkeeper runs them from Collections. The probe's stub lists no
+    # rules, so only the Add rule row is shown.
+    **{
+        f"Collections › {c}": (
+            "POST",
+            "/api/collections/rules",
+            {"days_from_due": 30, "subject": "Reminder", "body": "Please pay."},
+        )
+        for c in (
+            "Add rule",
+            "#rule-days-new",
+            "#rule-enabled-new",
+            "#rule-subject-new",
+            "#rule-body-new",
+        )
+    },
 }
 # Users and API tokens refuse every API token whatever its role, so these are
 # asked with a bookkeeper's own sign-in. Settings shows the two sections to

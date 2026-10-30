@@ -61,6 +61,8 @@ class CustomerCreate(StrictModel):
     # deep; bill_with_parent puts its invoices on the parent's A/R.
     parent_customer_id: Optional[int] = None
     bill_with_parent: bool = False
+    invoice_reminders_enabled: bool = True
+    monthly_statement: bool = False
 
 
 class CustomerUpdate(StrictModel):
@@ -92,6 +94,8 @@ class CustomerUpdate(StrictModel):
     donor_type: Optional[str] = Field(None, max_length=20)
     salutation: Optional[str] = Field(None, max_length=100)
     send_year_end_statement: Optional[bool] = None
+    invoice_reminders_enabled: Optional[bool] = None
+    monthly_statement: Optional[bool] = None
     is_active: Optional[bool] = None
     parent_customer_id: Optional[int] = None
     bill_with_parent: Optional[bool] = None
@@ -147,6 +151,8 @@ class CustomerResponse(BaseModel):
     donor_type: Optional[str] = None
     salutation: Optional[str] = None
     send_year_end_statement: bool = True
+    invoice_reminders_enabled: bool = True
+    monthly_statement: bool = False
 
     # Sub-customers (#638). full_name is "Parent: Sub" for a sub-customer
     # (the pickers' spelling) and the name itself otherwise; parent_name

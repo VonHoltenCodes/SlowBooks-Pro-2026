@@ -353,6 +353,7 @@ const SettingsPage = {
             SettingsPage.loadCompanyFile();
             SettingsPage.loadLegacyFiles();
             SettingsPage.loadEmailTemplates();
+            SettingsPage.loadReminderRules();
             SettingsPage.loadInvoiceMessages();
             if (Terms.isNonprofit()) SettingsPage.loadInvoiceMessages('giving_statement');
             SettingsPage.loadAiConfig();
@@ -812,6 +813,35 @@ const SettingsPage = {
                         <div class="form-group"><label>Grace Days</label>
                             <input name="late_fee_grace_days" type="number" min="0" step="1" value="${escapeHtml(s.late_fee_grace_days || '15')}"></div>
                     </div>
+                </div>
+
+                <div class="settings-section" id="settings-collections" role="group" aria-labelledby="settings-h-collections">
+                    <h3 id="settings-h-collections">Collections</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Reminders go to a customer's email when an ${T('invoice')} is coming due or is overdue. Run them from the <a href="#/collections">Collections</a> page, or let SlowBooks Pro send them for you.
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group"><label for="invoice-reminders-auto">Send reminders automatically</label>
+                            <select name="invoice_reminders_auto" id="invoice-reminders-auto" onchange="SettingsPage.previewAutoReminders(this)">
+                                <option value="false" ${s.invoice_reminders_auto !== 'true' ? 'selected' : ''}>Off</option>
+                                <option value="true" ${s.invoice_reminders_auto === 'true' ? 'selected' : ''}>On</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Once a day, when SlowBooks Pro is opened. Needs email set up.
+                                ${s.invoice_reminders_last_run ? `Last ran ${escapeHtml(formatDate(s.invoice_reminders_last_run))}.` : ''}</div></div>
+                        <div class="form-group"><label for="invoice-reminders-billed-sub-to">Remind about a sub-${T('customer').toLowerCase()} billed with its parent</label>
+                            <select name="invoice_reminders_billed_sub_to" id="invoice-reminders-billed-sub-to">
+                                <option value="property" ${(s.invoice_reminders_billed_sub_to || 'property') === 'property' ? 'selected' : ''}>The parent (whose account it is billed to)</option>
+                                <option value="tenant" ${s.invoice_reminders_billed_sub_to === 'tenant' ? 'selected' : ''}>The sub-${T('customer').toLowerCase()} itself</option>
+                                <option value="both" ${s.invoice_reminders_billed_sub_to === 'both' ? 'selected' : ''}>Both</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A tenant billed with its property, say. Whoever is written to must have an email and not be opted out.</div></div>
+                    </div>
+                    <h4 id="settings-h-reminder-rules" style="margin:12px 0 4px; font-size:12px;">Reminder rules</h4>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached.
+                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ company_name }}
+                    </div>
+                    <div id="reminder-rules-list"></div>
                 </div>
 
                 <div class="settings-section" role="group" aria-labelledby="settings-h-email-templates">
@@ -2584,6 +2614,93 @@ const SettingsPage = {
         }
         if (set !== undefined) SettingsPage._messages = set;
         return SettingsPage._messages;
+    },
+
+    // Switching the automatic run on: show who gets an email on the first run
+    // before the setting is saved (review of #654). Turning rules on for a
+    // company with old open invoices sends the firmest reminder on each one.
+    async previewAutoReminders(select) {
+        if (!select || select.value !== 'true') return;
+        const back = () => { select.value = 'false'; SettingsPage._updateDirty(); };
+        let summary;
+        try { summary = await CollectionsPage.dueSummary(); } catch (err) { toast(err.message, 'error'); return; }
+        const n = summary.due.items.length;
+        if (!n) { toast('Nothing is due today. Once saved, the first automatic run sends whatever is due when SlowBooks Pro next opens.', 'info'); return; }
+        openModal('Reminders the first run will send', `
+            <p>The first automatic run, the next time SlowBooks Pro opens after you save, emails <strong>${n}</strong> reminder${n === 1 ? '' : 's'}:</p>
+            ${summary.html}
+            <p style="font-size:11px; color:var(--text-muted);">To hold any of them back, turn reminders off on that ${T('customer').toLowerCase()} first, or send them yourself from Collections and review the result.</p>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal(); SettingsPage._autoPreviewCancel()">Leave it off</button>
+                <button type="button" class="btn btn-primary" onclick="closeModal()">Keep it on</button>
+            </div>`);
+        SettingsPage._autoPreviewCancel = back;
+    },
+    _autoPreviewCancel() {},
+
+    // Reminder rules (#653). The rows sit inside the Settings form, so the
+    // controls carry no name (nothing here is sent to PUT /api/settings) and
+    // Enter is held back in the single-line boxes. Writes are an
+    // administrator's: every control is data-admin data-write.
+    _rules: [],
+
+    async loadReminderRules() {
+        const el = $('#reminder-rules-list');
+        if (!el) return;
+        // A stubbed API (the admin-controls probe) may answer with no list
+        try { const got = await API.get('/collections/rules'); SettingsPage._rules = Array.isArray(got) ? got : []; } catch (e) {
+            el.innerHTML = `<div style="font-size:11px; color:var(--text-muted);">${escapeHtml(e.message)}</div>`;
+            return;
+        }
+        const rows = SettingsPage._rules.map(r => SettingsPage._ruleRowHtml(r)).join('');
+        el.innerHTML = `<div class="table-container"><table>
+            <thead><tr><th scope="col">Days from due</th><th scope="col">Enabled</th><th scope="col">Subject</th><th scope="col">Body</th><th scope="col">Actions</th></tr></thead>
+            <tbody>${rows}${SettingsPage._ruleRowHtml(null)}</tbody></table></div>`;
+    },
+
+    // One editable row; `r` null is the blank Add rule row
+    _ruleRowHtml(r) {
+        const id = r ? r.id : 'new';
+        const f = (part) => `id="rule-${part}-${id}"`;
+        const guard = `onkeydown="if (event.key === 'Enter') event.preventDefault()"`;
+        return `<tr data-rule="${id}">
+            <td><input type="number" step="1" style="width:70px" ${f('days')} ${guard} data-admin data-write aria-label="Days from due"
+                value="${r ? r.days_from_due : ''}" placeholder="e.g. 7">
+                ${r ? `<div style="font-size:10px; color:var(--text-muted);">${escapeHtml(r.label)}</div>` : ''}</td>
+            <td><input type="checkbox" ${f('enabled')} data-admin data-write aria-label="Enabled" ${!r || r.enabled ? 'checked' : ''}></td>
+            <td><input type="text" maxlength="500" style="width:100%" ${f('subject')} ${guard} data-admin data-write aria-label="Subject" value="${escapeHtml(r ? r.subject : '')}"></td>
+            <td><textarea rows="4" style="width:100%" ${f('body')} data-admin data-write aria-label="Body">${escapeHtml(r ? r.body : '')}</textarea></td>
+            <td class="actions">
+                <button type="button" class="btn btn-sm btn-primary" data-admin data-write onclick="SettingsPage.saveReminderRule(${r ? r.id : 'null'})">${r ? 'Save' : 'Add rule'}</button>
+                ${r ? `<button type="button" class="btn btn-sm btn-secondary" data-destructive data-admin data-write onclick="SettingsPage.deleteReminderRule(${r.id})">Delete</button>` : ''}
+            </td></tr>`;
+    },
+
+    async saveReminderRule(id) {
+        const key = id === null ? 'new' : id;
+        const days = $(`#rule-days-${key}`).value;
+        if (days === '' || !Number.isInteger(Number(days))) { toast('Enter the days from due as a whole number', 'error'); return; }
+        const body = {
+            days_from_due: parseInt(days, 10),
+            enabled: $(`#rule-enabled-${key}`).checked,
+            subject: $(`#rule-subject-${key}`).value,
+            body: $(`#rule-body-${key}`).value,
+        };
+        try {
+            if (id === null) await API.post('/collections/rules', body);
+            else await API.put(`/collections/rules/${id}`, body);
+            toast('Reminder rule saved');
+            SettingsPage.loadReminderRules();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async deleteReminderRule(id) {
+        if (!confirm('Delete this reminder rule?')) return;
+        try {
+            await API.del(`/collections/rules/${id}`);
+            toast('Reminder rule deleted');
+            SettingsPage.loadReminderRules();
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async loadInvoiceMessages() {

@@ -37,6 +37,7 @@ const App = {
         '/in-kind-gifts': { page: 'in-kind-gifts',   label: 'In-Kind Gifts',      nonprofit: true, render: () => InKindPage.render() },
         '/in-kind-gifts/:id': { page: 'in-kind-gifts', label: 'In-Kind Gift',     nonprofit: true, document: true, render: (id) => App.withDocument(() => InKindPage.render(), () => InKindPage.view(id)) },
         '/estimates':     { page: 'estimates',       label: 'Create Estimates',   render: () => EstimatesPage.render() },
+        '/collections':   { page: 'collections',    label: 'Collections',        render: () => CollectionsPage.render() },
         '/payments':      { page: 'payments',        label: 'Receive Payments',   render: () => PaymentsPage.render() },
         '/payments/:id':      { page: 'payments',   label: 'Payment',       document: true, render: (id) => App.withDocument(() => PaymentsPage.render(), () => PaymentsPage.view(id)) },
         '/banking':       { page: 'banking',         label: 'Banking',            render: () => BankingPage.render() },
@@ -2694,7 +2695,24 @@ const App = {
             // boot_check.js stops waiting for a first screen. Its data can
             // take a while on a big company, and that is not a failed start.
             if (window.SlowBooksBoot) window.SlowBooksBoot.drawn();
+            App.checkReminders();
         });
+    },
+
+    // Once per browser tab session: send the day's invoice reminders when
+    // Settings -> Collections has them on. Quiet on any error (a read-only
+    // role gets a 403). Not marked done on a 401: the sign-in reloads the
+    // page, and the check should run then.
+    checkReminders() {
+        const KEY = 'sb_reminders_checked';
+        try { if (sessionStorage.getItem(KEY)) return; } catch (e) { return; }
+        const done = () => { try { sessionStorage.setItem(KEY, '1'); } catch (e) { /* no storage */ } };
+        API.post('/collections/reminders/run-if-due').then(res => {
+            done();
+            if (res && res.ran === true && res.sent > 0) {
+                toast(`Sent ${res.sent} ${T('invoice')} reminder${res.sent === 1 ? '' : 's'}`);
+            }
+        }).catch(err => { if (err && err.status !== 401) done(); });
     },
 
     /**

@@ -221,3 +221,8 @@ from app.models.pay_applications import PayApplication  # noqa: E402,F401
 from app.models.pay_applications import PayApplicationLine  # noqa: E402,F401
 from app.models.lien_waivers import LienWaiver  # noqa: E402,F401
 from app.models.job_deposits import JobDeposit  # noqa: E402,F401
+from app.models.collections import (  # noqa: F401 — registers the tables
+    CustomerStatement,
+    InvoiceReminder,
+    InvoiceReminderRule,
+)
