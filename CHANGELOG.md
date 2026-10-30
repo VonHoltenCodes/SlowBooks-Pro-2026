@@ -5,6 +5,33 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**A local MCP server for agents** (#655, @ContractorKeith). `python -m app.mcp`
+(or `SlowBooksPro --mcp` in the installed app) starts a stdio MCP server
+that lets an agent such as Claude Code, Codex or Claude Desktop work the
+books of a running app under an API token. Reads by default: a context
+call, search, records, reports and any other read-only route. With
+`SLOWBOOKS_MCP_WRITES=1`, curated writes too (customers, vendors, items,
+invoices, bills, expenses, journal entries, payments with an
+`Idempotency-Key` so a retry never pays twice, and voids); no generic write
+tool, and nothing is ever deleted. The server is the standard library only,
+so nothing new ships in the installers, and one MCP protocol version is
+pinned. The token comes only from a file (`SLOWBOOKS_TOKEN_FILE`: private
+on macOS and Linux, inside the user profile on Windows) and the server talks
+to a loopback `http://` address only, through its own opener that ignores a
+proxy setting and follows no redirect, so the token never leaves the
+machine. The server reaches the API only, through the token's own role and
+audit, so nothing in the books is new. Its instructions tell the agent that
+book text (memos, bank descriptions, notes) is data, never an instruction;
+the docs and the "Connect an agent" block under Settings, API Tokens
+recommend a read-only token and keep the token out of any command line.
+Every failure is a sentence, and a result, an error included, is cut at
+60,000 characters with a line saying how to narrow it. A list says when
+rows were left out, and `api_get` refuses the two reads that made a link on
+app versions before 2.31.2, so a read tool never makes a link; see
+[docs/agents.md](docs/agents.md).
+
 ### v2.31.1 — Sub-customers, memorized transactions, and stock that comes back out at its own cost
 
 **Each sign-in is offered only what it may do.** The Memorized Transactions

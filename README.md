@@ -165,6 +165,9 @@ Full catalog in **[docs/features.md](docs/features.md)**. Highlights:
   reports ([docs/contractor-mode.md](docs/contractor-mode.md))
 - **Accessibility** — AA contrast in both themes, tagged PDFs, working
   toward WCAG 2.1 AA ([docs/accessibility.md](docs/accessibility.md))
+- **Agents** — a local MCP server lets Claude Code, Codex or Claude Desktop
+  work your books through an API token
+  ([docs/agents.md](docs/agents.md))
 - **Duplicate detection** — fuzzy customer/vendor matching at create time
 
 ![Company Snapshot in light and dark themes](screenshots/hero-themes.png)
@@ -235,6 +238,7 @@ Production checklist: **[docs/release-checklist.md](docs/release-checklist.md)**
 | [INSTALL.md](INSTALL.md) | Install / first-run / upgrade (installer + DMG + Docker + native) |
 | [docs/server-edition.md](docs/server-edition.md) | Serving the office: setup, users & roles, troubleshooting |
 | [packaging/macos/README.md](packaging/macos/README.md) | macOS maintainer build, signing, notarization runbook |
+| [docs/agents.md](docs/agents.md) | The local MCP server: connecting an agent, tools, what a token can never do |
 | [docs/features.md](docs/features.md) | Full feature catalog + API endpoint reference |
 | [docs/development.md](docs/development.md) | Tech stack, project structure, contributor flow |
 | [docs/data-model.md](docs/data-model.md) | Database schema |

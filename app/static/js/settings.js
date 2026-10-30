@@ -1054,6 +1054,7 @@ const SettingsPage = {
                             <div style="font-family:var(--font-mono); word-break:break-all; flex:1;" id="api-token-secret"></div>
                             <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.copyApiTokenSecret()">Copy</button>
                         </div>
+                        <div id="api-token-connect" style="display:none; margin-top:10px;"></div>
                     </div>
                     <div id="api-token-list" style="margin-bottom:12px;"></div>
                     <div class="form-grid" style="align-items:end;">
@@ -1612,12 +1613,41 @@ const SettingsPage = {
                 allow_backups: $('#token-new-backups').checked,
             });
             $('#api-token-secret').textContent = created.token;
+            SettingsPage.showAgentSnippet(created.token);
             $('#api-token-reveal').style.display = '';
             $('#token-new-label').value = '';
             $('#token-new-backups').checked = false;
             toast('Token created — press Copy below, it will not be shown again');
             SettingsPage.loadApiTokens();
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // "Connect an agent": the MCP setup. The token itself is never in the
+    // markup (Copy above gives it), so no command line carries it. Shown
+    // with the secret, so it is gone when the reveal box is.
+    showAgentSnippet(token) {
+        const box = $('#api-token-connect');
+        if (!box) return;
+        const pre = 'font-family:var(--font-mono); white-space:pre-wrap; word-break:break-all; margin:6px 0;';
+        box.innerHTML =
+            '<div>Use a read-only token unless the agent must post entries.</div>' +
+            '<div style="margin-top:6px;">Save the token in a private file (paste it, then Ctrl-D):</div>' +
+            '<pre style="' + pre + '">' +
+            escapeHtml('macOS/Linux:  (umask 077; cat > ~/.slowbooks-token)\n' +
+                'PowerShell:   New-Item -ItemType Directory -Force "$env:LOCALAPPDATA\\SlowBooksPro\\data" | Out-Null; ' +
+                'Set-Content -Encoding ascii "$env:LOCALAPPDATA\\SlowBooksPro\\data\\mcp-token" (Read-Host \'Token\')') + '</pre>' +
+            '<div>Connect Claude Code (use the full paths of this checkout\'s Python and of app/mcp/__main__.py; ' +
+            '<code>python -m app.mcp</code> works only from the checkout):</div>' +
+            '<pre style="' + pre + '">' +
+            escapeHtml('claude mcp add slowbooks -e SLOWBOOKS_TOKEN_FILE=$HOME/.slowbooks-token -- /path/to/.venv/bin/python /path/to/SlowBooks-Pro-2026/app/mcp/__main__.py\n' +
+                'claude mcp add slowbooks -e SLOWBOOKS_TOKEN_FILE="$env:LOCALAPPDATA\\SlowBooksPro\\data\\mcp-token" -- C:\\path\\to\\.venv\\Scripts\\python.exe C:\\path\\to\\SlowBooks-Pro-2026\\app\\mcp\\__main__.py') + '</pre>' +
+            '<div>Add <code>' + escapeHtml('-e SLOWBOOKS_MCP_WRITES=1') + '</code> to let it post entries.</div>' +
+            '<div style="margin-top:6px;">Desktop install: run the installed program with <code>--mcp</code>, by its full path (Windows <code>' +
+            escapeHtml('"C:\\Program Files\\SlowBooks Pro 2026\\SlowBooksPro.exe" --mcp') + '</code>, macOS <code>' +
+            escapeHtml('/Applications/SlowBooks Pro.app/Contents/MacOS/SlowBooksPro --mcp') + '</code>); ' +
+            'it reads the token from ' + escapeHtml('<data dir>/mcp-token') + ', the file the PowerShell line writes.</div>' +
+            '<div>More in <a href="https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/blob/main/docs/agents.md" target="_blank" rel="noopener">docs/agents.md</a>.</div>';
+        box.style.display = '';
     },
 
     copyApiTokenSecret() {

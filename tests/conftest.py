@@ -676,3 +676,39 @@ def books_fixture(client, seed_accounts):
     from tests.bakery_books import seed_books
 
     return seed_books(client, seed_accounts)
+
+
+@pytest.fixture
+def api(client, db_session):
+    """An ApiClient that reaches the app with a bookkeeper token."""
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.mcp.client import ApiClient
+    from app.models.api_tokens import ApiToken
+    from app.services.api_token_service import generate_token, hash_token
+
+    client.put("/api/settings", json={"company_name": "Acme Fence Test Co"})
+    secret = generate_token()
+    db_session.add(
+        ApiToken(
+            label="mcp-test",
+            token_hash=hash_token(secret),
+            token_hint=secret[:10],
+            role="bookkeeper",
+            is_active=True,
+            created_by="test",
+        )
+    )
+    db_session.commit()
+    http = TestClient(app)
+    http.headers["Authorization"] = f"Bearer {secret}"
+
+    def transport(method, path, params, body, headers):
+        r = http.request(method, path, params=params, json=body, headers=headers)
+        try:
+            return r.status_code, r.json()
+        except ValueError:
+            return r.status_code, r.text
+
+    return ApiClient(transport)

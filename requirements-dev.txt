@@ -5,3 +5,4 @@ pytest-cov>=5.0.0
 black>=24.8.0
 ruff>=0.6.0
 pypdf>=5.0.0  # reads rendered PDFs back in tests (the invoice header layout)
+mcp>=2.3.0,<3  # the official MCP client drives app/mcp over stdio in tests; the server itself is stdlib

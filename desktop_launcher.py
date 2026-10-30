@@ -27,6 +27,8 @@ again. Flags:
   --hidden      windowless mode -- redirects output to launcher.log and
                 shows a popup instead of a console on fatal startup
                 errors. Automatic in the installed (frozen) build.
+  --mcp         run the local MCP server over stdio against the running app
+                (see docs/agents.md)
   --port N      override the port (default: APP_PORT from .env, else 3001)
 
 The installed Windows build is this same file frozen by PyInstaller: the
@@ -2490,6 +2492,20 @@ def _repair_schema(argv) -> int:
     return 0 if result.ok else 1
 
 
+def run_mcp(port: int | None = None) -> int:
+    """--mcp: the stdio MCP server against the already-running app. Prepares
+    nothing (no .env, company, alembic or uvicorn); only stderr may print."""
+    if port or not os.environ.get("SLOWBOOKS_URL"):
+        # An explicit --port wins over SLOWBOOKS_URL; else .env's APP_PORT.
+        port = port or int(get_env_value("APP_PORT") or "3001")
+        os.environ["SLOWBOOKS_URL"] = f"http://127.0.0.1:{port}"
+    if not os.environ.get("SLOWBOOKS_TOKEN_FILE"):
+        os.environ["SLOWBOOKS_TOKEN_FILE"] = str(get_data_dir() / "mcp-token")
+    from app.mcp.server import run
+
+    return run()
+
+
 def main() -> int:
     # Make every stdio write total BEFORE argparse can print anything.
     # A frozen console=False build launched with redirected stdio (any
@@ -2584,9 +2600,19 @@ def main() -> int:
         "by the Server Edition scheduled task so books live in a "
         "machine-wide location instead of one user's profile.",
     )
+    parser.add_argument(
+        "--mcp",
+        action="store_true",
+        help="run the local MCP server over stdio against the running app "
+        "(see docs/agents.md)",
+    )
     args = parser.parse_args()
     if args.data_dir:
         os.environ["SLOWBOOKS_DATA_DIR"] = str(Path(args.data_dir).resolve())
+
+    # Before any stdout/stderr redirect: the MCP transport is stdio.
+    if args.mcp:
+        return run_mcp(args.port)
 
     # A frozen console=False exe has no console at all — always behave as
     # --hidden there so output lands in launcher.log instead of vanishing.

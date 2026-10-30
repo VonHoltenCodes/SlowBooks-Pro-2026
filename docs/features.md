@@ -564,6 +564,8 @@ python3 scripts/seed_irs_mock_data.py
 All endpoints under `/api/`. Swagger docs at `/docs`. 300+ routes across 50 routers. All routes (except `/api/auth/*`, `/health`, `/pay/*`, and `/api/stripe/webhook`) require an authenticated session.
 
 ### Authentication
+An MCP server ships for agents; see [agents.md](agents.md).
+
 | Endpoint | Methods | Description |
 |----------|---------|-------------|
 | `/api/auth/status` | GET | Auth state: `{setup_needed, authenticated, multi_user}`; signed out on a multi-user install, also `usernames` (names only) |
