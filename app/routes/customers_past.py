@@ -207,7 +207,9 @@ def _build_rows(db: Session, *, active: str) -> list[dict]:
         db.query(CreditMemo.customer_id, func.sum(CreditMemo.subtotal))
         .join(Customer, CreditMemo.customer_id == Customer.id)
         .filter(CreditMemo.status != CreditMemoStatus.VOID)
-        .filter(CreditMemo.is_write_off.isnot(True)),
+        .filter(CreditMemo.is_write_off.isnot(True))
+        # nor is an early-payment discount (#664)
+        .filter(CreditMemo.discount_payment_id.is_(None)),
         active,
     ).group_by(CreditMemo.customer_id)
     for cid, subtotal in cm.all():

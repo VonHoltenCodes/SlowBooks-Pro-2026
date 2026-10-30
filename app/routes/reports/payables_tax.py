@@ -79,6 +79,8 @@ def sales_tax_report(
         .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
         .filter(CreditMemo.status != CreditMemoStatus.VOID)
         .filter(CreditMemo.is_write_off.isnot(True))
+        # nor is an early-payment discount (#664)
+        .filter(CreditMemo.discount_payment_id.is_(None))
         .all()
     )
 
@@ -398,7 +400,7 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
         r = row(bill.vendor_id)
         # A bill with no due date (bills made from a PO before 2.18
         # never got one) ages from its date and terms, not as current.
-        due = bill.due_date or _due_date_from_terms(bill.date, bill.terms)
+        due = bill.due_date or _due_date_from_terms(db, bill.date, bill.terms)
         days = (as_of_date - due).days
         bal = home_amount(bill.balance_due, bill.exchange_rate)
         if days <= 0:

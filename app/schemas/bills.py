@@ -229,12 +229,23 @@ class BillResponse(BaseModel):
     # takes it to -3."). The void or edit posted; this says what it did.
     # Empty otherwise.
     warnings: list[str] = []
+    # From the terms (#664): the early-payment discount the terms offer and
+    # the last day to take it, as the document prints it; and a sentence
+    # when the terms aren't on the list and aren't Net N, so the due date
+    # was the old 30 days.
+    discount_percent: Optional[Decimal] = None
+    discount_date: Optional[dt_date] = None
+    discount_line: Optional[str] = None
+    terms_note: Optional[str] = None
     model_config = {"from_attributes": True}
 
 
 class BillPaymentAllocationCreate(StrictModel):
     bill_id: int
     amount: float
+    # An early-payment discount we took on this bill (#664), on top of
+    # `amount`: posted to the payment's discount_account_id.
+    discount: Decimal = Decimal("0")
 
 
 class BillPaymentCreate(StrictModel):
@@ -255,6 +266,9 @@ class BillPaymentCreate(StrictModel):
     # Pay a Sub whose COI has expired anyway (#553); recorded on the payment.
     coi_override: bool = False
     allocations: list[BillPaymentAllocationCreate] = []
+    # Where the allocations' discounts post (#664): required when one takes
+    # a discount, refused when none does.
+    discount_account_id: Optional[int] = None
 
 
 class BillPaymentMemoUpdate(StrictModel):
@@ -285,4 +299,21 @@ class BillPaymentResponse(BaseModel):
     # Which bills this payment paid, and how much of each — the bill's view
     # lists its payments from here so one can be voided on screen.
     allocations: list[BillPaymentAllocationResponse] = []
+    # The early-payment discounts taken with it (#664); empty when none.
+    discounts: list["BillPaymentDiscountResponse"] = []
     model_config = {"from_attributes": True}
+
+
+class BillPaymentDiscountResponse(BaseModel):
+    """A discount we took with this payment: the vendor credit applied to
+    the bill (#664)."""
+
+    bill_id: int
+    bill_number: Optional[str] = None
+    amount: Decimal
+    vendor_credit_id: int
+    credit_number: str
+    account_id: Optional[int] = None
+
+
+BillPaymentResponse.model_rebuild()

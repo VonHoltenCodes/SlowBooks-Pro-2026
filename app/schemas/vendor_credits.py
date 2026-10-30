@@ -98,6 +98,9 @@ class VendorCreditResponse(BaseModel):
     notes: Optional[str] = None
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    # Set on an early-payment discount (#664): the bill payment it was
+    # taken with.
+    discount_bill_payment_id: Optional[int] = None
     lines: list[VendorCreditLineResponse] = []
     created_at: Optional[datetime] = None
     # Set by create only (W-74, the shape of an invoice's #642 warnings): a

@@ -352,6 +352,7 @@ function newWindow(role, answers = {}) {
     ctx.App.hideWriteControls(modal);
   };
   vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync('app/static/js/payment_terms.js', 'utf8') + '\nthis.PaymentTerms = PaymentTerms;', ctx);
   for (const name of PAGES) {
     const src = fs.readFileSync(`app/static/js/${name}.js`, 'utf8');
     const obj = /^const ([A-Z]\w*) = \{/m.exec(src)[1];

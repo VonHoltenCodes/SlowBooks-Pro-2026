@@ -340,6 +340,8 @@ const SettingsPage = {
 
     async render() {
         const s = await API.get('/settings');
+        // Default Terms offers the terms list (#664)
+        await PaymentTerms.load(true);
         const logo = s.company_logo_path ? await API.get('/uploads/logo').catch(() => null) : null;
         // The clearing-account pickers (#583) list the chart; a failed load
         // leaves them empty rather than breaking the whole settings page.
@@ -355,6 +357,7 @@ const SettingsPage = {
             SettingsPage.loadEmailTemplates();
             SettingsPage.loadInvoiceMessages();
             if (Terms.isNonprofit()) SettingsPage.loadInvoiceMessages('giving_statement');
+            SettingsPage.loadPaymentTerms();
             SettingsPage.loadAiConfig();
             SettingsPage.loadClasses();
             SettingsPage.loadCostCodes();
@@ -475,8 +478,7 @@ const SettingsPage = {
                     <div class="form-grid">
                         <div class="form-group"><label>Default Terms</label>
                             <select name="default_terms">
-                                ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                    `<option ${s.default_terms===t?'selected':''}>${t}</option>`).join('')}
+                                ${PaymentTerms.optionsHtml(s.default_terms || 'Net 30')}
                             </select></div>
                         <div class="form-group"><label>Default Tax Rate (%)</label>
                             <input name="default_tax_rate" type="number" min="0" max="100" step="0.0001"
@@ -824,6 +826,19 @@ const SettingsPage = {
                         <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.seedTemplates()">Seed Default Templates</button>
                     </div>
                     <div id="email-template-list"></div>
+                </div>
+
+                <div class="settings-section" role="group" aria-labelledby="settings-h-payment-terms">
+                    <h3 id="settings-h-payment-terms">Payment Terms</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
+                        the date; a date-driven term is due on a day of the month. Either can offer an early-payment discount, which Receive Payments and Pay Bills
+                        suggest until its date passes. A term on an ${T('invoice')} or bill keeps its rule; make it inactive and add a new one to change it.
+                    </div>
+                    <div style="display:flex; gap:8px; margin-bottom:12px;" data-admin data-write>
+                        <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.editPaymentTerm()">+ Add Term</button>
+                    </div>
+                    <div id="payment-term-list"></div>
                 </div>
 
                 <div class="settings-section" role="group" aria-labelledby="settings-h-invoice-messages">
@@ -2676,6 +2691,122 @@ const SettingsPage = {
             await API.del(`/invoice-messages/${id}`);
             toast('Message deleted');
             SettingsPage.loadInvoiceMessages(kind);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // ==== Payment Terms (#664) ====
+    async loadPaymentTerms() {
+        const el = $('#payment-term-list');
+        if (!el) return;
+        let terms;
+        try { terms = await API.get('/payment-terms?include_inactive=true'); } catch (e) { return; }
+        if (!Array.isArray(terms)) return;
+        SettingsPage._paymentTerms = terms;
+        el.innerHTML = `<div class="table-container"><table>
+            <thead><tr><th scope="col">Name</th><th scope="col">Rule</th><th scope="col" class="amount">On documents</th><th scope="col">Actions</th></tr></thead>
+            <tbody>${terms.map(t => `<tr${t.is_active ? '' : ' style="color:var(--text-muted);"'}>
+                <td><strong>${escapeHtml(t.name)}</strong>${t.is_active ? '' : ' (inactive)'}</td>
+                <td style="font-size:11px;">${escapeHtml(t.description)}</td>
+                <td class="amount">${t.documents}</td>
+                <td class="actions">
+                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.editPaymentTerm(${t.id})">Edit</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.setPaymentTermActive(${t.id}, ${!t.is_active})">${t.is_active ? 'Make Inactive' : 'Make Active'}</button>
+                </td>
+            </tr>`).join('')}</tbody>
+        </table></div>`;
+    },
+
+    editPaymentTerm(id = null) {
+        const t = id ? (SettingsPage._paymentTerms || []).find(x => x.id === id) : null;
+        const v = t || { name: '', kind: 'standard', net_days: 30, due_day: '', cutoff_days: 0, discount_percent: '', discount_days: '', discount_day: '' };
+        const val = x => (x === null || x === undefined ? '' : escapeHtml(String(x)));
+        const locked = t && t.documents > 0
+            ? `<p class="hint" style="margin:0 0 8px;">${escapeHtml(t.name)} is on ${t.documents} ${T('invoices')} and bills, so its rule stays as they were made under it.</p>` : '';
+        openModal(t ? `Edit ${t.name}` : 'New Payment Term', `
+            <form id="payment-term-editor" onsubmit="SettingsPage.savePaymentTerm(event, ${id})">
+                ${locked}
+                <div class="form-grid">
+                    <div class="form-group full-width"><label for="pt-name">Name</label>
+                        <input id="pt-name" name="name" required maxlength="50" value="${val(v.name)}" placeholder="e.g. 2% 10 Net 30"></div>
+                    <div class="form-group"><label for="pt-kind">Kind</label>
+                        <select id="pt-kind" name="kind" onchange="SettingsPage.paymentTermKind(this.value)">
+                            <option value="standard" ${v.kind === 'standard' ? 'selected' : ''}>Standard: due in a number of days</option>
+                            <option value="date_driven" ${v.kind === 'date_driven' ? 'selected' : ''}>Date-driven: due on a day of the month</option>
+                        </select></div>
+                    <div class="form-group" data-kind="standard"><label for="pt-net-days">Due in (days)</label>
+                        <input id="pt-net-days" name="net_days" type="number" min="0" max="3650" step="1" value="${val(v.net_days)}"></div>
+                    <div class="form-group" data-kind="date_driven"><label for="pt-due-day">Due on day of the month</label>
+                        <input id="pt-due-day" name="due_day" type="number" min="1" max="31" step="1" value="${val(v.due_day)}"></div>
+                    <div class="form-group" data-kind="date_driven"><label for="pt-cutoff">Next month's when dated fewer than (days) before it</label>
+                        <input id="pt-cutoff" name="cutoff_days" type="number" min="0" max="31" step="1" value="${val(v.cutoff_days)}"></div>
+                    <div class="form-group"><label for="pt-discount">Early-payment discount (%)</label>
+                        <input id="pt-discount" name="discount_percent" type="number" min="0" max="99.99" step="0.01" value="${val(v.discount_percent)}" placeholder="none"></div>
+                    <div class="form-group" data-kind="standard"><label for="pt-discount-days">if paid within (days)</label>
+                        <input id="pt-discount-days" name="discount_days" type="number" min="0" max="3650" step="1" value="${val(v.discount_days)}"></div>
+                    <div class="form-group" data-kind="date_driven"><label for="pt-discount-day">if paid by day of the month</label>
+                        <input id="pt-discount-day" name="discount_day" type="number" min="1" max="31" step="1" value="${val(v.discount_day)}"></div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save Term</button>
+                </div>
+            </form>`);
+        SettingsPage.paymentTermKind(v.kind);
+    },
+
+    // Show the fields of the chosen kind only.
+    paymentTermKind(kind) {
+        document.querySelectorAll('#payment-term-editor [data-kind]').forEach(g => {
+            g.hidden = g.dataset.kind !== kind;
+        });
+    },
+
+    async savePaymentTerm(e, id) {
+        e.preventDefault();
+        const form = e.target;
+        const kind = form.kind.value;
+        const num = name => (form[name].value === '' ? null : Number(form[name].value));
+        const pct = form.discount_percent.value === '' ? null : form.discount_percent.value;
+        // the other kind's fields go as null, so the server checks one rule
+        const data = {
+            name: form.name.value.trim(),
+            kind,
+            net_days: kind === 'standard' ? num('net_days') : null,
+            due_day: kind === 'date_driven' ? num('due_day') : null,
+            cutoff_days: kind === 'date_driven' ? (num('cutoff_days') || 0) : 0,
+            discount_percent: pct,
+            discount_days: kind === 'standard' && pct !== null ? num('discount_days') : null,
+            discount_day: kind === 'date_driven' && pct !== null ? num('discount_day') : null,
+        };
+        try {
+            if (id) {
+                // a term in use sends only what changed; its rule stays
+                const t = (SettingsPage._paymentTerms || []).find(x => x.id === id) || {};
+                const changed = {};
+                for (const [k, v] of Object.entries(data)) {
+                    const was = t[k] === undefined ? null : t[k];
+                    const same = k === 'discount_percent'
+                        ? (was === null ? v === null : v !== null && Number(was) === Number(v))
+                        : was === v;
+                    if (!same) changed[k] = v;
+                }
+                await API.put(`/payment-terms/${id}`, changed);
+            } else {
+                await API.post('/payment-terms', data);
+            }
+            toast('Payment term saved');
+            closeModal();
+            await PaymentTerms.load(true);
+            SettingsPage.loadPaymentTerms();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async setPaymentTermActive(id, active) {
+        try {
+            await API.put(`/payment-terms/${id}`, { is_active: active });
+            toast(active ? 'Term made active' : 'Term made inactive; documents that carry it keep it');
+            await PaymentTerms.load(true);
+            SettingsPage.loadPaymentTerms();
         } catch (err) { toast(err.message, 'error'); }
     },
 

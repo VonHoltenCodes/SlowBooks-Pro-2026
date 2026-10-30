@@ -354,22 +354,42 @@ def _post_write_off(db: Session, inv: Invoice, when: dt_date, amount: Decimal, m
     Bad Debt Expense / CR A/R, applied to the invoice at once, so the A/R
     subledger, the statement and the aging all agree. The caller commits,
     so a batch posts all of its memos or none. Undone by voiding the memo."""
+    from app.services.accounting import get_bad_debt_account_id
+
+    memo = (
+        memo
+        or f"Write-off: {document_label(inv, terms_from_db(db))} #{inv.invoice_number}"
+    )
+    return post_applied_credit(
+        db, inv, when, amount, memo, get_bad_debt_account_id(db), "write-off of"
+    )
+
+
+def post_applied_credit(
+    db: Session,
+    inv: Invoice,
+    when: dt_date,
+    amount: Decimal,
+    memo: str,
+    account_id: int,
+    what: str,
+    discount_payment_id: int | None = None,
+):
+    """A credit memo for `amount` applied to `inv` at once, flushed and not
+    committed: DR `account_id` / CR A/R. A write-off (Bad Debt Expense) and
+    an early-payment discount (#664: the account the payment named, and
+    the payment it was taken with) are both this. `what` names it in the
+    entry's description ("write-off of")."""
     from app.models.credit_memos import (
         CreditApplication,
         CreditMemo,
         CreditMemoLine,
         CreditMemoStatus,
     )
-    from app.services.accounting import get_bad_debt_account_id
     from app.services.numbering import next_credit_memo_number
 
     balance = Decimal(str(inv.balance_due or 0))
     ar_id = get_ar_account_id(db)
-    bad_debt_id = get_bad_debt_account_id(db)
-    memo = (
-        memo
-        or f"Write-off: {document_label(inv, terms_from_db(db))} #{inv.invoice_number}"
-    )
     cm = None
     for _ in range(10):
         cm = CreditMemo(
@@ -387,7 +407,8 @@ def _post_write_off(db: Session, inv: Invoice, when: dt_date, amount: Decimal, m
             class_id=inv.class_id,
             job_id=inv.job_id,
             status=CreditMemoStatus.APPLIED,
-            is_write_off=True,
+            is_write_off=discount_payment_id is None,
+            discount_payment_id=discount_payment_id,
         )
         try:
             # a savepoint: a taken memo number rolls back this memo only,
@@ -417,13 +438,13 @@ def _post_write_off(db: Session, inv: Invoice, when: dt_date, amount: Decimal, m
     txn = create_journal_entry(
         db,
         when,
-        f"Credit Memo {cm.memo_number} - write-off of "
+        f"Credit Memo {cm.memo_number} - {what} "
         + document_reference(
             document_label(inv, terms_from_db(db)), inv.invoice_number
         ),
         [
             {
-                "account_id": bad_debt_id,
+                "account_id": account_id,
                 "debit": amount,
                 "credit": Decimal("0"),
                 "description": memo,
@@ -661,7 +682,7 @@ def duplicate_invoice(
         customer_id=original.customer_id,
         status=opening_status(total),
         date=today,
-        due_date=_due_date_from_terms(today, original.terms),
+        due_date=_due_date_from_terms(db, today, original.terms),
         terms=original.terms,
         po_number=original.po_number,
         subtotal=subtotal,

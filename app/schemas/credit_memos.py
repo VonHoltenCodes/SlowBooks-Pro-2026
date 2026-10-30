@@ -97,6 +97,8 @@ class CreditMemoResponse(BaseModel):
     class_id: Optional[int] = None
     job_id: Optional[int] = None
     is_write_off: bool = False
+    # Set on an early-payment discount (#664): the payment it was taken with.
+    discount_payment_id: Optional[int] = None
     lines: list[CreditMemoLineResponse] = []
     created_at: Optional[datetime] = None
     model_config = {"from_attributes": True}

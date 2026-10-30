@@ -58,6 +58,10 @@ class CreditMemo(Base):
     is_write_off = Column(Boolean, nullable=False, default=False)
     # Job-costing dimension (QB "Customer:Job"); NULL = no job
     job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
+    # An early-payment discount the customer took (#664): the payment it was
+    # taken with. Posts to the discount account the payment named; voiding
+    # the payment voids it.
+    discount_payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(

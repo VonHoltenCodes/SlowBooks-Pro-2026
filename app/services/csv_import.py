@@ -29,10 +29,22 @@ from app.services.csv_export import strip_formula_guard
 
 logger = logging.getLogger(__name__)
 
-# The terms the customer and vendor forms offer (customers.js, vendors.js,
-# settings.js). A value outside this list has no option on the form, so the
-# next save of that customer silently changed it to the first option.
-FORM_TERMS = ("Net 15", "Net 30", "Net 45", "Net 60", "Due on Receipt")
+
+def form_terms(db: Session) -> tuple[str, ...]:
+    """The terms the customer and vendor forms offer: the active entries
+    of the terms list (#664). A value outside it has no option on the form,
+    so the next save of that customer silently changed it to the first
+    option."""
+    from app.models.payment_terms import PaymentTerm
+    from app.services.payment_terms import ensure_seeded
+
+    ensure_seeded(db)
+    return tuple(
+        name
+        for (name,) in db.query(PaymentTerm.name)
+        .filter(PaymentTerm.is_active.is_(True))
+        .order_by(PaymentTerm.name)
+    )
 
 
 class UnguardedDictReader(csv.DictReader):
@@ -51,7 +63,7 @@ def _cell(row: dict, key: str) -> str | None:
     return value or None
 
 
-def _terms(row: dict, default: str) -> tuple[str | None, str | None]:
+def _terms(row: dict, default: str, choices) -> tuple[str | None, str | None]:
     """(terms in the form's spelling, None) — `default` when the cell is
     blank — or (None, the sentence to show) when the form does not offer
     them. Row messages are built here, never taken from an exception's
@@ -59,12 +71,13 @@ def _terms(row: dict, default: str) -> tuple[str | None, str | None]:
     raw = _cell(row, "Terms")
     if raw is None:
         return default, None
-    for option in FORM_TERMS:
-        if raw.lower() == option.lower():
+    for option in choices:
+        if " ".join(raw.split()).lower() == " ".join(option.split()).lower():
             return option, None
     return None, (
-        f'Terms "{raw}" isn\'t one the form offers ({", ".join(FORM_TERMS)}). '
-        "Use one of those, or leave Terms blank for the default."
+        f'Terms "{raw}" isn\'t on the terms list ({", ".join(choices)}). '
+        "Use one of those, add it under Settings > Payment Terms, or leave "
+        "Terms blank for the default."
     )
 
 
@@ -96,6 +109,7 @@ def _validation_message(exc: ValidationError, values: dict) -> str:
 
 def _contact_import(db: Session, csv_text: str, model, schema, fields, default_terms):
     reader = UnguardedDictReader(io.StringIO(csv_text))
+    choices = form_terms(db)
     created = 0
     skipped = 0
     errors = []
@@ -117,7 +131,7 @@ def _contact_import(db: Session, csv_text: str, model, schema, fields, default_t
                 value = _cell(row, column)
                 if value is not None:
                     values[attr] = value
-            values["terms"], problem = _terms(row, default_terms)
+            values["terms"], problem = _terms(row, default_terms, choices)
             if problem:
                 errors.append(f"Row {i}: {problem}")
                 continue
@@ -143,7 +157,7 @@ def import_customers(db: Session, csv_text: str) -> dict:
     # A row without terms gets the company's default (Settings -> Default
     # Terms), not a blank that no screen can show.
     default_terms = get_all_settings(db).get("default_terms") or "Net 30"
-    if default_terms not in FORM_TERMS:
+    if default_terms not in form_terms(db):
         default_terms = "Net 30"
     fields = (
         ("Company", "company"),

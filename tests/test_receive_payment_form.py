@@ -49,6 +49,23 @@ def probe():
     return {r["name"]: r for r in map(json.loads, out.stdout.splitlines())}
 
 
+def test_the_early_payment_discount_is_suggested_and_sent(probe):
+    """#664: the invoice's terms offer 2% until Sep 30; paid Sep 26, $6.25
+    comes off its $312.50 and Apply fills the rest. The other's discount
+    date has passed. The save sends each discount and the account."""
+    got = probe["discount"]
+    assert got["discounts"] == ["6.25", ""]
+    assert got["apply"] == ["306.25", "500.00"]
+    assert got["accountShown"] is True
+    assert "Fully allocated ($806.25)" in got["status"]
+    body = probe["discount-save"]["body"]
+    assert body["allocations"] == [
+        {"invoice_id": 11, "amount": 306.25, "discount": 6.25},
+        {"invoice_id": 12, "amount": 500},
+    ]
+    assert body["discount_account_id"] == 41
+
+
 def test_typing_the_amount_applies_it_oldest_first(probe):
     assert probe["partial"]["apply"] == ["312.30", "87.70"]
     assert probe["partial"]["keepShown"] is False

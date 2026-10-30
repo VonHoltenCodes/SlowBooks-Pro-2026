@@ -209,6 +209,8 @@ def _sales_by_item(
         .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
         .filter(CreditMemo.status != CreditMemoStatus.VOID)
         .filter(CreditMemo.is_write_off.isnot(True))
+        # nor is an early-payment discount (#664)
+        .filter(CreditMemo.discount_payment_id.is_(None))
     )
     if customer_id is not None:
         memos = memos.filter(CreditMemo.customer_id == customer_id)
@@ -442,6 +444,8 @@ def _sales_lines(
         .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
         .filter(CreditMemo.status != CreditMemoStatus.VOID)
         .filter(CreditMemo.is_write_off.isnot(True))
+        # nor is an early-payment discount (#664)
+        .filter(CreditMemo.discount_payment_id.is_(None))
     )
     if customer_id is not None:
         memos = memos.filter(CreditMemo.customer_id == customer_id)

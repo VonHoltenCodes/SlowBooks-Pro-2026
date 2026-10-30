@@ -43,7 +43,7 @@ const VendorCreditsPage = {
                 <td class="amount">${formatCurrency(l.amount)}</td>
             </tr>`).join('');
         openModal(`Vendor Credit ${escapeHtml(c.credit_number)}`, `
-            <p>${escapeHtml(c.vendor_name || '')} &middot; ${formatDate(c.date)} &middot; ${statusBadge(c.status)}</p>
+            <p>${escapeHtml(c.vendor_name || '')} &middot; ${formatDate(c.date)} &middot; ${statusBadge(c.status)}${c.discount_bill_payment_id ? ' (early-payment discount; void its bill payment to undo it)' : ''}</p>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${lines}</tbody>

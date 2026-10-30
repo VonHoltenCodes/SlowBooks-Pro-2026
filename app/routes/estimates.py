@@ -709,7 +709,7 @@ def convert_to_invoice(
     terms = (customer.terms if customer else None) or settings.get(
         "default_terms", "Net 30"
     )
-    due_date = _due_date_from_terms(today, terms)
+    due_date = _due_date_from_terms(db, today, terms)
 
     # The invoice is billed as a new one is, as of now (2.31.1 gate, W-80):
     # the Bill To whole is the payer's, the street with the name and

@@ -414,8 +414,8 @@ const CustomersPage = {
             const settings = await API.get('/settings').catch(() => ({}));
             if (settings.default_terms) c.terms = settings.default_terms;
         }
-        const termChoices = ['Net 15', 'Net 30', 'Net 45', 'Net 60', 'Due on Receipt'];
-        if (c.terms && !termChoices.includes(c.terms)) termChoices.unshift(c.terms);
+        // the terms list (#664); the customer's own terms stay offered
+        await PaymentTerms.load();
 
         // Sub-customers (#638): the parent picker lists the active top-level
         // customers (one level deep: a sub-customer is never a parent), the
@@ -461,8 +461,7 @@ const CustomersPage = {
                         <input name="website" value="${escapeHtml(c.website || '')}"></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms">
-                            ${termChoices.map(t =>
-                                `<option ${c.terms===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
+                            ${PaymentTerms.optionsHtml(c.terms)}
                         </select></div>
                 </div>
                 <h3 id="cust-bill-heading" style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Billing Address</h3>

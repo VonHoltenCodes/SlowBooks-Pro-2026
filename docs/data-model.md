@@ -82,6 +82,21 @@ and job-cost tables are described in their own sections below the table.
 | `restriction_releases` | Releases from restriction between net-asset classes |
 | `jobs`, `job_budgets`, `job_costs`, `job_cost_lines`, `job_cost_to_complete`, `job_deposits`, `cost_codes`, `cost_types`, `equipment`, `trade_packages`, `trade_package_sections`, `sov_lines`, `change_orders`, `change_order_lines`, `pay_applications`, `pay_application_lines`, `lien_waivers` | Jobs, job costing and construction mode: described section by section below |
 
+## payment_terms (#664)
+
+The terms list. `name` (String(50), unique; what a document's own `terms`
+column holds, so free text from before the list still reads), `kind`
+(`standard` · `date_driven`), `net_days` (standard: due this many days after
+the date), `due_day` and `cutoff_days` (date-driven: due on that day of the
+month, the next month's when the document is dated fewer than `cutoff_days`
+before it), `discount_percent` (Numeric(5,2)) with `discount_days`
+(standard) or `discount_day` (date-driven), and `is_active`. A discount taken
+in Receive Payments is a credit memo with `credit_memos.discount_payment_id`
+(FK payments) and one taken in Pay Bills a vendor credit with
+`vendor_credits.discount_bill_payment_id` (FK bill_payments). Migration
+`e5c1a7d3f9b2_payment_terms_list` (seeds the five form terms and any other
+Net N in use; downgrade drops the table and the two columns).
+
 ## jobs (Customer:Job / Projects)
 
 | column | notes |

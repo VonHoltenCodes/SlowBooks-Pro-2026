@@ -31,6 +31,7 @@ const ctx = {
   },
 };
 vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('app/static/js/payment_terms.js', 'utf8') + '\nthis.PaymentTerms = PaymentTerms;', ctx);
 vm.runInContext(fs.readFileSync('app/static/js/vendors.js', 'utf8') + '\nthis.VendorsPage = VendorsPage;', ctx);
 const V = ctx.VendorsPage;
 

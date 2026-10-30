@@ -531,7 +531,7 @@ def release_retainage(
         po_id=po.id,
         date=when,
         terms=terms,
-        due_date=_due_date_from_terms(when, terms),
+        due_date=_due_date_from_terms(db, when, terms),
         subtotal=amount,
         tax_rate=Decimal("0"),
         tax_amount=Decimal("0"),
@@ -801,7 +801,7 @@ def convert_to_bill(
         # The vendor's terms, and the due date they give — a converted bill
         # had "Net 30" and no due date, so it never aged (macbase1 F10).
         terms=terms,
-        due_date=_due_date_from_terms(bill_date, terms),
+        due_date=_due_date_from_terms(db, bill_date, terms),
         subtotal=subtotal,
         tax_rate=po.tax_rate,
         tax_amount=tax_amount,

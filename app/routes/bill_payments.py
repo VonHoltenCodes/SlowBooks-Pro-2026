@@ -13,10 +13,12 @@ from app.models.bills import Bill, BillStatus, BillPayment, BillPaymentAllocatio
 from app.models.contacts import Vendor
 from app.schemas.bills import (
     BillPaymentCreate,
+    BillPaymentDiscountResponse,
     BillPaymentMemoUpdate,
     BillPaymentResponse,
 )
 from app.services.accounting import (
+    _q,
     all_lines,
     create_journal_entry,
     get_ap_account_id,
@@ -77,7 +79,35 @@ def get_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
     resp = BillPaymentResponse.model_validate(p)
     if p.vendor:
         resp.vendor_name = p.vendor.name
+    resp.discounts = _discounts(db, p)
     return resp
+
+
+def _discounts(db: Session, payment: BillPayment) -> list[BillPaymentDiscountResponse]:
+    """The early-payment discounts taken with the payment (#664): the
+    vendor credits it posted, applied to their bills."""
+    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
+
+    rows = []
+    for vc in (
+        db.query(VendorCredit)
+        .filter(
+            VendorCredit.discount_bill_payment_id == payment.id,
+            VendorCredit.status != VendorCreditStatus.VOID,
+        )
+        .order_by(VendorCredit.id)
+    ):
+        rows.append(
+            BillPaymentDiscountResponse(
+                bill_id=vc.original_bill_id,
+                bill_number=vc.original_bill.bill_number if vc.original_bill else None,
+                amount=vc.total,
+                vendor_credit_id=vc.id,
+                credit_number=vc.credit_number,
+                account_id=vc.lines[0].account_id if vc.lines else None,
+            )
+        )
+    return rows
 
 
 @router.post("", response_model=BillPaymentResponse, status_code=201)
@@ -125,6 +155,7 @@ def create_bill_payment(
     from app.services.currency import (
         document_currency,
         fx_gain_loss_account_id,
+        home_currency,
         resolve_rate,
         to_home,
     )
@@ -134,6 +165,13 @@ def create_bill_payment(
     alloc_total = sum(a.amount for a in data.allocations)
     if alloc_total > data.amount:
         raise HTTPException(status_code=400, detail="Allocations exceed payment amount")
+    # The early-payment discounts we took (#664) and where they post,
+    # checked before anything is written.
+    from app.services import early_pay_discounts
+
+    discount_acct = early_pay_discounts.discount_account(
+        db, data.discount_account_id, [a.discount for a in data.allocations]
+    )
 
     # The accounts the journal needs, resolved before anything is written:
     # a missing one is a 409 naming it, with no payment, allocations or
@@ -189,6 +227,17 @@ def create_bill_payment(
             raise HTTPException(
                 status_code=400, detail="Allocation exceeds bill balance"
             )
+        discount = _q(alloc_data.discount)
+        paying = _q(Decimal(str(alloc_data.amount)))
+        if discount > 0 and paying + discount > Decimal(str(bill.balance_due)):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"${paying:,.2f} paid and a ${discount:,.2f} discount is "
+                    f"more than the ${Decimal(str(bill.balance_due)):,.2f} still "
+                    f"due on bill {bill.bill_number}."
+                ),
+            )
 
         bill_currency = document_currency(bill, db)
         if bill_currency != pay_currency:
@@ -224,6 +273,13 @@ def create_bill_payment(
             bill.status = BillStatus.PAID
         else:
             bill.status = BillStatus.PARTIAL
+        if discount > 0:
+            early_pay_discounts.refuse_foreign(
+                bill, bill_currency, home_currency(db), bill.bill_number, "bill"
+            )
+            early_pay_discounts.post_vendor_discount(
+                db, payment, bill, discount, discount_acct
+            )
 
     # A payment of one bill carries that bill's memo, for the check's memo
     # line (#602); a memo typed on the payment wins, and a payment of
@@ -291,6 +347,7 @@ def create_bill_payment(
     db.refresh(payment)
     resp = BillPaymentResponse.model_validate(payment)
     resp.vendor_name = vendor.name
+    resp.discounts = _discounts(db, payment)
     request_keys.finish(db, replay, 201, resp.model_dump(mode="json"), response)
     db.commit()
     return resp
@@ -381,6 +438,11 @@ def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
 
             # A statement line matched to this check goes back to review.
             release_statement_links(db, payment.transaction)
+
+    # The discounts taken with it go first (#664), then its own amounts.
+    from app.services.early_pay_discounts import void_vendor_discounts
+
+    void_vendor_discounts(db, payment)
 
     # Reverse allocations. Lock each bill row so a concurrent create or
     # second void can't race the read-modify-write of amount_paid /

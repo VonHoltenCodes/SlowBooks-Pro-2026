@@ -9,6 +9,10 @@ from app.schemas.common import StrictModel
 class PaymentAllocationCreate(StrictModel):
     invoice_id: int
     amount: Decimal
+    # An early-payment discount the customer took on this invoice (#664),
+    # on top of `amount`: posted to the payment's discount_account_id.
+    # Taken when the payment is received, not when a remainder is applied.
+    discount: Decimal = Decimal("0")
 
 
 class PaymentAllocationResponse(BaseModel):
@@ -33,6 +37,9 @@ class PaymentCreate(StrictModel):
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     allocations: list[PaymentAllocationCreate] = []
+    # Where the allocations' discounts post (#664): required when one takes
+    # a discount, refused when none does.
+    discount_account_id: Optional[int] = None
 
 
 class PaymentApply(StrictModel):
@@ -40,6 +47,18 @@ class PaymentApply(StrictModel):
     the same customer."""
 
     allocations: list[PaymentAllocationCreate] = Field(min_length=1)
+
+
+class PaymentDiscountResponse(BaseModel):
+    """A discount the customer took with this payment: the credit memo
+    applied to the invoice (#664)."""
+
+    invoice_id: int
+    invoice_number: Optional[str] = None
+    amount: Decimal
+    credit_memo_id: int
+    memo_number: str
+    account_id: Optional[int] = None
 
 
 class PaymentResponse(BaseModel):
@@ -68,5 +87,7 @@ class PaymentResponse(BaseModel):
     # On the single-payment read: an online payment whose processing fee is
     # booked, so the Void confirm can ask whether the provider refunded it.
     has_provider_fee: bool = False
+    # The early-payment discounts taken with it (#664); empty when none.
+    discounts: list[PaymentDiscountResponse] = []
 
     model_config = {"from_attributes": True}

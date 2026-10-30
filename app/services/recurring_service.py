@@ -588,14 +588,11 @@ def _post_installment(
     ar_id, default_income_id, tax_account_id = accounts
     tax_rate = rec.tax_rate or Decimal("0")
 
-    # Parse terms for due date
-    due_date = on + timedelta(days=30)
-    if rec.terms:
-        try:
-            days = int(rec.terms.lower().replace("net ", ""))
-            due_date = on + timedelta(days=days)
-        except ValueError:
-            pass
+    # The due date by the one terms parser (#664): its own copy read "Due
+    # on Receipt" as 30 days.
+    from app.services.payment_terms import due_date_for
+
+    due_date = due_date_for(db, on, rec.terms)
 
     # MAX+1 numbering races against concurrent manual creates (same as
     # the invoices route). Retry under a SAVEPOINT so a collision rolls

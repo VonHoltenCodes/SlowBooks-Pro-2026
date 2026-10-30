@@ -379,14 +379,35 @@ def void_credit_memo(cm_id: int, db: Session = Depends(get_db)):
     """Reverse a credit memo: put every application back on its invoice,
     post the mirror-image entry, return any inventory the memo took back,
     and mark it void. This is also how a mistaken write-off is undone."""
-    from app.services.accounting import reversing_lines
-    from app.services.inventory_hooks import reverse_return_for_credit_memo
 
     cm = db.query(CreditMemo).filter(CreditMemo.id == cm_id).with_for_update().first()
     if not cm:
         raise HTTPException(status_code=404, detail="Credit memo not found")
     if cm.status == CreditMemoStatus.VOID:
         raise HTTPException(status_code=400, detail="Credit memo is already void")
+    # A discount taken in Receive Payments goes with its payment (#664).
+    if cm.discount_payment_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Credit memo {cm.memo_number} is the early-payment discount "
+                "taken with a payment; void that payment to undo it."
+            ),
+        )
+    void_credit_memo_unchecked(db, cm)
+    db.commit()
+    db.refresh(cm)
+    resp = CreditMemoResponse.model_validate(cm)
+    resp.customer_name = cm.customer.name if cm.customer else None
+    return resp
+
+
+def void_credit_memo_unchecked(db: Session, cm: CreditMemo) -> None:
+    """The void itself, flushed and not committed; a payment voiding the
+    discount it took calls this."""
+    from app.services.accounting import reversing_lines
+    from app.services.inventory_hooks import reverse_return_for_credit_memo
+
     check_closing_date(db, cm.date)
 
     for app_row in list(cm.applications):
@@ -427,8 +448,4 @@ def void_credit_memo(cm_id: int, db: Session = Depends(get_db)):
     cm.amount_applied = Decimal("0")
     cm.balance_remaining = Decimal("0")
     cm.status = CreditMemoStatus.VOID
-    db.commit()
-    db.refresh(cm)
-    resp = CreditMemoResponse.model_validate(cm)
-    resp.customer_name = cm.customer.name if cm.customer else None
-    return resp
+    db.flush()

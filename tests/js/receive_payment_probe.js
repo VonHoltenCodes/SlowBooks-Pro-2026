@@ -46,6 +46,7 @@ const ctx = {
   location: { hash: '#/payments' },
 };
 vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('app/static/js/payment_terms.js', 'utf8') + '\nthis.PaymentTerms = PaymentTerms;', ctx);
 vm.runInContext(fs.readFileSync('app/static/js/payments.js', 'utf8') + '\nthis.PaymentsPage = PaymentsPage;', ctx);
 const P = ctx.PaymentsPage;
 P._invoices = [{ id: 11, invoice_number: '1001' }, { id: 12, invoice_number: '1002' }];
@@ -112,4 +113,29 @@ out('edited');
   creditAllocs[0].value = '312.30';
   P._creditStatus(60000);
   console.log(JSON.stringify({ name: 'credit-ok', status: byId['#credit-status'].textContent }));
+
+  // An early-payment discount (#664): suggested from the invoice's terms
+  // while the payment date is on or before its discount date, taken off
+  // what Apply fills, and sent with the account picked beside it.
+  const discs = [el({ dataset: { invoice: '11' } }), el({ dataset: { invoice: '12' } })];
+  byId['#payment-invoices .alloc-discount[data-invoice="11"]'] = discs[0];
+  byId['#payment-invoices .alloc-discount[data-invoice="12"]'] = discs[1];
+  byId['#discount-account-row'] = el({ hidden: true });
+  byId['#discount-account'] = el({ value: '41' });
+  byId['#payment-form [name="date"]'] = el({ value: '2026-09-26' });
+  host.querySelectorAll = (sel) => (sel === '.alloc-amount' ? allocs : sel === '.alloc-discount' ? discs : []);
+  ctx.$$ = (sel) => (sel === '#payment-invoices .alloc-amount' ? allocs
+    : sel === '#payment-invoices .alloc-discount' ? discs : []);
+  P._invoices = [
+    { id: 11, invoice_number: '1001', balance_due: '312.50', discount_percent: '2.00', discount_date: '2026-09-30' },
+    // its discount date has passed
+    { id: 12, invoice_number: '1002', balance_due: '500.00', discount_percent: '2.00', discount_date: '2026-09-20' },
+  ];
+  allocs[0].dataset.max = '312.50';
+  amount.value = '806.25';
+  P._suggestDiscounts();
+  out('discount', { discounts: discs.map((d) => d.value), accountShown: !byId['#discount-account-row'].hidden });
+  posts.length = 0;
+  await P.save({ preventDefault() {}, target: { ...form, amount: { value: '806.25' } } });
+  out('discount-save', { body: posts[0] && posts[0][1] });
 })();

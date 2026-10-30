@@ -50,7 +50,7 @@ const CreditMemosPage = {
                 <strong>${T('Customer')}:</strong> ${escapeHtml(cm.customer_name || '')}<br>
                 <strong>Date:</strong> ${formatDate(cm.date)}<br>
                 ${forInvoice}
-                <strong>Status:</strong> ${statusBadge(cm.status)}${cm.is_write_off ? ' (write-off)' : ''}
+                <strong>Status:</strong> ${statusBadge(cm.status)}${cm.is_write_off ? ' (write-off)' : ''}${cm.discount_payment_id ? ' (early-payment discount; void its payment to undo it)' : ''}
             </div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>

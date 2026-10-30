@@ -34,6 +34,7 @@ from app.services.accounting import (
 )
 from app.services.audit import audited_bulk_delete
 from app.services.compliance import vendor_compliance
+from app.services.payment_terms import DocumentTerms
 from app.services.closing_date import check_closing_date
 from app.services.job_costing import line_cost_type
 from app.services.request_utils import content_disposition
@@ -77,8 +78,10 @@ def list_bills(
         )
     bills = q.order_by(Bill.date.desc(), Bill.id.desc()).offset(skip).limit(limit).all()
     results = []
+    terms_reader = DocumentTerms(db, "bill")
     for b in bills:
         resp = BillResponse.model_validate(b)
+        terms_reader.fill(resp, b)
         if b.vendor:
             resp.vendor_name = b.vendor.name
             resp.vendor_compliance = VendorCompliance(**vendor_compliance(b.vendor))
@@ -92,6 +95,7 @@ def get_bill(bill_id: int, db: Session = Depends(get_db)):
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     if bill.vendor:
         resp.vendor_name = bill.vendor.name
         resp.vendor_compliance = VendorCompliance(**vendor_compliance(bill.vendor))
@@ -105,7 +109,14 @@ def _bill_html(db: Session, bill_id: int) -> tuple[Bill, str]:
     bill = db.query(Bill).filter(Bill.id == bill_id).first()
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
-    return bill, _render("bill_pdf.html", get_all_settings(db), bill=bill)
+    from app.services.payment_terms import document_discount_line
+
+    return bill, _render(
+        "bill_pdf.html",
+        get_all_settings(db),
+        bill=bill,
+        discount_line=document_discount_line(bill),
+    )
 
 
 @router.get("/{bill_id}/pdf")
@@ -475,7 +486,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     terms = data.terms
     if "terms" not in data.model_fields_set or not (terms or "").strip():
         terms = vendor.terms or "Net 30"
-    due_date = data.due_date or _due_date_from_terms(data.date, terms)
+    due_date = data.due_date or _due_date_from_terms(db, data.date, terms)
 
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
     if total <= 0:
@@ -542,6 +553,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(bill)
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
     return resp
@@ -817,9 +829,9 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
     if (
         "terms" in update_data or "date" in update_data
     ) and "due_date" not in update_data:
-        bill.due_date = _due_date_from_terms(bill.date, bill.terms or "Net 30")
+        bill.due_date = _due_date_from_terms(db, bill.date, bill.terms or "Net 30")
     if "due_date" in update_data and bill.due_date is None:
-        bill.due_date = _due_date_from_terms(bill.date, bill.terms or "Net 30")
+        bill.due_date = _due_date_from_terms(db, bill.date, bill.terms or "Net 30")
 
     if needs_repost:
         from app.routes.invoices.helpers import _reverse_and_delete_journal
@@ -896,6 +908,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(bill)
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
     resp.warnings = stock_warnings
@@ -1010,6 +1023,7 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(bill)
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     if bill.vendor:
         resp.vendor_name = bill.vendor.name
         resp.vendor_compliance = VendorCompliance(**vendor_compliance(bill.vendor))

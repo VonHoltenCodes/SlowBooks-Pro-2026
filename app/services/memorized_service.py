@@ -342,7 +342,7 @@ def _enter_bill(db: Session, mem: MemorizedTransaction, on: date) -> Bill:
         bill_number=_bill_number_for(db, vendor, mem.bill_number, on),
         vendor_id=vendor.id,
         date=on,
-        due_date=_due_date_from_terms(on, terms),
+        due_date=_due_date_from_terms(db, on, terms),
         terms=terms,
         subtotal=subtotal,
         tax_rate=tax_rate,

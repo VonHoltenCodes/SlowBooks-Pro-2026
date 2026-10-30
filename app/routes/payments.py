@@ -15,7 +15,12 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Customer
 from app.services.sub_customers import pays_for, refuse_unless_pays_for
 from app.models.transactions import Transaction
-from app.schemas.payments import PaymentApply, PaymentCreate, PaymentResponse
+from app.schemas.payments import (
+    PaymentApply,
+    PaymentCreate,
+    PaymentDiscountResponse,
+    PaymentResponse,
+)
 from app.services.accounting import (
     _q,
     all_lines,
@@ -56,7 +61,48 @@ def _response(payment: Payment, customer_name: str = None) -> PaymentResponse:
     if customer_name is None and payment.customer:
         customer_name = payment.customer.name
     resp.customer_name = customer_name
+    resp.discounts = _discounts(payment)
     return resp
+
+
+def _discounts(payment: Payment) -> list[PaymentDiscountResponse]:
+    """The early-payment discounts taken with the payment (#664): the
+    credit memos it posted, applied to their invoices."""
+    from sqlalchemy.orm import object_session
+
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+
+    db = object_session(payment)
+    if db is None:
+        return []
+    rows = []
+    for cm in (
+        db.query(CreditMemo)
+        .filter(
+            CreditMemo.discount_payment_id == payment.id,
+            CreditMemo.status != CreditMemoStatus.VOID,
+        )
+        .order_by(CreditMemo.id)
+    ):
+        inv = cm.original_invoice
+        rows.append(
+            PaymentDiscountResponse(
+                invoice_id=cm.original_invoice_id,
+                invoice_number=inv.invoice_number if inv else None,
+                amount=cm.total,
+                credit_memo_id=cm.id,
+                memo_number=cm.memo_number,
+                account_id=(
+                    next(
+                        (ln.account_id for ln in cm.transaction.lines if ln.debit > 0),
+                        None,
+                    )
+                    if cm.transaction
+                    else None
+                ),
+            )
+        )
+    return rows
 
 
 @router.get("", response_model=list[PaymentResponse])
@@ -128,6 +174,7 @@ def create_payment(
     from app.services.currency import (
         document_currency,
         fx_gain_loss_account_id,
+        home_currency,
         resolve_rate,
         to_home,
     )
@@ -144,6 +191,13 @@ def create_payment(
             status_code=400,
             detail="Allocation amounts must be positive",
         )
+    # The early-payment discounts the customer took (#664) and where they
+    # post, checked before anything is written.
+    from app.services import early_pay_discounts
+
+    discount_acct = early_pay_discounts.discount_account(
+        db, data.discount_account_id, [a.discount for a in data.allocations]
+    )
 
     # Validate allocations don't exceed payment
     alloc_total = sum(a.amount for a in data.allocations)
@@ -201,6 +255,16 @@ def create_payment(
                 status_code=400,
                 detail=f"Allocation {alloc_data.amount} exceeds invoice {invoice.invoice_number} balance {invoice.balance_due}",
             )
+        discount = _q(alloc_data.discount)
+        if discount > 0 and alloc_data.amount + discount > invoice.balance_due:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"${_q(alloc_data.amount):,.2f} paid and a ${discount:,.2f} "
+                    f"discount is more than the ${invoice.balance_due:,.2f} still "
+                    f"due on invoice {invoice.invoice_number}."
+                ),
+            )
 
         inv_currency = document_currency(invoice, db)
         if inv_currency != pay_currency:
@@ -234,6 +298,17 @@ def create_payment(
         invoice.status = (
             InvoiceStatus.PAID if invoice.balance_due == 0 else InvoiceStatus.PARTIAL
         )
+        if discount > 0:
+            early_pay_discounts.refuse_foreign(
+                invoice,
+                inv_currency,
+                home_currency(db),
+                invoice.invoice_number,
+                "invoice",
+            )
+            early_pay_discounts.post_customer_discount(
+                db, payment, invoice, discount, discount_acct
+            )
 
     # ================================================================
     # Journal Entry
@@ -340,6 +415,14 @@ def apply_payment(payment_id: int, data: PaymentApply, db: Session = Depends(get
     if any(_q(a.amount) <= 0 for a in data.allocations):
         raise HTTPException(
             status_code=400, detail="Allocation amounts must be positive"
+        )
+    if any(a.discount for a in data.allocations):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "An early-payment discount is taken when the payment is "
+                "received, not when its remainder is applied."
+            ),
         )
     applied = sum((Decimal(str(a.amount)) for a in payment.allocations), Decimal("0"))
     unapplied = _q(Decimal(str(payment.amount)) - applied)
@@ -637,6 +720,11 @@ def void_payment_unchecked(
             source_id=applied_fx.id,
             reference=applied_fx.reference or "",
         )
+
+    # The discounts taken with it go first (#664), then its own amounts.
+    from app.services.early_pay_discounts import void_customer_discounts
+
+    void_customer_discounts(db, payment)
 
     # Reverse invoice allocations. Lock each invoice row so a concurrent
     # create_payment / second void can't race the read-modify-write of

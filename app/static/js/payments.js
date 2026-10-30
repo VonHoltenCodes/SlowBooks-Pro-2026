@@ -65,6 +65,14 @@ const PaymentsPage = {
             }
             allocHtml += `</tbody></table></div>`;
         }
+        // the early-payment discounts the customer took with it (#664)
+        if ((p.discounts || []).length) {
+            allocHtml += `<h4 style="margin:12px 0 8px;">Discounts taken</h4>
+                <div class="table-container"><table><thead><tr>
+                <th scope="col">${T('Invoice')}</th><th scope="col">Credit memo</th><th scope="col" class="amount">Discount</th></tr></thead><tbody>
+                ${p.discounts.map(d => `<tr><td>#${escapeHtml(d.invoice_number || String(d.invoice_id))}</td><td>${escapeHtml(d.memo_number)}</td><td class="amount">${formatCurrency(d.amount)}</td></tr>`).join('')}
+                </tbody></table></div>`;
+        }
         const unapplied = p.is_voided ? 0 : (parseFloat(p.unapplied) || 0);
 
         // No "Print Check" here: this is money the customer paid US. A
@@ -149,6 +157,7 @@ const PaymentsPage = {
             API.get('/accounts'),
         ]);
         const bankAccts = accounts.filter(a => a.bank_kind === 'bank');
+        PaymentsPage._accounts = accounts;
 
         const custOpts = customers.map(c => `<option value="${c.id}"${prefillCustomerId === c.id ? ' selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
         const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
@@ -160,7 +169,7 @@ const PaymentsPage = {
                         <select name="customer_id" required onchange="PaymentsPage.loadInvoices(this.value)">
                             <option value="">Select...</option>${custOpts}</select></div>
                     <div class="form-group"><label>Date *</label>
-                        <input name="date" type="date" required value="${todayISO()}"></div>
+                        <input name="date" type="date" required value="${todayISO()}" onchange="PaymentsPage._suggestDiscounts()"></div>
                     <div class="form-group"><label>Amount *</label>
                         <input name="amount" class="money" type="number" step="0.01" min="0.01" required oninput="PaymentsPage._autoApply()"></div>
                     <div class="form-group"><label>Method</label>
@@ -235,7 +244,8 @@ const PaymentsPage = {
 
         let html = PaymentsPage._currencyHtml() + `<h4 style="margin-bottom:8px;">Apply to ${T('Invoices')}</h4>
             <div class="table-container"><table><thead><tr>
-            <th scope="col">${T('Invoice')}</th><th scope="col">Date</th><th scope="col">Due</th><th scope="col" class="amount">Balance</th><th scope="col" class="amount">Apply</th>
+            <th scope="col">${T('Invoice')}</th><th scope="col">Date</th><th scope="col">Due</th><th scope="col" class="amount">Balance</th>
+            <th scope="col" title="The last day the terms' early-payment discount can be taken">Disc. Date</th><th scope="col" class="amount">Discount</th><th scope="col" class="amount">Apply</th>
             </tr></thead><tbody>`;
         for (const inv of PaymentsPage._invoices) {
             html += `<tr>
@@ -243,6 +253,12 @@ const PaymentsPage = {
                 <td>${formatDate(inv.date)}</td>
                 <td>${formatDate(inv.due_date)}</td>
                 <td class="amount">${PaymentsPage._fmt(inv.balance_due)}</td>
+                <td>${inv.discount_date ? formatDate(inv.discount_date) : ''}</td>
+                <td><input class="alloc-discount money" data-invoice="${inv.id}"
+                    type="number" step="0.01" min="0" max="${inv.balance_due}"
+                    aria-label="Discount on ${escapeHtml(inv.invoice_number)}"
+                    oninput="PaymentsPage._discountChanged()"
+                    style="width:80px;"></td>
                 <td><input class="alloc-amount money" data-invoice="${inv.id}" data-max="${inv.balance_due}"
                     type="number" step="0.01" min="0" max="${inv.balance_due}"
                     aria-label="Apply to ${escapeHtml(inv.invoice_number)}"
@@ -254,10 +270,14 @@ const PaymentsPage = {
         // field. Catches over-allocation BEFORE the submit fires.
         html += `</tbody></table></div>
             <div style="margin-top:6px;"><button type="button" class="btn btn-sm btn-secondary" onclick="PaymentsPage._autoApply()">Apply oldest first</button></div>
+            <div class="form-group" id="discount-account-row" hidden style="margin-top:8px; max-width:360px;">
+                <label for="discount-account">Discount account</label>
+                <select id="discount-account" data-no-search>${PaymentTerms.discountAccountOptions(PaymentsPage._accounts || [], 'sales')}</select>
+                <div class="hint">Where the discounts the customer took post, as a credit memo applied to each ${T('invoice')}.</div></div>
             <div id="alloc-status" style="margin-top:8px; padding:8px 10px; border-radius:4px;
                 background:var(--gray-100); font-size:13px;"></div>`;
         $('#payment-invoices').innerHTML = html;
-        PaymentsPage._autoApply();
+        PaymentsPage._suggestDiscounts();
         PaymentsPage._prefillRate();
     },
 
@@ -319,10 +339,44 @@ const PaymentsPage = {
         const inputs = host ? [...host.querySelectorAll('.alloc-amount')] : [];
         let left = PaymentsPage._cents($('[name="amount"]')?.value);
         for (const input of inputs) {
-            const take = Math.max(0, Math.min(left, PaymentsPage._cents(input.dataset.max)));
+            // what is left to pay once the discount on it is taken (#664)
+            const owed = PaymentsPage._cents(input.dataset.max) - PaymentsPage._discountCents(input.dataset.invoice);
+            const take = Math.max(0, Math.min(left, owed));
             input.value = take > 0 ? (take / 100).toFixed(2) : '';
             left -= take;
         }
+        PaymentsPage._updateAllocStatus();
+    },
+
+    // The early-payment discount on each open invoice (#664): its terms'
+    // percent of the balance while the payment date is on or before the
+    // discount date, else none. The person can change any of them.
+    _suggestDiscounts() {
+        const host = $('#payment-invoices');
+        if (!host) return;
+        const payDate = $('#payment-form [name="date"]')?.value;
+        for (const input of host.querySelectorAll('.alloc-discount')) {
+            const inv = (PaymentsPage._invoices || []).find(i => String(i.id) === input.dataset.invoice);
+            const cents = inv ? PaymentTerms.suggestedCents(inv, payDate) : 0;
+            input.value = cents > 0 ? (cents / 100).toFixed(2) : '';
+        }
+        PaymentsPage._discountChanged();
+        PaymentsPage._autoApply();
+    },
+
+    _discountCents(invoiceId) {
+        const input = $(`#payment-invoices .alloc-discount[data-invoice="${invoiceId}"]`);
+        return input ? PaymentsPage._cents(input.value) : 0;
+    },
+
+    _anyDiscount() {
+        return [...$$('#payment-invoices .alloc-discount')].some(i => PaymentsPage._cents(i.value) > 0);
+    },
+
+    // The discount account shows while a discount is taken.
+    _discountChanged() {
+        const row = $('#discount-account-row');
+        if (row) row.hidden = !PaymentsPage._anyDiscount();
         PaymentsPage._updateAllocStatus();
     },
 
@@ -343,10 +397,11 @@ const PaymentsPage = {
         const host = $('#payment-invoices');
         for (const input of (host ? host.querySelectorAll('.alloc-amount') : [])) {
             const max = PaymentsPage._cents(input.dataset.max);
-            if (PaymentsPage._cents(input.value) > max) {
+            const discount = PaymentsPage._discountCents(input.dataset.invoice);
+            if (PaymentsPage._cents(input.value) + discount > max) {
                 const inv = (PaymentsPage._invoices || [])
                     .find(i => String(i.id) === String(input.dataset.invoice));
-                return { number: inv && inv.invoice_number, max };
+                return { number: inv && inv.invoice_number, max, discount };
             }
         }
         return null;
@@ -377,10 +432,12 @@ const PaymentsPage = {
             // The field's max blocks the save, so nothing may read as done.
             status.style.background = '#fde2e2';
             status.style.color = '#a4242b';
-            status.textContent = Terms.text(
-                `The Apply amount for ${over.number ? `invoice #${over.number}` : 'an invoice'} is more than ` +
-                `its balance of ${PaymentsPage._fmt(over.max / 100)}. Apply at most the balance; ` +
-                `money left over can be kept as a credit.`);
+            status.textContent = Terms.text(over.discount
+                ? `The Apply amount and discount for ${over.number ? `invoice #${over.number}` : 'an invoice'} are more than ` +
+                  `its balance of ${PaymentsPage._fmt(over.max / 100)}. Lower one of them.`
+                : `The Apply amount for ${over.number ? `invoice #${over.number}` : 'an invoice'} is more than ` +
+                  `its balance of ${PaymentsPage._fmt(over.max / 100)}. Apply at most the balance; ` +
+                  `money left over can be kept as a credit.`);
         } else if (total === 0 && allocated > 0) {
             // Amount cleared (or never entered) but money is allocated — this
             // would submit a NaN/zero payment with real allocations. Warn.
@@ -539,10 +596,20 @@ const PaymentsPage = {
         const allocations = [];
         $$('#payment-invoices .alloc-amount').forEach(input => {
             const cents = PaymentsPage._cents(input.value);
-            if (cents > 0) {
-                allocations.push({ invoice_id: parseInt(input.dataset.invoice), amount: cents / 100 });
+            const discount = PaymentsPage._discountCents(input.dataset.invoice);
+            if (cents > 0 || discount > 0) {
+                const row = { invoice_id: parseInt(input.dataset.invoice), amount: cents / 100 };
+                if (discount > 0) row.discount = discount / 100;
+                allocations.push(row);
             }
         });
+        // the discounts post to the account picked beside them (#664)
+        let discountAccountId = null;
+        if (allocations.some(a => a.discount)) {
+            discountAccountId = parseInt($('#discount-account')?.value) || null;
+            if (!discountAccountId) { toast('Pick the account the discount posts to.', 'error'); return; }
+            PaymentTerms.rememberDiscountAccount('sales', discountAccountId);
+        }
 
         const foreign = PaymentsPage._isForeign();
         const rate = foreign ? parseFloat(form.pay_exchange_rate?.value) : null;
@@ -562,6 +629,7 @@ const PaymentsPage = {
             deposit_to_account_id: form.deposit_to_account_id.value ? parseInt(form.deposit_to_account_id.value) : null,
             notes: form.notes.value || null,
             allocations,
+            discount_account_id: discountAccountId,
         };
 
         if (!(await TxnWarn.ok(form))) return;

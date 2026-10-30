@@ -3,7 +3,7 @@
 # lives in app/services/numbering.py.
 # ============================================================================
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 import logging
 
@@ -209,8 +209,9 @@ def money_applied(db: Session, invoice) -> list[dict]:
     """The payments and credit memos (a write-off is one) applied to an
     invoice and still standing, oldest first, each as ``{kind, id,
     number, customer_id, customer_name, date, amount}``: ``kind`` is
-    "payment", "credit_memo" or "write_off", ``customer_name`` whose money
-    it is ("Parent: Sub" for a sub-customer). A voided payment, or a
+    "payment", "credit_memo", "write_off" or "discount" (an early-payment
+    discount, #664), ``customer_name`` whose money it is ("Parent: Sub"
+    for a sub-customer). A voided payment, or a
     credit memo voided (which takes its applications off), is not on the
     invoice any more."""
     from sqlalchemy import or_
@@ -256,7 +257,11 @@ def money_applied(db: Session, invoice) -> list[dict]:
             CreditMemo.status != CreditMemoStatus.VOID,
         )
     ):
-        kind = "write_off" if memo.is_write_off else "credit_memo"
+        kind = (
+            "write_off"
+            if memo.is_write_off
+            else "discount" if memo.discount_payment_id else "credit_memo"
+        )
         add(kind, memo, memo.memo_number, amount)
     return sorted(
         (row for row in found.values() if row["amount"]),
@@ -269,7 +274,9 @@ def _money_phrase(row: dict) -> str:
     who = f"{row['customer_name']}'s" if row["customer_name"] else "a"
     if row["kind"] == "payment":
         return f"{who} payment of {amount} ({_day(row['date'])})"
-    noun = "write-off" if row["kind"] == "write_off" else "credit memo"
+    noun = {"write_off": "write-off", "discount": "early-payment discount"}.get(
+        row["kind"], "credit memo"
+    )
     number = f" {row['number']}" if row["number"] else ""
     return f"{who} {noun}{number} for {amount}"
 
@@ -336,25 +343,14 @@ def refuse_moving_money(db: Session, invoice, moved_to, words) -> None:
     )
 
 
-def _due_date_from_terms(base_date: date, terms: str | None) -> date:
-    """Compute a due date from a base date + a terms string.
+def _due_date_from_terms(db: Session, base_date: date, terms: str | None) -> date:
+    """A due date from a base date and terms, by the one parser
+    (app/services/payment_terms.py, #664): the terms list first, then
+    "Net N" and Due on Receipt. Terms it doesn't understand keep the old
+    30 days; the document's terms_note says so."""
+    from app.services.payment_terms import due_date_for
 
-    Handles "Net N" (N days out) and "Due on Receipt" (same day). Anything
-    unrecognized falls back to Net 30. Shared by create + update so the two
-    paths can't drift — and so "Due on Receipt" no longer silently became a
-    30-day due date (the old inline `int("due on receipt".replace("net ",""))`
-    raised ValueError and fell through to +30).
-    """
-    if not terms:
-        return base_date + timedelta(days=30)
-    t = terms.strip().lower()
-    if t in ("due on receipt", "due upon receipt", "cod", "net 0"):
-        return base_date
-    try:
-        days = int(t.replace("net ", "").strip())
-        return base_date + timedelta(days=days)
-    except ValueError:
-        return base_date + timedelta(days=30)
+    return due_date_for(db, base_date, terms)
 
 
 def resolve_line_taxable(db: Session, lines_data, customer=None) -> None:

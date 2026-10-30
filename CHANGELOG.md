@@ -5,6 +5,28 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Payment terms beyond Net N** (#664). Terms were free text with one rule:
+"Net N", else 30 days, said to no one, so "2% 10 Net 30", "Net 10th" and
+"15th of following month" were all quietly due 30 days out. Settings now
+keeps a terms list, the QuickBooks shape: a standard term is due a number of
+days after the date, a date-driven term on a day of the month (the next
+month's when the document is dated within a set number of days of it), and
+either can offer an early-payment discount. Every form that takes terms
+offers the list, and every document's due date (invoices, bills, recurring
+invoices, memorized bills, an estimate's or a PO's conversion, a duplicate)
+comes from one parser. Existing books don't change: Due on Receipt, Net 15,
+30, 45 and 60 are on the list with the rules they always had, any other
+Net N in use is added, and other text keeps its 30 days, with a sentence on
+the invoice or bill saying so. A recurring invoice on Due on Receipt is now
+due the day it is made; its generator had its own parser, which read it as
+30 days. The discount shows on the invoice and bill and on their PDFs, and
+Receive Payments and Pay Bills suggest it until its date: the customer's is
+a credit memo, ours a vendor credit, applied to the document, posted to the
+account you pick and voided with the payment. Migration `e5c1a7d3f9b2`
+(the list, seeded; two nullable columns tying a discount to its payment).
+
 ### v2.31.4 — Class and job wherever money moves, and payments that cannot double up
 
 **Simultaneous payments on one invoice no longer over-apply it** (#666). On SQLite the row lock the payment route takes was a no-op, and the driver began no transaction until the first write, so two payments sent at the same moment both read the same balance and both posted: four $98 payments on a $100 invoice all succeeded. Every row-lock site now takes the database's write lock first on SQLite; the second request waits for the first to finish, reads the balance it left and is refused, as it always was on PostgreSQL. Bill payments, batch payments, credit memos, vendor credits, deposits and the rest of the locked paths get the same.

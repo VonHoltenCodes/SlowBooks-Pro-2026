@@ -16,6 +16,7 @@ from app.services.accounting import (
     _q,
 )
 from app.services.numbering import next_invoice_number
+from app.services.payment_terms import DocumentTerms
 from app.services.closing_date import check_closing_date
 
 from app.routes.invoices._router import router
@@ -101,8 +102,10 @@ def list_invoices(
         .all()
     )
     results = []
+    terms_reader = DocumentTerms(db, "invoice")
     for inv in invoices:
         resp = InvoiceResponse.model_validate(inv)
+        terms_reader.fill(resp, inv)
         if inv.customer:
             # "Parent: Sub" for a sub-customer's, as the pickers say it
             resp.customer_name = invoice_customer_name(inv)
@@ -116,6 +119,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     resp = InvoiceResponse.model_validate(inv)
+    DocumentTerms(db, "invoice").fill(resp, inv)
     if inv.customer:
         resp.customer_name = invoice_customer_name(inv)
     return resp
@@ -145,7 +149,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     refuse_other_customers_jobs(db, customer.id, data.job_id, data.lines, noun, words)
 
     # Parse terms for due date (explicit due_date wins; else derive from terms)
-    due_date = data.due_date or _due_date_from_terms(data.date, data.terms)
+    due_date = data.due_date or _due_date_from_terms(db, data.date, data.terms)
     refuse_due_before_date(data.date, due_date)
     refuse_negative_lines(db, data.lines)
     resolve_line_taxable(db, data.lines, customer)
@@ -277,6 +281,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(invoice)
     resp = InvoiceResponse.model_validate(invoice)
+    DocumentTerms(db, "invoice").fill(resp, invoice)
     resp.customer_name = cust_name
     resp.warnings = stock_warnings
     return resp
@@ -521,7 +526,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     # through — without this, clearing the box would wipe the stored due
     # date to NULL. Mirror the create path: derive it from terms + date.
     if "due_date" in update_data and invoice.due_date is None:
-        invoice.due_date = _due_date_from_terms(invoice.date, invoice.terms)
+        invoice.due_date = _due_date_from_terms(db, invoice.date, invoice.terms)
 
     # Date changes synchronize owned headers above without replacing splits.
     # Other accounting changes reuse the shared invoice posting authority.
@@ -647,6 +652,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     db.commit()
     db.refresh(invoice)
     resp = InvoiceResponse.model_validate(invoice)
+    DocumentTerms(db, "invoice").fill(resp, invoice)
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
     resp.warnings = stock_warnings
