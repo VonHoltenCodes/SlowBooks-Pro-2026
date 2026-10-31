@@ -18,6 +18,18 @@ company reports on.
 
 ---
 
+## Federal withholding
+
+Federal income tax follows IRS Publication 15-T's percentage method for
+automated payroll systems: the 2026 STANDARD and Step 2 checkbox schedules
+for single, married filing jointly and head of household, the Step 3
+credits and Step 4 amounts from the employee's W-4, the 22% supplemental
+rate (37% over $1,000,000), Social Security 6.2% to the year's wage base,
+Medicare 1.45% plus the 0.9% additional over $200,000, FUTA 0.6% on the first
+$7,000 (`app/services/payroll_service.py`, each constant with the publication
+it came from). The schedules are the year's own as published in December;
+check the January pay run against the new Pub 15-T each year.
+
 ## State withholding
 
 All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engine for the rest (`app/services/state_tax/tables.py`). Parameters, sources and the employee inputs (allowances, extra withholding, elected rate, local rate) are in [state-withholding.md](state-withholding.md). Reciprocity in `state_tax/reciprocity.py`.
@@ -124,7 +136,7 @@ the header and a tamper-evident audit hash in the footer. The SPA's
 | `GET, POST /api/payroll/forms/w2/{emp_id}/pdf?year=YYYY` | W-2 PDF + `document_audits` row |
 | `POST /api/payroll/forms/w3/{year}` | W-3 aggregate across all active employees (JSON) |
 | `GET, POST /api/payroll/forms/w3/{year}/pdf` | W-3 PDF |
-| `POST /api/payroll/forms/940/{year}` | Form 940 FUTA — first $7K/employee at 0.6% (JSON) |
+| `POST /api/payroll/forms/940/{year}` | Form 940 FUTA — first $7,000 per employee at 0.6% (6.0% less the full state credit). When the company's state is a credit-reduction state for the year (Schedule A: California 1.2% and the U.S. Virgin Islands 4.5% for 2025), the form adds line 11 and line 12 for it (2.31.3); every employee's wages are treated as paid in the company's state. Schedule A for 2026 is published in November and added then (JSON) |
 | `GET, POST /api/payroll/forms/940/{year}/pdf` | Form 940 PDF |
 | `POST /api/payroll/forms/941/{year}/{quarter}` | Quarterly Form 941 figures: lines 1-3, 5a-5e, 6, 7 and 12 (JSON). Deposits and balance due (lines 11-13), Schedule B and Form 941-X are not produced |
 | `GET, POST /api/payroll/forms/941/{year}/{quarter}/pdf` | Form 941 PDF |
@@ -340,7 +352,8 @@ Who reads it, each on purpose:
   measure on gross. `employee_ytd` and the stub's YTD count every quarter.
 - **The Social Security wage base is the year's** (`SS_WAGE_BASES`,
   `ss_wage_base(year)`: 2023 $160,200, 2024 $168,600, 2025 $176,100, 2026
-  $184,500) for the opening's check, the paycheck and the 941 and W-2. A
+  $184,500, 2027 $192,300) for the opening's check, the paycheck and the 941
+  and W-2. A
   year with no base here is measured against the nearest one; the opening
   (`warnings`) and the pay run (`warnings`) say so. FUTA's $7,000 is
   statutory and the same every year.
