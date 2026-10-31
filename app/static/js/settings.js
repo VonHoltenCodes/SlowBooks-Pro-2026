@@ -758,7 +758,7 @@ const SettingsPage = {
                 <div class="settings-section" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
                     <h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
-                        ${Terms.text('Local OCR for the Scan Receipt button on the Enter Sales Receipt and Enter Bill forms.')}
+                        ${Terms.text('Local OCR for the Scan Receipt button on the Enter Sales Receipt, Enter Bill and Enter Expense forms.')}
                         Everything runs on this computer — no cloud, no data leaves the machine.
                         The desktop app ships with a built-in engine (Windows OCR / Apple Vision), so scanning
                         works out of the box; Tesseract is an optional extra engine you can install yourself.

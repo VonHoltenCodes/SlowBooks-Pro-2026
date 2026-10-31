@@ -852,8 +852,9 @@ def _refuse_reconciled(db: Session, txn) -> None:
             status_code=400,
             detail=(
                 f"This pay run's {_money(ln.credit or ln.debit)} on {where} is "
-                f"in a completed reconciliation{when} and cannot be voided. "
-                "Undo that reconciliation first, then void the run."
+                f"in a completed reconciliation{when} and cannot be voided: a "
+                "finished reconciliation is not reopened. Correct the run with "
+                "a new pay run or a journal entry instead."
             ),
         )
 

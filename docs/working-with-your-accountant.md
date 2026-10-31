@@ -42,11 +42,13 @@ they have signed off a period, the way QuickBooks' closing date works: a
 change dated into the closed period then takes the password, and each use
 is written to the audit log.
 
-If your accountant is not on your network, the setup most people use is a
-Cloudflare Tunnel from the host with Cloudflare Access in front of it, so
-only the email addresses you approve get through, switched on while they
-need it ([cloud-hosting.md](cloud-hosting.md)). Nothing on your network is
-opened to the internet that way.
+If your accountant is not on your network, give them a way onto it rather
+than opening the server: a VPN (Tailscale is the simplest) that puts their
+computer on the office network while they need it, or a tunnel with an
+access policy in front, both described in [server-edition.md](server-edition.md),
+"Reaching it from outside the office". Server Edition is plain HTTP, so it
+must never be port-forwarded. Books that should live off-site belong on a
+cloud server behind HTTPS ([cloud-hosting.md](cloud-hosting.md)).
 
 ## 2. Send them the reports
 

@@ -12,13 +12,22 @@ production-launch checklist see
 ### Quick local backup
 
 ```bash
-./scripts/backup.sh
+PGHOST=localhost ./scripts/backup.sh
 ```
 
-- Output: `~/bookkeeper-backups/bookkeeper-YYYY-MM-DD-HHMM.sql.gz`
-- Compression: gzip
+- Output: `~/bookkeeper-backups/bookkeeper_YYYYMMDD_HHMMSS.sql.gz`
+- The dump carries `--clean --if-exists`, so it restores over a database the
+  app has already set up (see Restore).
 - Retention: keeps the 30 most recent dumps; older ones are pruned
-  automatically.
+  automatically. A failed dump leaves no file behind.
+- `PGHOST=localhost` makes `pg_dump` connect over TCP with the password in
+  `~/.pgpass` (`localhost:5432:bookkeeper:bookkeeper:<password>`, mode 600);
+  the local socket uses peer authentication on stock Ubuntu, which refuses
+  the `bookkeeper` role. `DB_NAME`, `DB_USER` and `BACKUP_DIR` override the
+  defaults.
+- The desktop app and Server Edition keep each company in one SQLite file and
+  back it up from Settings → Backup / Restore; this script is for the
+  PostgreSQL installs.
 
 ### Scheduled production backup
 
@@ -46,25 +55,40 @@ inside the container. To copy them out to your host:
 docker compose cp slowbooks:/app/backups ./my-backups
 ```
 
-To take a one-off backup from a running container:
+To take a one-off backup from a running container, into the volume the
+`cp` above reads (without `BACKUP_DIR` it lands in the container's home
+folder and is lost when the container is recreated):
 
 ```bash
-docker compose exec slowbooks ./scripts/backup.sh
+docker compose exec -e BACKUP_DIR=/app/backups slowbooks ./scripts/backup.sh
 ```
 
+Under `docker-compose.prod.yml` the app container has no `PG*` connection
+settings; dump from the `postgres` container instead, as in
+[cloud-hosting.md](cloud-hosting.md), "Backups that leave the machine".
+
 ### Restore
+
+Stop the app first, and always pass `-v ON_ERROR_STOP=1`: without it psql
+reports every failed statement and still exits 0, and a restore that
+collided with the existing tables looked successful while nothing was
+restored. A dump from `scripts/backup.sh` (or `pg_dump --clean --if-exists`)
+replaces the tables the app's first start made; a plain dump restores only
+into an empty database, so drop and recreate it first.
 
 Native:
 
 ```bash
-gunzip -c bookkeeper-2026-05-23.sql.gz | psql -U bookkeeper bookkeeper
+gunzip -c bookkeeper_20260523_020000.sql.gz | PGHOST=localhost psql -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
 ```
 
 Docker:
 
 ```bash
-docker compose exec -T postgres psql -U bookkeeper bookkeeper \
-    < <(gunzip -c bookkeeper-2026-05-23.sql.gz)
+docker compose stop slowbooks
+gunzip -c bookkeeper_20260523_020000.sql.gz | \
+    docker compose exec -T postgres psql -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
+docker compose start slowbooks
 ```
 
 `pg_dump` not found?
@@ -102,8 +126,12 @@ python -m app.services.encryption rewrap
 # 5. Confirm nothing left on PREV, then unset PREV.
 ```
 
-Master key files (`.slowbooks-master.key`, `.slowbooks-session.key`)
-are excluded in `.gitignore` — never commit them. Losing the master
+The rewrap command needs the source tree; the desktop app and Server Edition
+(the frozen build) have no rotation command, and their keys live in the
+`.env` beside the data folder (`%LOCALAPPDATA%\SlowBooksPro\.env`, or
+`C:\ProgramData\SlowBooksPro\.env` for a Server Edition install): keep that
+file with the backups. Master key files (`.slowbooks-master.key`,
+`.slowbooks-session.key`) are excluded in `.gitignore` — never commit them. Losing the master
 key means entering every saved password and API key again: since 2.18 a
 secret no key decrypts reads as not set, and Settings names each one. A
 Docker install with no `SETTINGS_ENCRYPTION_KEY` derives its settings key
@@ -118,13 +146,14 @@ into your SIEM, or just `tail -f` them for small deployments:
 
 - **`audit_log`** — every model insert/update/delete with
   old/new values. Source = `api`.
-- **`login_attempts`** — every admin login attempt with IP +
+- **`login_attempts`** — every sign-in attempt, any role, with IP +
   user-agent, success or failure.
 - **`portal_accesses`** — every employee-portal hit (cookieless and
   authed), with the resolved employee_id when known.
-- **`document_audits`** — SHA-256 hash chain for every tax-form PDF
-  ever generated. A printed form's footer carries the hash + audit
-  ID; an auditor can verify the document hasn't been edited.
+- **`document_audits`** — a SHA-256 hash of every tax-form PDF ever
+  generated, one row per form. A printed form's footer carries the hash +
+  audit ID; an auditor can recompute the hash and confirm the document
+  hasn't been edited.
 - **`/health`** — unauthenticated liveness probe. Wire to your load
   balancer or k8s readiness probe.
 
@@ -166,9 +195,10 @@ Files. Nothing serves it until a server points at it. Two ways:
          APP_HOST: "0.0.0.0"
          APP_PORT: "3001"
          SLOWBOOKS_PRIVATE_NETWORK: "${SLOWBOOKS_PRIVATE_NETWORK:-1}"
+         FORCE_HTTPS: "false"
          PAYROLL_ENCRYPTION_SECRET: "${PAYROLL_ENCRYPTION_SECRET}"
        ports:
-         - "3002:3001"
+         - "127.0.0.1:3002:3001"
        volumes:
          - slowbooks_uploads_second:/app/app/static/uploads
          - slowbooks_backups_second:/app/backups
@@ -183,8 +213,10 @@ Files. Nothing serves it until a server points at it. Two ways:
    `DATABASE_URL` to the other database and `docker compose up -d` again. A
    restart signs everyone out of the company it was serving.
 
-Backups are per database: `scripts/backup.sh` inside each container backs up
-the company that container serves.
+Backups are per database: `scripts/backup.sh` dumps the database `DB_NAME`
+names (default `bookkeeper`), so for the second company pass its name:
+`docker compose exec -e DB_NAME=YOUR_DATABASE_NAME -e BACKUP_DIR=/app/backups slowbooks-second ./scripts/backup.sh`.
+Settings → Backup / Restore in each company does the same from the browser.
 
 ## Stopping, restarting, log rotation
 
@@ -212,8 +244,28 @@ services:
 
 ### Native (systemd)
 
-If running under systemd, logs go to the journal. Rotate normally
-via `journalctl` retention settings.
+A unit for a native install, as an example (`/etc/systemd/system/slowbooks.service`;
+the app reads its `.env` itself from the working directory):
+
+```ini
+[Unit]
+Description=SlowBooks Pro
+After=network.target postgresql.service
+
+[Service]
+User=slowbooks
+WorkingDirectory=/opt/slowbooks
+ExecStart=/opt/slowbooks/.venv/bin/python run.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`sudo systemctl enable --now slowbooks`; logs go to the journal
+(`journalctl -u slowbooks -f`) and rotate with its retention settings. Add a
+cron line for `scripts/run_recurring.py` if the company uses recurring
+invoices or memorized transactions and nobody opens the app daily.
 
 ---
 

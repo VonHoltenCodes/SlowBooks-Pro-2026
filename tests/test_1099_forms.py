@@ -63,9 +63,9 @@ def vendors(client, seed_accounts):
         client, "Dock Rent LLC", is_1099_vendor=True, vendor_1099_type="MISC"
     )
     plain = _vendor(client, "Big Box Supply")
-    _paid(client, seed_accounts, nec, 700, 1)
-    _paid(client, seed_accounts, misc, 900, 2)
-    _paid(client, seed_accounts, plain, 800, 3)
+    _paid(client, seed_accounts, nec, 2700, 1)
+    _paid(client, seed_accounts, misc, 2900, 2)
+    _paid(client, seed_accounts, plain, 2800, 3)
     return nec, misc, plain
 
 
@@ -79,10 +79,10 @@ def test_a_vendor_flagged_on_the_form_reaches_the_1099_nec_and_1096(client, vend
     data = client.get("/api/tax-forms/1099?year=2026").json()
     # 1099-NEC is for nonemployee compensation: a MISC vendor is not on it
     assert [v["name"] for v in data["vendors"]] == ["Blue Heron Installs"]
-    assert Decimal(str(data["vendors"][0]["total_paid"])) == Decimal("700.00")
+    assert Decimal(str(data["vendors"][0]["total_paid"])) == Decimal("2700.00")
     assert data["vendors"][0]["reportable"] is True
     assert data["transmittal"]["form_count"] == 1
-    assert Decimal(str(data["transmittal"]["total_amount"])) == Decimal("700.00")
+    assert Decimal(str(data["transmittal"]["total_amount"])) == Decimal("2700.00")
 
 
 def test_the_forms_name_the_company_in_settings_as_payer(client, vendors, monkeypatch):

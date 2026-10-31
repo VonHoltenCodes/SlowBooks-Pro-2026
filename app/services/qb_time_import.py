@@ -51,8 +51,8 @@ TIME_COLUMNS = ("Date", "Billing Status", "Duration")
 _DATE_FORMATS = ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d")
 _HOW = (
     "Export it from QuickBooks Desktop as Reports > Jobs, Time & Mileage > "
-    "Time by Name by Job detail (or Time by Job by Name detail), with the dates "
-    "set to All, and save it as CSV or Excel."
+    "Time by Job Detail (a Time by Name report grouped by job reads too), with "
+    "the dates covering the time you want, saved as CSV or Excel."
 )
 _PERSON = re.compile(r"^[^,:]+,\s*[^,:]+$")  # "Last, First", QuickBooks' names
 _BILLING = {

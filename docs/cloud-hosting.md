@@ -17,11 +17,13 @@ A cloud box for your own company is the first case. Hosting it for strangers
 is the second, and this guide is not for that.
 
 **Not the desktop build.** `SlowBooksPro.exe --serve-lan` and the macOS app
-serve plain HTTP on a trusted office network. They have no TLS, no place for a
-proxy to sit, and the docs say not to port-forward them. On a cloud server run
-the Docker image, which is built for this: it refuses to start in debug mode,
-requires a real session secret and encryption key, and emits `Secure` cookies
-and HSTS.
+serve plain HTTP on a trusted office network. They have no TLS and the docs
+say not to port-forward them; a VPN or an access-controlled tunnel to the
+office host is the way to reach one from outside
+([server-edition.md](server-edition.md), "Reaching it from outside the
+office"). On a cloud server run the Docker image, which is built for this: it
+refuses to start in debug mode, requires a real session secret and encryption
+key, and emits `Secure` cookies and HSTS.
 
 **What is at stake.** A company file holds payroll records with Social
 Security numbers, bank feeds, customer addresses and your tax filings. Treat
@@ -37,7 +39,7 @@ SlowBooks is not demanding.
 | | |
 |---|---|
 | Size | 1 vCPU, 2 GB RAM, 25 GB disk is comfortable for one company and a handful of users; the stress-test company (two years of books, 1,900 documents) runs in well under 1 GB |
-| OS | Ubuntu 24.04 LTS or Debian 12. This guide uses Ubuntu commands |
+| OS | Ubuntu 24.04 LTS, which this guide uses. Debian 12 works too, with Docker installed from Docker's own repository (its `docker-compose` package is the retired v1) |
 | Region | Near your users; the books do not care |
 | Cost | Roughly $5 to $12 a month at the time of writing |
 
@@ -68,6 +70,8 @@ usermod -aG sudo books
 rsync --archive --chown=books:books ~/.ssh /home/books
 sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/; s/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
 systemctl restart ssh
+# Ubuntu's cloud images also drop settings into /etc/ssh/sshd_config.d/, and
+# the first value wins: confirm with `sshd -T | grep -E 'permitrootlogin|passwordauthentication'`
 ```
 
 From here on log in as `books`. If your provider offers a firewall in its
@@ -83,11 +87,12 @@ sudo apt install -y docker.io docker-compose-v2 git
 sudo usermod -aG docker books   # log out and in again afterwards
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git ~/slowbooks
 cd ~/slowbooks
-git checkout v2.18.0             # a release tag, never main
+git checkout v2.31.3             # the latest release tag, never main
 ```
 
-Pin a release tag. `main` moves between gates; a tag is a build that three
-platforms passed.
+Pin a release tag (2.26.0 or later: earlier tags' production compose has no
+`FORWARDED_ALLOW_IPS`). `main` moves between gates; a tag is a build that
+three platforms passed.
 
 ## 4. Secrets and settings
 
@@ -111,8 +116,9 @@ Then open `.env` and set the rest by hand:
 |---|---|
 | `POSTGRES_USER`, `POSTGRES_DB` | `bookkeeper` is fine for both |
 | `APP_DEBUG` | `false` |
-| `FORCE_HTTPS` | `true` |
-| `FORWARDED_ALLOW_IPS` | the proxy's address or CIDR (for the compose network, e.g. `172.18.0.0/16`). uvicorn then takes the client address and scheme from the proxy's `X-Forwarded-*` headers, and the login audit trail and rate limiter see the real client. Never `*` or `0.0.0.0/0` |
+| `FORCE_HTTPS` | `true` (the production default; writing it down is fine) |
+| `FORWARDED_ALLOW_IPS` | the proxy's address or CIDR. For Caddy on the host as in step 6, `127.0.0.1`. For a proxy in the compose network, that network's subnet: after step 5, `docker network inspect slowbooks_default --format '{{(index .IPAM.Config 0).Subnet}}'` prints it (the name is the folder's name plus `_default`). uvicorn then takes the client address and scheme from the proxy's `X-Forwarded-*` headers, and the login audit trail and rate limiter see the real client. Wrong or unset, every page redirects to itself forever. Never `*` or `0.0.0.0/0` |
+| `APP_WORKERS` | `1`, unless you also run a Redis and set `RATE_LIMIT_STORAGE_URI` ([tls-proxy-setup.md](tls-proxy-setup.md)); with the default of 4 workers and no shared store, the sign-in rate limit is four times looser than it reads |
 | `CORS_ALLOW_ORIGINS` | `https://books.example.com`, your real name, no wildcard |
 | `SESSION_IDLE_TIMEOUT_SECONDS` | `14400` (four hours) is the default; shorter is fine |
 | `EMPLOYER_EIN`, `EMPLOYER_STATE`, `SUTA_RATE` | yours, if you run payroll |
@@ -131,7 +137,7 @@ openssl req -x509 -nodes -newkey rsa:2048 -days 3650 \
   -subj "/CN=postgres" \
   -keyout certs/postgres/server.key -out certs/postgres/server.crt
 sudo chown 70:70 certs/postgres/server.key   # the postgres user inside the alpine image
-chmod 600 certs/postgres/server.key
+# openssl wrote the key readable by its owner only, which is what postgres wants
 ```
 
 ## 5. Start it
@@ -154,17 +160,20 @@ docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml logs -f sl
 
 The log ends with the startup checks passing and uvicorn listening on 3001.
 If a check fails it says which setting is wrong and exits; fix `.env` and run
-`up -d` again. `curl -sI http://127.0.0.1:3001/health` answers from the host;
-from anywhere else the port does not exist, and the firewall would refuse it
-anyway.
+`up -d` again. `curl -sI http://127.0.0.1:3001/health` answers `307` from the
+host (the redirect to HTTPS, which is the app working as set); from anywhere
+else the port does not exist, and the firewall would refuse it anyway.
 
 ## 6. The proxy and the certificate
 
 Caddy is the least to get wrong. It obtains and renews the certificate itself
 and sets the forwarding headers the app needs.
 
+Install Caddy from its own repository (Ubuntu's package is behind; the
+steps are at https://caddyserver.com/docs/install), then replace the
+Caddyfile it installed:
+
 ```bash
-sudo apt install -y caddy
 sudo tee /etc/caddy/Caddyfile >/dev/null <<'EOF'
 books.example.com {
     reverse_proxy localhost:3001
@@ -174,19 +183,21 @@ sudo systemctl reload caddy
 ```
 
 Wait a few seconds, then open `https://books.example.com`. You should see
-the first-run setup screen, and the browser's padlock should be clean. nginx
-and Traefik are covered in [tls-proxy-setup.md](tls-proxy-setup.md) if you
-already run one of those.
+the first-run setup screen, and the browser's padlock should be clean. Do
+step 7 now, before anything else: until the first password is set, anyone
+who reaches the address could set it. nginx and Traefik are covered in
+[tls-proxy-setup.md](tls-proxy-setup.md) if you already run one of those.
 
 If you would rather run Caddy as a container, skip the loopback publish
 above, put Caddy on the compose network, and proxy to `slowbooks:3001`.
 
 ## 7. First run, and the users
 
-Open the site, set the operator password, and enter the company. Then, under
-**Manage → Users**, add a named account for each person and stop using the
-operator login for daily work. Roles are admin, bookkeeper and read-only;
-[server-edition.md](server-edition.md) describes what each can reach.
+Open the site, set the administrator's password, and enter the company.
+Then, under **Settings → Users**, add a named account for each person and
+stop sharing the first sign-in for daily work. Roles are administrator,
+bookkeeper, accountant and read-only; [server-edition.md](server-edition.md)
+describes what each can reach.
 
 On a multi-user install the sign-in screen lists the user names. That is by
 design on a trusted network; on a public address it is the one thing you may
@@ -199,16 +210,17 @@ A backup on the same disk as the database is not a backup. Two layers:
 
 **Nightly database dump, copied off the box.** Dump from the database
 container itself — it has `pg_dump` and reaches the database over its own
-socket, so no password or host is needed:
+socket, so no password or host is needed. Save this as
+`/home/books/backup.sh` (the `#!/bin/bash` line must be the first line of the
+file: cron runs a script with `sh` otherwise, which stops at `pipefail`):
 
 ```bash
-# /home/books/backup.sh
 #!/bin/bash
 set -euo pipefail
 cd /home/books/slowbooks
 mkdir -p /home/books/backups
 docker compose -f docker-compose.prod.yml exec -T postgres \
-  pg_dump -U bookkeeper bookkeeper | gzip > "/home/books/backups/slowbooks_$(date +%Y%m%d_%H%M%S).sql.gz"
+  pg_dump --clean --if-exists -U bookkeeper bookkeeper | gzip > "/home/books/backups/slowbooks_$(date +%Y%m%d_%H%M%S).sql.gz"
 # ship the newest one off the machine — pick one:
 #   rclone copy /home/books/backups remote:slowbooks-backups        (any cloud bucket)
 #   scp /home/books/backups/*.gz you@home-nas:/backups/slowbooks/   (a machine you own)
@@ -220,12 +232,25 @@ chmod +x ~/backup.sh
 (crontab -l 2>/dev/null; echo "15 2 * * * /home/books/backup.sh >> /home/books/backup.log 2>&1") | crontab -
 ```
 
-Restoring is the same command the other way, from [operations.md](operations.md):
-`docker compose -f docker-compose.prod.yml exec -T postgres psql -U bookkeeper bookkeeper < <(gunzip -c the-file.sql.gz)`
-on a fresh stack that has run once. Uploaded receipts, attachments and the
-logo are in the database from 2.18, so the dump carries them; the
-`slowbooks_uploads` volume holds what earlier versions wrote, which 2.18's
-first start copies in. Keep it mounted.
+Restoring, on a stack that has run once (the app's first start migrates and
+seeds the database, so the dump has to replace what is there; the
+`--clean --if-exists` above makes it do that, and `ON_ERROR_STOP` makes a
+failure say so instead of exiting 0 with the old data in place):
+
+```bash
+cd /home/books/slowbooks
+docker compose -f docker-compose.prod.yml stop slowbooks
+gunzip -c /home/books/backups/the-file.sql.gz | \
+  docker compose -f docker-compose.prod.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U bookkeeper bookkeeper
+docker compose -f docker-compose.prod.yml start slowbooks
+```
+
+A dump made without `--clean` restores only into an empty database: drop
+and recreate it first (`dropdb`/`createdb -U bookkeeper bookkeeper` in the
+postgres container). Uploaded receipts, attachments and the logo are in the
+database from 2.18, so the dump carries them; the `slowbooks_uploads` volume
+holds what earlier versions wrote, which 2.18's first start copies in. Keep
+it mounted.
 
 **Provider snapshots** of the whole disk, weekly, from the control panel.
 They are cheap and they restore the proxy and the secrets along with the data.
@@ -238,14 +263,14 @@ are in [operations.md](operations.md). Remember the encryption secret.
 ```bash
 cd ~/slowbooks
 git fetch --tags
-git checkout v2.19.0          # the new tag
+git checkout v2.32.0          # the new tag
 docker compose -f docker-compose.prod.yml -f docker-compose.proxy.yml up -d --build
 ```
 
 The app migrates the database on start. Take a backup first; a release never
 needs one, and the one time it does you will be glad. The Docker image is
-gated on Linux with PostgreSQL every release, so the path you are on is the
-path that was tested.
+built and started in CI on every change, and every release is gated on
+Linux as well as Windows and macOS.
 
 ```bash
 sudo apt update && sudo apt upgrade -y     # monthly, for the host itself

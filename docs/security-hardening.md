@@ -13,7 +13,7 @@ For the public security policy and responsible-disclosure address, see
 
 | # | Area | What changed | Where |
 |---|------|--------------|-------|
-| 1 | Startup checks | Fail hard in production if `PAYROLL_ENCRYPTION_SECRET` is the dev default | `app/main.py:startup_security_checks()` |
+| 1 | Startup checks | Fail hard in production, or on any non-SQLite database, if `PAYROLL_ENCRYPTION_SECRET` is the dev default, empty or shorter than 16 characters | `app/main.py:_run_startup_security_checks()` |
 | 2 | Startup checks | Fail hard in production if `DATABASE_URL` does not specify `sslmode` | `app/main.py:startup_security_checks()` |
 | 3 | Startup checks | Fail hard in production if `FORCE_HTTPS=false` | `app/main.py:startup_security_checks()` |
 | 4 | Transport | App-level HTTP→HTTPS redirect via `HTTPSRedirectMiddleware` | `app/main.py` |
@@ -27,7 +27,7 @@ For the public security policy and responsible-disclosure address, see
 | 12 | Encryption | Ciphertext now prefixed with `v1:` to enable clean key rotation | `app/services/encryption.py` |
 | 13 | Encryption | Support `PAYROLL_ENCRYPTION_SECRET_PREV` for in-flight rotation | `app/services/encryption.py` |
 
-All 452 tests pass after every change.
+The full suite passes after every change.
 
 ---
 
@@ -35,18 +35,25 @@ All 452 tests pass after every change.
 
 ### Startup fail-hard checks
 
-`APP_DEBUG=false` is the production switch. When it's set, three checks run
-at app startup and the process exits if any fails:
+`APP_DEBUG=false` is the production switch. These checks run at app startup
+and the process exits if any fails:
 
-1. `PAYROLL_ENCRYPTION_SECRET` must not be the well-known dev default. If it
-   were, anyone with the source code could decrypt bank PII at rest.
+1. `PAYROLL_ENCRYPTION_SECRET` must not be the well-known dev default, empty
+   or shorter than 16 characters. If it were, anyone with the source code
+   could decrypt bank PII at rest. This one also fires with `APP_DEBUG=true`
+   whenever the database is not SQLite (2.31.3 added the empty and short
+   cases: `.env.example` ships the line empty, and an empty value passed).
 2. `DATABASE_URL` must include `sslmode` (Postgres) or `ssl=` (other
    drivers). Without TLS, payroll data crosses the wire in plaintext.
 3. `FORCE_HTTPS` must be true. Without it, the app would happily serve
    over plain HTTP, leaking session cookies and portal tokens.
 
-The reasoning is the same in all three cases: the cheapest moment to fix a
-config mistake is before the app accepts its first request.
+`SLOWBOOKS_PRIVATE_NETWORK=1` (set by the single-host `docker-compose.yml`)
+skips checks 2 and 3 only, with a warning. Three more refusals are not about
+secrets: a configured `RATE_LIMIT_STORAGE_URI` whose Redis cannot be
+reached, an encrypted company file with no key, and a database behind the
+migration head. The reasoning is the same in every case: the cheapest moment
+to fix a config mistake is before the app accepts its first request.
 
 ### App-level HTTPS + HSTS
 
@@ -54,9 +61,11 @@ Production deployments terminate TLS at a reverse proxy, but defense in
 depth says the app shouldn't trust the proxy unconditionally. With
 `FORCE_HTTPS=true`:
 
-- `HTTPSRedirectMiddleware` 308-redirects plain HTTP to HTTPS at the app.
-  Behind a TLS proxy this is a no-op (the proxy already speaks HTTPS); in
-  front of a misconfigured proxy it closes the gap.
+- `HTTPSRedirectMiddleware` 307-redirects plain HTTP to HTTPS at the app.
+  Behind a TLS proxy it is a no-op once `FORWARDED_ALLOW_IPS` names the
+  proxy, because the forwarded scheme is HTTPS; without that setting the
+  app sees plain HTTP on every request and redirects forever
+  (`ERR_TOO_MANY_REDIRECTS`), see [tls-proxy-setup.md](tls-proxy-setup.md).
 - HSTS tells browsers to refuse plain HTTP for two years. The
   `includeSubDomains` and `preload` directives are required for HSTS
   preload-list submission.
@@ -202,7 +211,7 @@ ciphertext under the same key.
 
 | Risk | Mitigation |
 |------|-----------|
-| A01 — Broken Access Control | Single-user session auth, portal token expiry, rate limiting |
+| A01 — Broken Access Control | Named users in four roles (administrator, bookkeeper, accountant, read-only) enforced centrally; scoped, revocable API tokens that are never administrators; sessions ended on deactivation, role change or password reset; portal token expiry; rate limiting |
 | A02 — Cryptographic Failures | TLS enforced (transport) + Fernet at rest + key rotation path |
 | A03 — Injection | SQLAlchemy ORM throughout; one raw `CREATE DATABASE` guarded by allowlist regex; AST-audited subprocess callsites (zero `shell=True`) |
 | A04 — Insecure Design | Startup checks fail hard on critical misconfig |
@@ -225,17 +234,19 @@ export APP_DEBUG=false
 export PAYROLL_ENCRYPTION_SECRET=$(openssl rand -base64 32)
 export DATABASE_URL="postgresql://user:pass@host:5432/db?sslmode=require"
 export FORCE_HTTPS=true                  # default in production, explicit is better
+export FORWARDED_ALLOW_IPS=127.0.0.1     # the proxy's address or CIDR, never 0.0.0.0/0
 export CORS_ALLOW_ORIGINS="https://yourdomain.com"
 export SESSION_SECRET_KEY=$(openssl rand -base64 48)  # else autogenerated to a file
+export APP_WORKERS=1                     # or run a Redis and set RATE_LIMIT_STORAGE_URI
 
 # Recommended
 export RATE_LIMIT_ENABLED=1              # default on; set to 0 only for load tests
 export HSTS_MAX_AGE=63072000             # 2 years, the preload-list minimum
 ```
 
-Then run behind nginx or Traefik with a real TLS cert. The app's own
-`HTTPSRedirectMiddleware` then becomes a no-op because the proxy already
-speaks HTTPS to it.
+Then run behind Caddy, nginx or Traefik with a real TLS cert. The app's own
+`HTTPSRedirectMiddleware` then becomes a no-op because the proxy forwards
+the HTTPS scheme, from an address `FORWARDED_ALLOW_IPS` trusts.
 
 ---
 
@@ -272,7 +283,6 @@ Run the full suite:
 
 ```bash
 python -m pytest tests/ -q
-# 452 passed
 ```
 
 ### Shell-injection surface audit

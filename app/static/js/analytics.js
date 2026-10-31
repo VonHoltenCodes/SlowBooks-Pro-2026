@@ -326,9 +326,9 @@ const AnalyticsPage = {
                         <tr>
                             <th scope="col">${escapeHtml(nameHeader)}</th>
                             <th scope="col" class="amount">Current</th>
-                            <th scope="col" class="amount">30+</th>
-                            <th scope="col" class="amount">60+</th>
-                            <th scope="col" class="amount">90+</th>
+                            <th scope="col" class="amount">1-30</th>
+                            <th scope="col" class="amount">31-60</th>
+                            <th scope="col" class="amount">61-90+</th>
                             <th scope="col" class="amount">Total</th>
                         </tr>
                     </thead>

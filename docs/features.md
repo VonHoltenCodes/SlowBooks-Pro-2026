@@ -327,7 +327,7 @@ For installations where you don't want **any** AI credentials stored inside Slow
 - **Bearer-token auth.** Slowbooks sends `Authorization: Bearer <shared-secret>`; the Worker compares it against `env.AUTH_TOKEN` in constant time and rejects anything else with a 401
 - **OpenAI wire format.** The Worker translates Workers AI's native response into OpenAI-shaped JSON (including `tool_calls`) so Slowbooks' existing OpenAI-compat code path works unchanged
 
-**5-minute setup:** `wrangler login` → `openssl rand -hex 32` → `wrangler secret put AUTH_TOKEN` → `wrangler deploy` → paste the Worker URL + shared secret into Slowbooks **⚙ AI** → Provider: **Cloudflare Worker Gateway (self-hosted)**. Full step-by-step in **[cloudflare/README.md](../cloudflare/README.md)**.
+**Setup:** `wrangler login` → `openssl rand -hex 32` → `wrangler secret put AUTH_TOKEN` → `wrangler deploy` → in **Settings → AI Insights** choose Provider **Cloudflare Worker Gateway (self-hosted)**, paste the Worker URL and the shared secret, pick a model from the list and **Save AI settings**. Full step-by-step in **[cloudflare/README.md](../cloudflare/README.md)**.
 
 **What it does *not* protect against:** a compromised Slowbooks install still has the shared secret, so it can still invoke *your* Worker — rotate the secret if you suspect compromise; abnormal Worker traffic shows up in the Cloudflare dashboard immediately.
 
@@ -462,7 +462,7 @@ Canonical list of security measures lives in [SECURITY.md](../SECURITY.md); engi
 - **Round-Trip Safe** — Export from Slowbooks, re-import into Slowbooks — deduplication prevents double-entry
 - **Import from Report CSV** — QuickBooks Desktop can't export transactions to IIF, so a detail report saved as CSV uploads instead, the report type detected from its columns and rows: Transaction Detail filtered to **Sales Receipt** (a paid sale + payment each), filtered to **Invoice** (v2.23.0, #291: each invoice with its item lines, quantity and price, its sales tax, its Customer:Job and its number; open, partly paid or paid by the report's Open Balance column, with a payment for what was paid, dated the invoice, to Undeposited Funds — without that column every invoice comes in open and the import says how many did, and uploading the report again with the column marks the invoices here that have nothing paid on them paid or partly paid from it; an invoice's header row posts to Accounts Receivable and a receipt's to the deposit account, so one file can hold both), **Deposit Detail** and **Check Detail** (journal entries on the bank account). On all four, the report's Class column is read: the header row's class is the document's and each line's is its own, and a class the report names is created on first sight with a note (v2.23.1, #308) Re-uploads skip what is already here — an invoice is the same document when it is the same customer's under the report's number, as it was numbered here or as the import renumbered it when that number was taken (QB-1031), or, with no number, of the same date and total
 
-Full IIF format reference, account-type mapping, and round-trip examples live in the [QuickBooks 2003 Interop](#quickbooks-2003-pro-iif-interoperability) section below.
+Full IIF format reference, account-type mapping, and round-trip examples live in the [QuickBooks 2003 Interop](#quickbooks-2003-pro--iif-interoperability) section below.
 
 ## Utilities
 - **Backup Script** — `scripts/backup.sh` — pg_dump with gzip compression, keeps last 30 backups

@@ -70,7 +70,7 @@ SOURCE_TYPE = "qb_ledger_import"
 # QuickBooks' Type for a journal entry on this report
 GENERAL_JOURNAL_TYPES = frozenset({"General Journal", "Journal", "Journal Entry"})
 LEDGER_COLUMNS = ("Type", "Date", "Num", "Name", "Memo", "Split", "Debit", "Credit")
-_DATE_FORMATS = ("%m/%d/%Y", "%m/%d/%y")
+_DATE_FORMATS = ("%m/%d/%Y", "%m/%d/%y", "%Y-%m-%d")  # ISO: an .xlsx upload
 # SlowBooks is US-only, and a date is read as QuickBooks Desktop writes one
 # in the United States, month/day/year (#663): a file with any other date is
 # refused, its rows listed, and never read another way. One garbled
@@ -89,9 +89,10 @@ _DAY_FIRST = (
     " The dates look day first ({first}), and a date is read as "
     "month/day/year (01/31/2024), the way QuickBooks Desktop writes it in the "
     "United States. QuickBooks Desktop writes its dates in the order of "
-    "Windows' region setting: in Windows, set the region's format to English "
-    "(United States) (Control Panel > Region), then export the report from "
-    "QuickBooks again and import that."
+    "Windows' region setting: in Windows, set the regional format to English "
+    "(United States) (Settings > Time & language > Language & region > "
+    "Regional format, or Win+R, intl.cpl), restart QuickBooks, export the "
+    "report again and import that."
 )
 _LOOK_AT_THE_ROWS = (
     " A date reads month/day/year (01/31/2024) and an amount like 1,234.56. "
@@ -101,7 +102,8 @@ _LOOK_AT_THE_ROWS = (
 )
 _HOW = (
     "Export it from QuickBooks Desktop as Reports > Accountant & Taxes > "
-    "Transaction Detail by Account, with the dates set to All, and save it as CSV."
+    "Transaction Detail by Account, one year of dates per file (Excel > Create "
+    "New Worksheet > Create a comma separated values (.csv) file)."
 )
 
 
@@ -1251,7 +1253,9 @@ def _replaces_problem(db: Session, group: dict) -> dict:
     if not voidable:
         text += (
             " The entry in the books is in a completed reconciliation, so it "
-            "cannot be voided to replace it: undo that reconciliation first."
+            "is not replaced (a finished reconciliation is not reopened); leave "
+            "it as it is and clear its difference on 3950 Import Differences "
+            "with a journal entry."
         )
     return {
         "kind": "replaces",

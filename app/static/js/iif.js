@@ -127,8 +127,8 @@ const IIFPage = {
                         invoice comes in open; upload again with it and the open ones here are marked
                         paid), <strong>Deposit Detail</strong>, or <strong>Check Detail</strong> (both
                         import as journal entries on your bank account), or <strong>Transaction Detail
-                        by Account</strong> with the dates set to All (every transaction of every type
-                        as a journal entry; import the lists IIF first); or, for timesheets, <strong>Time by Name by Job detail</strong> or <strong>Time by Job by Name detail</strong> (Reports > Jobs, Time &amp; Mileage), saved as CSV or Excel: every entry becomes an approved time entry under its employee, marked as QuickBooks' so no pay run picks it up. Keep the report's default
+                        by Account</strong>, one year of dates per file (every transaction of every type
+                        as a journal entry; import the lists IIF first); or, for timesheets, <strong>Time by Job Detail</strong> (Reports > Jobs, Time &amp; Mileage; a Time by Name report grouped by job reads too), saved as CSV or Excel: every entry becomes an approved time entry under its employee, marked as QuickBooks' so no pay run picks it up. Keep the report's default
                         columns. Safe to re-upload — what is already here is skipped.
                         <strong>A categorized bank sheet</strong> (the Transaction Pro / SaasAnt layout: Bank Account, Transaction Date, Memo, Payee, Account, Amount) posts each row as the register entry it is, rows sharing the date, payee and memo as one split entry; payees not on the lists are added.
                     </p>

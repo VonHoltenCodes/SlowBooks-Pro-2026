@@ -42,9 +42,11 @@
 //   ALLOWED_MODELS — Comma-separated list of permitted model IDs.
 //                    If not set, defaults to:
 //                      @cf/meta/llama-3.3-70b-instruct-fp8-fast,
-//                      @cf/meta/llama-3.1-8b-instruct,
 //                      @cf/mistral/mistral-7b-instruct-v0.2-lora
-//                    Set via wrangler.toml [vars] or dashboard.
+//                    (llama-3.1-8b-instruct was retired by Cloudflare on
+//                    2026-05-30 and is no longer listed.) Set via
+//                    wrangler.toml [vars] or the dashboard. GET /v1/models
+//                    answers this list, so SlowBooks' model picker shows it.
 //
 //   DEFAULT_MODEL — Model to use if request doesn't specify one.
 //                   Must be in ALLOWED_MODELS.
@@ -63,9 +65,11 @@
 //   3. Generate shared secret:   openssl rand -hex 32
 //   4. Store it in Cloudflare:   wrangler secret put AUTH_TOKEN  (paste it)
 //   5. Deploy:                   wrangler deploy
-//   6. Slowbooks → ⚙ AI          Provider: cloudflare_worker
+//   6. SlowBooks → Settings → AI Insights
+//                                Provider: Cloudflare Worker Gateway (self-hosted)
 //                                Worker URL: <printed by wrangler deploy>
 //                                API key: the shared secret from step 3
+//                                Model: one from the list (this Worker's allowlist)
 //
 // ============================================================================
 
@@ -80,7 +84,6 @@ const MAX_TOOLS = 32;
 const DEFAULT_MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
 const DEFAULT_ALLOWED_MODELS = new Set([
   "@cf/meta/llama-3.3-70b-instruct-fp8-fast",
-  "@cf/meta/llama-3.1-8b-instruct",
   "@cf/mistral/mistral-7b-instruct-v0.2-lora",
 ]);
 
@@ -113,6 +116,34 @@ export default {
     }
 
     // --- Method + path gating ------------------------------------------------
+    const { pathname } = new URL(request.url);
+
+    // The model list SlowBooks' Settings page asks for (GET /v1/models,
+    // OpenAI's shape): this Worker's allowlist. It answered 405 before, so
+    // the picker was empty and Test said "No model chosen".
+    if (request.method === "GET" && pathname.endsWith("/models")) {
+      if (!env.AUTH_TOKEN) {
+        return jsonError(500, "Worker misconfigured: AUTH_TOKEN secret not set.", requestId);
+      }
+      const auth = request.headers.get("authorization") || "";
+      if (!constantTimeEqualPadded(auth, `Bearer ${env.AUTH_TOKEN}`)) {
+        return jsonError(401, "Unauthorized", requestId);
+      }
+      const data = [...resolveAllowedModels(env)].map((id) => ({
+        id,
+        object: "model",
+        owned_by: "cloudflare",
+      }));
+      return new Response(JSON.stringify({ object: "list", data }), {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "x-request-id": requestId,
+          ...getSecurityHeaders(request, env),
+        },
+      });
+    }
+
     if (request.method !== "POST") {
       return jsonError(
         405,
@@ -121,7 +152,6 @@ export default {
       );
     }
 
-    const { pathname } = new URL(request.url);
     if (!pathname.endsWith("/chat/completions")) {
       return jsonError(404, `Unknown route: ${pathname}`, requestId);
     }

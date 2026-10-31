@@ -178,7 +178,7 @@ def test_a_report_without_headings_says_which_report_to_export(
     text = "\n".join(",".join(row) for row in kept) + "\n"
     r = _upload(client, BY_NAME, data=text.encode("utf-8"), name="flat.csv")
     assert r["time_entries"] == 0
-    assert any("Time by Name by Job" in e for e in r["errors"]), r["errors"]
+    assert any("Time by Job Detail" in e for e in r["errors"]), r["errors"]
 
 
 def test_people_already_on_the_employees_list_are_matched_by_name(
@@ -236,7 +236,7 @@ def test_the_pages_list_and_count_them(client, db_session, seed_accounts):
     assert "en.customer_job" in hr and "QuickBooks" in hr
     iif = (root / "app/static/js/iif.js").read_text(encoding="utf-8")
     assert "time_entries: 'Time entries'" in iif
-    assert "(result.time_entries || 0)" in iif and "Time by Name by Job detail" in iif
+    assert "(result.time_entries || 0)" in iif and "Time by Job Detail" in iif
 
 
 def test_the_real_by_job_by_name_detail_layout_reads_the_same(

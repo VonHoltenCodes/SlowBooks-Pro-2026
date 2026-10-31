@@ -22,6 +22,14 @@ This guide covers three options. Pick one.
                                                                     (port 3001)
 ```
 
+Two things every option needs, covered at the end: `FORWARDED_ALLOW_IPS`
+naming the proxy (or every page redirects to itself), and a door the proxy
+can reach. `docker-compose.prod.yml` publishes no port: a proxy on the host
+needs `127.0.0.1:3001:3001` added (see [cloud-hosting.md](cloud-hosting.md),
+step 5), and a proxy in the compose network reaches `slowbooks:3001`. A
+native install should set `APP_HOST=127.0.0.1` so only the proxy reaches the
+app (the example `.env` ships `0.0.0.0`).
+
 ## Option 1: Caddy — easiest
 
 Caddy ships its own ACME client. One file, two lines, you're done.
@@ -32,10 +40,11 @@ books.example.com {
 }
 ```
 
-Save as `/etc/caddy/Caddyfile`, then:
+Install Caddy from its own repository (https://caddyserver.com/docs/install;
+Ubuntu's package is several versions behind), replace the
+`/etc/caddy/Caddyfile` it installed with the two lines above, then:
 
 ```bash
-sudo apt install caddy
 sudo systemctl reload caddy
 ```
 
@@ -53,7 +62,9 @@ More moving parts, but it's what most ops teams already know.
 ### Step 1: install nginx + certbot
 
 ```bash
-sudo apt install nginx certbot python3-certbot-nginx
+sudo apt install nginx
+sudo snap install --classic certbot      # certbot's recommended install; the apt package works too
+sudo ln -s /snap/bin/certbot /usr/bin/certbot
 ```
 
 ### Step 2: site config
@@ -72,7 +83,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        # SlowBooks downloads (pay stubs, tax-form PDFs) can be large.
+        # Uploads: attachments go to 50 MB; receipt scans can be larger.
         client_max_body_size 50M;
         proxy_read_timeout 300s;
     }
@@ -158,8 +169,8 @@ After whichever option:
 # Should return 200 with a real cert
 curl -fsSL https://books.example.com/health
 
-# Should 308 to https
-curl -fsSI http://books.example.com/health | grep -i location
+# Should redirect to https (301 from nginx and certbot, 308 from Caddy)
+curl -sSI http://books.example.com/health | grep -i location
 
 # Cert should grade A or A+
 # Open https://www.ssllabs.com/ssltest/analyze.html?d=books.example.com
@@ -175,9 +186,11 @@ If you're behind AWS ALB / GCP Load Balancer / Azure Application Gateway:
 - Make sure the LB sets `X-Forwarded-Proto: https` so SlowBooks knows
   the original scheme
 
-The app reads `X-Forwarded-For` and `X-Forwarded-Proto` correctly when
-those headers are present, so login-attempt IPs and same-origin checks
-work as expected.
+The app honours `X-Forwarded-For` and `X-Forwarded-Proto` only from the
+addresses in `FORWARDED_ALLOW_IPS` (below), so set it to the load balancer's
+subnet. A health check that speaks plain HTTP to the instance is answered
+`307` (the redirect to HTTPS): configure the check to accept 200–399, or
+check over HTTPS through the balancer.
 
 ## Client IP and rate limiting behind the proxy
 
@@ -215,9 +228,13 @@ retired; the app no longer parses the header a second time.)
 source, letting a client forge its own IP and evade the rate limiter.
 
 For the Traefik option above, the two containers share the compose
-network, so set `FORWARDED_ALLOW_IPS` to that network's CIDR. For nginx
-on the same host forwarding from `127.0.0.1`, the uvicorn default already
-covers it, but setting it explicitly to `127.0.0.1` documents the intent.
+network, so set `FORWARDED_ALLOW_IPS` to that network's CIDR:
+`docker network inspect <folder>_default --format '{{(index .IPAM.Config 0).Subnet}}'`
+prints it. For nginx or Caddy on the same host forwarding to a **native**
+app from `127.0.0.1`, the uvicorn default already covers it. For the app
+**in Docker** with the proxy on the host, the app sees the Docker bridge
+gateway (172.x.0.1), not 127.0.0.1, so the same `docker network inspect`
+subnet is the value to set.
 
 ### `RATE_LIMIT_STORAGE_URI` — required for multiple workers
 
@@ -230,8 +247,19 @@ Point the counters at shared storage so the limit means what it says:
 RATE_LIMIT_STORAGE_URI=redis://redis:6379/0
 ```
 
-Leave it unset for a single-worker container or the desktop app, where
-the in-memory default is correct. The app logs a warning at startup when
+Neither compose file ships a Redis, so add one beside the app (and an
+unreachable one stops the app at startup):
+
+```yaml
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+```
+
+Or set `APP_WORKERS=1` and leave the URI unset. Leave it unset for a
+single-worker container or the desktop app, where the in-memory default is
+correct. The app logs a warning at startup when
 `APP_WORKERS > 1` and this is unset. The `redis` client ships with the app,
 and when the URI is set the storage is health-checked once at startup: an
 unreachable Redis stops the app with a message naming the variable and the
@@ -245,7 +273,7 @@ host, rather than turning every login into a 500.
 | `ERR_TOO_MANY_REDIRECTS` | `FORWARDED_ALLOW_IPS` is unset (or does not cover the proxy's address). uvicorn then ignores the proxy's `X-Forwarded-Proto: https`, sees plain `http` on every request, and `FORCE_HTTPS` redirects to HTTPS forever. Set `FORWARDED_ALLOW_IPS` to the proxy's address or CIDR (above) and check the proxy sends `X-Forwarded-Proto: https`. |
 | HSTS won't go away after disable | The browser cached it for `HSTS_MAX_AGE` seconds (2 years by default). Use a private window to test cert changes. |
 | Let's Encrypt rate-limited | You hit 5 cert requests per week for the same domain. Wait, or use the staging environment (`--staging` flag) while iterating. |
-| 502 Bad Gateway from nginx | SlowBooks isn't running, or it's bound to `127.0.0.1` and nginx is in a different namespace. Check `ss -tlnp \| grep 3001`. |
+| 502 Bad Gateway from nginx or Caddy | SlowBooks isn't running, or nothing listens on the host's port 3001: `docker-compose.prod.yml` publishes no port until you add `127.0.0.1:3001:3001` (cloud-hosting.md step 5). Check `ss -tlnp \| grep 3001`. |
 
 ## Once it's up
 
