@@ -170,9 +170,10 @@ def test_a_day_first_file_is_refused_with_its_rows(client, db_session, seed_acco
         "(20/03/2024), and a date is read as month/day/year (01/31/2024), the "
         "way QuickBooks Desktop writes it in the United States. QuickBooks "
         "Desktop writes its dates in the order of Windows' region setting: in "
-        "Windows, set the region's format to English (United States) (Control "
-        "Panel > Region), then export the report from QuickBooks again and "
-        "import that."
+        "Windows, set the regional format to English (United States) (Settings "
+        "> Time & language > Language & region > Regional format, or Win+R, "
+        "intl.cpl), restart QuickBooks, export the report again and import "
+        "that."
     )
     # nothing is read day-first any more, so nothing says so
     assert not any("day/month/year" in w for w in data["warnings"])
@@ -204,17 +205,18 @@ def test_one_garbled_date_never_turns_a_us_file_day_first(
 
 
 def test_a_date_that_reads_no_way_is_refused(client, db_session, seed_accounts):
-    """31/02 is no date in either order, and 2024-03-25 is not one QuickBooks
+    """31/02 is no date in either order, and 25.03.2024 is not one QuickBooks
     writes: the rows are listed, and the sentence says how a date reads,
-    not that the dates look day first."""
-    data = send(client, _day_first(["05/03/2024", "31/02/2024", "2024-03-25"]))
+    not that the dates look day first. (2024-03-25 reads since 2.31.3: the
+    Excel route writes its dates that way.)"""
+    data = send(client, _day_first(["05/03/2024", "31/02/2024", "25.03.2024"]))
     assert data["journals"] == 0 and _imported(db_session) == []
     lead, *rows = data["errors"]
     assert rows == [
         "Row 4: the date ('31/02/2024') is not month/day/year",
-        "Row 5: the date ('2024-03-25') is not month/day/year",
+        "Row 5: the date ('25.03.2024') is not month/day/year",
         "Row 9: the date ('31/02/2024') is not month/day/year",
-        "Row 10: the date ('2024-03-25') is not month/day/year",
+        "Row 10: the date ('25.03.2024') is not month/day/year",
     ]
     assert lead.startswith("Nothing was imported: 4 rows could not be read")
     assert "look day first" not in lead
