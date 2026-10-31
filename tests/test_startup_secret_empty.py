@@ -58,3 +58,10 @@ def test_the_startup_check_raises_on_the_empty_secret(monkeypatch):
     monkeypatch.setattr(cfg, "APP_DEBUG", True)
     with pytest.raises(RuntimeError, match="empty or shorter"):
         m._run_startup_security_checks()
+
+
+def test_a_typed_short_secret_is_refused_on_the_desktop_too():
+    # SQLite with APP_DEBUG on is every desktop install; a hand-edited .env
+    # with a short value used to pass and encrypt bank numbers with it
+    problem = _payroll_secret_problem("tooshort", is_real_db=False, app_debug=True)
+    assert problem and "shorter than 16" in problem and "clear the line" in problem

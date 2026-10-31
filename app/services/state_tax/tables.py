@@ -1048,8 +1048,8 @@ _add(
 
 # States with a dedicated engine (kept here only for the catalog / SUTA base)
 # Dedicated engines (ca.py, ny.py, oregon.py, wa.py): name, 2026 SUTA wage
-# base (the same figure each engine carries) and a summary of what it
-# withholds. Sources: CA EDD DE 44 Rev. 52 (4-26) "2026 Payroll Tax Rates"
+# base (the same figure each engine carries), a summary of what it
+# withholds, the year and the publications the engine was set from. Sources: CA EDD DE 44 Rev. 52 (4-26) "2026 Payroll Tax Rates"
 # (UI taxable wage limit $7,000); NY DOL "NYS-45 Quarterly Reporting" UI wage
 # base table (2026 - $17,600); Oregon Employment Department release
 # 2025-11-18 (2026 taxable wage base $56,700); WA ESD "Taxable wage base"
@@ -1060,12 +1060,21 @@ DEDICATED = {
         D(7000),
         "Progressive (EDD DE 44 Method B 2026, low-income exemption, "
         "$168.30 allowance credit) + SDI 1.3% — dedicated engine",
+        "2026",
+        "EDD California Withholding Schedules for 2026, Method B (Tables 1-7); "
+        "EDD DE 44 Rev. 52 (4-26), 2026 Payroll Tax Rates (SDI 1.3%, no cap; UI "
+        "taxable wage limit $7,000)",
     ),
     "NY": (
         "New York",
         D(17600),
         "Progressive (NYS-50-T-NYS (1/26) exact calculation, $1,000 per "
         "exemption) + SDI + PFL 0.432% — dedicated engine",
+        "2026",
+        "NYS-50-T-NYS (1/26) New York State Withholding Tax Tables and Methods, "
+        "exact calculation method; paidfamilyleave.ny.gov 2026 rate (0.432%, "
+        "$411.91 cap); NY DOL NYS-45 UI wage base table (2026 $17,600); WCL 209 "
+        "SDI 0.5% to $0.60 a week",
     ),
     "OR": (
         "Oregon",
@@ -1073,12 +1082,22 @@ DEDICATED = {
         "Progressive (DOR 150-206-436 2026 formula, federal tax subtraction, "
         "$263 credit) + Paid Leave Oregon 0.6%/0.4% + statewide transit tax "
         "0.1% — dedicated engine",
+        "2026",
+        "Oregon DOR 150-206-436 Withholding Tax Formulas, effective 2026-01-01 "
+        "(Rev. 12-31-25); paidleave.oregon.gov employer contributions (1% to "
+        "$184,500, 60/40); OED 2026 tax rate release 2025-11-18 (UI base "
+        "$56,700); DOR statewide transit tax 0.1%",
     ),
     "WA": (
         "Washington",
         D(78200),
-        "No income tax; PFML 1.13% (71.43%/28.57%), WA Cares 0.58%, L&I by "
-        "risk class — dedicated engine",
+        "No income tax; PFML 1.13% (71.43% employee / 28.57% employer to "
+        "$184,500), WA Cares 0.58%, L&I by hours — dedicated engine",
+        "2026",
+        "WA ESD Paid Leave 2026 premium rate release 2025-10-29 (1.13%, "
+        "71.43/28.57, Social Security cap); paidleave.wa.gov WA Cares 0.58%; "
+        "WA ESD taxable wage base (2026 $78,200); L&I 2026 Hourly Rates by Risk "
+        "Classification Code and Fund",
     ),
 }
 

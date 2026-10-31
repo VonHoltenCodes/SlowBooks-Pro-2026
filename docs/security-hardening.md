@@ -13,7 +13,7 @@ For the public security policy and responsible-disclosure address, see
 
 | # | Area | What changed | Where |
 |---|------|--------------|-------|
-| 1 | Startup checks | Fail hard in production, or on any non-SQLite database, if `PAYROLL_ENCRYPTION_SECRET` is the dev default, empty or shorter than 16 characters | `app/main.py:_run_startup_security_checks()` |
+| 1 | Startup checks | Fail hard in production, or on any non-SQLite database, if `PAYROLL_ENCRYPTION_SECRET` is the dev default or empty; on every install, the desktop included, if it was typed shorter than 16 characters | `app/main.py:_run_startup_security_checks()` |
 | 2 | Startup checks | Fail hard in production if `DATABASE_URL` does not specify `sslmode` | `app/main.py:startup_security_checks()` |
 | 3 | Startup checks | Fail hard in production if `FORCE_HTTPS=false` | `app/main.py:startup_security_checks()` |
 | 4 | Transport | App-level HTTP→HTTPS redirect via `HTTPSRedirectMiddleware` | `app/main.py` |
@@ -41,8 +41,9 @@ and the process exits if any fails:
 1. `PAYROLL_ENCRYPTION_SECRET` must not be the well-known dev default, empty
    or shorter than 16 characters. If it were, anyone with the source code
    could decrypt bank PII at rest. This one also fires with `APP_DEBUG=true`
-   whenever the database is not SQLite (2.31.3 added the empty and short
-   cases: `.env.example` ships the line empty, and an empty value passed).
+   whenever the database is not SQLite, and the short case fires on every
+   install, the desktop included (2.31.3: `.env.example` ships the line
+   empty, and an empty value passed; a typed short value passed on SQLite).
 2. `DATABASE_URL` must include `sslmode` (Postgres) or `ssl=` (other
    drivers). Without TLS, payroll data crosses the wire in plaintext.
 3. `FORCE_HTTPS` must be true. Without it, the app would happily serve

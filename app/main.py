@@ -177,8 +177,9 @@ def _payroll_secret_problem(
     and in production; so is an empty or short value (2.31.3: .env.example
     ships the line as `PAYROLL_ENCRYPTION_SECRET=`, which read as "" and
     passed the dev-default check, so a native install made from it encrypted
-    with a key derived from nothing). SQLite in development is exempt; the
-    frozen app generates its own secret."""
+    with a key derived from nothing). SQLite in development is exempt from
+    the empty check (the frozen app generates its own secret), but a typed
+    value shorter than 16 characters is refused everywhere (2.31.3 gate)."""
     dev_key = "slowbooks-dev-payroll-key-change-me"
     if is_real_db and secret == dev_key:
         return (
@@ -193,6 +194,16 @@ def _payroll_secret_problem(
             "characters. Employee bank account numbers would be encrypted with "
             "a key anyone can derive. Set it to the output of "
             "`openssl rand -base64 32` in .env before starting."
+        )
+    if secret and secret != dev_key and len(secret) < 16:
+        # a value someone typed into .env, too short to protect anything:
+        # refused on the desktop too (the launcher only generates a secret
+        # when the line is empty or the placeholder)
+        return (
+            "FATAL: PAYROLL_ENCRYPTION_SECRET is shorter than 16 characters. "
+            "Employee bank account numbers would be encrypted with a key anyone "
+            "can guess. Set it to the output of `openssl rand -base64 32` in "
+            ".env, or clear the line and the app makes one, before starting."
         )
     return None
 

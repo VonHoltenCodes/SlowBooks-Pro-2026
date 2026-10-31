@@ -613,9 +613,9 @@ const AnalyticsPage = {
     };
     const bucketLabels = {
       current: "Current",
-      30: "30+ days",
-      60: "60+ days",
-      90: "90+ days",
+      30: "1-30 days",
+      60: "31-60 days",
+      90: "61-90+ days",
     };
 
     const datasets = buckets.map((b) => ({

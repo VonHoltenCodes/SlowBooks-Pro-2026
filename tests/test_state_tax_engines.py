@@ -587,5 +587,5 @@ def test_tables_ss_base_is_the_2026_social_security_wage_base():
 def test_dedicated_catalog_suta_bases_match_the_engines():
     from app.services.state_tax.tables import DEDICATED
 
-    for code, (_name, base, _summary) in DEDICATED.items():
+    for code, (_name, base, *_rest) in DEDICATED.items():
         assert get_engine(code).suta_wage_base == base, code

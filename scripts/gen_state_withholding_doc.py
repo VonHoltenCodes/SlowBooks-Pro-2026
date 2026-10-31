@@ -135,10 +135,17 @@ def main() -> int:
                 )
             )
         else:
-            name, base, summary = DEDICATED[code]
+            name, base, summary, year, source = DEDICATED[code]
             rows.append(
-                "| **{}** {} | {} | see engine | see engine | {} | see engine | `{}` |".format(
-                    code, name, cell(summary), money(base), ENGINE_FILES[code]
+                "| **{}** {} | {} | see `{}` | see `{}` | {} | {} | {} |".format(
+                    code,
+                    name,
+                    cell(summary),
+                    ENGINE_FILES[code],
+                    ENGINE_FILES[code],
+                    money(base),
+                    year,
+                    cell(source),
                 )
             )
 

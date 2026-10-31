@@ -6,7 +6,7 @@
       "Every state's withholding table was set from the state's own 2026 publication, and the California, New York, Oregon and Washington engines were rebuilt from theirs (Paid Leave Oregon was missing). Verify against the publication before filing, as before.",
       "Form 940 applies the FUTA credit reduction for an employer in a credit-reduction state, and the 1099-NEC threshold is $2,000 for payments made from 2026.",
       "Server Edition keeps its books under the data folder, copies the desktop books from where the app keeps them, stays running after three days and on battery, and comes back after an update.",
-      "A payroll encryption secret too short to protect anything is refused at startup, the backup script finishes every database, and QuickBooks Desktop ledger exports read whatever the Windows region."
+      "A payroll encryption secret too short to protect anything is refused at startup on every install, the backup script finishes every database, and QuickBooks Desktop ledger exports read whatever the Windows region."
     ]
   },
   "2.31.2": {
