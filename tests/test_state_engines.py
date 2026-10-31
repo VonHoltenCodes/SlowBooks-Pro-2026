@@ -75,7 +75,12 @@ def test_bracket_states_are_monotonic_and_honour_status_and_allowances(code):
     top = spec.brackets["single"][-1][1]
     assert c.income_tax <= Decimal("12000") * top + Decimal("0.01"), code
     married = calc(code, gross=4000, status="married")
-    assert married.income_tax <= b.income_tax, code
+    if code == "ND":
+        # ND's 2026 Section 2 tables put the married zero bracket at $57,500,
+        # $125 under the single one ($57,625), so married withholds 10¢ more.
+        assert married.income_tax - b.income_tax == Decimal("0.10"), code
+    else:
+        assert married.income_tax <= b.income_tax, code
     if spec.exemption:
         assert (
             calc(code, gross=4000, state_allowances=3).income_tax < b.income_tax
@@ -101,9 +106,15 @@ def test_pennsylvania_flat_no_deductions_plus_employee_ui():
 
 
 def test_virginia_brackets_and_deductions():
-    # 52,000 − 8,750 std − 930 × 1 = 42,320 → 60 + 60 + 600 + (42,320 − 17,000) × 5.75% = 2,175.90 / 26
+    # Rev. 10/26 formula: 52,000 − [8,750 + 930 × 1] = 42,320
+    # → 720 + (42,320 − 17,000) × 5.75% = 2,175.90 / 26
     r = calc("VA", gross=2000, state_allowances=1)
     assert r.income_tax == Decimal("83.69")
+    # the $8,750 deduction is the same for every filing status
+    assert (
+        calc("VA", gross=2000, status="married").income_tax
+        == calc("VA", gross=2000).income_tax
+    )
 
 
 def test_maryland_needs_a_county_rate():
@@ -129,7 +140,8 @@ def test_new_jersey_other_items_cap_at_the_wage_base():
         "NJ", gross=2000, ytd=43000
     )  # $1,800 left under the UI base; DI/FLI base is $171,100
     assert capped.employee_other == Decimal("16.05")
-    assert r.income_tax > 0
+    # Rate Table A (single), annual: 795 + 6.1% × (52,000 − 40,000) = 1,527.00 / 26
+    assert r.income_tax == Decimal("58.73")
 
 
 def test_pfml_states_split_employee_and_employer():
