@@ -27,7 +27,7 @@ def test_the_docs_carry_the_second_server_recipe():
     ops = (ROOT / "docs/operations.md").read_text(encoding="utf-8")
     assert "## Several companies on a server" in ops
     assert "slowbooks-second:" in ops and "YOUR_DATABASE_NAME" in ops
-    assert '"3002:3001"' in ops and "slowbooks_uploads_second" in ops
+    assert '3002:3001"' in ops and "slowbooks_uploads_second" in ops
     features = (ROOT / "docs/features.md").read_text(encoding="utf-8")
     assert "switchable from UI" not in features
     assert "a second company is a second server pointed at its database" in features

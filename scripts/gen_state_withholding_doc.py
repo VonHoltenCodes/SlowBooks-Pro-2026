@@ -163,13 +163,13 @@ def main() -> int:
         + FOOTER
     )
     if "--check" in sys.argv:
-        current = OUT.read_text() if OUT.exists() else ""
-        if current != doc:
+        current = OUT.read_text(encoding="utf-8") if OUT.exists() else ""
+        if current.replace("\r\n", "\n") != doc:
             print(f"{OUT.relative_to(ROOT)} is out of date; run {Path(__file__).name}")
             return 1
         print("up to date")
         return 0
-    OUT.write_text(doc)
+    OUT.write_text(doc, encoding="utf-8", newline="\n")
     print(f"wrote {OUT.relative_to(ROOT)} ({len(rows)} rows)")
     return 0
 
