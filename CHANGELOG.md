@@ -29,7 +29,9 @@ the list with the rules they always had, an entry is added for any other
 number of days the old parser read from text in use, and only the text the
 old parser read as exactly those days is tied to them ("net<TAB>45" was 30
 days and stays untied). Anything untied is read as the old parser read it,
-everywhere (A/P aging included); a document says what its due date is. A name the app already
+everywhere (A/P aging included); a document says what its due date is. Term
+names are stored with whitespace collapsed and invisible characters taken
+out, so a name reads, matches and parses alike. A name the app already
 reads ("Net 30", "COD") keeps its meaning. A recurring invoice whose terms
 are any of the receipt words (Due on Receipt, due upon receipt, COD, Net 0,
 in any case) is now due the day it is made; its generator had its own
@@ -43,7 +45,15 @@ one) is refused unless the payment says `allow_discount_override`, which is
 an administrator's; the forms ask first, and the payment, the memo or
 credit and the audit log record who took it and why. A discount the
 customer took after a short payment is taken with that payment later
-(`POST /api/payments/{id}/discount`, and `/api/bill-payments/{id}/discount`). On the cash basis a discount settles its share of the
+(`POST /api/payments/{id}/discount`, and `/api/bill-payments/{id}/discount`).
+A discount is a percent of the document's total, never on a payment dated
+before the document, and never on money a payment's remainder paid later.
+**The CSV list import changes on purpose:** Terms are no longer limited to
+the five the forms offered. A row takes any term on the list (matched as
+the list matches, so "net<TAB>45" is the listed Net 45) or any terms the old
+parser reads ("Net 99", "COD", "Net 0", "Net 1_0"), kept as typed, so rows
+main refused now come in; terms nothing reads, and terms that would be due
+before their date ("Net -5"), are still refused, each naming its row. On the cash basis a discount settles its share of the
 document as a payment does, and is recomputed with the payments when the
 document is edited, so the cash Sales Tax report agrees with its ledger. An invoice or bill
 with a discount taken keeps its terms and date. Migration `e5c1a7d3f9b2`

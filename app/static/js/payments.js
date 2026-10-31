@@ -121,10 +121,7 @@ const PaymentsPage = {
             API.get(`/invoices/${invoiceId}`),
             API.get('/accounts'),
         ]);
-        const alloc = p.allocations.find(a => a.invoice_id === invoiceId) || { amount: 0 };
-        const before = { ...inv, balance_due: (parseFloat(inv.balance_due) || 0) + (parseFloat(alloc.amount) || 0) };
-        const cents = Math.min(PaymentTerms.suggestedCents(before, p.date),
-            Math.round((parseFloat(inv.balance_due) || 0) * 100));
+        const cents = PaymentTerms.suggestedCents(inv, p.date);
         openModal(`Take a discount on ${T('Invoice')} #${escapeHtml(inv.invoice_number)}`, `
             <form id="take-discount-form" onsubmit="PaymentsPage.saveTakeDiscount(event, ${paymentId}, ${invoiceId})">
                 <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(inv.discount_line || 'Its terms offer no early-payment discount.')}

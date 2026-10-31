@@ -12,7 +12,7 @@
 
 from datetime import date as dt_date
 from decimal import Decimal
-from typing import Literal
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func
@@ -97,6 +97,17 @@ def _response(db: Session, term: PaymentTerm) -> PaymentTermResponse:
     return resp
 
 
+def _carried(docs: int, others) -> str:
+    """Where a term is, counted the same way in every refusal (#665: the
+    rename and the rule refusals gave two totals a minute apart)."""
+    said = f"is on {docs} invoices and bills saved under it"
+    if others:
+        said += (
+            f", and {others} customers, vendors, schedules or settings carry its name"
+        )
+    return said
+
+
 def _refuse(sentence: str):
     raise HTTPException(status_code=422, detail=sentence)
 
@@ -128,8 +139,13 @@ def _check_rule(v: dict) -> None:
             _refuse("A date-driven term needs the day of the month it's due.")
         if not 1 <= v["due_day"] <= 31:
             _refuse("The day of the month it's due must be 1 to 31.")
-        if not 0 <= (v["cutoff_days"] or 0) <= 31:
-            _refuse("The days before the due day must be 0 to 31.")
+        # past 28 a cutoff can be longer than February, and a document
+        # dated in it would be due sooner than its own cutoff (#665)
+        if not 0 <= (v["cutoff_days"] or 0) <= 28:
+            _refuse(
+                "The days before the due day must be 0 to 28, so the cutoff "
+                "fits inside February."
+            )
         if v["net_days"] is not None or v["discount_days"] is not None:
             _refuse(
                 "A date-driven term is due on a day of the month; a number of "
@@ -216,21 +232,39 @@ def list_terms(
 def terms_dates(
     request: Request,
     date: dt_date,
-    terms: str = Query("", max_length=TERMS_MAX),
+    terms: str = "",
     document: Literal["invoice", "bill"] = Query("invoice"),
+    invoice_id: Optional[int] = None,
+    bill_id: Optional[int] = None,
     db: Session = Depends(get_db),
 ):
     """The due date, early-payment discount and any note that a document
-    dated `date` with these terms gets when saved now: what the forms show
-    as terms are picked, by the same parser the save uses."""
-    _only(request, "date", "terms", "document")
+    dated `date` with these terms gets when saved: what the forms show as
+    terms are picked, by the same parser the save uses. With `invoice_id`
+    or `bill_id` (an edit) and terms that are the document's own text
+    exactly, its own rule answers, as the save keeps it (#665)."""
+    _only(request, "date", "terms", "document", "invoice_id", "bill_id")
+    if len(terms) > TERMS_MAX:
+        _refuse(f"Terms are at most {TERMS_MAX} characters; these are {len(terms)}.")
     if not MIN_REQUEST_YEAR <= date.year <= MAX_REQUEST_YEAR:
         _refuse(
             f"Date {date.isoformat()} is out of range; the year must be between "
             f"{MIN_REQUEST_YEAR} and {MAX_REQUEST_YEAR}."
         )
+    if invoice_id is not None and bill_id is not None:
+        _refuse("Send invoice_id or bill_id, not both.")
+    doc = None
+    if invoice_id is not None:
+        doc = get_or_404(db, Invoice, invoice_id, "Invoice")
+        document = "invoice"
+    elif bill_id is not None:
+        doc = get_or_404(db, Bill, bill_id, "Bill")
+        document = "bill"
     try:
-        got = parser.terms_dates(db, date, terms, document)
+        if doc is not None and terms == (doc.terms or ""):
+            got = parser.document_terms_dates(db, doc, date, document)
+        else:
+            got = parser.terms_dates(db, date, terms, document)
     except OverflowError:
         _refuse(
             f'"{terms.strip()}" from {date.isoformat()} runs past the calendar; '
@@ -251,7 +285,10 @@ def get_term(term_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("", response_model=PaymentTermResponse, status_code=201)
-def create_term(data: PaymentTermCreate, db: Session = Depends(get_db)):
+def create_term(
+    data: PaymentTermCreate, request: Request, db: Session = Depends(get_db)
+):
+    _only(request)
     # The first term a company adds joins the ones the forms always offered.
     parser.ensure_seeded(db)
     if _name_taken(db, data.name):
@@ -267,7 +304,13 @@ def create_term(data: PaymentTermCreate, db: Session = Depends(get_db)):
 
 
 @router.put("/{term_id}", response_model=PaymentTermResponse)
-def update_term(term_id: int, data: PaymentTermUpdate, db: Session = Depends(get_db)):
+def update_term(
+    term_id: int,
+    data: PaymentTermUpdate,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    _only(request)
     term = get_or_404(db, PaymentTerm, term_id, "Payment term")
     changes = data.model_dump(exclude_unset=True)
     for key in ("name", "kind", "cutoff_days", "is_active"):
@@ -277,14 +320,13 @@ def update_term(term_id: int, data: PaymentTermUpdate, db: Session = Depends(get
     if "name" in changes and changes["name"] != term.name:
         if _name_taken(db, changes["name"], except_id=term.id):
             _taken(changes["name"])
-        used = docs + _elsewhere(db, term.name)
-        if used:
+        others = _elsewhere(db, term.name)
+        if docs or others:
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"{term.name} is in use ({used} documents, customers, vendors "
-                    "or settings carry it), so its name stays. Add a new term "
-                    "and make this one inactive."
+                    f"{term.name} {_carried(docs, others)}, so its name stays. Add "
+                    "a new term and make this one inactive."
                 ),
             )
     rule = {k: getattr(term, k) for k in RULE_FIELDS}
@@ -311,9 +353,9 @@ def update_term(term_id: int, data: PaymentTermUpdate, db: Session = Depends(get
             raise HTTPException(
                 status_code=409,
                 detail=(
-                    f"{term.name} is on {docs} invoices and bills saved under it, "
-                    "so its rule stays as they were made under it. Add a new "
-                    "term and make this one inactive."
+                    f"{term.name} {_carried(docs, None)}, so its rule stays as "
+                    "they were made under it. Add a new term and make this one "
+                    "inactive."
                 ),
             )
         _check_rule(proposed)

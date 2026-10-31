@@ -272,7 +272,7 @@ def create_bill_payment(
             "bill",
             bill.bill_number,
             discount,
-            bill.balance_due,
+            bill.total,
             data.date,
             data.allow_discount_override,
             may_override,
@@ -418,6 +418,12 @@ def add_discount(
     from app.services import early_pay_discounts
     from app.services.currency import document_currency, home_currency
 
+    # a query parameter this route doesn't take is refused, not ignored
+    if request is not None and request.query_params:
+        key = next(iter(request.query_params.keys()))
+        raise HTTPException(
+            status_code=422, detail=f"'{key}' is not a parameter this accepts."
+        )
     replay = request_keys.reserve(
         db,
         request,
@@ -432,7 +438,6 @@ def add_discount(
         db.query(BillPayment)
         .filter(BillPayment.id == bill_payment_id)
         .with_for_update()
-        .populate_existing()
         .first()
     )
     if not payment:
@@ -445,13 +450,7 @@ def add_discount(
     acct = early_pay_discounts.discount_account(
         db, data.discount_account_id, [data.discount], data.allow_discount_override
     )
-    bill = (
-        db.query(Bill)
-        .filter(Bill.id == data.bill_id)
-        .with_for_update()
-        .populate_existing()
-        .first()
-    )
+    bill = db.query(Bill).filter(Bill.id == data.bill_id).with_for_update().first()
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     number = bill.bill_number
@@ -478,14 +477,13 @@ def add_discount(
     early_pay_discounts.refuse_foreign(
         bill, document_currency(bill, db), home_currency(db), number, "bill"
     )
-    before = _q(Decimal(str(bill.balance_due)) + Decimal(str(paid.amount)))
     against = early_pay_discounts.check_against_terms(
         db,
         bill,
         "bill",
         number,
         discount,
-        before,
+        bill.total,
         payment.date,
         data.allow_discount_override,
         request is None or is_admin(request),

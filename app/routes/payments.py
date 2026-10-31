@@ -301,7 +301,7 @@ def create_payment(
             "invoice",
             invoice.invoice_number,
             discount,
-            invoice.balance_due,
+            invoice.total,
             data.date,
             data.allow_discount_override,
             may_override,
@@ -537,7 +537,10 @@ def apply_payment(payment_id: int, data: PaymentApply, db: Session = Depends(get
         latest = max(latest, invoice.date)
         db.add(
             PaymentAllocation(
-                payment_id=payment.id, invoice_id=invoice.id, amount=amount
+                payment_id=payment.id,
+                invoice_id=invoice.id,
+                amount=amount,
+                from_remainder=True,
             )
         )
         invoice.amount_paid += amount
@@ -611,6 +614,12 @@ def add_discount(
     from app.services import early_pay_discounts
     from app.services.currency import document_currency, home_currency
 
+    # a query parameter this route doesn't take is refused, not ignored
+    if request is not None and request.query_params:
+        key = next(iter(request.query_params.keys()))
+        raise HTTPException(
+            status_code=422, detail=f"'{key}' is not a parameter this accepts."
+        )
     replay = request_keys.reserve(
         db,
         request,
@@ -621,12 +630,10 @@ def add_discount(
     if replay is not None and not isinstance(replay, request_keys.Reservation):
         return replay
     _claim(db, Payment, payment_id)
+    # FOR UPDATE reads the rows afresh even when this session holds them
+    # already, so a void or a discount since is seen (#665)
     payment = (
-        db.query(Payment)
-        .filter(Payment.id == payment_id)
-        .with_for_update()
-        .populate_existing()
-        .first()
+        db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
     )
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -642,13 +649,23 @@ def add_discount(
         db.query(Invoice)
         .filter(Invoice.id == data.invoice_id)
         .with_for_update()
-        .populate_existing()
         .first()
     )
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     number = invoice.invoice_number
-    paid = next((a for a in payment.allocations if a.invoice_id == invoice.id), None)
+    on_it = [a for a in payment.allocations if a.invoice_id == invoice.id]
+    paid = next((a for a in on_it if not a.from_remainder), None)
+    if paid is None and on_it:
+        # its remainder applied later: Apply refuses a discount, so this does
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This payment's money on invoice {number} was applied later from "
+                "its remainder; an early-payment discount is taken when the "
+                "payment is received, not when its remainder is applied."
+            ),
+        )
     if paid is None:
         raise HTTPException(
             status_code=400,
@@ -671,15 +688,13 @@ def add_discount(
     early_pay_discounts.refuse_foreign(
         invoice, document_currency(invoice, db), home_currency(db), number, "invoice"
     )
-    # its balance before this payment, as when the discount was suggested
-    before = _q(Decimal(str(invoice.balance_due)) + Decimal(str(paid.amount)))
     against = early_pay_discounts.check_against_terms(
         db,
         invoice,
         "invoice",
         number,
         discount,
-        before,
+        invoice.total,
         payment.date,
         data.allow_discount_override,
         request is None or is_admin(request),

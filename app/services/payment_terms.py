@@ -58,9 +58,13 @@ def _strip_format(text: str, keep=frozenset()) -> str:
 def clean_name(text: Optional[str]) -> str:
     """A term name as stored: NFKC-normalized (a full-width "Ｎｅｔ" is
     "Net"), invisible format characters (a zero-width space, a BOM, a
-    direction mark) taken out but for the joiners, so no two names on the
-    list look the same and differ unseen."""
-    return _strip_format(unicodedata.normalize("NFKC", text or ""), JOINERS)
+    direction mark) taken out but for the joiners, and every run of
+    whitespace (a tab, CR, LF, NBSP) one space, trimmed (#665: "Net<TAB>81"
+    passed the name guard, which read it as main did, then matched plain
+    "Net 81" through the list's key). Stored so, a name is read by the
+    guard, matched by the list and parsed by main_days alike."""
+    text = _strip_format(unicodedata.normalize("NFKC", text or ""), JOINERS)
+    return " ".join(text.split())
 
 
 def _key(text: Optional[str]) -> str:
@@ -468,3 +472,32 @@ def term_id_for(db: Session, text: Optional[str]) -> Optional[int]:
     with db.no_autoflush:
         term = find_term(db, text)
     return term.id if term is not None else None
+
+
+def document_terms_dates(db: Session, doc, on: date, noun: str) -> TermsDates:
+    """What a saved document's own terms give it dated `on`: its own rule
+    (the term it was saved under, or the old reading of its text), as the
+    save keeps it while its terms are sent back unchanged (#665: the bill
+    form promised a discount from a term an old untied bill doesn't
+    follow). A void or foreign-currency one offers no discount."""
+    if not _key(doc.terms):
+        return TermsDates(due_date=on + timedelta(days=FALLBACK_DAYS))
+    rule = document_rule(db, doc)
+    if rule is None:
+        text = doc.terms.strip()
+        note = (
+            f'This {noun}\'s terms were first saved before "{text}" was on the '
+            "terms list, so it keeps their old reading: the due date is "
+            f"{FALLBACK_DAYS} days from the {noun} date."
+            if find_term(db, text) is not None
+            else unrecognised_note(doc.terms, noun)
+        )
+        return TermsDates(due_date=on + timedelta(days=FALLBACK_DAYS), note=note)
+    by = rule.discount_date(on)
+    if by is None or _void(doc) or _foreign(db, doc):
+        return TermsDates(due_date=rule.due_date(on))
+    return TermsDates(
+        due_date=rule.due_date(on),
+        discount_percent=rule.discount_percent,
+        discount_date=by,
+    )

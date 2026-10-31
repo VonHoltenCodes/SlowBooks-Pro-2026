@@ -10,6 +10,7 @@ from pydantic import (
 )
 
 from app.schemas.common import (
+    Discount,
     StrictModel,
     TaxRateFloat,
     TaxRateOut,
@@ -251,7 +252,7 @@ class BillPaymentAllocationCreate(StrictModel):
     amount: float
     # An early-payment discount we took on this bill (#664), on top of
     # `amount`: posted to the payment's discount_account_id.
-    discount: Decimal = Decimal("0")
+    discount: Discount = Decimal("0")
 
 
 class BillPaymentCreate(StrictModel):
@@ -286,7 +287,7 @@ class BillPaymentDiscountAdd(StrictModel):
     of the bill (#665), recorded against that payment."""
 
     bill_id: int
-    discount: Decimal
+    discount: Discount
     discount_account_id: int
     allow_discount_override: StrictBool = False
 

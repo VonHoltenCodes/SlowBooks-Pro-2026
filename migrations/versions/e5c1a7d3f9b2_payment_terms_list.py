@@ -23,7 +23,9 @@ A discount taken in Receive Payments is a credit memo, and one taken in
 Pay Bills a vendor credit, tied to the payment that took it
 (discount_payment_id, discount_bill_payment_id) so voiding the payment
 voids its discount. A discount taken against the terms is recorded on the
-payment (discount_override and its note) and on the memo or credit.
+payment (discount_override and its note) and on the memo or credit, and
+an allocation applied from a payment's remainder later is marked
+(from_remainder): no discount goes with it.
 downgrade drops the table and every column added here.
 
 Revision ID: e5c1a7d3f9b2
@@ -84,6 +86,10 @@ FLAGS = (
                                server_default=sa.false())),
     ("vendor_credits", sa.Column("discount_override", sa.Boolean(), nullable=False,
                                  server_default=sa.false())),
+    # an allocation applied later from a payment's remainder takes no
+    # early-payment discount
+    ("payment_allocations", sa.Column("from_remainder", sa.Boolean(), nullable=False,
+                                      server_default=sa.false())),
 )
 
 

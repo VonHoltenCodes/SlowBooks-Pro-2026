@@ -2743,7 +2743,7 @@ const SettingsPage = {
                     <div class="form-group" data-kind="date_driven"><label for="pt-due-day">Due on day of the month</label>
                         <input id="pt-due-day" name="due_day" type="number" min="1" max="31" step="1" value="${val(v.due_day)}"></div>
                     <div class="form-group" data-kind="date_driven"><label for="pt-cutoff">Next month's when dated fewer than (days) before it</label>
-                        <input id="pt-cutoff" name="cutoff_days" type="number" min="0" max="31" step="1" value="${val(v.cutoff_days)}"></div>
+                        <input id="pt-cutoff" name="cutoff_days" type="number" min="0" max="28" step="1" value="${val(v.cutoff_days)}"></div>
                     <div class="form-group"><label for="pt-discount">Early-payment discount (%)</label>
                         <input id="pt-discount" name="discount_percent" type="number" min="0" max="99.99" step="0.01" value="${val(v.discount_percent)}" placeholder="none"></div>
                     <div class="form-group" data-kind="standard"><label for="pt-discount-days">if paid within (days)</label>

@@ -367,7 +367,7 @@ const BillsPage = {
         const form = $('#bill-form');
         const hint = $('#bill-terms-hint');
         if (!form || !hint) return;
-        const d = await PaymentTerms.dates(form.date.value, form.terms.value, 'bill');
+        const d = await PaymentTerms.dates(form.date.value, form.terms.value, 'bill', BillsPage._formBillId);
         if (!d) { hint.innerHTML = ''; return; }
         const extra = PaymentTerms.hintHtml(d);
         hint.innerHTML = `Due ${escapeHtml(formatDate(d.due_date))}${extra ? ` &middot; ${extra}` : ''}`;
@@ -460,6 +460,8 @@ const BillsPage = {
         await Nonprofit.loadFunds();
 
         BillsPage._vendors = vendors;
+        // the bill being edited, whose own terms answer by its own rule
+        BillsPage._formBillId = bill ? bill.id : null;
         const terms = bill && bill.terms ? bill.terms : 'Net 30';
         await PaymentTerms.load();
 
@@ -1155,10 +1157,7 @@ const BillsPage = {
             API.get(`/bills/${billId}`),
             API.get('/accounts'),
         ]);
-        const alloc = (p.allocations || []).find(a => a.bill_id === billId) || { amount: 0 };
-        const before = { ...bill, balance_due: (parseFloat(bill.balance_due) || 0) + (parseFloat(alloc.amount) || 0) };
-        const cents = Math.min(PaymentTerms.suggestedCents(before, p.date),
-            Math.round((parseFloat(bill.balance_due) || 0) * 100));
+        const cents = PaymentTerms.suggestedCents(bill, p.date);
         openModal(`Take a discount on bill ${escapeHtml(bill.bill_number)}`, `
             <form id="take-bill-discount-form" onsubmit="BillsPage.saveTakeDiscount(event, ${paymentId}, ${billId})">
                 <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(bill.discount_line || 'Its terms offer no early-payment discount.')}

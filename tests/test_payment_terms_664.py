@@ -225,7 +225,7 @@ def test_a_date_driven_discount_by_a_day_of_the_month(
         name="2% 10th Net 25th",
         kind="date_driven",
         due_day=25,
-        cutoff_days=31,
+        cutoff_days=28,
         discount_percent="2",
         discount_day=10,
     )
@@ -781,10 +781,16 @@ def test_no_form_keeps_its_own_terms_or_days():
         assert not fixed.search(path.read_text(encoding="utf-8")), path.name
     inv = _js("invoices.js")
     assert "daysMap" not in inv
-    assert "PaymentTerms.dates(dateEl.value, termsEl.value, 'invoice')" in inv
+    # the invoice being edited answers by its own rule while its terms are
+    # unchanged (#665)
+    assert (
+        "PaymentTerms.dates(dateEl.value, termsEl.value, 'invoice', "
+        "InvoicesPage._formInvoiceId)" in inv
+    )
     assert "PaymentTerms.viewHtml(inv)" in inv
-    assert "PaymentTerms.dates(form.date.value, form.terms.value, 'bill')" in _js(
-        "bills.js"
+    assert (
+        "PaymentTerms.dates(form.date.value, form.terms.value, 'bill', "
+        "BillsPage._formBillId)" in _js("bills.js")
     )
     for name, call in (
         ("customers.js", "PaymentTerms.optionsHtml(c.terms)"),
@@ -976,7 +982,7 @@ def test_a_rule_in_use_is_locked_whatever_whitespace_its_text_has(
             "2% 10 Net 30",
             "2026-10-12",
             "2.01",
-            "terms offer 2% of its $100.00 balance, $2.00; $2.01 is more",
+            "terms offer 2% of its $100.00 total, $2.00; $2.01 is more",
         ),
     ],
 )
@@ -1445,12 +1451,12 @@ def test_a_date_driven_discount_before_its_due_day_says_the_month_before(client)
         name="2% 25th Net 10th",
         kind="date_driven",
         due_day=10,
-        cutoff_days=31,
+        cutoff_days=28,
         discount_percent="2",
         discount_day=25,
     )
     assert term["description"] == (
-        "Due on day 10 of the month, the next month's when dated fewer than 31 "
+        "Due on day 10 of the month, the next month's when dated fewer than 28 "
         "days before it; 2% off if paid by day 25 of the month before it's due"
     )
 
@@ -2365,3 +2371,405 @@ def test_a_late_discount_sent_again_with_its_key_answers_the_first(
         db_session.query(CreditMemo).filter_by(discount_payment_id=pay["id"]).count()
         == 1
     )
+
+
+# ── the fourth pass (#665, Mac Studio, on 4995ac7f) ───────────────────
+
+
+def _invoice_on(client, customer_id, on):
+    return _invoice(client, customer_id, "2% 10 Net 30", on=on)
+
+
+def test_no_discount_on_a_payment_dated_before_its_invoice(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Pass 4, B1: an August payment took October's 2%, posted in August,
+    override or not."""
+    _term(client, **TWO_TEN)
+    inv = _invoice_on(client, seed_customer.id, "2026-10-28")
+    acct = _account_id(db_session, "4900")
+    for override in (False, True):
+        r = _receive_one(
+            client,
+            seed_customer.id,
+            inv["id"],
+            "98.00",
+            "2.00",
+            acct,
+            date="2026-08-01",
+            allow_discount_override=override,
+        )
+        assert r.status_code == 400, override
+        assert r.json()["detail"] == (
+            f"This payment is dated Aug 1, 2026, before invoice "
+            f"{inv['invoice_number']} (Oct 28, 2026); an early-payment discount "
+            "is taken with a payment made on or after the invoice's date."
+        )
+    assert db_session.query(CreditMemo).count() == 0
+
+
+def test_no_bill_discount_on_a_payment_dated_before_its_bill(
+    client, db_session, seed_accounts
+):
+    _term(client, **TWO_TEN)
+    vendor = _vendor(client, terms="2% 10 Net 30")
+    bill = _bill(client, vendor["id"], "2% 10 Net 30", on="2026-10-28", amount="100.00")
+    r = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": vendor["id"],
+            "date": "2026-08-03",
+            "amount": 98.0,
+            "allocations": [
+                {"bill_id": bill["id"], "amount": 98.0, "discount": "2.00"}
+            ],
+            "discount_account_id": _account_id(db_session, "4900"),
+        },
+    )
+    assert r.status_code == 400
+    assert "This payment is dated Aug 3, 2026, before bill B-1" in r.json()["detail"]
+
+
+def test_a_remainder_applied_later_takes_no_late_discount(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Pass 4, B1: /apply then /discount went round the apply refusal."""
+    _term(client, **TWO_TEN)
+    inv = _invoice_on(client, seed_customer.id, "2026-10-05")
+    pay = client.post(
+        "/api/payments",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-10-06",
+            "amount": "98.00",
+            "allocations": [],
+        },
+    ).json()
+    r = client.post(
+        f"/api/payments/{pay['id']}/apply",
+        json={"allocations": [{"invoice_id": inv["id"], "amount": "98"}]},
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(
+        f"/api/payments/{pay['id']}/discount",
+        json={
+            "invoice_id": inv["id"],
+            "discount": "2.00",
+            "discount_account_id": _account_id(db_session, "4900"),
+            "allow_discount_override": True,
+        },
+    )
+    assert r.status_code == 400
+    assert "was applied later from its remainder" in r.json()["detail"]
+
+
+def test_a_second_instalment_in_the_window_gets_the_whole_percent(
+    client, db_session, discounted
+):
+    """Pass 4, W5: 49 + 49 in the window; the second's discount was 2% of
+    the 51 left and needed an administrator."""
+    inv = discounted["invoice"]
+    acct = _account_id(db_session, "4900")
+    first = client.post(
+        "/api/payments",
+        json={
+            "customer_id": discounted["customer_id"],
+            "date": "2026-10-12",
+            "amount": "49.00",
+            "allocations": [{"invoice_id": inv["id"], "amount": "49.00"}],
+        },
+    )
+    assert first.status_code == 201
+    r = _receive_one(
+        client, discounted["customer_id"], inv["id"], "49.00", "2.00", acct
+    )
+    assert r.status_code == 201, r.text
+    assert client.get(f"/api/invoices/{inv['id']}").json()["status"] == "paid"
+
+
+@pytest.mark.parametrize("name", ["Net\t81", "Net\r\n81", "Net \x0b81", " Net  81 "])
+def test_a_name_with_odd_whitespace_reads_as_its_words(client, name):
+    """Pass 4, B2: "Net<TAB>81" passed the name guard (main gave that text
+    30 days), then took over plain "Net 81" with a 12-day rule."""
+    r = client.post("/api/payment-terms", json={"name": name, "net_days": 12})
+    assert r.status_code == 409
+    assert r.json()["detail"].startswith('"Net 81" already means due in 81 days')
+    made = client.post("/api/payment-terms", json={"name": name, "net_days": 81})
+    assert made.status_code == 201, made.text
+    assert made.json()["name"] == "Net 81"
+    again = client.post("/api/payment-terms", json={"name": "Net 81", "net_days": 81})
+    assert again.status_code == 409
+
+
+@pytest.mark.parametrize(
+    "path, body",
+    [
+        (
+            "payments",
+            {"allocations": [{"invoice_id": 1, "amount": "1", "discount": "1e30"}]},
+        ),
+        (
+            "bill-payments",
+            {"allocations": [{"bill_id": 1, "amount": 1, "discount": "1e30"}]},
+        ),
+    ],
+)
+def test_a_huge_discount_is_a_sentence_on_create(client, path, body):
+    """Pass 4, B3: "1e30" was a 500 on all four discount endpoints."""
+    who = {"customer_id": 1} if path == "payments" else {"vendor_id": 1}
+    r = client.post(
+        f"/api/{path}", json={**who, "date": "2026-10-12", "amount": "1", **body}
+    )
+    assert r.status_code == 422
+    assert (
+        r.json()["detail"][0]["message"]
+        == "Allocation 1: A discount is at most $9,999,999,999,999.99."
+    )
+
+
+def test_a_huge_late_discount_is_a_sentence(client, db_session, discounted):
+    pay = _short_paid(client, discounted)
+    for amount in ("1e30", "123456789012345678901234567890"):
+        r = client.post(
+            f"/api/payments/{pay['id']}/discount",
+            json={
+                "invoice_id": discounted["invoice"]["id"],
+                "discount": amount,
+                "discount_account_id": _account_id(db_session, "4900"),
+            },
+        )
+        assert r.status_code == 422, amount
+        assert r.json()["detail"][0]["message"] == (
+            "A discount is at most $9,999,999,999,999.99."
+        )
+    r = client.post(
+        "/api/bill-payments/1/discount",
+        json={"bill_id": 1, "discount": "1e30", "discount_account_id": 1},
+    )
+    assert r.status_code == 422
+
+
+def test_a_cutoff_fits_inside_february(client):
+    """Pass 4, B4: a 29 to 31 day cutoff moved one month, so in February a
+    document could be due sooner than its own cutoff."""
+    r = client.post(
+        "/api/payment-terms",
+        json={
+            "name": "1st cut31",
+            "kind": "date_driven",
+            "due_day": 1,
+            "cutoff_days": 29,
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"] == (
+        "The days before the due day must be 0 to 28, so the cutoff fits inside February."
+    )
+    _term(client, name="1st cut28", kind="date_driven", due_day=1, cutoff_days=28)
+    for on, due in (("2027-02-01", "2027-03-01"), ("2027-02-02", "2027-04-01")):
+        d = client.get(
+            "/api/payment-terms/dates", params={"date": on, "terms": "1st cut28"}
+        ).json()
+        assert d["due_date"] == due, on
+
+
+# ── pass 4 weaknesses ───────────────────────────────────────────────────
+
+
+def test_a_late_bill_discount_sent_again_with_its_key_answers_the_first(
+    client, db_session, discounted_bill
+):
+    """Pass 4, W1: without finish, a keyed bill-side retry answered 409
+    "being processed" for seven days instead of replaying."""
+    pay = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": discounted_bill["vendor_id"],
+            "date": "2026-10-12",
+            "amount": 490.0,
+            "allocations": [{"bill_id": discounted_bill["id"], "amount": 490.0}],
+        },
+    ).json()
+    url = f"/api/bill-payments/{pay['id']}/discount"
+    body = {
+        "bill_id": discounted_bill["id"],
+        "discount": "10.00",
+        "discount_account_id": _account_id(db_session, "4900"),
+    }
+    first = client.post(url, json=body, headers={"Idempotency-Key": "vc-1"})
+    again = client.post(url, json=body, headers={"Idempotency-Key": "vc-1"})
+    assert first.status_code == 200 and again.status_code == 200, again.text
+    assert again.headers.get("X-Replayed") == "true"
+    assert again.json() == first.json()
+    assert (
+        db_session.query(VendorCredit)
+        .filter_by(discount_bill_payment_id=pay["id"])
+        .count()
+        == 1
+    )
+
+
+def test_a_locked_claim_is_a_sentence(client, db_session, discounted, monkeypatch):
+    """Pass 4, W1: the claim's "locked" branch had no test."""
+    from sqlalchemy.exc import OperationalError
+    from sqlalchemy.orm import Query
+
+    pay = _short_paid(client, discounted)
+
+    def locked(self, *a, **kw):
+        raise OperationalError("UPDATE payments", {}, Exception("database is locked"))
+
+    monkeypatch.setattr(Query, "update", locked)
+    r = client.post(
+        f"/api/payments/{pay['id']}/discount",
+        json={
+            "invoice_id": discounted["invoice"]["id"],
+            "discount": "2.00",
+            "discount_account_id": _account_id(db_session, "4900"),
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"] == (
+        "Another discount on this payment is being saved; try again in a moment."
+    )
+
+
+def test_a_late_discount_reads_the_payment_and_document_afresh(
+    file_company, monkeypatch  # noqa: F811
+):
+    """Pass 4, W1: the populate_existing reads had no test. A session that
+    already holds a payment or a bill reads them again once it has the
+    claim: a void, or a discount taken meanwhile, is seen."""
+    from fastapi import HTTPException
+
+    from app.models.bills import Bill, BillPayment
+    from app.models.payments import Payment
+    from app.routes import bill_payments as bill_payment_routes
+    from app.routes import payments as payments_routes
+    from app.schemas.bills import BillPaymentDiscountAdd
+    from app.schemas.payments import PaymentDiscountAdd
+
+    client, Session, ids = file_company
+    _term(client, **TWO_TEN)
+    cust = client.post("/api/customers", json={"name": "Shore"}).json()
+    inv = _invoice(client, cust["id"], "2% 10 Net 30")
+    pay = client.post(
+        "/api/payments",
+        json={
+            "customer_id": cust["id"],
+            "date": "2026-10-12",
+            "amount": "98.00",
+            "allocations": [{"invoice_id": inv["id"], "amount": "98.00"}],
+        },
+    ).json()
+    held = Session()
+    assert held.get(Payment, pay["id"]).is_voided is False  # held, as read
+    with Session() as other:
+        payments_routes.void_payment(pay["id"], False, other)
+    body = PaymentDiscountAdd(
+        invoice_id=inv["id"], discount="2.00", discount_account_id=ids["4900"].id
+    )
+    with pytest.raises(HTTPException) as e:
+        payments_routes.add_discount(pay["id"], body, None, None, held)
+    assert e.value.detail == "This payment is void, so no discount goes with it."
+    held.close()
+
+    vendor = client.post(
+        "/api/vendors",
+        json={
+            "name": "Gulf Supply",
+            "terms": "2% 10 Net 30",
+            "default_expense_account_id": ids["6000"].id,
+        },
+    ).json()
+    bill = _bill(client, vendor["id"], "2% 10 Net 30", amount="100.00")
+    bp = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": vendor["id"],
+            "date": "2026-10-12",
+            "amount": 98.0,
+            "allocations": [{"bill_id": bill["id"], "amount": 98.0}],
+        },
+    ).json()
+    held = Session()
+    assert held.get(Bill, bill["id"]).balance_due == 2  # held, as read
+    held.get(BillPayment, bp["id"])
+    bbody = BillPaymentDiscountAdd(
+        bill_id=bill["id"], discount="2.00", discount_account_id=ids["4900"].id
+    )
+    with Session() as other:
+        bill_payment_routes.add_discount(bp["id"], bbody, None, None, other)
+    over = BillPaymentDiscountAdd(
+        bill_id=bill["id"],
+        discount="2.00",
+        discount_account_id=ids["4900"].id,
+        allow_discount_override=True,
+    )
+    with pytest.raises(HTTPException) as e:
+        bill_payment_routes.add_discount(bp["id"], over, None, None, held)
+    assert "still due on bill" in e.value.detail
+    held.close()
+    with Session() as db:
+        assert db.get(Bill, bill["id"]).balance_due == 0
+
+
+def test_the_form_hint_for_an_old_bill_says_what_it_offers(client, seed_accounts):
+    """Pass 4, W2: the bill form promised a list term's discount to an
+    untied bill that doesn't offer it."""
+    vendor = _vendor(client)
+    bill = _bill(client, vendor["id"], "2% 10 Net 30", on="2026-09-15")
+    _term(client, **TWO_TEN)
+    params = {"date": "2026-09-15", "terms": "2% 10 Net 30", "document": "bill"}
+    listed = client.get("/api/payment-terms/dates", params=params).json()
+    assert listed["discount_line"]  # a new bill would get it
+    own = client.get(
+        "/api/payment-terms/dates", params={**params, "bill_id": bill["id"]}
+    ).json()
+    assert own["discount_line"] is None and own["due_date"] == "2026-10-15"
+    got = client.get(f"/api/bills/{bill['id']}").json()
+    for k in ("due_date", "discount_percent", "discount_date", "discount_line"):
+        assert own[k] == got[k], k
+    assert own["note"].startswith("This bill's terms were first saved before")
+
+
+def test_new_writes_refuse_unknown_query_parameters(client, db_session, discounted):
+    """Pass 4, W7: ?bogus=1 was ignored on the new writes."""
+    pay = _short_paid(client, discounted)
+    r = client.post(
+        f"/api/payments/{pay['id']}/discount?bogus=1",
+        json={
+            "invoice_id": discounted["invoice"]["id"],
+            "discount": "2.00",
+            "discount_account_id": _account_id(db_session, "4900"),
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"] == "'bogus' is not a parameter this accepts."
+    r = client.post("/api/payment-terms?x=1", json={"name": "Twelve", "net_days": 12})
+    assert r.status_code == 422
+
+
+def test_the_in_use_counts_are_said_one_way(client, seed_accounts, seed_customer):
+    """Pass 4, W8: the rename and rule refusals gave two totals."""
+    term = _term(client, name="Net 22", net_days=22)
+    _invoice(client, seed_customer.id, "Net 22")
+    client.post("/api/customers", json={"name": "Bay", "terms": "Net 22"})
+    rename = client.put(f"/api/payment-terms/{term['id']}", json={"name": "Twenty-two"})
+    rule = client.put(f"/api/payment-terms/{term['id']}", json={"net_days": 23})
+    assert rename.json()["detail"].startswith(
+        "Net 22 is on 1 invoices and bills saved under it, and 1 customers, "
+        "vendors, schedules or settings carry its name, so its name stays."
+    )
+    assert rule.json()["detail"].startswith(
+        "Net 22 is on 1 invoices and bills saved under it, so its rule stays"
+    )
+
+
+def test_the_dates_length_refusal_is_a_sentence(client):
+    """Pass 4, W10: pydantic's "String should have at most 50 characters"."""
+    r = client.get(
+        "/api/payment-terms/dates", params={"date": "2026-10-01", "terms": "x" * 5000}
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Terms are at most 50 characters; these are 5000."

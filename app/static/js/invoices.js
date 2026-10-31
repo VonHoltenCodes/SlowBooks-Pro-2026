@@ -713,6 +713,8 @@ const InvoicesPage = {
             lines: [],
         };
         if (id) inv = await API.get(`/invoices/${id}`);
+        // the invoice being edited, whose own terms answer by its own rule
+        InvoicesPage._formInvoiceId = id || null;
         // A tax amount with no rate behind it (QuickBooks Online's, when its
         // tax lines don't make one rate) stays as it is when the invoice is
         // saved, as the server keeps it, until a rate is entered.
@@ -949,7 +951,7 @@ const InvoicesPage = {
         const termsEl = form.querySelector('[name="terms"]');
         const dueDateEl = form.querySelector('[name="due_date"]');
         if (!dateEl || !termsEl || !dueDateEl || !dateEl.value) return;
-        const d = await PaymentTerms.dates(dateEl.value, termsEl.value, 'invoice');
+        const d = await PaymentTerms.dates(dateEl.value, termsEl.value, 'invoice', InvoicesPage._formInvoiceId);
         if (!d) return;
         dueDateEl.value = d.due_date;
         const hint = $('#invoice-terms-hint');

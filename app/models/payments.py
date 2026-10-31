@@ -68,6 +68,12 @@ class PaymentAllocation(Base):
         Integer, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False
     )
     amount = Column(Numeric(15, 2), nullable=False)
+    # Applied later from the payment's remainder (POST /payments/{id}/apply),
+    # not when the payment was received: no early-payment discount goes with
+    # it (#665).
+    from_remainder = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     payment = relationship("Payment", back_populates="allocations")
     invoice = relationship("Invoice", backref="payment_allocations")

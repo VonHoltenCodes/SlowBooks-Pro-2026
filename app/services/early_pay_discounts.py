@@ -116,27 +116,40 @@ def check_against_terms(
     noun: str,
     number: str,
     discount,
-    balance,
+    base,
     pay_date,
     override,
     may_override: bool = True,
 ) -> Optional[str]:
     """The discount the document's own terms offer, checked before it is
-    taken: terms that offer one, a payment dated by its last day, no more
-    than its percent of the balance (to the cent, as the forms suggest it),
-    and none taken on the document before.
+        taken: terms that offer one, a payment dated by its last day, no more
+        than its percent of `base`, the document's total as QuickBooks takes it
+    (#665: a customer paying in two instalments in the window got 2% of what
+    was left for the second), to the cent as the forms suggest it,
+        and none taken on the document before.
 
-    A discount that fails is refused, the sentence naming
-    allow_discount_override. With the override it is taken, by an
-    administrator only (`may_override`; another role is refused in a
-    sentence), and the reason is returned so the payment and the memo
-    record it. None when the terms offer it."""
+        A discount that fails is refused, the sentence naming
+        allow_discount_override. With the override it is taken, by an
+        administrator only (`may_override`; another role is refused in a
+        sentence), and the reason is returned so the payment and the memo
+        record it. None when the terms offer it."""
     from app.services.accounting import _q
     from app.services.payment_terms import document_rule
 
     if discount <= 0:
         return None
     what = f"{noun.capitalize()} {number}"
+    # never before the document exists (#665: an August prepayment applied
+    # to an October invoice posted its discount in August), override or not
+    if doc.date is not None and pay_date < doc.date:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This payment is dated {_day(pay_date)}, before {noun} {number} "
+                f"({_day(doc.date)}); an early-payment discount is taken with a "
+                f"payment made on or after the {noun}'s date."
+            ),
+        )
     rule = document_rule(db, doc)
     by = rule.discount_date(doc.date) if rule is not None else None
     terms = (doc.terms or "").strip() or "no terms"
@@ -149,11 +162,11 @@ def check_against_terms(
             f"dated {_day(pay_date)}."
         )
     else:
-        most = _q(Decimal(str(balance)) * rule.discount_percent / Decimal("100"))
+        most = _q(Decimal(str(base)) * rule.discount_percent / Decimal("100"))
         if discount > most:
             reason = (
                 f"{what}'s terms offer {rule.discount_percent.normalize():f}% of its "
-                f"${Decimal(str(balance)):,.2f} balance, ${most:,.2f}; "
+                f"${Decimal(str(base)):,.2f} total, ${most:,.2f}; "
                 f"${discount:,.2f} is more."
             )
     if reason is None:

@@ -36,14 +36,25 @@ const PaymentTerms = {
         const names = PaymentTerms.names();
         // the record's own text exactly as stored, never a list name that
         // only matches it case- or space-blind: sent back unchanged, it
-        // leaves a document saved before that term untied (#665)
+        // leaves a document saved before that term untied (#665). It comes
+        // first and says it is the record's own, so it can't be mistaken
+        // for the list term it resembles, and typing what the box shows
+        // picks it again.
         const current = selected || '';
-        const choices = current && !names.includes(current) ? [...names, current] : names;
+        const own = current && !names.includes(current);
         // blank terms stay blank (due in 30 days, as always) rather than
         // the first term on the list
         if (blank === null && !current) blank = 'No terms (due in 30 days)';
         return (blank !== null ? `<option value="" ${!current ? 'selected' : ''}>${escapeHtml(blank)}</option>` : '')
-            + choices.map(t => `<option value="${escapeHtml(t)}" ${t === current ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+            + (own ? `<option value="${PaymentTerms.attr(current)}" selected>${escapeHtml(current.trim())} (as saved)</option>` : '')
+            + names.map(t => `<option value="${PaymentTerms.attr(t)}" ${t === current ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+    },
+
+    // An attribute value that comes back byte for byte: HTML turns a CR
+    // (or CR LF) typed in an attribute into LF, so CR and LF are written
+    // as character references, which it leaves alone (#665).
+    attr(text) {
+        return escapeHtml(text).replace(/\r/g, '&#13;').replace(/\n/g, '&#10;');
     },
 
     // Put the record's terms in the select, adding an option when the list
@@ -51,18 +62,21 @@ const PaymentTerms = {
     choose(select, terms) {
         if (!select || !terms) return;
         if (![...select.options].some(o => o.value === terms)) {
-            select.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(terms)}">${escapeHtml(terms)}</option>`);
+            select.insertAdjacentHTML('beforeend', `<option value="${PaymentTerms.attr(terms)}">${escapeHtml(terms)}</option>`);
         }
         select.value = terms;
     },
 
     // The due date, discount and note the server's parser gives a document
     // dated `date` with `terms`; null when it can't be asked.
-    async dates(date, terms, documentKind = 'invoice') {
+    // `docId`: the document being edited, so its own terms answer by its
+    // own rule while they are sent back unchanged (#665), not the list's.
+    async dates(date, terms, documentKind = 'invoice', docId = null) {
         if (!date) return null;
+        const own = docId ? `&${documentKind}_id=${encodeURIComponent(docId)}` : '';
         try {
             return await API.get(`/payment-terms/dates?date=${encodeURIComponent(date)}`
-                + `&terms=${encodeURIComponent(terms || '')}&document=${documentKind}`);
+                + `&terms=${encodeURIComponent(terms || '')}&document=${documentKind}${own}`);
         } catch (e) {
             return null;
         }
@@ -100,11 +114,15 @@ const PaymentTerms = {
     // The early-payment discount suggested for an open document paid on
     // `payDate`: its percent of the balance, in cents, while the discount
     // date has not passed; 0 otherwise.
+    // Its percent of the document's total, as the server takes it (#665),
+    // no more than its balance, and none before the document's date.
     suggestedCents(doc, payDate) {
         const pct = parseFloat(doc.discount_percent);
         if (!(pct > 0) || !doc.discount_date || !payDate || payDate > doc.discount_date) return 0;
+        if (doc.date && payDate < doc.date) return 0;
         const balance = Math.round((parseFloat(doc.balance_due) || 0) * 100);
-        return Math.round(balance * pct / 100);
+        const total = doc.total !== undefined ? Math.round((parseFloat(doc.total) || 0) * 100) : balance;
+        return Math.min(Math.round(total * pct / 100), balance);
     },
 
     // The accounts a discount can post to (income, expense or cost of

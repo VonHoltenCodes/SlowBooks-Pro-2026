@@ -266,3 +266,21 @@ def _tax_rate_json(value) -> str:
 TaxRateOut = Annotated[
     Decimal, PlainSerializer(_tax_rate_json, return_type=str, when_used="json")
 ]
+
+
+# The most a discount can be: the money columns are Numeric(15, 2).
+DISCOUNT_MAX = Decimal("9999999999999.99")
+
+
+def _check_discount(value):
+    """An early-payment discount (#664) in a sentence when it is past what
+    a money column holds (1e30 was a 500 when the route rounded it). Whole
+    cents are checked where it is taken, beside the account."""
+    if value is None:
+        return value
+    if abs(value) > DISCOUNT_MAX:
+        raise ValueError(f"A discount is at most ${DISCOUNT_MAX:,.2f}.")
+    return value
+
+
+Discount = Annotated[Decimal, AfterValidator(_check_discount)]
