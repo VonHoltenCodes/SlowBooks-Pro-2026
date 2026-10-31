@@ -11,16 +11,17 @@ on what the software does, not on what sprint shipped what.
 "Net N", else 30 days, said to no one, so "2% 10 Net 30", "Net 10th" and
 "15th of following month" were all quietly due 30 days out. Settings now
 keeps a terms list, the QuickBooks shape: a standard term is due a number of
-days after the date, a date-driven term on a day of the month (the next
-month's when the document is dated fewer than a set number of days before
-it), and either can offer an early-payment discount. Every form that takes
+days after the date, a date-driven term on its next day of the month
+(the one after, when the document is dated fewer than a set number of days
+before that day), and either can offer an early-payment discount. Every form that takes
 terms offers the list, and every document's due date (invoices, bills,
 recurring invoices, memorized bills, an estimate's or a PO's conversion, a
 duplicate) comes from one parser. An invoice, a bill and a recurring or
 memorized schedule are tied to the term their terms named when the person
 picked them, and keep that term's rule; a term added to the list later
 never reaches what was saved before it, even when it is saved again with
-the same terms (only picking other terms ties it anew), and a term an
+exactly the same terms (any other text picked, even one differing only
+in case or spacing, ties it anew to the entry it names), and a term an
 invoice or bill was saved under keeps its rule and name. A duplicate and a
 schedule's next document keep their source's tie; an import ties nothing.
 Existing books don't change: Due on Receipt, Net 15, 30, 45 and 60 are on
@@ -29,9 +30,10 @@ number of days the old parser read from text in use, and only the text the
 old parser read as exactly those days is tied to them ("net<TAB>45" was 30
 days and stays untied). Anything untied is read as the old parser read it,
 everywhere (A/P aging included); a document says what its due date is. A name the app already
-reads ("Net 30", "COD") keeps its meaning. A recurring invoice on Due on
-Receipt is now due the day it is made; its generator had its own parser,
-which read it as 30 days. The discount shows on the invoice and bill and on
+reads ("Net 30", "COD") keeps its meaning. A recurring invoice whose terms
+are any of the receipt words (Due on Receipt, due upon receipt, COD, Net 0,
+in any case) is now due the day it is made; its generator had its own
+parser, which read all of them as 30 days. The discount shows on the invoice and bill and on
 their PDFs (a foreign-currency one offers none), and Receive Payments and
 Pay Bills suggest it until its date, on what the payment applies to: the
 customer's is a credit memo, ours a vendor credit, applied to the document,

@@ -180,7 +180,7 @@ def check_against_terms(
     return reason
 
 
-def refuse_doubled(allocations, key: str, number_of) -> None:
+def refuse_doubled(allocations, key: str, noun: str, number_of) -> None:
     """One document twice on a payment with a discount: refused before any
     memo or credit is numbered, naming the document, never a number that
     was rolled back (#665)."""
@@ -193,7 +193,8 @@ def refuse_doubled(allocations, key: str, number_of) -> None:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"{number_of(doc_id)} is on this payment more than once with a "
+                    f"{noun.capitalize()} {number_of(doc_id)} is on this payment "
+                    "more than once with a "
                     "discount. Put it on one row, with its whole payment and its "
                     "discount."
                 ),

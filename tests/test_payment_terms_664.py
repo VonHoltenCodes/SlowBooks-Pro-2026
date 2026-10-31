@@ -199,16 +199,20 @@ def test_a_date_driven_term_is_due_on_its_day(
 
 def test_end_of_month_and_the_following_month(client, seed_accounts, seed_customer):
     _term(client, name="Due end of month", kind="date_driven", due_day=31)
+    # "15th of following month" is a 15-day cutoff: the next 15th, or the
+    # one after when dated fewer than 15 days before it. (Pass 3, B3: this
+    # test pinned it as cutoff 31, which only passed because the cutoff was
+    # never applied past the date's own month.)
     _term(
         client,
         name="15th of following month",
         kind="date_driven",
         due_day=15,
-        cutoff_days=31,
+        cutoff_days=15,
     )
     feb = _invoice(client, seed_customer.id, "Due end of month", on="2026-02-03")
     assert feb["due_date"] == "2026-02-28"  # a short month's last day
-    for on in ("2026-10-01", "2026-10-14", "2026-10-31"):
+    for on in ("2026-10-01", "2026-10-14", "2026-10-15", "2026-10-16", "2026-10-31"):
         inv = _invoice(client, seed_customer.id, "15th of following month", on=on)
         assert inv["due_date"] == "2026-11-15", on
 
@@ -371,7 +375,7 @@ def test_a_recurring_invoice_due_on_receipt_is_due_that_day(
 
 
 def test_a_bill_and_a_memorized_bill_read_the_list(client, db_session, seed_accounts):
-    _term(client, name="Net 10th prox", kind="date_driven", due_day=10, cutoff_days=31)
+    _term(client, name="Net 10th prox", kind="date_driven", due_day=10, cutoff_days=10)
     vendor = _vendor(client, terms="Net 10th prox")
     bill = _bill(client, vendor["id"], "Net 10th prox", on="2026-10-05")
     assert bill["due_date"] == "2026-11-10"
@@ -859,9 +863,9 @@ def test_a_term_added_later_leaves_documents_saved_before_it(
     got = client.get(f"/api/invoices/{old['id']}").json()
     assert got["discount_line"] is None and got["discount_date"] is None
     assert got["terms_note"] == (
-        'This invoice was saved before "Net 10th" was on the terms list, so it '
-        "doesn't follow that term's rule; its due date was set 30 days from the "
-        "invoice date."
+        'This invoice\'s terms were first saved before "Net 10th" was on the '
+        "terms list, so it keeps their old reading, not that term's rule; its "
+        "due date was set 30 days from the invoice date."
     )
     html = client.get(f"/api/invoices/{old['id']}/print-preview").text
     assert "discount if paid by" not in html
@@ -1508,12 +1512,16 @@ def test_an_old_invoice_saved_with_the_same_terms_stays_untied(
     to a term made later; the invoice form always sends them."""
     inv = _invoice(client, seed_customer.id, "2% 10 Net 30")  # before the term
     term = _term(client, **TWO_TEN)
-    for terms in ("2% 10 Net 30", "2% 10 NET 30", " 2% 10 net 30 "):
+    for _ in range(2):
         got = _put(
-            client, f"/api/invoices/{inv['id']}", {"terms": terms, "notes": "memo"}
+            client,
+            f"/api/invoices/{inv['id']}",
+            {"terms": "2% 10 Net 30", "notes": "memo"},
         )
-        assert got["discount_line"] is None, terms
-        assert got["terms_note"].startswith("This invoice was saved before"), terms
+        assert got["discount_line"] is None
+        assert got["terms_note"].startswith(
+            "This invoice's terms were first saved before"
+        )
     assert client.get(f"/api/payment-terms/{term['id']}").json()["documents"] == 0
     # picking other terms, then these, is choosing them: now it is tied
     _put(client, f"/api/invoices/{inv['id']}", {"terms": "Net 30"})
@@ -1529,12 +1537,12 @@ def test_an_old_bill_saved_with_the_same_terms_keeps_its_rule_and_due_date(
     vendor = _vendor(client, terms="Net 30")
     bill = _bill(client, vendor["id"], "net10th", on="2026-10-05")
     assert bill["due_date"] == "2026-11-04"  # main's 30 days
-    _term(client, name="net10th", kind="date_driven", due_day=10, cutoff_days=31)
+    _term(client, name="net10th", kind="date_driven", due_day=10, cutoff_days=10)
     got = _put(
-        client, f"/api/bills/{bill['id']}", {"terms": "NET10TH", "date": "2026-10-06"}
+        client, f"/api/bills/{bill['id']}", {"terms": "net10th", "date": "2026-10-06"}
     )
     assert got["due_date"] == "2026-11-05"  # still the old 30 days, from the new date
-    assert got["terms_note"].startswith("This bill was saved before")
+    assert got["terms_note"].startswith("This bill's terms were first saved before")
 
 
 def test_copies_and_schedules_keep_the_tie_of_their_source(
@@ -1950,3 +1958,410 @@ def test_untied_text_reads_exactly_as_main_read_it(client, text, due):
         "/api/payment-terms/dates", params={"date": "2026-10-01", "terms": text}
     ).json()
     assert d["due_date"] == due, text
+
+
+# ── the third pass (#665, Omarchy, on e474ac95) ───────────────────────
+
+
+@pytest.mark.parametrize(
+    "on, due",
+    [
+        ("2026-01-01", "2026-02-05"),  # Jan 5 is 4 days away: the month after
+        ("2026-01-26", "2026-02-05"),  # 10 days before Feb 5: not fewer
+        ("2026-01-27", "2026-03-05"),  # 9 days before Feb 5: the month after
+        ("2026-01-31", "2026-03-05"),
+        ("2026-12-28", "2027-02-05"),  # across the year
+    ],
+)
+def test_the_cutoff_moves_a_month_across_a_month_end(client, on, due):
+    """Pass 3, B3: dated Jan 27 under "5th, 10-day cutoff" was due Feb 5;
+    the rule says fewer than 10 days before the due day moves it a month."""
+    _term(client, name="5th prox", kind="date_driven", due_day=5, cutoff_days=10)
+    d = client.get(
+        "/api/payment-terms/dates", params={"date": on, "terms": "5th prox"}
+    ).json()
+    assert d["due_date"] == due, on
+
+
+def test_any_other_text_picked_ties_anew(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Pass 3, B2 and W2: picking "Net 45" over a bill saved as "net<TAB>45"
+    (main's 30 days) was taken for the same terms, so the bill stayed 30
+    days out where main moved it to 45; a case-only pick of a listed term
+    was ignored without a word."""
+    from app.services.payment_terms import ensure_seeded
+
+    vendor = _vendor(client)
+    # saved before the list held Net 45, as main's books were
+    bill = _bill(client, vendor["id"], "net\t45", on="2026-09-15")
+    assert bill["due_date"] == "2026-10-15"  # main read it as 30 days
+    ensure_seeded(db_session)
+    db_session.commit()
+    got = _put(client, f"/api/bills/{bill['id']}", {"terms": "Net 45"})
+    assert got["due_date"] == "2026-10-30" and got["terms_note"] is None
+    # a case-only pick of a listed term is a pick: tied, its rule applies
+    inv = _invoice(client, seed_customer.id, "net30")
+    term = _term(
+        client, name="NET30", net_days=30, discount_percent="1", discount_days=5
+    )
+    got = _put(client, f"/api/invoices/{inv['id']}", {"terms": "NET30"})
+    assert got["terms_note"] is None
+    assert got["discount_line"] == "1% discount if paid by Oct 10, 2026"
+    assert client.get(f"/api/payment-terms/{term['id']}").json()["documents"] == 1
+
+
+def test_a_copy_says_its_terms_keep_their_first_reading(
+    client, seed_accounts, seed_customer
+):
+    """Pass 3, B4: a duplicate made after the term existed said it "was
+    saved before" it."""
+    inv = _invoice(client, seed_customer.id, "2% 10 Net 30")
+    _term(client, **TWO_TEN)
+    dup = client.post(f"/api/invoices/{inv['id']}/duplicate", json={}).json()
+    assert dup["terms_note"].startswith(
+        'This invoice\'s terms were first saved before "2% 10 Net 30" was on the '
+        "terms list, so it keeps their old reading"
+    )
+    assert "was saved before" not in dup["terms_note"]
+
+
+def _short_paid(client, discounted):
+    return client.post(
+        "/api/payments",
+        json={
+            "customer_id": discounted["customer_id"],
+            "date": "2026-10-12",
+            "amount": "98.00",
+            "allocations": [
+                {"invoice_id": discounted["invoice"]["id"], "amount": "98.00"}
+            ],
+        },
+    ).json()
+
+
+def test_a_late_discount_on_a_void_payment_or_a_closed_period_is_refused(
+    client, db_session, discounted
+):
+    """Pass 3, W1: both refusals survived their deletion."""
+    inv = discounted["invoice"]
+    body = {
+        "invoice_id": inv["id"],
+        "discount": "2.00",
+        "discount_account_id": _account_id(db_session, "4900"),
+    }
+    pay = _short_paid(client, discounted)
+    assert client.post(f"/api/payments/{pay['id']}/void").status_code == 200
+    r = client.post(f"/api/payments/{pay['id']}/discount", json=body)
+    assert r.status_code == 400
+    assert r.json()["detail"] == "This payment is void, so no discount goes with it."
+    pay = _short_paid(client, discounted)
+    assert (
+        client.put("/api/settings", json={"closing_date": "2026-10-31"}).status_code
+        == 200
+    )
+    # the closed period is said first, before the discount is weighed (the
+    # journal refuses it again underneath, on purpose): $5.00 is more than
+    # is due, but the answer is the closing date
+    r = client.post(
+        f"/api/payments/{pay['id']}/discount", json={**body, "discount": "5.00"}
+    )
+    assert r.status_code == 403
+    assert "closing date" in r.json()["detail"]
+
+
+def test_a_late_bill_discount_on_a_void_payment_or_a_closed_period_is_refused(
+    client, db_session, discounted_bill
+):
+    def paid():
+        return client.post(
+            "/api/bill-payments",
+            json={
+                "vendor_id": discounted_bill["vendor_id"],
+                "date": "2026-10-12",
+                "amount": 490.0,
+                "allocations": [{"bill_id": discounted_bill["id"], "amount": 490.0}],
+            },
+        ).json()
+
+    body = {
+        "bill_id": discounted_bill["id"],
+        "discount": "10.00",
+        "discount_account_id": _account_id(db_session, "4900"),
+    }
+    pay = paid()
+    assert client.post(f"/api/bill-payments/{pay['id']}/void").status_code == 200
+    r = client.post(f"/api/bill-payments/{pay['id']}/discount", json=body)
+    assert r.status_code == 400
+    assert r.json()["detail"] == "This payment is void, so no discount goes with it."
+    pay = paid()
+    assert (
+        client.put("/api/settings", json={"closing_date": "2026-10-31"}).status_code
+        == 200
+    )
+    r = client.post(
+        f"/api/bill-payments/{pay['id']}/discount", json={**body, "discount": "50.00"}
+    )
+    assert r.status_code == 403
+    assert "closing date" in r.json()["detail"]
+
+
+def test_a_memorized_schedule_is_retied_only_when_its_terms_change(
+    client, db_session, seed_accounts
+):
+    """Pass 3, W1: the memorized PUT's re-tie survived its deletion."""
+    from app.models.memorized import MemorizedTransaction
+
+    vendor = _vendor(client)
+    mem = client.post(
+        "/api/memorized",
+        json={
+            "kind": "bill",
+            "name": "Rent",
+            "mode": "remind",
+            "frequency": "monthly",
+            "start_date": "2026-10-20",
+            "vendor_id": vendor["id"],
+            "terms": "2% 10 Net 30",
+            "lines": [
+                {
+                    "account_id": _account_id(db_session, "6500"),
+                    "description": "Rent",
+                    "amount": 400,
+                }
+            ],
+        },
+    ).json()
+    term = _term(client, **TWO_TEN)
+    _put(client, f"/api/memorized/{mem['id']}", {"terms": "2% 10 Net 30"})
+    db_session.expire_all()
+    assert db_session.get(MemorizedTransaction, mem["id"]).payment_term_id is None
+    _put(client, f"/api/memorized/{mem['id']}", {"terms": "2% 10 net 30"})
+    db_session.expire_all()
+    assert db_session.get(MemorizedTransaction, mem["id"]).payment_term_id == term["id"]
+
+
+def test_text_past_the_calendar_reads_as_nothing(client):
+    """Pass 3, W1: the 99,999-day cap. Net 100000 from 2026 lands in 2300,
+    which main gave it; past the cap the date would leave the calendar for
+    some dates, so the text reads as nothing (30 days and a note)."""
+    d = client.get(
+        "/api/payment-terms/dates", params={"date": "2026-10-01", "terms": "Net 100000"}
+    ).json()
+    assert d["due_date"] == "2026-10-31" and d["note"]
+    d = client.get(
+        "/api/payment-terms/dates", params={"date": "2026-10-01", "terms": "Net 99999"}
+    ).json()
+    assert d["due_date"] == "2300-07-16" and d["note"] is None
+
+
+def test_a_csv_import_refuses_negative_terms(client):
+    """Pass 3, W3: "Net -5" came in, then every invoice for that customer
+    was refused for being due before its date."""
+    r = client.post(
+        "/api/csv/import/customers",
+        files={
+            "file": ("c.csv", b"Name,Terms\nNeg Co,Net -5\nOk Co,Net 99\n", "text/csv")
+        },
+    )
+    out = r.json()
+    assert out["created"] == 1
+    assert out["errors"] == [
+        'Row 2: Terms "Net -5" would make an invoice due before its date. Use a '
+        "number of days of 0 or more."
+    ]
+
+
+@pytest.mark.parametrize(
+    "name, sentence",
+    [
+        ("ﬀ" * 50, "A term name is at most 50 characters; this one is 100."),
+        ("‎‏", "A term needs a name."),
+    ],
+)
+def test_a_name_refusal_is_a_sentence(client, name, sentence):
+    """Pass 3, W4: "At most 50 name are allowed." """
+    r = client.post("/api/payment-terms", json={"name": name, "net_days": 3})
+    assert r.status_code == 422
+    assert r.json()["detail"][0]["message"] == sentence
+
+
+def test_joiners_stay_in_a_name_but_not_in_its_comparison(client):
+    """Pass 3, W3: stripping every format character took ZWJ out of emoji
+    and ZWNJ out of Persian text."""
+    term = _term(client, name="fam \U0001f468‍\U0001f469", net_days=3)
+    assert "‍" in term["name"]
+    r = client.post(
+        "/api/payment-terms", json={"name": "fam \U0001f468\U0001f469", "net_days": 3}
+    )
+    assert r.status_code == 409
+
+
+def test_a_void_document_offers_no_discount(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Pass 3, W5: a void invoice still advertised its discount."""
+    _term(client, **TWO_TEN)
+    inv = _invoice(client, seed_customer.id, "2% 10 Net 30")
+    r = client.post(f"/api/invoices/{inv['id']}/void")
+    assert r.status_code == 200, r.text
+    assert r.json()["discount_line"] is None
+    assert (
+        "discount if paid"
+        not in client.get(f"/api/invoices/{inv['id']}/print-preview").text
+    )
+    vendor = _vendor(client, terms="2% 10 Net 30")
+    bill = _bill(client, vendor["id"], "2% 10 Net 30")
+    assert client.post(f"/api/bills/{bill['id']}/void").status_code == 200
+    assert client.get(f"/api/bills/{bill['id']}").json()["discount_line"] is None
+    assert (
+        "discount if paid"
+        not in client.get(f"/api/bills/{bill['id']}/print-preview").text
+    )
+
+
+# ── pass 3, B1: the late-discount endpoints under concurrency ─────────────
+
+from tests.test_memorized_transactions import _race, file_company  # noqa: E402,F401
+
+
+def _post_after_all_read(monkeypatch, name):
+    """Hold every racer at the posting until the others have read too, or
+    a second and a half has passed: without the claim all four read "no
+    discount yet" and then each posts one; with it, the first holds the
+    write lock here and the rest wait at the claim, then read its memo."""
+    import threading
+
+    from app.services import early_pay_discounts
+
+    gate = threading.Barrier(4, timeout=1.5)
+    real = getattr(early_pay_discounts, name)
+
+    def post(*args, **kw):
+        try:
+            gate.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return real(*args, **kw)
+
+    monkeypatch.setattr(early_pay_discounts, name, post)
+
+
+def test_four_late_discounts_at_once_post_one(file_company, monkeypatch):  # noqa: F811
+    """Pass 3, B1: four simultaneous /discount calls posted four credit
+    memos (A/R -$4.00, Sales Discounts $6.00 on a $2.00 discount)."""
+    from fastapi import HTTPException
+
+    from app.models.credit_memos import CreditMemo
+    from app.models.invoices import Invoice
+    from app.routes import payments as payments_routes
+    from app.schemas.payments import PaymentDiscountAdd
+
+    client, Session, ids = file_company
+    _term(client, **TWO_TEN)
+    cust = client.post("/api/customers", json={"name": "Shore"}).json()
+    inv = _invoice(client, cust["id"], "2% 10 Net 30")
+    pay = client.post(
+        "/api/payments",
+        json={
+            "customer_id": cust["id"],
+            "date": "2026-10-12",
+            "amount": "98.00",
+            "allocations": [{"invoice_id": inv["id"], "amount": "98.00"}],
+        },
+    ).json()
+    _post_after_all_read(monkeypatch, "post_customer_discount")
+    body = PaymentDiscountAdd(
+        invoice_id=inv["id"], discount="2.00", discount_account_id=ids["4900"].id
+    )
+
+    def take():
+        with Session() as db:
+            return payments_routes.add_discount(pay["id"], body, None, None, db)
+
+    out = _race(take, take, take, take)
+    refused = [x for x in out if isinstance(x, HTTPException)]
+    assert len(refused) == 3, out
+    # each loser read the winner's memo once it held the lock: the balance
+    # it left (nothing), refused in a sentence
+    assert {x.status_code for x in refused} == {400}, [x.detail for x in refused]
+    assert all(
+        "still due on invoice" in x.detail or "already taken" in x.detail
+        for x in refused
+    ), [x.detail for x in refused]
+    with Session() as db:
+        assert (
+            db.query(CreditMemo).filter_by(discount_payment_id=pay["id"]).count() == 1
+        )
+        row = db.get(Invoice, inv["id"])
+        assert row.balance_due == 0 and row.amount_paid == 100
+
+
+def test_four_late_bill_discounts_at_once_post_one(
+    file_company, monkeypatch  # noqa: F811
+):
+    from fastapi import HTTPException
+
+    from app.models.vendor_credits import VendorCredit
+    from app.routes import bill_payments as bill_payment_routes
+    from app.schemas.bills import BillPaymentDiscountAdd
+
+    client, Session, ids = file_company
+    _term(client, **TWO_TEN)
+    vendor = client.post(
+        "/api/vendors",
+        json={
+            "name": "Gulf Supply",
+            "terms": "2% 10 Net 30",
+            "default_expense_account_id": ids["6000"].id,
+        },
+    ).json()
+    bill = _bill(client, vendor["id"], "2% 10 Net 30", amount="100.00")
+    pay = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": vendor["id"],
+            "date": "2026-10-12",
+            "amount": 98.0,
+            "allocations": [{"bill_id": bill["id"], "amount": 98.0}],
+        },
+    ).json()
+    _post_after_all_read(monkeypatch, "post_vendor_discount")
+    body = BillPaymentDiscountAdd(
+        bill_id=bill["id"], discount="2.00", discount_account_id=ids["4900"].id
+    )
+
+    def take():
+        with Session() as db:
+            return bill_payment_routes.add_discount(pay["id"], body, None, None, db)
+
+    out = _race(take, take, take, take)
+    assert sum(isinstance(x, HTTPException) for x in out) == 3, out
+    with Session() as db:
+        assert (
+            db.query(VendorCredit).filter_by(discount_bill_payment_id=pay["id"]).count()
+            == 1
+        )
+
+
+def test_a_late_discount_sent_again_with_its_key_answers_the_first(
+    client, db_session, discounted
+):
+    """Pass 3, B1: an agent's retry after a lost response posted twice."""
+    inv = discounted["invoice"]
+    pay = _short_paid(client, discounted)
+    body = {
+        "invoice_id": inv["id"],
+        "discount": "2.00",
+        "discount_account_id": _account_id(db_session, "4900"),
+    }
+    url = f"/api/payments/{pay['id']}/discount"
+    first = client.post(url, json=body, headers={"Idempotency-Key": "take-2"})
+    again = client.post(url, json=body, headers={"Idempotency-Key": "take-2"})
+    assert first.status_code == 200 and again.status_code == 200
+    assert again.headers.get("X-Replayed") == "true"
+    assert again.json() == first.json()
+    assert (
+        db_session.query(CreditMemo).filter_by(discount_payment_id=pay["id"]).count()
+        == 1
+    )

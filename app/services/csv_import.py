@@ -82,7 +82,14 @@ def _terms(row: dict, default: str, choices) -> tuple[str | None, str | None]:
     # (#665), so only text nothing reads is refused
     from app.services.payment_terms import read_text
 
-    if read_text(raw) is not None:
+    read = read_text(raw)
+    if read is not None and read.net_days < 0:
+        # due before it is dated: every invoice on them would be refused
+        return None, (
+            f'Terms "{raw[:50]}" would make an invoice due before its date. '
+            "Use a number of days of 0 or more."
+        )
+    if read is not None:
         return raw, None
     # the list named, but not without end: a long list ends "and N more"
     shown = ", ".join(choices[:TERMS_SHOWN])

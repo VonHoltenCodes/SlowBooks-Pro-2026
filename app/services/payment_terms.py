@@ -46,19 +46,31 @@ MAX_TEXT_DAYS = 99999
 MAX_DAYS = 3650
 
 
+# The joiners some scripts and emoji need (ZWNJ in Persian and Indic text,
+# ZWJ in "👨‍👩‍👧"): kept in a stored name, ignored when names are compared.
+JOINERS = {"\u200c", "\u200d"}
+
+
+def _strip_format(text: str, keep=frozenset()) -> str:
+    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf" or ch in keep)
+
+
 def clean_name(text: Optional[str]) -> str:
     """A term name as stored: NFKC-normalized (a full-width "Ｎｅｔ" is
-    "Net"), invisible format characters (a zero-width space, a BOM) taken
-    out, so no two names on the list look the same and differ unseen."""
-    text = unicodedata.normalize("NFKC", text or "")
-    return "".join(ch for ch in text if unicodedata.category(ch) != "Cf")
+    "Net"), invisible format characters (a zero-width space, a BOM, a
+    direction mark) taken out but for the joiners, so no two names on the
+    list look the same and differ unseen."""
+    return _strip_format(unicodedata.normalize("NFKC", text or ""), JOINERS)
 
 
 def _key(text: Optional[str]) -> str:
-    """The text as a list name is matched: cleaned (clean_name), trimmed,
-    single-spaced, lower case. Matching to the list only; text is READ as
-    the old parser read it (read_text), which is stricter."""
-    return " ".join(clean_name(text).split()).lower()
+    """The text as a list name is matched: NFKC, every format character
+    out (the joiners too), trimmed, single-spaced, lower case. Matching to
+    the list only; text is READ as the old parser read it (read_text),
+    which is stricter."""
+    return " ".join(
+        _strip_format(unicodedata.normalize("NFKC", text or "")).split()
+    ).lower()
 
 
 @dataclass(frozen=True)
@@ -76,11 +88,16 @@ class Rule:
 
     def due_date(self, on: date) -> date:
         if self.kind == DATE_DRIVEN:
+            # the first due day on or after the date (a short month's last
+            # day standing in for a day it lacks); dated fewer than
+            # cutoff_days before it, the month after's (#665: the cutoff was
+            # only checked against the date's own month, so a document dated
+            # Jan 27 under "5th, 10-day cutoff" was due Feb 5, not Mar 5)
             due = _day_in(on.year, on.month, self.due_day)
-            # Before the date, or fewer than cutoff_days after it: the
-            # next month's day. Never more than one month on.
-            if (due - on).days < (self.cutoff_days or 0) or due < on:
+            if due < on:
                 due = _day_in(*_next_month(on.year, on.month), self.due_day)
+            if (due - on).days < (self.cutoff_days or 0):
+                due = _day_in(*_next_month(due.year, due.month), self.due_day)
             return due
         return on + timedelta(days=self.net_days or 0)
 
@@ -212,9 +229,12 @@ def stored_note(db: Session, doc, noun: str, listed=None) -> str:
     if listed is None:
         listed = find_term(db, text) is not None
     if listed:
+        # true of a document saved before the term and of a copy of one (a
+        # duplicate, a schedule's next document), which keeps its source's
+        # reading (#665)
         head = (
-            f'This {noun} was saved before "{text}" was on the terms list, '
-            "so it doesn't follow that term's rule"
+            f'This {noun}\'s terms were first saved before "{text}" was on the '
+            "terms list, so it keeps their old reading, not that term's rule"
         )
         tail = ""
     else:
@@ -358,13 +378,20 @@ def link_terms(db: Session, doc) -> None:
 
 
 def retie(db: Session, doc, before: Optional[str]) -> bool:
-    """After an edit: tie anew only when the terms changed, compared by the
-    list's key, so a form that sends the same terms back (or a case shift
-    of them) leaves an untied document untied. True when it re-tied."""
-    if _key(before) == _key(doc.terms):
+    """After an edit: tie anew whenever the terms text changed, by so much
+    as a space or a letter's case, to the entry the new text names (#665:
+    "Net 45" picked over "net<TAB>45" was taken for the same terms and left
+    30 days out). Only the identical text sent back, as the forms send it,
+    leaves the document as it was saved. True when it re-tied."""
+    if (before or "") == (doc.terms or ""):
         return False
     link_terms(db, doc)
     return True
+
+
+def _void(doc) -> bool:
+    status = getattr(doc, "status", None)
+    return getattr(status, "value", status) == "void"
 
 
 def _foreign(db: Session, doc) -> bool:
@@ -399,8 +426,9 @@ class DocumentTerms:
 
     def fill(self, resp, doc) -> None:
         """discount_percent, discount_date, discount_line and terms_note on
-        `resp`, from the rule `doc` was saved under and its date."""
-        if not _key(doc.terms) or doc.date is None:
+        `resp`, from the rule `doc` was saved under and its date. A void
+        document offers no discount (#665)."""
+        if not _key(doc.terms) or doc.date is None or _void(doc):
             return
         rule = self._rule(doc)
         if rule is None:
@@ -422,7 +450,9 @@ def document_discount_line(doc) -> Optional[str]:
     from sqlalchemy.orm import object_session
 
     db = object_session(doc)
-    if db is None or doc.date is None or not _key(doc.terms) or _foreign(db, doc):
+    if db is None or doc.date is None or not _key(doc.terms) or _void(doc):
+        return None
+    if _foreign(db, doc):
         return None
     rule = document_rule(db, doc)
     if rule is None:

@@ -209,9 +209,11 @@ def create_payment(
 
     def _number(invoice_id):
         inv = db.get(Invoice, invoice_id)
-        return f"Invoice {inv.invoice_number if inv else invoice_id}"
+        return inv.invoice_number if inv else invoice_id
 
-    early_pay_discounts.refuse_doubled(data.allocations, "invoice_id", _number)
+    early_pay_discounts.refuse_doubled(
+        data.allocations, "invoice_id", "invoice", _number
+    )
     # and where they post, checked before anything is written
     discount_acct = early_pay_discounts.discount_account(
         db,
@@ -590,6 +592,7 @@ def add_discount(
     payment_id: int,
     data: PaymentDiscountAdd,
     request: Request = None,
+    response: Response = None,
     db: Session = Depends(get_db),
 ):
     """Take an early-payment discount with a payment already recorded
@@ -597,13 +600,33 @@ def add_discount(
     taken then. The discount is checked against the invoice's terms on the
     payment's date and its balance before the payment, posts as one taken
     with the payment would (a credit memo tied to it, voided with it), and
-    is dated as the payment is."""
+    is dated as the payment is.
+
+    Claimed before anything is read (#665: four at once each posted a
+    memo): an Idempotency-Key is reserved, then the payment's row is
+    written, so a second request waits for the first to commit and then
+    reads its discount and is refused; a retry with the same key answers
+    with the first response."""
     from app.routes._roles import is_admin
     from app.services import early_pay_discounts
     from app.services.currency import document_currency, home_currency
 
+    replay = request_keys.reserve(
+        db,
+        request,
+        f"POST /api/payments/{payment_id}/discount",
+        data.model_dump(),
+        _actor(db),
+    )
+    if replay is not None and not isinstance(replay, request_keys.Reservation):
+        return replay
+    _claim(db, Payment, payment_id)
     payment = (
-        db.query(Payment).filter(Payment.id == payment_id).with_for_update().first()
+        db.query(Payment)
+        .filter(Payment.id == payment_id)
+        .with_for_update()
+        .populate_existing()
+        .first()
     )
     if not payment:
         raise HTTPException(status_code=404, detail="Payment not found")
@@ -619,6 +642,7 @@ def add_discount(
         db.query(Invoice)
         .filter(Invoice.id == data.invoice_id)
         .with_for_update()
+        .populate_existing()
         .first()
     )
     if not invoice:
@@ -666,9 +690,36 @@ def add_discount(
     early_pay_discounts.record_override(
         payment, [against] if against else [], _actor(db)
     )
-    db.commit()
+    db.flush()
     db.refresh(payment)
-    return _response(payment)
+    resp = _response(payment)
+    request_keys.finish(db, replay, 200, resp.model_dump(mode="json"), response)
+    db.commit()
+    return resp
+
+
+def _claim(db: Session, model, row_id: int) -> None:
+    """Write the row before anything is read (#665). On SQLite the write
+    opens the transaction and takes the database's write lock, so a second
+    request waits here for the first to commit and reads what it posted;
+    on PostgreSQL it is the row's lock. The value is left as it was."""
+    from sqlalchemy.exc import OperationalError
+
+    try:
+        db.query(model).filter(model.id == row_id).update(
+            {model.discount_override: model.discount_override},
+            synchronize_session=False,
+        )
+    except OperationalError as e:
+        if "locked" in str(e.orig).lower():
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Another discount on this payment is being saved; try "
+                    "again in a moment."
+                ),
+            ) from e
+        raise
 
 
 def _paid_out_warning(db, lines, provider) -> str | None:

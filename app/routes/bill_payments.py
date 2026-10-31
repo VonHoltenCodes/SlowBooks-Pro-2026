@@ -190,9 +190,9 @@ def create_bill_payment(
 
     def _number(bill_id):
         row = db.get(Bill, bill_id)
-        return f"Bill {row.bill_number if row else bill_id}"
+        return row.bill_number if row else bill_id
 
-    early_pay_discounts.refuse_doubled(data.allocations, "bill_id", _number)
+    early_pay_discounts.refuse_doubled(data.allocations, "bill_id", "bill", _number)
 
     # The accounts the journal needs, resolved before anything is written:
     # a missing one is a 409 naming it, with no payment, allocations or
@@ -405,19 +405,34 @@ def add_discount(
     bill_payment_id: int,
     data: BillPaymentDiscountAdd,
     request: Request = None,
+    response: Response = None,
     db: Session = Depends(get_db),
 ):
     """Take an early-payment discount with a bill payment already recorded
     (#665), checked against the bill's terms on the payment's date and its
-    balance before the payment, posted as one taken with it would be."""
+    balance before the payment, posted as one taken with it would be.
+    Claimed before anything is read, and an Idempotency-Key honoured, as
+    the customer side (#665)."""
     from app.routes._roles import is_admin
+    from app.routes.payments import _claim
     from app.services import early_pay_discounts
     from app.services.currency import document_currency, home_currency
 
+    replay = request_keys.reserve(
+        db,
+        request,
+        f"POST /api/bill-payments/{bill_payment_id}/discount",
+        data.model_dump(),
+        _actor(db),
+    )
+    if replay is not None and not isinstance(replay, request_keys.Reservation):
+        return replay
+    _claim(db, BillPayment, bill_payment_id)
     payment = (
         db.query(BillPayment)
         .filter(BillPayment.id == bill_payment_id)
         .with_for_update()
+        .populate_existing()
         .first()
     )
     if not payment:
@@ -430,7 +445,13 @@ def add_discount(
     acct = early_pay_discounts.discount_account(
         db, data.discount_account_id, [data.discount], data.allow_discount_override
     )
-    bill = db.query(Bill).filter(Bill.id == data.bill_id).with_for_update().first()
+    bill = (
+        db.query(Bill)
+        .filter(Bill.id == data.bill_id)
+        .with_for_update()
+        .populate_existing()
+        .first()
+    )
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     number = bill.bill_number
@@ -473,11 +494,13 @@ def add_discount(
     early_pay_discounts.record_override(
         payment, [against] if against else [], _actor(db)
     )
-    db.commit()
+    db.flush()
     db.refresh(payment)
     resp = BillPaymentResponse.model_validate(payment)
     resp.vendor_name = payment.vendor.name if payment.vendor else None
     resp.discounts = _discounts(db, payment)
+    request_keys.finish(db, replay, 200, resp.model_dump(mode="json"), response)
+    db.commit()
     return resp
 
 

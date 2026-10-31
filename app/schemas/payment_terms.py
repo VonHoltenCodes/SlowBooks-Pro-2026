@@ -4,29 +4,34 @@ from typing import Annotated, Literal, Optional
 
 from pydantic import (
     BaseModel,
-    BeforeValidator,
+    AfterValidator,
     StrictBool,
     StrictInt,
-    StringConstraints,
 )
 
 from app.schemas.common import StrictModel
 
 
-def _clean(value: str) -> str:
+def _clean(value):
     """NFKC, invisible format characters out (a zero-width space made a
-    second "Net 30" on every list), then trimmed (#665)."""
+    second "Net 30" on every list), then trimmed, and its length said in a
+    sentence: a name is at most what a document's terms column holds (50)."""
+    if not isinstance(value, str):
+        return value
     from app.services.payment_terms import clean_name
 
-    return clean_name(value).strip()
+    value = clean_name(value).strip()
+    if not value:
+        raise ValueError("A term needs a name.")
+    if len(value) > 50:
+        raise ValueError(
+            f"A term name is at most 50 characters; this one is {len(value)}."
+        )
+    return value
 
 
 # The documents' terms column is String(50), so a name fits it.
-TermName = Annotated[
-    str,
-    BeforeValidator(lambda v: _clean(v) if isinstance(v, str) else v),
-    StringConstraints(min_length=1, max_length=50),
-]
+TermName = Annotated[str, AfterValidator(_clean)]
 TermKind = Literal["standard", "date_driven"]
 
 
