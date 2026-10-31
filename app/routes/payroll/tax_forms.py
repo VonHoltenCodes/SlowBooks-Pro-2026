@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import Depends, HTTPException, Query
 from fastapi.responses import Response, JSONResponse
 from sqlalchemy.orm import Session
@@ -128,6 +130,11 @@ def generate_form_940(
         "box_2": str(data["total_futa_tax"]),  # FUTA tax for the year
         "total_payments": str(data["total_payments"]),
         "exempt_payments": str(data["exempt_payments"]),
+        # Line 11 / 12 — present only for a credit-reduction state employer
+        "credit_reduction": str(data.get("credit_reduction", Decimal("0"))),
+        "total_futa_tax_after_adjustments": str(
+            data.get("total_futa_tax_after_adjustments", data["total_futa_tax"])
+        ),
         "employer_ein": company["ein"] or "XX-XXXXXXX",
         "employer_name": company["name"],
         "tax_year": str(year),

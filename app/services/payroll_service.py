@@ -5,9 +5,17 @@
 # Method for Automated Payroll Systems) using the 2020+ redesigned Form W-4 —
 # there are no "allowances" anymore. Supplemental wages use Worksheet 4 (flat).
 #
-# DISCLAIMER: Bracket figures are 2026-approximate, modelled on the published
-# Pub 15-T schedule structure. Verify against the current IRS Pub 15-T before
-# relying on these for actual tax filing.
+# Sources for the figures below (verified against the publications 2026-10-31):
+#   * IRS Publication 15-T (2026), Federal Income Tax Withholding Methods,
+#     Dec. 2025 (Cat. No. 32112B) — Worksheet 1A and the "2026 Percentage
+#     Method Tables for Automated Payroll Systems", pages 11-12.
+#     https://www.irs.gov/pub/irs-pdf/p15t.pdf
+#   * IRS Publication 15 (2026), (Circular E) Employer's Tax Guide, Dec. 15,
+#     2025 (Cat. No. 10000W) — Social Security wage base, supplemental-wage
+#     rates (section 7), FUTA rate and credit (section 14).
+#     https://www.irs.gov/pub/irs-pdf/p15.pdf
+#   * SSA, "Contribution and Benefit Base" (2027 base announced 2026-10-14).
+#     https://www.ssa.gov/oact/cola/cbb.html
 # ============================================================================
 
 from decimal import Decimal
@@ -21,24 +29,39 @@ SS_RATE = Decimal("0.062")  # Social Security 6.2% (employee & employer each)
 # The Social Security wage base changes every year (SSA announces the next
 # year's in October). A pay run, an opening balance and a form use the base
 # for their own year: ss_wage_base(year).
+# 2026: Pub 15 (2026) "What's New" — "The social security wage base limit is
+# $184,500." 2027: SSA Contribution and Benefit Base page, $192,300
+# (https://www.ssa.gov/oact/cola/cbb.html, announced with the 2027 COLA on
+# 2026-10-14).
 SS_WAGE_BASES = {
     2023: Decimal("160200"),
     2024: Decimal("168600"),
     2025: Decimal("176100"),
     2026: Decimal("184500"),
+    2027: Decimal("192300"),
 }
-SS_WAGE_BASE = SS_WAGE_BASES[max(SS_WAGE_BASES)]  # the newest year's
+# The current year's base: the fallback when a caller gives no year, and the
+# single base every form used before per-year bases (2.29.0), which the
+# Form history "legacy" check still measures against. Next year's base
+# lives only in the table above until the year turns.
+SS_WAGE_BASE = SS_WAGE_BASES[2026]
 MEDICARE_RATE = Decimal("0.0145")  # Medicare 1.45% (employee & employer each)
 MEDICARE_ADDITIONAL_RATE = Decimal("0.009")  # extra 0.9% (employee only)
 MEDICARE_ADDITIONAL_THRESHOLD = Decimal("200000")  # withhold the extra above this
 
 # --- Federal unemployment (FUTA) -------------------------------------------
 # $7,000 by statute (26 U.S.C. 3306(b)(1)) since 1983: the same every year.
+# Pub 15 (2026) section 14: "For 2026, the FUTA tax rate is 6.0%" and the
+# credit for state unemployment tax "may be as much as 5.4%", so 0.6% net.
+# A credit-reduction state's extra FUTA is figured on the annual Form 940
+# (tax_forms/form_940.py), not on the paycheck.
 FUTA_WAGE_BASE = Decimal("7000")
 FUTA_EFFECTIVE_RATE = Decimal("0.006")  # 6.0% gross less the standard 5.4% state credit
 
 # --- Pub 15-T Worksheet 1A -------------------------------------------------
 # Line 1g standard-deduction add-back (skipped when the Step 2 box is checked).
+# Pub 15-T (2026) Worksheet 1A line 1g: "enter $12,900 if the taxpayer is
+# married filing jointly or $8,600 otherwise" — unchanged for 2026.
 STD_DEDUCTION_ADDBACK = {
     "married": Decimal("12900"),
     "single": Decimal("8600"),
@@ -47,77 +70,86 @@ STD_DEDUCTION_ADDBACK = {
 
 # Percentage Method annual schedules as (lower_bound, marginal_rate) pairs,
 # ascending. Cumulative tax is derived in _tax_from_brackets so the schedules
-# stay internally consistent regardless of transcription.
+# stay internally consistent regardless of transcription; the derived
+# cumulative amounts equal column C of the published tables to the cent.
+#
+# "2026 Percentage Method Tables for Automated Payroll Systems and
+# Withholding on Periodic Payments of Pensions and Annuities" — STANDARD
+# Withholding Rate Schedules (Form W-4 from 2019 or earlier, or 2020+ with
+# the Step 2 box NOT checked), Pub 15-T (2026) page 12.
 _STANDARD = {
-    "single": [
+    "single": [  # Single or Married Filing Separately
         (Decimal("0"), Decimal("0")),
-        (Decimal("6000"), Decimal("0.10")),
-        (Decimal("17600"), Decimal("0.12")),
-        (Decimal("53150"), Decimal("0.22")),
-        (Decimal("106525"), Decimal("0.24")),
-        (Decimal("197950"), Decimal("0.32")),
-        (Decimal("249725"), Decimal("0.35")),
-        (Decimal("615350"), Decimal("0.37")),
+        (Decimal("7500"), Decimal("0.10")),
+        (Decimal("19900"), Decimal("0.12")),
+        (Decimal("57900"), Decimal("0.22")),
+        (Decimal("113200"), Decimal("0.24")),
+        (Decimal("209275"), Decimal("0.32")),
+        (Decimal("263725"), Decimal("0.35")),
+        (Decimal("648100"), Decimal("0.37")),
     ],
-    "married": [
+    "married": [  # Married Filing Jointly
         (Decimal("0"), Decimal("0")),
-        (Decimal("17100"), Decimal("0.10")),
-        (Decimal("40300"), Decimal("0.12")),
-        (Decimal("111400"), Decimal("0.22")),
-        (Decimal("218150"), Decimal("0.24")),
-        (Decimal("400000"), Decimal("0.32")),
-        (Decimal("503550"), Decimal("0.35")),
-        (Decimal("747200"), Decimal("0.37")),
+        (Decimal("19300"), Decimal("0.10")),
+        (Decimal("44100"), Decimal("0.12")),
+        (Decimal("120100"), Decimal("0.22")),
+        (Decimal("230700"), Decimal("0.24")),
+        (Decimal("422850"), Decimal("0.32")),
+        (Decimal("531750"), Decimal("0.35")),
+        (Decimal("788000"), Decimal("0.37")),
     ],
     "head_of_household": [
         (Decimal("0"), Decimal("0")),
-        (Decimal("13300"), Decimal("0.10")),
-        (Decimal("29850"), Decimal("0.12")),
-        (Decimal("76400"), Decimal("0.22")),
-        (Decimal("113800"), Decimal("0.24")),
-        (Decimal("205250"), Decimal("0.32")),
-        (Decimal("257000"), Decimal("0.35")),
-        (Decimal("622650"), Decimal("0.37")),
+        (Decimal("15550"), Decimal("0.10")),
+        (Decimal("33250"), Decimal("0.12")),
+        (Decimal("83000"), Decimal("0.22")),
+        (Decimal("121250"), Decimal("0.24")),
+        (Decimal("217300"), Decimal("0.32")),
+        (Decimal("271750"), Decimal("0.35")),
+        (Decimal("656150"), Decimal("0.37")),
     ],
 }
 
-# "Form W-4, Step 2, Checkbox" schedules — used when the employee checked the
-# multiple-jobs box. Roughly the standard schedule with the brackets halved.
+# "Form W-4, Step 2, Checkbox, Withholding Rate Schedules" — used when the
+# employee checked the multiple-jobs box (Pub 15-T (2026) page 12, right
+# half). Roughly the standard schedule with the brackets halved.
 _CHECKBOX = {
-    "single": [
+    "single": [  # Single or Married Filing Separately
         (Decimal("0"), Decimal("0")),
-        (Decimal("7300"), Decimal("0.10")),
-        (Decimal("13100"), Decimal("0.12")),
-        (Decimal("30875"), Decimal("0.22")),
-        (Decimal("57563"), Decimal("0.24")),
-        (Decimal("103275"), Decimal("0.32")),
-        (Decimal("129163"), Decimal("0.35")),
-        (Decimal("311975"), Decimal("0.37")),
+        (Decimal("8050"), Decimal("0.10")),
+        (Decimal("14250"), Decimal("0.12")),
+        (Decimal("33250"), Decimal("0.22")),
+        (Decimal("60900"), Decimal("0.24")),
+        (Decimal("108938"), Decimal("0.32")),
+        (Decimal("136163"), Decimal("0.35")),
+        (Decimal("328350"), Decimal("0.37")),
     ],
-    "married": [
+    "married": [  # Married Filing Jointly
         (Decimal("0"), Decimal("0")),
-        (Decimal("14600"), Decimal("0.10")),
-        (Decimal("26200"), Decimal("0.12")),
-        (Decimal("61750"), Decimal("0.22")),
-        (Decimal("115125"), Decimal("0.24")),
-        (Decimal("206550"), Decimal("0.32")),
-        (Decimal("258325"), Decimal("0.35")),
-        (Decimal("380200"), Decimal("0.37")),
+        (Decimal("16100"), Decimal("0.10")),
+        (Decimal("28500"), Decimal("0.12")),
+        (Decimal("66500"), Decimal("0.22")),
+        (Decimal("121800"), Decimal("0.24")),
+        (Decimal("217875"), Decimal("0.32")),
+        (Decimal("272325"), Decimal("0.35")),
+        (Decimal("400450"), Decimal("0.37")),
     ],
     "head_of_household": [
         (Decimal("0"), Decimal("0")),
-        (Decimal("10800"), Decimal("0.10")),
-        (Decimal("19075"), Decimal("0.12")),
-        (Decimal("42350"), Decimal("0.22")),
-        (Decimal("61050"), Decimal("0.24")),
-        (Decimal("106775"), Decimal("0.32")),
-        (Decimal("132650"), Decimal("0.35")),
-        (Decimal("224100"), Decimal("0.37")),
+        (Decimal("12075"), Decimal("0.10")),
+        (Decimal("20925"), Decimal("0.12")),
+        (Decimal("45800"), Decimal("0.22")),
+        (Decimal("64925"), Decimal("0.24")),
+        (Decimal("112950"), Decimal("0.32")),
+        (Decimal("140175"), Decimal("0.35")),
+        (Decimal("332375"), Decimal("0.37")),
     ],
 }
 
-# Supplemental wage withholding (Pub 15 / Worksheet 4): flat 22%, or 37% on
-# cumulative supplemental wages above $1M for the year.
+# Supplemental wage withholding (Pub 15 (2026) section 7 / Pub 15-T
+# Worksheet 4): "The withholding rate on supplemental wages remains 22% (37%
+# if supplemental wages paid to an employee during the calendar year exceed
+# $1 million)".
 SUPPLEMENTAL_RATE = Decimal("0.22")
 SUPPLEMENTAL_HIGH_RATE = Decimal("0.37")
 SUPPLEMENTAL_HIGH_THRESHOLD = Decimal("1000000")
@@ -502,6 +534,9 @@ def calculate_withholdings(
         state_extra_withholding=state_extra_withholding,
         state_rate_override=state_rate_override,
         local_tax_rate=local_tax_rate,
+        # Oregon subtracts the period's federal withholding from wages
+        # before its rates (150-206-436); the other engines ignore it.
+        federal_withholding=federal,
     )
     engine = get_engine(work_state)
     state = engine.calculate(
