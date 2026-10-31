@@ -39,7 +39,8 @@ const PayrollPage = {
                     <td>${formatDate(r.period_start)} - ${formatDate(r.period_end)}</td>
                     <td>${formatDate(r.pay_date)}</td>
                     <td>${statusBadge(r.status)}${r.status === 'draft' && r.stale_reason
-                        ? ` <span style="color:var(--text-warning);font-size:11px" title="${escapeHtml(r.stale_reason)}">figured before its year-to-date changed: process as figured, or discard it</span>` : ''}</td>
+                        ? ` <span style="color:var(--text-warning);font-size:11px" title="${escapeHtml(r.stale_reason)}">figured before its year-to-date changed: process as figured, or discard it</span>` : ''}${r.warnings && r.warnings.length
+                        ? ` <span style="color:var(--text-warning);font-size:11px" title="${escapeHtml(r.warnings.join(' '))}">figured with another year's tables</span>` : ''}</td>
                     <td class="amount">${formatCurrency(r.total_gross)}</td>
                     <td class="amount">${formatCurrency(r.total_taxes)}</td>
                     <td class="amount">${formatCurrency(r.total_net)}</td>
@@ -320,6 +321,7 @@ const PayrollPage = {
                 ${run.burden_job_cost_id ? `<div class="total-row"><span class="label">Labor burden distributed</span><span class="value"><a href="#/job-costs">Job cost entry #${run.burden_job_cost_id}</a></span></div>` : ''}
             </div>
             ${PayrollPage._directDepositNote(run)}
+            ${run.warnings && run.warnings.length ? `<div class="card note--caution" role="note" style="padding:10px 12px;margin:8px 0">${run.warnings.map(w => `<p style="margin:0">${escapeHtml(w)}</p>`).join('')}</div>` : ''}
             <div class="form-actions">
                 ${run.status === 'processed' && run.stubs.some(s => s.direct_deposit) ? `<button class="btn btn-primary" onclick="PayrollPage.downloadDirectDeposit(${run.id})" title="The ACH file to upload to the bank">Direct deposit file</button>` : ''}
                 ${run.status === 'processed' ? `<button class="btn btn-secondary" data-destructive onclick="PayrollPage.void(${run.id})">Void</button>` : ''}

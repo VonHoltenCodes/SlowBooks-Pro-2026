@@ -448,6 +448,7 @@ def calculate_withholdings(
     ytd_bases: dict | None = None,
     year: int | None = None,
     employee_count: int | None = None,
+    state_employee_count: int | None = None,
 ) -> dict:
     """Compute a full set of payroll taxes for one employee for one pay period.
 
@@ -557,9 +558,11 @@ def calculate_withholdings(
         # Oregon subtracts the period's federal withholding from wages
         # before its rates (150-206-436); the other engines ignore it.
         federal_withholding=federal,
-        # the company's active employees: WA PFML (50+) and Paid Leave
-        # Oregon (25+) charge their employer share by headcount
+        # headcounts for the leave programs' employer share: Paid Leave
+        # Oregon sizes an employer by every employee (25+), WA PFML by the
+        # employees working in Washington (50+)
         employee_count=employee_count,
+        state_employee_count=state_employee_count,
     )
     engine = get_engine(work_state)
     state = engine.calculate(

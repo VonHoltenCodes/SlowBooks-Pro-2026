@@ -33,9 +33,10 @@ Social Security wage base is kept per year: a pay run dated in another year
 (back-dated 2025 payroll entered during a conversion, say) is figured with
 this build's schedules and tables and carries a warning saying so.
 
-Washington PFML's employer share and Paid Leave Oregon's apply by headcount
-(50 and 25 employees): the pay run counts the company's active employees and
-charges the employer share only from those sizes; the employee's share is
+Washington PFML's employer share and Paid Leave Oregon's apply by headcount:
+the pay run counts the company's active employees and charges the employer
+share only from those sizes, Oregon by every employee (25 or more), Washington
+by the employees working in Washington (50 or more); the employee's share is
 withheld either way.
 
 ## State withholding

@@ -45,6 +45,11 @@ from app.services import benefits_engine
 
 def _with_employee_names(run: PayRun) -> PayRunResponse:
     resp = PayRunResponse.model_validate(run)
+    # a run dated outside the tables' year says so wherever it is read, not
+    # only in the answer to its creation (2.31.3 gate, note A)
+    note = tables_year_note(run.pay_date.year) if run.pay_date else None
+    if note:
+        resp.warnings = [note]
     for stub_resp, stub in zip(resp.stubs, run.stubs):
         if stub.employee:
             stub_resp.employee_name = stub.employee.full_name
@@ -230,10 +235,14 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
 
     year = data.pay_date.year
     # the company's active employees, for the state leave programs whose
-    # employer share applies from a headcount (WA PFML 50+, Paid Leave Oregon 25+)
-    employee_count = (
-        db.query(Employee).filter(Employee.is_active.is_(True)).count()  # noqa: E712
-    )
+    # employer share applies from a headcount: Paid Leave Oregon counts every
+    # employee (25+), WA PFML the employees working in Washington (50+)
+    active = db.query(Employee).filter(Employee.is_active.is_(True)).all()
+    employee_count = len(active)
+    state_counts: dict[str, int] = {}
+    for e in active:
+        code = (e.work_state or "WA").upper()
+        state_counts[code] = state_counts.get(code, 0) + 1
     total_gross = total_taxes = total_net = total_employer = Decimal("0")
     total_employer_benefits = Decimal("0")
     period = f"{data.period_start} to {data.period_end}"
@@ -402,6 +411,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             state_rate_override=emp.state_rate_override,
             local_tax_rate=emp.local_tax_rate,
             employee_count=employee_count,
+            state_employee_count=state_counts.get(work_state, 0),
             hours=total_hours,
             pretax_deductions=ben.pretax_federal + adhoc_pretax,
             pretax_state=ben.pretax_state + adhoc_pretax,
@@ -1362,12 +1372,17 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
     work_state = (emp.work_state or "WA").upper()
     wh_state = withholding_state(work_state, emp.residence_state)
     bases = wage_base_ytd(db, emp.id, year, work_state)
-    employee_count = db.query(Employee).filter(Employee.is_active.is_(True)).count()
+    active = db.query(Employee).filter(Employee.is_active.is_(True)).all()
+    employee_count = len(active)
+    state_employee_count = sum(
+        1 for e in active if (e.work_state or "WA").upper() == work_state
+    )
 
     def net_of(g: Decimal) -> Decimal:
         return calculate_withholdings(
             g,
             employee_count=employee_count,
+            state_employee_count=state_employee_count,
             pay_frequency=emp.pay_frequency.value if emp.pay_frequency else "biweekly",
             filing_status=emp.filing_status.value if emp.filing_status else "single",
             multiple_jobs=bool(emp.multiple_jobs),

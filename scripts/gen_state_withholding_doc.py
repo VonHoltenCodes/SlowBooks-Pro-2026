@@ -51,9 +51,9 @@ Employee inputs the engines read (Employees → form): **State W-4 allowances**,
 **extra state withholding** per period, an **elected rate** (Arizona A-4), and a flat
 **local tax rate** in percent where the state requires one (Indiana and Maryland counties,
 Ohio cities and school districts, Pennsylvania municipalities, Michigan cities). Local
-jurisdictions are not modelled individually. The pay run also passes the company's
-active-employee count: Washington PFML's employer share (50 or more employees) and Paid
-Leave Oregon's (25 or more) are charged from those sizes only.
+jurisdictions are not modelled individually. The pay run also passes headcounts: Paid
+Leave Oregon's employer share is charged from 25 active employees (in or out of state) and
+Washington PFML's from 50 active employees working in Washington.
 
 The `GET /api/payroll/states` catalog returns the same information.
 
