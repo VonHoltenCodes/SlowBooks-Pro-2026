@@ -107,7 +107,7 @@ _add(
             OtherItem("AK employee unemployment insurance", D("0.005"), D(54200)),
         ),
         year="2026",
-        source=f"Alaska DOL Employment Security Tax; {SUI}",
+        source="Alaska DOL Employment Security Tax, 2026 Industry / Experience Rates (taxable wage base $54,200; employee rate 0.50%), https://labor.alaska.gov/estax/2026-experience-rates.html",
     )
 )
 _add(
@@ -117,7 +117,7 @@ _add(
         "none",
         D(7000),
         year="2026",
-        source=f"Florida DOR reemployment tax; {SUI}",
+        source="Florida DOR reemployment tax, taxable wage base $7,000 (s. 443.1217 F.S.; floridarevenue.com/taxes/taxesfees/Pages/rt_rate.aspx); Equifax 2026 state UI tax guide (2026-03-26)",
     )
 )
 _add(
@@ -192,8 +192,8 @@ _add(
         D(8000),
         default_rate=D("0.020"),
         year="2026",
-        source=f"Arizona Form A-4; {TF}; {SUI}",
-        notes="Employee elects a rate on Form A-4 (0.5%–3.5%); 2.0% is the default when none is on file. Set employee.state_rate_override. The 2.5% flat income tax is what the election approximates.",
+        source="Arizona DOR Form A-4 (2026) and azdor.gov/businesses-arizona/withholding-tax: employee elects 0.5%-3.5% of gross taxable wages, 2.0% when no A-4 is on file; SUI base $8,000 (Arizona DES; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="Employee elects a rate on Form A-4 (0.5%-3.5% in half-point steps); 2.0% is the default when none is on file. Set employee.state_rate_override. There are no deductions or allowances. The 2.5% flat income tax is what the election approximates.",
     )
 )
 _add(
@@ -203,12 +203,12 @@ _add(
         "flat",
         D(30600),
         flat_rate=D("0.044"),
-        std_deduction=_sd(16100, 32200, 24150),
+        std_deduction=_sd(5500, 11000, 5500),
         employee_items=(OtherItem("CO FAMLI (employee)", D("0.0044"), SS_BASE),),
         employer_items=(OtherItem("CO FAMLI (employer)", D("0.0044"), SS_BASE),),
         year="2026",
-        source=f"Colorado DR 1098 / DR 0004; FAMLI 0.88% for 2026 split 50/50 (famli.colorado.gov); {TF}; {SUI}",
-        notes="Employers with 9 or fewer employees owe no employer FAMLI share.",
+        source="Colorado DR 1098 2026 Colorado Withholding Worksheet for Employers (rev. 10/21/25), Step 2a $11,000 married filing jointly / qualifying surviving spouse, $5,500 otherwise, Step 2c 4.40%, https://tax.colorado.gov/sites/default/files/documents/DR_1098_Colorado_Withholding_Worksheet_for_Employees.pdf; FAMLI 2026 premium 0.88% (0.44% employee / 0.44% employer) on wages to the Social Security cap, famli.colorado.gov premium & benefits calculator (0.86% from 2027); SUI base $30,600 (CDLE; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="The deduction is the DR 1098 Step 2a amount that applies when the employee has only a federal W-4 (head of household gets the $5,500 'otherwise' amount). An employee who files DR 0004 with a Line 2 amount should have that amount deducted instead; not modelled. Employers with 9 or fewer employees owe no employer FAMLI share.",
     )
 )
 _add(
@@ -221,8 +221,8 @@ _add(
         std_deduction=_sd(15000, 30000, 15000),
         exemption=D(5000),
         year="2026",
-        source=f"Georgia Employer's Tax Guide, revised 2026 (4.99%); {SUI}",
-        notes="Allowances = dependent allowances on Form G-4 ($5,000 each).",
+        source="Georgia Employer's Withholding Tax Guide 2026 (revised September 2026), What's New + Table E/F percentage method: 4.99% (HB 463, retroactive to 2026-01-01; withhold at 5.19% for pay dates before 2026-05-11), standard deduction $30,000 MFJ / $15,000 single, HOH, MFS, dependent allowance $5,000, https://dor.georgia.gov/document/document/2026-employers-tax-guide-updated-june-2026/download; SUI base $9,500 (Georgia DOL; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="Allowances = dependent allowances on Form G-4 ($5,000 each). Married couples who both work use the $15,000 column-3 deduction each; the engine's married status gives the $30,000 one-earner amount. Pay dates before 2026-05-11 were withheld at 5.19%.",
     )
 )
 _add(
@@ -232,9 +232,10 @@ _add(
         "flat",
         D(58300),
         flat_rate=D("0.053"),
-        std_deduction=_sd(16100, 32200, 24150),
+        std_deduction=_sd(16100, 32200, 16100),
         year="2026",
-        source=f"Idaho Table for Percentage Computation Method; {TF}; {SUI}",
+        source="Idaho EPB00744 Table for Percentage Computation Method of Withholding (07-23-2026): single including head of household 5.3% over $16,100, married 5.3% over $32,200, https://tax.idaho.gov/wp-content/uploads/pubs/EPB00744/EPB00744_07-23-2026.pdf; Idaho Child Tax Credit Allowance Table = $0 (credit sunset, Idaho Code 63-3029L); SUI base $58,300 (IDOL Administrative Order 682, 2025-11-06)",
+        notes="Head of household uses the single table. Idaho W-4 allowances are worth $0 in 2026 (the child tax credit allowance sunset), so employee.state_allowances has no effect.",
     )
 )
 _add(
@@ -246,8 +247,8 @@ _add(
         flat_rate=D("0.0495"),
         exemption=D(2925),
         year="2026",
-        source=f"Illinois Booklet IL-700-T (2026: $2,925 exemption allowance); {SUI}",
-        notes="Allowances = IL-W-4 line 1 count × $2,925 (line 2 additional allowances are $1,000 each — add them as allowances at the reduced value or use extra withholding).",
+        source="Illinois Booklet IL-700-T, effective 2026-01-01: 4.95%, $2,925 per IL-W-4 Line 1 allowance, $1,000 per Line 2 allowance, https://tax.illinois.gov/content/dam/soi/en/web/tax/forms/withholding/documents/currentyear/il-700-t.pdf; SUI base $14,250 (IDES; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="Allowances = IL-W-4 line 1 count x $2,925 (line 2 additional allowances are $1,000 each - add them as allowances at the reduced value or use extra withholding).",
     )
 )
 _add(
@@ -259,8 +260,8 @@ _add(
         flat_rate=D("0.0295"),
         exemption=D(1000),
         year="2026",
-        source=f"Indiana Departmental Notice #1 (2026: 2.95%); {SUI}",
-        notes="County income tax (0.5%–3%) is required: set employee.local_tax_rate to the county rate.",
+        source="Indiana Departmental Notice #1 (R47 / 10-26, effective 2026-10-01): 2.95% for 2026, $1,000 per WH-4 line 5 personal exemption, $1,500 per dependent (lines 6-7), $3,000 per adopted child, county rates; https://www.in.gov/dor/files/dn01.pdf (2.90% for 2027); SUI base $9,500 (Indiana DWD; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="County income tax (0.5%-3%) is required: set employee.local_tax_rate to the county rate. Dependent exemptions are $1,500 each (count a dependent as 1.5 allowances) and adopted children $3,000.",
     )
 )
 _add(
@@ -270,9 +271,11 @@ _add(
         "flat",
         D(20400),
         flat_rate=D("0.038"),
-        std_deduction=_sd(16100, 32200, 24150),
+        std_deduction=_sd(13000, 26000, 19500),
+        exemption=D("1052.63"),
         year="2026",
-        source=f"Iowa Withholding Formula (3.8% flat); {TF}; {SUI}",
+        source="Iowa Department of Revenue, Iowa Withholding Formula effective 2026-01-01 (released November 2025): D = $13,000 'Other' / MFJ with a working spouse, $19,500 head of household, $26,000 MFJ spouse without earned income or QSS; rate 3.80%; allowances are a dollar credit (old IA W-4: $40 per allowance), https://revenue.iowa.gov/media/53/download; SUI base $20,400 (Iowa Workforce Development, SF 607; $21,100 for 2027)",
+        notes="The married deduction is the $26,000 one-earner amount (the form's default when the spouse-income question is blank); a two-earner couple should use $13,000 (treat as single). Iowa allowances are a credit against tax, not an exemption: $1,052.63 per allowance x 3.8% = the $40 credit per old-style allowance; a 2024+ IA W-4 states the credit in dollars, so enter its total / $40 as allowances.",
     )
 )
 _add(
@@ -284,7 +287,8 @@ _add(
         flat_rate=D("0.035"),
         std_deduction=_sd(3360, 3360, 3360),
         year="2026",
-        source=f"Kentucky Withholding Tax Formula (2026: 3.5% per HB 1, std deduction $3,360); {SUI}",
+        source="Kentucky DOR 2026 Withholding Tax Formula, 42A003 (TCF)(10-2025): standard deduction $3,360, 3.5% flat, https://revenue.ky.gov/Forms/2026%20Withholding%20Formula.pdf; SUI base $12,000 (Kentucky Office of Unemployment Insurance; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="No allowances. Employees with more than one W-2 may need an extra $117.60 a year withheld (the deduction is taken once).",
     )
 )
 _add(
@@ -294,24 +298,27 @@ _add(
         "flat",
         D(7000),
         flat_rate=D("0.030"),
-        std_deduction=_sd(12875, 25750, 12875),
+        std_deduction=_sd(12875, 25750, 25750),
         year="2026",
-        source=f"Louisiana R-1300 (3% flat); {TF}; {SUI}",
+        source="Louisiana Revenue Information Bulletin 26-005 (2026-01-12) and Emergency Rule LAC 61:I.1501 effective 2026-01-01: 3% flat; standard deduction $12,875 single and MFS, $25,750 MFJ, QSS and head of household, https://dam.ldr.la.gov/lawspolicies/RIB%2026-005-Updated%20Withholding%20Tables.pdf; SUI base $7,000 (Louisiana Workforce Commission; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="Head of household gets the $25,750 deduction, the same as married filing jointly.",
     )
 )
 _add(
     StateSpec(
         "MA",
         "Massachusetts",
-        "flat",
+        "brackets",
         D(15000),
-        flat_rate=D("0.050"),
-        base_exemption=_sd(4400, 8800, 6800),
+        brackets=_br([(0, 5), (1107750, 9)], [(0, 5), (1107750, 9)]),
+        std_deduction=_sd(2000, 2000, 2000),
+        base_exemption=_sd(4400, 8400, 6800),
+        exemption=D(1000),
         employee_items=(OtherItem("MA PFML (employee)", D("0.0046"), SS_BASE),),
         employer_items=(OtherItem("MA PFML (employer)", D("0.0042"), SS_BASE),),
         year="2026",
-        source=f"Massachusetts Circular M; PFML 0.88% for 2026, 25+ employees (mass.gov); {SUI}",
-        notes="4% surtax on income over $1M is not withheld here. Employers under 25 employees owe no employer PFML share (0.46% total).",
+        source="Massachusetts Circular M (Rev. 12/25), Percentage Methods for Wages Paid from January 1, 2026, p.12: FICA/Medicare/retirement deduction up to $2,000; exemption factors $4,400 (claiming 1) or $1,000 x number claimed + $3,400 (a claimed spouse counts as 4); 5% to $1,107,750 and 9% above (4% surtax); head of household -$120 of tax; https://www.mass.gov/doc/massachusetts-circular-m-income-tax-withholding-tables-at-50-effective-january-1-2026/download; PFML 2026 0.88% for 25+ covered individuals = employee 0.46% (0.18% family + 0.28% medical) / employer 0.42%, wages to the Social Security cap, mass.gov PFML employer contribution rates; SUI base $15,000 (mass.gov UI contribution rates)",
+        notes="The $2,000 FICA deduction is modelled at its cap (reached at $26,144 of wages; below that it over-deducts by up to $2,000, i.e. up to $100 of tax). base_exemption assumes the employee claims 1 (single/HOH) or self + spouse = 5 exemptions (married, $8,400); each allowance here is one more dependent ($1,000). An M-4 claiming '0' gets no exemption - not modelled. Head of household: the $120 annual tax reduction is modelled as $2,400 more exemption ($120 / 5%). Employers under 25 covered individuals owe no employer PFML share (0.46% total).",
     )
 )
 _add(
@@ -319,12 +326,12 @@ _add(
         "MI",
         "Michigan",
         "flat",
-        D(9500),
+        D(9000),
         flat_rate=D("0.0425"),
         exemption=D(5900),
         year="2026",
-        source=f"Michigan Income Tax Withholding Guide (2026 exemption $5,900); {SUI}",
-        notes="Cities with an income tax (Detroit, Grand Rapids…) — use employee.local_tax_rate.",
+        source="Michigan Treasury Form 446, 2026 Michigan Income Tax Withholding Guide (Rev. 02-26): withholding rate 4.25%, personal exemption $5,900, https://www.michigan.gov/taxes/-/media/Project/Websites/taxes/Forms/SUW/TY2026/446_Withholding-Guide_2026.pdf (Treasury 2026-04-15: rate stays 4.25% for 2026); SUI base $9,000 for employers in good standing (Michigan UIA Employer Advisor, December 2025 / taxable wage base page; $9,500 for employers not in good standing)",
+        notes="Cities with an income tax (Detroit, Grand Rapids...) - use employee.local_tax_rate. The SUI base is $9,500 for employers delinquent on reports or taxes (UIA Form 6354).",
     )
 )
 _add(
@@ -377,12 +384,12 @@ _add(
         "brackets",
         D(8000),
         brackets=_br([(0, 2), (500, 4), (3000, 5)], [(0, 2), (1000, 4), (6000, 5)]),
-        std_deduction=_sd(3000, 8500, 5200),
+        std_deduction=_sd(2500, 5000, 2500),
         base_exemption=_sd(1500, 3000, 3000),
         exemption=D(1000),
         year="2026",
-        source=f"Alabama Withholding Tax Tables and Instructions; {TF}; {SUI}",
-        notes="Standard deduction phases down with income; the maximum is used.",
+        source="Alabama Withholding Tax Tables and Instructions for Employers (revised January 2026), Formula for Computing Alabama Withholding Tax p.6-7: standard deduction $3,000 S / $8,500 M / $5,200 H at gross income <= $25,999 phasing down to $2,500 / $5,000 / $2,500 at >= $35,500; federal withholding deduction; personal exemption $1,500 S/MS, $3,000 M/H; dependents $1,000 (<= $50,000), $500 (to $100,000), $300 above; 2%/4%/5% at $500/$3,000 (M: $1,000/$6,000), https://www.revenue.alabama.gov/wp-content/uploads/2026/01/whbooklet_0126.pdf; SUI base $8,000 (Alabama DOL; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="Standard deduction uses the floor amounts that apply at gross income >= $35,500 ($2,500 / $5,000 / $2,500); below $26,000 the published amounts are $500 / $3,500 / $2,700 higher (up to $25 / $175 / $135 a year more tax here). The deduction for the employee's annualized federal income tax withholding (line 2B) cannot be modelled: this over-withholds 5% of federal withholding (about $250 a year at $60,000 single). Dependents are $1,000 each regardless of income here ($500 / $300 above $50,000 / $100,000 in the formula). An A-4 claiming '0' gets no personal exemption - this assumes S, M or H is claimed. Occupational taxes - use employee.local_tax_rate.",
     )
 )
 _add(
@@ -391,11 +398,31 @@ _add(
         "Arkansas",
         "brackets",
         D(7000),
-        brackets=_br([(0, 2), (4600, 3.9)], [(0, 2), (4600, 3.9)]),
-        std_deduction=_sd(2470, 4940, 2470),
+        brackets=_br(
+            [
+                (0, 0),
+                (5600, 2),
+                (11200, 3),
+                (16000, 3.4),
+                (26400, 3.7),
+                (94700, 13.6055),
+                (97600, 3.7),
+            ],
+            [
+                (0, 0),
+                (5600, 2),
+                (11200, 3),
+                (16000, 3.4),
+                (26400, 3.7),
+                (94700, 13.6055),
+                (97600, 3.7),
+            ],
+        ),
+        std_deduction=_sd(2470, 2470, 2470),
+        exemption=D(784),
         year="2026",
-        source=f"Arkansas Withholding Tax Formula Method (2026 std deduction $2,470); {TF}; {SUI}",
-        notes="Arkansas gives a $29 per-exemption credit rather than an exemption amount; not modelled.",
+        source="Arkansas DFA Withholding Tax Formula Method, Effective 01/01/2026 (posted 2026-05-29 for Act 1 of 2026 / HB 1001, top rate 3.9% -> 3.7% retroactive to 2026-01-01): standard deduction $2,470 (every status); 0% to $5,599, 2% - $111.98 to $11,199, 3% - $223.97 to $15,999, 3.4% - $287.97 to $26,399, 3.7% - $367.16 to $94,700, adjustment stepping down $10 per $100 to 3.7% - $79.90 at $97,601+; $29 credit per AR4EC exemption, https://www.dfa.arkansas.gov/wp-content/uploads/Withholding-Tax-Formula.pdf; SUI base $7,000 (Arkansas DWS; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="Rates in force now (retroactive to 2026-01-01; the October 2025 edition had 3.9% - $419.96 / $89.30). The DFA 'minus adjustment' schedule is expressed as marginal brackets: the $94,700-$97,600 band recaptures the lower rates at 13.6055% so that income above $97,600 is taxed at a flat 3.7% - $79.90 (exact at $97,600 and above, within $5 inside the band). The $29 per-exemption credit is modelled as a $784 exemption ($29 / 3.7%); it is worth $26.66 per exemption in the 3.4% bracket. DFA's $50-midrange lookup and whole-dollar rounding are not applied.",
     )
 )
 _add(
@@ -405,39 +432,68 @@ _add(
         "brackets",
         D(27000),
         brackets=_br(
-            [
-                (0, 2),
-                (10000, 4.5),
-                (50000, 5.5),
-                (100000, 6),
-                (200000, 6.5),
-                (250000, 6.9),
-                (500000, 6.99),
+            [  # Withholding Code F (single) - TPG-211 fitted on gross annual wages
+                (0, 0),
+                (15000, 2.4083),
+                (30000, 8.2518),
+                (44000, 4.725),
+                (50000, 4.95),
+                (56500, 6.3286),
+                (60000, 11.2056),
+                (64500, 5.993),
+                (100000, 6.0),
+                (101500, 6.7143),
+                (105000, 6.5),
+                (150000, 6.05),
+                (200000, 8.3),
+                (250000, 8.7),
+                (345000, 6.9581),
+                (500000, 7.99),
+                (540000, 6.99),
             ],
-            [
-                (0, 2),
-                (20000, 4.5),
-                (100000, 5.5),
-                (200000, 6),
-                (400000, 6.5),
-                (500000, 6.9),
-                (1000000, 6.99),
+            [  # Withholding Code C (married, spouse not employed)
+                (0, 0),
+                (24000, 1.7),
+                (44000, 3.825),
+                (48000, 8.2261),
+                (71000, 4.3648),
+                (96000, 12.095),
+                (100000, 13.5),
+                (100500, 6.5),
+                (145500, 5.5917),
+                (200000, 6.0),
+                (210000, 6.5),
+                (300000, 6.05),
+                (400000, 8.3),
+                (500000, 8.7),
+                (690000, 6.9581),
+                (1000000, 7.99),
+                (1080000, 6.99),
             ],
-            [
-                (0, 2),
-                (16000, 4.5),
-                (80000, 5.5),
-                (160000, 6),
-                (320000, 6.5),
-                (400000, 6.9),
-                (800000, 6.99),
+            [  # Withholding Code B (head of household)
+                (0, 0),
+                (19000, 1.6),
+                (35000, 4.3583),
+                (38000, 8.2264),
+                (56000, 4.4378),
+                (74000, 10.36),
+                (78500, 7.1667),
+                (80000, 6.4275),
+                (114500, 5.5879),
+                (160000, 6.0),
+                (168000, 6.5),
+                (240000, 6.05),
+                (320000, 8.25),
+                (400000, 8.65),
+                (552000, 6.9565),
+                (800000, 7.99),
+                (864000, 6.99),
             ],
         ),
-        base_exemption=_sd(15000, 24000, 19000),
         employee_items=(OtherItem("CT Paid Leave", D("0.005"), SS_BASE),),
         year="2026",
-        source=f"Connecticut Circular CT; CT Paid Leave 0.5% (ctpaidleave.org); {TF}; {SUI}",
-        notes="Personal exemption phases out above $30k/$48k; the full amount is used. Withholding codes A–F map to filing status here.",
+        source="Connecticut DRS TPG-211, 2026 Withholding Calculation Rules (Rev. 12/25, 'unchanged from 2025'): Table A personal exemption ($15,000 code F phasing out $30,000-$44,000; $24,000 code C, $48,000-$71,000; $19,000 code B, $38,000-$56,000), Table B initial tax 2%/4.5%/5.5%/6%/6.5%/6.9%/6.99%, Table C 2% phase-out add-back, Table D tax recapture, Table E personal tax credit (75% down to 0 at $64,500 / $100,500 / $78,500), https://portal.ct.gov/-/media/drs/forms/2025/wth/tpg-211_1225.pdf; CT Paid Leave 0.5% of wages to the Social Security cap (ctpaidleave.org, rate kept at 0.5% for 2026); SUI base $27,000 (CT DOL; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="Connecticut has no percentage method: every table (exemption phase-out, add-back, recapture, credit) keys off annualized gross wages, so each withholding code is encoded here as an equivalent marginal schedule on gross wages with no separate exemption. single = code F, married = code C (spouse not employed), head_of_household = code B. Exact at the schedule's break points ($50,000, $52,000, $64,500, $100,000... single) and within one table step ($25-$90) elsewhere; up to $110 high below $30,000 where the credit varies. Codes A and D (two-earner married) are not available - use code F (single) for an A or D employee, which is within $20 of code A above $56,000.",
     )
 )
 _add(
@@ -467,11 +523,12 @@ _add(
             ],
         ),
         std_deduction=_sd(3250, 6500, 3250),
+        exemption=D(2000),
         employee_items=(OtherItem("DE Paid Leave (employee)", D("0.004"), SS_BASE),),
         employer_items=(OtherItem("DE Paid Leave (employer)", D("0.004"), SS_BASE),),
         year="2026",
-        source=f"Delaware Withholding Tax Tables; Paid Leave 0.8% (employer may pass up to half to employees); {TF}; {SUI}",
-        notes="Delaware gives a $110 per-exemption credit; not modelled.",
+        source="Delaware Division of Revenue, Employer's Guide (Withholding Regulations and Employer's Duties), Section 17 Withholding Methods Based on Annualized Wages (page modified 2026-01-09): standard deduction $3,250 single / $6,500 MFJ / $3,250 MFS, Tax Computation Table effective 2025-01-01 (0 / 2.2% / 3.9% / 4.8% / 5.2% / 5.55% / 6.6% at $2,000 / $5,000 / $10,000 / $20,000 / $25,000 / $60,000), $110 credit per personal exemption, https://revenue.delaware.gov/employers-guide-withholding-regulations-employers-duties/; Delaware Paid Leave 0.8% for 25+ employees (0.4% medical + 0.32% parental + 0.08% caregiving), employer may deduct up to half, wages to the Social Security cap (DE DOL PFML actuarial review 2026-03-30); SUI base $14,500 (labor.delaware.gov employer services)",
+        notes="The $110 per-exemption credit is modelled as a $2,000 exemption ($110 / 5.55%); it is $6 short per exemption in the 5.2% bracket and $22 over in the 6.6% bracket. Head of household uses the single amounts. Employers with 10-24 employees owe Paid Leave at 0.32% (parental only); under 10, none.",
     )
 )
 _add(
@@ -500,12 +557,13 @@ _add(
                 (1000000, 10.75),
             ],
         ),
-        std_deduction=_sd(16100, 32200, 24150),
+        exemption=D(4300),
         employer_items=(
             OtherItem("DC Paid Family Leave (employer)", D("0.0075"), None),
         ),
         year="2026",
-        source=f"DC OTR withholding instructions (FR-230); {TF}; {SUI}",
+        source="DC OTR FR-230 Income Tax Withholding Instructions (Rev. 12/13/17): 'the standard deduction will not be used in the withholding calculation', one personal exemption allowance per D-4 allowance, https://otr.cfo.dc.gov/sites/default/files/dc/sites/otr/publication/attachments/2018%20FR-230_12.13.17.pdf; OTR Tax Notice 2022-08 (2022-10-17): use the current rate schedule and the federal allowance amount = $4,300 (IRS Publication 15-T 2026); rate schedule 4% / 6% / 6.5% / 8.5% / 9.25% / 9.75% / 10.75% at $10,000 / $40,000 / $60,000 / $250,000 / $500,000 / $1,000,000 (D.C. Code 47-1806.03, tax years 2022+); DC Paid Family Leave employer 0.75% of all wages (dcpaidfamilyleave.dc.gov); SUI base $9,000 (DOES; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="No standard deduction in withholding; $4,300 per D-4 allowance. The same schedule applies to every filing status.",
     )
 )
 _add(
@@ -524,10 +582,6 @@ _add(
                 (36000, 7.2),
                 (48000, 7.6),
                 (125000, 7.9),
-                (175000, 8.25),
-                (225000, 9),
-                (275000, 10),
-                (325000, 11),
             ],
             [
                 (0, 1.4),
@@ -538,20 +592,16 @@ _add(
                 (72000, 7.2),
                 (96000, 7.6),
                 (250000, 7.9),
-                (350000, 8.25),
-                (450000, 9),
-                (550000, 10),
-                (650000, 11),
             ],
         ),
-        std_deduction=_sd(4400, 8800, 6424),
+        std_deduction=_sd(4350, 4350, 4350),
         exemption=D(1144),
         employee_items=(
-            OtherItem("HI Temporary Disability Insurance", D("0.005"), D(78000)),
+            OtherItem("HI Temporary Disability Insurance", D("0.005"), D("78010.92")),
         ),
         year="2026",
-        source=f"Hawaii Booklet A; TDI 0.5% of weekly wages, max $7.50/week in 2026 (DLIR); {TF}; {SUI}",
-        notes="TDI employee share is capped weekly; modelled as an annual wage base ($1,500/week × 52).",
+        source="Hawaii Booklet A, Employer's Tax Guide (Rev. 2025, for wages paid from 2026-01-01), Appendix Part 1 Annualized Income Tax Withholding: $1,144 per allowance, extra lump sum withholding allowance $4,350, withholding rates 1.4% to 7.9% at $9,600 / $14,400 / $19,200 / $24,000 / $36,000 / $48,000 / $125,000 (single incl. unmarried head of household; married doubled), https://files.hawaii.gov/tax/news/pubs/25BkltA.pdf; TDI 0.5% of weekly wages up to the 2026 maximum weekly wage base $1,500.21 (max $7.50/week), DLIR Disability Compensation Division notice 2025-12-10; SUI base $64,500 (DLIR Schedule C, labor.hawaii.gov/ui)",
+        notes="The withholding table stops at 7.9%; the 8.25%-11% income-tax brackets are not used for withholding. Head of household uses the single table. TDI employee share is capped weekly ($7.50); modelled as an annual wage base ($1,500.21 x 52).",
     )
 )
 _add(
@@ -561,11 +611,12 @@ _add(
         "brackets",
         D(15100),
         brackets=_br([(0, 5.2), (23000, 5.58)], [(0, 5.2), (46000, 5.58)]),
-        std_deduction=_sd(3605, 8240, 6180),
-        base_exemption=_sd(9160, 18320, 9160),
+        std_deduction=_sd(3605, 8240, 3605),
+        base_exemption=_sd(9160, 18320, 11480),
         exemption=D(2320),
         year="2026",
-        source=f"Kansas Withholding Tax Guide (KW-100); {TF}; {SUI}",
+        source="Kansas Withholding Tax Guide KW-100 (Rev. 10-24, tables for wages paid on or after 2024-07-01, still current for 2026 - Notice 26-11 of 2026-10-15: no rate reduction): personal exemption $9,160 ($18,320 MFJ), +$2,320 head of household, +$2,320 per dependent; Table 7 annual: single incl. HOH 0 to $3,605, 5.2% to $26,605, 5.58% above; married 0 to $8,240, 5.2% to $54,240, 5.58% above, https://www.ksrevenue.gov/pdf/kw100.pdf; SUI base $15,100 (Kansas DOL; Equifax 2026 state UI tax guide (2026-03-26))",
+        notes="base_exemption grants the personal exemption automatically ($9,160; $18,320 married; $11,480 head of household = $9,160 + the $2,320 HOH allowance); employee.state_allowances are dependents at $2,320 each.",
     )
 )
 _add(
@@ -575,14 +626,24 @@ _add(
         "brackets",
         D(12000),
         brackets=_br(
-            [(0, 5.8), (27400, 6.75), (64850, 7.15)],
-            [(0, 5.8), (54850, 6.75), (129750, 7.15)],
-            [(0, 5.8), (41100, 6.75), (97300, 7.15)],
+            [(0, 5.8), (27400, 6.75), (64850, 7.15), (1000000, 9.15)],
+            [(0, 5.8), (54850, 6.75), (129750, 7.15), (1500000, 9.15)],
         ),
-        std_deduction=_sd(15300, 30600, 22950),
+        std_deduction=_sd(12850, 28550, 12850),
         exemption=D(5300),
+        employee_items=(
+            OtherItem(
+                "ME Paid Family and Medical Leave (employee)", D("0.005"), SS_BASE
+            ),
+        ),
+        employer_items=(
+            OtherItem(
+                "ME Paid Family and Medical Leave (employer)", D("0.005"), SS_BASE
+            ),
+        ),
         year="2026",
-        source=f"Maine Revenue Services 2026 Withholding Tables (exemption $5,300; std deduction $15,300/$30,600); {SUI}",
+        source="Maine Revenue Services, Withholding Tables for Individual Income Tax 2026, Revised August 2026 (LD 2212 surcharge and higher standard deduction), Percentage Method p.6: $5,300 per allowance; standard deduction $12,850 single (wages <= $102,250, phased out to $0 at $177,250) / $28,550 married (<= $204,550, $0 at $354,550); 5.8% / 6.75% / 7.15% at $27,400 / $64,850 (married $54,850 / $129,750); 2% surcharge on annualized income over $1,000,000 single / $1,500,000 married, https://www.maine.gov/revenue/sites/maine.gov.revenue/files/inline-files/26_wh_tab_instr_August2026.pdf; Maine PFML contribution 1% of wages for employers with 15+ employees, up to 0.5% deductible from employees, wages to the Social Security base (MDOL PFML Employer FAQ, June 2026; 26 M.R.S. 850-F); SUI base $12,000 (2026 Form ME UC-1)",
+        notes="Head of household uses the single schedule (there is no HOH table). The standard-deduction phase-out above $102,250 / $204,550 is not modelled (high earners are under-withheld by up to $920 / $2,040 a year). The LD 2212 surcharge is the 9.15% bracket. Employers with fewer than 15 employees pay 0.5% PFML in total and may deduct all of it from employees - no employer line for them.",
     )
 )
 _add(
@@ -593,10 +654,7 @@ _add(
         D(8500),
         brackets=_br(
             [
-                (0, 2),
-                (1000, 3),
-                (2000, 4),
-                (3000, 4.75),
+                (0, 4.75),
                 (100000, 5),
                 (125000, 5.25),
                 (150000, 5.5),
@@ -605,10 +663,16 @@ _add(
                 (1000000, 6.5),
             ],
             [
-                (0, 2),
-                (1000, 3),
-                (2000, 4),
-                (3000, 4.75),
+                (0, 4.75),
+                (150000, 5),
+                (175000, 5.25),
+                (225000, 5.5),
+                (300000, 5.75),
+                (600000, 6.25),
+                (1200000, 6.5),
+            ],
+            [
+                (0, 4.75),
                 (150000, 5),
                 (175000, 5.25),
                 (225000, 5.5),
@@ -617,11 +681,11 @@ _add(
                 (1200000, 6.5),
             ],
         ),
-        std_deduction=_sd(3350, 6700, 3350),
+        std_deduction=_sd(3400, 3400, 3400),
         exemption=D(3200),
         year="2026",
-        source=f"Maryland Employer Withholding Guide (2026: new 6.25% / 6.5% brackets, std deduction $3,350/$6,700); {TF}; {SUI}",
-        notes="County tax (2.25%–3.2%) is required — set employee.local_tax_rate. Standard deduction is 15% of wages within a range; the maximum is used.",
+        source="Maryland Employer Withholding Guide, effective January 2026: 'for the purpose of the percentage method calculation the Standard Deduction is $3,400'; one exemption $3,200 annual; percentage charts (a) married filing joint or head of household 4.75% to $150,000 then 5% / 5.25% / 5.5% / 5.75% / 6.25% / 6.5% at $175,000 / $225,000 / $300,000 / $600,000 / $1,200,000, (b) single incl. MFS 4.75% to $100,000 then at $125,000 / $150,000 / $250,000 / $500,000 / $1,000,000 (state share; the charts add the county rate), https://www.marylandcomptroller.gov/content/dam/mdcomp/tax/instructions/withholding/2026/withholding-guide.pdf; SUI base $8,500 (labor.maryland.gov UI trust fund points)",
+        notes="County tax (2.25%-3.2%) is required - set employee.local_tax_rate. The withholding schedules disregard the 2%/3%/4% return rates below $3,000 (4.75% from the first dollar) and head of household uses the joint chart. Maryland applies the county rate to taxable income after the deduction and exemptions; the engine applies it to gross taxable wages, which over-withholds the local tax by ($3,400 + $3,200 x exemptions) x the county rate (about $200 a year at 3.2%). No withholding on wages under $5,000 a year. FAMLI contributions start 2027-01-01 (0.9%, 0.45/0.45).",
     )
 )
 _add(
@@ -633,15 +697,14 @@ _add(
         brackets=_br(
             [(0, 5.35), (33310, 6.8), (109430, 7.85), (203150, 9.85)],
             [(0, 5.35), (48700, 6.8), (193480, 7.85), (337930, 9.85)],
-            [(0, 5.35), (41010, 6.8), (164790, 7.85), (270060, 9.85)],
         ),
-        std_deduction=_sd(15300, 30600, 22950),
+        std_deduction=_sd(4700, 14700, 4700),
         exemption=D(5300),
         employee_items=(OtherItem("MN Paid Leave (employee)", D("0.0044"), SS_BASE),),
         employer_items=(OtherItem("MN Paid Leave (employer)", D("0.0044"), SS_BASE),),
         year="2026",
-        source=f"Minnesota Income Tax Withholding Instruction Booklet; Paid Leave 0.88% from 2026-01-01 split 50/50 (pl.mn.gov); {TF}; {SUI}",
-        notes="Small employers pay a reduced 0.66% total Paid Leave premium.",
+        source="Minnesota Income Tax Withholding Instruction Booklet 2026, Computer Formula p.34 ('supersedes any formulas before Jan. 1, 2026'): $5,300 per allowance; single 5.35% from $4,700 to $38,010, 6.80% to $114,130 (+$1,782.09), 7.85% to $207,850 (+$6,958.25), 9.85% above (+$14,315.27); married 5.35% from $14,700 to $63,400, 6.80% to $208,180, 7.85% to $352,630, 9.85% above, https://www.revenue.state.mn.us/sites/default/files/2025-12/wh-inst-26.pdf; Paid Leave 2026 premium 0.88% (0.61% medical + 0.27% family), employer may deduct up to 0.44%, wages to the Social Security limit (Minn. Stat. 268B.14; DEED small-employer rate notice); SUI base $44,000 (uimn.org taxable wage base)",
+        notes="The zero bracket ($4,700 single / $14,700 married) is carried as std_deduction. Form W-4MN has single and married only: head of household uses the single chart. Small employers (30 or fewer employees, average wage at or below 150% of the state average) pay 0.66% in total - the employer share drops to 0.22%, the employee share stays 0.44%.",
     )
 )
 _add(
@@ -655,7 +718,8 @@ _add(
         base_exemption=_sd(6000, 12000, 9500),
         exemption=D(1500),
         year="2026",
-        source=f"Mississippi Withholding Tax Tables (2026: 4.0%, stepping toward 3% by 2030); {TF}; {SUI}",
+        source="Mississippi DOR Pub 89-700-25-1 Withholding Income Tax Tables and Employer Instructions (Rev. 07/25, file revised 2026-01-13, tables effective 2026-01-01): exemptions $6,000 single / $9,500 head of family / $12,000 married; standard deduction $2,300 / $3,400 / $4,600; tax year 2026 0% on the first $10,000 and 4.0% on the excess; dependents, age 65 and blindness $1,500 each, https://www.dor.ms.gov/sites/default/files/tax-forms/business/89700251revised1.13.2026.pdf (3.75% for 2027); SUI base $14,000 (MDES)",
+        notes="Married = Tables C (spouse not employed: $12,000 exemption, $4,600 deduction). A two-earner spouse (Tables D) claims a share of the $12,000 and a $2,300 deduction - not modelled. An employee with no exemption certificate on file gets zero exemption in Mississippi; the engine always grants the base amount.",
     )
 )
 _add(
@@ -686,9 +750,10 @@ _add(
                 (9436, 4.7),
             ],
         ),
-        std_deduction=_sd(16100, 32200, 24150),
+        std_deduction=_sd(16100, 16100, 24150),
         year="2026",
-        source=f"Missouri Employer's Tax Guide (Form MO-W-4); {TF}; {SUI}",
+        source="Missouri DOR 2026 Missouri Withholding Tax Formula: standard deduction $16,100 single / married and spouse works / MFS, $32,200 married and spouse does not work (MO W-4 line 1 box), $24,150 head of household; annual rates 0% to $1,348, then 2% / 2.5% / 3% / 3.5% / 4% / 4.5% per $1,348 step, 4.7% over $9,436, https://dor.mo.gov/forms/Withholding%20Formula_2026.pdf; SUI base $9,000 (labor.mo.gov/des/employers/tax-rates)",
+        notes="Married uses the $16,100 'spouse works' deduction (the default unless the MO W-4 line 1 box is checked); an employee whose spouse does not work is entitled to $32,200 - not modelled (under-withholds them by nothing, over-withholds by up to $757 a year). No allowances. DOR rounds each bracket's tax to whole dollars; the engine does not.",
     )
 )
 _add(
@@ -704,7 +769,8 @@ _add(
         ),
         std_deduction=_sd(16100, 32200, 24150),
         year="2026",
-        source=f"Montana Withholding Tax Guide (2026: 5.65% top rate above $47,500; 5.4% in 2027); {TF}; {SUI}",
+        source="Montana Employer and Information Agent Guide with 2026 Tax Tables, formula W = A + B(G - C) annual: single / MFS / MFJ both working 0% to $16,100, 4.7% to $63,600, 5.65% above; MFJ (MW-4 1b) 0% to $32,200, 4.7% to $127,200; head of household 0% to $24,150, 4.7% to $95,400, https://revenuefiles.mt.gov/files/Forms/Montana_Employer_and_Information_Agent_Guide_with_Tax_Tables.pdf (2027: 4.7% to $65,000 / $130,000 / $97,500, then 5.4%); SUI base $47,300 (uid.dli.mt.gov Rate Explanation)",
+        notes="No allowances since the 2024 Form MW-4; the zero bracket is carried as std_deduction. Married = MW-4 box 1b (one earner); a married employee whose spouse also works marks 1a and uses the single column.",
     )
 )
 _add(
