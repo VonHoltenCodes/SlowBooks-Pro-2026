@@ -301,11 +301,14 @@ def tables_year_note(year: int | None) -> str | None:
     the federal schedules and state tables are for; None when it is."""
     if year is None or year == TABLES_YEAR:
         return None
+    # true of a run made by an earlier version too: each version keeps one
+    # year's tables and figures every run with them, whatever its pay date
     return (
-        f"This run is dated {year}, and SlowBooks withholds with the "
-        f"{TABLES_YEAR} federal schedules, state tables and leave rates (only "
-        f"the Social Security wage base is {year}'s). Check the figures against "
-        f"{year}'s publications before relying on them."
+        f"This run is dated {year}. SlowBooks keeps one year's federal "
+        f"schedules, state tables and leave rates ({TABLES_YEAR}'s in this "
+        f"version) and figures every run with them, whatever its pay date; "
+        f"only the Social Security wage base is {year}'s own. Check the "
+        f"figures against {year}'s publications before relying on them."
     )
 
 

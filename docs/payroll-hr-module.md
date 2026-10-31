@@ -31,7 +31,9 @@ it came from). The schedules are the year's own as published in December;
 check the January pay run against the new Pub 15-T each year. Only the
 Social Security wage base is kept per year: a pay run dated in another year
 (back-dated 2025 payroll entered during a conversion, say) is figured with
-this build's schedules and tables and carries a warning saying so.
+this version's schedules and tables and carries a warning saying so, wherever
+the run is read (a run an earlier version made shows it too: that version
+kept one year's tables the same way).
 
 Washington PFML's employer share and Paid Leave Oregon's apply by headcount:
 the pay run counts the company's active employees and charges the employer

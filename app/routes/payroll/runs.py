@@ -241,6 +241,8 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     employee_count = len(active)
     state_counts: dict[str, int] = {}
     for e in active:
+        # the employee's work state, read as the stub reads it: a blank one
+        # is Washington for the stub's taxes, so it is for the count too
         code = (e.work_state or "WA").upper()
         state_counts[code] = state_counts.get(code, 0) + 1
     total_gross = total_taxes = total_net = total_employer = Decimal("0")
