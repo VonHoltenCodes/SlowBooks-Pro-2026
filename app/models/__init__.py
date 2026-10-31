@@ -55,6 +55,7 @@ from app.models.vendor_credits import (
 )
 
 # Phase 3: Productivity
+from app.models.payment_terms import PaymentTerm  # noqa: F401 — registers the table
 from app.models.recurring import RecurringInvoice, RecurringInvoiceLine
 from app.models.memorized import (  # noqa: F401 — registers the tables
     MemorizedTransaction,

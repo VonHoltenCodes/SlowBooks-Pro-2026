@@ -14,7 +14,7 @@ from app.models.accounts import Account
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.contacts import Vendor
 from app.routes.reports._router import router
-from app.routes.invoices.helpers import _due_date_from_terms
+from app.services.payment_terms import document_due_date
 from app.services import cash_basis
 
 # accrual, cash, or the company default (#483), as the statements take it
@@ -79,6 +79,8 @@ def sales_tax_report(
         .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
         .filter(CreditMemo.status != CreditMemoStatus.VOID)
         .filter(CreditMemo.is_write_off.isnot(True))
+        # nor is an early-payment discount (#664)
+        .filter(CreditMemo.discount_payment_id.is_(None))
         .all()
     )
 
@@ -144,7 +146,9 @@ def _sales_tax_cash(db: Session, start_date, end_date):
     received in the dates, each payment's allocation to an invoice taking
     that invoice's sales, taxable amount and tax in the proportion paid (the
     proportion the payment's own 2200 cash lines were written in). Credit
-    memos are accrual documents and never counted: no cash came for them."""
+    memos are accrual documents and never counted: no cash came for them.
+    An early-payment discount is the exception (#664): it settles its share
+    as a payment does, and its cash lines take that share of the tax."""
     from sqlalchemy.orm import joinedload, selectinload
 
     from app.models.payments import Payment, PaymentAllocation
@@ -161,41 +165,61 @@ def _sales_tax_cash(db: Session, start_date, end_date):
         .filter(Payment.is_voided.isnot(True))
         .all()
     )
+    # An early-payment discount settles its share of an invoice with no
+    # cash, and the cash basis recognizes it as it does a payment (#664),
+    # so the discount takes its share of the sales and the tax here too.
+    from app.models.credit_memos import CreditMemo, CreditMemoStatus
+
+    discounts = (
+        db.query(CreditMemo)
+        .options(
+            joinedload(CreditMemo.original_invoice).options(
+                joinedload(Invoice.customer), selectinload(Invoice.lines)
+            )
+        )
+        .filter(CreditMemo.discount_payment_id.isnot(None))
+        .filter(CreditMemo.status != CreditMemoStatus.VOID)
+        .filter(CreditMemo.date >= start_date, CreditMemo.date <= end_date)
+        .all()
+    )
+    settled = [
+        (pay, alloc.invoice, alloc.amount)
+        for pay in payments
+        for alloc in pay.allocations
+    ] + [(cm, cm.original_invoice, cm.total) for cm in discounts]
     rows = []
-    for pay in payments:
-        for alloc in pay.allocations:
-            inv = alloc.invoice
-            if inv is None or inv.status == InvoiceStatus.VOID:
-                continue
-            fx = Decimal(str(inv.exchange_rate or 1))
-            # The base the payment's own cash lines were prorated on: the
-            # invoice's amount due when it was issued, net of the retainage
-            # it holds back and with any it releases (a pay application's,
-            # #555). Dividing by the invoice total read less tax than 2200's
-            # cash lines took on a retainage invoice (2.30.0 gate NEW-184).
-            due = to_home(
-                Decimal(str(inv.total or 0))
-                - Decimal(str(inv.retainage_held or 0))
-                + Decimal(str(inv.retainage_released or 0)),
-                fx,
+    for pay, inv, amount in settled:
+        if inv is None or inv.status == InvoiceStatus.VOID:
+            continue
+        fx = Decimal(str(inv.exchange_rate or 1))
+        # The base the payment's own cash lines were prorated on: the
+        # invoice's amount due when it was issued, net of the retainage
+        # it holds back and with any it releases (a pay application's,
+        # #555). Dividing by the invoice total read less tax than 2200's
+        # cash lines took on a retainage invoice (2.30.0 gate NEW-184).
+        due = to_home(
+            Decimal(str(inv.total or 0))
+            - Decimal(str(inv.retainage_held or 0))
+            + Decimal(str(inv.retainage_released or 0)),
+            fx,
+        )
+        applied = to_home(amount, fx)
+        if due == 0 or applied == 0:
+            continue
+        ratio = applied / due
+        tax_full = to_home(inv.tax_amount or 0, fx)
+        taxable_full = (
+            to_home(taxable_subtotal(inv.lines), fx) if tax_full > 0 else _q(0)
+        )
+        rows.append(
+            (
+                pay,
+                inv,
+                _q(to_home(inv.subtotal or 0, fx) * ratio),
+                _q(taxable_full * ratio),
+                _q(tax_full * ratio),
             )
-            applied = to_home(alloc.amount, fx)
-            if due == 0 or applied == 0:
-                continue
-            ratio = applied / due
-            tax_full = to_home(inv.tax_amount or 0, fx)
-            taxable_full = (
-                to_home(taxable_subtotal(inv.lines), fx) if tax_full > 0 else _q(0)
-            )
-            rows.append(
-                (
-                    pay,
-                    inv,
-                    _q(to_home(inv.subtotal or 0, fx) * ratio),
-                    _q(taxable_full * ratio),
-                    _q(tax_full * ratio),
-                )
-            )
+        )
     rows.sort(key=lambda r: (r[0].date, r[0].id, str(r[1].invoice_number)))
 
     items = [
@@ -398,7 +422,9 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
         r = row(bill.vendor_id)
         # A bill with no due date (bills made from a PO before 2.18
         # never got one) ages from its date and terms, not as current.
-        due = bill.due_date or _due_date_from_terms(bill.date, bill.terms)
+        # by the bill's own rule (#664): its term if it was saved under one,
+        # else the old reading of its text, never a term added since
+        due = bill.due_date or document_due_date(db, bill)
         days = (as_of_date - due).days
         bal = home_amount(bill.balance_due, bill.exchange_rate)
         if days <= 0:

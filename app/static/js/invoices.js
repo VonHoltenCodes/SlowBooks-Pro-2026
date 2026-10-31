@@ -310,6 +310,8 @@ const InvoicesPage = {
                 <strong>${T('Customer')}:</strong> ${escapeHtml(inv.customer_name || '')}<br>
                 <strong>Date:</strong> ${formatDate(inv.date)}<br>
                 <strong>Due:</strong> ${formatDate(inv.due_date)}<br>
+                ${inv.terms ? `<strong>Terms:</strong> ${escapeHtml(inv.terms)}<br>` : ''}
+                ${PaymentTerms.viewHtml(inv)}
                 <strong>Status:</strong> ${statusBadge(inv.status)}<br>
                 ${inv.po_number ? `<strong>PO#:</strong> ${escapeHtml(inv.po_number)}<br>` : ''}
             </div>
@@ -692,6 +694,7 @@ const InvoicesPage = {
             API.get('/settings'),
             // the saved messages (#392); the form works without the list
             API.get('/invoice-messages').catch(() => []),
+            PaymentTerms.load(),
         ]);
         InvoicesPage._messages = messages;
         const defaultMessage = messages.find(m => m.is_default);
@@ -708,6 +711,8 @@ const InvoicesPage = {
             lines: [],
         };
         if (id) inv = await API.get(`/invoices/${id}`);
+        // the invoice being edited, whose own terms answer by its own rule
+        InvoicesPage._formInvoiceId = id || null;
         // A tax amount with no rate behind it (QuickBooks Online's, when its
         // tax lines don't make one rate) stays as it is when the invoice is
         // saved, as the server keeps it, until a rate is entered.
@@ -750,9 +755,9 @@ const InvoicesPage = {
                     <div class="form-group"><label>Terms</label>
                         <select name="terms" id="invoice-terms"
                             onchange="InvoicesPage._recomputeDueDate()">
-                            ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                `<option value="${t}" ${inv.terms===t?'selected':''}>${t}</option>`).join('')}
-                        </select></div>
+                            ${PaymentTerms.optionsHtml(inv.terms)}
+                        </select>
+                        <div class="hint" id="invoice-terms-hint">${PaymentTerms.hintHtml({ note: inv.terms_note, discount_line: inv.discount_line })}</div></div>
                     <div class="form-group"><label>Due Date</label>
                         <input name="due_date" type="date" value="${inv.due_date || ''}"
                             title="Auto-calculated from Date + Terms. Edit to override."></div>
@@ -825,7 +830,7 @@ const InvoicesPage = {
         const customer = InvoicesPage._customers.find(c => c.id == customerId);
         const termsField = $('#invoice-terms');
         if (customer && termsField && customer.terms) {
-            termsField.value = customer.terms;
+            PaymentTerms.choose(termsField, customer.terms);
             // Setting .value programmatically does NOT fire 'change', so the
             // due-date wouldn't recompute on its own — leaving the form with
             // (e.g.) Net 60 terms but a Net 30 due date. Recompute explicitly.
@@ -930,11 +935,11 @@ const InvoicesPage = {
         return t;
     },
 
-    // Auto-fill due_date from date + terms when either changes. Backend
-    // does the same calc server-side if due_date arrives null, but
-    // showing it inline tells the user "yes this is what we mean by
-    // Net 30" before they hit Save.
-    _recomputeDueDate() {
+    // Auto-fill due_date from date + terms when either changes, by the
+    // server's one terms parser (#664): the terms list's rule, the discount
+    // the terms offer, or a sentence when the terms aren't understood. The
+    // save makes the same date when due_date arrives null.
+    async _recomputeDueDate() {
         // Scope to the invoice form — a backced report page or another modal
         // could also have a [name="date"] input, and a bare document-level
         // query would grab whichever appears first in the DOM.
@@ -944,18 +949,11 @@ const InvoicesPage = {
         const termsEl = form.querySelector('[name="terms"]');
         const dueDateEl = form.querySelector('[name="due_date"]');
         if (!dateEl || !termsEl || !dueDateEl || !dateEl.value) return;
-        const daysMap = {
-            'Net 15': 15, 'Net 30': 30, 'Net 45': 45, 'Net 60': 60,
-            'Due on Receipt': 0,
-        };
-        const days = daysMap[termsEl.value];
-        if (days === undefined) return;
-        // Parse YYYY-MM-DD as local date (not UTC) to avoid DST shifts.
-        const [y, m, d] = dateEl.value.split('-').map(Number);
-        const dt = new Date(y, m - 1, d);
-        dt.setDate(dt.getDate() + days);
-        const pad = n => String(n).padStart(2, '0');
-        dueDateEl.value = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+        const d = await PaymentTerms.dates(dateEl.value, termsEl.value, 'invoice', InvoicesPage._formInvoiceId);
+        if (!d) return;
+        dueDateEl.value = d.due_date;
+        const hint = $('#invoice-terms-hint');
+        if (hint) hint.innerHTML = PaymentTerms.hintHtml(d);
     },
 
     async save(e, id) {

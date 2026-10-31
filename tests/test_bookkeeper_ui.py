@@ -149,6 +149,8 @@ SETTINGS_READS = [
     "/api/backups",
     "/api/email-templates",
     "/api/invoice-messages",
+    "/api/payment-terms",
+    "/api/payment-terms?include_inactive=true",
     "/api/analytics/ai-config",
     "/api/classes?include_archived=true",
     "/api/cost-codes?include_inactive=true",
@@ -254,6 +256,12 @@ SETTINGS_TAKEN = {
         {"is_default": True},
     ),
     "Invoice Messages › Delete": ("DELETE", "/api/invoice-messages/{message}", None),
+    # the terms list (#664) is company setup, kept under Settings
+    "Payment Terms › + Add Term": (
+        "POST",
+        "/api/payment-terms",
+        {"name": "Net 20", "net_days": 20},
+    ),
 }
 # Users and API tokens refuse every API token whatever its role, so these are
 # asked with a bookkeeper's own sign-in. Settings shows the two sections to

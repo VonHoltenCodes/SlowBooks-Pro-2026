@@ -32,6 +32,10 @@ class RecurringInvoice(Base):
     is_active = Column(Boolean, default=True)
 
     terms = Column(String(50), default="Net 30")
+    # The list entry these terms named when the template was saved (#664):
+    # each document it makes is tied to it. NULL for text that named none
+    # then, read as the old parser read it, never the list.
+    payment_term_id = Column(Integer, ForeignKey("payment_terms.id"), nullable=True)
     tax_rate = Column(Numeric(7, 6), default=0)  # a fraction: 8.875% is 0.08875
     notes = Column(Text, nullable=True)
     invoices_created = Column(Integer, default=0)

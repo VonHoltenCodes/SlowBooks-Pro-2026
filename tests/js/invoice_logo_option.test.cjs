@@ -23,6 +23,7 @@ function fixture(settings = {}) {
         },
     };
     vm.createContext(context);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/payment_terms.js'), 'utf8'), context);
     vm.runInContext(fs.readFileSync(path.join(__dirname, '../../app/static/js/settings.js'), 'utf8') + '\nthis.page = SettingsPage;', context);
     return { page: context.page, writes };
 }

@@ -272,6 +272,7 @@ from app.models import (  # noqa: F401,E402
     lien_waivers,
     pay_applications,
     nonprofit as nonprofit_model,
+    payment_terms,
     payments,
     payroll,
     payroll_opening,

@@ -9,11 +9,15 @@ from app.database import SessionLocal
 from app.models.accounts import Account, AccountType
 from app.seed.chart_of_accounts import CHART_OF_ACCOUNTS
 from app.seed.fixed_assets import ensure_default_asset_type
+from app.services.payment_terms import ensure_seeded as ensure_payment_terms
 
 
 def seed():
     db = SessionLocal()
     try:
+        # the terms list the forms offer (#664), whatever the chart holds
+        ensure_payment_terms(db)
+        db.commit()
         existing = db.query(Account).count()
         if existing > 0:
             print(f"Database already has {existing} accounts. Skipping seed.")

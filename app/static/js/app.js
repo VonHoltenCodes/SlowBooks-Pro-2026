@@ -2096,6 +2096,7 @@ const App = {
         const [customers, items] = await Promise.all([
             API.get('/customers?active_only=true&tree=1'),
             API.get('/items?active_only=true'),
+            PaymentTerms.load(),
         ]);
         App._qeCustomers = customers;
         App._qeItems = items;
@@ -2134,8 +2135,7 @@ const App = {
                         <input name="date" id="qe-date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms" id="qe-terms">
-                            ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                `<option ${t==='Net 30'?'selected':''}>${t}</option>`).join('')}
+                            ${PaymentTerms.optionsHtml('Net 30')}
                         </select></div>
                     <div class="form-group"><label>PO #</label>
                         <input name="po_number" id="qe-po"></div>

@@ -39,6 +39,7 @@ from app.services.accounting import (
 )
 from app.services.closing_date import check_closing_date
 from app.services.numbering import next_invoice_number
+from app.services.payment_terms import term_id_for
 from app.services.pay_applications import (
     application_figures,
     deposits_figures,
@@ -604,6 +605,7 @@ def _create_invoice(
             date=when,
             due_date=when,
             terms="Net 30",
+            payment_term_id=term_id_for(db, "Net 30"),
             subtotal=subtotal,
             tax_rate=tax_rate,
             tax_amount=tax_amount,

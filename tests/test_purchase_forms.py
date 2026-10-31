@@ -117,7 +117,10 @@ def test_enter_bill_shows_a_running_total_and_refuses_zero():
 def test_a_vendor_brings_its_terms_and_default_account_to_the_bill():
     # F11: Enter Bill always said Net 30.
     picked = _method(_js("bills.js"), "vendorSelected(vendorId)")
-    assert "vendor.terms" in picked and "terms.value = vendor.terms" in picked
+    # the vendor's terms, kept even when off the terms list (#664)
+    assert "PaymentTerms.choose(terms, vendor.terms)" in picked
+    helper = _js("payment_terms.js")
+    assert "select.value = terms;" in helper
     assert "default_expense_account_id" in picked and ".line-account" in picked
 
 

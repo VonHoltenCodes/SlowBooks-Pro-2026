@@ -25,6 +25,7 @@ from app.services.recurring_service import (
     generate_due_invoices,
     roll_next_due_forward,
 )
+from app.services.payment_terms import retie, term_id_for
 from app.services.terminology import terms_from_db
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
@@ -123,6 +124,8 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
         end_date=data.end_date,
         next_due=data.start_date,
         terms=data.terms,
+        # its invoices follow the term these terms name now (#664)
+        payment_term_id=term_id_for(db, data.terms),
         tax_rate=data.tax_rate,
         notes=data.notes,
         class_id=data.class_id,
@@ -176,8 +179,12 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
 
     was_active = rec.is_active
     stored_end = rec.end_date
+    terms_before = rec.terms
     for key, val in changes.items():
         setattr(rec, key, val)
+    # terms the person changed tie the schedule anew; the same terms sent
+    # back leave it as it was saved (#664)
+    retie(db, rec, terms_before)
 
     # Re-activating a paused template resumed from a stale next_due and
     # back-dated an invoice for every missed period (and a date inside the

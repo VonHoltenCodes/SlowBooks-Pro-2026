@@ -105,6 +105,7 @@ from app.routes import journal, deposits, cc_charges, checks, expenses, transfer
 # Phase 10: Quick Wins + Medium Effort Features
 from app.routes import bank_rules, budgets, attachments, email_templates
 from app.routes import invoice_messages as invoice_messages_routes
+from app.routes import payment_terms as payment_terms_routes
 
 # Phase 9: Analytics (real-time business intelligence)
 from app.routes import analytics
@@ -602,6 +603,13 @@ app = FastAPI(
         "- **`tax_rate` on a document is a fraction** (0.089 = 8.9%), kept "
         "to six places (0.08875 = 8.875%); `default_tax_rate` in settings is "
         'a percent string ("8.9"). Divide by 100.\n'
+        "- **`terms` names an entry on `/api/payment-terms`** (its rule gives "
+        "the due date and any early-payment discount; the document keeps the "
+        "term it was saved under); text that is neither on the list nor "
+        "`Net N` is due in 30 days and the document's `terms_note` says so. "
+        "A payment's `allocations[].discount` must be one the document's "
+        "terms offer, else an administrator sends `allow_discount_override`, "
+        "which the payment records.\n"
         "- Enumerated fields are enums in this spec; read the allowed values "
         "here rather than guessing."
     ),
@@ -990,6 +998,8 @@ _ADMIN_WRITE_PREFIXES = (
     # The saved invoice messages are company settings by another name
     # (#392): kept under Settings, written by an administrator.
     "/api/invoice-messages",
+    # The terms list is company setup too (#664): kept under Settings.
+    "/api/payment-terms",
 )
 # HR and payroll are admin functions, reads included: pay stubs, W-2s and
 # 941s, NACHA files, benefit elections, garnishments and onboarding
@@ -1519,6 +1529,7 @@ app.include_router(attachments.router)
 app.include_router(email_templates.router)
 # the saved invoice messages, chosen on the invoice form (#392)
 app.include_router(invoice_messages_routes.router)
+app.include_router(payment_terms_routes.router)
 # Phase 11: Saved Reports (inventory endpoints live on the items router)
 app.include_router(saved_reports.router)
 

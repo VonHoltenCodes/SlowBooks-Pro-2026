@@ -240,6 +240,14 @@ class InvoiceResponse(BaseModel):
     payment_token: Optional[str] = None
     checkout_provider: Optional[str] = None
     lines: list[InvoiceLineResponse] = []
+    # From the terms (#664): the early-payment discount the terms offer and
+    # the last day to take it, as the document prints it; and a sentence
+    # when the terms aren't on the list and aren't Net N, so the due date
+    # was the old 30 days.
+    discount_percent: Optional[Decimal] = None
+    discount_date: Optional[dt_date] = None
+    discount_line: Optional[str] = None
+    terms_note: Optional[str] = None
     customer_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime

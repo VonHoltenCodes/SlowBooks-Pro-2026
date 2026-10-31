@@ -79,6 +79,7 @@ const pages = {
   'vendor_credits.js': ['VendorCreditsPage'],
   'reports.js': ['ReportsPage'],
 };
+vm.runInContext(fs.readFileSync('app/static/js/payment_terms.js', 'utf8') + '\nthis.PaymentTerms = PaymentTerms;', ctx);
 for (const [file, names] of Object.entries(pages)) {
   const expose = names.map((n) => `this.${n} = ${n};`).join(' ');
   vm.runInContext(fs.readFileSync('app/static/js/' + file, 'utf8') + '\n' + expose, ctx);

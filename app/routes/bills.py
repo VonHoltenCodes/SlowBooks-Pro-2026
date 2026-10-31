@@ -34,6 +34,13 @@ from app.services.accounting import (
 )
 from app.services.audit import audited_bulk_delete
 from app.services.compliance import vendor_compliance
+from app.services.early_pay_discounts import discounted_on
+from app.services.payment_terms import (
+    DocumentTerms,
+    document_due_date,
+    retie,
+    term_id_for,
+)
 from app.services.closing_date import check_closing_date
 from app.services.job_costing import line_cost_type
 from app.services.request_utils import content_disposition
@@ -77,8 +84,10 @@ def list_bills(
         )
     bills = q.order_by(Bill.date.desc(), Bill.id.desc()).offset(skip).limit(limit).all()
     results = []
+    terms_reader = DocumentTerms(db, "bill")
     for b in bills:
         resp = BillResponse.model_validate(b)
+        terms_reader.fill(resp, b)
         if b.vendor:
             resp.vendor_name = b.vendor.name
             resp.vendor_compliance = VendorCompliance(**vendor_compliance(b.vendor))
@@ -92,6 +101,7 @@ def get_bill(bill_id: int, db: Session = Depends(get_db)):
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     if bill.vendor:
         resp.vendor_name = bill.vendor.name
         resp.vendor_compliance = VendorCompliance(**vendor_compliance(bill.vendor))
@@ -105,7 +115,14 @@ def _bill_html(db: Session, bill_id: int) -> tuple[Bill, str]:
     bill = db.query(Bill).filter(Bill.id == bill_id).first()
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
-    return bill, _render("bill_pdf.html", get_all_settings(db), bill=bill)
+    from app.services.payment_terms import document_discount_line
+
+    return bill, _render(
+        "bill_pdf.html",
+        get_all_settings(db),
+        bill=bill,
+        discount_line=document_discount_line(bill),
+    )
 
 
 @router.get("/{bill_id}/pdf")
@@ -475,7 +492,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     terms = data.terms
     if "terms" not in data.model_fields_set or not (terms or "").strip():
         terms = vendor.terms or "Net 30"
-    due_date = data.due_date or _due_date_from_terms(data.date, terms)
+    due_date = data.due_date or _due_date_from_terms(db, data.date, terms)
 
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
     if total <= 0:
@@ -510,6 +527,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         date=data.date,
         due_date=due_date,
         terms=terms,
+        payment_term_id=term_id_for(db, terms),
         ref_number=data.ref_number,
         po_id=data.po_id,
         subtotal=subtotal,
@@ -542,6 +560,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(bill)
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
     return resp
@@ -588,6 +607,10 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         data.model_dump(exclude_unset=True, exclude={"lines"}),
         allow_null=("bill_number",),
     )
+    # a discount taken under its terms and date keeps them (#664)
+    from app.services.early_pay_discounts import refuse_moving_its_terms
+
+    refuse_moving_its_terms(db, bill, update_data, "bill")
     # A retainage the request names is set by hand from here on: later edits
     # of the lines, tax or date keep it instead of re-deriving it (#597).
     if "retainage_held" in update_data:
@@ -707,7 +730,8 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
                 status_code=400,
                 detail=(
                     f"Bill total cannot be less than the amount already paid "
-                    f"({amount_paid:.2f}). Void the payment first, or keep the "
+                    f"({amount_paid:.2f}{discounted_on(db, bill, 'bill')}). Void the "
+                    "payment first, or keep the "
                     "total at least that much."
                 ),
             )
@@ -807,19 +831,22 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         )
 
     renumbered = number != bill.bill_number or vendor.id != bill.vendor_id
+    terms_before = bill.terms
     for key, val in update_data.items():
         setattr(bill, key, val)
     if renumbered:
         _flush_number(db, number)
+    # Terms the person changed tie the bill to the entry they name now
+    # (#664); the same terms sent back leave it as it was saved.
+    terms_changed = retie(db, bill, terms_before)
 
     # Terms or date changed without a due date: the due date follows the
-    # terms, as on create; a cleared due date is derived the same way.
-    if (
-        "terms" in update_data or "date" in update_data
-    ) and "due_date" not in update_data:
-        bill.due_date = _due_date_from_terms(bill.date, bill.terms or "Net 30")
+    # bill's own rule, as on create; a cleared due date is derived the same
+    # way. A blank terms text is the default Net 30, as it always was.
+    if (terms_changed or "date" in update_data) and "due_date" not in update_data:
+        bill.due_date = document_due_date(db, bill)
     if "due_date" in update_data and bill.due_date is None:
-        bill.due_date = _due_date_from_terms(bill.date, bill.terms or "Net 30")
+        bill.due_date = document_due_date(db, bill)
 
     if needs_repost:
         from app.routes.invoices.helpers import _reverse_and_delete_journal
@@ -896,6 +923,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(bill)
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
     resp.warnings = stock_warnings
@@ -1010,6 +1038,7 @@ def void_bill(bill_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(bill)
     resp = BillResponse.model_validate(bill)
+    DocumentTerms(db, "bill").fill(resp, bill)
     if bill.vendor:
         resp.vendor_name = bill.vendor.name
         resp.vendor_compliance = VendorCompliance(**vendor_compliance(bill.vendor))

@@ -13,10 +13,13 @@ from app.models.bills import Bill, BillStatus, BillPayment, BillPaymentAllocatio
 from app.models.contacts import Vendor
 from app.schemas.bills import (
     BillPaymentCreate,
+    BillPaymentDiscountAdd,
+    BillPaymentDiscountResponse,
     BillPaymentMemoUpdate,
     BillPaymentResponse,
 )
 from app.services.accounting import (
+    _q,
     all_lines,
     create_journal_entry,
     get_ap_account_id,
@@ -77,7 +80,36 @@ def get_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
     resp = BillPaymentResponse.model_validate(p)
     if p.vendor:
         resp.vendor_name = p.vendor.name
+    resp.discounts = _discounts(db, p)
     return resp
+
+
+def _discounts(db: Session, payment: BillPayment) -> list[BillPaymentDiscountResponse]:
+    """The early-payment discounts taken with the payment (#664): the
+    vendor credits it posted, applied to their bills."""
+    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
+
+    rows = []
+    for vc in (
+        db.query(VendorCredit)
+        .filter(
+            VendorCredit.discount_bill_payment_id == payment.id,
+            VendorCredit.status != VendorCreditStatus.VOID,
+        )
+        .order_by(VendorCredit.id)
+    ):
+        rows.append(
+            BillPaymentDiscountResponse(
+                bill_id=vc.original_bill_id,
+                bill_number=vc.original_bill.bill_number if vc.original_bill else None,
+                amount=vc.total,
+                vendor_credit_id=vc.id,
+                credit_number=vc.credit_number,
+                account_id=vc.lines[0].account_id if vc.lines else None,
+                override=bool(vc.discount_override),
+            )
+        )
+    return rows
 
 
 @router.post("", response_model=BillPaymentResponse, status_code=201)
@@ -125,6 +157,7 @@ def create_bill_payment(
     from app.services.currency import (
         document_currency,
         fx_gain_loss_account_id,
+        home_currency,
         resolve_rate,
         to_home,
     )
@@ -134,6 +167,32 @@ def create_bill_payment(
     alloc_total = sum(a.amount for a in data.allocations)
     if alloc_total > data.amount:
         raise HTTPException(status_code=400, detail="Allocations exceed payment amount")
+    # The early-payment discounts we took (#664) and where they post,
+    # checked before anything is written.
+    from app.services import early_pay_discounts
+
+    discount_acct = early_pay_discounts.discount_account(
+        db,
+        data.discount_account_id,
+        [a.discount for a in data.allocations],
+        data.allow_discount_override,
+    )
+    # a discount comes with a payment on its bill, said by the bill's number
+    for a in data.allocations:
+        if a.discount > 0 and a.amount <= 0:
+            row = db.get(Bill, a.bill_id)
+            early_pay_discounts.refuse_unpaid_discount(
+                "bill",
+                row.bill_number if row else str(a.bill_id),
+                Decimal(str(a.amount)),
+                a.discount,
+            )
+
+    def _number(bill_id):
+        row = db.get(Bill, bill_id)
+        return row.bill_number if row else bill_id
+
+    early_pay_discounts.refuse_doubled(data.allocations, "bill_id", "bill", _number)
 
     # The accounts the journal needs, resolved before anything is written:
     # a missing one is a 409 naming it, with no payment, allocations or
@@ -165,6 +224,11 @@ def create_bill_payment(
     # booked rate) — the realized-FX basis, mirroring the A/R side.
     ap_home_debits: list[Decimal] = []
     applied_bills: list[tuple] = []  # (bill, home amount) for the cash basis
+    # (bill, discount, why it was taken against the terms) to post
+    discounts: list[tuple] = []
+    from app.routes._roles import is_admin
+
+    may_override = request is None or is_admin(request)
     for alloc_data in data.allocations:
         # Row lock for the read-check-write, as the void path below and
         # create_payment already do (GHSA-rm5h-555g-vpjj). No-op on SQLite.
@@ -189,6 +253,30 @@ def create_bill_payment(
             raise HTTPException(
                 status_code=400, detail="Allocation exceeds bill balance"
             )
+        discount = _q(alloc_data.discount)
+        paying = _q(Decimal(str(alloc_data.amount)))
+        if discount > 0 and paying + discount > Decimal(str(bill.balance_due)):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"${paying:,.2f} paid and a ${discount:,.2f} discount is "
+                    f"more than the ${Decimal(str(bill.balance_due)):,.2f} still "
+                    f"due on bill {bill.bill_number}."
+                ),
+            )
+        # the discount the bill's own terms offer, or the override
+        # (an administrator's, recorded with the reason)
+        against = early_pay_discounts.check_against_terms(
+            db,
+            bill,
+            "bill",
+            bill.bill_number,
+            discount,
+            bill.total,
+            data.date,
+            data.allow_discount_override,
+            may_override,
+        )
 
         bill_currency = document_currency(bill, db)
         if bill_currency != pay_currency:
@@ -224,6 +312,21 @@ def create_bill_payment(
             bill.status = BillStatus.PAID
         else:
             bill.status = BillStatus.PARTIAL
+        if discount > 0:
+            early_pay_discounts.refuse_foreign(
+                bill, bill_currency, home_currency(db), bill.bill_number, "bill"
+            )
+            discounts.append((bill, discount, against))
+
+    # The discounts post once every row has passed (#665): a refused row
+    # never leaves a numbered credit behind.
+    for bill, discount, against in discounts:
+        early_pay_discounts.post_vendor_discount(
+            db, payment, bill, discount, discount_acct, against
+        )
+    early_pay_discounts.record_override(
+        payment, [a for _b, _d, a in discounts if a], _actor(db)
+    )
 
     # A payment of one bill carries that bill's memo, for the check's memo
     # line (#602); a memo typed on the payment wins, and a payment of
@@ -291,7 +394,110 @@ def create_bill_payment(
     db.refresh(payment)
     resp = BillPaymentResponse.model_validate(payment)
     resp.vendor_name = vendor.name
+    resp.discounts = _discounts(db, payment)
     request_keys.finish(db, replay, 201, resp.model_dump(mode="json"), response)
+    db.commit()
+    return resp
+
+
+@router.post("/{bill_payment_id}/discount", response_model=BillPaymentResponse)
+def add_discount(
+    bill_payment_id: int,
+    data: BillPaymentDiscountAdd,
+    request: Request = None,
+    response: Response = None,
+    db: Session = Depends(get_db),
+):
+    """Take an early-payment discount with a bill payment already recorded
+    (#665), checked against the bill's terms on the payment's date and its
+    balance before the payment, posted as one taken with it would be.
+    Claimed before anything is read, and an Idempotency-Key honoured, as
+    the customer side (#665)."""
+    from app.routes._roles import is_admin
+    from app.routes.payments import _claim
+    from app.services import early_pay_discounts
+    from app.services.currency import document_currency, home_currency
+
+    # a query parameter this route doesn't take is refused, not ignored
+    if request is not None and request.query_params:
+        key = next(iter(request.query_params.keys()))
+        raise HTTPException(
+            status_code=422, detail=f"'{key}' is not a parameter this accepts."
+        )
+    replay = request_keys.reserve(
+        db,
+        request,
+        f"POST /api/bill-payments/{bill_payment_id}/discount",
+        data.model_dump(),
+        _actor(db),
+    )
+    if replay is not None and not isinstance(replay, request_keys.Reservation):
+        return replay
+    _claim(db, BillPayment, bill_payment_id)
+    payment = (
+        db.query(BillPayment)
+        .filter(BillPayment.id == bill_payment_id)
+        .with_for_update()
+        .first()
+    )
+    if not payment:
+        raise HTTPException(status_code=404, detail="Bill payment not found")
+    if payment.is_voided:
+        raise HTTPException(
+            status_code=400, detail="This payment is void, so no discount goes with it."
+        )
+    check_closing_date(db, payment.date)
+    acct = early_pay_discounts.discount_account(
+        db, data.discount_account_id, [data.discount], data.allow_discount_override
+    )
+    bill = db.query(Bill).filter(Bill.id == data.bill_id).with_for_update().first()
+    if not bill:
+        raise HTTPException(status_code=404, detail="Bill not found")
+    number = bill.bill_number
+    paid = next((a for a in payment.allocations if a.bill_id == bill.id), None)
+    if paid is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This payment paid nothing on bill {number}; a discount is taken "
+                "with the payment that paid it."
+            ),
+        )
+    if bill.status == BillStatus.VOID:
+        raise HTTPException(status_code=400, detail=f"Bill {number} is void.")
+    discount = _q(data.discount)
+    if discount > Decimal(str(bill.balance_due)):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"A ${discount:,.2f} discount is more than the "
+                f"${Decimal(str(bill.balance_due)):,.2f} still due on bill {number}."
+            ),
+        )
+    early_pay_discounts.refuse_foreign(
+        bill, document_currency(bill, db), home_currency(db), number, "bill"
+    )
+    against = early_pay_discounts.check_against_terms(
+        db,
+        bill,
+        "bill",
+        number,
+        discount,
+        bill.total,
+        payment.date,
+        data.allow_discount_override,
+        request is None or is_admin(request),
+    )
+    early_pay_discounts.post_vendor_discount(db, payment, bill, discount, acct, against)
+    early_pay_discounts.record_override(
+        payment, [against] if against else [], _actor(db)
+    )
+    db.flush()
+    db.refresh(payment)
+    resp = BillPaymentResponse.model_validate(payment)
+    resp.vendor_name = payment.vendor.name if payment.vendor else None
+    resp.discounts = _discounts(db, payment)
+    request_keys.finish(db, replay, 200, resp.model_dump(mode="json"), response)
     db.commit()
     return resp
 
@@ -381,6 +587,11 @@ def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
 
             # A statement line matched to this check goes back to review.
             release_statement_links(db, payment.transaction)
+
+    # The discounts taken with it go first (#664), then its own amounts.
+    from app.services.early_pay_discounts import void_vendor_discounts
+
+    void_vendor_discounts(db, payment)
 
     # Reverse allocations. Lock each bill row so a concurrent create or
     # second void can't race the read-modify-write of amount_paid /

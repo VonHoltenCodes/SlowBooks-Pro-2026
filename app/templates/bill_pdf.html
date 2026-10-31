@@ -67,6 +67,10 @@
         {% if bill.ref_number %}<tr>
             <td class="meta-label">Ref:</td><td colspan="3">{{ bill.ref_number }}</td>
         </tr>{% endif %}
+        {# The early-payment discount the vendor's terms offer (#664). #}
+        {% if discount_line %}<tr>
+            <td class="meta-label">Discount:</td><td colspan="3">{{ discount_line }}</td>
+        </tr>{% endif %}
     </table>
 
     <div class="addresses">

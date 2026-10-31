@@ -24,6 +24,7 @@
     .meta-table th { padding: 3px 8px; font-size: 8pt; font-weight: 700; color: #4a4a6a; text-align: left; border-bottom: 1px solid #d0d6e0; }
     .meta-table td { padding: 3px 8px; font-size: 9pt; vertical-align: top; white-space: nowrap; }
     .meta-table td.po { white-space: normal; overflow-wrap: anywhere; }
+    .terms-discount { margin: -10px 0 14px; padding: 0 8px; font-size: 9pt; font-weight: 700; }
     .addresses { display: flex; gap: 40px; margin-bottom: 20px; }
     .address-block { flex: 1; }
     .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
@@ -84,6 +85,10 @@
             {% if inv.po_number %}<td class="po">{{ inv.po_number }}</td>{% endif %}
         </tr>
     </table>
+    {# The early-payment discount the terms offer (#664), and by when. #}
+    {% if discount_line and not inv.is_sales_receipt and kind != 'Pledge' %}
+    <div class="terms-discount">{{ discount_line }}</div>
+    {% endif %}
 
     <div class="addresses">
         <div class="address-block">

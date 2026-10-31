@@ -38,6 +38,7 @@ from app.schemas.vendor_credits import (
 )
 from app.services.accounting import (
     _q,
+    all_lines,
     compute_line_totals,
     create_journal_entry,
     get_ap_account_id,
@@ -395,7 +396,6 @@ def void_vendor_credit(vc_id: int, db: Session = Depends(get_db)):
     the mirror-image entry, put returned stock back on the shelf at the cost
     it went out at, and mark it void. Stock coming back never takes a count
     below zero, so the void has no stock warning to give."""
-    from app.services.inventory_hooks import reverse_returns_for_vendor_credit
 
     vc = (
         db.query(VendorCredit)
@@ -407,6 +407,27 @@ def void_vendor_credit(vc_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Vendor credit not found")
     if vc.status == VendorCreditStatus.VOID:
         raise HTTPException(status_code=400, detail="Vendor credit is already void")
+    # A discount taken in Pay Bills goes with its bill payment (#664).
+    if vc.discount_bill_payment_id is not None:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Vendor credit {vc.credit_number} is the early-payment "
+                "discount taken with a bill payment; void that payment to "
+                "undo it."
+            ),
+        )
+    void_vendor_credit_unchecked(db, vc)
+    db.commit()
+    db.refresh(vc)
+    return _with_vendor_name(vc)
+
+
+def void_vendor_credit_unchecked(db: Session, vc: VendorCredit) -> None:
+    """The void itself, flushed and not committed; a bill payment voiding
+    the discount it took calls this."""
+    from app.services.inventory_hooks import reverse_returns_for_vendor_credit
+
     check_closing_date(db, vc.date)
 
     for app_row in list(vc.applications):
@@ -430,7 +451,8 @@ def void_vendor_credit(vc_id: int, db: Session = Depends(get_db)):
                 db,
                 vc.date,
                 f"VOID Vendor Credit {vc.credit_number}",
-                reversing_lines(txn.lines),
+                # every line, an early-payment discount's cash ones too
+                reversing_lines(all_lines(db, txn.id)),
                 source_type="vendor_credit_void",
                 source_id=vc.id,
                 class_id=vc.class_id,
@@ -448,6 +470,4 @@ def void_vendor_credit(vc_id: int, db: Session = Depends(get_db)):
     vc.amount_applied = Decimal("0")
     vc.balance_remaining = Decimal("0")
     vc.status = VendorCreditStatus.VOID
-    db.commit()
-    db.refresh(vc)
-    return _with_vendor_name(vc)
+    db.flush()

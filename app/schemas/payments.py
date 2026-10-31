@@ -2,13 +2,17 @@ from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, Field
-from app.schemas.common import StrictModel
+from pydantic import BaseModel, Field, StrictBool
+from app.schemas.common import Discount, StrictModel
 
 
 class PaymentAllocationCreate(StrictModel):
     invoice_id: int
     amount: Decimal
+    # An early-payment discount the customer took on this invoice (#664),
+    # on top of `amount`: posted to the payment's discount_account_id.
+    # Taken when the payment is received, not when a remainder is applied.
+    discount: Discount = Decimal("0")
 
 
 class PaymentAllocationResponse(BaseModel):
@@ -33,6 +37,13 @@ class PaymentCreate(StrictModel):
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     allocations: list[PaymentAllocationCreate] = []
+    # Where the allocations' discounts post (#664): required when one takes
+    # a discount, refused when none does.
+    discount_account_id: Optional[int] = None
+    # Take a discount the invoice's terms don't offer: none at all, after
+    # its date, more than its percent, or a second one (#664). Each refusal
+    # names this field.
+    allow_discount_override: StrictBool = False
 
 
 class PaymentApply(StrictModel):
@@ -40,6 +51,20 @@ class PaymentApply(StrictModel):
     the same customer."""
 
     allocations: list[PaymentAllocationCreate] = Field(min_length=1)
+
+
+class PaymentDiscountResponse(BaseModel):
+    """A discount the customer took with this payment: the credit memo
+    applied to the invoice (#664)."""
+
+    invoice_id: int
+    invoice_number: Optional[str] = None
+    amount: Decimal
+    credit_memo_id: int
+    memo_number: str
+    account_id: Optional[int] = None
+    # taken against the terms, with allow_discount_override (#665)
+    override: bool = False
 
 
 class PaymentResponse(BaseModel):
@@ -68,5 +93,21 @@ class PaymentResponse(BaseModel):
     # On the single-payment read: an online payment whose processing fee is
     # booked, so the Void confirm can ask whether the provider refunded it.
     has_provider_fee: bool = False
+    # The early-payment discounts taken with it (#664); empty when none.
+    discounts: list[PaymentDiscountResponse] = []
+    # A discount taken against the terms (#665): who, on what, and why.
+    discount_override: bool = False
+    discount_override_note: Optional[str] = None
 
     model_config = {"from_attributes": True}
+
+
+class PaymentDiscountAdd(StrictModel):
+    """An early-payment discount taken after the payment that paid the rest
+    (#665): the customer paid 98 of 100 within the window, and the 2 is
+    recorded against that payment, dated as it is."""
+
+    invoice_id: int
+    discount: Discount
+    discount_account_id: int
+    allow_discount_override: StrictBool = False
