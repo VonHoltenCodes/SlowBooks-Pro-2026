@@ -91,7 +91,7 @@ const TaxFormsPage = {
 
             <div class="card" style="margin-bottom:16px;padding:16px">
                 <h3 id="taxforms-h-1099-nec-1096-contractors">1099-NEC / 1096 (Contractors)</h3>
-                <p style="font-size:12px;color:var(--gray-500);margin:0 0 8px;">Vendors marked "1099 Vendor: Yes" with type NEC on the Vendors page. A 1099-NEC is required for anyone paid $600 or more in the year; the 1096 sends them to the IRS.</p>
+                <p style="font-size:12px;color:var(--gray-500);margin:0 0 8px;">Vendors marked "1099 Vendor: Yes" with type NEC on the Vendors page. A 1099-NEC is required for anyone paid $2,000 or more in the year from 2026 ($600 or more through 2025); the 1096 sends them to the IRS.</p>
                 <div class="form-grid" role="group" aria-labelledby="taxforms-h-1099-nec-1096-contractors">
                     <div class="form-group">
                         <label>Year</label>
@@ -226,7 +226,7 @@ const TaxFormsPage = {
                 return '<option value="">No 1099-NEC vendors: mark vendors "1099 Vendor: Yes" on the Vendors page</option>';
             }
             for (const v of data.vendors) {
-                html += `<option value="${v.vendor_id}">${escapeHtml(v.name)} — ${formatCurrency(v.total_paid)}${v.reportable ? '' : ' (under $600)'}</option>`;
+                html += `<option value="${v.vendor_id}">${escapeHtml(v.name)} — ${formatCurrency(v.total_paid)}${v.reportable ? '' : ` (under ${formatCurrency(data.threshold)})`}</option>`;
             }
         } catch (_) {
             html += '<option value="" disabled>Could not load vendors</option>';

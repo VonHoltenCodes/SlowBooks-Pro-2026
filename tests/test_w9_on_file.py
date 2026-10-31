@@ -83,9 +83,11 @@ def test_the_1099_nec_and_summary_say_who_has_one(client, db_session, seed_accou
     small = _vendor(
         client, "Corner Hardware", is_1099_vendor=True, vendor_1099_type="NEC"
     )
-    _pay(client, with_w9["id"], 700, seed_accounts)
-    _pay(client, without["id"], 650, seed_accounts)
-    _pay(client, small["id"], 100, seed_accounts)  # under the threshold: not reportable
+    _pay(client, with_w9["id"], 2700, seed_accounts)
+    _pay(client, without["id"], 2600, seed_accounts)
+    _pay(
+        client, small["id"], 100, seed_accounts
+    )  # under the 2026 threshold ($2,000): not reportable
     rows = {d["name"]: d for d in compute_1099_data(db_session, 2026)}
     assert (
         rows["Harbor Supply"]["w9_on_file"] is True

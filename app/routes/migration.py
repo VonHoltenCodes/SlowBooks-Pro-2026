@@ -107,9 +107,11 @@ def _sheet_as_csv(content: bytes, computed: bool = False) -> str:
             if cell is None:
                 cells.append("")
             elif isinstance(cell, datetime):
-                cells.append(cell.strftime("%m/%d/%Y"))
+                # ISO: every importer's dialect reads it, and the day-first
+                # ones (MYOB) misread a month-first text (2.31.3)
+                cells.append(cell.strftime("%Y-%m-%d"))
             elif isinstance(cell, date):
-                cells.append(cell.strftime("%m/%d/%Y"))
+                cells.append(cell.strftime("%Y-%m-%d"))
             elif isinstance(cell, time):
                 # a duration Excel took for a time of day ("0:20" in a
                 # Minutes-format timesheet): hours and minutes (NEW-137)

@@ -169,6 +169,45 @@ from app.services.served_companies import CompanyUnavailable, sentence_of
 _COMPANY_HEADER = "X-SlowBooks-Company"
 
 
+def _payroll_secret_problem(
+    secret: str, is_real_db: bool, app_debug: bool
+) -> str | None:
+    """Why PAYROLL_ENCRYPTION_SECRET cannot protect this deployment's bank
+    numbers, or None. The dev default is refused on any non-SQLite database
+    and in production; so is an empty or short value (2.31.3: .env.example
+    ships the line as `PAYROLL_ENCRYPTION_SECRET=`, which read as "" and
+    passed the dev-default check, so a native install made from it encrypted
+    with a key derived from nothing). SQLite in development is exempt from
+    the empty check (the frozen app generates its own secret), but a typed
+    value shorter than 16 characters is refused everywhere (2.31.3 gate)."""
+    dev_key = "slowbooks-dev-payroll-key-change-me"
+    if is_real_db and secret == dev_key:
+        return (
+            "FATAL: PAYROLL_ENCRYPTION_SECRET is the public dev default while "
+            "connected to a non-SQLite database. All employee bank PII would be "
+            "decryptable by anyone with the source code — even with APP_DEBUG=true. "
+            "Set a unique, strong PAYROLL_ENCRYPTION_SECRET before deploying."
+        )
+    if (is_real_db or not app_debug) and len(secret or "") < 16:
+        return (
+            "FATAL: PAYROLL_ENCRYPTION_SECRET is empty or shorter than 16 "
+            "characters. Employee bank account numbers would be encrypted with "
+            "a key anyone can derive. Set it to the output of "
+            "`openssl rand -base64 32` in .env before starting."
+        )
+    if secret and secret != dev_key and len(secret) < 16:
+        # a value someone typed into .env, too short to protect anything:
+        # refused on the desktop too (the launcher only generates a secret
+        # when the line is empty or the placeholder)
+        return (
+            "FATAL: PAYROLL_ENCRYPTION_SECRET is shorter than 16 characters. "
+            "Employee bank account numbers would be encrypted with a key anyone "
+            "can guess. Set it to the output of `openssl rand -base64 32` in "
+            ".env, or clear the line and the app makes one, before starting."
+        )
+    return None
+
+
 def _run_startup_security_checks():
     """Fail hard on critical misconfigurations BEFORE touching the DB.
 
@@ -182,18 +221,15 @@ def _run_startup_security_checks():
     _is_real_db = not DATABASE_URL.startswith("sqlite")
 
     # UNCONDITIONAL guard (fires even under APP_DEBUG): the public dev
-    # encryption key must never protect data in a real database. Without
-    # this, setting APP_DEBUG=true in production "to debug an issue" would
-    # silently leave every employee's bank PII decryptable with the key
-    # that ships in the source tree. SQLite (dev/test) is exempt, so this
-    # never trips local development or the test suite.
-    if _is_real_db and PAYROLL_ENCRYPTION_SECRET == _DEV_KEY:
-        raise RuntimeError(
-            "FATAL: PAYROLL_ENCRYPTION_SECRET is the public dev default while "
-            "connected to a non-SQLite database. All employee bank PII would be "
-            "decryptable by anyone with the source code — even with APP_DEBUG=true. "
-            "Set a unique, strong PAYROLL_ENCRYPTION_SECRET before deploying."
-        )
+    # encryption key, or no key worth the name, must never protect data in
+    # a real database. Without this, setting APP_DEBUG=true in production
+    # "to debug an issue" would silently leave every employee's bank PII
+    # decryptable with the key that ships in the source tree. SQLite
+    # (dev/test) is exempt, so this never trips local development or the
+    # test suite.
+    problem = _payroll_secret_problem(PAYROLL_ENCRYPTION_SECRET, _is_real_db, APP_DEBUG)
+    if problem:
+        raise RuntimeError(problem)
 
     # A configured rate-limit storage that cannot be reached would otherwise
     # surface as a 500 on every rate-limited route (login first of all).

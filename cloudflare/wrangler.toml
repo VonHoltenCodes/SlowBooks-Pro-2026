@@ -3,13 +3,14 @@
 # Per-installation deploy config. Each LAN owner gets their own Worker,
 # their own secret, their own quota.
 #
-# Deploy:
+# Deploy (plain `wrangler deploy`: there is no [env.production] here, so
+# `--env production` would make a second, unconfigured Worker):
 #   wrangler secret put AUTH_TOKEN     # paste output of `openssl rand -hex 32`
 #   wrangler deploy
 #
 # Rotate the shared secret:
 #   wrangler secret put AUTH_TOKEN     # paste a new one
-#   (then update Slowbooks → ⚙ AI → API key)
+#   (then paste it into SlowBooks → Settings → AI Insights → API key)
 #
 # Tail live logs:
 #   wrangler tail
@@ -31,9 +32,10 @@ binding = "AI"
 # Optional configuration variables (uncomment and customize as needed).
 # Set these via this [vars] section OR via the Cloudflare dashboard.
 [vars]
-# Comma-separated list of allowed model IDs.
-# If not set, defaults to:
-#   @cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct,@cf/mistral/mistral-7b-instruct-v0.2-lora
+# Comma-separated list of allowed model IDs, which GET /v1/models answers
+# (SlowBooks' model picker). If not set, defaults to:
+#   @cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/mistral/mistral-7b-instruct-v0.2-lora
+# Cloudflare's current list: https://developers.cloudflare.com/workers-ai/models/
 # ALLOWED_MODELS = ""
 
 # Default model to use if request doesn't specify one.

@@ -1,5 +1,8 @@
 #!/bin/bash
-set -e
+# pipefail: the boot self-check below pipes pytest through tail, and
+# without it the `if` read tail's exit code, so a failed check never
+# stopped the container (2.31.3).
+set -eo pipefail
 
 echo "Slowbooks Pro 2026 — Starting up..."
 

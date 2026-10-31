@@ -1,33 +1,51 @@
-# Payroll / HR Module — Tier 1-3
+# Payroll and HR
 
-The payroll/HR module is layered in tiers so the surface area grows
-intentionally rather than as a sprawl. This document is the reference for
-what's in each tier, where each piece lives, and what's still pending.
+SlowBooks runs payroll in-house: employees, pay runs with federal and state
+withholding, direct deposit files, W-2/W-3/940/941 and the state SUI
+report, benefits and garnishments, time entries and time off, new-hire
+onboarding, and a self-service portal for employees. This document is the
+reference for where each piece lives and how the routes fit together; the
+state tables are in [state-withholding.md](state-withholding.md).
 
-## Status snapshot
-
-| Layer | What it covers | Backend | Admin UI | Tests |
-|-------|----------------|---------|----------|-------|
-| **Tier 1** | Onboarding checklist, time entries, PTO policies/requests | ✅ | ✅ | ✅ |
-| **Tier 2** | Deductions (401k, HSA, etc.), garnishments | ✅ | ✅ | ✅ |
-| **Tier 3 — Tax forms (JSON)** | W-2, W-3, Form 940, Form 941 endpoints — machine-readable | ✅ | ✅ | ✅ |
-| **Tier 3 — Tax forms (PDF)** | WeasyPrint-rendered, employer-branded, audit-hashed | ✅ | ✅ | ✅ |
-| **Tier 3 — Document audit hashes** | SHA-256 chain in PDF footer + `document_audits` table | ✅ | n/a | ✅ |
-| **Tier 3 — Portal** | Token-accessed self-service for pay stubs, W-4, bank, PTO | ✅ | n/a | ✅ |
-| **Tier 3 — Portal cookie session** | URL token only at first claim; subsequent navigation is cookieless | ✅ | n/a | ✅ |
-| **Tier 3 — Portal hardening** | Expiration, no-referrer, rate limiting, employer branding | ✅ | ✅ | ✅ |
-| **PTO year-end carryover** | Batch endpoint applies policy carryover caps + resets YTD | ✅ | n/a | ✅ |
-| **Time-entry → pay-run auto-population** | Pay-run form checkbox pulls approved unpaid hours | ✅ | ✅ | ✅ |
-
-452 tests pass across the full suite.
+**Who can use it.** Payroll and HR need an administrator signed in.
+Bookkeeper, accountant and read-only sign-ins, and every API token (a token
+is never an administrator since 2.29.0; older administrator tokens stopped
+working in 2.31.2), are refused on `/api/payroll`, `/api/benefits`,
+`/api/deductions`, `/api/onboarding`, `/api/tax-forms`,
+`/api/document-audits` and the employee portal-token, bank-account and YTD
+routes. Payroll forms stay on the calendar year whatever fiscal year the
+company reports on.
 
 ---
+
+## Federal withholding
+
+Federal income tax follows IRS Publication 15-T's percentage method for
+automated payroll systems: the 2026 STANDARD and Step 2 checkbox schedules
+for single, married filing jointly and head of household, the Step 3
+credits and Step 4 amounts from the employee's W-4, the 22% supplemental
+rate (37% over $1,000,000), Social Security 6.2% to the year's wage base,
+Medicare 1.45% plus the 0.9% additional over $200,000, FUTA 0.6% on the first
+$7,000 (`app/services/payroll_service.py`, each constant with the publication
+it came from). The schedules are the year's own as published in December;
+check the January pay run against the new Pub 15-T each year. Only the
+Social Security wage base is kept per year: a pay run dated in another year
+(back-dated 2025 payroll entered during a conversion, say) is figured with
+this version's schedules and tables and carries a warning saying so, wherever
+the run is read (a run an earlier version made shows it too: that version
+kept one year's tables the same way).
+
+Washington PFML's employer share and Paid Leave Oregon's apply by headcount:
+the pay run counts the company's active employees and charges the employer
+share only from those sizes, Oregon by every employee (25 or more), Washington
+by the employees working in Washington (50 or more); the employee's share is
+withheld either way.
 
 ## State withholding
 
 All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engine for the rest (`app/services/state_tax/tables.py`). Parameters, sources and the employee inputs (allowances, extra withholding, elected rate, local rate) are in [state-withholding.md](state-withholding.md). Reciprocity in `state_tax/reciprocity.py`.
 
-## Tier 1 — Onboarding, time, PTO
+## Onboarding, time entries and time off
 
 ### Models
 
@@ -39,41 +57,44 @@ All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engi
 
 ### Routes
 
-| Method + Path | Handler | Purpose |
-|---------------|---------|---------|
-| `GET /api/onboarding/{emp_id}` | `onboarding.get_checklist` | Fetch checklist (the default, unsaved and without task ids, until it is seeded) |
-| `POST /api/onboarding/{emp_id}/seed` | `onboarding.seed_checklist` | Reset / re-seed standard tasks |
-| `PUT /api/onboarding/tasks/{task_id}` | `onboarding.update_task` | Mark signed / complete |
-| `POST /api/onboarding/tasks/{task_id}/complete` | `onboarding.complete_task` | Convenience for the SPA checkbox |
-| `GET /api/onboarding/{emp_id}/new-hire-report` | `onboarding.new_hire_report` | JSON for state new-hire reporting |
-| `GET /api/onboarding/{emp_id}/new-hire-report/pdf` | `onboarding.new_hire_pdf` | Downloadable PDF |
-| `GET /api/time-entries` | `time_entries.list_entries` | List, filterable by employee/date range |
-| `POST /api/time-entries` | `time_entries.create_entry` | Create a time entry |
-| `PUT /api/time-entries/{entry_id}` | `time_entries.update_entry` | Edit (not `status`, and blocked once paid or costed to a job) |
-| `DELETE /api/time-entries/{entry_id}` | `time_entries.delete_entry` | Remove (blocked once paid or costed to a job) |
-| `POST /api/time-entries/{entry_id}/submit` | `time_entries.submit_entry` | Move draft → submitted |
-| `POST /api/time-entries/{entry_id}/approve` | `time_entries.approve_entry` | Manager workflow; approver is the signed-in user (body `approved_by` ignored) |
-| `POST /api/time-entries/{entry_id}/reject` | `time_entries.reject_entry` | Manager workflow |
-| `GET /api/pto/policies` | `pto.list_policies` | All policies |
-| `GET /api/pto/policies/{policy_id}` | `pto.get_policy` | Single policy (added during wiring audit) |
-| `POST /api/pto/policies` | `pto.create_policy` | New policy |
-| `PUT /api/pto/policies/{policy_id}` | `pto.update_policy` | Edit policy (added during wiring audit) |
-| `GET /api/pto/requests` | `pto.list_requests` | All PTO requests, filterable |
-| `POST /api/pto/requests` | `pto.create_request` | Submit a request |
-| `POST /api/pto/requests/{request_id}/decision` | `pto.decide_request` | Canonical approve/reject endpoint |
-| `POST /api/pto/requests/{request_id}/approve` | `pto.approve_request` | Alias for `decision(status=approved)` |
-| `POST /api/pto/requests/{request_id}/reject` | `pto.reject_request` | Alias for `decision(status=denied)` |
-| `POST /api/pto/requests/{request_id}/cancel` | `pto.cancel_request` | Cancel a pending or approved request; an approved one puts the hours it drew back into the bank and reverses its relief journal |
+| Method + Path | Purpose |
+|---------------|---------|
+| `GET /api/onboarding/{emp_id}` | Fetch checklist (the default, unsaved and without task ids, until it is seeded) |
+| `POST /api/onboarding/{emp_id}/seed` | Save the default tasks (adds any missing; never resets completed ones). The Onboarding page calls it when View Checklist is opened |
+| `PUT /api/onboarding/tasks/{task_id}` | Mark signed / complete |
+| `POST /api/onboarding/tasks/{task_id}/complete` | Convenience for the checkbox |
+| `GET /api/onboarding/{emp_id}/new-hire-report` | JSON for state new-hire reporting |
+| `GET /api/onboarding/{emp_id}/new-hire-report/pdf` | Downloadable PDF |
+| `GET /api/time-entries` | List, filterable by employee/date range |
+| `POST /api/time-entries` | Create a time entry |
+| `PUT /api/time-entries/{entry_id}` | Edit (not `status`, and blocked once paid or costed to a job) |
+| `DELETE /api/time-entries/{entry_id}` | Remove (blocked once paid or costed to a job) |
+| `POST /api/time-entries/{entry_id}/submit` | Move draft → submitted |
+| `POST /api/time-entries/{entry_id}/approve` | Manager workflow; approver is the signed-in user (body `approved_by` ignored) |
+| `POST /api/time-entries/{entry_id}/reject` | Manager workflow |
+| `POST /api/time-entries/{entry_id}/post-to-job`, `POST /api/time-entries/post-to-job` | Post an approved entry (or several) to its job as labor cost, one job cost entry each |
+| `POST /api/time-entries/classify` | Run the overtime engine (FLSA plus state rules) over raw daily hours |
+| `GET /api/time-entries/summary?period_start=&period_end=` | Approved unpaid hours per employee for a pay period |
+| `GET /api/pto/policies` | All policies |
+| `GET /api/pto/policies/{policy_id}` | Single policy |
+| `POST /api/pto/policies` | New policy |
+| `PUT /api/pto/policies/{policy_id}` | Edit policy |
+| `GET /api/pto/requests` | All time-off requests, filterable |
+| `POST /api/pto/requests` | Submit a request |
+| `POST /api/pto/requests/{request_id}/decision` | Canonical approve/reject endpoint |
+| `POST /api/pto/requests/{request_id}/approve` | Alias for `decision(status=approved)` |
+| `POST /api/pto/requests/{request_id}/reject` | Alias for `decision(status=denied)` |
+| `POST /api/pto/requests/{request_id}/cancel` | Cancel a pending or approved request; an approved one puts the hours it drew back into the bank and reverses its relief journal |
 
 ### Frontend
 
-- `app/static/js/onboarding.js` (280 lines) — checklist UI with per-task signature
-- `app/static/js/time_entries.js` (220 lines) — entry list + approve/reject buttons
-- `app/static/js/pto.js` (250 lines) — policies + requests with workflow buttons
+- `app/static/js/onboarding.js` — checklist UI with per-task signature
+- `app/static/js/time_entries.js` — entry list + approve/reject buttons
+- `app/static/js/pto.js` — the Time Off page: policies + requests with workflow buttons
 
 ---
 
-## Tier 2 — Deductions & garnishments
+## Benefits and garnishments
 
 ### Models
 
@@ -100,7 +121,7 @@ All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engi
 | `POST /api/pto/accruals/{id}/revalue` | Restate a PTO bank's dollars at the current rate |
 | `GET /api/deductions/garnishments` | List, filterable by `?employee_id=...` |
 | `POST /api/deductions/garnishments` | Create a garnishment order |
-| `DELETE /api/deductions/garnishments/{order_id}` | Cancel an order |
+| `POST /api/deductions/garnishments/{order_id}/end` | End an order (the page's **End order** button); it is no longer withheld and its record stays. `DELETE` is refused (405) |
 
 ### Frontend
 
@@ -110,9 +131,7 @@ All 50 states + DC: dedicated engines for WA / CA / NY / OR, a table-driven engi
 
 ---
 
-**Where the portal link works.** The link is absolute and uses the address the request came in on, so it is only as reachable as the server: a desktop install is `127.0.0.1` on that PC only; Server Edition on the LAN gives a LAN address; employees outside the building need the reverse proxy / tunnel setup (`docs/tls-proxy-setup.md`, `cloudflare/`). In the desktop app the link opens in the system browser on purpose — the portal is a separate cookie-based site and must not be rendered in the app's document window.
-
-## Tier 3 — Tax forms
+## Tax forms
 
 ### Routes
 
@@ -124,13 +143,13 @@ the header and a tamper-evident audit hash in the footer. The SPA's
 
 | Method + Path | Returns |
 |---------------|---------|
-| `POST /api/payroll/forms/w2/{emp_id}?year=YYYY` | W-2 boxes 1-6 + employee/employer identifiers (JSON) |
+| `POST /api/payroll/forms/w2/{emp_id}?year=YYYY` | W-2 boxes 1-6, boxes 15-17 per state (`states`) + employee/employer identifiers (JSON) |
 | `GET, POST /api/payroll/forms/w2/{emp_id}/pdf?year=YYYY` | W-2 PDF + `document_audits` row |
 | `POST /api/payroll/forms/w3/{year}` | W-3 aggregate across all active employees (JSON) |
 | `GET, POST /api/payroll/forms/w3/{year}/pdf` | W-3 PDF |
-| `POST /api/payroll/forms/940/{year}` | Form 940 FUTA — first $7K/employee at 0.6% (JSON) |
+| `POST /api/payroll/forms/940/{year}` | Form 940 FUTA — first $7,000 per employee at 0.6% (6.0% less the full state credit). When the company's state is a credit-reduction state for the year (Schedule A: California 1.2% and the U.S. Virgin Islands 4.5% for 2025), the form adds line 11 and line 12 for it (2.31.3); every employee's wages are treated as paid in the company's state. Schedule A for 2026 is published in November and added then (JSON) |
 | `GET, POST /api/payroll/forms/940/{year}/pdf` | Form 940 PDF |
-| `POST /api/payroll/forms/941/{year}/{quarter}` | Quarterly FICA aggregation (JSON) |
+| `POST /api/payroll/forms/941/{year}/{quarter}` | Quarterly Form 941 figures: lines 1-3, 5a-5e, 6, 7 and 12 (JSON). Deposits and balance due (lines 11-13), Schedule B and Form 941-X are not produced |
 | `GET, POST /api/payroll/forms/941/{year}/{quarter}/pdf` | Form 941 PDF |
 | `GET /api/document-audits` | List audit rows (newest first), filterable by `doc_type` + `doc_key` |
 | `GET /api/document-audits/{id}` | One audit row — for verifying a PDF by its footer ID |
@@ -144,7 +163,7 @@ the header and a tamper-evident audit hash in the footer. The SPA's
 
 ---
 
-## Tier 3 — Self-service portal
+## Self-service portal
 
 ### Models
 
@@ -164,6 +183,10 @@ portal_token_expires_at = Column(DateTime(timezone=True), nullable=True)
 | `GET /api/employees/{id}/portal-token` | The token + expiry as they stand; never mints (null with a note when there is none) |
 | `POST /api/employees/{id}/portal-token` | Make the token, or rotate it (resets expiry windows) |
 
+On the employee's Details, **Make Link** makes the first link and **Rotate
+Token** replaces it; **Copy Link** and **Email to Employee…** send it.
+Reading never creates one, and only an administrator sees the section.
+
 ### Routes — employee (token-authed, rate-limited)
 
 All return `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
@@ -180,6 +203,10 @@ All return `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
 | `POST /portal/{token}/pto` | 10/min | Submit a PTO request |
 | `POST /portal/pto/{request_id}/withdraw` | 10/min | Withdraw the employee's own request while it is still pending |
 
+After the first visit the browser is redirected to `/portal/…` without the
+token, which lives in an HttpOnly cookie for 30 days; the token appears in a
+URL only on that first claim.
+
 ### Token lifecycle
 
 - **Hard expiry**: 1 year from mint, in `portal_token_expires_at`.
@@ -187,6 +214,8 @@ All return `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
   on every authenticated request, so an active user never trips it.
 - **Expired tokens** return `410 Gone`. The admin can issue a fresh one
   via the rotate endpoint.
+
+**Where the portal link works.** The link is absolute and uses the address the request came in on, so it is only as reachable as the server: a desktop install is `127.0.0.1` on that PC only; Server Edition on the LAN gives a LAN address; employees outside the building need a server they can reach: a cloud host behind HTTPS (`docs/cloud-hosting.md`) or a tunnel to the office host with a bypass for `/portal/` (`docs/server-edition.md`, "Reaching it from outside the office"). In the desktop app the link opens in the system browser on purpose — the portal is a separate cookie-based site and must not be rendered in the app's document window.
 
 ---
 
@@ -196,11 +225,11 @@ All return `Referrer-Policy: no-referrer` and `Cache-Control: no-store`.
 |-------|------|-----------|
 | `#/hr/onboarding` | Employee list with completion % | `onboarding.js` |
 | `#/hr/time-entries` | Time entries with approve/reject | `time_entries.js` |
-| `#/hr/pto` | Policies + pending requests | `pto.js` |
+| `#/hr/pto` | Time Off: policies + pending requests | `pto.js` |
 | `#/hr/benefits` | Benefit codes, groups, enrollments, remittance | `benefits.js` |
 | `#/hr/deductions` | Garnishments | `deductions.js` |
 | `#/hr/tax-forms` | W-2/W-3/940/941 generation + Form history (who, when, hash, Check) | `tax_forms.js` |
-| `#/employees/{id}` | Details modal with portal/YTD/bank/docs tabs | `employees.js` |
+| `#/employees` → Details | Overview, Portal Access, E-Verify, YTD Totals, Opening YTD, Bank Accounts, Documents | `employees.js` |
 
 ---
 
@@ -232,6 +261,21 @@ account in its prenote waiting period is not paid). Each stub of a run
 carries `direct_deposit`: true when the file pays it, false means pay by
 check; the view shows the split and a Paid by column. Admin only, like the
 rest of payroll.
+
+---
+
+## Voiding a pay run
+
+`POST /api/payroll/{run_id}/void` (the run's **Void** button) reverses the
+journal entry the run posted, line for line, marks the run void and puts
+back what it took: time entries are released, benefit and loan balances
+step back, YTD figures drop the run. A run whose entry was already reversed
+by hand, or whose bank line sits in a finished reconciliation, is refused
+with the reason. Three things make the void ask first (409 `confirm_void`,
+sent again with `confirm=1` to go ahead): a direct deposit file was made
+from the run, a liability the run credited was paid out since its pay date
+(a 941 deposit, net pay paid out of 2300), or a W-2, W-3, 940 or 941 was
+generated since that counted it. The response's `warnings` repeat them.
 
 ---
 
@@ -319,7 +363,8 @@ Who reads it, each on purpose:
   measure on gross. `employee_ytd` and the stub's YTD count every quarter.
 - **The Social Security wage base is the year's** (`SS_WAGE_BASES`,
   `ss_wage_base(year)`: 2023 $160,200, 2024 $168,600, 2025 $176,100, 2026
-  $184,500) for the opening's check, the paycheck and the 941 and W-2. A
+  $184,500, 2027 $192,300) for the opening's check, the paycheck and the 941
+  and W-2. A
   year with no base here is measured against the nearest one; the opening
   (`warnings`) and the pay run (`warnings`) say so. FUTA's $7,000 is
   statutory and the same every year.
@@ -373,73 +418,7 @@ build against.
 
 ---
 
-## Pending items
-
-The major Tier 3 work has shipped — tax PDFs with audit hashes, the
-cookie-based portal session, PTO year-end carryover, and time-entry →
-pay-run auto-population are all live. What's left is in `docs/todo.md`:
-
-- **State SUI filings** — `app/services/tax_forms/state_sui.py` has
-  scaffolding; needs per-state form rendering + an endpoint
-- **E-Verify submission flow** — schema has `everify_case_number` but
-  no integration with the federal system
-- **Portal-token UI on admin side** — show expiry and last-used
-  inline (the API already returns `expires_at`)
-- **CSP nonce mode** — drop `'unsafe-inline'` once the inline bootstrap
-  script in `index.html` moves to an external file
-- **Penetration test against a staging deploy** — never done
-- **Encryption rewrap CLI** — `python -m app.services.encryption rewrap`
-  for offline key rotation; in-flight rotation via
-  `PAYROLL_ENCRYPTION_SECRET_PREV` already works
-
----
-
-## Where it all lives
-
-```
-app/
-├── models/
-│   ├── hr.py                  # onboarding, employee documents
-│   ├── pto.py                 # policies, accruals, requests
-│   ├── time_entries.py        # daily hours tracking
-│   ├── deductions.py          # garnishments
-│   ├── benefits.py            # benefits engine (codes, groups, enrollments)
-│   ├── bank_accounts.py       # encrypted direct-deposit
-│   └── payroll.py             # Employee, PayRun, PayStub
-├── routes/
-│   ├── onboarding.py          # Tier 1
-│   ├── time_entries.py        # Tier 1
-│   ├── pto.py                 # Tier 1
-│   ├── deductions.py          # Tier 2 (garnishments)
-│   ├── benefits.py            # Tier 2 (benefits engine)
-│   ├── tax_forms.py           # Tier 3 (UI placeholder routes)
-│   ├── payroll.py             # Tier 3 — forms endpoints + core payroll
-│   ├── portal.py              # Tier 3 — self-service portal
-│   └── employees.py           # Cross-cutting: portal-token mint, documents
-├── services/
-│   ├── encryption.py          # Fernet with v1: versioning
-│   ├── pto_accrual.py         # Per-period accrual math
-│   ├── payroll_accounts.py    # Where a pay run posts: the pieces and their settings (#620)
-│   └── payroll_service.py     # Withholding, FICA, FUTA, state tax
-├── schemas/
-│   ├── hr.py
-│   ├── pto.py
-│   ├── deductions.py
-│   ├── time_entries.py
-│   └── payroll.py
-└── static/js/
-    ├── onboarding.js
-    ├── time_entries.js
-    ├── pto.js
-    ├── deductions.js
-    ├── tax_forms.js
-    └── employees.js           # extended with portal/YTD/bank/docs tabs
-```
-
----
-
 ## Related docs
 
 - [security-hardening.md](security-hardening.md) — the production-readiness pass that hardened the portal, encryption, and HTTPS layers
-- [wiring-audit.md](wiring-audit.md) — the spider-web audit methodology and the four disconnects we fixed
 - [../SECURITY.md](../SECURITY.md) — public security policy / responsible disclosure

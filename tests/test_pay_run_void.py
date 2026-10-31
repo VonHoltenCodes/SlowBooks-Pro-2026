@@ -560,7 +560,7 @@ def test_a_reconciled_net_pay_line_refuses_the_void(client, db_session, seed_acc
     assert r.status_code == 400, r.text
     detail = r.json()["detail"]
     assert "completed reconciliation" in detail
-    assert "2026-04-30" in detail and "Undo that reconciliation" in detail
+    assert "2026-04-30" in detail and "not reopened" in detail
     db_session.expire_all()
     assert _balances(db_session) == before
     assert client.get(f"/api/payroll/{run['id']}").json()["status"] == "processed"

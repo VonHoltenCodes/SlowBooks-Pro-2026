@@ -53,7 +53,13 @@
             <tr><td class="box">3</td><td>Total payments to all employees</td><td class="r">{{ data.total_payments | currency }}</td></tr>
             <tr><td class="box">4</td><td>Payments exempt from FUTA (over ${{ "%.0f" | format(data.futa_wage_base) }} wage base)</td><td class="r">{{ data.exempt_payments | currency }}</td></tr>
             <tr><td class="box">7</td><td>Total taxable FUTA wages</td><td class="r">{{ data.futa_taxable_wages | currency }}</td></tr>
+            {% if data.credit_reduction is defined %}
+            <tr><td class="box">8</td><td>FUTA tax before adjustments</td><td class="r">{{ data.total_futa_tax | currency }}</td></tr>
+            <tr><td class="box">11</td><td>Credit reduction &mdash; {{ data.credit_reduction_state }} is a credit reduction state for {{ data.year }} (Schedule A rate {{ "%.1f" | format(data.credit_reduction_rate * 100) }}% of taxable FUTA wages)</td><td class="r">{{ data.credit_reduction | currency }}</td></tr>
+            <tr class="total"><td class="box">12</td><td>Total FUTA tax after adjustments</td><td class="r">{{ data.total_futa_tax_after_adjustments | currency }}</td></tr>
+            {% else %}
             <tr class="total"><td class="box">8</td><td>FUTA tax for the year</td><td class="r">{{ data.total_futa_tax | currency }}</td></tr>
+            {% endif %}
         </tbody>
     </table>
 

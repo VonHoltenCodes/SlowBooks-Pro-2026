@@ -11,13 +11,13 @@ barrier as a bug.
 *The same screen in both themes. Switch with the theme button in the toolbar,
 or Alt+D.*
 
-## What is in place (v2.19.0)
+## What is in place (v2.31)
 
 ### Contrast, in both themes
 
 - Text meets **WCAG AA contrast** (4.5:1, or 3:1 for large text: 24px, or
   18.66px bold) in the light and the dark theme everywhere it is drawn: every
-  page, 142 dialogs, the sign-in and setup screens, pop-up messages and the
+  page and dialog, the sign-in and setup screens, pop-up messages and the
   PDF window. Semi-transparent text is measured as it is painted. (v2.18.0)
 - Chart lines, bars and colour keys meet **3:1** (WCAG 1.4.11), so the A/R
   aging colours can be told apart in both themes. (v2.18.0)
@@ -89,6 +89,23 @@ or Alt+D.*
   the card.
 
 - **Notifications** ("Invoice saved") announce through a polite live region.
+- **Sortable lists say how they are sorted** (v2.31.1): a column heading that
+  sorts a list (the Invoices list, among others) is a button, and the sort is
+  announced (`aria-sort`).
+- **The window zooms** (v2.30.0): Ctrl and + or −, Ctrl+0 to reset, or Ctrl
+  and the mouse wheel (⌘ on a Mac) scale the whole desktop window, and the
+  level is kept between launches. A text-size setting that leaves the sidebar
+  alone is still to come.
+- **A sound when a transaction posts**, optional and per sign-in (v2.29.1):
+  Settings → Sounds. Off by default.
+- **Enter moves between fields** on request (v2.29.1): Settings → My
+  Preferences, for people used to the way desktop bookkeeping software has
+  always done it.
+- **The top bar names its shortcuts** (v2.31.1): Home (Alt+H) and the rest
+  read their keys to a screen reader and on hover.
+- **A long problem list is one Tab stop** (v2.31.2): the QuickBooks import's
+  list of problems to tick is walked with the arrow keys, and the keyboard's
+  ring follows, on Windows and on a Mac.
 - **Every data table declares its column headers** (`scope="col"`).
 - **Icon-only buttons** (remove a line, delete an attachment, close a dialog)
   carry accessible names.
@@ -96,8 +113,8 @@ or Alt+D.*
   Sent; a reconciliation reads "Balanced" or "Out of balance".
 - **Landmarks and skip links where the forms are long** (v2.22.2): the
   invoice, bill and journal-entry forms are form landmarks named by the
-  dialog's title, and each opens with "Skip to the line items" as its
-  first stop — a screen reader hears it first, Shift+Tab from the first
+  dialog's title, and each opens with "Skip to the line items" ("Skip to
+  the lines" on the journal form) as its first stop — a screen reader hears it first, Shift+Tab from the first
   field reaches it, and it lands the keyboard on the first line's first
   box with the ring showing — so the lines are one press away, not forty
   tabs past the address block. The dialog still opens on its first
@@ -149,8 +166,11 @@ a screen reader hears it (v2.22.2).
 
 ## What we know is still open
 
-- Keyboard-only drag ordering is not offered where a mouse drag exists
-  (the dashboard uses arrow buttons instead).
+- Keyboard ordering is offered everywhere a mouse drag exists: document
+  lines have **Move line up**, **Move line down** and **Insert line below**
+  beside the drag handle (v2.31.0), and the dashboard's cards use arrow
+  buttons. What is still open is a text-size setting of the app's own; the
+  window zoom above is the way to larger text today.
 
 ## Tell us
 

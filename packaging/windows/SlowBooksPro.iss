@@ -68,7 +68,15 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 Filename: "{tmp}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"; \
   StatusMsg: "Installing or updating the Microsoft WebView2 runtime (app window component)..."; \
   Check: not IsWebView2Current; Flags: waituntilterminated
-Filename: "{app}\SlowBooksPro.exe"; Description: "Launch SlowBooks Pro 2026"; Flags: nowait postinstall skipifsilent
+; A Server Edition host (the SlowBooksProServer task exists) gets its server
+; started again instead of a desktop window: PrepareToInstall killed the
+; server, nothing restarted the task before the next boot, and the window
+; the launch box opened then held port 3001 against it (2.31.3).
+Filename: "{sys}\schtasks.exe"; Parameters: "/Run /TN SlowBooksProServer"; \
+  StatusMsg: "Starting the Server Edition task..."; \
+  Check: ServerTaskExists; Flags: runhidden waituntilterminated
+Filename: "{app}\SlowBooksPro.exe"; Description: "Launch SlowBooks Pro 2026"; Flags: nowait postinstall skipifsilent; \
+  Check: not ServerTaskExists
 
 [Code]
 // The WebView2 runtime the app's window needs: MIN_WEBVIEW2 in
@@ -79,6 +87,26 @@ Filename: "{app}\SlowBooksPro.exe"; Description: "Launch SlowBooks Pro 2026"; Fl
 const
   MinWebView2 = '101.0.1210.39';
   WebView2Client = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  ServerTask = 'SlowBooksProServer';
+
+var
+  ServerTaskChecked: Boolean;
+  ServerTaskFound: Boolean;
+
+// Whether this PC is a Server Edition host: the startup task the install
+// script registers exists (schtasks /Query exits 0). Asked once per run.
+function ServerTaskExists(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  if not ServerTaskChecked then
+  begin
+    ServerTaskChecked := True;
+    ServerTaskFound := Exec(ExpandConstant('{sys}\schtasks.exe'), '/Query /TN ' + ServerTask,
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) and (ResultCode = 0);
+  end;
+  Result := ServerTaskFound;
+end;
 
 // The number before the next dot of S, taken off the front of S; -1 when
 // that part is not a number.

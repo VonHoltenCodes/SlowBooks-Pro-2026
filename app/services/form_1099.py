@@ -6,8 +6,11 @@
 #   - 1096 transmittal summary / PDF aggregating the NEC forms
 #
 # A vendor crosses the IRS 1099-NEC reporting threshold at $600 of payments
-# in the calendar year. Vendor payments are recorded as BillPayment rows
-# (vendor_id, date, amount).
+# in a calendar year through 2025, and at $2,000 from 2026 (the One Big
+# Beautiful Bill Act, section 70433, for payments made after December 31,
+# 2025; indexed for inflation after 2026). Vendor payments are recorded as
+# BillPayment rows (vendor_id, date, amount) and register entries naming the
+# vendor.
 #
 # DISCLAIMER: IRS thresholds and form layouts change. Verify against the
 # current-year IRS instructions before filing.
@@ -27,8 +30,17 @@ from app.services.bank_register import voided_transaction_ids
 from app.services.accounting import _q
 from app.services.pdf_service import _jinja_env, render_pdf
 
-# IRS 1099-NEC reporting threshold for nonemployee compensation.
+# IRS 1099-NEC reporting threshold for nonemployee compensation, by the
+# year the payments were made.
 NEC_THRESHOLD = Decimal("600.00")
+NEC_THRESHOLD_2026 = Decimal("2000.00")
+
+
+def nec_threshold(year: int) -> Decimal:
+    """The reporting threshold for payments made in `year`: $600 through
+    2025, $2,000 from 2026 (2.31.3). The 2027+ inflation adjustment is
+    published by the IRS each fall; until it is, the 2026 figure stands."""
+    return NEC_THRESHOLD_2026 if year >= 2026 else NEC_THRESHOLD
 
 
 def is_1099_vendor():
@@ -181,10 +193,12 @@ def compute_1099_data(db: Session, year: int) -> list[dict]:
     compensation (see is_1099_vendor and _files_nec).
 
     One dict per eligible vendor with vendor id, name, address, tax_id, the
-    total amount paid in `year`, whether they cross the $600 reporting
-    threshold (`reportable`), and whether a W-9 is on file.
+    total amount paid in `year`, whether they cross that year's reporting
+    threshold (`reportable`, see nec_threshold), and whether a W-9 is on
+    file.
     """
     totals = _vendor_payment_totals(db, year)
+    threshold = nec_threshold(year)
     vendors = db.query(Vendor).filter(is_1099_vendor()).order_by(Vendor.name).all()
 
     results: list[dict] = []
@@ -198,7 +212,7 @@ def compute_1099_data(db: Session, year: int) -> list[dict]:
                 "address": _vendor_address(vendor),
                 "tax_id": vendor.tax_id,
                 "total_paid": total,
-                "reportable": total >= NEC_THRESHOLD,
+                "reportable": total >= threshold,
                 "w9_on_file": bool(vendor.w9_on_file),
                 "year": year,
             }
@@ -231,7 +245,9 @@ def generate_1099_nec_pdf(db: Session, year: int, vendor_id: int, payer: dict) -
         raise ValueError(f"Vendor {vendor_id} is not 1099-eligible or does not exist")
 
     template = _jinja_env.get_template("form_1099nec.html")
-    html_str = template.render(rec=record, payer=payer, year=year)
+    html_str = template.render(
+        rec=record, payer=payer, year=year, threshold=nec_threshold(year)
+    )
     return render_pdf(html_str)
 
 
@@ -246,5 +262,6 @@ def generate_1096_pdf(db: Session, year: int, payer: dict) -> bytes:
         vendors=reportable,
         payer=payer,
         year=year,
+        threshold=nec_threshold(year),
     )
     return render_pdf(html_str)

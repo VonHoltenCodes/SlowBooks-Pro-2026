@@ -141,22 +141,22 @@ def test_a_linked_register_entry_counts_toward_the_1099(client, seed_accounts):
     v = client.post(
         "/api/vendors", json={"name": "Sub Co", "is_1099_vendor": True}
     ).json()
-    _post(client, seed_accounts, payee="Sub Co", amount="-500.00")
-    assert _nec(client, v["id"])["total_paid"] == 500.00
+    _post(client, seed_accounts, payee="Sub Co", amount="-1500.00")
+    assert _nec(client, v["id"])["total_paid"] == 1500.00
     assert not _nec(client, v["id"])["reportable"]
-    _post(client, seed_accounts, payee="x", vendor_id=v["id"], amount="-150.00")
+    _post(client, seed_accounts, payee="x", vendor_id=v["id"], amount="-600.00")
     nec = _nec(client, v["id"])
-    assert nec["total_paid"] == 650.00 and nec["reportable"]
-    assert _summary(client, v["id"])["total_paid"] == 650.0
+    assert nec["total_paid"] == 2100.00 and nec["reportable"]  # 2026: $2,000
+    assert _summary(client, v["id"])["total_paid"] == 2100.0
     # a refund linked to the vendor nets off; a voided entry is left out
     _post(client, seed_accounts, payee="Sub Co", amount="25.00")
-    assert _nec(client, v["id"])["total_paid"] == 625.00
+    assert _nec(client, v["id"])["total_paid"] == 2075.00
     last = _post(client, seed_accounts, payee="Sub Co", amount="-100.00")
     assert client.post(f"/api/banking/entries/{last['id']}/void").status_code in (
         200,
         201,
     )
-    assert _nec(client, v["id"])["total_paid"] == 625.00
+    assert _nec(client, v["id"])["total_paid"] == 2075.00
 
 
 def test_an_unlinked_payee_and_a_transfer_do_not_count(client, seed_accounts):

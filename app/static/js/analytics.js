@@ -326,9 +326,9 @@ const AnalyticsPage = {
                         <tr>
                             <th scope="col">${escapeHtml(nameHeader)}</th>
                             <th scope="col" class="amount">Current</th>
-                            <th scope="col" class="amount">30+</th>
-                            <th scope="col" class="amount">60+</th>
-                            <th scope="col" class="amount">90+</th>
+                            <th scope="col" class="amount">1-30</th>
+                            <th scope="col" class="amount">31-60</th>
+                            <th scope="col" class="amount">61-90+</th>
                             <th scope="col" class="amount">Total</th>
                         </tr>
                     </thead>
@@ -613,9 +613,9 @@ const AnalyticsPage = {
     };
     const bucketLabels = {
       current: "Current",
-      30: "30+ days",
-      60: "60+ days",
-      90: "90+ days",
+      30: "1-30 days",
+      60: "31-60 days",
+      90: "61-90+ days",
     };
 
     const datasets = buckets.map((b) => ({

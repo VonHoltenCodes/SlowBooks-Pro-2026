@@ -1,13 +1,16 @@
 # Data Model
 
-Schema reference for the Slowbooks PostgreSQL database. 55 tables on
-a double-entry accounting foundation. For migration history, see the
-files under `migrations/versions/`; for model code, see `app/models/`.
+Schema reference for a SlowBooks Pro company database: one SQLite file per
+company on the desktop and Server Edition, or a PostgreSQL database. 105
+tables on a double-entry accounting foundation (Alembic head
+`4810bd59e481` in 2.31.3). For migration history, see the files under
+`migrations/versions/`; for model code, see `app/models/`. The construction
+and job-cost tables are described in their own sections below the table.
 
 | Table | Purpose |
 |-------|---------|
-| `accounts` | Chart of Accounts — asset, liability, equity, income, expense, COGS |
-| `customers` | Customer contacts with billing/shipping addresses |
+| `accounts` | Chart of Accounts — asset, liability, equity, income, expense, COGS; `parent_id` for sub-accounts, `detail_type` (one of 15, drives the statements' grouping) |
+| `customers` | Customer contacts with billing/shipping addresses; `parent_customer_id` and `bill_with_parent` for sub-customers (2.31.1) |
 | `vendors` | Vendor contacts |
 | `items` | Product/service/material/labor items with rates |
 | `invoices` | Invoice headers with status tracking |
@@ -16,7 +19,7 @@ files under `migrations/versions/`; for model code, see `app/models/`.
 | `estimate_lines` | Estimate line items |
 | `payments` | Payment records |
 | `payment_allocations` | Maps payments to invoices (many-to-many) |
-| `transactions` | Journal entry headers |
+| `transactions` | Journal entry headers: `date`, `reference`, `description`, `memo`, `source_type`/`source_id` (the document that posted it), `class_id`, `job_id`, `vendor_id`, `is_adjusting`, `posted_by`; from an imported ledger (2.31.2) `source_ref` (QuickBooks' Num), `source_kind` (its Type) and `source_difference` (what posted to 3950 Import Differences) |
 | `transaction_lines` | Journal entry splits (debit OR credit); `cleared` / `reconciliation_id` on bank-account lines |
 | `accounts.bank_kind` | `bank` / `credit_card` — which chart accounts the register, pickers and transfers use |
 | `bank_accounts` | A bank feed: the statement identity of a ledger account (`account_id`); `legacy_balance` = the pre-2.10 register balance until posted or dismissed |
@@ -52,10 +55,32 @@ files under `migrations/versions/`; for model code, see `app/models/`.
 | `email_templates` | Customizable email templates |
 | `inventory_movements` | Per-item qty/cost ledger (purchases, sales, adjustments) |
 | `saved_reports` | Named (report_type + parameters) tuples |
-| `document_audits` | SHA-256 hash chain for generated tax-form PDFs (W-2/W-3/940/941) |
+| `document_audits` | A SHA-256 hash per generated tax-form PDF (W-2/W-3/940/941), printed in the form's footer |
 | `portal_accesses` | Audit log for self-service portal hits (success + failure) |
 | `login_attempts` | Authentication-attempt audit log |
 | `reseller_permits` | Per-entity sales-tax reseller permits with expiration + verification trail |
+| `users`, `user_preferences` | Named sign-ins with a role (administrator, bookkeeper, accountant, read-only), end date, one-time-password flag; per-user preferences |
+| `api_tokens` | Scoped API tokens: label, role (never administrator), `allow_backups`, hash and hint, revoked flag |
+| `request_keys` | Idempotency keys seen on write requests |
+| `classes` | Classes (funds in a nonprofit) with the Uncategorized default |
+| `invoice_messages` | Saved messages for emailed invoices |
+| `memorized_transactions`, `memorized_transaction_lines` | Memorized bills and journal entries with their schedule (2.31.1) |
+| `duplicate_dismissals` | Possible Duplicates groups marked Not a duplicate |
+| `stored_files` | Files kept inside the company file: the logo, attachments, employee documents (since 2.18) |
+| `ocr_templates` | Per-merchant receipt layouts remembered by Scan Receipt |
+| `accountants_copies` | Accountant's copies sent and applied, with the dividing date |
+| `fixed_assets`, `fixed_asset_types` | Fixed assets, their type, depreciation method and runs |
+| `employee_bank_accounts` | Direct-deposit accounts (routing and account numbers encrypted) |
+| `benefit_codes`, `benefit_rates`, `employee_benefits`, `employee_groups`, `employee_group_benefits`, `benefit_ytd`, `pay_stub_benefits` | The benefits engine: codes with rules and effective-dated rates, enrolments by employee or group, year-to-date and per-stub amounts |
+| `garnishment_orders` | Garnishment orders and their ends |
+| `onboarding_tasks` | An employee's onboarding checklist |
+| `time_entries` | Time entries with approval and job-cost posting |
+| `pto_policies`, `pto_requests`, `pto_accruals` | Time off |
+| `payroll_opening_balances`, `payroll_opening_quarters`, `payroll_opening_state_balances`, `payroll_opening_benefits` | Opening year-to-date payroll from an earlier system, quarter by quarter |
+| `allocation_rules`, `allocation_rule_targets`, `functional_allocations`, `functional_allocation_lines` | Nonprofit functional-expense allocations |
+| `in_kind_gifts`, `in_kind_gift_lines` | In-kind gifts |
+| `restriction_releases` | Releases from restriction between net-asset classes |
+| `jobs`, `job_budgets`, `job_costs`, `job_cost_lines`, `job_cost_to_complete`, `job_deposits`, `cost_codes`, `cost_types`, `equipment`, `trade_packages`, `trade_package_sections`, `sov_lines`, `change_orders`, `change_order_lines`, `pay_applications`, `pay_application_lines`, `lien_waivers` | Jobs, job costing and construction mode: described section by section below |
 
 ## jobs (Customer:Job / Projects)
 
@@ -71,9 +96,14 @@ files under `migrations/versions/`; for model code, see `app/models/`.
 
 `job_id` (nullable FK) lives on: transactions, transaction_lines, invoices,
 invoice_lines, bills, bill_lines, estimates, estimate_lines, purchase_orders,
-purchase_order_lines, credit_memos, vendor_credits, vendor_credit_lines,
-recurring_invoices, time_entries.
-`class_id` was added to transaction_lines, invoice_lines and bill_lines.
+purchase_order_lines, credit_memos, credit_memo_lines, vendor_credits,
+vendor_credit_lines, recurring_invoices, memorized_transactions and their
+lines, in_kind_gifts and their lines, allocation_rule_targets, time_entries.
+`class_id` rides transactions and every document header and line that
+posts (transaction_lines, invoice_lines, bill_lines, credit_memo_lines, the
+estimate, purchase-order, vendor-credit, memorized and in-kind lines);
+`customer_id` rides transaction_lines too, for a deposit split among several
+payers (#606).
 Attribution rule for reports: `coalesce(line.job_id, transaction.job_id)`.
 Migration `e9f0a1b2c3d4_add_jobs`.
 
@@ -81,7 +111,7 @@ Migration `e9f0a1b2c3d4_add_jobs`.
 
 | column | notes |
 |---|---|
-| id, code (unique, case-insensitive via API; normalized to the `DD SS SS` division/section shape) | e.g. `03` Concrete, `03 30 00` Cast-in-Place Concrete |
+| id, code (unique, case-insensitive via API; normalized to the `DD SS SS` division/section shape), name | e.g. `03` Concrete, `03 30 00` Cast-in-Place Concrete |
 | level | `division` · `section` · null (a custom, non-standard code) |
 | cost_type | per-code default: labor · material · subcontract · equipment · other |
 | account_id (FK accounts, nullable) | default posting account |
@@ -256,7 +286,9 @@ The owner's progress bill from the schedule of values. Two new tables:
   applied to the current due), `lien_waiver_status` String(16),
   `invoice_id` (FK invoices, SET NULL — the invoice approve created; null for
   an application that only moves stored material into the work),
-  `tax_rate` Numeric(7,4), `charge_tax` Boolean default true (#576),
+  `tax_rate` Numeric(7,6), `charge_tax` Boolean default true (#576),
+  `deposit_payment_id` (FK payments, SET NULL — the payment that drew the
+  owner deposit down),
   `contract_sum_original` / `contract_sum_to_date` Numeric(15,2) nullable (the
   contract sums as of approval), `approved_at`, `voided_at`, `notes`. Retainage
   to date is net of releases.
@@ -293,7 +325,7 @@ cost-to-complete and the other job reports are #556.
 
 | table | purpose |
 |---|---|
-| cost_types | code (key), name, is_labor, burden_pct, default_account_id, offset_account_id, burden_offset_account_id, sort_order, is_active — seeded labor/material/subcontract/equipment/other |
+| cost_types | code (key), name, is_labor, burden_pct, burden_method (flat), default_account_id, offset_account_id, burden_offset_account_id, sort_order, is_active — the five starting types (labor/material/subcontract/equipment/other) are saved at the company's first write that needs them, never by a read (2.31.2) |
 | cost_codes.parent_id | hierarchy (self FK) |
 | equipment | code, name, hourly_rate, cost_code_id, recovery_account_id |
 | job_costs | number (JC-000001), date, job_id (NULL for allocations), memo, source manual/time_entry/allocation, status posted/void, transaction_id, total |

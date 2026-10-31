@@ -69,7 +69,7 @@ def list_states() -> list[dict]:
         if code in STATES:
             out.append(describe(STATES[code]))
         else:
-            name, base, summary = DEDICATED[code]
+            name, base, summary, year, source = DEDICATED[code]
             out.append(
                 {
                     "code": code,
@@ -79,9 +79,9 @@ def list_states() -> list[dict]:
                     "suta_wage_base": float(base),
                     "uses_local_rate": False,
                     "uses_rate_election": False,
-                    "year": "2026-approximate",
-                    "source": f"app/services/state_tax/{code.lower() if code != 'OR' else 'oregon'}.py",
-                    "notes": "",
+                    "year": year,
+                    "source": source,
+                    "notes": f"Dedicated engine: app/services/state_tax/{'oregon' if code == 'OR' else code.lower()}.py.",
                 }
             )
     return out

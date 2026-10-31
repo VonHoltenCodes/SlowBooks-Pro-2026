@@ -1,4 +1,14 @@
 {
+  "2.31.3": {
+    "title": "Payroll at the 2026 figures, and a Server Edition that comes back after an update",
+    "items": [
+      "Federal withholding follows the 2026 Publication 15-T schedules; the old ones withheld $196 to $1,166 a year too much. The 2027 Social Security wage base is in place for January.",
+      "Every state's withholding table was set from the state's own 2026 publication, and the California, New York, Oregon and Washington engines were rebuilt from theirs (Paid Leave Oregon was missing). Verify against the publication before filing, as before.",
+      "Form 940 applies the FUTA credit reduction for an employer in a credit-reduction state, and the 1099-NEC threshold is $2,000 for payments made from 2026.",
+      "Server Edition keeps its books under the data folder, copies the desktop books from where the app keeps them, stays running after three days and on battery, and comes back after an update.",
+      "A payroll encryption secret too short to protect anything is refused at startup on every install, the backup script finishes every database, and QuickBooks Desktop ledger exports read whatever the Windows region."
+    ]
+  },
   "2.31.2": {
     "title": "A QuickBooks import with no dead ends, and a register that keeps your place",
     "items": [
@@ -17,7 +27,8 @@
       "A bill's void or edit takes its stock back out at the cost it came in at, and a reversal's leftover goes to Cost of Goods Sold, so Inventory always reads quantity times average cost.",
       "An expense keeps the memo it was given.",
       "The Invoices list sorts by any column: press a heading, again to reverse.",
-      "A bank feed imports into any bank account in your chart: no need to add it on the Banking page first.", "On Windows, a WebView2 runtime too old for the app's window is named at start, with what to do, instead of a white window; the installer now updates an old one."
+      "A bank feed imports into any bank account in your chart: no need to add it on the Banking page first.",
+      "On Windows, a WebView2 runtime too old for the app's window is named at start, with what to do, instead of a white window; the installer now updates an old one."
     ]
   },
   "2.31.0": {

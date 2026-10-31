@@ -21,13 +21,12 @@ health, healthcare provision, or payment for healthcare.
 | Data | HIPAA classification | Notes |
 |------|----------------------|-------|
 | Employee name + address | Not PHI by itself | Becomes PHI only when combined with healthcare information |
-| Employee SSN (last 4) | Not PHI | An identifier, but no health data attached |
+| Employee SSN (last 4 on the record; the full number on an uploaded W-4 or I-9) | Not PHI | An identifier, but no health data attached |
 | Employee bank routing / account # | Not PHI | Financial data, encrypted at rest |
 | Pay-stub gross / withholding | Not PHI | Wage data |
 | HSA deduction *amount* | Not PHI | Reveals only that an HSA exists, not health details |
-| Health insurance deduction *amount* | Not PHI | Same — premium amount without enrollment/claim details |
+| Health insurance enrollment (a benefit code such as "Section 125 Health Premium", its rate, the carrier it is remitted to) | Borderline | The benefits engine stores the enrollment and the carrier as a vendor; no plan, claim or diagnosis details |
 | Pre-tax FSA / dependent-care amount | Not PHI | Same |
-| Insurance carrier name (if stored) | Borderline | Could imply health context; we don't currently store this |
 | Actual claims, diagnoses, treatment | Would be PHI | **We don't store any of this** |
 
 **Default verdict:** A business running SlowBooks for normal accounting +
@@ -47,8 +46,8 @@ to existing SlowBooks behavior.
 
 | Spec | Implementation |
 |------|---------------|
-| Unique user identification (R) | Single-operator design; no multi-tenant users yet |
-| Emergency access procedure (R) | Manual — operator has the master password + backup files |
+| Unique user identification (R) | ✅ Named users in four roles (administrator, bookkeeper, accountant, read-only), enforced centrally for every route; API tokens are their own principals (`token:<label>` in the audit log), never administrators (since 2.29.0; an older administrator token is refused since 2.31.2). Access is by route group, not per field |
+| Emergency access procedure (R) | Manual — any administrator's sign-in, the recovery key of an encrypted company file, and the backup files |
 | Automatic logoff (A) | ✅ `SESSION_IDLE_TIMEOUT_SECONDS` (default 14400s / 4h) clears sessions |
 | Encryption + decryption (A) | ✅ Fernet for bank PII at rest; AES-128-CBC + HMAC-SHA256 |
 
@@ -86,9 +85,9 @@ to existing SlowBooks behavior.
 
 | Spec | Implementation |
 |------|---------------|
-| Integrity controls (A) | ✅ HTTPS enforced; HSTS `max-age=63072000; includeSubDomains; preload` |
-| Encryption (A) | ✅ `FORCE_HTTPS=true` (default in production) + `HTTPSRedirectMiddleware`; session cookie carries `Secure` flag |
-| Database transport | ✅ Startup fails hard in production if `DATABASE_URL` lacks `sslmode=require` |
+| Integrity controls (A) | ✅ On a production server behind a TLS proxy (`docker-compose.prod.yml`): HSTS `max-age=63072000; includeSubDomains; preload`. ⚠ The desktop app, Server Edition on a LAN and the single-host `docker compose up` serve plain HTTP by design (`APP_DEBUG=true` / `SLOWBOOKS_PRIVATE_NETWORK=1`), with no HSTS |
+| Encryption (A) | ✅ `FORCE_HTTPS=true` (default in production) + `HTTPSRedirectMiddleware`; session cookie carries `Secure` flag. ⚠ Not on the plain-HTTP deployments above: a HIPAA-conscious deployment is the production image behind HTTPS ([cloud-hosting.md](cloud-hosting.md)) |
+| Database transport | ✅ Startup fails hard in production if `DATABASE_URL` lacks `sslmode=require` (skipped by `SLOWBOOKS_PRIVATE_NETWORK=1`, where the database is on the host's own Docker network) |
 
 ### § 164.312(a)(2)(iv) — Encryption at Rest
 
@@ -99,9 +98,9 @@ to existing SlowBooks behavior.
 | AI provider API keys | ✅ Fernet-encrypted via `app/services/crypto.py` |
 | Password hashes | ✅ Argon2id (one-way) |
 | Company file (SQLite) | ✅ Optional whole-file SQLCipher encryption (#290), off by default; on a desktop the key is the practice's own (a recovery key shown once, unlocked by an administrator's sign-in), on a server the operator's secret; backups are ciphertext; PostgreSQL is the host's job |
-| Employee SSN | ⚠ Only last 4 digits stored — full SSN never collected |
-| Employee name / address | ⚠ Plaintext (not PHI in HIPAA terms) |
-| HSA / health-insurance deduction amounts | ⚠ Plaintext (not PHI in HIPAA terms) |
+| Employee SSN | ⚠ Only the last 4 digits on the record; an uploaded W-4 or I-9 (stored inside the company file) carries the full number, protected only by whole-file encryption |
+| Employee name / address | ⚠ Plaintext in the database (not PHI in HIPAA terms); encrypted on disk when whole-file encryption is on |
+| HSA / health-insurance deduction amounts | ⚠ Plaintext in the database (not PHI in HIPAA terms); same |
 
 ---
 
@@ -114,10 +113,10 @@ configured to support them but doesn't enforce them on its own.
 |-----------|-------|
 | § 164.308 Security Management Process | Customer responsibility — risk analysis, sanctions policy, etc. |
 | § 164.308 Workforce Security | Customer responsibility — background checks, termination procedures |
-| § 164.308 Information Access Management | SlowBooks is single-operator; multi-user RBAC is not implemented |
+| § 164.308 Information Access Management | Four roles with central enforcement, sign-in end dates, one-time passwords for new sign-ins, sessions ended on deactivation, role change or password reset; the access policy itself is the customer's |
 | § 164.308 Security Awareness and Training | Customer responsibility |
 | § 164.308 Security Incident Procedures | Customer responsibility; SlowBooks logs help with detection |
-| § 164.308 Contingency Plan | ✅ `pg_dump` backup via `app/services/backup_service.py` + restore flow |
+| § 164.308 Contingency Plan | ✅ Backups and restore from Settings → Backup / Restore: a `pg_dump` on PostgreSQL, a copy of the company file on the desktop and Server Edition (encrypted when the file is) |
 | § 164.308 Evaluation | Periodic re-assessment — customer responsibility |
 | § 164.308 Business Associate Contracts | Customer responsibility — if SlowBooks operator becomes a BA |
 | § 164.310 Facility Access Controls | Physical deploy environment (datacenter / office) — customer responsibility |
@@ -134,8 +133,8 @@ to change to fully align with the Security Rule:
 
 | Gap | Severity | Fix |
 |-----|----------|-----|
-| **No role-based access control** | High | SlowBooks is single-operator. HIPAA expects "minimum necessary" — different staff see different data. Would require a user model + role assignment + per-field access checks |
-| **Employee data not encrypted at rest** | Medium | Names, addresses, hire date, etc. are plaintext. If treated as PHI, would need Fernet wrapping (same scheme as bank fields) |
+| **Access control is by route group, not per field** | Medium | Four roles decide which screens and operations a person reaches; HIPAA's "minimum necessary" may want finer cuts (one person sees pay, another only time). Would require per-field access checks |
+| **Employee data not encrypted per field** | Medium | Names, addresses, hire date, etc. are plaintext in the database; whole-file encryption (SQLCipher) covers them on disk, and a PostgreSQL server relies on the host's disk encryption. If treated as PHI, would need Fernet wrapping (same scheme as bank fields) |
 | **No data-retention enforcement** | Medium | Pay stubs and employee records stay forever. HIPAA expects retention/destruction policies — would need a configurable retention period + automated purge |
 | **No breach-notification flow** | Medium | If the audit log detects tampering or unauthorized access, there's no automated alerting. Would need email/webhook integration |
 | **No employee data-export endpoint** | Low | Right-to-access — the portal lets an employee see their own data, but there's no "give me everything you have on me as a JSON export" feature |
@@ -151,9 +150,11 @@ These aren't strictly HIPAA-required but are good signals for any
 compliance regime (HIPAA, SOC 2, PCI-DSS):
 
 - **Versioned ciphertext** (`v1:` prefix) — supports zero-downtime key rotation
-- **Login + document audit trails** with content-hash chaining
+- **Login + document audit trails**, every tax-form PDF with its own SHA-256 content hash
 - **Idle session timeout** + automatic logoff
-- **Startup fail-hard checks** on production misconfig (encryption secret, DB TLS, FORCE_HTTPS)
+- **Startup fail-hard checks** on production misconfig (an encryption secret that is the dev default, empty or short; DB TLS; FORCE_HTTPS)
+- **Whole-file encryption** of a company file (SQLCipher) with a recovery key shown once and per-administrator unlocking
+- **"Ask for the password each time SlowBooks Pro starts"**, revocable sessions, sign-in end dates and one-time passwords for new sign-ins
 - **Rate-limited login** + Argon2id password hashing (~100ms cost)
 - **Content-Security-Policy** + HSTS + strict CORS
 - **Atomic secret file writes** (`mkstemp` + `os.replace`)
@@ -176,7 +177,7 @@ care even though only payroll/financial data is in scope):
 5. **Set up offsite backup encryption keys** separately from the database — never co-locate the encryption secret with the data
 6. **Enable system audit logging** at the OS level (auditd / journald) — captures process-level events SlowBooks doesn't see
 7. **Rotate `PAYROLL_ENCRYPTION_SECRET` annually** — use the `PAYROLL_ENCRYPTION_SECRET_PREV` flow for zero-downtime rotation
-8. **Review `login_attempts` and `audit_log` tables weekly** — even a quick "show me failed logins in the last 7 days" run catches slow probes
+8. **Review the Audit Log page and the `login_attempts` table weekly** — even a quick "show me failed logins in the last 7 days" run catches slow probes (`login_attempts` has no page of its own; query it in the database)
 
 ---
 
@@ -184,8 +185,8 @@ care even though only payroll/financial data is in scope):
 
 - This document was written by an engineer doing a code audit, not by a HIPAA compliance officer. If HIPAA is contractually required for your deployment, retain a qualified compliance professional to do a real risk assessment.
 - "Aligned with" HIPAA's technical safeguards is not the same as "HIPAA-certified." The OCR doesn't certify software products; certification, if any, applies to the deployed system as operated by the Covered Entity or Business Associate.
-- The pyjwt PYSEC-2025-183 advisory (no upstream fix) is currently tracked in `docs/todo.md` — note it in any formal risk assessment until a patched release lands.
+- The dependency scan (`pip-audit`) runs in CI on every change; an open advisory with no upstream fix would be listed in the release notes.
 
 ---
 
-**Last updated:** 2026-05-21 — alongside the tax-form audit-hash work.
+**Last updated:** 2026-10-31, for v2.31.3.

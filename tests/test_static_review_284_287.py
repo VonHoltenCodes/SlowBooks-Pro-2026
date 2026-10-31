@@ -228,9 +228,9 @@ def test_a_voided_payment_is_not_money_paid_on_the_1099(
     client, db_session, seed_accounts
 ):
     v = _vendor(client, "Sign Painter", is_1099_vendor=True, vendor_1099_type="NEC")
-    bill = _bill(client, v["id"], "700.00", "2026-03-10", seed_accounts)
+    bill = _bill(client, v["id"], "2700.00", "2026-03-10", seed_accounts)
     paid = _payment(
-        client, v["id"], bill, "700.00", "2026-03-20", bank_id=seed_accounts["1000"].id
+        client, v["id"], bill, "2700.00", "2026-03-20", bank_id=seed_accounts["1000"].id
     )
     assert paid.status_code == 201, paid.text
 
@@ -238,9 +238,9 @@ def test_a_voided_payment_is_not_money_paid_on_the_1099(
         return client.get("/api/reports/1099-summary", params={"year": 2026}).json()
 
     s = summary()
-    assert s["total"] == 700.0 and s["vendors_above_threshold"] == 1
+    assert s["total"] == 2700.0 and s["vendors_above_threshold"] == 1
     assert form_1099._vendor_payment_totals(db_session, 2026)[v["id"]] == Decimal(
-        "700.00"
+        "2700.00"
     )
 
     r = client.post(f"/api/bill-payments/{paid.json()['id']}/void")
@@ -256,12 +256,12 @@ def test_a_voided_payment_is_not_money_paid_on_the_1099(
 
     # a replacement payment counts, alone
     again = _payment(
-        client, v["id"], bill, "700.00", "2026-04-02", bank_id=seed_accounts["1000"].id
+        client, v["id"], bill, "2700.00", "2026-04-02", bank_id=seed_accounts["1000"].id
     )
     assert again.status_code == 201, again.text
     s = summary()
-    assert s["total"] == 700.0 and s["vendors_above_threshold"] == 1
+    assert s["total"] == 2700.0 and s["vendors_above_threshold"] == 1
     db_session.expire_all()
     assert form_1099._vendor_payment_totals(db_session, 2026)[v["id"]] == Decimal(
-        "700.00"
+        "2700.00"
     )

@@ -8,15 +8,17 @@ lines; a card is paid with a transfer. (Issue #114, from discussion #112.)
 
 ## Accounts
 
-**Chart of Accounts → an asset account → kind: Bank**, or a liability →
-**Credit card**. Checking (1000), Savings (1010) and Credit Card (2100) come
-flagged. Only flagged accounts appear in "Paid from", "Deposit to", "Pay
-from", the transfer form and the Banking page. `GET /api/accounts?bank=1`.
+**Chart of Accounts → New Account (or Edit) → Type: Bank**, or **Type: Credit
+Card**. Checking (1000), Savings (1010) and Credit Card (2100) come flagged.
+Only flagged accounts appear in "Paid From", "Deposit To", "Pay From
+Account", the transfer form and the Banking page (the sidebar link reads
+**Bank Accounts**, under Banking). `GET /api/accounts?bank=1`.
 
 A **bank feed** (Banking → + New Bank Account) is the account's statement
 identity: bank name, last four, and where SimpleFIN or a file import lands.
 It links to exactly one ledger account. An **opening balance** entered there
-posts against 3900 Opening Balance Equity (created on demand): for a bank,
+(the form calls it **Statement balance**, as of the **As of** date) posts
+against 3900 Opening Balance Equity (created on demand): for a bank,
 the cash in it; for a card, the amount owed. When the ledger already
 carries the account on the As-of date, the statement balance is compared
 with it instead: equal posts nothing, and a difference posts (as "Opening
@@ -49,15 +51,19 @@ number included), type, a link to the document, the running balance, and a
 closed it.
 
 **+ Entry** posts a register entry: date, amount (sign per the rule), payee,
-check/ref number, **category** (required — the other side of the entry) and
-memo. A category that is itself a bank or card account makes it a transfer.
+check/ref number, **category** (required — the other side of the entry),
+memo, and for money in a **Customer** (who the money came from; a Donor in
+a nonprofit). A category that is itself a bank or card account makes it a
+transfer.
 "Split this entry…" takes an account and amount per line and posts one
 entry with several lines (a check that pays several things, a loan
-payment's principal and interest); a deposit splits the same way, and a
-line ticked **Taken out** goes the other way from the entry, so a card
-processor's deposit is the gross as income, the fee as an expense, and the
-net the bank got (`splits` on the API, each line signed; a line against the
-entry's sign is the fee or a refund).
+payment's principal and interest); a deposit splits the same way, each line
+with its own customer and class when a deposit holds several people's money
+(#606), and a line ticked **Taken out** goes the other way from the entry,
+so a card processor's deposit is the gross as income, the fee as an expense,
+and the net the bank got (`splits` on the API, each line signed, with
+`customer_id` and `class_id` per line; a line against the entry's sign is the
+fee or a refund).
 Register entries, transfers and card charges have **Void** (a mirror-image
 reversal; the original stays). An entry a completed reconciliation holds
 cannot be voided.
@@ -114,6 +120,21 @@ line says so, as the journal entry's edit does. An accountant's
 sign-in posts and voids journal entries but does not edit them, so it is
 offered no Edit on these rows.
 
+Above the register, **From**, **To** and **Class** narrow what it shows. A
+From date adds a *Balance brought forward* row, and the running balance
+counts the lines shown. The dates apply when you press Enter or leave the
+boxes (a date picked from the calendar applies at once); a half-typed date,
+or a year outside 1900–2199, is refused and the register stays as it was.
+The From date you last used is remembered for that account in that company
+file, so the register reopens there; **Clear**, or an emptied From, forgets
+it. The entry row stays with a date filter; while a class is chosen it is
+hidden (the row has no class box) and + Entry posts with the chosen class.
+Saving, editing or voiding an entry, a transfer, a file import, the bank
+feed's review actions and the reconcile screen's Later, Finish and Abandon
+keep the dates, the class and the page's place, and bring a saved entry
+into view; an entry you post or edit that falls outside the dates is kept,
+and the message says so (2.31.2).
+
 The entry row at the foot of the register posts the same way (Enter or
 Post). After a post the row (and + Entry) opens on the date just posted,
 each register its own, until the page is reloaded or you sign in again; in the
@@ -129,7 +150,8 @@ name moves the link, and to a name no vendor has drops it; a transfer has no
 vendor. A linked entry counts toward that vendor's 1099-NEC, and the 1099
 Summary, beside its bill payments (QuickBooks counts a register check the
 same way), subject to the same vendor rules — a 1099 vendor of NEC type, the
-$600 threshold, voided entries left out, and only an entry paid from a bank
+IRS reporting threshold ($600 for payments through 2025, $2,000 for
+payments from 2026 on), voided entries left out, and only an entry paid from a bank
 account (not a credit card) counts, by its expense and cost-of-goods lines; a refund linked to the vendor nets
 off. A bank-feed line linked to a vendor counts the same. A transfer, and
 text with no vendor, do not. A payee typed there, or in + Entry, that is not already a customer's
@@ -240,7 +262,10 @@ DR to / CR from. Paying a card is a transfer from the bank to the card.
 
 ## Bank feeds and file imports: the review queue
 
-A statement line arriving by SimpleFIN sync, OFX/QFX or CSV import. CSV
+A statement line arriving by a bank feed (SimpleFIN, [setup-bank-feeds.md](setup-bank-feeds.md),
+or Mercury, [setup-mercury.md](setup-mercury.md)), or an OFX/QFX or CSV
+import. A feed's **Imports into** list offers every bank and card account in
+the chart, and picking one makes the feed for it (2.31.1). CSV
 files: the Bank of America, Chase and PayPal layouts, or any file whose
 header names a date, a description (or payee / memo) and either one signed
 amount or money-out / money-in columns. For a file whose header says none
@@ -278,6 +303,10 @@ uncategorised and is categorised in the review queue.
      (`PATCH /api/banking/transactions/{id} {category_account_id}`), so
      Add all posts it and a reload keeps it.
    - **Find matches** — re-runs auto-match for the feed.
+   - **Rule…** — makes a bank rule from the line, for the next one like it.
+   - **Payout…** — on a Stripe, PayPal or Square payout, when payments post
+     to a clearing account: posts the payout against it, fee and all
+     ([setup-stripe.md](setup-stripe.md), "How it posts").
 
 `GET /api/banking/transactions?bank_account_id=&status=unmatched`;
 `/transactions/{id}/candidates`, `match {line_id}`, `unmatch`, `add
@@ -292,11 +321,15 @@ the queue.
 Banking → an account → **Reconcile**: statement date and ending balance (for
 a card, the amount owed). The session lists the ledger lines on the account
 up to that date that no completed reconciliation holds; matched statement
-lines arrive ticked. **Beginning balance** is the prior completed statement's
+lines arrive ticked; **Mark all**, **Clear all** and **Mark through that
+date** tick in bulk. **Beginning balance** is the prior completed statement's
 balance; **difference** = statement − (beginning + cleared). Finish when the
 difference is zero: the cleared lines are stamped with the reconciliation
 and locked. **Abandon** drops the session and keeps the ticks. One open
-reconciliation per account.
+reconciliation per account. **A completed reconciliation is final**: it
+cannot be reopened or undone, and the entries it holds keep their amount and
+date (correct a mistake with a new entry; a QuickBooks import's partial entry
+held by one is left in place and its difference cleared by journal entry).
 
 `POST /api/banking/reconciliations {account_id, statement_date,
 statement_balance}` (409 with `existing_id` when one is open), `GET

@@ -60,8 +60,8 @@
 
     <div class="footer">
         Reporting status:
-        {% if rec.reportable %}REPORTABLE (meets $600 threshold)
-        {% else %}below $600 threshold &mdash; informational only{% endif %}
+        {% if rec.reportable %}REPORTABLE (meets the {{ threshold | currency }} threshold for {{ year }})
+        {% else %}below the {{ threshold | currency }} threshold for {{ year }} &mdash; informational only{% endif %}
         &bull; W-9 on file: {{ 'Yes' if rec.w9_on_file else 'No' }}
     </div>
 </body>

@@ -527,6 +527,9 @@ def report_1099_summary(
     for vid, paid in register_payment_totals(db, year).items():
         totals_by_vendor[vid] = Decimal(str(totals_by_vendor.get(vid, 0))) + paid
 
+    from app.services.form_1099 import nec_threshold
+
+    threshold = nec_threshold(year)  # $600 through 2025, $2,000 from 2026
     items = []
     total = Decimal(0)
     above_threshold = 0
@@ -535,7 +538,7 @@ def report_1099_summary(
     for vendor in vendors_1099:
         vendor_total = Decimal(str(totals_by_vendor.get(vendor.id, 0) or 0))
         total += vendor_total
-        flagged = vendor_total >= 600
+        flagged = vendor_total >= threshold
         if flagged:
             above_threshold += 1
             if not vendor.w9_on_file:
@@ -561,5 +564,5 @@ def report_1099_summary(
         "total": float(total),
         "vendors_above_threshold": above_threshold,
         "vendors_missing_w9": missing_w9,
-        "threshold": 600.0,
+        "threshold": float(threshold),
     }

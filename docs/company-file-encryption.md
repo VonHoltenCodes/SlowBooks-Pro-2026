@@ -30,6 +30,10 @@ manager, a sealed envelope. It opens the file, and every backup of it, on
 any machine, if every administrator's password is lost; and anyone holding
 it can read the books. SlowBooks Pro keeps no copy.
 
+**Backups made before you turned it on are still plain**, readable by anyone
+with the file. Settings counts them and says so; delete them once a newer,
+encrypted backup exists.
+
 ## Opening the books from then on
 
 The company picker asks for an **administrator's sign-in** when it opens
@@ -64,17 +68,23 @@ recovery key it was made under; the backup file itself is never changed.
 
 ## Turning it off
 
-**Turn off…** (an administrator, the company's name typed) rewrites the
-file as plain SQLite and retires the recovery key.
+**Turn off…** (an administrator, the company's name typed, and their own
+password) rewrites the file as plain SQLite and retires the recovery key.
+Backups made while encryption was on still open with that retired recovery
+key only, so keep it until those backups are gone.
 
 ## Server Edition
 
 A server has nobody at the picker, so it unlocks from an operator-set
-credential at startup: set `COMPANY_FILE_ENCRYPTION_SECRET` where
-SlowBooks Pro starts (the way `PAYROLL_ENCRYPTION_SECRET` is set), start
-it again, and turn encryption on under Settings; the file is keyed from
-the secret and no recovery key is made. A file encrypted on a desktop
-under a recovery key does not open headless: open it at the window, turn
+credential at startup. **Set the secret first, then turn encryption on**:
+put `COMPANY_FILE_ENCRYPTION_SECRET` in the server's `.env`
+(`C:\ProgramData\SlowBooksPro\.env` for a Server Edition install, the
+place `PAYROLL_ENCRYPTION_SECRET` lives; the Docker `.env` otherwise), stop
+and start the server, and only then turn encryption on under Settings: the
+file is keyed from the secret and no recovery key is made. Turned on before
+the secret is set, the company gets a recovery key instead, and the next
+server start refuses the file. A file encrypted on a desktop under a
+recovery key does not open headless either: open it at the window, turn
 encryption off, and turn it on again under the secret.
 
 Companies on **PostgreSQL** are the database host's job (PostgreSQL's own

@@ -337,7 +337,7 @@ PROVIDERS: Dict[str, ProviderSpec] = {
         key="cloudflare_worker",
         label="Cloudflare Worker Gateway (self-hosted)",
         wire_format="openai",
-        docs_url="https://github.com/pnwimport/slowbooks-pro-2026/tree/main/cloudflare",
+        docs_url="https://github.com/VonHoltenCodes/SlowBooks-Pro-2026/tree/main/cloudflare",
         free_tier_hint=(
             "Deploy cloudflare/worker.js in your own CF account — "
             "real API credentials stay in Cloudflare, Slowbooks only "

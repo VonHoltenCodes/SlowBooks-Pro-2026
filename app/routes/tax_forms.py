@@ -119,6 +119,7 @@ def get_tax_liability(
 def get_1099(year: int = Query(...), db: Session = Depends(get_db)):
     return {
         "year": year,
+        "threshold": float(form_1099.nec_threshold(year)),
         "transmittal": form_1099.compute_1096(db, year),
         "vendors": form_1099.compute_1099_data(db, year),
     }

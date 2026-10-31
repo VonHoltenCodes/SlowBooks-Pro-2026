@@ -27,7 +27,7 @@ no Python install**. Your books are stored in ordinary files on your own
 machine, under `%LOCALAPPDATA%\SlowBooksPro`, which upgrades and even
 uninstalls leave untouched.
 
-When a new version is released, the footer of the app shows an
+When a new version is released, the top of the sidebar shows an
 **Update available** notice — download the new installer and run it over
 the old install; your companies and settings are kept.
 
@@ -36,7 +36,8 @@ the old install; your companies and settings are kept.
 This install manages companies the way QuickBooks Desktop does: each company
 is its own file, stored under `%LOCALAPPDATA%\SlowBooksPro\data\companies\`.
 Every time you open SlowBooks Pro you're asked which company to open (or to
-create a new one). To switch companies, close the app and open it again.
+create a new one). To switch companies while it is open, use **Companies →
+Switch company…**.
 
 ### Stopping the app
 
@@ -97,14 +98,21 @@ access → Add an allowed app → Recently blocked apps**, and pick
 Backups created from the Settings UI are simply snapshots of the open
 company's `.db` file (stored in the app's `backups` folder). You can also copy
 the company files in `%LOCALAPPDATA%\SlowBooksPro\data\companies\` anywhere
-you like while the app is closed — each file is a complete, self-contained
-company.
+you like while the app is closed — each file is a complete company. Keep
+`%LOCALAPPDATA%\SlowBooksPro\.env` with your copies: it holds the keys that
+encrypt payroll bank numbers and saved credentials, which a restored company
+needs. An encrypted company also has a `.db.keyring` beside it and a recovery
+key you were shown once; keep that too.
 
 ### Tradeoffs versus Option 1 (Docker + PostgreSQL)
 
-This path is **single-user, single-machine**: no multi-user client portal
-serving other people, no concurrent access. In exchange, there's nothing to
-administer — no `pg_dump`, no containers, no background services.
+Out of the box this path is single-user on one machine, with nothing to
+administer — no `pg_dump`, no containers, no background services. The same
+install also serves an office over the LAN as **Server Edition**
+([docs/server-edition.md](docs/server-edition.md)): browser sign-ins with
+roles, an audit trail that names who changed what, and a startup task that
+serves the books before anyone logs in. Docker and PostgreSQL are for Linux
+servers, Intel Macs and a cloud host.
 
 ---
 
@@ -152,7 +160,8 @@ cd SlowBooks-Pro-2026
 cp .env.example .env
 
 # Set a strong encryption secret for employee bank PII. The app refuses to
-# start against Postgres with the shipped dev default, so this is required:
+# start against Postgres with the shipped dev default, an empty value or
+# one shorter than 16 characters, so this is required:
 #   Linux/macOS:  openssl rand -base64 32
 #   any OS:       python -c "import secrets; print(secrets.token_urlsafe(32))"
 # Put the result on the PAYROLL_ENCRYPTION_SECRET= line in .env.
@@ -163,29 +172,26 @@ docker compose up
 Open **http://localhost:3001** in your browser.
 
 > The compose stack is a **single-host** install: Postgres lives on the
-> compose-internal network and the app serves plain HTTP on localhost, so
-> `docker-compose.yml` sets `SLOWBOOKS_PRIVATE_NETWORK=1` to relax the two
-> production transport guards (database TLS, HTTPS redirect). Before you
-> expose it beyond the host, put a TLS proxy in front
-> ([docs/tls-proxy-setup.md](docs/tls-proxy-setup.md)), set `FORCE_HTTPS=true`,
-> add `?sslmode=require` to `DATABASE_URL`, and unset that flag. Behind a
-> proxy you must also set `FORWARDED_ALLOW_IPS` to the proxy's address or
-> CIDR, or the login rate limiter and the audit tables both key on the
-> proxy's IP instead of the real client's. uvicorn reads that variable
-> itself and decides the client address once; the older `TRUST_PROXY_HEADERS`
-> knob is retired. With several workers, point `RATE_LIMIT_STORAGE_URI` at a
-> Redis (the client ships with the app; startup refuses to boot when it is
-> unreachable) — see [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md).
+> compose-internal network and the app serves plain HTTP on localhost.
+> `docker-compose.yml` sets `SLOWBOOKS_PRIVATE_NETWORK=1`, which skips the
+> two production startup checks for a TLS database connection and an HTTPS
+> redirect, and `FORCE_HTTPS=false`, so http://localhost:3001 answers
+> instead of redirecting. Leave `FORCE_HTTPS` unset in `.env` (a `true`
+> there wins over the compose default and sends the browser to an https://
+> address nothing answers). To serve beyond this host, use
+> `docker-compose.prod.yml` behind a TLS proxy: [docs/cloud-hosting.md](docs/cloud-hosting.md)
+> is the whole recipe, and [docs/tls-proxy-setup.md](docs/tls-proxy-setup.md)
+> covers the proxy, `FORWARDED_ALLOW_IPS` and `RATE_LIMIT_STORAGE_URI`.
 
 > On Windows, **Option 0** avoids all of this (no Docker at all, secret
-> generated for you, opens a desktop window) — prefer it unless you
-> specifically want a multi-user Docker + PostgreSQL server.
+> generated for you, opens a desktop window, and serves the office as Server
+> Edition from the same install).
 
 ### What happens on first run
 
 1. PostgreSQL 17 starts and creates the `bookkeeper` database
 2. Alembic runs all migrations (the complete schema — no table depends on app startup)
-3. Chart of Accounts is seeded (57 accounts — Contractor template, includes the payroll-liability accounts and 6810 Depreciation Expense) and a default Equipment asset type
+3. Chart of Accounts is seeded (56 accounts, including the payroll-liability accounts and 6810 Depreciation Expense; a corporation's or partnership's chart adds its equity accounts) and a default Equipment asset type
 4. Uvicorn starts serving the app on port 3001
 5. On first visit, you'll be prompted to set an operator password (min 8 characters)
 
@@ -225,6 +231,9 @@ LAN. To reach either from another machine, set the matching bind variable in
 APP_BIND=0.0.0.0        # expose the app (put a TLS proxy in front first)
 POSTGRES_BIND=0.0.0.0   # expose Postgres (set a real POSTGRES_PASSWORD first)
 ```
+
+A port Docker publishes is opened by Docker itself, around a host firewall
+such as `ufw`; the bind address is what keeps it off the network.
 
 For production, use `docker-compose.prod.yml`, which publishes neither service
 and expects your own TLS-terminating reverse proxy in front.
@@ -295,15 +304,16 @@ pip install -r requirements.txt
 
 # Set up environment
 cp .env.example .env
-# Edit .env if your database credentials differ.
-#
-# For a local development install, also set:
-#     APP_DEBUG=true
-# Leaving APP_DEBUG=false (the production default) turns on FORCE_HTTPS,
-# which 307-redirects http://localhost:3001 to https://localhost:3001 —
-# and a native install serves no TLS on that port, so the browser gets a
-# connection error. Production deployments should keep APP_DEBUG=false and
-# terminate TLS at a reverse proxy in front of the app.
+# Edit .env if your database credentials differ, and set these three:
+#     APP_DEBUG=true                # a development install; see below
+#     APP_HOST=127.0.0.1            # the example ships 0.0.0.0, the whole LAN
+#     PAYROLL_ENCRYPTION_SECRET=    # paste the output of: openssl rand -base64 32
+# The app refuses to start against PostgreSQL with that secret empty or
+# shorter than 16 characters. Leave FORCE_HTTPS unset: with APP_DEBUG=true
+# it defaults to false, and a true there 307-redirects http://localhost:3001
+# to https://localhost:3001, where a native install serves no TLS.
+# Production deployments keep APP_DEBUG=false (FORCE_HTTPS then defaults to
+# true) and terminate TLS at a reverse proxy: docs/tls-proxy-setup.md.
 
 # Run migrations and seed
 alembic upgrade head
@@ -335,21 +345,31 @@ Same as Linux but using Homebrew for system dependencies.
 
 ```bash
 # Install dependencies
-brew install postgresql@17 cairo pango gdk-pixbuf libffi
+brew install postgresql@17 python@3.13 cairo pango gdk-pixbuf libffi
 
-# Start PostgreSQL
+# Start PostgreSQL. postgresql@17 is keg-only, so its commands are not on
+# PATH until linked (or call them as $(brew --prefix postgresql@17)/bin/...).
 brew services start postgresql@17
+brew link --force postgresql@17
 
 # Create database
 createuser bookkeeper -P    # password: bookkeeper
 createdb bookkeeper -O bookkeeper
 
-# Clone and install
+# Clone and install into a virtual environment (Homebrew's Python refuses a
+# bare pip install, PEP 668)
 git clone https://github.com/VonHoltenCodes/SlowBooks-Pro-2026.git
 cd SlowBooks-Pro-2026
+python3.13 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 
-# Set up and run
+# WeasyPrint (PDFs) finds Homebrew's pango and cairo through this; put it in
+# your shell profile too
+export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
+
+# Set up and run: the same .env edits as the Linux install above
+# (APP_DEBUG=true, APP_HOST=127.0.0.1, a real PAYROLL_ENCRYPTION_SECRET)
 cp .env.example .env
 alembic upgrade head
 python scripts/seed_database.py

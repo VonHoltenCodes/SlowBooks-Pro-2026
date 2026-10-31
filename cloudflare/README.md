@@ -1,39 +1,54 @@
-# Slowbooks Pro 2026 — Cloudflare Workers AI Gateway
+# SlowBooks Pro 2026 — Cloudflare Worker AI Gateway
 
-Optional per-installation AI gateway. Runs inside your own Cloudflare
-account so the actual AI credentials never touch Slowbooks' database.
+Optional. Runs inside your own Cloudflare account so the AI credential never
+touches SlowBooks' company file: SlowBooks holds only a shared secret that
+opens your one Worker, and the Worker calls Cloudflare's Workers AI models
+with the account's own binding.
+
+If you would rather not run a Worker, **Settings → AI Insights** also takes a
+Cloudflare API token directly (provider *Cloudflare Workers AI (direct)*), or
+a key for Anthropic, xAI, Groq, OpenAI, Google Gemini or any OpenAI-compatible
+endpoint. This page is for the Worker.
 
 ## Why bother?
 
-- **Your keys stay in Cloudflare.** Slowbooks only ever holds a shared
-  secret scoped to your one Worker. Even if someone dumps the Slowbooks
-  SQLite file, they can't talk to Workers AI as you.
-- **Free tier.** Cloudflare Workers AI gives every account 10,000
-  neurons per day for free — plenty for hundreds of AI Insights runs
-  and tool-calling Q&A sessions.
-- **Per-person lockdown.** Every LAN owner installs their own Worker in
-  their own Cloudflare account. One compromised install can't reach
-  another. One abused install can't burn someone else's quota.
-- **Zero leakage.** The Worker never logs the AUTH_TOKEN, never echoes
-  it back, and never stores request bodies. Constant-time comparison
-  on the shared secret prevents timing side-channels.
+- **Your keys stay in Cloudflare.** SlowBooks only ever holds a shared
+  secret scoped to your one Worker. Even if someone copies the company
+  file, they can't talk to Workers AI as you.
+- **Per-installation lockdown.** Every office installs its own Worker in
+  its own Cloudflare account. One compromised install can't reach
+  another, and one abused install can't burn someone else's allowance.
+- **Zero leakage.** The Worker never logs the shared secret, never echoes
+  it back, and never stores request bodies. The secret is compared in
+  constant time.
+- **Cost.** Workers AI has a free daily allowance (10,000 neurons a day at
+  the time of writing) and paid accounts are billed per neuron. An AI
+  Insights run is capped at 1,024 output tokens, which on the default
+  70B model is a few dozen runs a day on the free allowance; Cloudflare's
+  pricing page has the current figures.
 
-## One-time setup (~5 minutes)
+## One-time setup (about 10 minutes)
 
 ### 1. Cloudflare account
 
-Free tier is all you need:
-https://dash.cloudflare.com/sign-up
+The free plan is enough: https://dash.cloudflare.com/sign-up
 
 ### 2. Install wrangler
 
+Wrangler, Cloudflare's command-line tool, needs **Node.js 22 or later**
+(Ubuntu 24.04's packaged Node is 18, which it refuses). Install Node from
+https://nodejs.org or your package manager's current channel, then, from the
+`cloudflare/` folder of your SlowBooks checkout:
+
 ```bash
-npm install -g wrangler
-wrangler login
+cd cloudflare
+npm install wrangler@latest
+npx wrangler login
 ```
 
-`wrangler login` opens a browser tab; approve the OAuth request and
-come back to the terminal.
+`wrangler login` opens a browser tab; approve the request and come back to
+the terminal. The commands below use `npx wrangler`; a global install
+(`npm install -g wrangler`) works too, as plain `wrangler`.
 
 ### 3. Generate a shared secret
 
@@ -41,48 +56,51 @@ come back to the terminal.
 openssl rand -hex 32
 ```
 
-Copy the 64-char hex string. You'll paste it twice: once into
-Cloudflare (step 4), once into Slowbooks (step 6). Never commit it.
+Copy the 64-character string. You'll paste it twice: once into Cloudflare
+(step 4), once into SlowBooks (step 6). Never commit it.
 
 ### 4. Store the secret in Cloudflare
 
-From the `cloudflare/` directory of your Slowbooks checkout:
-
 ```bash
-cd cloudflare
-wrangler secret put AUTH_TOKEN
+npx wrangler secret put AUTH_TOKEN
 # Paste the hex string from step 3, press Enter
 ```
 
-Wrangler encrypts the secret at rest inside Cloudflare. It never shows
-up in source control, in logs, or in the Worker's response payloads.
+Wrangler encrypts the secret at rest inside Cloudflare. It never shows up
+in source control, in logs, or in the Worker's responses.
 
 ### 5. Deploy the Worker
 
 ```bash
-wrangler deploy
+npx wrangler deploy
 ```
 
-Wrangler prints your Worker URL, e.g.
-`https://slowbooks-ai.yourname.workers.dev`. Copy it.
+Plain `deploy`: this `wrangler.toml` has no environments, so `--env
+production` would create a second Worker named `slowbooks-ai-production`
+with no secret, which SlowBooks never calls. Wrangler prints your Worker
+URL, e.g. `https://slowbooks-ai.yourname.workers.dev`. Copy it.
 
-### 6. Wire Slowbooks to the Worker
+### 6. Wire SlowBooks to the Worker
 
-1. Open Slowbooks → Analytics → **⚙ AI**
-2. Provider: **Cloudflare Workers AI** (or the dedicated
-   _Cloudflare Worker Gateway_ option if your version of Slowbooks
-   ships one separately)
-3. Cloudflare account ID: your 32-char hex ID from the top right of
-   https://dash.cloudflare.com/
-4. Worker URL: the one `wrangler deploy` just printed
-5. API key: the shared secret from step 3
-6. Click **Save**, then **Test** — you should see the word `ok`
+1. Open SlowBooks → **Settings → AI Insights** (an administrator's setting).
+2. Provider: **Cloudflare Worker Gateway (self-hosted)**.
+3. Worker URL: the one `wrangler deploy` printed.
+4. API key: the shared secret from step 3.
+5. Model: pick one from the list. The list is this Worker's allowlist
+   (`ALLOWED_MODELS`, below); the default is
+   `@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
+6. Click **Save AI settings**, then **Test**. A good answer names the model
+   and says the provider answered.
+
+No account ID is needed for the gateway; that field belongs to the direct
+provider.
 
 ## Smoke test from the command line
 
-You can verify the Worker without touching Slowbooks:
-
 ```bash
+curl -sS https://slowbooks-ai.yourname.workers.dev/v1/models \
+  -H "Authorization: Bearer <your-shared-secret>"
+
 curl -sS https://slowbooks-ai.yourname.workers.dev/v1/chat/completions \
   -H "Authorization: Bearer <your-shared-secret>" \
   -H "Content-Type: application/json" \
@@ -95,112 +113,91 @@ curl -sS https://slowbooks-ai.yourname.workers.dev/v1/chat/completions \
       }'
 ```
 
-You should get an OpenAI-shaped JSON response with `choices[0].message.content: "ok"`.
+The first answers the allowed models in OpenAI's list shape; the second an
+OpenAI-shaped response with `choices[0].message.content: "ok"`.
 
 ## Environment variables
 
-The Worker respects several environment variables to customize behaviour.
-All are optional except `AUTH_TOKEN`.
+All optional except `AUTH_TOKEN`. Set the optional ones in the `[vars]`
+section of `wrangler.toml` and deploy again; a value set in the Cloudflare
+dashboard is overwritten by the next deploy unless `wrangler.toml` has
+`keep_vars = true`.
 
 ### AUTH_TOKEN (required)
 
-The shared secret that Slowbooks sends as a Bearer token. Generate it with
-`openssl rand -hex 32` and store it in Cloudflare as a secret:
-
-```bash
-cd cloudflare
-wrangler secret put AUTH_TOKEN
-# Paste the 64-char hex string from `openssl rand -hex 32`, press Enter
-```
+The shared secret SlowBooks sends as a Bearer token. Set it with
+`npx wrangler secret put AUTH_TOKEN`, never in `wrangler.toml`.
 
 ### ALLOWED_MODELS (optional)
 
-Comma-separated list of model IDs to permit. If not set, defaults to:
+Comma-separated model IDs the Worker will run, and the list `GET /v1/models`
+answers (what SlowBooks' model picker shows). Default:
 
 ```
-@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/meta/llama-3.1-8b-instruct,@cf/mistral/mistral-7b-instruct-v0.2-lora
+@cf/meta/llama-3.3-70b-instruct-fp8-fast,@cf/mistral/mistral-7b-instruct-v0.2-lora
 ```
 
-To restrict which models Slowbooks can invoke:
-
-```bash
-wrangler deploy --env production
-# (first set ALLOWED_MODELS in wrangler.toml [vars] section, or in the
-# Cloudflare dashboard under Variables > Configuration > Variables)
-```
+Cloudflare retires models from time to time (`@cf/meta/llama-3.1-8b-instruct`,
+in the old default, went on 2026-05-30); the current list is at
+https://developers.cloudflare.com/workers-ai/models/. Pick text-generation
+models.
 
 ### DEFAULT_MODEL (optional)
 
-Which model to use if Slowbooks' request doesn't specify one. Must be a model
-in `ALLOWED_MODELS`. Defaults to `@cf/meta/llama-3.3-70b-instruct-fp8-fast`.
-
-Set via wrangler.toml or Cloudflare dashboard.
-
-### ALLOWED_ORIGINS (optional)
-
-Comma-separated list of browser origins allowed for CORS. If not set, CORS is
-not enforced (useful for same-origin deployments). Example:
-
-```
-http://localhost:3000,https://slowbooks.local
-```
-
-Set via wrangler.toml or Cloudflare dashboard.
+The model used when a request names none. Must be in `ALLOWED_MODELS`.
+Default `@cf/meta/llama-3.3-70b-instruct-fp8-fast`. SlowBooks always names
+the model it was given, so this only matters for other callers.
 
 ### LOG_VERBOSE (optional)
 
-Set to `"1"` to enable structured logging of requests and responses to stdout
-(visible in `wrangler tail`). Defaults to `"0"` (logging disabled) to avoid
-logging sensitive data.
+Set to `"1"` to log each request's model, message count and token usage
+(never the text or the secret) to the Worker's logs, visible with
+`npx wrangler tail`. Default `"0"`.
 
-```bash
-wrangler deploy --env production
-# (first set LOG_VERBOSE = "1" in wrangler.toml [vars], or dashboard)
-wrangler tail  # watch live logs
-```
+### ALLOWED_ORIGINS (optional)
+
+Browser origins allowed for CORS. SlowBooks calls the Worker from its own
+server, not from the browser, so this is only for other clients of yours.
+Unset, no CORS headers are sent.
 
 ## Rotating the shared secret
 
-Routine hygiene — do it whenever you rotate other credentials:
-
 ```bash
-cd cloudflare
-wrangler secret put AUTH_TOKEN   # paste a fresh `openssl rand -hex 32`
+npx wrangler secret put AUTH_TOKEN   # paste a fresh `openssl rand -hex 32`
 ```
 
-Then update Slowbooks → ⚙ AI → API key with the new value and click
-**Save**. Old Slowbooks installs using the old secret will get `401`s
-immediately.
+Then paste the new value into SlowBooks → Settings → AI Insights → API key
+and **Save AI settings**. Anything still using the old secret gets `401`
+at once.
 
 ## Operational notes
 
-- **Live logs:** `wrangler tail` streams every request to your terminal
-  (minus the Authorization header, which wrangler sanitises).
-- **Custom domain:** if you don't like `workers.dev`, bind the Worker
-  to any domain you own via the Cloudflare dashboard → Workers &
-  Pages → your Worker → Triggers.
-- **Rate limits:** Cloudflare applies the free 10k-neurons/day quota
-  automatically. Add `[limits]` to `wrangler.toml` if you want
-  additional guardrails.
-- **Auditing:** every Worker invocation is visible in the Cloudflare
-  dashboard under Workers & Pages → slowbooks-ai → Logs.
+- **Live logs:** `npx wrangler tail` streams every request to your terminal
+  (the Authorization header is never logged).
+- **Custom domain:** bind the Worker to a domain you own from the Worker's
+  settings in the Cloudflare dashboard, then put that address in SlowBooks.
+- **Limits:** the Worker refuses bodies over 512 KB, more than 64 messages,
+  and models not on the allowlist, and clamps `max_tokens` to 4,096. The
+  `[limits]` section of `wrangler.toml` caps CPU time per request (paid
+  plans); request rate limiting is Cloudflare's rate-limiting binding, not
+  covered here.
+- **Auditing:** every invocation is counted on the Worker's page in the
+  Cloudflare dashboard, under its metrics and logs.
 
 ## What this does _not_ protect against
 
-- A compromised Slowbooks install still has the shared secret, so it
-  can still invoke _your_ Worker. Mitigation: rotate the secret if you
-  suspect compromise; you'll detect unexpected Worker traffic in the
-  Cloudflare dashboard.
-- Workers AI itself is a third-party service. Cloudflare's terms and
-  privacy policy apply to anything you send through it.
+- A compromised SlowBooks install still has the shared secret, so it can
+  still invoke _your_ Worker. Rotate the secret if you suspect compromise;
+  unexpected traffic shows in the Worker's metrics.
+- Workers AI is a third-party service. Cloudflare's terms and privacy
+  policy apply to what you send through it, as with every AI provider
+  SlowBooks offers.
 
 ## Uninstalling
 
 ```bash
-cd cloudflare
-wrangler delete
+npx wrangler delete
 ```
 
-That tears down the Worker. Slowbooks will start returning 502s on AI
-requests until you either redeploy or switch to a different provider
-in ⚙ AI settings.
+That removes the Worker. SlowBooks' AI features then fail with a 502 until
+you redeploy or choose another provider under Settings → AI Insights.

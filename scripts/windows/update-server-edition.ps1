@@ -91,7 +91,7 @@ try {
         } catch { }
     }
     if (-not $ok) {
-        throw "Server did not become healthy within 60s - check C:\ProgramData\SlowBooksPro\launcher.log"
+        throw "Server did not become healthy within 60s - check C:\ProgramData\SlowBooksPro\data\launcher.log"
     }
 }
 finally {
