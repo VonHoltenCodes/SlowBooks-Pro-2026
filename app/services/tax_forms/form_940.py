@@ -4,6 +4,13 @@
 # Aggregates a full calendar year of PROCESSED pay stubs into the FUTA wage
 # and tax totals reported on IRS Form 940. FUTA wages are capped at the first
 # $7,000 paid to each employee for the year.
+#
+# Credit reduction (Form 940 line 11 / Schedule A): an employer who paid
+# state unemployment tax to a state that has not repaid its federal UI loans
+# loses part of the 5.4% credit, so owes extra FUTA on the FUTA taxable
+# wages paid in that state. The states and rates are published each year on
+# Schedule A (Form 940); the company's state (Settings → company_state, else
+# the EMPLOYER_STATE setting) decides whether it applies.
 # ============================================================================
 
 from datetime import date
@@ -15,6 +22,24 @@ from app.models.payroll import PayRun, PayStub, PayRunStatus
 from app.services.accounting import _q
 from app.services.payroll_service import FUTA_WAGE_BASE, stub_taxable_wages
 from app.services.pdf_service import _jinja_env, render_pdf
+
+# Credit reduction rates by return year and state, from Schedule A (Form 940).
+# 2025: "Credit reduction states for 2025. The credit reduction rate for
+# California is 0.012 (1.2%). The credit reduction rate for the U.S. Virgin
+# Islands is 0.045 (4.5%)." — Schedule A (Form 940) for 2025, Cat. No.
+# 16997C, created 11/12/25, https://www.irs.gov/pub/irs-pdf/f940sa.pdf
+# (checked 2026-10-31). A year with no row has no credit-reduction states
+# that SlowBooks knows of; the 2026 Schedule A is published in November 2026.
+FUTA_CREDIT_REDUCTION: dict[int, dict[str, Decimal]] = {
+    2025: {"CA": Decimal("0.012"), "VI": Decimal("0.045")},
+}
+
+
+def credit_reduction_rate(year: int, state: str | None) -> Decimal:
+    """The Schedule A credit reduction rate for `state` in `year` (0 if none)."""
+    if not state:
+        return Decimal("0")
+    return FUTA_CREDIT_REDUCTION.get(year, {}).get(state.strip().upper(), Decimal("0"))
 
 
 def _year_stubs(db, year: int) -> list[PayStub]:
@@ -97,7 +122,7 @@ def compute_940(db, year: int, legacy: bool = False) -> dict:
     # Payments exempt from FUTA = total payments above the per-employee cap.
     exempt_payments = total_payments - total_taxable
 
-    return {
+    out = {
         "year": year,
         # Employees who received wages: a $0.00 stub pays no one.
         "num_employees": sum(1 for paid in gross_by_employee.values() if paid > 0),
@@ -109,9 +134,33 @@ def compute_940(db, year: int, legacy: bool = False) -> dict:
         # Line 7 — total FUTA taxable wages
         "futa_taxable_wages": _q(total_taxable),
         "futa_wage_base": FUTA_WAGE_BASE,
-        # Line 8 — FUTA tax for the year
+        # Line 8 — FUTA tax before adjustments
         "total_futa_tax": _q(futa_tax),
     }
+
+    # Line 11 — credit reduction (Schedule A), when the company's state is a
+    # credit-reduction state for the return year. Every FUTA taxable wage is
+    # taken as paid in the company's state (Schedule A wants the wages paid
+    # in THAT state; SlowBooks has one employer state per company). The
+    # lines are added only when a reduction applies, so a form for any other
+    # employer keeps the figures — and the Form history hash — it had.
+    from app.services.payroll_documents import employer_block
+
+    state = (employer_block(db).get("state") or "").strip().upper()
+    rate = credit_reduction_rate(year, state)
+    if rate > 0:
+        reduction = _q(total_taxable * rate)
+        out.update(
+            {
+                "credit_reduction_state": state,
+                "credit_reduction_rate": rate,
+                # Line 11 — FUTA taxable wages paid in the state × its rate
+                "credit_reduction": reduction,
+                # Line 12 — total FUTA tax after adjustments
+                "total_futa_tax_after_adjustments": _q(futa_tax) + reduction,
+            }
+        )
+    return out
 
 
 def generate_940_pdf(db, year: int, company: dict, audit: dict | None = None) -> bytes:

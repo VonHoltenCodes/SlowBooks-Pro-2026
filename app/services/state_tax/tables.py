@@ -83,8 +83,13 @@ def _br(single, married=None, hoh=None):
     return {"single": s, "married": m, "head_of_household": h}
 
 
-# Social Security wage base — several PFML programs cap at it.
-SS_BASE = D(176100)
+# Social Security wage base — several PFML programs cap at it. 2026: $184,500
+# (IRS Pub 15 (2026) "What's New"; SSA Contribution and Benefit Base,
+# https://www.ssa.gov/oact/cola/cbb.html). Kept as a literal because
+# payroll_service imports this package (importing SS_WAGE_BASES from it here
+# would be circular); tests/test_state_tax_engines.py asserts it equals
+# payroll_service.SS_WAGE_BASES[2026]. 2027: $192,300.
+SS_BASE = D(184500)
 
 STATES: dict[str, StateSpec] = {}
 
@@ -1042,22 +1047,38 @@ _add(
 )
 
 # States with a dedicated engine (kept here only for the catalog / SUTA base)
+# Dedicated engines (ca.py, ny.py, oregon.py, wa.py): name, 2026 SUTA wage
+# base (the same figure each engine carries) and a summary of what it
+# withholds. Sources: CA EDD DE 44 Rev. 52 (4-26) "2026 Payroll Tax Rates"
+# (UI taxable wage limit $7,000); NY DOL "NYS-45 Quarterly Reporting" UI wage
+# base table (2026 - $17,600); Oregon Employment Department release
+# 2025-11-18 (2026 taxable wage base $56,700); WA ESD "Taxable wage base"
+# (2026 $78,200).
 DEDICATED = {
     "CA": (
         "California",
         D(7000),
-        "Progressive (DE 44 Method B) + SDI — dedicated engine",
+        "Progressive (EDD DE 44 Method B 2026, low-income exemption, "
+        "$168.30 allowance credit) + SDI 1.3% — dedicated engine",
     ),
-    "NY": ("New York", D(12800), "Progressive (NYS-50-T) + SDI/PFL — dedicated engine"),
+    "NY": (
+        "New York",
+        D(17600),
+        "Progressive (NYS-50-T-NYS (1/26) exact calculation, $1,000 per "
+        "exemption) + SDI + PFL 0.432% — dedicated engine",
+    ),
     "OR": (
         "Oregon",
-        D(54300),
-        "Progressive + statewide transit tax — dedicated engine",
+        D(56700),
+        "Progressive (DOR 150-206-436 2026 formula, federal tax subtraction, "
+        "$263 credit) + Paid Leave Oregon 0.6%/0.4% + statewide transit tax "
+        "0.1% — dedicated engine",
     ),
     "WA": (
         "Washington",
-        D(72800),
-        "No income tax; PFML, WA Cares, L&I — dedicated engine",
+        D(78200),
+        "No income tax; PFML 1.13% (71.43%/28.57%), WA Cares 0.58%, L&I by "
+        "risk class — dedicated engine",
     ),
 }
 

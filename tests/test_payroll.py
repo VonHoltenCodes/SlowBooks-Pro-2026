@@ -15,10 +15,28 @@ from decimal import Decimal
 def test_federal_withholding_single_biweekly():
     from app.services.payroll_service import federal_income_tax
 
-    # $2,000 biweekly, single -> annual 52,000; adjusted 43,400 after the
-    # $8,600 standard add-back; tax 4,256/yr -> 163.69 per period.
+    # Pub 15-T (2026) Worksheet 1A: $2,000 biweekly, single -> annual
+    # 52,000; adjusted 43,400 after the $8,600 line 1g add-back; STANDARD
+    # single row 19,900 – 57,900: 1,240 + (43,400 - 19,900) x 12% = 4,060/yr
+    # -> 156.15 per period.
     tax = federal_income_tax(Decimal("2000"), 26, "single")
-    assert tax == Decimal("163.69")
+    assert tax == Decimal("156.15")
+
+
+def test_federal_withholding_2026_pub_15t_annual_figures():
+    from app.services.payroll_service import federal_income_tax
+
+    # Single, $50,000 a year, standard W-4 (annual pay period): adjusted
+    # 50,000 - 8,600 = 41,400; 1,240 + (41,400 - 19,900) x 12% = 3,820.00
+    assert federal_income_tax(Decimal("50000"), 1, "single") == Decimal("3820.00")
+    # Married filing jointly, $100,000: 100,000 - 12,900 = 87,100;
+    # 2,480 + (87,100 - 44,100) x 12% = 7,640.00
+    assert federal_income_tax(Decimal("100000"), 1, "married") == Decimal("7640.00")
+    # Head of household, $60,000, Step 2 box checked (no add-back; checkbox
+    # schedule row 45,800 – 64,925): 3,870 + (60,000 - 45,800) x 22% = 6,994.00
+    assert federal_income_tax(
+        Decimal("60000"), 1, "head_of_household", multiple_jobs=True
+    ) == Decimal("6994.00")
 
 
 def test_dependents_credit_reduces_withholding():
