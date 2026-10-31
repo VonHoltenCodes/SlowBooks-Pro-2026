@@ -6,7 +6,7 @@ QuickBooks you're leaving:
 | You're on | Use | Where in SlowBooks |
 |---|---|---|
 | **QuickBooks Online** | Its own Export data zip (no Intuit app) | sidebar → **Migrate Data** → QuickBooks Online export |
-| **QuickBooks Desktop** (2003–current) | IIF file import | sidebar → **Interoperability** |
+| **QuickBooks Desktop** (2003 through 2024 / Enterprise 24.0, the current release) | IIF file import | sidebar → **Interoperability** |
 
 The Desktop path imports accounts, customers, vendors, items, invoices,
 payments, and **sales receipts**. Sales receipts come across as what
@@ -27,12 +27,14 @@ Export data path replaces it.
 
 QuickBooks Online's own export is enough, and needs no Intuit app at all.
 
-1. In QuickBooks Online: the **gear** → **Tools** → **Export data**. Leave
-   every report and list ticked, and set the date range to **All**. Before
-   you export, set the company's report basis to **Accrual** (the gear →
-   Account and settings → Advanced → Accounting method) if you want the
-   Trial Balance to verify the import; on the cash basis it is set aside
-   with a note.
+1. In QuickBooks Online: **Settings** (the gear) → **Export data**, pick a
+   reason and **Continue**. On the **Reports** tab set the date range to
+   **All dates**, leave every report and list switched on, and press
+   **Export to Excel**. Before you export, set the company's report basis to
+   **Accrual** (Settings → Account and settings → Advanced → Accounting →
+   Accounting method) if you want the Trial Balance to verify the import; on
+   the cash basis it is set aside with a note. A very large company may be
+   told some files were too big to export; export shorter ranges then.
 2. QuickBooks downloads a zip named for the company and the date. Keep it
    as it is.
 3. In SlowBooks: sidebar → **Migrate Data** → source **QuickBooks Online
@@ -65,8 +67,9 @@ the import** below.
 **Receivables and payables.** The Journal posts every invoice and payment
 to the export's own receivable account, "Accounts Receivable (A/R)", so
 what is still open sits there. To carry it over, download QuickBooks
-Online's **A/R Aging Detail** report (Reports → A/R Aging Detail → Export to
-Excel) and upload it with the zip. Each open invoice comes across as an
+Online's **Accounts receivable aging detail** report (Reports → Standard
+reports → Who owes you → Accounts receivable aging detail → Export → Export
+to Excel) and upload it with the zip. Each open invoice comes across as an
 invoice with its number, date, due date and open balance, and each payment
 not yet applied as an unapplied payment, so the A/R aging and every
 customer's balance are right; their postings move the open balance to 1100
@@ -83,9 +86,9 @@ account.
 
 QuickBooks Desktop's built-in IIF export (`File → Utilities → Export →
 Lists to IIF Files`) covers **lists only**: chart of accounts,
-customers, vendors, items. Export those and drop the `.iif` file(s) on
-**Interoperability → Import** — there's a **Validate** button that
-checks the file before anything is written.
+customers, vendors, items. Export those and drop each `.iif` file, one at
+a time, on **Interoperability → Import from IIF**; press **Validate**, which
+checks the file before anything is written, then **Import**.
 
 Names typed in ALL CAPS in QuickBooks come across as typed. If you'd rather
 have them in normal capitalization, Validate shows a few of the file's names
@@ -123,8 +126,9 @@ two trial balances match.
 
 The simplest way to bring every transaction across: in QuickBooks Desktop,
 **Reports > Accountant & Taxes > Transaction Detail by Account**, set the
-dates to **one year** (see *One year per file* below), and save it
-as CSV (keep the report's default columns).
+dates to **one year** (see *One year per file* below), and save it as CSV:
+**Excel → Create New Worksheet → Create a comma separated values (.csv)
+file → Export** (keep the report's default columns).
 In **Customize Report → Filters → Account**, choose **All accounts**.
 That is a filter, not a column: do **not** add an **Account** column. The
 account-grouped report already names each account above its transactions.
@@ -150,8 +154,9 @@ United States, and an amount as 1,234.56. QuickBooks Desktop writes its
 dates in the order of Windows' region setting, so a report exported under
 another region's format has day-first dates (20/03/2024) and is refused,
 the sentence above the rows saying the dates look day first: in Windows,
-set the region's format to English (United States) (Control Panel >
-Region), export the report again and import that. One with other problems
+set the regional format to English (United States) (Windows 11: Settings >
+Time & language > Language & region > Regional format; or Win+R, `intl.cpl`,
+Formats tab), restart QuickBooks, export the report again and import that. One with other problems
 imports nothing yet (since 2.31.2): the page lists the problems, grouped,
 for you to tick the ones to accept and leave the rest:
 
@@ -159,7 +164,8 @@ for you to tick the ones to accept and leave the rest:
   name, amount and how far off it is, and on which side ("$10.00 more in
   debits"). Ticked, it posts with the difference
   on **3950 Import Differences**, an equity account made the first time it
-  is needed, for you or your accountant to clear. Common causes: a report
+  is needed (or the next free number after 3950 when your chart has that
+  one), for you or your accountant to clear. Common causes: a report
   filtered to some accounts (set Filters → Account to All accounts), and a
   range of more than a year (see *One year per file* below).
 - **An account not in the chart**, once, with how many transactions touch
@@ -210,10 +216,11 @@ that in turn. Unticked, both stay as they are and the file's copy is left
 out. Nothing is ticked to start with. A cut file whose transactions the
 books already hold (the same cut file again, or the old one after the
 corrected file) posts nothing: they are counted with the duplicates. A
-partial entry in a completed reconciliation is not replaced until that
-reconciliation is undone, and one that was voided, by you or by a
-replacement, no longer counts as imported, so the next file that has that
-transaction brings it in.
+partial entry held by a completed reconciliation is never replaced (a
+finished reconciliation cannot be reopened): leave it as it is and clear
+its difference on 3950 Import Differences with a journal entry. One that
+was voided, by you or by a replacement, no longer counts as imported, so
+the next file that has that transaction brings it in.
 
 In a bank or card register each entry reads as one typed there does:
 QuickBooks' **Name** is the payee, its **Num** the Ref #, each line's
@@ -255,8 +262,8 @@ the same note sits above the list of them. A July–June fiscal year is 12
 months and gets no warning. A transaction's lines share a date, so a
 year never splits one, and a line already posted is skipped on the next file.
 
-**Long histories.** QuickBooks' Save as CSV also stops a report at 32,768 rows
-with no warning: the last section ends without its Total line (or the file
+**Long histories.** QuickBooks' CSV export also stops a report at about
+32,768 rows (users report 32,769 lines with the header) with no warning: the last section ends without its Total line (or the file
 without the report's TOTAL row), and the income and expense accounts, which
 come after the balance sheet accounts, may be missing altogether. The import
 says the file may be cut off, and the transactions missing their other side
@@ -264,13 +271,13 @@ do not balance. One year per file
 keeps most companies under the cap; a year that still does not fit can go in
 two files split at a month end.
 
-### Time: the Time by Name by Job detail report
+### Time: the Time by Job Detail report
 
 QuickBooks Desktop does not export timesheets to IIF (it only imports them),
 so the way across is a report: **Reports > Jobs, Time & Mileage > Time by
-Name by Job detail** (Time by Job by Name detail reads the same), with the
-dates set to **All**, saved as CSV or Excel. Upload it under
-Interoperability → Import from Report CSV. Every row becomes an approved
+Job Detail**, with the dates covering the time you want, saved as CSV or
+Excel (a Time by Name report customized to group by job reads too). Upload
+it under Interoperability → Import from Report CSV. Every row becomes an approved
 time entry under its employee, with the hours (2.25 or 2:15; QuickBooks'
 minutes are kept exact, and an Excel file's Total rows read from the values
 Excel computed), the notes, the
@@ -344,12 +351,13 @@ and it gets built in.
 An IIF file does not carry QuickBooks' memorized transaction list, and no
 Desktop report prints it with its schedule, so there is nothing to import:
 rebuild them under **Memorized Transactions** in the sidebar (#605). A
-memorized bill or journal entry takes the same how-often choices QuickBooks
-offers (weekly, every two weeks, twice a month, monthly, every N months,
-quarterly, yearly, or every N days, weeks or months), a next date, an end
+memorized bill or journal entry takes the how-often choices QuickBooks
+offers (daily, weekly, every two weeks, twice a month, monthly, every two
+months, quarterly, twice a year, yearly; QuickBooks' "every four weeks" is
+every 4 weeks here), or every N days, weeks or months, a next date, an end
 date or a number of times, and is either entered automatically on its date
-or listed as due until you enter it, as QuickBooks' Automate Transaction
-Entry and Remind Me do. The quickest way to rebuild one is from the last
+(Auto-enter) or listed as due until you enter it (Remind me), as
+QuickBooks' Automate Transaction Entry and Add to my Reminders List do. The quickest way to rebuild one is from the last
 document it entered, once that is imported: open the bill on its page and
 press **Memorize**, and the same on a journal entry's page; the form opens
 filled from the document, and only the schedule is left to set. Recurring
@@ -361,12 +369,13 @@ Memorized Transactions page too.
 Desktop does not export transactions to IIF natively. Two other options:
 
 - **A third-party IIF transaction exporter** (several exist for QB
-  Desktop). The importer understands `INVOICE`, `PAYMENT`,
-  `CASH SALE` (sales receipts), `ESTIMATE`, `BILL`, and `DEPOSIT`
-  blocks. Import lists first, then transactions, so customer/item/
-  account names resolve.
+  Desktop). The importer understands the same blocks listed under *What
+  Desktop can export by itself* above: invoices, payments, sales receipts,
+  estimates, bills, deposits, checks, card charges, transfers, bill
+  payments and general journal entries. Import lists first, then
+  transactions, so customer/item/account names resolve.
 - **For sales receipts, deposits, and checks: a report CSV imports
-  directly.** Three Desktop report exports upload straight into
+  directly.** Four Desktop report exports upload straight into
   **Interoperability → Import from Report CSV** (the report type is
   auto-detected):
 
@@ -388,10 +397,10 @@ Desktop does not export transactions to IIF natively. Two other options:
   Import your **lists first** (chart of accounts, customers, items via
   IIF) so account and item names resolve — deposit and check blocks
   whose accounts are missing are reported with a pointer to do exactly
-  that. All three are safe to re-upload; duplicates are skipped.
+  that. All four are safe to re-upload; duplicates are skipped.
 - **A bank or credit card statement (CSV, OFX, QFX) is not an
   Interoperability import.** It goes in from the account itself, under
-  **Banking → the account → Import file**. The vendors and accounts on the
+  **Banking → Bank Accounts → the account → Import file**. The vendors and accounts on the
   statement do not need to exist first: each line comes in as a statement
   line with its payee kept as text. A line that matches exactly one entry
   already in the books is matched to it on import; every other line waits in
@@ -409,10 +418,11 @@ Desktop does not export transactions to IIF natively. Two other options:
   4. Keep the report's **default columns** — the importer needs at
      least Date, Num, Name, Account, Split, Debit, and Credit (Memo,
      Item, Qty, and Sales Price are used when present).
-  5. **Excel → Create New Worksheet**, save as CSV (or Print → Save as
-     CSV).
-  6. Upload it under **Interoperability → Sales Receipts from Report
-     CSV**. Each receipt imports as a paid sale + its payment, with
+  5. **Excel → Create New Worksheet → Create a comma separated values
+     (.csv) file → Export** (or Print → Print to: File → Comma delimited
+     file).
+  6. Upload it under **Interoperability → Import from Report CSV**; the
+     report type is detected. Each receipt imports as a paid sale + its payment, with
      balanced journals; applied-deposit and discount lines keep their
      signs, tax rows are recognized by the percentage in Sales Price,
      and re-uploads skip duplicates.
@@ -434,8 +444,9 @@ The same report, filtered to **Invoice** instead of Sales Receipt:
    so every invoice comes in open and the import says how many did; upload
    the report again with the column and the invoices here that have
    nothing paid on them are marked paid or partly paid from it.
-4. Excel → Create New Worksheet, save as CSV, and upload it under
-   **Interoperability → Import from Report CSV**. The report type is
+4. Excel → Create New Worksheet → Create a comma separated values (.csv)
+   file → Export, and upload it under **Interoperability → Import from
+   Report CSV**. The report type is
    detected from the rows: an invoice's header row posts to Accounts
    Receivable, a receipt's to the deposit account, so one file can hold
    both.
@@ -474,7 +485,7 @@ imports each one as:
 
 Details worth knowing:
 
-- **Customer:Job names** — the colon splits the customer from the job: `Smith:Kitchen Remodel` becomes customer *Smith* with job *Kitchen Remodel*, and the invoice, sales receipt or estimate is tagged to that job (see the Jobs page). A deeper `A:B:C` path becomes job `B:C` under `A`.
+- **Customer:Job names** — the colon splits the customer from the job: `Smith:Kitchen Remodel` becomes customer *Smith* with job *Kitchen Remodel*, and the invoice, sales receipt or estimate is tagged to that job (see the Jobs page). If the colon names a sub-customer rather than a job (a property's tenants, a parent company's locations), tick **The Customer:Job names in this file are sub-customers, not jobs** on the Validate report (2.31.1): each then comes in as a sub-customer that can bill with its parent. Names deeper than Parent:Child are kept one level deep, and the result says so.
 - **Blank customer** — QB allows counter sales with no Customer:Job.
   Those import against an auto-created **"Walk-In Customer"** (the
   import report notes each one).
@@ -521,8 +532,8 @@ under Uncategorized is a posting QuickBooks had no class on either.
   not name that has never been posted to. Either way, an account with
   history is kept: delete nothing by hand that a transaction still uses.
   If your business does not number its accounts, untick **Settings →
-  Company → Use account numbers** after the import: the starter accounts
-  keep their numbers, but nothing prints them.
+  Company Information → Use account numbers** after the import: the
+  starter accounts keep their numbers, but nothing prints them.
 - Spot-check **Reports → Trial Balance** against the same report in
   QuickBooks as of your cutover date (mind the date range — set it to
   cover the imported history).
@@ -545,8 +556,8 @@ under Uncategorized is a posting QuickBooks had no class on either.
 ## Leaving QuickBooks Contractor Edition
 
 If your file is a QuickBooks Desktop **Contractor Edition** company, set
-SlowBooks to the matching mode after you import: **Settings → Company Type →
-Construction**. It changes no data and can be switched back at any time. What
+SlowBooks to the matching mode after you import: **Settings → Company
+Information → Company Type → Construction**. It changes no data and can be switched back at any time. What
 it does:
 
 - Adds the contractor accounts — Retainage Receivable and Payable,
@@ -568,4 +579,5 @@ The seed chart SlowBooks starts a brand-new company with is already the
 Contractor template (Materials, Labor and Subcontractor Costs on the COGS
 side), so a fresh contractor file and an imported one converge on the same
 accounts. QuickBooks' **Customer:Job** list imports as SlowBooks jobs under
-their customers; the name prints as "Customer: Job" here.
+their customers (or as sub-customers, when you tick that on the Validate
+report); the name prints as "Customer: Job" here.

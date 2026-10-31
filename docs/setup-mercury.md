@@ -11,7 +11,7 @@ its other bank activity. The connector only reads Mercury; it cannot send money.
 
 ## Connect
 
-1. In Mercury, open **Settings → API Tokens**, create a **Read Only** token,
+1. In Mercury, open **All Settings → Tokens**, create a **Read Only** token,
    and copy it. See [Mercury's token guide](https://docs.mercury.com/docs/getting-started).
 2. In SlowBooks, sign in as an administrator and open **Banking**. In
    **Bank Feed (Mercury)**, paste the token and click **Connect Mercury**.

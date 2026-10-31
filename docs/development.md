@@ -12,13 +12,14 @@ internal hardening notes see
 
 | Component | Technology |
 |-----------|-----------|
-| Backend | Python 3.13 + FastAPI (50 routers, 300+ routes) |
-| Database | PostgreSQL 17 / SQLite + SQLAlchemy 2.0 |
-| Migrations | Alembic |
+| Backend | Python 3.13 + FastAPI (89 routers, 735 API operations on 588 paths in 2.31.3) |
+| Database | SQLite company files (desktop, Server Edition) or PostgreSQL 17 + SQLAlchemy 2.0 |
+| Migrations | Alembic; every table and column change needs one (see below) |
 | Frontend | Vanilla HTML/CSS/JS (no framework) + self-hosted Chart.js 4.4.6 for analytics |
-| PDF | WeasyPrint 60.2 + Jinja2 |
-| Bank Import | ofxparse (OFX/QFX) |
-| Payments | Stripe Checkout (hosted) |
+| PDF | WeasyPrint 70.0 + Jinja2 |
+| Bank feeds and imports | SimpleFIN, Mercury; ofxparse (OFX/QFX), CSV |
+| Payments | Stripe Checkout, PayPal and Square (hosted pages), one abstraction in `app/services/payments/` |
+| Auth | Named users in four roles, sessions, scoped API tokens |
 | Port | 3001 |
 
 ---
@@ -34,10 +35,10 @@ SlowBooks-Pro-2026/
 ├── alembic.ini               # Alembic config
 ├── migrations/               # Alembic database migrations (script_location in alembic.ini)
 ├── app/
-│   ├── main.py               # FastAPI app + 50 routers (300+ routes)
+│   ├── main.py               # FastAPI app + the routers, role policy, startup checks
 │   ├── config.py             # Environment-based settings (CORS, origins)
 │   ├── database.py           # SQLAlchemy engine + session + table auto-creation
-│   ├── models/               # 35 model modules (55 tables)
+│   ├── models/               # 60 model modules (105 tables)
 │   │   ├── accounts.py       # Chart of Accounts (self-referencing)
 │   │   ├── contacts.py       # Customers + Vendors
 │   │   ├── items.py          # Products, services, materials, labor
@@ -65,12 +66,12 @@ SlowBooks-Pro-2026/
 │   │   ├── attachments.py    # File attachments
 │   │   ├── bank_rules.py     # Bank transaction categorization rules
 │   │   ├── budgets.py        # Budget tracking by account/period
-│   │   ├── document_audit.py # SHA-256 hash chain for tax-form PDFs
+│   │   ├── document_audit.py # a SHA-256 hash per generated tax-form PDF
 │   │   ├── portal_access.py  # Portal access audit log
 │   │   ├── reseller_permit.py # Per-entity reseller permits
 │   │   └── email_templates.py # Customizable email templates
 │   ├── schemas/              # Pydantic request/response models
-│   ├── routes/               # FastAPI routers (50 routers, 300+ routes)
+│   ├── routes/               # FastAPI routers (89; payroll and reports are packages)
 │   ├── services/
 │   │   ├── accounting.py     # Double-entry journal entry engine
 │   │   ├── analytics.py      # Business intelligence aggregates (8 methods)
@@ -83,14 +84,14 @@ SlowBooks-Pro-2026/
 │   │   ├── csv_import.py     # CSV import with error handling
 │   │   ├── ofx_import.py     # OFX/QFX bank feed parser
 │   │   ├── tax_export.py     # Schedule C data + CSV export
-│   │   ├── backup_service.py # pg_dump/pg_restore wrapper
+│   │   ├── backup_service.py # backups: pg_dump on PostgreSQL, a file copy on SQLite
 │   │   ├── company_service.py # Multi-company DB management
 │   │   ├── iif_export.py     # IIF export (8 export functions)
 │   │   ├── iif_import.py     # IIF parser + import + validation
 │   │   ├── pdf_service.py    # WeasyPrint PDF generation
-│   │   ├── stripe_service.py # Stripe Checkout + webhook verification
+│   │   ├── payments/         # stripe, paypal, square, recorder, clearing
 │   │   ├── qbo_export_import.py # QuickBooks Online's Export data zip → Migrate Data
-│   │   ├── auth.py           # Single-user password auth + session management
+│   │   ├── auth.py           # Users, roles, sessions, API tokens
 │   │   ├── rate_limit.py     # slowapi rate limiting
 │   │   ├── settings_service.py # Settings CRUD with sensitive key filtering
 │   │   ├── encryption.py     # Fernet encryption + versioned ciphertext + rewrap CLI
@@ -102,7 +103,7 @@ SlowBooks-Pro-2026/
 │       │   ├── style.css     # QB2003 "Default Blue" skin
 │       │   └── dark.css      # Dark mode CSS overrides
 │       └── js/               # SPA router, API wrapper, 40+ page modules
-│           ├── app.js              # Main SPA router with 64 routes
+│           ├── app.js              # Main SPA router (76 routes)
 │           ├── api.js              # HTTP wrapper (API.get/post/put/del)
 │           ├── employees.js        # Employee CRUD + Details modal
 │           ├── onboarding.js       # Onboarding checklists + e-signature
@@ -121,7 +122,7 @@ SlowBooks-Pro-2026/
 │   ├── worker.js             # Hardened proxy (model allowlist, rate limiting, security headers)
 │   ├── wrangler.toml         # Deployment config
 │   └── README.md             # Setup guide
-├── tests/                    # 452 pytest tests (auth, security, posting, reporting, import, payroll Tiers 1-3, HR, wiring audit, schema audit, jinja autoescape audit, rounding consistency, race-condition / N+1 / closing-date / secret-redaction / void-symmetry / IIF round-trip / shell-injection audits)
+├── tests/                    # ~7,200 pytest tests (auth, security, posting, reporting, imports, payroll, HR, browser tests under Playwright, the wiring, schema, autoescape, rounding, race-condition, N+1, closing-date, secret-redaction, void-symmetry, IIF round-trip and shell-injection audits)
 └── index.html                # SPA shell
 ```
 
@@ -132,10 +133,12 @@ SlowBooks-Pro-2026/
   / `@router.post` / etc., then `app.include_router(router)` in
   `app/main.py`. Group by domain — add to the smallest existing
   router file, or create a new one for a new feature area.
-- **New DB table** — model goes in `app/models/<name>.py`. Test
-  setup uses `Base.metadata.create_all()` so fresh installs pick it
-  up; for in-place upgrades on existing deploys, add an Alembic
-  migration in `migrations/versions/`.
+- **New DB table or column** — model goes in `app/models/<name>.py`
+  **and** an Alembic migration in `migrations/versions/` (`alembic
+  revision -m "..."`, then `alembic upgrade head`). Both are required:
+  the app refuses to start against a database behind the migration
+  head, and `tests/test_gate_290_fixes.py` fails on a table only
+  `create_all()` makes.
 - **New Pydantic shape** — `app/schemas/<domain>.py`. **Beware the
   `date: date` field-shadows-type collision** — see
   [CONTRIBUTING.md → Schema conventions](../CONTRIBUTING.md#-the-date-date-field-name-shadows-the-type-collision).
@@ -152,26 +155,35 @@ SlowBooks-Pro-2026/
 ## Running tests
 
 ```bash
-pip install -r requirements-dev.txt
-pytest                       # full suite (~50s)
-pytest tests/test_wiring.py  # 0.15s — JS <-> backend wiring audit
+pip install -r requirements.txt -r requirements-dev.txt
+pytest                       # the full suite, about 7,200 tests; 40 minutes on one machine
+pytest tests/test_wiring.py  # under a second: the JS <-> backend wiring audit
 pytest -k "audit or portal"  # subset by keyword
 ```
 
+The browser tests need Playwright's Chromium (`playwright install
+chromium`) and skip without it; the PostgreSQL-only tests run when
+`SLOWBOOKS_TEST_POSTGRES_URL` names a database. To run the app while you
+work: `cp .env.example .env`, set `APP_DEBUG=true`, `APP_HOST=127.0.0.1` and
+a `PAYROLL_ENCRYPTION_SECRET`, then `python run.py` and open
+http://localhost:3001 (INSTALL.md, Option 2, has the whole setup). The
+desktop window is `python desktop_launcher.py`.
+
 The wiring audit is also a boot-time tripwire in
-`docker-entrypoint.sh`: containers built off `requirements-dev.txt`
-will fail to start if any JS API call points at a removed route.
-Production images (built off `requirements.txt` only) skip the
-boot check silently — CI already gates the same condition before the
-image is built.
+`docker-entrypoint.sh`: a container that has pytest installed (the
+Dockerfile installs `requirements.txt` only, so add `requirements-dev.txt`
+in a debug image) fails to start if any JS API call points at a removed
+route. Production images skip the boot check silently — CI already gates
+the same condition before the image is built.
 
 ### Manual end-to-end smoke test
 
 `scripts/integration_test_frontend.py` is a live-HTTP integration
 script (deliberately not under `tests/` so the pytest collector
-skips it). Hits every SPA page + API endpoint over real HTTP and
-confirms JS bundles load without errors. Run it against a running
-server when you've touched routing or the SPA shell:
+skips it). It covers the HR and payroll pages against a fresh
+database at `127.0.0.1:8000`, confirming the pages and their API calls
+answer over real HTTP. Run it against a server started for it when
+you've touched those pages:
 
 ```bash
 uvicorn app.main:app --port 8000 &
@@ -184,14 +196,12 @@ python scripts/integration_test_frontend.py
 
 ```bash
 pip install "black>=24.8.0" "ruff>=0.6.0"
-black --check app/main.py app/services/audit.py tests/   # mirrors CI scope
-ruff check app/main.py app/services/audit.py tests/
+black --check app/ tests/ scripts/   # what CI runs
+ruff check app/ tests/ scripts/
 ```
 
-CI gates a curated file allowlist (`.github/workflows/ci.yml`).
-Earlier-phase routes carry pre-black style and are tracked in
-[todo.md](todo.md) for a dedicated cleanup pass — new files MUST
-land in the allowlist so they don't slip the gate.
+CI lints the whole tree (`.github/workflows/ci.yml`); both pass on every
+release tag.
 
 ---
 
@@ -203,7 +213,7 @@ version:
 1. Branch off `main`
 2. Make changes; add/update tests
 3. `pytest` green locally
-4. Open a PR — CI runs lint, full pytest, pip-audit, and Docker build
+4. Open a PR — CI runs lint, the full suite on Linux and Windows, pip-audit, CodeQL and the Docker build; the installer and DMG build on their own workflows
 5. Reviewer merges once green
 
 The PR template prompts for: summary, test plan, security/perf notes,

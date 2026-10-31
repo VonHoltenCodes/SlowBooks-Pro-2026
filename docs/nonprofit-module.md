@@ -1,6 +1,6 @@
 # Nonprofit mode
 
-SlowBooks is free software and always will be. Small nonprofits — churches,
+SlowBooks is free and source-available, and always will be. Small nonprofits — churches,
 clubs, PTOs, community arts groups, small foundations — are the people it
 can help most, and they pay for a "nonprofit edition" of everything else.
 Nonprofit mode is one switch in Settings. Nothing in your data changes name;
@@ -13,7 +13,12 @@ reloads in nonprofit words and the four accounts the mode needs are created
 if they are missing (3300 Net Assets Without Donor Restrictions, 3400 Net
 Assets With Donor Restrictions, 4400 In-Kind Contributions, 6960 Bad Debt
 Expense — the numbers yield to an existing chart). Switch back any time;
-nothing is lost either way.
+nothing is lost either way. The statements never add these accounts on a
+read (2.31.2): a company switched to nonprofit over the API with
+`PUT /api/settings` alone, or an older file that never ran setup, shows a
+net-asset line by name with no account until a release, in-kind gift or
+write-off posts; run Settings → Company Type again, or
+`POST /api/nonprofit/setup-accounts`, if a statement shows one.
 
 ## What changes on screen
 
@@ -83,7 +88,8 @@ actual and variance for the grant while the fund reports show restriction.
   pledge that has already generated installments can't be deleted (its
   pledges would be left orphaned) — set the End Date instead. Re-ticking
   Active after a pause resumes from today and skips the paused months rather
-  than back-dating a pledge for each one.
+  than back-dating a pledge for each one; a schedule past its End Date must
+  have the date moved or cleared first (409 otherwise, 2.31.1).
 - **Property** — an **In-Kind Gift**: each line names what the property is
   (an asset or expense account) and the donor's estimate of its value. The
   credit is In-Kind Contributions. The acknowledgment describes the
@@ -138,7 +144,9 @@ Donation so it is revenue the day it arrives.
 Every gift gets a written acknowledgment: **Acknowledgment (PDF)** and
 **Email Acknowledgment** on the donation, payment and in-kind views. The
 wording is yours — **Settings → Email Templates → donation_acknowledgment**
-— with `{{ irs.text }}` supplying the sentence the IRS requires (no goods
+(press **Seed Default Templates** first if the list is empty; until then the
+built-in wording is used) — with `{{ irs.text }}` supplying the sentence the
+IRS requires (no goods
 or services were provided; or the fair value of what was, and the
 deductible portion). A receipt's own payment is not a second gift; the
 receipt is what gets acknowledged.
@@ -146,8 +154,8 @@ receipt is what gets acknowledged.
 ## Month end
 
 1. **Allocate shared costs.** Rent, utilities, the office manager's wages:
-   post them **Unassigned** (the function picker's last choice, or omit the
-   function on a line in a fund with no default). A saved **allocation
+   post them **Unassigned (allocate later)** (the function picker's last
+   choice, or omit the function on a line in a fund with no default). A saved **allocation
    rule** (Functional Allocations page) says how they divide — by percent,
    by square feet, or by hours worked on grants — across functions and/or
    funds. **Run** the rule for the month: it moves everything still
@@ -164,10 +172,14 @@ receipt is what gets acknowledged.
 
 ## Year end
 
-- **Giving statements** — Report Center → Year-End Giving Statements: one
-  PDF per donor, or every donor in one PDF with a page break each (print the
-  stack), or emailed to everyone (donors who opted out on their record are
-  skipped). Cash gifts with the deductible portion and a running total;
+- **Giving statements** — Report Center → Year-End Giving Statements:
+  **Download all (PDF)**, every donor in one PDF with a page break each
+  (print the stack), or **Email all** (donors who opted out on their record
+  are skipped); one donor's own statement is **Giving Statement (last year)**
+  on the donor's record (`GET /api/donors/{id}/giving-statement/pdf?year=`).
+  Cash gifts with the amount eligible for a deduction and a running total
+  (whether a donor can deduct it depends on their own return: from tax year
+  2026 non-itemizers may deduct some cash gifts and itemizers face a floor);
   non-cash gifts described without amounts; the IRS sentence at the foot.
 - **The ministry's own words** — Settings → Giving Statement (nonprofit mode)
   keeps the ministry's own message and footer on the statement. The **Opening
@@ -194,8 +206,11 @@ receipt is what gets acknowledged.
 
 ## The statements
 
-All four are computed from the same posted lines as the P&L and balance
-sheet and reconcile to the cent; each has PDF and CSV.
+All five are computed from the same posted lines as the P&L and balance
+sheet and reconcile to the cent; each has PDF and CSV. The Statement of
+Activities, Financial Position and Functional Expenses take a **Basis**
+(accrual or cash) like the P&L (2.30.0), so a church on the cash basis
+reports on it.
 
 | Statement | What it shows | Reconciles to |
 |---|---|---|
@@ -224,8 +239,7 @@ Saved Reports at the top of the Report Center, as a collapsible list.
 ## Driving nonprofit mode from the API
 
 Everything above is an API call, so a bring-your-own-AI agent with a scoped
-token can do the month-end and year-end work unattended. The order that
-`tests/test_nonprofit_byoai_e2e.py` proves:
+token can do the month-end and year-end work unattended, in this order:
 
 1. `GET /openapi.json` — every nonprofit path is described.
 2. `PUT /api/settings {"company_type": "nonprofit"}` then
@@ -254,15 +268,6 @@ token can do the month-end and year-end work unattended. The order that
    and `POST …/acknowledgment/email`; year end:
    `GET /api/donors/giving-statements/pdf?year=` and
    `POST /api/donors/giving-statements/batch-email`.
-
-## The Riverbend example
-
-`~/Development/slowbooks-demo-data/seed_nonprofit_demo.py` builds
-"Riverbend Community Arts" into a copy of a company file through the API: a
-general fund, a restricted Youth Program grant with a budget, a permanently
-restricted scholarship endowment, a spring gala with a $45 dinner, two
-monthly pledgers, an in-kind piano, shared rent allocated 70/20/10 by square
-footage, and a June release. It prints the acceptance equalities at the end.
 
 ## What is deliberately out
 

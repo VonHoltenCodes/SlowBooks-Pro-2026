@@ -17,12 +17,16 @@ to your SimpleFIN bridge over HTTPS.
 2. On the bridge's site, you connect your bank(s). The bridge handles the
    bank login, MFA, and aggregation.
 3. The bridge gives you a one-time **setup token**. Paste it into
-   **Banking → Bank Feeds (SimpleFIN) → Connect**.
+   **Banking → Bank Feeds (SimpleFIN) → Connect**. Connecting, mapping and
+   disconnecting are an administrator's; a bookkeeper runs the syncs.
 4. SlowBooks exchanges the token once for a permanent read-only access
    credential, stored encrypted-at-rest in your company file and never
-   shown again (Settings displays `********`).
-5. Map each bridge account to a SlowBooks bank account, then click
-   **Sync Now** whenever you want fresh transactions.
+   shown again, anywhere.
+5. Map each bridge account: the **Imports into** list offers every bank and
+   credit-card account in your chart, and picking one makes the feed for it
+   when you save the mapping (since 2.31.1). Tick **Reverse signs** on a feed
+   whose bridge reports money out as positive. Then click **Sync Now**
+   whenever you want fresh transactions.
 
 Synced transactions land in the same review flow as OFX/CSV imports:
 
@@ -64,6 +68,14 @@ sample transactions to play with. Disconnect afterward to clear it.
   token was consumed, generate a fresh token on the bridge site.
 - **Desktop installs work fully** — the sync is outbound HTTPS polling;
   no webhooks, no ports to open, no server required.
+- **One source per account.** A feed's transaction ids don't match an OFX
+  or CSV export of the same account, so importing both doubles the lines;
+  pick the feed or the file.
+- **Not too often.** The SimpleFIN Bridge asks for 24 or fewer requests a
+  day per token and can disable a token that goes well past that. Each Sync
+  Now is one request; fetching 12 months of older history is about five.
+- **Payouts from Stripe, PayPal or Square** show a **Payout…** button in To
+  review when the clearing-account option is on ([setup-stripe.md](setup-stripe.md)).
 - **Disconnecting** (Banking → Bank Feeds → Disconnect) forgets the
   credential, mapping, and cache. Transactions already imported stay in
   your registers.

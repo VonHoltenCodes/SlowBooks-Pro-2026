@@ -1,45 +1,54 @@
 # Migrating from MYOB
 
-SlowBooks imports MYOB **exports**, not `.MYO` company files — the `.MYO`
-format is MYOB's proprietary binary database and can only be opened by
-MYOB itself. The good news: three quick exports from inside MYOB are all
-the importer needs, and the dry-run verifies everything against your
-trial balance before a single record is written.
+SlowBooks imports MYOB **exports**, not company files — `.MYO` (AccountRight
+Classic) and `.myox` or an online file (current AccountRight) are MYOB's own
+databases and only MYOB opens them. The good news: three quick exports from
+inside MYOB are all the importer needs, and the dry-run verifies everything
+against your trial balance before a single record is written.
 
-Works with MYOB AccountRight (classic and 2022+) and MYOB Business.
-Tab-separated `.TXT` exports and comma `.CSV` exports both import.
+Works with MYOB Business AccountRight Plus and Premier (the desktop app or
+the browser), MYOB Business Lite and Pro, and exports already made from
+AccountRight Classic (v19 and earlier, read-only since February 2026).
+Tab-separated `.TXT`, comma `.CSV` and Excel `.xlsx` exports all import,
+singly or together in a `.zip`.
 
 ---
 
 ## Step 1 — Export the three files from MYOB
 
-### AccountRight (classic desktop)
+### AccountRight (the desktop app)
 
-1. **Accounts list** — `File → Export Data → Accounts → Account
-   Information`. Accept the defaults (tab-separated, headers in the
-   first record). Save as `Accounts.TXT`.
-2. **Journals** — `File → Export Data → Transaction Journals →
-   General Journal Entries`. Set the date range to cover everything you
-   want to bring across (e.g. 01/01/2000 to today). Save as
-   `Journal.TXT`.
-   *Some versions split journals by type (Sales, Purchases, Disbursements
-   …) or offer an "All" export. Upload EITHER the single All file OR the
-   per-type files together — never both, or every transaction counts
-   twice (the dry-run's trial-balance check will catch it, loudly).
-   Journal types with no transactions simply won't export — that's fine;
-   upload the ones you have.*
+1. **Accounts list** — `File → Import/Export Assistant → Export data →
+   Next`, choose **Accounts list**, tab-separated with the field names in
+   the first row, every field, and save it as `Accounts.TXT`.
+2. **Journals** — the same assistant, data type **Transaction journals**,
+   every journal, with the dates covering everything you want to bring
+   across (e.g. 01/01/2000 to today). Save as `Journal.TXT`. (**General
+   journal entries** alone exports only the general-journal transactions,
+   not the sales, purchases and banking ones.)
+   *If your version exports one file per journal type (Sales, Purchases,
+   Disbursements …), upload them together — and never together with an
+   "All" export, or every transaction counts twice (the dry-run's
+   trial-balance check will catch it, loudly). Journal types with no
+   transactions simply won't export; upload the ones you have.*
 3. **Trial balance** — `Reports → Index to Reports → Accounts → Trial
-   Balance`, set the same period end, then `Export → CSV` (or
-   tab-separated text). Save as `TrialBalance.TXT`.
+   Balance`, set the same period end, display it, then `File → Export →
+   CSV` (or tab-separated text). Save as `TrialBalance.TXT`.
+
+AccountRight Classic (v19) had these under `File → Export Data → Accounts →
+Account Information` and `… → Transaction Journals`; an export made there
+imports the same way.
 
 ### MYOB Business (browser)
 
-1. **Chart of accounts** — `Accounting → Chart of accounts → Export to
-   CSV`.
-2. **Journals** — `Accounting → Reports → General Ledger (detail)` (or
-   `Journal report`), full date range, `Export → CSV`.
-3. **Trial balance** — `Accounting → Reports → Trial Balance`, same
-   period end, `Export → CSV`.
+1. **Chart of accounts** — the settings menu (⚙) → **Import and export
+   data** → **Export** → **Chart of accounts** (a tab-separated `.TXT`).
+2. **Journals** — **Reporting → Reports → General ledger [Detail]**, the
+   full date range, **Export → Excel**. The browser exports reports to Excel
+   or PDF only; upload the `.xlsx` as it is (SlowBooks reads MYOB's
+   day-first dates from it).
+3. **Trial balance** — **Reporting → Reports → Trial balance**, the same
+   period end, **Export → Excel**.
 
 **Filenames matter**: keep "account"/"chart", "journal"/"ledger", and
 "trial" in the names — the importer recognizes each file's role by
@@ -97,5 +106,5 @@ to the cent and every account reconciling exactly to MYOB's trial
 balance.
 
 If your export uses a column heading the importer doesn't recognize, the
-dry-run lists it — send the header row to the project and it's a
-one-line alias fix.
+dry-run lists it — send the header row (only the header, no figures) to
+support@slowbookspro.com and it's a one-line alias fix.

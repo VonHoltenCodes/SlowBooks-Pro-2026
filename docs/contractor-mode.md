@@ -1,11 +1,21 @@
 # Contractor mode
 
-Settings → Company Type → **Construction** sets a company up the way a
-contractor keeps its books, the same way **Nonprofit** does for a ministry:
-one switch, no change to any data, reversible at any time. It is the
-counterpart to QuickBooks Desktop's Contractor Edition. This is Phase 2 (Testing #110) — a
-setting, the accounts, the cost codes and the subcontractor vendor type. No
-new accounting posts yet.
+Settings → Company Information → Company Type → **Construction** sets a
+company up the way a contractor keeps its books, the same way **Nonprofit**
+does for a ministry: one switch, no change to any data, reversible at any
+time. It is the counterpart to QuickBooks Desktop's Contractor Edition.
+Construction mode adds the contractor accounts, division/section cost codes,
+trade packages, a Sub vendor type, construction estimating, the contract and
+schedule of values, commitments, change orders, progress billing with
+retainage, and seven job reports. Every role reaches these screens; only
+payroll and HR are the administrator's alone.
+
+The five starting cost types (labor, material, subcontract, equipment,
+other) appear in the Cost Types list once the company has saved something
+that uses them — construction setup, a new cost type or code, or a costed
+line; a read alone never saves them (2.31.2). An agent that reads
+`GET /api/cost-types` on a company that has written none sees an empty list,
+not a missing chart.
 
 ## The switch
 
@@ -89,8 +99,8 @@ costs post to. The two are mapped many-to-many — a package can span
 divisions, and a division can be split across packages. Construction setup
 seeds a default set of packages mapped to the sections it has; edit them, and
 the section mapping, under **Settings → Trade Packages** (shown only for
-construction companies). Nothing references a package yet — bids and
-commitments are later steps.
+construction companies). Estimate lines, commitments, the schedule of values
+and the Buyout tab all use them.
 
 ### Cost type per line
 
@@ -154,7 +164,7 @@ allowances, at 8 / 1.5 / 5 / 1 percent:
 | **Bid total** | subtotal + the four | **116,252.01** |
 
 The **bid total** is the subtotal plus the markups, and it is **pre-tax**: the
-owner's contract sum and schedule of values (a later step, #552) are pre-tax,
+owner's contract sum and schedule of values (#552) are pre-tax,
 and tax is added on each invoice. Tax covers the lines and the markups
 together — the tax rate times the taxable line subtotal plus the markups —
 when any included line is taxable; an exempt customer pays no tax on anything.
@@ -273,14 +283,11 @@ show at the foot of the grid, and the balance stays highlighted until it is
 zero. When the contract sum came from the estimate (the pre-tax bid, plus any
 contingency), a freshly built schedule already balances.
 
-**What comes next.** Change orders (#554, see *Change orders* below) revise the
-contract amount, the budget and the sub commitments together, with the rule
-that work paid for out of an allowance carries no markup. Progress billing
-(#555, see *Progress billing and retainage* below) turns the SOV into an owner
-pay application — previous / this period / stored / retainage / balance per
-line — holding retainage back and releasing it at the end. Job reports (#556,
-see *Job reports* below) add the WIP schedule with over- and under-billing,
-cost-to-complete, the change-order log, the buyout report and job cost by vendor.
+Change orders, progress billing and the job reports (below) build on this:
+change orders revise the contract amount, the budget and the sub commitments
+together (work paid for out of an allowance carries no markup), progress
+billing turns the SOV into an owner pay application that holds retainage back
+and releases it at the end, and the job reports read the lot.
 
 ## Buyout and commitments
 
@@ -319,8 +326,9 @@ owed now, and the A/P aging and vendor balances show the net (the held amount
 sits on 2050, not A/P). A bill entered by hand can hold retainage the same way.
 The 2050 line carries the bill's job, so release can find it by job.
 Editing the lines of a converted bill re-computes the retainage at the commitment's rate on the new subtotal, unless the edit sends `retainage_held`. A retainage that was set by hand (sent as `retainage_held` through the API; the bill's `retainage_manual` is then true) is kept across later edits of the lines, tax or date, while one the commitment's rate derived keeps following that rate even after the rate is changed; it still may not exceed the new subtotal or leave less than has been paid. A fully billed (closed) commitment refuses a higher amount (409): raise it with a sub change order.
-Releasing retainage (a debit back to 2050) is progress billing's job (#555);
-for now the figure is the retainage held to date.
+Release it with **Release retainage** on the commitment
+(`POST /api/purchase-orders/{id}/release-retainage`): a release bill debits
+2050 back for the amount released, see *Progress billing and retainage* below.
 
 **Retainage on the cash basis.** A bill's held retainage is not an expense on
 a cash-basis report until it is paid: paying the net spreads that amount over
@@ -364,12 +372,11 @@ shown on the bill's payments and the payment's own view. Through the API,
 `coi_override: true`. The lien waiver is only a status: saving it works on a
 bill in a closed period, since it posts nothing.
 
-**What comes next.** Sub **change orders** (#554, see *Change orders* below)
-revise a commitment the way owner change orders revise the contract.
-**Progress billing** (#555, see *Progress billing and retainage* below) bills a
-commitment's schedule of values as a sub pay application and releases retainage
-on both sides. **Reports** (#556, see *Job reports* below) add the buyout report
-and job cost by vendor.
+Sub **change orders** (see *Change orders* below) revise a commitment the way
+owner change orders revise the contract; **progress billing** (see *Progress
+billing and retainage* below) bills a commitment's schedule of values as a sub
+pay application and releases retainage on both sides; the **Buyout Report** and
+**Job Cost by Vendor** (see *Job reports* below) read it all.
 
 ## Change orders
 
@@ -647,9 +654,10 @@ change orders and the pay applications above.
 
 ## Job reports
 
-Seven reports sit on the Report Center for a construction company (they lead the
-grid; a Business or Nonprofit company never sees them), each a plain grid with a
-JSON route, a PDF and a CSV like P&L by Job. Each takes an `as_of` date (or
+Seven reports sit on the Report Center for a construction company (its first
+cards, after the three job reports every company has; a Business or Nonprofit
+company never sees them), each a plain grid with a JSON route, a PDF and a CSV
+like P&L by Job. Each takes an `as_of` date (or
 `start_date`/`end_date` where a period applies) and optional `job_id`,
 `customer_id`, `status` and `include_closed`; by default closed and not-awarded
 jobs are left out.
@@ -669,7 +677,9 @@ cost-to-complete forecast** (below), so a job past its budget with work still to
 do reads under 100%; with no forecast entered the default is budget − actual per
 cell, floored at zero, and a job with no budget and no forecast has nothing to
 measure against, so it earns nothing: it is listed with a warning ("no budget or
-forecast; not included"), left out of the totals and the adjusting entry, until
+forecast; nothing earned"); its contract, cost to date, billed to date and
+retainage count in the totals, but its earned revenue, over/under billing and
+loss provision are left out, and so is it from the adjusting entry, until
 its cost to date reaches the contract (then it reads 100% complete, and the loss
 is the true loss, with no extra provision). Every figure reads **as of the date**: cost to date and
 posted revenue to that day, billing and retainage from the applications approved
@@ -792,12 +802,12 @@ W-9 on file is a fact you record, not a default, so it stays No.
 
 ## The reports
 
-The Report Center leads with a **Construction** group: the three reports that
-always existed — **Job Profitability**, **Job Budget vs Actual** and **P&L by
-Job** — then the seven added in #556: **WIP Schedule**, **Cost to Complete**,
-**Change Order Log**, **Buyout Report**, **Job Cost by Vendor**,
-**Cost-to-Complete Forecast** and **Commitment Status** (see *Job reports*
-above). The seven show in construction mode only. Every other report
+In construction mode the Report Center's first ten cards are the three job
+reports that always existed — **Job Profitability**, **Job Budget vs Actual**
+and **P&L by Job** — then the seven construction reports: **WIP Schedule**,
+**Cost to Complete**, **Change Order Log**, **Buyout Report**, **Job Cost by
+Vendor**, **Cost-to-Complete Forecast** and **Commitment Status** (see *Job
+reports* above). The seven show in construction mode only. Every other report
 stays where it is.
 
 ## What this mode does not do yet
@@ -810,11 +820,3 @@ stays where it is.
 - **No full section catalog** (the numbered catalog isn't ours to publish);
   the division titles and a set of common sections ship, and you import the
   rest.
-- **The estimate references trade packages** (#551), **the contract on the
-  job** (#552) is set with its schedule of values, sub commitments bill
-  against a package (#553), **change orders** (#554, see *Change orders* above)
-  revise the contract, budget and commitments, **progress billing** (#555,
-  see *Progress billing and retainage* above) bills the schedule with retainage
-  on both sides, and the **job reports** (#556, see *Job reports* above) add the
-  WIP schedule, cost-to-complete, the change-order log, the buyout report and
-  job cost by vendor.
