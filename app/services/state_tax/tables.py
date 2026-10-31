@@ -122,7 +122,12 @@ _add(
 )
 _add(
     StateSpec(
-        "NV", "Nevada", "none", D(43700), year="2026", source=f"Nevada DETR; {SUI}"
+        "NV",
+        "Nevada",
+        "none",
+        D(43700),
+        year="2026",
+        source="Nevada DETR Employment Security Division, UI Tax (detr.nv.gov/Page/UI_Tax): 2026 taxable wage base $43,700 ($45,400 for 2027). Verified 2026-10-31.",
     )
 )
 _add(
@@ -132,13 +137,19 @@ _add(
         "none",
         D(14000),
         year="2026",
-        source=f"NH Employment Security; {SUI}",
+        source="NH Employment Security, Employer Claims & Taxes (nhes.nh.gov/services/employers/claimtax.htm): taxable wage base $14,000 (statutory, RSA 282-A:4). Verified 2026-10-31.",
         notes="No tax on wages (interest & dividends tax repealed 2025).",
     )
 )
 _add(
     StateSpec(
-        "SD", "South Dakota", "none", D(15000), year="2026", source=f"SD DOL; {SUI}"
+        "SD",
+        "South Dakota",
+        "none",
+        D(15000),
+        year="2026",
+        source="SD Department of Labor & Regulation, Reemployment Assistance for businesses (dlr.sd.gov/ra/businesses): 2026 taxable wage base $15,000; 2026 rate notices mailed 2025-10-31. Verified 2026-10-31.",
+        notes="SD added a 0.08% employer administrative fee on taxable wages for 2026 (not modelled).",
     )
 )
 _add(
@@ -148,11 +159,29 @@ _add(
         "none",
         D(7000),
         year="2026",
-        source=f"TN DOL; {SUI} (base is statutory at $7,000)",
+        source="TN Department of Labor & Workforce Development, UI Tax Rates (tn.gov/workforce/employers/.../unemployment-insurance-tax/tax-rates.html): taxable wage base $7,000 for calendar 2026 (the base moves with the trust-fund balance, so re-check each January). Verified 2026-10-31.",
     )
 )
-_add(StateSpec("TX", "Texas", "none", D(9000), year="2026", source=f"TWC; {SUI}"))
-_add(StateSpec("WY", "Wyoming", "none", D(33800), year="2026", source=f"WY DWS; {SUI}"))
+_add(
+    StateSpec(
+        "TX",
+        "Texas",
+        "none",
+        D(9000),
+        year="2026",
+        source="Texas Workforce Commission, Your Tax Rates (twc.texas.gov/programs/unemployment-tax/your-tax-rates): taxable wage base $9,000 per employee per year. Verified 2026-10-31.",
+    )
+)
+_add(
+    StateSpec(
+        "WY",
+        "Wyoming",
+        "none",
+        D(33800),
+        year="2026",
+        source="Wyoming DWS, Unemployment Taxable Wage Base (dws.wyo.gov/dws-division/unemployment-insurance/wyui/unemployment-taxable-wage-base/): 2026 $33,800; 2027 $34,900. Verified 2026-10-31.",
+    )
+)
 
 # --- Flat-rate states ----------------------------------------------------------
 _add(
@@ -304,10 +333,12 @@ _add(
         "North Carolina",
         "flat",
         D(34200),
-        flat_rate=D("0.0399"),
-        std_deduction=_sd(12750, 25500, 19125),
+        flat_rate=D("0.0409"),
+        std_deduction=_sd(12750, 12750, 19125),
+        exemption=D(2500),
         year="2026",
-        source=f"NC-30 Withholding Tables (2026: 3.99%); {SUI}",
+        source="NC-30 2026 Income Tax Withholding Tables and Instructions for Employers (Web 11-25), Annualized Method p.19: 3.99% income tax rate + 0.1% = 4.09% withholding rate; N.C. standard deduction $12,750 (single, married, surviving spouse) / $19,125 (head of household); $2,500 per allowance (ncdor.gov/income-tax-withholding-tables-and-instructions-employers/open). SUI: NC DES 2026 taxable wage base $34,200 (des.nc.gov). Verified 2026-10-31.",
+        notes="The withholding rate is 0.1 point above the 3.99% income tax rate by design (NC-30). Married uses the single deduction, not double. 2027: tax rate drops to 3.49% (S.L. 2026-41); expect a 3.59% NC-30 rate.",
     )
 )
 _add(
@@ -321,7 +352,7 @@ _add(
             OtherItem("PA employee unemployment contribution", D("0.0007"), None),
         ),
         year="2026",
-        source=f"PA Employer Withholding Guide (REV-415); {SUI}",
+        source="PA Department of Revenue, Employer Withholding (pa.gov/agencies/revenue/resources/tax-types-and-information/employer-withholding): flat 3.07% of compensation, no deductions or exemptions; Employer Withholding Guide REV-415. PA L&I UC Yearly Tax Highlights (pa.gov/agencies/dli/resources/for-employers-uc-tax-services/yearly-tax-highlights): 2026 employee UC withholding 0.07% of all gross wages (no cap); employer taxable wage base $10,000. Verified 2026-10-31.",
         notes="No deductions or exemptions. Local EIT (municipal + school) — use employee.local_tax_rate.",
     )
 )
@@ -333,8 +364,8 @@ _add(
         D(50700),
         flat_rate=D("0.0445"),
         year="2026",
-        source=f"Utah Publication 14 (4.45% for pay periods from 2026-06-01; 4.5% before); {SUI}",
-        notes="Utah's withholding allowance credit is not modelled; the flat rate applies to taxable wages.",
+        source="Utah Publication 14, Withholding Tax Guide (Rev. 4/26, effective for pay periods beginning on or after 2026-06-01), Schedule 7 Annual p.10: 4.45% of taxable wages minus a credit (files.tax.utah.gov/tax/forms/pubs/pub-14.pdf). SUI: Utah DWS, 'During 2026, the taxable wage base is $50,700.00' (jobs.utah.gov/ui/employer/Public/Questions/TaxRates.aspx). Verified 2026-10-31.",
+        notes="SIMPLIFIED: Pub 14 subtracts a credit of $485 (single) / $970 (married) that phases out at 1.3% of annual wages over $9,348 / $18,696. The credit is not modelled: exact for single filers earning $46,656 or more and married filers earning $93,311 or more; below that the engine over-withholds by the remaining credit (at most $485 single / $970 married a year, e.g. married $50,000 → $563). Pay periods before 2026-06-01 used 4.5% (SB 60 made 4.45% retroactive for the tax year).",
     )
 )
 
@@ -683,14 +714,29 @@ _add(
         "brackets",
         D(9000),
         brackets=_br(
-            [(0, 2.46), (4130, 3.51), (24760, 4.55)],
-            [(0, 2.46), (8250, 3.51), (49530, 4.55)],
-            [(0, 2.46), (7700, 3.51), (39560, 4.55)],
+            [
+                (0, 0),
+                (3430, 2.26),
+                (6710, 3.22),
+                (21810, 4.21),
+                (31610, 4.35),
+                (40130, 4.48),
+                (75370, 4.60),
+            ],
+            [
+                (0, 0),
+                (8190, 2.26),
+                (13010, 3.22),
+                (32400, 4.21),
+                (50400, 4.35),
+                (62530, 4.48),
+                (82920, 4.60),
+            ],
         ),
-        std_deduction=_sd(8850, 17700, 12990),
+        exemption=D(2440),
         year="2026",
-        source=f"Nebraska Circular EN (2026: 4.55% top rate, 3.99% by 2027); {TF}; {SUI} (base $9,000; $24,000 for the highest-rate employers)",
-        notes="Nebraska's $176 per-exemption credit is not modelled.",
+        source="Nebraska Circular EN, Income Tax Withholding Percentage Method Tables for wages paid on or after 2026-01-01 (Rev. 11-2025), Table 7 Annual p.13 and Withholding Allowance Table p.9 ($2,440 per allowance) (revenue.nebraska.gov/sites/default/files/doc/business/Cir_En_2025/2026_percent.pdf, .../2026_instruct.pdf). SUI: NDOL 2026 taxable wage base $9,000 ($24,000 for category-20 employers). Verified 2026-10-31.",
+        notes="Head of household uses the single table (Circular EN). The 1.5%-of-wages minimum-withholding rule for employees claiming many allowances is not modelled. 2027 Circular EN (Rev. 8-2026) is already published: $2,510 per allowance, top rate 4.03%.",
     )
 )
 _add(
@@ -701,33 +747,33 @@ _add(
         D(44800),
         brackets=_br(
             [
-                (0, 1.4),
-                (20000, 1.75),
-                (35000, 3.5),
-                (40000, 5.525),
-                (75000, 6.37),
-                (500000, 8.97),
-                (1000000, 10.75),
+                (0, 1.5),
+                (20000, 2.0),
+                (35000, 3.9),
+                (40000, 6.1),
+                (75000, 7.0),
+                (500000, 9.9),
+                (1000000, 11.8),
             ],
             [
-                (0, 1.4),
-                (20000, 1.75),
-                (50000, 2.45),
-                (70000, 3.5),
-                (80000, 5.525),
-                (150000, 6.37),
-                (500000, 8.97),
-                (1000000, 10.75),
+                (0, 1.5),
+                (20000, 2.0),
+                (50000, 2.7),
+                (70000, 3.9),
+                (80000, 6.1),
+                (150000, 7.0),
+                (500000, 9.9),
+                (1000000, 11.8),
             ],
             [
-                (0, 1.4),
-                (20000, 1.75),
-                (50000, 2.45),
-                (70000, 3.5),
-                (80000, 5.525),
-                (150000, 6.37),
-                (500000, 8.97),
-                (1000000, 10.75),
+                (0, 1.5),
+                (20000, 2.0),
+                (50000, 2.7),
+                (70000, 3.9),
+                (80000, 6.1),
+                (150000, 7.0),
+                (500000, 9.9),
+                (1000000, 11.8),
             ],
         ),
         exemption=D(1000),
@@ -737,8 +783,8 @@ _add(
             OtherItem("NJ family leave insurance", D("0.0023"), D(171100)),
         ),
         year="2026",
-        source=f"New Jersey NJ-WT (Rate Tables A / B); NJDOL 2026 rates: UI/WF wage base $44,800 (max $190.40), TDI 0.19% + FLI 0.23% on $171,100; {SUI}",
-        notes="Rate Table A for single, B for married/head of household.",
+        source="NJ Division of Taxation, Tables for Percentage Method of Withholding, Rate A and Rate B, Annual Payroll Period (applicable to wages paid on and after 2020-10-01; still the tables NJ-WT Sept 2025 directs to), $1,000 per allowance (nj.gov/treasury/taxation/pdf/NJWithholdingRateTablesPercentageMethod.pdf). NJDOL 2026 rates (nj.gov/labor/ea/employer-services/rate-info): worker UI 0.3825% + WF/SWF 0.0425% = 0.425% to $44,800; TDI 0.19% and FLI 0.23% to $171,100; employer UI base $44,800. Verified 2026-10-31.",
+        notes="Withholding uses the NJ-W4 Rate Tables, not the income-tax-return schedule: Rate A (single / married filing separately) and Rate B (married filing jointly, head of household, surviving spouse). Rate tables C, D and E, which an employee may elect on the NJ-W4 for two-income households, are not modelled. 2027: TDI/FLI 0.24% each to $177,100; UI base $46,400.",
     )
 )
 _add(
@@ -773,9 +819,10 @@ _add(
                 (315000, 5.9),
             ],
         ),
-        std_deduction=_sd(16100, 32200, 24150),
+        std_deduction=_sd(8050, 16100, 12075),
         year="2026",
-        source=f"New Mexico FYI-104; {TF}; {SUI}",
+        source="New Mexico FYI-104 New Mexico Withholding Tax (Rev. 11/2025, for wages paid on or after 2026-01-01), Table 7 Annual p.7: zero bracket to $8,050 single / $16,100 married / $12,075 head of household, then 1.5%–5.9% (tax.newmexico.gov → Withholding Tax Rates → FYI-104 2026). SUI: NM DWS 2026 taxable wage base $34,800 (dws.nm.gov). Verified 2026-10-31.",
+        notes="The zero bracket is modelled as the standard deduction; the published brackets then start at $0. No per-allowance amount (federal 2020+ W-4).",
     )
 )
 _add(
@@ -785,13 +832,13 @@ _add(
         "brackets",
         D(46600),
         brackets=_br(
-            [(0, 0), (48475, 1.95), (244825, 2.5)],
-            [(0, 0), (80975, 1.95), (298075, 2.5)],
-            [(0, 0), (64700, 1.95), (244825, 2.5)],
+            [(0, 0), (57625, 1.95), (258450, 2.5)],
+            [(0, 0), (57500, 1.95), (168525, 2.5)],
+            [(0, 0), (78475, 1.95), (289675, 2.5)],
         ),
-        std_deduction=_sd(16100, 32200, 24150),
         year="2026",
-        source=f"North Dakota Income Tax Withholding Rates and Instructions; {TF}; {SUI}",
+        source="North Dakota Income Tax Withholding Rates & Instructions for wages paid in 2026, Section 2 (Forms W-4 for 2020 and after), Annual Percentage Method Tables p.45: single 0% to $57,625, 1.95% to $258,450, 2.5% above; married filing jointly $57,500 / $168,525; head of household $78,475 / $289,675; no deduction or allowance step (tax.nd.gov/sites/www/files/documents/forms/individual/2026-iit/2026-income-tax-withholding-rates-booklet.pdf). SUI: Job Service ND 2026 taxable wage base $46,600. Verified 2026-10-31.",
+        notes="Section 2 (2020+ federal W-4) has no allowances, so state_allowances has no effect. Section 1 (pre-2020 W-4s: $5,044 per allowance and lower thresholds) is not modelled.",
     )
 )
 _add(
@@ -800,11 +847,14 @@ _add(
         "Ohio",
         "brackets",
         D(9000),
-        brackets=_br([(0, 0), (26050, 2.75)], [(0, 0), (26050, 2.75)]),
-        exemption=D(2400),
+        brackets=_br(
+            [(0, 1.6), (26050, 2.99), (100000, 3.4)],
+            [(0, 1.6), (26050, 2.99), (100000, 3.4)],
+        ),
+        exemption=D(650),
         year="2026",
-        source=f"Ohio Employer Withholding Tables (2026: flat 2.75% above $26,050); {TF}; {SUI}",
-        notes="Municipal income tax (RITA / CCA cities) and school district tax — use employee.local_tax_rate.",
+        source="Ohio Department of Taxation, Employer Withholding Taxes - Percentage Method, effective 2026-08-01: $12.50 per exemption per week ($650 a year); 1.600% to $500.96/week ($26,050 a year), 2.990% to $1,923.08/week ($100,000), 3.400% above (dam.assets.ohio.gov/image/upload/tax.ohio.gov/employer_withholding/2026%20Withholding%20Tables/WHT_PercentageMethod_2026.pdf). SUI: ODJFS 2026 taxable wage base $9,000. Verified 2026-10-31.",
+        notes="Figures in force now (from 2026-08-01). Pay dates 2026-01-01 to 2026-07-31 used the 2025-10-01 tables: 1.775% / 2.990% / 3.640% at the same breaks and the same $650 exemption. Ohio publishes weekly through monthly tables; the annual breaks are 52 × the weekly ones (within a dollar). 2.75% is only the supplemental-wage rate. Municipal income tax (RITA / CCA cities) and school district tax — use employee.local_tax_rate.",
     )
 )
 _add(
@@ -817,10 +867,11 @@ _add(
             [(0, 0), (3750, 2.5), (4900, 3.5), (7200, 4.5)],
             [(0, 0), (7500, 2.5), (9800, 3.5), (14400, 4.5)],
         ),
-        std_deduction=_sd(6350, 12700, 9350),
+        std_deduction=_sd(6350, 12700, 6350),
         exemption=D(1000),
         year="2026",
-        source=f"Oklahoma Income Tax Withholding Tables (2026: brackets collapsed to three, 4.5% top); {TF}; {SUI}",
+        source="Oklahoma Income Tax Withholding Tables, Packet OW-2 (Revised 11-2025, effective 2026-01-01), Table 7 Annual p.9: single 0% to $10,100, 2.5% to $11,250, 3.5% to $13,550, 4.5% above; married $20,200 / $22,500 / $27,100; $1,000 per allowance p.6 (oklahoma.gov/.../withholding-tables/WHTables-2026.pdf). SUI: OESC 2026 taxable wage base $25,000 ($24,400 for 2027). Verified 2026-10-31.",
+        notes="Modelled as a $6,350 / $12,700 deduction plus brackets at 3,750 / 4,900 / 7,200 (× 2 married), which reproduces Table 7 exactly. OW-2 has single and married tables only; head of household uses single.",
     )
 )
 _add(
@@ -830,14 +881,13 @@ _add(
         "brackets",
         D(30800),
         brackets=_br([(0, 3.75), (82050, 4.75), (186450, 5.99)]),
-        std_deduction=_sd(11200, 22400, 16800),
-        exemption=D(5250),
+        exemption=D(1000),
         employee_items=(
             OtherItem("RI Temporary Disability Insurance", D("0.011"), D(100000)),
         ),
         year="2026",
-        source=f"Rhode Island Withholding Tax Booklet; RI DLT 2026: TDI 1.1% on $100,000, UI base $30,800; {TF}",
-        notes="Brackets are the same for every filing status. Deduction/exemption phase out at high income; full amounts used.",
+        source="Rhode Island 2026 Withholding Tax Booklet, Percentage Method for the period beginning on or after 2026-01-01 (updated 11/04/2025) p.8-9: $1,000 per withholding exemption, no standard deduction; 3.75% to $82,050, 4.75% to $186,450, 5.99% above, all filing statuses (tax.ri.gov/sites/g/files/xkgbur541/files/2025-12/2026%20Withholding%20Tax%20Booklet.pdf). RI DLT 2026 UI & TDI Quick Reference: TDI/TCI 1.1% of the first $100,000; UI taxable wage base $30,800 ($32,300 for the highest-rate employers). Verified 2026-10-31.",
+        notes="Brackets are the same for every filing status. SIMPLIFIED: the exemption amount is $0 once annual wages exceed $290,800 (booklet p.8); that cut-off is not modelled, so employees above it are under-withheld by 5.99% × $1,000 per exemption claimed.",
     )
 )
 _add(
@@ -849,11 +899,10 @@ _add(
         brackets=_br(
             [(0, 0), (3640, 3), (18230, 6.0)], [(0, 0), (3640, 3), (18230, 6.0)]
         ),
-        std_deduction=_sd(16100, 32200, 24150),
-        exemption=D(4930),
+        exemption=D(5000),
         year="2026",
-        source=f"South Carolina Withholding Tax Tables (WH-1603F); {TF}; {SUI}",
-        notes="Top rate is legislated to step; check mid-year.",
+        source="SC DOR WH-1603F, Formula for Computing South Carolina 2026 Withholding Tax (Rev. 11/4/25): $5,000 per personal allowance; standard deduction $0 with zero allowances, otherwise 10% of gross wages up to $7,500; 0% to $3,640, 3% to $18,230, 6% above (dor.sc.gov/sites/dor/files/forms/WH1603F_2026.pdf). SUI: SC DEW 2026 taxable wage base $14,000. Verified 2026-10-31.",
+        notes="SIMPLIFIED: WH-1603F's standard deduction (10% of annual wages, max $7,500, only when one or more allowances are claimed) depends on wages and is not modelled. Exact for employees claiming zero allowances; an employee claiming allowances is over-withheld by 6% of that deduction (up to $450 a year; $300 at $50,000). Act 110 of 2026 rewrote the 2026 income tax (1.99% / 5.21%) but SCDOR has not revised the withholding formula; this is the formula in force.",
     )
 )
 _add(
@@ -863,14 +912,16 @@ _add(
         "brackets",
         D(15400),
         brackets=_br(
-            [(0, 3.35), (49400, 6.6), (119700, 7.6), (249700, 8.75)],
-            [(0, 3.35), (82500, 6.6), (199450, 7.6), (304000, 8.75)],
-            [(0, 3.35), (66200, 6.6), (171100, 7.6), (277000, 8.75)],
+            [(0, 0), (3925, 3.35), (54675, 6.6), (126775, 7.6), (260225, 8.75)],
+            [(0, 0), (11775, 3.35), (96475, 6.6), (216525, 7.6), (323825, 8.75)],
         ),
-        std_deduction=_sd(7650, 15300, 11500),
-        exemption=D(5300),
+        exemption=D(5400),
+        employer_items=(
+            OtherItem("VT Child Care Contribution (employer)", D("0.0044"), None),
+        ),
         year="2026",
-        source=f"Vermont Income Tax Withholding Instructions; {TF}; {SUI}",
+        source="Vermont GB-1210-2026, 2026 Income Tax Withholding Instructions, Tables, and Charts (effective 2026-01-01 to 2026-12-31), Annual Payrolls table p.6: $5,400 per withholding allowance; single 0% to $3,925, 3.35% to $54,675, 6.6% to $126,775, 7.6% to $260,225, 8.75% above; married $11,775 / $96,475 / $216,525 / $323,825; Child Care Contribution 0.44% employer payroll tax p.4 (tax.vermont.gov/sites/tax/files/documents/GB-1210-2026.pdf). SUI: VT DOL, taxable wage base $15,400 effective 2026-01-01 (labor.vermont.gov/node/5551). Verified 2026-10-31.",
+        notes="GB-1210 has single and married tables only; head of household uses single. The Child Care Contribution is an employer tax on all wages subject to Vermont withholding (no cap); an employer may deduct up to a quarter of it (0.11%) from the employee — that optional employee share is not modelled.",
     )
 )
 _add(
@@ -883,10 +934,11 @@ _add(
             [(0, 2), (3000, 3), (5000, 5), (17000, 5.75)],
             [(0, 2), (3000, 3), (5000, 5), (17000, 5.75)],
         ),
-        std_deduction=_sd(8750, 17500, 8750),
+        std_deduction=_sd(8750, 8750, 8750),
         exemption=D(930),
         year="2026",
-        source=f"Virginia Employer Withholding Instructions (2026 std deduction $8,750/$17,500); {TF}; {SUI}",
+        source="Virginia Income Tax Withholding Guide for Employers (2614086 Rev. 10/26), Formula for Computing Tax to be Withheld p.21, effective for wages paid after 2025-07-01: T = (G × P) − [$8,750 + E1 × $930 + E2 × $800]; 2% to $3,000, 3% to $5,000, 5% to $17,000, 5.75% above (tax.virginia.gov/sites/default/files/vatax-pdf/employer-withholding-instructions.pdf). SUI: VEC taxable wage base $8,000 (statutory). Verified 2026-10-31.",
+        notes="The withholding formula deducts one $8,750 amount for every employee regardless of filing status (the $17,500 married figure is the income-tax-return deduction, used only in the wage-bracket tables). E2 (age 65 and over / blind, $800 each) is not modelled — add those as allowances at $930 or use extra withholding. 2027: the deduction rises to $9,200 / $18,400 (2026 special-session budget).",
     )
 )
 _add(
@@ -896,12 +948,13 @@ _add(
         "brackets",
         D(9500),
         brackets=_br(
-            [(0, 2.22), (10000, 2.96), (25000, 3.33), (40000, 4.44), (60000, 4.82)],
-            [(0, 2.22), (10000, 2.96), (25000, 3.33), (40000, 4.44), (60000, 4.82)],
+            [(0, 2.11), (7500, 2.81), (18750, 3.16), (30000, 4.22), (45000, 4.58)],
+            [(0, 2.11), (7500, 2.81), (18750, 3.16), (30000, 4.22), (45000, 4.58)],
         ),
         exemption=D(2000),
         year="2026",
-        source=f"West Virginia Employer's Withholding Tax Tables; {TF}; {SUI}",
+        source="West Virginia IT-100.2.A, Tables for Percentage Method of Withholding (March 2026, rates after SB 392's 5% cut retroactive to 2026-01-01), Two Earner / Two or More Jobs Table 5 Annual p.2: $2,000 per exemption; 2.11% to $7,500, 2.81% to $18,750, 3.16% to $30,000, 4.22% to $45,000, 4.58% above (tax.wv.gov/Documents/Withholding/it100.2a.pdf). SUI: W. Va. Code §21A-1A-28 taxable wage base $9,500. Verified 2026-10-31.",
+        notes="The two-earner table is the default for every employee (IT-104). The optional one-earner table (same rates at $10,000 / $25,000 / $40,000 / $60,000), for a single, head-of-household or one-income married employee who checks the box on IT-104 line 5, is not modelled: such employees are over-withheld by up to $156 a year.",
     )
 )
 _add(
@@ -911,15 +964,14 @@ _add(
         "brackets",
         D(14000),
         brackets=_br(
-            [(0, 3.5), (15110, 4.4), (51950, 5.3), (332720, 7.65)],
-            [(0, 3.5), (20150, 4.4), (69260, 5.3), (443630, 7.65)],
-            [(0, 3.5), (15110, 4.4), (51950, 5.3), (332720, 7.65)],
+            [(0, 3.54), (12760, 4.65), (25520, 5.30), (280950, 7.65)],
+            [(0, 3.54), (12760, 4.65), (25520, 5.30), (280950, 7.65)],
         ),
-        std_deduction=_sd(13960, 25840, 18000),
-        exemption=D(700),
+        std_deduction=_sd("2835.60", "4606.40", "2835.60"),
+        exemption=D(400),
         year="2026",
-        source=f"Wisconsin Publication W-166 (2026 std deduction $13,960/$25,840); {TF}; {SUI}",
-        notes="Standard deduction phases out with income; the maximum is used.",
+        source="Wisconsin Publication W-166, Withholding Tax Guide (1/26), Alternate Method of Withholding Wisconsin Income Tax p.25-26 (effective for withholding periods beginning on or after 2022-01-01, unchanged for 2026): deduction $6,702 single / $9,461 married phasing down (see notes), $400 per exemption; 3.54% to $12,760, 4.65% to $25,520, 5.30% to $280,950, 7.65% above, all statuses (revenue.wi.gov/DOR%20Publications/pb166.pdf). SUI: WI DWD 2026 taxable wage base $14,000. Verified 2026-10-31.",
+        notes="SIMPLIFIED: W-166's deduction depends on wages — single $6,702 below $17,780 in annual wages, less 12% of wages over $17,780, $0 from $73,630; married $9,461 below $25,727, less 20% of wages over $25,727, $0 from $73,032. The engine uses the deduction at $50,000 of annual wages ($2,835.60 single / $4,606.40 married), so it is exact there and off by 12% (single) or 20% (married) of the distance from $50,000 × the marginal rate elsewhere: $10,000 away = about $64 a year single / $106 married, and employees at or above $73,630 / $73,032 are under-withheld by $150 / $244 a year. Head of household uses the single figures.",
     )
 )
 
