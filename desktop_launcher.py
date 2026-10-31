@@ -531,7 +531,9 @@ def launch_company(
         stop_server(proc)
         raise RuntimeError(
             f"Server did not become healthy on port {port}. "
-            "Check for another app using the port, then try again."
+            "The server's own message is in launcher.log in the data folder "
+            "(a setting in .env it refuses is named there); otherwise check for "
+            "another app using the port, then try again."
         )
     return proc
 

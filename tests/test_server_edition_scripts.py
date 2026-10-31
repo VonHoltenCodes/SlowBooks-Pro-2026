@@ -81,7 +81,7 @@ def test_the_firewall_rule_is_private_and_domain_only():
 def test_the_data_home_is_restricted_to_system_and_administrators():
     text = INSTALL.read_text(encoding="utf-8")
     assert re.search(
-        r"icacls \$DataDir /inheritance:r /grant .*S-1-5-18.*S-1-5-32-544", text
+        r"icacls \$DataDir /inheritance:r /grant:r .*S-1-5-18.*S-1-5-32-544", text
     )
 
 
@@ -120,3 +120,21 @@ def test_the_installer_restarts_the_server_task_and_skips_the_window_on_a_server
         "'/Query /TN ' + ServerTask" in text
         and "ServerTask = 'SlowBooksProServer'" in text
     )
+
+
+def test_the_install_acl_grants_on_the_folder_and_resets_the_files():
+    # W-90 (2.31.3 gate): a /T grant with /inheritance:r stripped every
+    # existing file's entries and gave it none, so the server could not read
+    # companies.json. The grant goes on the folder; the files are reset to
+    # inherit; icacls' exit code is checked; the server's /health is awaited.
+    text = INSTALL.read_text(encoding="utf-8")
+    grant = [
+        ln
+        for ln in text.splitlines()
+        if "/inheritance:r" in ln and not ln.lstrip().startswith("#")
+    ]
+    assert len(grant) == 1 and "/T" not in grant[0] and "/grant:r" in grant[0]
+    assert "/reset /T /C" in text
+    assert text.count("$LASTEXITCODE -ne 0") >= 2
+    assert "/health" in text and "Get-Content $log -Tail" in text
+    assert "Get-NetConnectionProfile" in text and "Set-NetConnectionProfile" in text

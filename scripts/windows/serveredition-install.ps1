@@ -86,6 +86,9 @@ if ((Test-HasBooks $DataDir) -and -not (Test-HasBooks $ServerData)) {
         Move-Item $oldEnv -Destination $newEnv
         Write-Host "   .env (the encryption and session keys; it was at $oldEnv)"
     }
+    if (Test-Path "C:\SlowBooksServer") {
+        Write-Host "   (C:\SlowBooksServer holds only the old program now; delete it when you like)"
+    }
 }
 
 # Bring existing desktop-mode books along (docs promised this; the script
@@ -125,7 +128,17 @@ if (-not (Test-HasBooks $ServerData) -and (Test-HasBooks $DesktopData)) {
 # which here would be every company file and the .env with the keys. The
 # server runs as SYSTEM; administrators keep access for backups.
 Write-Host ">> Restricting $DataDir to SYSTEM and Administrators"
-icacls $DataDir /inheritance:r /grant "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /T /Q | Out-Null
+# The grant goes on the folder only: (OI)(CI) entries apply to what is under
+# it by inheritance. A /T grant with /inheritance:r stripped every existing
+# file's entries and gave it none (a file takes no (OI)(CI) entry), so the
+# server could not read companies.json. The /reset then makes every existing
+# file and folder inherit the two entries.
+icacls $DataDir /inheritance:r /grant:r "*S-1-5-18:(OI)(CI)F" "*S-1-5-32-544:(OI)(CI)F" /Q | Out-Null
+if ($LASTEXITCODE -ne 0) { Write-Host "icacls could not set $DataDir (exit $LASTEXITCODE)" -ForegroundColor Red; exit 1 }
+if (Get-ChildItem $DataDir -Force -ErrorAction SilentlyContinue | Select-Object -First 1) {
+    icacls "$DataDir\*" /reset /T /C /Q | Out-Null
+    if ($LASTEXITCODE -ne 0) { Write-Host "icacls could not reset the files under $DataDir (exit $LASTEXITCODE)" -ForegroundColor Red; exit 1 }
+}
 
 # Private and domain networks only: a laptop host on a public network
 # (netsh's default is every profile) would serve the sign-in screen, the
@@ -153,7 +166,38 @@ Register-ScheduledTask -TaskName $TaskName -Action $Action -Trigger $Trigger `
 
 Write-Host ">> Starting the server now"
 Start-ScheduledTask -TaskName $TaskName
-Start-Sleep -Seconds 8
+$healthy = $false
+for ($i = 0; $i -lt 30 -and -not $healthy; $i++) {
+    Start-Sleep -Seconds 2
+    try {
+        $r = Invoke-WebRequest -Uri "http://127.0.0.1:$Port/health" -UseBasicParsing -TimeoutSec 3
+        if ($r.StatusCode -eq 200) { $healthy = $true }
+    } catch { }
+}
+if (-not $healthy) {
+    $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction SilentlyContinue
+    Write-Host ">> The server did not answer on port $Port within a minute." -ForegroundColor Red
+    if ($info) { Write-Host ("   Task state: " + (Get-ScheduledTask -TaskName $TaskName).State + ", last result " + $info.LastTaskResult) }
+    $log = Join-Path $ServerData "launcher.log"
+    if (Test-Path $log) {
+        Write-Host "   The last lines of $log :"
+        Get-Content $log -Tail 15 | ForEach-Object { Write-Host ("   " + $_) }
+    }
+    Write-Host "   Fix what it says, then: Start-ScheduledTask -TaskName $TaskName"
+    exit 1
+}
+
+# A Windows network marked Public gets no port from the rule above (Windows
+# puts a new network there until someone says it is private).
+$public = Get-NetConnectionProfile -ErrorAction SilentlyContinue | Where-Object { $_.NetworkCategory -eq "Public" }
+if ($public) {
+    Write-Host ""
+    Write-Host ">> This PC's network is marked Public in Windows, so the firewall rule does not apply to it" -ForegroundColor Yellow
+    foreach ($p in $public) {
+        Write-Host ("   If " + $p.Name + " is your office network, mark it private (as administrator):")
+        Write-Host ("   Set-NetConnectionProfile -InterfaceIndex " + $p.InterfaceIndex + " -NetworkCategory Private")
+    }
+}
 
 $ips = Get-NetIPAddress -AddressFamily IPv4 |
     Where-Object { $_.IPAddress -notlike "127.*" -and $_.IPAddress -notlike "169.254.*" } |

@@ -37,9 +37,11 @@ PFML_TOTAL_RATE = Decimal("0.0113")  # total premium as a fraction of gross
 PFML_EMPLOYEE_SHARE = Decimal("0.7143")  # employee pays 71.43% of the premium
 PFML_EMPLOYER_SHARE = Decimal("0.2857")  # employer pays 28.57% of the premium
 PFML_WAGE_CAP = Decimal("184500")  # the 2026 Social Security wage base
-# SIMPLIFICATION: employers with fewer than 50 employees owe no employer
-# share (ESD sizes them each September); the engine has no headcount, so the
-# employer share is always charged (the 50+ employee case).
+# Employers with fewer than 50 employees owe no employer share (ESD sizes
+# them each September from the previous four quarters). The pay run passes
+# the company's active-employee count as employee_count; a caller that
+# passes none is charged the employer share (the 50+ employee case).
+PFML_EMPLOYER_MIN_EMPLOYEES = 50
 
 # --- WA Cares Fund (long-term care) -----------------------------------------
 WA_CARES_RATE = Decimal("0.0058")  # employee-only, fraction of gross, no cap
@@ -71,7 +73,12 @@ class WAEngine(StateEngine):
         pfml_wages = max(Decimal("0"), min(gross, PFML_WAGE_CAP - ytd))
         pfml_total = pfml_wages * PFML_TOTAL_RATE
         pfml_employee = _q(pfml_total * PFML_EMPLOYEE_SHARE)
-        pfml_employer = _q(pfml_total * PFML_EMPLOYER_SHARE)
+        count = _extra.get("employee_count")
+        pfml_employer = (
+            _q(pfml_total * PFML_EMPLOYER_SHARE)
+            if count is None or count >= PFML_EMPLOYER_MIN_EMPLOYEES
+            else Decimal("0.00")
+        )
 
         # WA Cares — employee-only long-term-care premium.
         wa_cares = _q(gross * WA_CARES_RATE)

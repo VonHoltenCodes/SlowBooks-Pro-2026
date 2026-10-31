@@ -226,7 +226,7 @@ const TaxFormsPage = {
                 return '<option value="">No 1099-NEC vendors: mark vendors "1099 Vendor: Yes" on the Vendors page</option>';
             }
             for (const v of data.vendors) {
-                html += `<option value="${v.vendor_id}">${escapeHtml(v.name)} — ${formatCurrency(v.total_paid)}${v.reportable ? '' : ' (under $600)'}</option>`;
+                html += `<option value="${v.vendor_id}">${escapeHtml(v.name)} — ${formatCurrency(v.total_paid)}${v.reportable ? '' : ` (under ${formatCurrency(data.threshold)})`}</option>`;
             }
         } catch (_) {
             html += '<option value="" disabled>Could not load vendors</option>';

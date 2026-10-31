@@ -290,6 +290,25 @@ def ss_wage_base(year: int | None = None) -> Decimal:
     return SS_WAGE_BASES[nearest]
 
 
+# The year the withholding schedules and state tables in this build are for.
+# Only the Social Security wage base is kept per year (SS_WAGE_BASES); a pay
+# run dated in another year is figured with these and says so.
+TABLES_YEAR = 2026
+
+
+def tables_year_note(year: int | None) -> str | None:
+    """The sentence a pay run carries when its pay date is not in the year
+    the federal schedules and state tables are for; None when it is."""
+    if year is None or year == TABLES_YEAR:
+        return None
+    return (
+        f"This run is dated {year}, and SlowBooks withholds with the "
+        f"{TABLES_YEAR} federal schedules, state tables and leave rates (only "
+        f"the Social Security wage base is {year}'s). Check the figures against "
+        f"{year}'s publications before relying on them."
+    )
+
+
 def wage_base_note(year: int | None) -> str | None:
     """The sentence a pay run or an opening balance carries when its year
     has no Social Security wage base here; None when it has one."""
@@ -428,6 +447,7 @@ def calculate_withholdings(
     local_tax_rate=None,
     ytd_bases: dict | None = None,
     year: int | None = None,
+    employee_count: int | None = None,
 ) -> dict:
     """Compute a full set of payroll taxes for one employee for one pay period.
 
@@ -537,6 +557,9 @@ def calculate_withholdings(
         # Oregon subtracts the period's federal withholding from wages
         # before its rates (150-206-436); the other engines ignore it.
         federal_withholding=federal,
+        # the company's active employees: WA PFML (50+) and Paid Leave
+        # Oregon (25+) charge their employer share by headcount
+        employee_count=employee_count,
     )
     engine = get_engine(work_state)
     state = engine.calculate(

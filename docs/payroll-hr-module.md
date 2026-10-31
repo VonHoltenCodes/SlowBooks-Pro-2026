@@ -28,7 +28,15 @@ rate (37% over $1,000,000), Social Security 6.2% to the year's wage base,
 Medicare 1.45% plus the 0.9% additional over $200,000, FUTA 0.6% on the first
 $7,000 (`app/services/payroll_service.py`, each constant with the publication
 it came from). The schedules are the year's own as published in December;
-check the January pay run against the new Pub 15-T each year.
+check the January pay run against the new Pub 15-T each year. Only the
+Social Security wage base is kept per year: a pay run dated in another year
+(back-dated 2025 payroll entered during a conversion, say) is figured with
+this build's schedules and tables and carries a warning saying so.
+
+Washington PFML's employer share and Paid Leave Oregon's apply by headcount
+(50 and 25 employees): the pay run counts the company's active employees and
+charges the employer share only from those sizes; the employee's share is
+withheld either way.
 
 ## State withholding
 

@@ -71,10 +71,14 @@ The script:
   place once, and says so);
 - restricts the data home to SYSTEM and Administrators. Windows lets every
   local account read what is created under `C:\ProgramData` by default,
-  which here would be every company file and the keys;
+  which here would be every company file and the keys (the grant goes on
+  the folder and the files under it are reset to inherit it, so books that
+  were already there stay readable to the server);
 - opens TCP 3001 in Windows Firewall on **private and domain** networks
   only, so a laptop host on a network Windows calls Public does not serve the
-  sign-in screen to it;
+  sign-in screen to it. When the host's own network is marked Public, the
+  script says so at the end and prints the `Set-NetConnectionProfile` line
+  that marks it Private;
 - registers the startup task **SlowBooksProServer**, which runs the server
   as SYSTEM before anyone logs in, with no time limit, on battery as well as
   mains, and restarted if it dies;
@@ -310,7 +314,8 @@ whoever reaches it, and the session cookie travels unencrypted.
 - **Other computers can't connect** — the firewall rule covers private and
   domain networks; if Windows calls the office network Public, change the
   network's profile to Private (Settings → Network & internet → the network
-  → Network profile type). Confirm host and clients are on the same network.
+  → Network profile type, or the `Set-NetConnectionProfile` line the install
+  script printed). Confirm host and clients are on the same network.
   The quick-trial path relies on you clicking Allow at the firewall prompt.
 - **The server stops after the host sleeps or goes on battery** — an install
   made before 2.31.3 used Task Scheduler's defaults, which stop a task on

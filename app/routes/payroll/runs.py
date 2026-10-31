@@ -25,7 +25,12 @@ from app.models.accounts import Account
 from app.schemas.payroll import PayRunCreate, PayRunResponse
 from app.schemas.deductions import GrossUpRequest, GrossUpResponse
 from app.services.payroll_accounts import PayrollAccountProblem, posting_accounts
-from app.services.payroll_service import _q, calculate_withholdings, wage_base_note
+from app.services.payroll_service import (
+    _q,
+    calculate_withholdings,
+    tables_year_note,
+    wage_base_note,
+)
 from app.services.accounting import create_journal_entry
 from app.services.garnishment import (
     GarnishmentSpec,
@@ -224,6 +229,11 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
     db.flush()
 
     year = data.pay_date.year
+    # the company's active employees, for the state leave programs whose
+    # employer share applies from a headcount (WA PFML 50+, Paid Leave Oregon 25+)
+    employee_count = (
+        db.query(Employee).filter(Employee.is_active.is_(True)).count()  # noqa: E712
+    )
     total_gross = total_taxes = total_net = total_employer = Decimal("0")
     total_employer_benefits = Decimal("0")
     period = f"{data.period_start} to {data.period_end}"
@@ -391,6 +401,7 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
             state_extra_withholding=emp.state_extra_withholding or 0,
             state_rate_override=emp.state_rate_override,
             local_tax_rate=emp.local_tax_rate,
+            employee_count=employee_count,
             hours=total_hours,
             pretax_deductions=ben.pretax_federal + adhoc_pretax,
             pretax_state=ben.pretax_state + adhoc_pretax,
@@ -529,6 +540,9 @@ def create_pay_run(data: PayRunCreate, db: Session = Depends(get_db)):
         # Nothing is written: the session is never committed.
         raise HTTPException(status_code=422, detail=" ".join(refused))
     note = wage_base_note(year)
+    if note:
+        warnings.append(note)
+    note = tables_year_note(year)
     if note:
         warnings.append(note)
 
@@ -1348,10 +1362,12 @@ def gross_up_paycheck(data: GrossUpRequest, db: Session = Depends(get_db)):
     work_state = (emp.work_state or "WA").upper()
     wh_state = withholding_state(work_state, emp.residence_state)
     bases = wage_base_ytd(db, emp.id, year, work_state)
+    employee_count = db.query(Employee).filter(Employee.is_active.is_(True)).count()
 
     def net_of(g: Decimal) -> Decimal:
         return calculate_withholdings(
             g,
+            employee_count=employee_count,
             pay_frequency=emp.pay_frequency.value if emp.pay_frequency else "biweekly",
             filing_status=emp.filing_status.value if emp.filing_status else "single",
             multiple_jobs=bool(emp.multiple_jobs),

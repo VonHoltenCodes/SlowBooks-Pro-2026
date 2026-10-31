@@ -245,7 +245,9 @@ def generate_1099_nec_pdf(db: Session, year: int, vendor_id: int, payer: dict) -
         raise ValueError(f"Vendor {vendor_id} is not 1099-eligible or does not exist")
 
     template = _jinja_env.get_template("form_1099nec.html")
-    html_str = template.render(rec=record, payer=payer, year=year)
+    html_str = template.render(
+        rec=record, payer=payer, year=year, threshold=nec_threshold(year)
+    )
     return render_pdf(html_str)
 
 
@@ -260,5 +262,6 @@ def generate_1096_pdf(db: Session, year: int, payer: dict) -> bytes:
         vendors=reportable,
         payer=payer,
         year=year,
+        threshold=nec_threshold(year),
     )
     return render_pdf(html_str)

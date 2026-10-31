@@ -50,11 +50,13 @@ TRANSIT_TAX_RATE = Decimal("0.001")  # 0.1% of gross, employee
 
 # --- Paid Leave Oregon (2026) -----------------------------------------------
 # 1% of gross wages up to the Social Security wage base ($184,500 in 2026),
-# 60% employee / 40% employer. SIMPLIFICATION: employers averaging fewer
-# than 25 employees owe no employer share; SlowBooks has no headcount in the
-# engine, so the employer share is always charged (the large-employer case).
+# 60% employee / 40% employer. Employers averaging fewer than 25 employees
+# owe no employer share: the pay run passes the company's active-employee
+# count as employee_count; a caller that passes none is charged it (the
+# large-employer case).
 PAID_LEAVE_EMPLOYEE_RATE = Decimal("0.006")
 PAID_LEAVE_EMPLOYER_RATE = Decimal("0.004")
+PAID_LEAVE_EMPLOYER_MIN_EMPLOYEES = 25
 PAID_LEAVE_WAGE_CAP = Decimal("184500")
 
 # --- Oregon income tax, 150-206-436 (2026) ----------------------------------
@@ -177,7 +179,12 @@ class OregonEngine(StateEngine):
         ytd = Decimal(str(ytd_gross))
         pl_wages = max(Decimal("0"), min(gross, PAID_LEAVE_WAGE_CAP - ytd))
         paid_leave_employee = _q(pl_wages * PAID_LEAVE_EMPLOYEE_RATE)
-        paid_leave_employer = _q(pl_wages * PAID_LEAVE_EMPLOYER_RATE)
+        count = _extra.get("employee_count")
+        paid_leave_employer = (
+            _q(pl_wages * PAID_LEAVE_EMPLOYER_RATE)
+            if count is None or count >= PAID_LEAVE_EMPLOYER_MIN_EMPLOYEES
+            else Decimal("0.00")
+        )
 
         # Statewide transit tax — flat 0.1% of gross, employee.
         transit_tax = _q(gross * TRANSIT_TAX_RATE)
