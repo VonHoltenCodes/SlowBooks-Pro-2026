@@ -1159,12 +1159,13 @@ const BankingPage = {
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)'}">${formatCurrency(t.amount)}</td>
                 <td>${AccountQuickAdd.picker(`<select id="cat-${t.id}" class="review-cat" data-write data-current="${t.category_account_id || ''}" aria-label="Category" onchange="BankingPage.setCategory(${t.id}, this)"><option value="">${t.category_name ? escapeHtml(t.category_name) : 'Pick a category…'}</option></select>`, 'review', { ctx: accountId })}</td>
                 ${BankingPage._reviewDimCells(t)}
-                <td style="white-space:nowrap;" data-write>
+                <td style="white-space:nowrap;" data-write><div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
                     <button class="btn btn-sm btn-primary" onclick="BankingPage.addLine(${t.id}, ${accountId})">Add</button>
                     ${t.suggested_payout ? `<button class="btn btn-sm btn-secondary" onclick="BankingPage.showPayout(${t.id}, ${accountId})" title="Record this deposit as a ${escapeHtml(t.suggested_payout.display_name)} payout, clearing the clearing account">Payout…</button>` : ''}
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.showMatch(${t.id}, ${accountId})">Match</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.excludeLine(${t.id}, ${accountId})">Exclude</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.ruleFromLine(${t.id}, ${accountId})" title="A bank rule from this payee and the category chosen">Rule…</button>
+                </div>
                 </td>
             </tr>`).join('');
         setTimeout(() => BankingPage._fillCategorySelects(kind), 0);
@@ -1233,7 +1234,7 @@ const BankingPage = {
     // jobs the Job box then narrows to. Left blank, the line posts as it
     // always did: no class, no job, the vendor its payee or rule names.
     _reviewDimCells(t) {
-        const small = 'font-size:11px; padding:2px 4px; width:100%; min-width:0; display:block;';
+        const small = 'font-size:11px; padding:2px 4px; width:150px; display:block;';
         let html = '';
         if (BankingPage._lineClassShown()) {
             const opts = BankingPage._classes_().filter(c => !c.is_archived)
@@ -1250,14 +1251,11 @@ const BankingPage = {
         if (moneyIn) {
             const opts = (BankingPage._customers || [])
                 .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
-            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small} grid-column:1 / -1;"><option value="">—</option>${opts}</select>`;
+            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
         } else {
-            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small} grid-column:1 / -1;">`;
+            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}">`;
         }
-        // two columns: Class and Job side by side, the Name across the
-        // second line, so the row is two lines tall, not four (the owner's
-        // note on the 2.31.4 gate: a stack took a quarter of the row)
-        return html ? `<td style="min-width:220px;"><div style="display:grid; grid-template-columns:1fr 1fr; gap:2px 4px;">${html}</div></td>` : '';
+        return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';
     },
 
     // What a review row chose besides its category, as the add call takes it.
