@@ -757,7 +757,7 @@ const InvoicesPage = {
                     <div class="form-group"><label>Terms</label>
                         <select name="terms" id="invoice-terms"
                             onchange="InvoicesPage._recomputeDueDate()">
-                            ${PaymentTerms.optionsHtml(inv.terms)}
+                            ${PaymentTerms.optionsHtml(inv.terms, null, !id || inv.payment_term_id != null)}
                         </select>
                         <div class="hint" id="invoice-terms-hint">${PaymentTerms.hintHtml({ note: inv.terms_note, discount_line: inv.discount_line })}</div></div>
                     <div class="form-group"><label>Due Date</label>
@@ -987,11 +987,15 @@ const InvoicesPage = {
             });
         });
 
+        // the terms text, and the id of the list entry when one is picked, so
+        // a list pick whose name matches legacy text ties the document (#665)
+        const termSel = PaymentTerms.selection(form.terms);
         const data = {
             customer_id: parseInt(form.customer_id.value),
             date: form.date.value,
             due_date: form.due_date.value || null,
-            terms: form.terms.value,
+            terms: termSel.terms,
+            payment_term_id: termSel.payment_term_id,
             po_number: form.po_number.value || null,
             is_pledge: form.is_pledge ? form.is_pledge.checked : false,
             class_id: classIdFromForm(form),

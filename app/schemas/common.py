@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    StrictInt,
     StringConstraints,
     field_validator,
 )
@@ -284,3 +285,13 @@ def _check_discount(value):
 
 
 Discount = Annotated[Decimal, AfterValidator(_check_discount)]
+
+
+# A row id a request carries, for a column stored as a signed 64-bit integer.
+# StrictInt refuses a bool (``true`` was read as id 1) and a string; the
+# bounds keep an id out of the range that overflowed SQLite with a 500
+# (#665: discount_account_id/invoice_id/bill_id of 2**63 or more). The 422's
+# sentence names the field ("Discount account must be ... or less.").
+BIGINT_MAX = 9223372036854775807
+
+StrictId = Annotated[StrictInt, Field(ge=1, le=BIGINT_MAX)]

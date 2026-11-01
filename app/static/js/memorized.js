@@ -395,7 +395,7 @@ const MemorizedPage = {
                         <div class="hint" id="mem-bill-number-hint">Left blank, each bill is numbered the date and the vendor's initials, as Enter Bill numbers one. A number typed here is used as it is on the first bill and -2, -3... after that, since a vendor's bill number cannot repeat. Memorize from a bill leaves it blank on purpose.</div></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms" title="The due date follows from the terms">
-                            ${PaymentTerms.optionsHtml(terms, "The vendor's terms")}
+                            ${PaymentTerms.optionsHtml(terms, "The vendor's terms", !id || m.payment_term_id != null)}
                         </select></div>
                     ${classGroup}${jobGroup}
                 </div>
@@ -455,7 +455,11 @@ const MemorizedPage = {
                 // the rate the totals were shown with (a bill memorized from one that carried a rate)
                 tax_rate: BillsPage._taxRate || 0,
                 bill_number: form.bill_number.value.trim() || null,
-                terms: form.terms.value || null,
+                // the terms text, and the id of the list entry when one is
+                // picked, so a list pick whose name matches legacy text ties
+                // the template (#665)
+                terms: PaymentTerms.selection(form.terms).terms || null,
+                payment_term_id: PaymentTerms.selection(form.terms).payment_term_id,
                 notes: form.notes.value || null,
                 class_id: classIdFromForm(form),
                 job_id: jobIdFromForm(form),

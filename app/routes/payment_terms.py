@@ -14,8 +14,9 @@ from datetime import date as dt_date
 from decimal import Decimal
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -56,6 +57,9 @@ LABELS = {
 # A term name is at most what a document's terms column holds.
 TERMS_MAX = 50
 CENT_PERCENT = Decimal("0.01")
+# The largest id a signed 64-bit column holds; past it SQLite raised an
+# OverflowError (a 500) on every id this route reads (#665).
+INT64_MAX = 9223372036854775807
 
 
 def _documents(db: Session, term: PaymentTerm) -> int:
@@ -99,13 +103,27 @@ def _response(db: Session, term: PaymentTerm) -> PaymentTermResponse:
 
 def _carried(docs: int, others) -> str:
     """Where a term is, counted the same way in every refusal (#665: the
-    rename and the rule refusals gave two totals a minute apart)."""
-    said = f"is on {docs} invoices and bills saved under it"
+    rename and the rule refusals gave two totals a minute apart). Singular
+    or plural as the count runs, and a zero count is left out rather than
+    said as "0 invoices and bills" (#665)."""
+    inv = None
+    if docs:
+        word = "invoice or bill" if docs == 1 else "invoices and bills"
+        inv = f"is on {docs} {word} saved under it"
+    oth = None
     if others:
-        said += (
-            f", and {others} customers, vendors, schedules or settings carry its name"
+        cats = (
+            "customer, vendor, schedule or setting"
+            if others == 1
+            else "customers, vendors, schedules or settings"
         )
-    return said
+        verb = "carries" if others == 1 else "carry"
+        oth = (inv and f"{others} {cats} {verb} its name") or (
+            f"is carried by {others} {cats}"
+        )
+    if inv and oth:
+        return f"{inv}, and {oth}"
+    return inv or oth or "is on no invoice or bill saved under it"
 
 
 def _refuse(sentence: str):
@@ -200,12 +218,18 @@ def _check_name(name: str, rule: dict) -> None:
         )
 
 
-def _name_taken(db: Session, name: str, except_id: int | None = None) -> bool:
+def _existing_named(db: Session, name: str, except_id: int | None = None):
+    """The entry whose name is the same as this one (parser._key: case,
+    whitespace and look-alike letters aside), lowest id on a tie, or None.
+    Returned so a refusal quotes the entry's own name, not what was typed
+    (#665)."""
     key = parser._key(name)
-    q = db.query(PaymentTerm)
-    if except_id is not None:
-        q = q.filter(PaymentTerm.id != except_id)
-    return any(parser._key(t.name) == key for t in q.all())
+    matches = [
+        t
+        for t in db.query(PaymentTerm).all()
+        if t.id != except_id and parser._key(t.name) == key
+    ]
+    return min(matches, key=lambda t: t.id) if matches else None
 
 
 def _taken(name: str):
@@ -234,8 +258,8 @@ def terms_dates(
     date: dt_date,
     terms: str = "",
     document: Literal["invoice", "bill"] = Query("invoice"),
-    invoice_id: Optional[int] = None,
-    bill_id: Optional[int] = None,
+    invoice_id: Optional[int] = Query(None, ge=1, le=INT64_MAX),
+    bill_id: Optional[int] = Query(None, ge=1, le=INT64_MAX),
     db: Session = Depends(get_db),
 ):
     """The due date, early-payment discount and any note that a document
@@ -270,17 +294,33 @@ def terms_dates(
             f'"{terms.strip()}" from {date.isoformat()} runs past the calendar; '
             "give the due date instead."
         )
+    # A due date the terms put before the document's own date (Net -5, or a
+    # customer's own free text) is refused on save; say so up front, in the
+    # words the save uses (#665).
+    note = got.note
+    if note is None and got.due_date is not None and got.due_date < date:
+        noun = parser.company_noun(db, document)
+        note = (
+            f"The due date ({parser._day(got.due_date)}) is before the {noun} "
+            f"date ({parser._day(date)}). Pick a due date on or after the "
+            f"{noun} date."
+        )
     return TermsDatesResponse(
         due_date=got.due_date,
         discount_percent=got.discount_percent,
         discount_date=got.discount_date,
         discount_line=parser.discount_line(got.discount_percent, got.discount_date),
-        note=got.note,
+        note=note,
     )
 
 
 @router.get("/{term_id}", response_model=PaymentTermResponse)
-def get_term(term_id: int, db: Session = Depends(get_db)):
+def get_term(
+    request: Request,
+    term_id: int = Path(..., ge=1, le=INT64_MAX),
+    db: Session = Depends(get_db),
+):
+    _only(request)
     return _response(db, get_or_404(db, PaymentTerm, term_id, "Payment term"))
 
 
@@ -291,23 +331,32 @@ def create_term(
     _only(request)
     # The first term a company adds joins the ones the forms always offered.
     parser.ensure_seeded(db)
-    if _name_taken(db, data.name):
-        _taken(data.name)
+    existing = _existing_named(db, data.name)
+    if existing is not None:
+        _taken(existing.name)
     values = data.model_dump()
     _check_rule(values)
     _check_name(data.name, values)
     term = PaymentTerm(**values)
     db.add(term)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Eight at once with the same name raced past the read above and met
+        # the unique index at flush (#665): answer the 409 the check gives,
+        # quoting the entry that won.
+        db.rollback()
+        won = parser.find_term(db, data.name)
+        _taken(won.name if won is not None else data.name)
     db.refresh(term)
     return _response(db, term)
 
 
 @router.put("/{term_id}", response_model=PaymentTermResponse)
 def update_term(
-    term_id: int,
     data: PaymentTermUpdate,
     request: Request,
+    term_id: int = Path(..., ge=1, le=INT64_MAX),
     db: Session = Depends(get_db),
 ):
     _only(request)
@@ -318,8 +367,9 @@ def update_term(
             _refuse(f"{LABELS[key]} can't be blank; leave it out instead.")
     docs = _documents(db, term)
     if "name" in changes and changes["name"] != term.name:
-        if _name_taken(db, changes["name"], except_id=term.id):
-            _taken(changes["name"])
+        clash = _existing_named(db, changes["name"], except_id=term.id)
+        if clash is not None:
+            _taken(clash.name)
         others = _elsewhere(db, term.name)
         if docs or others:
             raise HTTPException(
@@ -366,7 +416,16 @@ def update_term(
         term.name = changes["name"]
     if "is_active" in changes:
         term.is_active = changes["is_active"]
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # A rename racing another rename to the same name meets the unique
+        # index at flush (#665): the 409 the check gives, quoting the winner.
+        db.rollback()
+        if "name" not in changes:
+            raise
+        won = parser.find_term(db, changes["name"])
+        _taken(won.name if won is not None else changes["name"])
     db.refresh(term)
     return _response(db, term)
 

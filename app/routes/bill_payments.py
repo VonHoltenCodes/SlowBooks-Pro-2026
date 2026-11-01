@@ -5,7 +5,7 @@
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Request, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
@@ -31,6 +31,7 @@ from app.services.check_numbers import refuse_duplicate
 from app.services.closing_date import check_closing_date
 from app.services import request_keys
 from app.services.audit import _actor
+from app.schemas.common import BIGINT_MAX
 
 router = APIRouter(prefix="/api/bill-payments", tags=["bill_payments"])
 
@@ -60,6 +61,7 @@ def list_bill_payments(
         resp = BillPaymentResponse.model_validate(p)
         if p.vendor:
             resp.vendor_name = p.vendor.name
+        _fill_can_take(db, p, resp)
         results.append(resp)
     return results
 
@@ -81,7 +83,22 @@ def get_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
     if p.vendor:
         resp.vendor_name = p.vendor.name
     resp.discounts = _discounts(db, p)
+    _fill_can_take(db, p, resp)
     return resp
+
+
+def _fill_can_take(
+    db: Session, payment: BillPayment, resp: BillPaymentResponse
+) -> None:
+    """Mark on each allocation whether Pay Bills may offer "Take discount"
+    (#665). The response keeps allocations in the order the model has them,
+    so they line up one-for-one."""
+    from app.services import early_pay_discounts
+
+    for model, out in zip(payment.allocations, resp.allocations):
+        out.can_take_discount = early_pay_discounts.can_take_discount(
+            db, model.bill, "bill", payment, False
+        )
 
 
 def _discounts(db: Session, payment: BillPayment) -> list[BillPaymentDiscountResponse]:
@@ -402,8 +419,8 @@ def create_bill_payment(
 
 @router.post("/{bill_payment_id}/discount", response_model=BillPaymentResponse)
 def add_discount(
-    bill_payment_id: int,
-    data: BillPaymentDiscountAdd,
+    bill_payment_id: int = Path(ge=1, le=BIGINT_MAX),
+    data: BillPaymentDiscountAdd = ...,
     request: Request = None,
     response: Response = None,
     db: Session = Depends(get_db),
@@ -447,6 +464,12 @@ def add_discount(
             status_code=400, detail="This payment is void, so no discount goes with it."
         )
     check_closing_date(db, payment.date)
+    # A discount of zero or less can't be taken; say so before the account
+    # check, which otherwise advised leaving out the required account (#665).
+    if _q(data.discount) <= 0:
+        raise HTTPException(
+            status_code=400, detail="A discount must be more than zero."
+        )
     acct = early_pay_discounts.discount_account(
         db, data.discount_account_id, [data.discount], data.allow_discount_override
     )
@@ -463,8 +486,9 @@ def add_discount(
                 "with the payment that paid it."
             ),
         )
-    if bill.status == BillStatus.VOID:
-        raise HTTPException(status_code=400, detail=f"Bill {number} is void.")
+    # No void-bill guard here: a bill with a payment that paid it has
+    # amount_paid > 0, which void_bill refuses, and a void payment is refused
+    # above, so a void bill is unreachable (#665, pass 5: dead code removed).
     discount = _q(data.discount)
     if discount > Decimal(str(bill.balance_due)):
         raise HTTPException(

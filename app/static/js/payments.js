@@ -62,8 +62,10 @@ const PaymentsPage = {
                 <th scope="col">${T('Invoice')}</th><th scope="col" class="amount">Amount</th></tr></thead><tbody>`;
             const discounted = new Set((p.discounts || []).map(d => d.invoice_id));
             for (const a of p.allocations) {
-                // a discount not taken with the payment can be taken now (#665)
-                const take = !p.is_voided && !discounted.has(a.invoice_id)
+                // a discount not taken with the payment can be taken now, but
+                // only where the server says it still can (#665); an older
+                // response without the field still offers it
+                const take = !p.is_voided && !discounted.has(a.invoice_id) && a.can_take_discount !== false
                     ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="PaymentsPage.showTakeDiscount(${p.id}, ${a.invoice_id})">Take discount</button>` : '';
                 allocHtml += `<tr><td>#${escapeHtml(a.invoice_number || String(a.invoice_id))}</td><td class="amount">${formatCurrency(a.amount)}${take}</td></tr>`;
             }
@@ -73,7 +75,7 @@ const PaymentsPage = {
         if ((p.discounts || []).length) {
             allocHtml += `<h4 style="margin:12px 0 8px;">Discounts taken</h4>
                 <div class="table-container"><table><thead><tr>
-                <th scope="col">${T('Invoice')}</th><th scope="col">Credit memo</th><th scope="col" class="amount">Discount</th></tr></thead><tbody>
+                <th scope="col">${T('Invoice')}</th><th scope="col">${T('Credit memo')}</th><th scope="col" class="amount">Discount</th></tr></thead><tbody>
                 ${p.discounts.map(d => `<tr><td>#${escapeHtml(d.invoice_number || String(d.invoice_id))}</td><td>${escapeHtml(d.memo_number)}${d.override ? ' (against the terms)' : ''}</td><td class="amount">${formatCurrency(d.amount)}</td></tr>`).join('')}
                 </tbody></table></div>`;
         }
@@ -124,7 +126,7 @@ const PaymentsPage = {
         const cents = PaymentTerms.suggestedCents(inv, p.date);
         openModal(`Take a discount on ${T('Invoice')} #${escapeHtml(inv.invoice_number)}`, `
             <form id="take-discount-form" onsubmit="PaymentsPage.saveTakeDiscount(event, ${paymentId}, ${invoiceId})">
-                <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(inv.discount_line || 'Its terms offer no early-payment discount.')}
+                <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(PaymentTerms.dueSentence(inv.discount_line))}
                     ${formatCurrency(inv.balance_due)} is still due on it; the discount is dated ${formatDate(p.date)}, as the payment is.</p>
                 <div class="form-grid">
                     <div class="form-group"><label for="take-discount-amount">Discount</label>
@@ -329,7 +331,7 @@ const PaymentsPage = {
             <div class="form-group" id="discount-account-row" hidden style="margin-top:8px; max-width:360px;">
                 <label for="discount-account">Discount account</label>
                 <select id="discount-account" data-no-search>${PaymentTerms.discountAccountOptions(PaymentsPage._accounts || [], 'sales')}</select>
-                <div class="hint">Where the discounts the customer took post, as a credit memo applied to each ${T('invoice')}.</div></div>
+                <div class="hint">Where the discounts the ${T('customer')} took post, as a ${T('credit memo')} applied to each ${T('invoice')}.</div></div>
             <div id="alloc-status" style="margin-top:8px; padding:8px 10px; border-radius:4px;
                 background:var(--gray-100); font-size:13px;"></div>`;
         $('#payment-invoices').innerHTML = html;
@@ -412,7 +414,7 @@ const PaymentsPage = {
     },
 
     // The early-payment discount on each open invoice (#664): its terms'
-    // percent of the balance while the payment date is on or before the
+    // percent of the total while the payment date is on or before the
     // discount date, else none. The person can change any of them.
     _suggestDiscounts() {
         const host = $('#payment-invoices');

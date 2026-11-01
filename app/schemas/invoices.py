@@ -37,6 +37,15 @@ RateOut = Annotated[
 ]
 
 
+class DiscountTaken(BaseModel):
+    """The early-payment discount already taken on a document (#664): the
+    amount and the number of the credit memo (invoice) or vendor credit
+    (bill) that is it. Shown in place of the offer once it is spent."""
+
+    amount: Decimal
+    number: str
+
+
 class InvoiceLineCreate(StrictModel):
     item_id: Optional[int] = None
     description: Optional[str] = None
@@ -86,6 +95,10 @@ class InvoiceCreate(StrictModel):
     date: dt_date
     due_date: Optional[dt_date] = None
     terms: str = "Net 30"
+    # An explicit pick of a list entry (#664): tie the invoice to it even
+    # when its terms text is the entry's own name. 1..2**63-1, so a huge id
+    # is a 422, not an OverflowError at the query (#665).
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     po_number: Optional[str] = None
     bill_address1: Optional[str] = None
     bill_address2: Optional[str] = None
@@ -131,6 +144,9 @@ class InvoiceUpdate(StrictModel):
     date: Optional[dt_date] = None
     due_date: Optional[dt_date] = None
     terms: Optional[str] = None
+    # An explicit pick of a list entry (#664), so a legacy document whose
+    # text is the entry's own name can finally be tied to it. 1..2**63-1.
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     po_number: Optional[str] = None
     # The addresses (2.31.1 gate, W-72): sent, they correct the invoice's
     # Bill To street or its Ship To, the Ship To's country with it (round
@@ -247,6 +263,9 @@ class InvoiceResponse(BaseModel):
     discount_percent: Optional[Decimal] = None
     discount_date: Optional[dt_date] = None
     discount_line: Optional[str] = None
+    # Set once the discount has been taken (#664): the memo and amount,
+    # shown in place of the offer, which is then cleared.
+    discount_taken: Optional[DiscountTaken] = None
     terms_note: Optional[str] = None
     customer_name: Optional[str] = None
     created_at: datetime

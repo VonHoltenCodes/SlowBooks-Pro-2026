@@ -25,7 +25,7 @@ from app.services.recurring_service import (
     generate_due_invoices,
     roll_next_due_forward,
 )
-from app.services.payment_terms import retie, term_id_for
+from app.services.payment_terms import picked_term_id, retie
 from app.services.terminology import terms_from_db
 
 router = APIRouter(prefix="/api/recurring", tags=["recurring"])
@@ -124,8 +124,9 @@ def create_recurring(data: RecurringCreate, db: Session = Depends(get_db)):
         end_date=data.end_date,
         next_due=data.start_date,
         terms=data.terms,
-        # its invoices follow the term these terms name now (#664)
-        payment_term_id=term_id_for(db, data.terms),
+        # its invoices follow the term these terms name now, or the entry
+        # the person explicitly picked (#664)
+        payment_term_id=picked_term_id(db, data.terms, data.payment_term_id),
         tax_rate=data.tax_rate,
         notes=data.notes,
         class_id=data.class_id,
@@ -180,11 +181,18 @@ def update_recurring(rec_id: int, data: RecurringUpdate, db: Session = Depends(g
     was_active = rec.is_active
     stored_end = rec.end_date
     terms_before = rec.terms
+    # An explicit pick goes through picked_term_id, not straight onto the
+    # column, so a bad one is refused (#664).
+    pick = changes.pop("payment_term_id", None)
     for key, val in changes.items():
         setattr(rec, key, val)
     # terms the person changed tie the schedule anew; the same terms sent
     # back leave it as it was saved (#664)
     retie(db, rec, terms_before)
+    # an explicit pick ties it even when its text is the entry's own name,
+    # so a legacy schedule can finally follow a term added since (#664)
+    if pick is not None:
+        rec.payment_term_id = picked_term_id(db, rec.terms, pick)
 
     # Re-activating a paused template resumed from a stale next_due and
     # back-dated an invoice for every missed period (and a date inside the

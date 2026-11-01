@@ -291,7 +291,8 @@ def test_a_rule_that_cannot_work_is_refused_in_a_sentence(client, body, sentence
 def test_a_name_already_on_the_list_or_an_unknown_field_is_refused(client):
     r = client.post("/api/payment-terms", json={"name": "net 30", "net_days": 30})
     assert r.status_code == 409
-    assert r.json()["detail"] == '"net 30" is already on the terms list.'
+    # the refusal quotes the entry that is already there, not what was typed
+    assert r.json()["detail"] == '"Net 30" is already on the terms list.'
     r = client.post(
         "/api/payment-terms", json={"name": "Net 20", "net_days": 20, "days": 20}
     )
@@ -306,7 +307,7 @@ def test_a_term_on_a_document_keeps_its_rule_and_name(
     r = client.put(f"/api/payment-terms/{term['id']}", json={"net_days": 45})
     assert r.status_code == 409
     assert (
-        "is on 1 invoices and bills saved under it, so its rule stays"
+        "is on 1 invoice or bill saved under it, so its rule stays"
         in r.json()["detail"]
     )
     r = client.put(f"/api/payment-terms/{term['id']}", json={"name": "2/10 n30"})
@@ -752,7 +753,105 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     }
     assert "payment_term_id" not in {c["name"] for c in insp.get_columns("invoices")}
     engine.dispose()
+
+    # Up again rebuilds the list, re-ties the documents, and puts the
+    # indexes back (#665: the re-upgrade used to assert nothing).
     command.upgrade(cfg, "head")
+    engine = create_engine(f"sqlite:///{db}")
+    insp = inspect(engine)
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text("SELECT name, net_days FROM payment_terms ORDER BY net_days")
+        ).all()
+        tied = conn.execute(
+            text(
+                "SELECT i.id, t.name FROM invoices i LEFT JOIN payment_terms t "
+                "ON t.id = i.payment_term_id ORDER BY i.id"
+            )
+        ).all()
+    assert [tuple(r) for r in rows] == [
+        ("Due on Receipt", 0),
+        ("Net 10", 10),
+        ("Net 15", 15),
+        ("Net 20", 20),
+        ("Net 30", 30),
+        ("Net 45", 45),
+        ("Net 60", 60),
+    ]
+    assert [tuple(r) for r in tied] == [
+        (1, "Net 10"),
+        (2, None),
+        (3, "Net 30"),
+        (4, None),
+        (5, None),
+        (6, "Net 30"),
+    ]
+    # the unique index is on lower(name), an expression SQLAlchemy's
+    # reflection skips, so it is read from the catalog directly
+    with engine.connect() as conn:
+        all_indexes = {
+            r[0]
+            for r in conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type = 'index'")
+            )
+        }
+    assert "ix_payment_terms_name_lower" in all_indexes
+    for table, column in (
+        ("invoices", "payment_term_id"),
+        ("bills", "payment_term_id"),
+        ("credit_memos", "discount_payment_id"),
+        ("vendor_credits", "discount_bill_payment_id"),
+    ):
+        assert f"ix_{table}_{column}" in {
+            ix["name"] for ix in insp.get_indexes(table)
+        }, (table, column)
+    engine.dispose()
+
+
+def test_the_downgrade_refuses_to_drop_a_standing_discount_link(tmp_path):
+    """#665: downgrade() silently dropped discount_payment_id and the ties;
+    now it refuses while any credit memo, vendor credit or override stands,
+    naming the counts. A book with none still walks down (the test above)."""
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    db = tmp_path / "disc.db"
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
+
+    command.upgrade(cfg, "head")
+    engine = create_engine(f"sqlite:///{db}")
+    with engine.begin() as conn:
+        # a payment, and a credit memo that is its early-payment discount
+        conn.execute(
+            text(
+                "INSERT INTO payments (id, customer_id, amount, date, is_voided) "
+                "VALUES (1, 1, 98, '2026-10-12', 0)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO credit_memos (id, memo_number, customer_id, date, "
+                "status, total, discount_payment_id) VALUES "
+                "(1, 'CM-0001', 1, '2026-10-12', 'applied', 2, 1)"
+            )
+        )
+    engine.dispose()
+
+    with pytest.raises(RuntimeError) as e:
+        command.downgrade(cfg, "4810bd59e481")
+    assert "1 credit memo" in str(e.value)
+    assert "Void those payments first" in str(e.value)
+    # the link survived the refusal
+    engine = create_engine(f"sqlite:///{db}")
+    with engine.connect() as conn:
+        kept = conn.execute(
+            text("SELECT discount_payment_id FROM credit_memos WHERE id = 1")
+        ).scalar()
+    assert kept == 1
+    engine.dispose()
 
 
 # ── the pages ───────────────────────────────────────────────────────────
@@ -795,8 +894,16 @@ def test_no_form_keeps_its_own_terms_or_days():
     for name, call in (
         ("customers.js", "PaymentTerms.optionsHtml(c.terms)"),
         ("vendors.js", "PaymentTerms.optionsHtml(v.terms)"),
-        ("recurring.js", "PaymentTerms.optionsHtml(rec.terms)"),
-        ("memorized.js", 'PaymentTerms.optionsHtml(terms, "The vendor\'s terms")'),
+        (
+            "recurring.js",
+            "PaymentTerms.optionsHtml(rec.terms, null, "
+            "!id || rec.payment_term_id != null)",
+        ),
+        (
+            "memorized.js",
+            'PaymentTerms.optionsHtml(terms, "The vendor\'s terms", '
+            "!id || m.payment_term_id != null)",
+        ),
         ("bill_quick_entry.js", "PaymentTerms.optionsHtml('Net 30')"),
         ("app.js", "PaymentTerms.optionsHtml('Net 30')"),
         ("settings.js", "PaymentTerms.optionsHtml(s.default_terms || 'Net 30')"),
@@ -2006,12 +2113,14 @@ def test_any_other_text_picked_ties_anew(
     db_session.commit()
     got = _put(client, f"/api/bills/{bill['id']}", {"terms": "Net 45"})
     assert got["due_date"] == "2026-10-30" and got["terms_note"] is None
-    # a case-only pick of a listed term is a pick: tied, its rule applies
-    inv = _invoice(client, seed_customer.id, "net30")
+    # a case-only pick of a listed term is a pick: tied, its rule applies.
+    # ("Special30", not "NET30": #665 made "Net30" the same name as the
+    # seeded "Net 30", so this needs a name of its own.)
+    inv = _invoice(client, seed_customer.id, "special30")
     term = _term(
-        client, name="NET30", net_days=30, discount_percent="1", discount_days=5
+        client, name="Special30", net_days=30, discount_percent="1", discount_days=5
     )
-    got = _put(client, f"/api/invoices/{inv['id']}", {"terms": "NET30"})
+    got = _put(client, f"/api/invoices/{inv['id']}", {"terms": "SPECIAL30"})
     assert got["terms_note"] is None
     assert got["discount_line"] == "1% discount if paid by Oct 10, 2026"
     assert client.get(f"/api/payment-terms/{term['id']}").json()["documents"] == 1
@@ -2758,11 +2867,11 @@ def test_the_in_use_counts_are_said_one_way(client, seed_accounts, seed_customer
     rename = client.put(f"/api/payment-terms/{term['id']}", json={"name": "Twenty-two"})
     rule = client.put(f"/api/payment-terms/{term['id']}", json={"net_days": 23})
     assert rename.json()["detail"].startswith(
-        "Net 22 is on 1 invoices and bills saved under it, and 1 customers, "
-        "vendors, schedules or settings carry its name, so its name stays."
+        "Net 22 is on 1 invoice or bill saved under it, and 1 customer, vendor, "
+        "schedule or setting carries its name, so its name stays."
     )
     assert rule.json()["detail"].startswith(
-        "Net 22 is on 1 invoices and bills saved under it, so its rule stays"
+        "Net 22 is on 1 invoice or bill saved under it, so its rule stays"
     )
 
 

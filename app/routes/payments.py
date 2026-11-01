@@ -5,7 +5,7 @@
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
@@ -41,6 +41,7 @@ from app.services.payments.clearing import (
 )
 from app.services import cash_basis, request_keys
 from app.services.audit import _actor
+from app.schemas.common import BIGINT_MAX
 
 router = APIRouter(prefix="/api/payments", tags=["payments"])
 
@@ -49,10 +50,21 @@ def _response(payment: Payment, customer_name: str = None) -> PaymentResponse:
     """The payment as the screens read it: allocations by invoice NUMBER,
     and how much of it is not applied to any invoice yet (a credit the
     customer holds). Callers eager-load .allocations and their invoices."""
+    from sqlalchemy.orm import object_session
+
+    from app.services import early_pay_discounts
+
     resp = PaymentResponse.model_validate(payment)
     numbers = {a.id: a.invoice.invoice_number for a in payment.allocations if a.invoice}
+    by_id = {a.id: a for a in payment.allocations}
+    db = object_session(payment)
     for a in resp.allocations:
         a.invoice_number = numbers.get(a.id)
+        model = by_id.get(a.id)
+        if db is not None and model is not None:
+            a.can_take_discount = early_pay_discounts.can_take_discount(
+                db, model.invoice, "invoice", payment, bool(model.from_remainder)
+            )
     applied = sum((Decimal(str(a.amount)) for a in payment.allocations), Decimal("0"))
     resp.unapplied = (
         Decimal("0")
@@ -592,8 +604,8 @@ def apply_payment(payment_id: int, data: PaymentApply, db: Session = Depends(get
 
 @router.post("/{payment_id}/discount", response_model=PaymentResponse)
 def add_discount(
-    payment_id: int,
-    data: PaymentDiscountAdd,
+    payment_id: int = Path(ge=1, le=BIGINT_MAX),
+    data: PaymentDiscountAdd = ...,
     request: Request = None,
     response: Response = None,
     db: Session = Depends(get_db),
@@ -642,6 +654,12 @@ def add_discount(
             status_code=400, detail="This payment is void, so no discount goes with it."
         )
     check_closing_date(db, payment.date)
+    # A discount of zero or less can't be taken; say so before the account
+    # check, which otherwise advised leaving out the required account (#665).
+    if _q(data.discount) <= 0:
+        raise HTTPException(
+            status_code=400, detail="A discount must be more than zero."
+        )
     acct = early_pay_discounts.discount_account(
         db, data.discount_account_id, [data.discount], data.allow_discount_override
     )
@@ -674,8 +692,10 @@ def add_discount(
                 "taken with the payment that paid it."
             ),
         )
-    if invoice.status == InvoiceStatus.VOID:
-        raise HTTPException(status_code=400, detail=f"Invoice {number} is void.")
+    # No void-invoice guard here: an invoice with a payment that paid it
+    # (the `paid` row above) has amount_paid > 0, and void_invoice refuses
+    # that; a void payment is refused above. So a void invoice is unreachable
+    # on this path (#665, pass 5: the guard was dead code and was removed).
     discount = _q(data.discount)
     if discount > invoice.balance_due:
         raise HTTPException(

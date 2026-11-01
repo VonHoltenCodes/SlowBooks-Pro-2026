@@ -1,7 +1,7 @@
 // The terms list on the forms (#664): every terms select offers the list's
 // active terms plus the record's own text when it is off the list, so a
 // save never changes it silently; and the discount Receive Payments and Pay
-// Bills suggest is the terms' percent of the balance until the discount
+// Bills suggest is the terms' percent of the total until the discount
 // date passes.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -124,4 +124,86 @@ test('the suggestion is the percent of the total, at most the balance', () => {
     assert.equal(pt.suggestedCents({ ...second, balance_due: '1.00' }, '2026-10-12'), 100);
     // none on a payment dated before the document
     assert.equal(pt.suggestedCents(second, '2026-08-01'), 0);
+});
+
+test('Cancel on the override question toasts the plain reason, not the API line (#665)', () => {
+    // confirm returns false: the person pressed Cancel
+    const pt = helper(LIST, false);
+    const err = { message: 'Its discount had to be taken by Oct 15. Send allow_discount_override to take it anyway.' };
+    assert.equal(pt.asksOverride(err, {}), false);
+    // the caller toasts err.message, which no longer names the override flag
+    assert.equal(err.message, 'Its discount had to be taken by Oct 15.');
+});
+
+test('the Take-discount line ends with one full stop (#665)', () => {
+    const pt = helper(LIST);
+    // a server discount line (no trailing stop) gets one, so the balance
+    // sentence after it does not run on
+    assert.equal(pt.dueSentence('1% discount if paid by Nov 11, 2026'), '1% discount if paid by Nov 11, 2026.');
+    // the fallback already ends with a stop: it stays single
+    assert.equal(pt.dueSentence('Its terms offer no early-payment discount.'), 'Its terms offer no early-payment discount.');
+    assert.equal(pt.dueSentence(''), 'Its terms offer no early-payment discount.');
+    assert.equal(pt.dueSentence(null), 'Its terms offer no early-payment discount.');
+});
+
+test('Pay Bills never pre-selects a sales discount account (#665)', () => {
+    const pt = helper(LIST);
+    const accounts = [
+        { id: 1, name: 'Checking', account_type: 'asset' },
+        { id: 4, name: 'Sales Discounts', account_type: 'income', account_number: '4999' },
+    ];
+    // no purchase-side discount account: Pay Bills pre-selects nothing
+    assert.equal(options(pt.discountAccountOptions(accounts, 'purchases')).find(o => o[1]), undefined);
+    // Receive Payments still pre-selects its own sales account
+    assert.equal(options(pt.discountAccountOptions(accounts, 'sales')).find(o => o[1])[0], '4');
+});
+
+test('an untied look-alike keeps its own option; a tied one picks the list (#665)', async () => {
+    const pt = helper([{ id: 7, name: '2% 10 Net 30' }]);
+    await pt.load();
+    // untied (payment_term_id null): the own text is first and selected, the
+    // list entry a separate option that carries its id so a pick ties it
+    const untied = pt.optionsHtml('2% 10 Net 30', null, false);
+    assert.deepEqual(options(untied), [['2% 10 Net 30', true], ['2% 10 Net 30', false]]);
+    assert.ok(untied.includes('>2% 10 Net 30 (as saved)</option>'));
+    assert.ok(untied.includes('data-term-id="7"'));
+    // tied: no own option, the list entry itself is selected
+    const tied = pt.optionsHtml('2% 10 Net 30', null, true);
+    assert.deepEqual(options(tied), [['2% 10 Net 30', true]]);
+    assert.ok(!tied.includes('(as saved)'));
+});
+
+test('selection reads the picked term id, or none for the own text (#665)', () => {
+    const pt = helper(LIST);
+    const same = (got, terms, id) => {
+        assert.equal(got.terms, terms);
+        assert.equal(got.payment_term_id, id);
+    };
+    // a list option carries its id: the save sends payment_term_id and ties
+    same(pt.selection({ value: 'Net 30', selectedOptions: [{ dataset: { termId: '7' } }] }), 'Net 30', 7);
+    // the own "(as saved)" option carries none: the text is sent alone
+    same(pt.selection({ value: 'net 30', selectedOptions: [{ dataset: {} }] }), 'net 30', null);
+    same(pt.selection(null), '', null);
+});
+
+// Source pins for the two review fixes not reachable through the helpers:
+// the Take-discount modals use the full-stop helper, "Take discount" shows
+// only where the server still allows it, and the forms send payment_term_id.
+const src = name => fs.readFileSync(path.join(__dirname, '../../app/static/js', name), 'utf8');
+
+test('the Take-discount modals close the discount line with dueSentence (#665)', () => {
+    assert.ok(src('payments.js').includes('PaymentTerms.dueSentence(inv.discount_line)'));
+    assert.ok(src('bills.js').includes('PaymentTerms.dueSentence(bill.discount_line)'));
+});
+
+test('Take discount is offered only where the server allows it (#665)', () => {
+    assert.ok(src('payments.js').includes('a.can_take_discount !== false'));
+    assert.ok(src('bills.js').includes('a.can_take_discount !== false'));
+});
+
+test('the forms send the picked term id with the save (#665)', () => {
+    for (const name of ['invoices.js', 'bills.js', 'recurring.js', 'memorized.js']) {
+        assert.ok(src(name).includes('payment_term_id'), name);
+        assert.ok(src(name).includes('PaymentTerms.selection('), name);
+    }
 });

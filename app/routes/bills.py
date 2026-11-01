@@ -38,8 +38,8 @@ from app.services.early_pay_discounts import discounted_on
 from app.services.payment_terms import (
     DocumentTerms,
     document_due_date,
+    picked_term_id,
     retie,
-    term_id_for,
 )
 from app.services.closing_date import check_closing_date
 from app.services.job_costing import line_cost_type
@@ -115,13 +115,18 @@ def _bill_html(db: Session, bill_id: int) -> tuple[Bill, str]:
     bill = db.query(Bill).filter(Bill.id == bill_id).first()
     if not bill:
         raise HTTPException(status_code=404, detail="Bill not found")
-    from app.services.payment_terms import document_discount_line
+    from app.services.payment_terms import (
+        document_discount_line,
+        document_discount_taken,
+    )
 
     return bill, _render(
         "bill_pdf.html",
         get_all_settings(db),
         bill=bill,
         discount_line=document_discount_line(bill),
+        # the discount already taken, shown in place of the offer (#664)
+        discount_taken=document_discount_taken(db, bill),
     )
 
 
@@ -492,6 +497,9 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     terms = data.terms
     if "terms" not in data.model_fields_set or not (terms or "").strip():
         terms = vendor.terms or "Net 30"
+    # An explicit pick of a list entry (#664): validated before anything is
+    # written.
+    term_id = picked_term_id(db, terms, data.payment_term_id)
     due_date = data.due_date or _due_date_from_terms(db, data.date, terms)
 
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
@@ -527,7 +535,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
         date=data.date,
         due_date=due_date,
         terms=terms,
-        payment_term_id=term_id_for(db, terms),
+        payment_term_id=term_id,
         ref_number=data.ref_number,
         po_id=data.po_id,
         subtotal=subtotal,
@@ -832,6 +840,9 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
 
     renumbered = number != bill.bill_number or vendor.id != bill.vendor_id
     terms_before = bill.terms
+    # An explicit pick goes through picked_term_id below, not straight onto
+    # the column, so a bad one is refused (#664).
+    pick = update_data.pop("payment_term_id", None)
     for key, val in update_data.items():
         setattr(bill, key, val)
     if renumbered:
@@ -839,11 +850,17 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
     # Terms the person changed tie the bill to the entry they name now
     # (#664); the same terms sent back leave it as it was saved.
     terms_changed = retie(db, bill, terms_before)
+    # An explicit pick ties it even when its text is the entry's own name,
+    # so a legacy bill can finally follow a term added since (#664).
+    if pick is not None:
+        bill.payment_term_id = picked_term_id(db, bill.terms, pick)
 
-    # Terms or date changed without a due date: the due date follows the
-    # bill's own rule, as on create; a cleared due date is derived the same
-    # way. A blank terms text is the default Net 30, as it always was.
-    if (terms_changed or "date" in update_data) and "due_date" not in update_data:
+    # Terms or date changed (or a pick) without a due date: the due date
+    # follows the bill's own rule, as on create; a cleared due date is
+    # derived the same way. A blank terms text is the default Net 30.
+    if (terms_changed or pick is not None or "date" in update_data) and (
+        "due_date" not in update_data
+    ):
         bill.due_date = document_due_date(db, bill)
     if "due_date" in update_data and bill.due_date is None:
         bill.due_date = document_due_date(db, bill)

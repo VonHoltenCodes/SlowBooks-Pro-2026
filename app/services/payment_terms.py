@@ -18,7 +18,6 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.payment_terms import DATE_DRIVEN, STANDARD, PaymentTerm
@@ -67,14 +66,59 @@ def clean_name(text: Optional[str]) -> str:
     return " ".join(text.split())
 
 
+# A small table of the Cyrillic and Greek letters that look exactly like a
+# Latin letter (#665: "Nеt 30" with a Cyrillic е was a second "Net 30").
+# Folded only for matching, never in the stored name. The letter O is NOT
+# here: folding it to the digit 0 would make "1OO" and "100" one name.
+_CONFUSABLES = {
+    # Cyrillic
+    "а": "a",
+    "е": "e",
+    "о": "o",
+    "р": "p",
+    "с": "c",
+    "х": "x",
+    "у": "y",
+    "і": "i",
+    "ј": "j",
+    "ѕ": "s",
+    "А": "a",
+    "Е": "e",
+    "О": "o",
+    "Р": "p",
+    "С": "c",
+    "Х": "x",
+    "У": "y",
+    "І": "i",
+    "Ј": "j",
+    "Ѕ": "s",
+    # Greek
+    "ο": "o",
+    "α": "a",
+    "ν": "v",
+    "ρ": "p",
+    "τ": "t",
+    "ι": "i",
+    "κ": "k",
+    "Ο": "o",
+    "Α": "a",
+    "Ν": "v",
+    "Ρ": "p",
+    "Τ": "t",
+    "Ι": "i",
+    "Κ": "k",
+}
+
+
 def _key(text: Optional[str]) -> str:
-    """The text as a list name is matched: NFKC, every format character
-    out (the joiners too), trimmed, single-spaced, lower case. Matching to
-    the list only; text is READ as the old parser read it (read_text),
-    which is stricter."""
-    return " ".join(
-        _strip_format(unicodedata.normalize("NFKC", text or "")).split()
-    ).lower()
+    """The text as a list name is matched: NFKC, every format character out
+    (the joiners too), the common confusables folded to their Latin
+    look-alike, EVERY whitespace ignored, lower case (#665: "Net30",
+    "Nеt 30" and "Net 30" are one name). Matching to the list only; text is
+    READ as the old parser read it (read_text), which is stricter."""
+    text = _strip_format(unicodedata.normalize("NFKC", text or ""))
+    text = "".join(_CONFUSABLES.get(ch, ch) for ch in text)
+    return "".join(text.split()).lower()
 
 
 @dataclass(frozen=True)
@@ -112,10 +156,22 @@ class Rule:
             return None
         if self.kind == DATE_DRIVEN:
             due = self.due_date(on)
-            last = _day_in(due.year, due.month, self.discount_day)
-            if last > due:
+            if self.discount_day > self.due_day:
+                # "paid by day D of the month BEFORE it's due" (#665): a
+                # short month's clamp used to land day D on the due day
+                # itself (_day_in(due.month, 31) is the 28th in February,
+                # equal to a due_day of 30), so the discount ran right
+                # through the due date. Compute it in the month before the
+                # due month, clamped to that month's last day; it is before
+                # the due date whatever the month's length.
                 last = _day_in(*_prev_month(due.year, due.month), self.discount_day)
-            return last if last >= on else None
+                # a document dated after that day offers none: a Feb 1
+                # invoice cannot be paid by Jan 31
+                return last if on <= last < due else None
+            # the same month, an earlier day: no discount once that day has
+            # already passed by the document's own date
+            last = _day_in(due.year, due.month, self.discount_day)
+            return last if on <= last < due else None
         return on + timedelta(days=self.discount_days or 0)
 
 
@@ -150,24 +206,18 @@ def rule_of(term: PaymentTerm) -> Rule:
 
 
 def find_term(db: Session, text: Optional[str]) -> Optional[PaymentTerm]:
-    """The list entry these terms name, matched as _key matches: "net 30"
-    is Net 30. Inactive entries still count, so a document keeps the rule
-    it was made under."""
+    """The list entry these terms name, matched in Python as _key matches:
+    "net 30" is Net 30. The list is short, so it is loaded and compared
+    here rather than in SQL — Postgres's lower() folds İSTANBUL/istanbul
+    and ΟΔΟΣ/οδοσ together where _key does not, which tied a document to
+    the wrong row (#665, B4/B5). An exact-key tie goes to the lowest id, so
+    the answer is the same every time. Inactive entries still count, so a
+    document keeps the rule it was made under."""
     key = _key(text)
     if not key:
         return None
-    term = (
-        db.query(PaymentTerm)
-        .filter(func.lower(func.trim(PaymentTerm.name)) == key)
-        .first()
-    )
-    if term is not None:
-        return term
-    # A name typed with doubled spaces matches too; the list is short.
-    for term in db.query(PaymentTerm).all():
-        if _key(term.name) == key:
-            return term
-    return None
+    matches = [t for t in db.query(PaymentTerm).all() if _key(t.name) == key]
+    return min(matches, key=lambda t: t.id) if matches else None
 
 
 def main_days(text: Optional[str]) -> Optional[int]:
@@ -211,6 +261,16 @@ ADD_IT = (
     "An administrator can add it under Settings > Payment Terms to give it "
     "its own rule."
 )
+
+
+def company_noun(db: Session, noun: str) -> str:
+    """A note's document word in the company's own vocabulary (#664): a
+    nonprofit reads "pledge" where a business reads "invoice", and "bill"
+    stays "bill" everywhere. Translated once at each note's entry point, so
+    every note a document or the /dates form shows uses the right word."""
+    from app.services.terminology import terms_from_db
+
+    return terms_from_db(db)(noun)
 
 
 def unrecognised_note(text: str, noun: str = "invoice") -> str:
@@ -272,6 +332,7 @@ def terms_dates(
     """The due date, early-payment discount and any note for a document
     dated `on` with these terms. Blank terms are the default Net 30, as
     they always were."""
+    noun = company_noun(db, noun)
     if not _key(text):
         return TermsDates(due_date=on + timedelta(days=FALLBACK_DAYS))
     rule = rule_for(db, text)
@@ -398,6 +459,64 @@ def _void(doc) -> bool:
     return getattr(status, "value", status) == "void"
 
 
+def _paid(doc) -> bool:
+    status = getattr(doc, "status", None)
+    return getattr(status, "value", status) == "paid"
+
+
+def document_discount_taken(db: Session, doc) -> Optional[dict]:
+    """The early-payment discount already taken on a document (#664): the
+    non-void credit memo (an invoice) or vendor credit (a bill) tied to the
+    payment that took it, as {"amount", "number"}, or None. Shown in place
+    of the offer once the discount is spent."""
+    from app.models.bills import Bill
+
+    if isinstance(doc, Bill):
+        from app.models.vendor_credits import (
+            VendorCredit,
+            VendorCreditApplication,
+            VendorCreditStatus,
+        )
+
+        rows = (
+            db.query(VendorCredit)
+            .join(
+                VendorCreditApplication,
+                VendorCreditApplication.vendor_credit_id == VendorCredit.id,
+            )
+            .filter(
+                VendorCreditApplication.bill_id == doc.id,
+                VendorCredit.discount_bill_payment_id.isnot(None),
+                VendorCredit.status != VendorCreditStatus.VOID,
+            )
+            .all()
+        )
+    else:
+        from app.models.credit_memos import (
+            CreditApplication,
+            CreditMemo,
+            CreditMemoStatus,
+        )
+
+        rows = (
+            db.query(CreditMemo)
+            .join(CreditApplication, CreditApplication.credit_memo_id == CreditMemo.id)
+            .filter(
+                CreditApplication.invoice_id == doc.id,
+                CreditMemo.discount_payment_id.isnot(None),
+                CreditMemo.status != CreditMemoStatus.VOID,
+            )
+            .all()
+        )
+    if not rows:
+        return None
+    amount = sum((Decimal(str(r.total or 0)) for r in rows), Decimal("0"))
+    number = getattr(rows[0], "credit_number", None) or getattr(
+        rows[0], "memo_number", None
+    )
+    return {"amount": amount, "number": number}
+
+
 def _foreign(db: Session, doc) -> bool:
     """A discount is taken in the home currency only, so a foreign-currency
     document offers none."""
@@ -414,7 +533,7 @@ class DocumentTerms:
 
     def __init__(self, db: Session, noun: str = "invoice"):
         self.db = db
-        self.noun = noun
+        self.noun = company_noun(db, noun)
         self._terms: dict = {}
         self._listed: dict = {}
 
@@ -429,11 +548,18 @@ class DocumentTerms:
         return read_text(doc.terms)
 
     def fill(self, resp, doc) -> None:
-        """discount_percent, discount_date, discount_line and terms_note on
-        `resp`, from the rule `doc` was saved under and its date. A void
-        document offers no discount (#665)."""
+        """discount_percent, discount_date, discount_line, discount_taken
+        and terms_note on `resp`, from the rule `doc` was saved under and
+        its date. A void document offers no discount (#665); once the
+        discount has been taken, or the document is paid, the offer is spent
+        and what was taken is shown instead (#664)."""
         if not _key(doc.terms) or doc.date is None or _void(doc):
             return
+        from app.schemas.invoices import DiscountTaken
+
+        taken = document_discount_taken(self.db, doc)
+        if taken is not None:
+            resp.discount_taken = DiscountTaken(**taken)
         rule = self._rule(doc)
         if rule is None:
             key = _key(doc.terms)
@@ -442,7 +568,12 @@ class DocumentTerms:
             resp.terms_note = stored_note(self.db, doc, self.noun, self._listed[key])
             return
         by = rule.discount_date(doc.date)
-        if by is not None and not _foreign(self.db, doc):
+        if (
+            taken is None
+            and not _paid(doc)
+            and by is not None
+            and not _foreign(self.db, doc)
+        ):
             resp.discount_percent = rule.discount_percent
             resp.discount_date = by
             resp.discount_line = discount_line(rule.discount_percent, by)
@@ -456,7 +587,9 @@ def document_discount_line(doc) -> Optional[str]:
     db = object_session(doc)
     if db is None or doc.date is None or not _key(doc.terms) or _void(doc):
         return None
-    if _foreign(db, doc):
+    # Once it is paid or the discount has been taken, the offer is spent:
+    # the printed document shows what was taken, not what could be (#664).
+    if _paid(doc) or _foreign(db, doc) or document_discount_taken(db, doc) is not None:
         return None
     rule = document_rule(db, doc)
     if rule is None:
@@ -474,12 +607,45 @@ def term_id_for(db: Session, text: Optional[str]) -> Optional[int]:
     return term.id if term is not None else None
 
 
+def picked_term_id(
+    db: Session, text: Optional[str], payment_term_id: Optional[int]
+) -> Optional[int]:
+    """The entry a document ties to (#664). With no explicit pick, the entry
+    the terms text names now (term_id_for), exactly as before. With one —
+    the form's "I picked the list entry" even when the text is the entry's
+    own name, so a schedule saved as "Net 10th" before the term existed can
+    finally follow it — the picked entry, when it is active and its _key is
+    the key of the terms text; otherwise 409 naming both. A pick names a
+    deliberate tie, so the identical-text rule that leaves a copy untied
+    does not apply to it."""
+    if payment_term_id is None:
+        return term_id_for(db, text)
+    from fastapi import HTTPException
+
+    term = db.get(PaymentTerm, payment_term_id)
+    if term is None or not term.is_active:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Payment term {payment_term_id} is not on the list.",
+        )
+    if _key(term.name) != _key(text):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f'The terms "{(text or "").strip()}" are not "{term.name}", so '
+                "they can't be tied to it. Change the terms or the term picked."
+            ),
+        )
+    return term.id
+
+
 def document_terms_dates(db: Session, doc, on: date, noun: str) -> TermsDates:
     """What a saved document's own terms give it dated `on`: its own rule
     (the term it was saved under, or the old reading of its text), as the
     save keeps it while its terms are sent back unchanged (#665: the bill
     form promised a discount from a term an old untied bill doesn't
     follow). A void or foreign-currency one offers no discount."""
+    noun = company_noun(db, noun)
     if not _key(doc.terms):
         return TermsDates(due_date=on + timedelta(days=FALLBACK_DAYS))
     rule = document_rule(db, doc)

@@ -85,9 +85,15 @@
             {% if inv.po_number %}<td class="po">{{ inv.po_number }}</td>{% endif %}
         </tr>
     </table>
-    {# The early-payment discount the terms offer (#664), and by when. #}
-    {% if discount_line and not inv.is_sales_receipt and kind != 'Pledge' %}
+    {# The early-payment discount the terms offer (#664), and by when: never
+       once it is paid or a discount was taken, even if an older server still
+       sends the offer line (#665). #}
+    {% if discount_line and not discount_taken and not inv.is_sales_receipt and kind != 'Pledge' and inv.balance_due and inv.balance_due != 0 %}
     <div class="terms-discount">{{ discount_line }}</div>
+    {% endif %}
+    {# The discount the customer took, once one is taken (#665). #}
+    {% if discount_taken and not inv.is_sales_receipt and kind != 'Pledge' %}
+    <div class="terms-discount">Early-payment discount taken: {{ discount_taken.amount | currency(cur) }} ({{ discount_taken.number }})</div>
     {% endif %}
 
     <div class="addresses">

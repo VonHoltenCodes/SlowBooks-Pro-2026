@@ -150,7 +150,7 @@ const BillsPage = {
                 <td>${escapeHtml(b.bill_number || '')}</td>
                 <td>${formatDate(b.date)}</td>
                 <td class="amount">${formatCurrency(a.amount)}</td>
-                <td class="actions"><button class="btn btn-sm btn-secondary" onclick="BillsPage.view(${a.bill_id})">View Bill</button>${!p.is_voided && !(p.discounts || []).some(d => d.bill_id === a.bill_id) ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BillsPage.showTakeDiscount(${p.id}, ${a.bill_id})">Take discount</button>` : ''}</td>
+                <td class="actions"><button class="btn btn-sm btn-secondary" onclick="BillsPage.view(${a.bill_id})">View Bill</button>${!p.is_voided && !(p.discounts || []).some(d => d.bill_id === a.bill_id) && a.can_take_discount !== false ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BillsPage.showTakeDiscount(${p.id}, ${a.bill_id})">Take discount</button>` : ''}</td>
             </tr>`;
         }).join('');
         const applied = allocations.reduce((sum, a) => sum + Number(a.amount), 0);
@@ -478,7 +478,7 @@ const BillsPage = {
                         <input name="date" type="date" required value="${bill ? bill.date : todayISO()}" onchange="BillsPage.termsHint()"></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms" title="The vendor's terms; the due date follows from them" onchange="BillsPage.termsHint()">
-                            ${PaymentTerms.optionsHtml(terms)}
+                            ${PaymentTerms.optionsHtml(terms, null, !bill || bill.payment_term_id != null)}
                         </select>
                         <div class="hint" id="bill-terms-hint"></div></div>
                     ${classGroup}${jobGroup}
@@ -861,11 +861,15 @@ const BillsPage = {
         if (!(await ClassWarn.ok(form, { rows: '#bill-lines tr', cls: 'line-function' }))) return;
         try {
             const vendorId = await VendorQuickAdd.ensure('bill-vendor');
+            // the terms text, and the id of the list entry when one is picked,
+            // so a list pick whose name matches legacy text ties the bill (#665)
+            const termSel = PaymentTerms.selection(form.terms);
             const body = {
                 vendor_id: vendorId,
                 bill_number: form.bill_number.value.trim() || null,
                 date: form.date.value,
-                terms: form.terms.value,
+                terms: termSel.terms,
+                payment_term_id: termSel.payment_term_id,
                 notes: form.notes.value || null,
                 class_id: classIdFromForm(form),
                 job_id: jobIdFromForm(form),
@@ -1160,7 +1164,7 @@ const BillsPage = {
         const cents = PaymentTerms.suggestedCents(bill, p.date);
         openModal(`Take a discount on bill ${escapeHtml(bill.bill_number)}`, `
             <form id="take-bill-discount-form" onsubmit="BillsPage.saveTakeDiscount(event, ${paymentId}, ${billId})">
-                <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(bill.discount_line || 'Its terms offer no early-payment discount.')}
+                <p style="font-size:13px; margin:0 0 8px;">${escapeHtml(PaymentTerms.dueSentence(bill.discount_line))}
                     ${formatCurrency(bill.balance_due)} is still due on it; the discount is dated ${formatDate(p.date)}, as the payment is.</p>
                 <div class="form-grid">
                     <div class="form-group"><label for="take-bill-discount-amount">Discount</label>

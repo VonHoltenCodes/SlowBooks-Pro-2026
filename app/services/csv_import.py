@@ -74,8 +74,14 @@ def _terms(row: dict, default: str, choices) -> tuple[str | None, str | None]:
     raw = _cell(row, "Terms")
     if raw is None:
         return default, None
+    # Matched to the active list the same way the parser matches a document's
+    # terms (#664/#665: NFKC, confusables and whitespace aside), so a
+    # fullwidth "Ｎｅｔ ３０" reads as Net 30 just as the list and /dates do.
+    from app.services.payment_terms import _key
+
+    raw_key = _key(raw)
     for option in choices:
-        if " ".join(raw.split()).lower() == " ".join(option.split()).lower():
+        if raw_key == _key(option):
             return option, None
     # text the terms parser reads ("Net 99", "COD") keeps its meaning and is
     # kept as typed; the forms offer a record's own terms beside the list

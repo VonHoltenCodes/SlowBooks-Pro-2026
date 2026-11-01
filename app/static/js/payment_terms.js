@@ -32,22 +32,38 @@ const PaymentTerms = {
     // record's own terms when they are not on it (free text from before the
     // list, an import, or a term made inactive), so a save never changes
     // them silently. `blank` adds a first option with that label and value "".
-    optionsHtml(selected, blank = null) {
+    // `tied` is whether the record is tied to a list entry (payment_term_id
+    // set); false when it is still untied (#665).
+    optionsHtml(selected, blank = null, tied = true) {
+        const list = PaymentTerms._list || [];
         const names = PaymentTerms.names();
-        // the record's own text exactly as stored, never a list name that
-        // only matches it case- or space-blind: sent back unchanged, it
-        // leaves a document saved before that term untied (#665). It comes
-        // first and says it is the record's own, so it can't be mistaken
-        // for the list term it resembles, and typing what the box shows
-        // picks it again.
+        // the record's own text exactly as stored. It is offered first and
+        // said to be the record's own when it is off the list, or when it
+        // matches a list name but the document is still untied from the list
+        // (payment_term_id null): then picking the list entry beside it ties
+        // the document, while leaving this selected re-sends the text
+        // unchanged, so a save never ties or unties a document on its own.
         const current = selected || '';
-        const own = current && !names.includes(current);
+        const own = current && (!names.includes(current) || !tied);
         // blank terms stay blank (due in 30 days, as always) rather than
         // the first term on the list
         if (blank === null && !current) blank = 'No terms (due in 30 days)';
+        // each list option carries its id, so the save can send the term the
+        // user picked (#665); the own "(as saved)" option carries none.
         return (blank !== null ? `<option value="" ${!current ? 'selected' : ''}>${escapeHtml(blank)}</option>` : '')
             + (own ? `<option value="${PaymentTerms.attr(current)}" selected>${escapeHtml(current.trim())} (as saved)</option>` : '')
-            + names.map(t => `<option value="${PaymentTerms.attr(t)}" ${t === current ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('');
+            + list.map(t => `<option value="${PaymentTerms.attr(t.name)}" ${!own && t.name === current ? 'selected' : ''}${t.id != null ? ` data-term-id="${t.id}"` : ''}>${escapeHtml(t.name)}</option>`).join('');
+    },
+
+    // What a terms select carries on save: its text, and the id of the list
+    // entry when a list option is picked, so the server ties the document to
+    // that term; null id when the record's own "(as saved)" option is picked,
+    // so the text is sent alone and the tie is left as it was (#665).
+    selection(select) {
+        if (!select) return { terms: '', payment_term_id: null };
+        const opt = select.selectedOptions && select.selectedOptions[0];
+        const id = opt && opt.dataset ? opt.dataset.termId : null;
+        return { terms: select.value, payment_term_id: id ? parseInt(id, 10) : null };
     },
 
     // An attribute value that comes back byte for byte: HTML turns a CR
@@ -107,9 +123,21 @@ const PaymentTerms = {
         const msg = String((err && err.message) || '');
         if (body.allow_discount_override || !msg.includes(PaymentTerms.OVERRIDE)) return false;
         const why = msg.replace(` Send ${PaymentTerms.OVERRIDE} to take it anyway.`, '');
+        // the person sees the plain reason, never the API instruction,
+        // whether they take it anyway or press Cancel: the caller then toasts
+        // the rewritten message, not the raw one (#665).
+        if (err) err.message = why;
         return confirm(`${why}\n\nTake the discount anyway?`);
     },
     OVERRIDE: 'allow_discount_override',
+
+    // The line above a Take-discount modal: the discount the terms offer (or
+    // that they offer none), closed with a full stop so the balance sentence
+    // after it does not run on to it (#665).
+    dueSentence(discountLine) {
+        const line = discountLine || 'Its terms offer no early-payment discount';
+        return line.replace(/\.?$/, '.');
+    },
 
     // The early-payment discount suggested for an open document paid on
     // `payDate`: its percent of the balance, in cents, while the discount
@@ -135,8 +163,10 @@ const PaymentTerms = {
         // a discount account for this side: sales discounts given on
         // Receive Payments, purchase discounts taken on Pay Bills (#665)
         const other = side === 'sales' ? /purchase|taken|earned|vendor/i : /sales|given|allowed|customer/i;
-        const named = usable.find(a => /discount/i.test(a.name) && !other.test(a.name))
-            || usable.find(a => /discount/i.test(a.name));
+        // only a discount account for this side: never fall back to the other
+        // side's, so Pay Bills does not pre-select Sales Discounts (#665).
+        // With none on this side, nothing is pre-selected and the user picks.
+        const named = usable.find(a => /discount/i.test(a.name) && !other.test(a.name));
         const pick = usable.find(a => String(a.id) === last) || named || null;
         return '<option value="">Select...</option>' + usable.map(a =>
             `<option value="${a.id}" ${pick && pick.id === a.id ? 'selected' : ''}>${escapeHtml((a.account_number ? a.account_number + ' ' : '') + a.name)}</option>`).join('');

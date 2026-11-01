@@ -19,8 +19,8 @@ from app.services.numbering import next_invoice_number
 from app.services.payment_terms import (
     DocumentTerms,
     document_due_date,
+    picked_term_id,
     retie,
-    term_id_for,
 )
 from app.services.closing_date import check_closing_date
 
@@ -153,6 +153,9 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     # The job, on the header or a line, is this customer's (NEW-36).
     refuse_other_customers_jobs(db, customer.id, data.job_id, data.lines, noun, words)
 
+    # An explicit pick of a list entry (#664): validated here, so a bad one
+    # is refused before anything is written.
+    term_id = picked_term_id(db, data.terms, data.payment_term_id)
     # Parse terms for due date (explicit due_date wins; else derive from terms)
     due_date = data.due_date or _due_date_from_terms(db, data.date, data.terms)
     refuse_due_before_date(data.date, due_date)
@@ -206,7 +209,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             date=data.date,
             due_date=due_date,
             terms=data.terms,
-            payment_term_id=term_id_for(db, data.terms),
+            payment_term_id=term_id,
             po_number=data.po_number,
             subtotal=subtotal,
             tax_rate=data.tax_rate,
@@ -519,6 +522,9 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
 
     previous_customer_id = invoice.customer_id
     terms_before = invoice.terms
+    # An explicit pick of a list entry is set through picked_term_id below,
+    # not straight onto the column, so a bad one is refused (#664).
+    pick = update_data.pop("payment_term_id", None)
     for key, val in update_data.items():
         if key == "is_pledge" and val is None:
             continue
@@ -526,7 +532,17 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     # Terms the person changed tie the invoice to the entry they name now
     # (#664); the same terms sent back (the form always sends them) leave
     # it as it was saved, tied or not.
-    retie(db, invoice, terms_before)
+    terms_changed = retie(db, invoice, terms_before)
+    # An explicit pick ties it even when its text is the entry's own name,
+    # so a legacy invoice can finally follow a term added since (#664).
+    if pick is not None:
+        invoice.payment_term_id = picked_term_id(db, invoice.terms, pick)
+    # Terms changed (or a pick) and no due date sent: recompute it from the
+    # new rule, as bills.py does (#664). A recomputed date before the
+    # invoice date (Net -5) is refused, as on create.
+    if (terms_changed or pick is not None) and "due_date" not in update_data:
+        invoice.due_date = document_due_date(db, invoice)
+        refuse_due_before_date(invoice.date, invoice.due_date)
     # Moved to another customer: the Bill To whole is the new customer's
     # payer's as of now, as create makes it, the street with the name and
     # country, and the ship-to the new customer's with its country; an

@@ -3,6 +3,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 from pydantic import (
     BaseModel,
+    Field,
     StrictBool,
     field_validator,
     model_validator,
@@ -11,6 +12,7 @@ from pydantic import (
 
 from app.schemas.common import (
     Discount,
+    StrictId,
     StrictModel,
     TaxRateFloat,
     TaxRateOut,
@@ -18,7 +20,7 @@ from app.schemas.common import (
     validate_non_negative_line,
     quantity_text,
 )
-from app.schemas.invoices import RateOut
+from app.schemas.invoices import DiscountTaken, RateOut
 
 
 class BillLineCreate(StrictModel):
@@ -135,6 +137,10 @@ class BillCreate(StrictModel):
     date: dt_date
     due_date: Optional[dt_date] = None
     terms: str = "Net 30"
+    # An explicit pick of a list entry (#664): tie the bill to it even when
+    # its terms text is the entry's own name. 1..2**63-1, so a huge id is a
+    # 422, not an OverflowError at the query (#665).
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     ref_number: Optional[str] = None
     po_id: Optional[int] = None
     tax_rate: TaxRateFloat = 0
@@ -176,6 +182,9 @@ class BillUpdate(StrictModel):
     date: Optional[dt_date] = None
     due_date: Optional[dt_date] = None
     terms: Optional[str] = None
+    # An explicit pick of a list entry (#664), so a legacy bill whose text
+    # is the entry's own name can finally be tied to it. 1..2**63-1.
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     ref_number: Optional[str] = None
     tax_rate: Optional[TaxRateFloat] = None
     notes: Optional[str] = None
@@ -243,6 +252,9 @@ class BillResponse(BaseModel):
     discount_percent: Optional[Decimal] = None
     discount_date: Optional[dt_date] = None
     discount_line: Optional[str] = None
+    # Set once the discount has been taken (#664): the vendor credit and
+    # amount, shown in place of the offer, which is then cleared.
+    discount_taken: Optional[DiscountTaken] = None
     terms_note: Optional[str] = None
     model_config = {"from_attributes": True}
 
@@ -275,7 +287,7 @@ class BillPaymentCreate(StrictModel):
     allocations: list[BillPaymentAllocationCreate] = []
     # Where the allocations' discounts post (#664): required when one takes
     # a discount, refused when none does.
-    discount_account_id: Optional[int] = None
+    discount_account_id: Optional[StrictId] = None
     # Take a discount the bill's terms don't offer: none at all, after its
     # date, more than its percent, or a second one (#664). Each refusal
     # names this field.
@@ -286,9 +298,9 @@ class BillPaymentDiscountAdd(StrictModel):
     """An early-payment discount taken after the payment that paid the rest
     of the bill (#665), recorded against that payment."""
 
-    bill_id: int
+    bill_id: StrictId
     discount: Discount
-    discount_account_id: int
+    discount_account_id: StrictId
     allow_discount_override: StrictBool = False
 
 
@@ -299,6 +311,11 @@ class BillPaymentMemoUpdate(StrictModel):
 class BillPaymentAllocationResponse(BaseModel):
     bill_id: int
     amount: Decimal = Decimal("0")
+    # Whether Pay Bills may offer "Take discount" on this allocation (#665):
+    # only when the bill's terms offer one, none was taken, and neither the
+    # payment nor the bill is void or foreign-currency. The JS hides the
+    # button on false, so it is never offered where the click would fail.
+    can_take_discount: bool = False
     model_config = {"from_attributes": True}
 
 

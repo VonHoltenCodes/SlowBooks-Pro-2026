@@ -37,7 +37,7 @@ from app.schemas.memorized import (
 )
 from app.services import scheduler
 from app.services.accounting import compute_line_totals
-from app.services.payment_terms import retie, term_id_for
+from app.services.payment_terms import picked_term_id, retie
 from app.services.memorized_service import (
     OccurrenceTaken,
     amount_of,
@@ -230,8 +230,9 @@ def create_memorized(data: MemorizedCreate, db: Session = Depends(get_db)):
         vendor_id=data.vendor_id if data.kind == KIND_BILL else None,
         bill_number=(data.bill_number or "").strip() or None,
         terms=data.terms,
-        # its bills follow the term these terms name now (#664)
-        payment_term_id=term_id_for(db, data.terms),
+        # its bills follow the term these terms name now, or the entry the
+        # person explicitly picked (#664)
+        payment_term_id=picked_term_id(db, data.terms, data.payment_term_id),
         tax_rate=data.tax_rate,
         notes=data.notes,
         description=data.description,
@@ -318,6 +319,10 @@ def update_memorized(mem_id: int, data: MemorizedUpdate, db: Session = Depends(g
     # terms the person changed tie the schedule anew; the same terms sent
     # back leave it as it was saved (#664)
     retie(db, mem, terms_before)
+    # an explicit pick ties it even when its text is the entry's own name,
+    # so a legacy schedule can finally follow a term added since (#664)
+    if data.payment_term_id is not None:
+        mem.payment_term_id = picked_term_id(db, mem.terms, data.payment_term_id)
     mem.frequency, mem.interval = checked.frequency, checked.interval
     if "bill_number" in changes:
         mem.bill_number = (checked.bill_number or "").strip() or None

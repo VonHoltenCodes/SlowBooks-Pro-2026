@@ -833,7 +833,7 @@ const SettingsPage = {
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
                         the date; a date-driven term is due on a day of the month. Either can offer an early-payment discount, which Receive Payments and Pay Bills
-                        suggest until its date passes. An ${T('invoice')} or bill keeps the term it was saved under; a term on one keeps its rule, so make it inactive and add a new one to change it.
+                        suggest until its date passes. Each ${T('invoice')} or bill keeps the term it was saved under; a term on one keeps its rule, so make it inactive and add a new one to change it.
                         A term added later never reaches what was saved before it: saving one again with exactly the same terms leaves it as it was, and picking any other terms (even the same words in other case) ties it to the term they name. A date-driven term is due on its next day of the month, or the one a month later when the document is dated fewer than the given number of days before that day.
                     </div>
                     <div style="display:flex; gap:8px; margin-bottom:12px;" data-admin data-write>
@@ -2705,8 +2705,8 @@ const SettingsPage = {
         SettingsPage._paymentTerms = terms;
         el.innerHTML = `<div class="table-container"><table>
             <thead><tr><th scope="col">Name</th><th scope="col">Rule</th>
-                <th scope="col" class="amount" title="Invoices and bills saved under it; their rule stays">${T('Invoices')} &amp; bills</th>
-                <th scope="col" class="amount" title="Customers, vendors, recurring ${T('invoices')}, memorized bills and Default Terms that carry it: a change of its rule reaches their next documents">Customers, vendors &amp; schedules</th>
+                <th scope="col" class="amount" title="${T('Invoices')} and bills saved under it; their rule stays">${T('Invoices')} &amp; bills</th>
+                <th scope="col" class="amount" title="${T('Customers')}, vendors, recurring ${T('invoices')}, memorized bills and Default Terms that carry it: a change of its rule reaches their next documents">${T('Customers')}, vendors &amp; schedules</th>
                 <th scope="col">Actions</th></tr></thead>
             <tbody>${terms.map(t => `<tr${t.is_active ? '' : ' style="color:var(--text-muted);"'}>
                 <td><strong>${escapeHtml(t.name)}</strong>${t.is_active ? '' : ' (inactive)'}</td>

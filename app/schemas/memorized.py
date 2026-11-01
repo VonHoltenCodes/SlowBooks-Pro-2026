@@ -4,6 +4,7 @@ from typing import Optional
 
 from pydantic import (
     BaseModel,
+    Field,
     ValidationError,
     field_serializer,
     field_validator,
@@ -149,6 +150,8 @@ class MemorizedCreate(StrictModel):
     vendor_id: Optional[int] = None
     bill_number: Optional[str] = None
     terms: Optional[str] = None
+    # An explicit pick of a list entry for a memorized bill (#664). 1..2**63-1.
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     tax_rate: TaxRateFloat = 0
     notes: Optional[str] = None
     # a journal entry
@@ -239,6 +242,8 @@ class MemorizedUpdate(StrictModel):
     vendor_id: Optional[int] = None
     bill_number: Optional[str] = None
     terms: Optional[str] = None
+    # An explicit pick of a list entry for a memorized bill (#664). 1..2**63-1.
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     tax_rate: Optional[TaxRateFloat] = None
     notes: Optional[str] = None
     description: Optional[str] = None

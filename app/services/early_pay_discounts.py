@@ -229,6 +229,42 @@ def record_override(payment, reasons: list[str], actor: str) -> None:
     )
 
 
+def offers_discount(db: Session, doc) -> bool:
+    """Whether the document's own terms offer an early-payment discount."""
+    from app.services.payment_terms import document_rule
+
+    if doc is None or getattr(doc, "date", None) is None:
+        return False
+    rule = document_rule(db, doc)
+    return rule is not None and rule.discount_date(doc.date) is not None
+
+
+def can_take_discount(
+    db: Session, doc, noun: str, payment, from_remainder: bool
+) -> bool:
+    """Whether a payment's allocation may still take an early-payment
+    discount (#665), so the view offers "Take discount" only where the click
+    would go through: the document's terms offer one, none was taken on it,
+    the money was not applied later from a remainder, the payment is not
+    void, and the document is neither void nor foreign-currency."""
+    from app.models.bills import BillStatus
+    from app.models.invoices import InvoiceStatus
+    from app.services.currency import document_currency, home_currency
+
+    if doc is None or from_remainder or payment is None or payment.is_voided:
+        return False
+    status = getattr(doc, "status", None)
+    if (noun == "invoice" and status == InvoiceStatus.VOID) or (
+        noun == "bill" and status == BillStatus.VOID
+    ):
+        return False
+    if document_currency(doc, db) != home_currency(db):
+        return False
+    if not offers_discount(db, doc):
+        return False
+    return _earlier_discount(db, doc, noun) is None
+
+
 def _day(d) -> str:
     return f"{d.strftime('%b')} {d.day}, {d.year}"
 
@@ -285,9 +321,16 @@ def post_customer_discount(
     """The credit memo for a discount the customer took on `invoice` with
     `payment`, applied to the invoice. Flushed; the caller commits."""
     from app.routes.invoices.lifecycle import post_applied_credit
+    from app.services.donor_documents import document_label
+    from app.services.terminology import terms_from_db
 
+    # The document's own face, the same label the journal header uses
+    # (donor_documents.document_label): a nonprofit pledge's stored memo
+    # reads "pledge", not "invoice", so a later flip can't leave the header
+    # and the memo disagreeing (#665).
+    noun = document_label(invoice, terms_from_db(db)).lower()
     memo = (
-        f"Early-payment discount on invoice {invoice.invoice_number}"
+        f"Early-payment discount on {noun} {invoice.invoice_number}"
         f"{_terms_words(invoice)}"
     )
     if override:

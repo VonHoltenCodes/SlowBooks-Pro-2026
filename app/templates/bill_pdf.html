@@ -67,9 +67,15 @@
         {% if bill.ref_number %}<tr>
             <td class="meta-label">Ref:</td><td colspan="3">{{ bill.ref_number }}</td>
         </tr>{% endif %}
-        {# The early-payment discount the vendor's terms offer (#664). #}
-        {% if discount_line %}<tr>
+        {# The early-payment discount the vendor's terms offer (#664): never
+           once the bill is paid or a discount was taken, even if an older
+           server still sends the offer line (#665). #}
+        {% if discount_line and not discount_taken and bill.balance_due and bill.balance_due != 0 %}<tr>
             <td class="meta-label">Discount:</td><td colspan="3">{{ discount_line }}</td>
+        </tr>{% endif %}
+        {# The discount the vendor gave, once one is taken (#665). #}
+        {% if discount_taken %}<tr>
+            <td class="meta-label">Early-payment discount taken:</td><td colspan="3">{{ discount_taken.amount | currency }} ({{ discount_taken.number }})</td>
         </tr>{% endif %}
     </table>
 

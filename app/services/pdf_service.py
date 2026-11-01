@@ -244,14 +244,24 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
 
 def render_invoice_html(invoice, company_settings: dict) -> str:
     """Use the same invoice face and logo preference for PDF and Print."""
-    from app.services.donor_documents import invoice_pdf_context
-    from app.services.payment_terms import document_discount_line
+    from sqlalchemy.orm import object_session
 
+    from app.services.donor_documents import invoice_pdf_context
+    from app.services.payment_terms import (
+        document_discount_line,
+        document_discount_taken,
+    )
+
+    _db = object_session(invoice)
     return _render(
         "invoice_pdf.html",
         company_settings,
         inv=invoice,
         discount_line=document_discount_line(invoice),
+        # the discount already taken, shown in place of the offer (#664)
+        discount_taken=(
+            document_discount_taken(_db, invoice) if _db is not None else None
+        ),
         company_logo_data_uri=(
             _company_logo_data_uri(company_settings)
             if company_settings.get("invoice_show_logo", "true") != "false"

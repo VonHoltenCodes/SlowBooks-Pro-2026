@@ -56,9 +56,25 @@ main refused now come in; terms nothing reads, and terms that would be due
 before their date ("Net -5"), are still refused, each naming its row. On the cash basis a discount settles its share of the
 document as a payment does, and is recomputed with the payments when the
 document is edited, so the cash Sales Tax report agrees with its ledger. An invoice or bill
-with a discount taken keeps its terms and date. Migration `e5c1a7d3f9b2`
-(the list, seeded; nullable columns tying an invoice or bill to its term
-and a discount to its payment).
+with a discount taken keeps its terms and date. On a new document, text the
+old parser did not understand now reads through the list: `net<TAB>45` and
+`net` with a no-break space before `45` are the listed Net 45, due in 45
+days where main gave 30, while a document stored with that text keeps main's
+reading until it is tied. A date-driven term's discount day that falls past
+its due day is in the month before the due month. A nonprofit's screens
+and the memo text stored with a discount it takes use its own words
+(a pledge, a donor). Migration `e5c1a7d3f9b2` (the list, seeded; nullable
+`payment_term_id` tying an invoice, bill, recurring or memorized schedule to
+its term, and nullable `discount_payment_id` / `discount_bill_payment_id`
+tying a discount to its payment; the NOT NULL flag columns
+`payments.discount_override`, `bill_payments.discount_override`,
+`credit_memos.discount_override`, `vendor_credits.discount_override` and
+`payment_allocations.from_remainder`, each default false; the indexes
+`ix_payment_terms_name_lower` on `lower(name)` and one on each of
+`invoices.payment_term_id`, `bills.payment_term_id`,
+`credit_memos.discount_payment_id` and
+`vendor_credits.discount_bill_payment_id`; its downgrade refuses while any
+discount taken against the terms still exists).
 
 ### v2.31.4 — Class and job wherever money moves, and payments that cannot double up
 

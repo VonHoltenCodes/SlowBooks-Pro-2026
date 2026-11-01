@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, Field, StrictBool
-from app.schemas.common import Discount, StrictModel
+from app.schemas.common import Discount, StrictId, StrictModel
 
 
 class PaymentAllocationCreate(StrictModel):
@@ -21,6 +21,12 @@ class PaymentAllocationResponse(BaseModel):
     amount: Decimal
     # The invoice's own number, for a person to read ("1001", not the id)
     invoice_number: Optional[str] = None
+    # Whether the payment view may offer "Take discount" on this allocation
+    # (#665): only when the invoice's terms offer one, none was taken, the
+    # money was not applied later from a remainder, and neither the payment
+    # nor the invoice is void or foreign-currency. The JS hides the button
+    # on false, so it is never offered where the click would be refused.
+    can_take_discount: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -39,7 +45,7 @@ class PaymentCreate(StrictModel):
     allocations: list[PaymentAllocationCreate] = []
     # Where the allocations' discounts post (#664): required when one takes
     # a discount, refused when none does.
-    discount_account_id: Optional[int] = None
+    discount_account_id: Optional[StrictId] = None
     # Take a discount the invoice's terms don't offer: none at all, after
     # its date, more than its percent, or a second one (#664). Each refusal
     # names this field.
@@ -107,7 +113,7 @@ class PaymentDiscountAdd(StrictModel):
     (#665): the customer paid 98 of 100 within the window, and the 2 is
     recorded against that payment, dated as it is."""
 
-    invoice_id: int
+    invoice_id: StrictId
     discount: Discount
-    discount_account_id: int
+    discount_account_id: StrictId
     allow_discount_override: StrictBool = False

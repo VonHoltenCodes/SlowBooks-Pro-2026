@@ -74,22 +74,50 @@ LINKS = (
     ("recurring_invoices", "payment_term_id", "payment_terms"),
     ("memorized_transactions", "payment_term_id", "payment_terms"),
 )
+# Columns a lookup leans on (a term's documents, a payment's discount
+# memo): a plain index each, dropped in downgrade.
+INDEXED = (
+    ("invoices", "payment_term_id"),
+    ("bills", "payment_term_id"),
+    ("credit_memos", "discount_payment_id"),
+    ("vendor_credits", "discount_bill_payment_id"),
+)
 # (table, column) without a foreign key
 FLAGS = (
-    ("payments", sa.Column("discount_override", sa.Boolean(), nullable=False,
-                           server_default=sa.false())),
+    (
+        "payments",
+        sa.Column(
+            "discount_override", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+    ),
     ("payments", sa.Column("discount_override_note", sa.Text(), nullable=True)),
-    ("bill_payments", sa.Column("discount_override", sa.Boolean(), nullable=False,
-                                server_default=sa.false())),
+    (
+        "bill_payments",
+        sa.Column(
+            "discount_override", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+    ),
     ("bill_payments", sa.Column("discount_override_note", sa.Text(), nullable=True)),
-    ("credit_memos", sa.Column("discount_override", sa.Boolean(), nullable=False,
-                               server_default=sa.false())),
-    ("vendor_credits", sa.Column("discount_override", sa.Boolean(), nullable=False,
-                                 server_default=sa.false())),
+    (
+        "credit_memos",
+        sa.Column(
+            "discount_override", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+    ),
+    (
+        "vendor_credits",
+        sa.Column(
+            "discount_override", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+    ),
     # an allocation applied later from a payment's remainder takes no
     # early-payment discount
-    ("payment_allocations", sa.Column("from_remainder", sa.Boolean(), nullable=False,
-                                      server_default=sa.false())),
+    (
+        "payment_allocations",
+        sa.Column(
+            "from_remainder", sa.Boolean(), nullable=False, server_default=sa.false()
+        ),
+    ),
 )
 
 
@@ -150,9 +178,7 @@ def upgrade() -> None:
             sa.Column("kind", sa.String(length=12), nullable=False),
             sa.Column("net_days", sa.Integer(), nullable=True),
             sa.Column("due_day", sa.Integer(), nullable=True),
-            sa.Column(
-                "cutoff_days", sa.Integer(), nullable=False, server_default="0"
-            ),
+            sa.Column("cutoff_days", sa.Integer(), nullable=False, server_default="0"),
             sa.Column("discount_percent", sa.Numeric(5, 2), nullable=True),
             sa.Column("discount_days", sa.Integer(), nullable=True),
             sa.Column("discount_day", sa.Integer(), nullable=True),
@@ -173,6 +199,17 @@ def upgrade() -> None:
             ),
         )
         op.create_index("ix_payment_terms_id", "payment_terms", ["id"])
+        # One name per list, case and (on Postgres) accents aside: a unique
+        # index on lower(name), an expression index both SQLite and Postgres
+        # keep, so eight parallel creates of the same name meet it at flush
+        # and get the 409 the read gives (#665). Folds case only; the route's
+        # _key folds whitespace and look-alikes before the write.
+        op.create_index(
+            "ix_payment_terms_name_lower",
+            "payment_terms",
+            [sa.text("lower(name)")],
+            unique=True,
+        )
 
         # one entry per number of days: the seed, then what the old parser
         # read from text in use (0 is Due on Receipt)
@@ -227,10 +264,69 @@ def upgrade() -> None:
                     {"id": term_id, "text": text},
                 )
 
+    # A plain index on the columns a lookup leans on.
+    insp = sa.inspect(bind)
+    for table, column in INDEXED:
+        if table not in tables or column not in _columns(insp, table):
+            continue
+        name = f"ix_{table}_{column}"
+        if name not in {ix["name"] for ix in insp.get_indexes(table)}:
+            op.create_index(name, table, [column])
+
+
+def _discount_counts(bind, insp, tables) -> tuple[int, int, int]:
+    """How many credit memos, vendor credits and payments carry an
+    early-payment discount this migration added the columns for."""
+
+    def count(table, where):
+        return (
+            bind.execute(
+                sa.text(f"SELECT COUNT(*) FROM {table} WHERE {where}")
+            ).scalar()
+            or 0
+        )
+
+    cm = vc = ov = 0
+    if "credit_memos" in tables and "discount_payment_id" in _columns(
+        insp, "credit_memos"
+    ):
+        cm = count("credit_memos", "discount_payment_id IS NOT NULL")
+    if "vendor_credits" in tables and "discount_bill_payment_id" in _columns(
+        insp, "vendor_credits"
+    ):
+        vc = count("vendor_credits", "discount_bill_payment_id IS NOT NULL")
+    if "payments" in tables and "discount_override" in _columns(insp, "payments"):
+        ov = (
+            bind.execute(
+                sa.text(
+                    "SELECT COUNT(*) FROM payments WHERE discount_override = :t"
+                ).bindparams(t=True)
+            ).scalar()
+            or 0
+        )
+    return cm, vc, ov
+
 
 def downgrade() -> None:
-    insp = sa.inspect(op.get_bind())
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
     tables = set(insp.get_table_names())
+    # Dropping the discount columns would silently lose the links between a
+    # payment and the credit memo or vendor credit that is its early-payment
+    # discount. Refuse while any stands, naming the counts (#665).
+    cm, vc, ov = _discount_counts(bind, insp, tables)
+    if cm or vc or ov:
+        raise RuntimeError(
+            "This downgrade would lose early-payment discount links that still "
+            f"stand: {cm} credit memo(s), {vc} vendor credit(s) and {ov} "
+            "payment(s) carry one. Void those payments first, then downgrade."
+        )
+    # The plain indexes go before their columns do.
+    for table, column in INDEXED:
+        if table in tables and column in _columns(insp, table):
+            name = f"ix_{table}_{column}"
+            if name in {ix["name"] for ix in insp.get_indexes(table)}:
+                op.drop_index(name, table_name=table)
     for table, column in FLAGS:
         if table in tables and column.name in _columns(insp, table):
             with op.batch_alter_table(table) as batch:
@@ -242,5 +338,8 @@ def downgrade() -> None:
             batch.drop_constraint(_fk(table, column), type_="foreignkey")
             batch.drop_column(column)
     if "payment_terms" in tables:
+        existing = {ix["name"] for ix in insp.get_indexes("payment_terms")}
+        if "ix_payment_terms_name_lower" in existing:
+            op.drop_index("ix_payment_terms_name_lower", table_name="payment_terms")
         op.drop_index("ix_payment_terms_id", table_name="payment_terms")
         op.drop_table("payment_terms")
