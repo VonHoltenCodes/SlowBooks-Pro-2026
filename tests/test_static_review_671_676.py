@@ -26,7 +26,7 @@ def _body(start, end):
 def test_the_review_row_draws_class_job_and_name_under_the_forms_rules():
     cells = _body("    _reviewDimCells(t) {", "    _reviewPicks(lineId) {")
     # a class only once the company has one of its own; a job once jobs exist
-    assert "if (Nonprofit.lineClassShown()) {" in cells
+    assert "if (BankingPage._lineClassShown()) {" in cells
     assert "if (jobs.length) {" in cells
     # every box is named, and takes part in the read-only role's lock
     for box in ("rv-class-", "rv-job-", "rv-customer-", "rv-vendor-"):
@@ -65,7 +65,7 @@ def test_the_entry_row_has_the_class_box_and_posts_it():
     )
     assert "${BankingPage._quickClassHtml(key)}" in row
     box = _body("    _quickClassHtml(key) {", "\n    },")
-    assert "if (!Nonprofit.lineClassShown()) return '';" in box
+    assert "if (!BankingPage._lineClassShown()) return '';" in box
     assert 'id="qe-class" aria-label="New entry ${T(\'class\').toLowerCase()}"' in box
     post = _body("    async postQuickEntry(accountId) {", "\n    },")
     assert (

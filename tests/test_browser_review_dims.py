@@ -86,7 +86,13 @@ def test_the_review_row_posts_its_class_job_and_name(browser, company, books):
     finally:
         page.close()
 
-    assert names == ["Class", "Job", "Vendor", "Customer", "Job"]
+    assert names == [
+        f"Class, line {fuel}",
+        f"Job, line {fuel}",
+        f"Vendor, line {fuel}",
+        f"Customer, line {deposit}",
+        f"Job, line {deposit}",
+    ]
     assert bound == f"rv-customer-{deposit}"
     assert body == {
         "category_account_id": expense,

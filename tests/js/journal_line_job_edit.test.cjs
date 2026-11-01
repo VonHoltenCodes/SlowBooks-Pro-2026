@@ -60,7 +60,7 @@ function page({ jobs = JOBS, entries = [], entry = null, accountant = false, row
         toast: (...args) => calls.toast.push(args),
         toastPosted: () => {},
         closeModal: () => {},
-        CostCodes: { headHtml: () => '', cellHtml: () => '', load: async () => {}, fromRow: () => null },
+        CostCodes: { headHtml: () => '', cellHtml: () => '', viewCellHtml: () => '', labelOf: () => '', any: () => false, load: async () => {}, fromRow: () => null },
         CostTypes: { headHtml: () => '', cellHtml: () => '', load: async () => {}, fromRow: () => null },
         Nonprofit: {
             loadFunds: async () => {}, headHtml: () => '<th scope="col">Class</th>',

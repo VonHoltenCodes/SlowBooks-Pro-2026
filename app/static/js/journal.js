@@ -209,7 +209,7 @@ const JournalPage = {
     jobCellHtml() {
         const jobs = JournalPage._jobs || [];
         if (!jobs.length) return '';
-        return `<td><select class="je-job" aria-label="${T('Job')}"><option value="">Same as header</option>${jobs.map(j =>
+        return `<td><select class="je-job"><option value="">Same as header</option>${jobs.map(j =>
             `<option value="${j.id}">${escapeHtml(j.full_name || j.name)}</option>`).join('')}</select></td>`;
     },
 

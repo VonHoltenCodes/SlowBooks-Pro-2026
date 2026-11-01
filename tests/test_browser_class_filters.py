@@ -235,7 +235,7 @@ def test_the_register_filters_by_dates_and_class(browser, company, books, classe
             len(page.evaluate(REG_ROWS)) == all_rows
         ), "January's opening goes, the balance brought forward comes"
 
-        page.get_by_label("Class").select_option(str(site["id"]))
+        page.get_by_label("Class", exact=True).select_option(str(site["id"]))
         settle(page, handled)
         page.wait_for_function(
             "() => document.getElementById('reg-filter-note') && /Site Prep/.test(document.getElementById('reg-filter-note').textContent)"

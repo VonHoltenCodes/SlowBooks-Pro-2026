@@ -632,6 +632,10 @@ const BankingPage = {
     // through them) and sent to the service, which computes the balance
     // brought forward under the same class test.
     _regFilter: { start_date: '', end_date: '', class_id: '' },
+    // the class column's rule and the classes, read through a guard: the
+    // register is also drawn in a test probe that loads this file alone
+    _lineClassShown() { return typeof Nonprofit !== 'undefined' && Nonprofit.lineClassShown(); },
+    _classes_() { return (typeof Nonprofit !== 'undefined' && Nonprofit._funds) || BankingPage._classes || []; },
     _regFilterId: null,  // the register it is for
 
     // The From date each register was last read from (#663), so one worked
@@ -995,7 +999,8 @@ const BankingPage = {
         // the class, job and name boxes of the review rows and the entry row
         // (#671) draw from these: the classes as the forms read them
         // (Nonprofit.lineClassShown), the jobs, the active customers
-        Nonprofit._funds = Array.isArray(classes) ? classes : [];
+        if (typeof Nonprofit !== 'undefined') Nonprofit._funds = Array.isArray(classes) ? classes : [];
+        BankingPage._classes = Array.isArray(classes) ? classes : [];
         BankingPage._jobs = Array.isArray(jobs) ? jobs : [];
         if (customers) BankingPage._customers = customers;
         const info = overview.find(a => a.account_id === id) || {};
@@ -1163,7 +1168,7 @@ const BankingPage = {
                 </td>
             </tr>`).join('');
         setTimeout(() => BankingPage._fillCategorySelects(kind), 0);
-        const dimHeads = (Nonprofit.lineClassShown() ? `<th scope="col">${T('Class')}</th>` : '')
+        const dimHeads = (BankingPage._lineClassShown() ? `<th scope="col">${T('Class')}</th>` : '')
             + ((BankingPage._jobs || []).length ? `<th scope="col">${T('Job')}</th>` : '')
             + `<th scope="col">Name</th>`;
         return `<div class="card" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
@@ -1176,7 +1181,7 @@ const BankingPage = {
                 <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category and the ${Nonprofit.lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
+                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
                 <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
@@ -1230,24 +1235,24 @@ const BankingPage = {
     _reviewDimCells(t) {
         const small = 'font-size:11px; padding:2px 4px; max-width:140px;';
         let html = '';
-        if (Nonprofit.lineClassShown()) {
-            const opts = (Nonprofit._funds || []).filter(c => !c.is_archived)
+        if (BankingPage._lineClassShown()) {
+            const opts = BankingPage._classes_().filter(c => !c.is_archived)
                 .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-            html += `<td><select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}" style="${small}"><option value="">—</option>${opts}</select></td>`;
+            html += `<td><select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select></td>`;
         }
         const moneyIn = parseFloat(t.amount) > 0;
         const jobs = BankingPage._jobs || [];
         if (jobs.length) {
             const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
             const bind = moneyIn ? ` data-customer-select="rv-customer-${t.id}"` : '';
-            html += `<td><select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}" style="${small}"><option value="">— No job —</option>${opts}</select></td>`;
+            html += `<td><select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}"><option value="">— No job —</option>${opts}</select></td>`;
         }
         if (moneyIn) {
             const opts = (BankingPage._customers || [])
                 .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
-            html += `<td><select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}" style="${small}"><option value="">—</option>${opts}</select></td>`;
+            html += `<td><select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select></td>`;
         } else {
-            html += `<td><input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}"></td>`;
+            html += `<td><input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}"></td>`;
         }
         return html;
     },
@@ -1535,8 +1540,8 @@ const BankingPage = {
     // company has a class of its own, the default class chosen unless
     // Settings asks for a class to be picked every time.
     _quickClassHtml(key) {
-        if (!Nonprofit.lineClassShown()) return '';
-        const classes = (Nonprofit._funds || []).filter(c => !c.is_archived);
+        if (!BankingPage._lineClassShown()) return '';
+        const classes = BankingPage._classes_().filter(c => !c.is_archived);
         const blank = ClassWarn.enabled();
         const opts = (blank ? `<option value="" selected>— choose a ${T('class').toLowerCase()} —</option>` : '<option value="">—</option>')
             + classes.map(c => `<option value="${c.id}"${!blank && c.is_system_default ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
@@ -1551,7 +1556,7 @@ const BankingPage = {
         const cls = T('class').toLowerCase();
         // a company with a class of its own has a class box on the row
         // (#671); the balance is the reason then too
-        const why = isDefault || Nonprofit.lineClassShown() ? `the running balance counts this ${cls} only`
+        const why = isDefault || BankingPage._lineClassShown() ? `the running balance counts this ${cls} only`
             : `it has no ${cls} box, and the running balance counts this ${cls} only`;
         return `<tfoot><tr id="reg-quick-entry-off" data-write><td colspan="10" style="padding:6px 10px; font-size:11px; color:var(--gray-500);">The entry row is hidden while a ${cls} is chosen: ${why}. Choose All ${T('classes').toLowerCase()} to use it, or post with + Entry.</td></tr></tfoot>`;
     },
