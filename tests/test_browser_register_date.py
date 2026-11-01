@@ -828,12 +828,21 @@ def test_a_from_typed_a_key_at_a_time_applies_once_the_bar_is_left(browser):
             "() => location.hash === '#/banking/1?start_date=2025-11-15'"
             " && document.getElementById('reg-start').value === '2025-11-15'"
         )
+        # the From is kept, the note and the focus follow the redraw: waited
+        # for, not read a frame early (a 4-core box failed here under load)
+        page.wait_for_function(
+            "() => localStorage.getItem(BankingPage._fromKey(1)) === '2025-11-15'"
+        )
         assert page.evaluate(KEPT, 1) == "2025-11-15"
-        assert "from Nov 15, 2025" in page.inner_text("#reg-filter-note")
+        page.wait_for_function(
+            "() => (document.getElementById('reg-filter-note')?.innerText || '')"
+            ".includes('from Nov 15, 2025')"
+        )
         # the register drawn again, the keyboard is past the bar, not lost
         page.wait_for_function(OUT_OF_BAR)
-        assert page.evaluate(
-            "() => !!document.getElementById('reg-quick-entry').contains(document.activeElement)"
+        page.wait_for_function(
+            "() => !!document.getElementById('reg-quick-entry')"
+            " && document.getElementById('reg-quick-entry').contains(document.activeElement)"
         )
     finally:
         page.close()
