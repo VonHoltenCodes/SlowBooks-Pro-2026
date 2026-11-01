@@ -67,6 +67,9 @@ from sqlalchemy import event as _sa_event  # noqa: E402
 from sqlalchemy.engine import Engine as _Engine  # noqa: E402
 
 if os.environ.get("SLOWBOOKS_SQLITE_FSYNC") != "1":
+    # the alembic subprocesses the migration tests run read this and skip
+    # fsync too (migrations/env.py); a real install never sees it set
+    os.environ["SLOWBOOKS_SQLITE_FSYNC"] = "0"
 
     @_sa_event.listens_for(_Engine, "connect")
     def _suite_sqlite_without_fsync(dbapi_conn, _record):

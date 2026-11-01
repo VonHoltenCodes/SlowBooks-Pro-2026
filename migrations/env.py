@@ -113,6 +113,20 @@ def run_migrations_online() -> None:
             poolclass=pool.NullPool,
         )
 
+    if url.startswith("sqlite") and os.environ.get("SLOWBOOKS_SQLITE_FSYNC") == "0":
+        # the test suite walks the whole chain in alembic subprocesses (the
+        # migration tests), where its in-process no-fsync hook does not
+        # reach; on the Windows runner that walk went past the per-test
+        # timeout once the chain grew. The suite sets the flag; nothing
+        # else does, and a real upgrade keeps SQLite's default durability.
+        from sqlalchemy import event
+
+        @event.listens_for(connectable, "connect")
+        def _no_fsync(dbapi_conn, _record):
+            cur = dbapi_conn.cursor()
+            cur.execute("PRAGMA synchronous=OFF")
+            cur.close()
+
     with connectable.connect() as connection:
         context.configure(connection=connection, target_metadata=target_metadata)
 
