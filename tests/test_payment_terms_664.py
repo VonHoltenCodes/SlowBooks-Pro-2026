@@ -669,9 +669,9 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == ["e5c1a7d3f9b2"]
-    assert script.get_revision("e5c1a7d3f9b2").down_revision == "d7b3f9a1c5e2"
+    assert script.get_revision("e5c1a7d3f9b2").down_revision == "4810bd59e481"
 
-    command.upgrade(cfg, "d7b3f9a1c5e2")
+    command.upgrade(cfg, "4810bd59e481")
     engine = create_engine(f"sqlite:///{db}")
     with engine.begin() as conn:
         conn.execute(
@@ -743,7 +743,7 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     ]
     engine.dispose()
 
-    command.downgrade(cfg, "d7b3f9a1c5e2")
+    command.downgrade(cfg, "4810bd59e481")
     engine = create_engine(f"sqlite:///{db}")
     insp = inspect(engine)
     assert "payment_terms" not in insp.get_table_names()

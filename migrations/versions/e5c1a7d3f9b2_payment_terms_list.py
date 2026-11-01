@@ -29,7 +29,7 @@ an allocation applied from a payment's remainder later is marked
 downgrade drops the table and every column added here.
 
 Revision ID: e5c1a7d3f9b2
-Revises: d7b3f9a1c5e2
+Revises: 4810bd59e481
 Create Date: 2026-10-30
 """
 
@@ -39,7 +39,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "e5c1a7d3f9b2"
-down_revision: Union[str, None] = "d7b3f9a1c5e2"
+down_revision: Union[str, None] = "4810bd59e481"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
