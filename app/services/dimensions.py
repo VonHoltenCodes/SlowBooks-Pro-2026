@@ -10,7 +10,10 @@ from app.models.jobs import Job
 
 
 def require_dimensions(
-    db: Session, class_id: int | None = None, job_id: int | None = None
+    db: Session,
+    class_id: int | None = None,
+    job_id: int | None = None,
+    customer_id: int | None = None,
 ) -> None:
     if class_id is not None:
         cls = db.query(TxnClass).filter(TxnClass.id == class_id).first()
@@ -29,4 +32,9 @@ def require_dimensions(
             raise HTTPException(
                 status_code=400,
                 detail=f"The job {job.full_name} is inactive; pick an active one.",
+            )
+        if customer_id is not None and job.customer_id != customer_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The job {job.full_name} belongs to another customer.",
             )

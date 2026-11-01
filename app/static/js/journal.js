@@ -102,6 +102,9 @@ const JournalPage = {
 
     async view(id) {
         const entry = await API.get(`/journal/${id}`);
+        // the Cost Code column is decided by CostCodes.any(): load the list
+        // here too, not only when a form opens (2.31.4 gate, NEW-196)
+        if (CostCodes._list === null && CostCodes.load) await CostCodes.load();
         const registerHref = entry.register_account_id ? await JournalPage._registerHref(entry) : '';
         // a Job column when a line has one (#672)
         const jobCol = entry.lines.some(l => l.job_id);

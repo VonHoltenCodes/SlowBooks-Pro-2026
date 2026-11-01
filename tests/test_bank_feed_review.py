@@ -499,3 +499,34 @@ def test_one_add_refuses_an_inactive_job(client, db_session, seed_accounts, feed
         json={"category_account_id": seed_accounts["6000"].id, "job_id": job["id"]},
     )
     assert r.status_code == 400 and "inactive" in r.json()["detail"], r.text
+
+
+def test_a_money_in_add_refuses_another_customers_job(
+    client, db_session, seed_accounts, feed
+):
+    """2.31.4 gate, NEW-198: the review row's Job list narrows to the
+    customer picked, but macOS's native menu still shows (and let through)
+    another customer's job; the server refuses it now, and Add all and the
+    register entry go the same way."""
+    _cls, cust, job = _class_and_job(client)
+    other = client.post("/api/customers", json={"name": "Someone Else"}).json()
+    import_transactions(db_session, feed["id"], _lines((8, "400", "DEPOSIT")))
+    bt = db_session.query(BankTransaction).first()
+    r = client.post(
+        f"/api/banking/transactions/{bt.id}/add",
+        json={
+            "category_account_id": seed_accounts["4000"].id,
+            "customer_id": other["id"],
+            "job_id": job["id"],
+        },
+    )
+    assert r.status_code == 400 and "another customer" in r.json()["detail"], r.text
+    r = client.post(
+        f"/api/banking/transactions/{bt.id}/add",
+        json={
+            "category_account_id": seed_accounts["4000"].id,
+            "customer_id": cust["id"],
+            "job_id": job["id"],
+        },
+    )
+    assert r.status_code == 200, r.text

@@ -1168,9 +1168,9 @@ const BankingPage = {
                 </td>
             </tr>`).join('');
         setTimeout(() => BankingPage._fillCategorySelects(kind), 0);
-        const dimHeads = (BankingPage._lineClassShown() ? `<th scope="col">${T('Class')}</th>` : '')
-            + ((BankingPage._jobs || []).length ? `<th scope="col">${T('Job')}</th>` : '')
-            + `<th scope="col">Name</th>`;
+        // one column for the row's picks (NEW-197: three columns pushed
+        // Match / Exclude / Rule… past the right edge at 1280)
+        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name'].filter(Boolean).join(' / ')}</th>`;
         return `<div class="card" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
@@ -1233,28 +1233,28 @@ const BankingPage = {
     // jobs the Job box then narrows to. Left blank, the line posts as it
     // always did: no class, no job, the vendor its payee or rule names.
     _reviewDimCells(t) {
-        const small = 'font-size:11px; padding:2px 4px; max-width:140px;';
+        const small = 'font-size:11px; padding:2px 4px; width:150px; display:block;';
         let html = '';
         if (BankingPage._lineClassShown()) {
             const opts = BankingPage._classes_().filter(c => !c.is_archived)
                 .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-            html += `<td><select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select></td>`;
+            html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
         }
         const moneyIn = parseFloat(t.amount) > 0;
         const jobs = BankingPage._jobs || [];
         if (jobs.length) {
             const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
             const bind = moneyIn ? ` data-customer-select="rv-customer-${t.id}"` : '';
-            html += `<td><select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}"><option value="">— No job —</option>${opts}</select></td>`;
+            html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}"><option value="">— No job —</option>${opts}</select>`;
         }
         if (moneyIn) {
             const opts = (BankingPage._customers || [])
                 .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
-            html += `<td><select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select></td>`;
+            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
         } else {
-            html += `<td><input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}"></td>`;
+            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}">`;
         }
-        return html;
+        return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';
     },
 
     // What a review row chose besides its category, as the add call takes it.

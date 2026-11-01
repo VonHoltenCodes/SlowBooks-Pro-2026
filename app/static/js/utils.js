@@ -1695,6 +1695,7 @@ const JobPicker = {
             if (!opt.value) continue;
             const mine = !cid || (cid !== '__new__' && opt.dataset.customer === cid);
             opt.hidden = !mine;
+            opt.disabled = !mine;  // macOS's native menu shows a hidden option; disabled it cannot be picked
             if (!mine && opt.selected) select.value = '';
         }
     },

@@ -437,7 +437,7 @@ def statement_add(
                 customer_id=data.customer_id,
             ),
         )
-    require_dimensions(db, data.class_id, data.job_id)
+    require_dimensions(db, data.class_id, data.job_id, data.customer_id)
     bt = m.add(
         db,
         bt,
@@ -603,7 +603,7 @@ def feed_add_all(
     for p in (data.lines if data else []):
         # a class or job a row picked must exist and be live, as one Add
         # checks; refused before anything posts (2.31.4 gate, W-95)
-        require_dimensions(db, p.class_id, p.job_id)
+        require_dimensions(db, p.class_id, p.job_id, p.customer_id)
         picks[p.id] = {
             "class_id": p.class_id,
             "job_id": p.job_id,
@@ -825,7 +825,7 @@ def create_bank_transaction(
     category, splits = _category_and_splits(db, account, data)
     vendor = _entry_vendor(db, data.vendor_id, data.payee)
     customer_id = _entry_customer(db, data.customer_id)
-    require_dimensions(db, data.class_id, data.job_id)
+    require_dimensions(db, data.class_id, data.job_id, customer_id)
     if data.amount < 0:
         refuse_duplicate(
             db, account.id, data.check_number, allow=allow_duplicate_check_number

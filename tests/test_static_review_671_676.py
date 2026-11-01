@@ -13,6 +13,8 @@ account showed one and dropped it.
 
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
 JS = (
     Path(__file__).resolve().parents[1] / "app" / "static" / "js" / "banking.js"
 ).read_text(encoding="utf-8")
@@ -81,3 +83,15 @@ def test_the_transfer_dialog_has_a_class_and_sends_it():
     save = _body("    async saveTransfer(e) {", "\n    },")
     assert "class_id: classIdFromForm(form)," in save
     assert "ClassWarn.ok(form)" in save
+
+
+def test_the_job_list_disables_what_it_hides_and_the_view_loads_cost_codes():
+    # NEW-198: a native select on macOS shows hidden options; disabled ones
+    # cannot be picked. NEW-196: View decides its Cost Code column by
+    # CostCodes.any(), so it loads the list itself.
+    utils = (ROOT / "app/static/js/utils.js").read_text(encoding="utf-8")
+    sync = utils[utils.index("sync(select) {") :][:900]
+    assert "opt.hidden = !mine;" in sync and "opt.disabled = !mine;" in sync
+    journal = (ROOT / "app/static/js/journal.js").read_text(encoding="utf-8")
+    view = journal[journal.index("async view(id) {") :][:600]
+    assert "CostCodes.load()" in view
