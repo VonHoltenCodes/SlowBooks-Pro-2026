@@ -1,4 +1,14 @@
 {
+  "2.31.4": {
+    "title": "Class and job wherever money moves, and payments that cannot double up",
+    "items": [
+      "Two payments sent at the same moment on one invoice no longer both post on a desktop (SQLite) install: the second waits for the first and is refused with the balance, as on PostgreSQL. Bill payments, credit memos, deposits and the other locked paths get the same.",
+      "A bank feed line under review takes a Class, a Job and a Name before it is added; Add all keeps each row's picks; the register's entry row and + Entry have the same boxes.",
+      "A journal line takes its own job beside its class, and a hand-entered journal entry can be edited from the Journal Entries page, not only from a bank register.",
+      "Reclassify Transactions moves a job as well as an account or class; a bank rule carries a class and a job, so a matched line comes in with them.",
+      "A transfer takes a class, shown in the Transfers list; + Entry to a bank or card account keeps the class it showed. A class or job named on a posting must exist."
+    ]
+  },
   "2.31.3": {
     "title": "Payroll at the 2026 figures, and a Server Edition that comes back after an update",
     "items": [
