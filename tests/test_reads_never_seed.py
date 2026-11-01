@@ -467,7 +467,7 @@ def test_books_from_before_2_9_get_the_default_asset_type_at_the_upgrade(tmp_pat
     db, cfg = _books_before_the_type(tmp_path, "old", CHART)
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("407d52f22d78").down_revision == "d7b3f9a1c5e2"
-    assert script.get_heads() == ["4810bd59e481"]
+    assert script.get_heads() == ["95209e8d293c"]
     command.upgrade(cfg, "407d52f22d78")
     types, accounts = _after_upgrade(db)
     expense = accounts["Depreciation Expense"]

@@ -16,6 +16,9 @@ class BankRule(Base):
     pattern = Column(String(200), nullable=False)
     account_id = Column(Integer, ForeignKey("accounts.id"), nullable=True)
     vendor_id = Column(Integer, ForeignKey("vendors.id"), nullable=True)
+    # the class and job a matched line comes in with (#675); NULL = none
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
+    job_id = Column(Integer, ForeignKey("jobs.id"), nullable=True)
     rule_type = Column(String(20), default="contains")  # contains, starts_with, exact
     priority = Column(Integer, default=0)
     is_active = Column(Boolean, default=True)

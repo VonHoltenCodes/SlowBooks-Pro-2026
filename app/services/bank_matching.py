@@ -273,6 +273,14 @@ def add(
     check_closing_date(db, bt.date)
     payee = payee or bt.payee
     vendor = _entry_vendor(db, bt, payee, vendor_id)
+    if not splits and (class_id is None or job_id is None):
+        # the class and job the statement line's rule names (#675), where
+        # the caller named none; a split's lines carry their own
+        from app.services.bank_rules_engine import rule_dimensions
+
+        rule_class, rule_job = rule_dimensions(db, bt.payee)
+        class_id = class_id if class_id is not None else rule_class
+        job_id = job_id if job_id is not None else rule_job
     txn = post_bank_entry(
         db,
         acct,

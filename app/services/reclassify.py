@@ -1,4 +1,4 @@
-"""Reclassify (#337): move many lines to another account, or class, at once.
+"""Reclassify (#337): move many lines to another account, class or job at once.
 
 Catching up a client's books means parking the unfamiliar in a holding
 account ("Other expenses") and moving each item once the client answers.
@@ -20,6 +20,16 @@ A move dated into a closed period takes the closing-date password, like
 any other change there, and shows on the Closing Date Exceptions report.
 The audit log carries one event for the move, naming every line, and the
 change to each line.
+
+The job (#674) moves the same way: a line's job is its own, else the
+entry's (``job_attribution``), and the job reports read exactly that, so
+setting the line's job (and the bill line's, which the vendor-by-job report
+reads) is the whole move. A job cost entry, payroll and the rest post their
+own lines and do not move at all, so no stored job cost record is left
+behind on the old job. Taking the job off a line whose entry itself is on
+a job is refused with a sentence: the line would fall back to the entry's
+job, so the entry is where it changes. A line already billed to the job's
+customer keeps its job.
 
 The payee filter (#394): an unrecognized vendor is parked in Other
 expenses until the client says what it was, so the list takes a vendor
@@ -48,6 +58,7 @@ from app.models.accounts import Account
 from app.models.bills import Bill, BillLine
 from app.models.classes import TxnClass
 from app.models.contacts import Vendor
+from app.models.jobs import Job
 from app.models.transactions import Transaction, TransactionLine
 
 # The documents and postings whose account was chosen by hand: these lines
@@ -144,6 +155,12 @@ def _class_out(cls: TxnClass | None) -> dict | None:
     if cls is None:
         return None
     return {"id": cls.id, "name": cls.name}
+
+
+def _job_out(job: Job | None) -> dict | None:
+    if job is None:
+        return None
+    return {"id": job.id, "name": job.full_name}
 
 
 def _voided_ids(db: Session, txn_ids: list[int]) -> set[int]:
@@ -295,10 +312,11 @@ class _Context:
         return None, ""
 
 
-def _line_out(ctx: _Context, line: TransactionLine, classes: dict) -> dict:
+def _line_out(ctx: _Context, line: TransactionLine, classes: dict, jobs: dict) -> dict:
     txn = line.transaction
     movable, reason, _ = ctx.verdict(line)
     cls_id = line.class_id if line.class_id is not None else txn.class_id
+    job_id = line.job_id if line.job_id is not None else txn.job_id
     debit = Decimal(line.debit or 0)
     credit = Decimal(line.credit or 0)
     vendor_id, payee = ctx.payee(txn)
@@ -319,6 +337,8 @@ def _line_out(ctx: _Context, line: TransactionLine, classes: dict) -> dict:
         "class_id": cls_id,
         "class_name": classes.get(cls_id).name if classes.get(cls_id) else None,
         "class_own": line.class_id is not None,
+        "job_id": job_id,
+        "job_name": jobs[job_id].full_name if jobs.get(job_id) else None,
         "movable": movable,
         "reason": reason,
     }
@@ -357,7 +377,8 @@ def lines_on_account(
     )
     ctx = _Context(db, lines)
     classes = {c.id: c for c in db.query(TxnClass).all()}
-    out = [_line_out(ctx, ln, classes) for ln in lines]
+    jobs = _jobs_for(db, lines)
+    out = [_line_out(ctx, ln, classes, jobs) for ln in lines]
     if vendor is not None:
         # a contains match on the resolved payee, so the bank-feed spelling
         # (HOME DEPOT #4521 JOLIET IL), an IIF check memo (Home Depot —
@@ -438,6 +459,30 @@ def _target_class(db: Session, class_id: int | None) -> TxnClass | None:
     return cls
 
 
+def _target_job(db: Session, job_id: int | None) -> Job | None:
+    if job_id is None:
+        return None
+    job = db.get(Job, job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="The job to move to was not found.")
+    if job.is_active is False:
+        raise HTTPException(
+            status_code=400,
+            detail=f"The job {job.full_name} is inactive; pick an active one.",
+        )
+    return job
+
+
+def _jobs_for(db: Session, lines: list[TransactionLine]) -> dict[int, Job]:
+    """The jobs these lines are on (their own, else their entry's)."""
+    ids = {ln.job_id for ln in lines if ln.job_id is not None} | {
+        ln.transaction.job_id for ln in lines if ln.transaction.job_id is not None
+    }
+    if not ids:
+        return {}
+    return {j.id: j for j in db.query(Job).filter(Job.id.in_(ids)).all()}
+
+
 def reclassify(
     db: Session,
     line_ids: list[int],
@@ -445,23 +490,38 @@ def reclassify(
     account_id: int | None,
     class_id: int | None,
     clear_class: bool = False,
+    job_id: int | None = None,
+    clear_job: bool = False,
     dry_run: bool = True,
 ) -> dict:
     """Move the lines: ``account_id`` is the account they go to (None
     leaves the account), ``class_id`` the class (None leaves it,
-    ``clear_class`` removes the line's own). ``dry_run`` answers with the
-    plan and changes nothing."""
-    if account_id is None and class_id is None and not clear_class:
+    ``clear_class`` removes the line's own), ``job_id`` the job (None
+    leaves it, ``clear_job`` takes the line off its job). ``dry_run``
+    answers with the plan and changes nothing."""
+    if (
+        account_id is None
+        and class_id is None
+        and not clear_class
+        and job_id is None
+        and not clear_job
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Choose an account to move the lines to, or a class.",
+            detail="Choose an account to move the lines to, a class, or a job.",
         )
     if class_id is not None and clear_class:
         raise HTTPException(
             status_code=400, detail="Choose a class, or no class, not both."
         )
+    if job_id is not None and clear_job:
+        raise HTTPException(
+            status_code=400, detail="Choose a job, or no job, not both."
+        )
     to_account = _target_account(db, account_id)
     to_class = _target_class(db, class_id)
+    to_job = _target_job(db, job_id)
+    moves_job = to_job is not None or clear_job
     wanted = list(dict.fromkeys(int(i) for i in line_ids))
     lines = (
         db.query(TransactionLine).filter(TransactionLine.id.in_(wanted)).all()
@@ -471,6 +531,7 @@ def reclassify(
     by_id = {ln.id: ln for ln in lines}
     ctx = _Context(db, lines)
     classes = {c.id: c for c in db.query(TxnClass).all()}
+    jobs = _jobs_for(db, lines)
 
     moved, skipped = [], []
     for line_id in wanted:
@@ -491,9 +552,38 @@ def reclassify(
             same_class = True
         else:
             same_class = line.class_id == to_class.id
-        if same_account and same_class:
+        job_now = line.job_id if line.job_id is not None else txn.job_id
+        if clear_job:
+            same_job = job_now is None
+        elif to_job is None:
+            same_job = True
+        else:
+            same_job = job_now == to_job.id
+        if same_account and same_class and same_job:
             skipped.append({"line_id": line_id, "reason": "already there"})
             continue
+        if not same_job:
+            if clear_job and txn.job_id is not None:
+                header = jobs.get(txn.job_id)
+                skipped.append(
+                    {
+                        "line_id": line_id,
+                        "reason": (
+                            "the entry itself is on the job "
+                            f"{header.full_name if header else txn.job_id}; "
+                            "take the job off the entry"
+                        ),
+                    }
+                )
+                continue
+            if line.billed_invoice_line_id is not None:
+                skipped.append(
+                    {
+                        "line_id": line_id,
+                        "reason": "already billed to the job's customer on an invoice",
+                    }
+                )
+                continue
         from_account = line.account
         from_class = classes.get(cls_now)
         after_class = (
@@ -515,6 +605,12 @@ def reclassify(
                 ),
                 "from_class": _class_out(from_class),
                 "to_class": _class_out(after_class),
+                "from_job": _job_out(jobs.get(job_now)),
+                "to_job": _job_out(
+                    None
+                    if clear_job
+                    else (to_job if to_job is not None else jobs.get(job_now))
+                ),
                 "document_line_follows": bill_line is not None,
                 "_line": line,
                 "_bill_line": bill_line,
@@ -526,6 +622,8 @@ def reclassify(
         "to_account": _account_out(to_account),
         "to_class": _class_out(to_class),
         "clear_class": clear_class,
+        "to_job": _job_out(to_job),
+        "clear_job": clear_job,
         "count": len(moved),
         "moved": [{k: v for k, v in m.items() if not k.startswith("_")} for m in moved],
         "skipped": skipped,
@@ -571,6 +669,13 @@ def reclassify(
             line.class_id = to_class.id
             if bill_line is not None:
                 bill_line.class_id = to_class.id
+        # the job reports read the line's own job, else the entry's; the
+        # bill's line is what the vendor-by-job report reads, so it follows
+        if moves_job:
+            new_job = None if clear_job else to_job.id
+            line.job_id = new_job
+            if bill_line is not None:
+                bill_line.job_id = new_job
     db.flush()
     apply_balance_deltas(db, balance_deltas)
 
@@ -590,12 +695,14 @@ def reclassify(
         new_values={
             "account": _account_out(to_account),
             "class": "cleared" if clear_class else _class_out(to_class),
+            "job": "cleared" if clear_job else _job_out(to_job),
             "lines": [m["line_id"] for m in moved],
             "transactions": sorted({m["transaction_id"] for m in moved}),
             "count": len(moved),
         },
         changed_fields=(["account_id"] if to_account is not None else [])
-        + (["class_id"] if (to_class is not None or clear_class) else []),
+        + (["class_id"] if (to_class is not None or clear_class) else [])
+        + (["job_id"] if moves_job else []),
         source="reclassify",
     )
     db.commit()
