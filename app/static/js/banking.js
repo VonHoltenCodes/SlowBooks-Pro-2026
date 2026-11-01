@@ -1159,7 +1159,7 @@ const BankingPage = {
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)'}">${formatCurrency(t.amount)}</td>
                 <td>${AccountQuickAdd.picker(`<select id="cat-${t.id}" class="review-cat" data-write data-current="${t.category_account_id || ''}" aria-label="Category" onchange="BankingPage.setCategory(${t.id}, this)"><option value="">${t.category_name ? escapeHtml(t.category_name) : 'Pick a category…'}</option></select>`, 'review', { ctx: accountId })}</td>
                 ${BankingPage._reviewDimCells(t)}
-                <td style="white-space:nowrap;" data-write><div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;">
+                <td style="white-space:nowrap;" data-write><div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;" data-write>
                     <button class="btn btn-sm btn-primary" onclick="BankingPage.addLine(${t.id}, ${accountId})">Add</button>
                     ${t.suggested_payout ? `<button class="btn btn-sm btn-secondary" onclick="BankingPage.showPayout(${t.id}, ${accountId})" title="Record this deposit as a ${escapeHtml(t.suggested_payout.display_name)} payout, clearing the clearing account">Payout…</button>` : ''}
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.showMatch(${t.id}, ${accountId})">Match</button>
