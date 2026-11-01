@@ -670,9 +670,9 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == ["e5c1a7d3f9b2"]
-    assert script.get_revision("e5c1a7d3f9b2").down_revision == "4810bd59e481"
+    assert script.get_revision("e5c1a7d3f9b2").down_revision == "95209e8d293c"
 
-    command.upgrade(cfg, "4810bd59e481")
+    command.upgrade(cfg, "95209e8d293c")
     engine = create_engine(f"sqlite:///{db}")
     with engine.begin() as conn:
         conn.execute(
@@ -744,7 +744,7 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     ]
     engine.dispose()
 
-    command.downgrade(cfg, "4810bd59e481")
+    command.downgrade(cfg, "95209e8d293c")
     engine = create_engine(f"sqlite:///{db}")
     insp = inspect(engine)
     assert "payment_terms" not in insp.get_table_names()
@@ -841,7 +841,7 @@ def test_the_downgrade_refuses_to_drop_a_standing_discount_link(tmp_path):
     engine.dispose()
 
     with pytest.raises(RuntimeError) as e:
-        command.downgrade(cfg, "4810bd59e481")
+        command.downgrade(cfg, "95209e8d293c")
     assert "1 credit memo" in str(e.value)
     assert "Void those payments first" in str(e.value)
     # the link survived the refusal
