@@ -2674,12 +2674,13 @@ const ReportsPage = {
             rc.range = range;
             rc.plan = null;
             if (!rc.lists) {
-                const [accounts, classes, vendors] = await Promise.all([
+                const [accounts, classes, vendors, jobs] = await Promise.all([
                     API.get('/accounts').catch(() => []),
                     API.get('/classes').catch(() => []),
                     API.get('/vendors').catch(() => []),
+                    API.get('/jobs').catch(() => []),
                 ]);
-                rc.lists = { accounts, classes, vendors };
+                rc.lists = { accounts, classes, vendors, jobs };
             }
             const accountId = String(prm.account_id || '');
             const vendorId = String(prm.vendor_id || '');
@@ -2699,6 +2700,8 @@ const ReportsPage = {
             }
             const data = await API.get(`/reclassify/lines?account_id=${accountId}&start_date=${range.start}&end_date=${range.end}${vendorId ? `&vendor_id=${vendorId}` : ''}${payeeText ? `&payee=${encodeURIComponent(payeeText)}` : ''}`);
             rc.lines = data.lines;
+            // the Job column and picker (#674) once the company has jobs
+            const hasJobs = rc.lists.jobs.length > 0;
             const listed = new Set(data.lines.map(l => l.id));
             rc.ticked.forEach(id => { if (!listed.has(id)) rc.ticked.delete(id); });
             const rows = data.lines.map(l => {
@@ -2716,18 +2719,20 @@ const ReportsPage = {
                         <td>${escapeHtml(l.payee || '')}</td>
                         <td>${escapeHtml(l.description || '')}${l.movable ? '' : ` <span style="font-size:11px;">(stays: ${escapeHtml(l.reason)})</span>`}</td>
                         <td>${escapeHtml(l.class_name || '')}</td>
+                        ${hasJobs ? `<td>${escapeHtml(l.job_name || '')}</td>` : ''}
                         <td class="amount">${formatCurrency(l.amount)}</td>
                     </tr>`;
             }).join('');
             const targets = rc.lists.accounts.filter(a => a.is_active !== false && !a.bank_kind && !a.is_control && String(a.id) !== accountId);
             const classOpts = rc.lists.classes.filter(c => !c.is_archived).map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
-            const empty = `<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No lines${data.vendor ? ` for ${escapeHtml(data.vendor.name)}` : ''} on ${escapeHtml(data.account.label)} in this period</td></tr>`;
+            const jobOpts = rc.lists.jobs.map(j => `<option value="${j.id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            const empty = `<tr><td colspan="${hasJobs ? 8 : 7}" style="text-align:center; color:var(--gray-400);">No lines${data.vendor ? ` for ${escapeHtml(data.vendor.name)}` : ''} on ${escapeHtml(data.account.label)} in this period</td></tr>`;
             return `${picker}
                 <p style="margin-bottom:8px; color:var(--gray-500);">${formatDate(data.start_date)} &mdash; ${formatDate(data.end_date)} · ${data.count} ${data.count === 1 ? 'line' : 'lines'}, ${data.movable} can move${data.count ? ` · lines that can move total ${formatCurrency(data.movable_total)}` : ''}</p>
                 <div class="table-container"><table id="rc-table">
                     <thead><tr>
                         <th scope="col" style="width:28px;">${data.movable ? `<input type="checkbox" id="rc-all" data-write aria-label="Tick every line that can move" onchange="ReportsPage.rcTickAll(this.checked)">` : ''}</th>
-                        <th scope="col">Date</th><th scope="col">Type</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">${T('Class')}</th><th scope="col" class="amount">Amount</th>
+                        <th scope="col">Date</th><th scope="col">Type</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">${T('Class')}</th>${hasJobs ? `<th scope="col">${T('Job')}</th>` : ''}<th scope="col" class="amount">Amount</th>
                     </tr></thead>
                     <tbody>${rows || empty}</tbody>
                 </table></div>
@@ -2741,6 +2746,10 @@ const ReportsPage = {
                             <label for="rc-to-class" style="font-size:11px;">${T('Class')}</label>
                             <select id="rc-to-class" data-no-search data-write style="max-width:220px;"><option value="">Leave as it is</option><option value="none">No ${T('class').toLowerCase()}</option>${classOpts}</select>
                         </div>
+                        ${hasJobs ? `<div class="form-group" style="margin:0;">
+                            <label for="rc-to-job" style="font-size:11px;">${T('Job')}</label>
+                            <select id="rc-to-job" data-no-search data-write style="max-width:260px;"><option value="">Leave as it is</option><option value="none">No ${T('job').toLowerCase()}</option>${jobOpts}</select>
+                        </div>` : ''}
                         <button type="button" class="btn btn-secondary" data-write onclick="ReportsPage.rcPreview()">Preview the move</button>
                     </div>
                     <div id="rc-plan" style="margin-top:8px;" aria-live="polite"></div>
@@ -2769,10 +2778,13 @@ const ReportsPage = {
         const ids = rc.lines.filter(l => l.movable && rc.ticked.has(l.id)).map(l => l.id);
         const toAccount = ($('#rc-to-account') || {}).value || '';
         const toClass = ($('#rc-to-class') || {}).value || '';
+        const toJob = ($('#rc-to-job') || {}).value || '';
         const body = { line_ids: ids, dry_run: dryRun };
         if (toAccount) body.account_id = parseInt(toAccount, 10);
         if (toClass === 'none') body.clear_class = true;
         else if (toClass) body.class_id = parseInt(toClass, 10);
+        if (toJob === 'none') body.clear_job = true;
+        else if (toJob) body.job_id = parseInt(toJob, 10);
         return body;
     },
 
@@ -2780,20 +2792,24 @@ const ReportsPage = {
         const where = [
             r.to_account ? `to <strong>${escapeHtml(r.to_account.label)}</strong>` : '',
             r.clear_class ? `with no ${T('class').toLowerCase()}` : (r.to_class ? `under ${T('class').toLowerCase()} <strong>${escapeHtml(r.to_class.name)}</strong>` : ''),
+            r.clear_job ? `off its ${T('job').toLowerCase()}` : (r.to_job ? `onto ${T('job').toLowerCase()} <strong>${escapeHtml(r.to_job.name)}</strong>` : ''),
         ].filter(Boolean).join(', ');
+        // the Job column when the move names a job, or a line is on one
+        const showJob = r.clear_job || !!r.to_job || r.moved.some(m => m.from_job);
         const rows = r.moved.map(m => `<tr>
                 <td>${formatDate(m.date)}</td>
                 <td>${m.document ? escapeHtml(m.document) : `${escapeHtml(m.source_label)}${m.reference ? ` <span style="color:var(--gray-500);">${escapeHtml(m.reference)}</span>` : ''}`}</td>
                 <td>${escapeHtml(m.description || '')}</td>
                 <td>${escapeHtml(m.from_account ? m.from_account.label : '')} → ${escapeHtml(m.to_account ? m.to_account.label : '')}</td>
                 <td>${escapeHtml(m.from_class ? m.from_class.name : '')} → ${escapeHtml(m.to_class ? m.to_class.name : '')}</td>
+                ${showJob ? `<td>${escapeHtml(m.from_job ? m.from_job.name : '')} → ${escapeHtml(m.to_job ? m.to_job.name : '')}</td>` : ''}
                 <td class="amount">${formatCurrency(m.amount)}</td>
             </tr>`).join('');
         const skipped = r.skipped.length ? `<p style="font-size:11px; color:var(--gray-500);">${r.skipped.length} ${r.skipped.length === 1 ? 'line stays' : 'lines stay'}: ${r.skipped.map(s => escapeHtml(s.reason)).filter((v, i, a) => a.indexOf(v) === i).join('; ')}.</p>` : '';
         const verb = done ? 'Moved' : 'This moves';
         return `<p style="margin:0 0 6px;"><strong>${verb} ${r.count} ${r.count === 1 ? 'line' : 'lines'}</strong> ${where}.${done ? ' Each is in the audit log.' : ''}</p>
             ${skipped}
-            ${r.count ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Memo</th><th scope="col">Account</th><th scope="col">${T('Class')}</th><th scope="col" class="amount">Amount</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+            ${r.count ? `<div class="table-container"><table><thead><tr><th scope="col">Date</th><th scope="col">Type</th><th scope="col">Memo</th><th scope="col">Account</th><th scope="col">${T('Class')}</th>${showJob ? `<th scope="col">${T('Job')}</th>` : ''}<th scope="col" class="amount">Amount</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
             ${(!done && r.count) ? `<div style="margin-top:8px;"><button type="button" class="btn btn-primary" data-write onclick="ReportsPage.rcMove()">Move ${r.count} ${r.count === 1 ? 'line' : 'lines'}</button></div>` : ''}`;
     },
 
@@ -2801,7 +2817,7 @@ const ReportsPage = {
         const body = ReportsPage._rcRequest(true);
         const plan = $('#rc-plan');
         if (!body.line_ids.length) { plan.innerHTML = '<p style="color:var(--gray-500);">Tick the lines to move first.</p>'; return; }
-        if (!body.account_id && !body.class_id && !body.clear_class) { plan.innerHTML = `<p style="color:var(--gray-500);">Choose the account to move them to, or a ${T('class').toLowerCase()}.</p>`; return; }
+        if (!body.account_id && !body.class_id && !body.clear_class && !body.job_id && !body.clear_job) { plan.innerHTML = `<p style="color:var(--gray-500);">Choose the account to move them to, a ${T('class').toLowerCase()}, or a ${T('job').toLowerCase()}.</p>`; return; }
         try {
             const r = await API.post('/reclassify', body);
             ReportsPage._rc.plan = r;

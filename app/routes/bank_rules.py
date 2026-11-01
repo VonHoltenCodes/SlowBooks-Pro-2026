@@ -10,7 +10,9 @@ from app.database import get_db
 from app.routes._helpers import reject_null_updates
 from app.models.accounts import Account
 from app.models.bank_rules import BankRule
+from app.models.classes import TxnClass
 from app.models.contacts import Vendor
+from app.models.jobs import Job
 from app.models.banking import BankTransaction
 from app.schemas.bank_rules import BankRuleCreate, BankRuleUpdate, BankRuleResponse
 from app.services.account_label import account_label
@@ -20,7 +22,8 @@ router = APIRouter(prefix="/api/bank-rules", tags=["bank-rules"])
 
 
 def _out(db: Session, rules: list[BankRule]) -> list[BankRuleResponse]:
-    """The rules with their account's and vendor's names (#493)."""
+    """The rules with their account's and vendor's names (#493), and their
+    class's and job's (#675)."""
     acct_ids = {r.account_id for r in rules if r.account_id}
     vendor_ids = {r.vendor_id for r in rules if r.vendor_id}
     accounts = (
@@ -33,6 +36,18 @@ def _out(db: Session, rules: list[BankRule]) -> list[BankRuleResponse]:
         if vendor_ids
         else {}
     )
+    class_ids = {r.class_id for r in rules if r.class_id}
+    job_ids = {r.job_id for r in rules if r.job_id}
+    classes = (
+        {c.id: c.name for c in db.query(TxnClass).filter(TxnClass.id.in_(class_ids))}
+        if class_ids
+        else {}
+    )
+    jobs = (
+        {j.id: j.full_name for j in db.query(Job).filter(Job.id.in_(job_ids))}
+        if job_ids
+        else {}
+    )
     numbered = use_account_numbers(db)
     out = []
     for r in rules:
@@ -41,6 +56,8 @@ def _out(db: Session, rules: list[BankRule]) -> list[BankRuleResponse]:
         if a is not None:
             resp.account_name = account_label(a.account_number, a.name, numbered)
         resp.vendor_name = vendors.get(r.vendor_id)
+        resp.class_name = classes.get(r.class_id)
+        resp.job_name = jobs.get(r.job_id)
         out.append(resp)
     return out
 
@@ -52,6 +69,24 @@ def _check_refs(db: Session, fields: dict) -> None:
         Account, fields["account_id"]
     ):
         raise HTTPException(status_code=404, detail="Account not found")
+    if fields.get("class_id") is not None:
+        cls = db.get(TxnClass, fields["class_id"])
+        if cls is None:
+            raise HTTPException(status_code=404, detail="Class not found")
+        if cls.is_archived:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The class {cls.name} is archived; pick a live one.",
+            )
+    if fields.get("job_id") is not None:
+        job = db.get(Job, fields["job_id"])
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.is_active is False:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The job {job.full_name} is inactive; pick an active one.",
+            )
 
 
 @router.get("", response_model=list[BankRuleResponse])

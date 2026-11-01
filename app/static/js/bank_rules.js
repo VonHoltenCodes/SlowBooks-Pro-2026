@@ -20,10 +20,13 @@ const BankRulesPage = {
         if (rules.length === 0) {
             html += '<div class="empty-state"><p>No bank rules yet. Create one to auto-categorize transactions.</p></div>';
         } else {
+            // the Class and Job columns (#675) once a rule names one
+            const withClass = rules.some(r => r.class_id);
+            const withJob = rules.some(r => r.job_id);
             html += `<div class="table-container"><table>
                 <thead><tr>
                     <th scope="col">Name</th><th scope="col">Pattern</th><th scope="col">Match Type</th>
-                    <th scope="col">Category Account</th><th scope="col">Vendor</th><th scope="col">Priority</th><th scope="col">Active</th><th scope="col">Actions</th>
+                    <th scope="col">Category Account</th><th scope="col">Vendor</th>${withClass ? `<th scope="col">${T('Class')}</th>` : ''}${withJob ? `<th scope="col">${T('Job')}</th>` : ''}<th scope="col">Priority</th><th scope="col">Active</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const r of rules) {
                 html += `<tr>
@@ -32,6 +35,8 @@ const BankRulesPage = {
                     <td>${escapeHtml(r.rule_type)}</td>
                     <td>${r.account_name ? escapeHtml(r.account_name) : '—'}</td>
                     <td>${r.vendor_name ? escapeHtml(r.vendor_name) : '—'}</td>
+                    ${withClass ? `<td>${r.class_name ? escapeHtml(r.class_name) : '—'}</td>` : ''}
+                    ${withJob ? `<td>${r.job_name ? escapeHtml(r.job_name) : '—'}</td>` : ''}
                     <td>${r.priority}</td>
                     <td>${r.is_active ? 'Yes' : 'No'}</td>
                     <td class="actions">
@@ -56,7 +61,7 @@ const BankRulesPage = {
 
     // prefill: a rule's fields filled in from another screen (#259).
     async showForm(id = null, prefill = null) {
-        let rule = { name: '', pattern: '', account_id: '', vendor_id: '', rule_type: 'contains', priority: 0, is_active: true };
+        let rule = { name: '', pattern: '', account_id: '', vendor_id: '', class_id: '', job_id: '', rule_type: 'contains', priority: 0, is_active: true };
         if (id) rule = await API.get(`/bank-rules/${id}`);
         if (prefill) {
             const { afterSave, from, ...fields } = prefill;
@@ -66,9 +71,11 @@ const BankRulesPage = {
             BankRulesPage._afterSave = null;
         }
 
-        const [accounts, vendors] = await Promise.all([
+        const [accounts, vendors, classes, jobs] = await Promise.all([
             API.get('/accounts'),
             API.get('/vendors').catch(() => []),
+            API.get('/classes?include_archived=true').catch(() => []),
+            API.get('/jobs?include_inactive=true').catch(() => []),
         ]);
         BankRulesPage._accounts = accounts;
         // the vendor a matched line is posted for (#493): active vendors,
@@ -76,6 +83,19 @@ const BankRulesPage = {
         const vendorOpts = vendors
             .filter(v => v.is_active !== false || v.id == rule.vendor_id)
             .map(v => `<option value="${v.id}" ${rule.vendor_id==v.id?'selected':''}>${escapeHtml(v.name)}</option>`).join('');
+        // the class and job a matched line comes in with (#675): live ones,
+        // and the rule's own even when archived or made inactive. Each
+        // picker shows once the company has classes, or jobs.
+        const classOpts = classes
+            .filter(c => !c.is_archived || c.id == rule.class_id)
+            .map(c => `<option value="${c.id}" ${rule.class_id==c.id?'selected':''}>${escapeHtml(c.name)}</option>`).join('');
+        const jobOpts = jobs
+            .filter(j => j.is_active !== false || j.id == rule.job_id)
+            .map(j => `<option value="${j.id}" ${rule.job_id==j.id?'selected':''}>${escapeHtml(j.full_name || j.name)}</option>`).join('');
+        const classGroup = classOpts ? `<div class="form-group"><label for="bank-rule-class">${T('Class')}</label>
+                        <select id="bank-rule-class" name="class_id"><option value="">-- None --</option>${classOpts}</select></div>` : '';
+        const jobGroup = jobOpts ? `<div class="form-group"><label for="bank-rule-job">${T('Job')}</label>
+                        <select id="bank-rule-job" name="job_id"><option value="">-- None --</option>${jobOpts}</select></div>` : '';
         const acctOpts = accounts
             .filter(a => BankRulesPage.CATEGORY_TYPES.includes(a.account_type))
             .map(a => `<option value="${a.id}" ${rule.account_id==a.id?'selected':''}>${accountLabel(a)}</option>`).join('');
@@ -99,6 +119,8 @@ const BankRulesPage = {
                     <div class="form-group"><label for="bank-rule-vendor">Vendor</label>
                         <select id="bank-rule-vendor" name="vendor_id" aria-describedby="bank-rule-vendor-hint"><option value="">-- None --</option>${vendorOpts}</select>
                         <div id="bank-rule-vendor-hint" class="form-hint" style="font-size:11px; color:var(--gray-500);">A line this rule matches is added for this vendor. The vendor's own name matches too.</div></div>
+                    ${classGroup}
+                    ${jobGroup}
                     <div class="form-group"><label>Priority</label>
                         <input name="priority" type="number" value="${rule.priority}" title="Higher = checked first"></div>
                     <div class="form-group"><label>Active</label>
@@ -119,6 +141,10 @@ const BankRulesPage = {
         const data = Object.fromEntries(new FormData(e.target).entries());
         data.account_id = data.account_id ? parseInt(data.account_id) : null;
         data.vendor_id = data.vendor_id ? parseInt(data.vendor_id) : null;
+        // a picker that isn't on the form (no classes, no jobs) leaves the
+        // rule's own as it is
+        if ('class_id' in data) data.class_id = data.class_id ? parseInt(data.class_id) : null;
+        if ('job_id' in data) data.job_id = data.job_id ? parseInt(data.job_id) : null;
         data.priority = parseInt(data.priority) || 0;
         data.is_active = data.is_active === 'true';
         try {
