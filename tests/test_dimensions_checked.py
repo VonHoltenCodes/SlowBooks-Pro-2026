@@ -81,5 +81,5 @@ def test_a_register_entry_takes_a_job(client, seed_accounts, db_session):
     assert r.status_code == 201, r.text
     from app.models.transactions import Transaction
 
-    txn = db_session.get(Transaction, r.json()["transaction_id"])
-    assert txn.job_id == job.id
+    txn = db_session.query(Transaction).order_by(Transaction.id.desc()).first()
+    assert txn.job_id == job.id and all(ln.job_id == job.id for ln in txn.lines)

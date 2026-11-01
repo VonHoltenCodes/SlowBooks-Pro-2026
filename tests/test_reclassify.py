@@ -835,3 +835,44 @@ def test_the_page_offers_a_job_beside_the_class():
     # shown once the company has jobs
     assert "const hasJobs = rc.lists.jobs.length > 0;" in src
     assert '${hasJobs ? `<div class="form-group"' in src
+
+
+def test_a_line_whose_entry_is_on_the_class_is_not_taken_off_it(
+    client, db_session, seed_accounts
+):
+    # the same shape as the job: clearing the line's own class would leave
+    # it reporting under the entry's, so it is refused with the sentence
+    accounts = seed_accounts
+    cls = _ok(client.post("/api/classes", json={"name": "North Crew"}))
+    entry = _ok(
+        client.post(
+            "/api/journal",
+            json={
+                "date": "2026-03-10",
+                "description": "Tile",
+                "class_id": cls["id"],
+                "lines": [
+                    {"account_id": accounts["6900"].id, "debit": "50", "credit": "0"},
+                    {"account_id": accounts["2000"].id, "debit": "0", "credit": "50"},
+                ],
+            },
+        )
+    )
+    line = (
+        db_session.query(TransactionLine)
+        .filter(
+            TransactionLine.transaction_id == entry["id"],
+            TransactionLine.account_id == accounts["6900"].id,
+        )
+        .one()
+    )
+    r = _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": [line.id], "clear_class": True, "dry_run": False},
+        )
+    )
+    assert r["moved"] == []
+    assert r["skipped"][0]["line_id"] == line.id
+    assert "North Crew" in r["skipped"][0]["reason"]
+    assert "take the class off the entry" in r["skipped"][0]["reason"]

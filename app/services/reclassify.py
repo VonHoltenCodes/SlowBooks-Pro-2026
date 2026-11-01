@@ -547,7 +547,7 @@ def reclassify(
         same_account = to_account is None or to_account.id == line.account_id
         cls_now = line.class_id if line.class_id is not None else txn.class_id
         if clear_class:
-            same_class = line.class_id is None
+            same_class = cls_now is None
         elif to_class is None:
             same_class = True
         else:
@@ -561,6 +561,21 @@ def reclassify(
             same_job = job_now == to_job.id
         if same_account and same_class and same_job:
             skipped.append({"line_id": line_id, "reason": "already there"})
+            continue
+        if not same_class and clear_class and txn.class_id is not None:
+            # the line would fall back to the entry's class the moment its
+            # own is cleared, and report under it still (as for the job)
+            header = classes.get(txn.class_id)
+            skipped.append(
+                {
+                    "line_id": line_id,
+                    "reason": (
+                        "the entry itself is on the class "
+                        f"{header.name if header else txn.class_id}; "
+                        "take the class off the entry"
+                    ),
+                }
+            )
             continue
         if not same_job:
             if clear_job and txn.job_id is not None:
