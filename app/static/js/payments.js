@@ -75,7 +75,7 @@ const PaymentsPage = {
         if ((p.discounts || []).length) {
             allocHtml += `<h4 style="margin:12px 0 8px;">Discounts taken</h4>
                 <div class="table-container"><table><thead><tr>
-                <th scope="col">${T('Invoice')}</th><th scope="col">${T('Credit memo')}</th><th scope="col" class="amount">Discount</th></tr></thead><tbody>
+                <th scope="col">${T('Invoice')}</th><th scope="col">Credit memo</th><th scope="col" class="amount">Discount</th></tr></thead><tbody>
                 ${p.discounts.map(d => `<tr><td>#${escapeHtml(d.invoice_number || String(d.invoice_id))}</td><td>${escapeHtml(d.memo_number)}${d.override ? ' (against the terms)' : ''}</td><td class="amount">${formatCurrency(d.amount)}</td></tr>`).join('')}
                 </tbody></table></div>`;
         }
@@ -331,7 +331,7 @@ const PaymentsPage = {
             <div class="form-group" id="discount-account-row" hidden style="margin-top:8px; max-width:360px;">
                 <label for="discount-account">Discount account</label>
                 <select id="discount-account" data-no-search>${PaymentTerms.discountAccountOptions(PaymentsPage._accounts || [], 'sales')}</select>
-                <div class="hint">Where the discounts the ${T('customer')} took post, as a ${T('credit memo')} applied to each ${T('invoice')}.</div></div>
+                <div class="hint">Where the discounts the ${T('customer')} took post, as a credit memo applied to each ${T('invoice')}.</div></div>
             <div id="alloc-status" style="margin-top:8px; padding:8px 10px; border-radius:4px;
                 background:var(--gray-100); font-size:13px;"></div>`;
         $('#payment-invoices').innerHTML = html;
