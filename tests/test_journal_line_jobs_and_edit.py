@@ -141,3 +141,32 @@ def test_the_list_offers_the_accountant_no_edit(client, db_session, seed_account
     assert r.status_code == 200, r.text
     listed = {x["id"]: x for x in client.get("/api/journal").json()}
     assert listed[standing["id"]]["editable"] is False
+
+
+def test_an_edit_keeps_the_header_class_on_a_line_sent_blank(
+    client, db_session, seed_accounts
+):
+    # the in-place edit path stored a blank line class as null while a new
+    # entry's line takes the header's; same shape as the job fix above
+    r = client.post("/api/classes", json={"name": "Shop"})
+    assert r.status_code in (200, 201), r.text
+    shop = r.json()["id"]
+    posted = _post(client, seed_accounts)
+    e = client.get(f"/api/journal/{posted['id']}").json()
+    body = {
+        "date": e["date"],
+        "description": e["description"],
+        "class_id": shop,
+        "lines": [
+            {
+                "account_id": ln["account_id"],
+                "debit": ln["debit"],
+                "credit": ln["credit"],
+                "class_id": None,
+            }
+            for ln in e["lines"]
+        ],
+    }
+    r = client.put(f"/api/journal/{posted['id']}", json=body)
+    assert r.status_code == 200, r.text
+    assert {ln["class_id"] for ln in r.json()["lines"]} == {shop}

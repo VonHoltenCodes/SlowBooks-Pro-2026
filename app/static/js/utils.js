@@ -1764,6 +1764,13 @@ const CostCodes = {
         return CostCodes.any() ? `<td><select class="${cls}">${CostCodes.optionsHtml(selectedId)}</select></td>` : '';
     },
     headHtml(label = 'Cost Code') { return CostCodes.any() ? `<th scope="col">${label}</th>` : ''; },
+    // the label for a line's cost code on a read-only view ('' when none)
+    labelOf(id) {
+        const c = (CostCodes._list || []).find(x => x.id === id);
+        return c ? (c.label || (c.code + ' ' + c.name)) : '';
+    },
+    // <td> for a read-only row, or '' when the company has no cost codes
+    viewCellHtml(id) { return CostCodes.any() ? `<td>${escapeHtml(CostCodes.labelOf(id))}</td>` : ''; },
     fromRow(row, cls) {
         const v = row.querySelector(`.${cls}`)?.value;
         return v ? parseInt(v) : null;

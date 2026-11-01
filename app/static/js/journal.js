@@ -109,6 +109,7 @@ const JournalPage = {
             `<tr><td>${accountLabel(l, l.account_name)}</td>
              <td>${escapeHtml(l.description || '')}</td>
              ${jobCol ? `<td class="je-line-job">${escapeHtml(l.job_name || '')}</td>` : ''}
+             ${CostCodes.viewCellHtml(l.cost_code_id)}
              <td class="amount">${l.debit > 0 ? formatCurrency(l.debit) : ''}</td>
              <td class="amount">${l.credit > 0 ? formatCurrency(l.credit) : ''}</td></tr>`
         ).join('');

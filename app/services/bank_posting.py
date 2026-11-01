@@ -656,9 +656,12 @@ def replace_journal_lines(
             # a line naming no job takes the entry's, as create_journal_entry
             # posts it (#672: the form's per-line "Same as header" sends null)
             o.job_id = n.get("job_id") or job_id
-            if o.class_id != n.get("class_id"):
-                o.class_id = n.get("class_id")
-                o.function = default_function_of(db, n.get("class_id"), fn_cache)
+            # a line with no class of its own takes the header's, as a new
+            # entry's line does (#672 found the same for the job)
+            new_class = n.get("class_id") or class_id
+            if o.class_id != new_class:
+                o.class_id = new_class
+                o.function = default_function_of(db, new_class, fn_cache)
             elif "function" in n:
                 o.function = n["function"]
         db.flush()
