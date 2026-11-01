@@ -22,5 +22,11 @@ def require_dimensions(
                 detail=f"Class {cls.name} is archived; restore it under Classes or choose another.",
             )
     if job_id is not None:
-        if db.query(Job).filter(Job.id == job_id).first() is None:
+        job = db.query(Job).filter(Job.id == job_id).first()
+        if job is None:
             raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        if job.is_active is False:
+            raise HTTPException(
+                status_code=400,
+                detail=f"The job {job.full_name} is inactive; pick an active one.",
+            )

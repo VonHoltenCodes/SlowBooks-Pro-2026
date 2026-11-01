@@ -446,3 +446,56 @@ def test_a_review_line_added_as_a_transfer_keeps_its_class(
     txn = db_session.query(Transaction).get(r.json()["transaction_id"])
     assert txn.source_type == "transfer" and txn.class_id == cls["id"]
     assert [ln.class_id for ln in txn.lines] == [cls["id"], cls["id"]]
+
+
+def test_add_all_refuses_a_class_or_job_that_does_not_exist_before_posting(
+    client, db_session, seed_accounts, feed, vendor
+):
+    """2.31.4 gate, W-95: Add all posted a row's job 99999 where one Add
+    answered 404, and P&L by Job then failed on the unknown job. The picks
+    are checked before anything posts, like one Add's."""
+    cls, _cust, _job = _class_and_job(client)
+    import_transactions(
+        db_session,
+        feed["id"],
+        _lines((8, "-60", "HARDWARE STORE"), (9, "-20", "PAPER CO")),
+    )
+    a, b = db_session.query(BankTransaction).order_by(BankTransaction.id).all()
+    for bt in (a, b):
+        r = client.patch(
+            f"/api/banking/transactions/{bt.id}",
+            json={"category_account_id": seed_accounts["6000"].id},
+        )
+        assert r.status_code == 200, r.text
+    r = client.post(
+        f"/api/banking/accounts/{feed['id']}/feed/add-all",
+        json={"lines": [{"id": a.id, "job_id": 99999}, {"id": b.id}]},
+    )
+    assert r.status_code == 404 and "Job 99999" in r.json()["detail"]
+    db_session.expire_all()
+    assert all(
+        bt.transaction_id is None for bt in db_session.query(BankTransaction).all()
+    ), "nothing posts when a pick is refused"
+    r = client.put(f"/api/classes/{cls['id']}", json={"is_archived": True})
+    assert r.status_code == 200, r.text
+    r = client.post(
+        f"/api/banking/accounts/{feed['id']}/feed/add-all",
+        json={"lines": [{"id": a.id, "class_id": cls["id"]}]},
+    )
+    assert r.status_code == 400 and "archived" in r.json()["detail"]
+    assert client.get("/api/reports/profit-loss-by-job").status_code == 200
+
+
+def test_one_add_refuses_an_inactive_job(client, db_session, seed_accounts, feed):
+    """2.31.4 gate, W-96: rules and Reclassify refused an inactive job; one
+    Add took it. The same sentence everywhere."""
+    _cls, _cust, job = _class_and_job(client)
+    r = client.put(f"/api/jobs/{job['id']}", json={"is_active": False})
+    assert r.status_code == 200, r.text
+    import_transactions(db_session, feed["id"], _lines((8, "-60", "HARDWARE STORE")))
+    bt = db_session.query(BankTransaction).first()
+    r = client.post(
+        f"/api/banking/transactions/{bt.id}/add",
+        json={"category_account_id": seed_accounts["6000"].id, "job_id": job["id"]},
+    )
+    assert r.status_code == 400 and "inactive" in r.json()["detail"], r.text

@@ -601,6 +601,9 @@ def feed_add_all(
         raise HTTPException(status_code=404, detail="Bank account not found")
     picks = {}
     for p in (data.lines if data else []):
+        # a class or job a row picked must exist and be live, as one Add
+        # checks; refused before anything posts (2.31.4 gate, W-95)
+        require_dimensions(db, p.class_id, p.job_id)
         picks[p.id] = {
             "class_id": p.class_id,
             "job_id": p.job_id,
