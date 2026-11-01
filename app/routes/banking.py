@@ -68,6 +68,7 @@ from app.services.bank_register import (
     voided_transaction_ids,
 )
 from app.services.closing_date import check_closing_date
+from app.services.dimensions import require_dimensions
 from app.services.entry_text import BANK_ENTRY_HEADER
 
 router = APIRouter(prefix="/api/banking", tags=["banking"])
@@ -436,6 +437,7 @@ def statement_add(
                 customer_id=data.customer_id,
             ),
         )
+    require_dimensions(db, data.class_id, data.job_id)
     bt = m.add(
         db,
         bt,
@@ -820,6 +822,7 @@ def create_bank_transaction(
     category, splits = _category_and_splits(db, account, data)
     vendor = _entry_vendor(db, data.vendor_id, data.payee)
     customer_id = _entry_customer(db, data.customer_id)
+    require_dimensions(db, data.class_id, data.job_id)
     if data.amount < 0:
         refuse_duplicate(
             db, account.id, data.check_number, allow=allow_duplicate_check_number

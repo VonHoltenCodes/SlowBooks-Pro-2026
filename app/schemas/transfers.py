@@ -32,3 +32,5 @@ class TransferResponse(BaseModel):
     memo: str
     reference: str
     status: str
+    class_id: Optional[int] = None
+    class_name: str = ""

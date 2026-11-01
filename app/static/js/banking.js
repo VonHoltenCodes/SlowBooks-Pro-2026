@@ -1702,6 +1702,8 @@ const BankingPage = {
         const shownFor = !entry && ctx.accountId === accountId && String(BankingPage._regFilterId) === String(accountId)
             && BankingPage._regFilter.class_id ? ctx.classId : null;
         const classGroup = await classFormGroupHtml(shownFor || undefined);
+        // the entry's job beside its class (#671 put one on the review row)
+        const jobGroup = await jobFormGroupHtml(entry ? entry.job_id : null);
         // a new entry opens on the register's last posted date (#566); an
         // edit fills in its own
         const carried = (!entry && BankingPage._lastDate[accountId]) || '';
@@ -1723,6 +1725,7 @@ const BankingPage = {
                     <div class="form-group full-width"><label>Memo</label>
                         <input name="description"></div>
                     ${classGroup}
+                    ${jobGroup}
                     <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from)</span></label>
                         ${BankingPage.nameSelectHtml('entry-name', 'customer_id', null, `${T('Customer')}`)}</div>
                     <div class="form-group full-width" id="entry-splits" style="display:none;">
@@ -2118,6 +2121,7 @@ const BankingPage = {
             description: form.description.value || null,
             check_number: form.check_number.value || null,
             class_id: classIdFromForm(form),
+            job_id: jobIdFromForm(form),
             ...(splits ? { splits } : {}),
         };
         // the plain entry's name (#606): on money in only, null clears it
@@ -2425,10 +2429,10 @@ const BankingPage = {
     async showTransfers() {
         const rows = await API.get('/transfers');
         const body = rows.length ? `<div class="table-container"><table>
-            <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">To</th><th scope="col" class="amount">Amount</th><th scope="col">Memo</th><th scope="col"></th></tr></thead>
+            <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">To</th><th scope="col" class="amount">Amount</th><th scope="col">Memo</th>${rows.some(t => t.class_name) ? `<th scope="col">${T('Class')}</th>` : ''}<th scope="col"></th></tr></thead>
             <tbody>${rows.map(t => `<tr style="${t.status === 'void' ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                 <td>${formatDate(t.date)}</td><td>${escapeHtml(t.from_account_name)}</td><td>${escapeHtml(t.to_account_name)}</td>
-                <td class="amount">${formatCurrency(t.amount)}</td><td>${escapeHtml(t.memo || '')}</td>
+                <td class="amount">${formatCurrency(t.amount)}</td><td>${escapeHtml(t.memo || '')}</td>${rows.some(x => x.class_name) ? `<td>${escapeHtml(t.class_name || '')}</td>` : ''}
                 <td>${t.status === 'void' ? '' : `<button data-destructive class="btn btn-sm btn-secondary" onclick="BankingPage.voidTransfer(${t.id})">Void</button>`}</td>
             </tr>`).join('')}</tbody></table></div>` : '<p>No transfers yet.</p>';
         openModal('Transfers', body);
