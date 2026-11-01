@@ -149,9 +149,20 @@ def _reconciled_sentence(recon) -> str:
     )
 
 
-def _line_dict(line, acct) -> dict:
+def _job_names(db: Session) -> dict:
+    """Every job's "Customer: Job" name by id, inactive ones too, so an
+    entry's view names the job on each line (#672)."""
+    from sqlalchemy.orm import joinedload
+
+    from app.models.jobs import Job
+
+    return {j.id: j.full_name for j in db.query(Job).options(joinedload(Job.customer))}
+
+
+def _line_dict(line, acct, jobs: Optional[dict] = None) -> dict:
     """One posted line with its account and every dimension, for the
-    list and single-entry responses alike."""
+    list and single-entry responses alike. `jobs` (id -> name) names the
+    line's job when the caller has them."""
     return {
         "id": line.id,
         "account_id": line.account_id,
@@ -161,6 +172,7 @@ def _line_dict(line, acct) -> dict:
         "credit": float(line.credit),
         "description": line.description or "",
         "job_id": line.job_id,
+        "job_name": (jobs or {}).get(line.job_id, "") if line.job_id else "",
         "class_id": line.class_id,
         "cost_code_id": line.cost_code_id,
         "cost_type": line.cost_type,
@@ -274,6 +286,7 @@ def list_journal_entries(
         "omit for every entry",
     ),
     db: Session = Depends(get_db),
+    request: Request = None,
 ):
     q = db.query(Transaction)
     if adjusting is not None:
@@ -313,12 +326,14 @@ def list_journal_entries(
             Transaction.source_type.in_(REVERSALS), Transaction.source_id.isnot(None)
         )
     }
+    jobs = _job_names(db)
+    role = _role(request)
     results = []
     for txn in entries:
         txn_lines = all_lines(db, txn.id)
         lines_data = []
         for line in txn_lines:
-            lines_data.append(_line_dict(line, accounts.get(line.account_id)))
+            lines_data.append(_line_dict(line, accounts.get(line.account_id), jobs))
         results.append(
             JournalEntryResponse(
                 id=txn.id,
@@ -335,6 +350,9 @@ def list_journal_entries(
                 total_credit=float(sum(line.credit for line in txn_lines)),
                 voided=txn.id in voided,
                 voidable=_voidable(txn, txn.id in voided),
+                # the page's Edit (#673): the register's rule, the same
+                # answer the entry's own GET gives
+                editable=_je_editable(txn, txn.id in voided, role),
             )
         )
     return results
@@ -350,10 +368,11 @@ def get_journal_entry(
     from app.services.qbo_documents import reversed_already
 
     accounts = {a.id: a for a in db.query(Account).all()}
+    jobs = _job_names(db)
     txn_lines = all_lines(db, txn.id)
     lines_data = []
     for line in txn_lines:
-        lines_data.append(_line_dict(line, accounts.get(line.account_id)))
+        lines_data.append(_line_dict(line, accounts.get(line.account_id), jobs))
     voided = reversed_already(db, txn)
     recon = reconciled_on(db, txn)
     # A bank entry is edited in its register, not here: the page says so
