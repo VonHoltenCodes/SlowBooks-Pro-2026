@@ -499,6 +499,7 @@ const MemorizedPage = {
         await CostCodes.load();
         await CostTypes.load();
         await Nonprofit.loadFunds();
+        await JournalPage.loadJobs();
         // the journal form's grid draws from JournalPage's own state
         JournalPage._accounts = accounts;
         JournalPage._lineCount = 0;
@@ -529,7 +530,7 @@ const MemorizedPage = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Lines</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${Nonprofit.headHtml()}<th scope="col" class="col-rate">Debit</th><th scope="col" class="col-rate">Credit</th><th scope="col" class="col-actions"></th></tr></thead>
+                    <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${JournalPage.jobHeadHtml()}${Nonprofit.headHtml()}<th scope="col" class="col-rate">Debit</th><th scope="col" class="col-rate">Credit</th><th scope="col" class="col-actions"></th></tr></thead>
                     <tbody id="je-lines"></tbody>
                 </table>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="JournalPage.addLine()">+ Add Line</button>

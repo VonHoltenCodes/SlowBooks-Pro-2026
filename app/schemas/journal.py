@@ -38,6 +38,8 @@ class JournalLineResponse(BaseModel):
     account_name: str = ""
     account_number: str = ""
     job_id: Optional[int] = None
+    # the line's job by its "Customer: Job" name, for the entry's view (#672)
+    job_name: str = ""
     class_id: Optional[int] = None
     cost_code_id: Optional[int] = None
     cost_type: Optional[str] = None

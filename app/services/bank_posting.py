@@ -653,7 +653,9 @@ def replace_journal_lines(
             o.is_billable = bool(n.get("is_billable"))
             o.cost_code_id = n.get("cost_code_id")
             o.customer_id = n.get("customer_id")
-            o.job_id = n.get("job_id")
+            # a line naming no job takes the entry's, as create_journal_entry
+            # posts it (#672: the form's per-line "Same as header" sends null)
+            o.job_id = n.get("job_id") or job_id
             if o.class_id != n.get("class_id"):
                 o.class_id = n.get("class_id")
                 o.function = default_function_of(db, n.get("class_id"), fn_cache)
