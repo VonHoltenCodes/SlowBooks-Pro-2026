@@ -233,8 +233,7 @@ def test_the_entry_row_stays_under_a_date_filter_not_a_class_one(browser):
     """Any From, To or class hid the entry row, so a register always worked
     from the start of the month never showed it (#663). A date filter keeps
     it, with entries in the range or none yet; a class filter puts a line
-    in its place, since the row has no class box and the running balance
-    counts that class only."""
+    in its place, since the running balance counts that class only."""
     register = {**REGISTER, "entries": []}
     page = _register_page(browser, [], "#/banking/1?start_date=2026-10-01", register)
     try:
@@ -260,10 +259,12 @@ def test_the_entry_row_stays_under_a_date_filter_not_a_class_one(browser):
             page, "#/banking/1?start_date=2026-10-01&class_id=2", "#reg-quick-entry-off"
         )
         assert page.locator("#reg-quick-entry").count() == 0
+        # the company has a class of its own, so the row has a class box
+        # (#671): the balance is the reason
         assert page.inner_text("#reg-quick-entry-off") == (
-            "The entry row is hidden while a class is chosen: it has no class box,"
-            " and the running balance counts this class only. Choose All classes"
-            " to use it, or post with + Entry."
+            "The entry row is hidden while a class is chosen: the running balance"
+            " counts this class only. Choose All classes to use it, or post with"
+            " + Entry."
         )
         page.select_option("#reg-class", "")
         page.wait_for_selector("#reg-quick-entry")

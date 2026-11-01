@@ -230,6 +230,26 @@ class StatementAdd(StrictModel):
     splits: Optional[list[BankSplit]] = None
 
 
+class FeedLinePicks(StrictModel):
+    """What the To review row chose for one line besides its category
+    (#671): the entry's class and job, and the vendor or customer it names."""
+
+    id: int
+    class_id: Optional[int] = None
+    job_id: Optional[int] = None
+    vendor_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    # a name typed that is no vendor's: the entry's payee, as text
+    payee: Optional[str] = None
+
+
+class FeedAddAll(StrictModel):
+    """Add all categorised, with each row's own picks (#671). A line not
+    listed posts with its category alone, as before."""
+
+    lines: list[FeedLinePicks] = []
+
+
 class StatementPayout(StrictModel):
     """Record an unmatched deposit as a provider payout (#584): the server
     builds the split (CR clearing the gross, DR the fee, DR bank the net)

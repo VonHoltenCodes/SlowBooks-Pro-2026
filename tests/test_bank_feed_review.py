@@ -308,3 +308,141 @@ def test_exclude_restore_and_unlinked_feed(client, db_session, seed_accounts):
         == "unmatched"
     )
     assert client.post(f"/api/banking/transactions/{bt.id}/restore").status_code == 400
+
+
+def _class_and_job(client):
+    cls = client.post("/api/classes", json={"name": "North Crew"}).json()
+    cust = client.post("/api/customers", json={"name": "Harbor Co"}).json()
+    job = client.post(
+        "/api/jobs", json={"customer_id": cust["id"], "name": "Dock Repair"}
+    ).json()
+    return cls, cust, job
+
+
+def test_add_carries_the_class_job_and_vendor_the_review_row_chose(
+    client, db_session, seed_accounts, feed, vendor
+):
+    """#671: the To review row sets the class, the job and the vendor (or
+    the customer, for money in) before the line is added; every line of
+    the posted entry carries the class and job, and P&L by Class sees it."""
+    cls, cust, job = _class_and_job(client)
+    import_transactions(
+        db_session,
+        feed["id"],
+        _lines((8, "-60", "HARDWARE STORE"), (9, "400", "DEPOSIT")),
+    )
+    out, inn = db_session.query(BankTransaction).order_by(BankTransaction.id).all()
+    r = client.post(
+        f"/api/banking/transactions/{out.id}/add",
+        json={
+            "category_account_id": seed_accounts["6000"].id,
+            "class_id": cls["id"],
+            "job_id": job["id"],
+            "vendor_id": vendor["id"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["vendor_name"] == "City Water"
+    txn = db_session.query(Transaction).get(r.json()["transaction_id"])
+    assert txn.class_id == cls["id"] and txn.job_id == job["id"]
+    assert txn.vendor_id == vendor["id"]
+    assert {ln.class_id for ln in txn.lines} == {cls["id"]}
+    assert {ln.job_id for ln in txn.lines} == {job["id"]}
+
+    r = client.post(
+        f"/api/banking/transactions/{inn.id}/add",
+        json={
+            "category_account_id": seed_accounts["4000"].id,
+            "class_id": cls["id"],
+            "customer_id": cust["id"],
+        },
+    )
+    assert r.status_code == 200, r.text
+    txn = db_session.query(Transaction).get(r.json()["transaction_id"])
+    income = next(ln for ln in txn.lines if ln.account_id == seed_accounts["4000"].id)
+    assert income.customer_id == cust["id"] and income.class_id == cls["id"]
+
+    g = client.get(
+        "/api/reports/profit-loss-by-class?start_date=2026-09-01&end_date=2026-09-30"
+    ).json()
+    by_class = {c["class_id"]: c for c in g["classes"]}
+    assert by_class[cls["id"]]["income"] == 400.0, g["classes"]
+    assert by_class[cls["id"]]["expenses"] == 60.0
+
+
+def test_add_all_keeps_each_rows_class_job_and_vendor(
+    client, db_session, seed_accounts, feed, vendor
+):
+    """#671: Add all categorised posts each line with the picks of its own
+    row; a line with none posts as before, with no class or job."""
+    cls, _cust, job = _class_and_job(client)
+    import_transactions(
+        db_session,
+        feed["id"],
+        _lines((8, "-60", "HARDWARE STORE"), (9, "-20", "PAPER CO")),
+    )
+    a, b = db_session.query(BankTransaction).order_by(BankTransaction.id).all()
+    for bt in (a, b):
+        r = client.patch(
+            f"/api/banking/transactions/{bt.id}",
+            json={"category_account_id": seed_accounts["6000"].id},
+        )
+        assert r.status_code == 200, r.text
+    r = client.post(
+        f"/api/banking/accounts/{feed['id']}/feed/add-all",
+        json={
+            "lines": [
+                {
+                    "id": a.id,
+                    "class_id": cls["id"],
+                    "job_id": job["id"],
+                    "vendor_id": vendor["id"],
+                },
+                {"id": b.id, "payee": "Paper Company"},
+            ]
+        },
+    )
+    assert r.status_code == 200 and r.json()["added"] == 2, r.text
+    db_session.refresh(a)
+    db_session.refresh(b)
+    ta = db_session.query(Transaction).get(a.transaction_id)
+    tb = db_session.query(Transaction).get(b.transaction_id)
+    assert {ln.class_id for ln in ta.lines} == {cls["id"]}
+    assert {ln.job_id for ln in ta.lines} == {job["id"]}
+    assert ta.vendor_id == vendor["id"]
+    assert {ln.class_id for ln in tb.lines} == {None} and tb.job_id is None
+    assert tb.description == "Paper Company"
+
+    # a customer who is not there refuses the whole call, nothing posted
+    [dep] = _lines((10, "75", "DEPOSIT"))
+    import_transactions(db_session, feed["id"], [{**dep, "fitid": "F-DEP"}])
+    c = db_session.query(BankTransaction).filter_by(payee="DEPOSIT").one()
+    client.patch(
+        f"/api/banking/transactions/{c.id}",
+        json={"category_account_id": seed_accounts["4000"].id},
+    )
+    r = client.post(
+        f"/api/banking/accounts/{feed['id']}/feed/add-all",
+        json={"lines": [{"id": c.id, "customer_id": 99999}]},
+    )
+    assert r.status_code == 404
+    db_session.refresh(c)
+    assert c.match_status == "unmatched"
+
+
+def test_a_review_line_added_as_a_transfer_keeps_its_class(
+    client, db_session, seed_accounts, feed
+):
+    """#676: a statement line categorised to another bank or card account
+    posts as a transfer, and the class chosen is on both of its lines."""
+    cls = client.post("/api/classes", json={"name": "North Crew"}).json()
+    import_transactions(db_session, feed["id"], _lines((8, "-300", "CARD PAYMENT")))
+    [bt] = db_session.query(BankTransaction).all()
+    r = client.post(
+        f"/api/banking/transactions/{bt.id}/add",
+        json={"category_account_id": seed_accounts["2100"].id, "class_id": cls["id"]},
+    )
+    assert r.status_code == 200, r.text
+    txn = db_session.query(Transaction).get(r.json()["transaction_id"])
+    assert txn.source_type == "transfer" and txn.class_id == cls["id"]
+    assert [ln.class_id for ln in txn.lines] == [cls["id"], cls["id"]]

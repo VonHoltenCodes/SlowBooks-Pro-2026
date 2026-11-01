@@ -64,7 +64,16 @@ def create_transfer(data: TransferCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
     src = require_bank_account(db, data.from_account_id)
     dst = require_bank_account(db, data.to_account_id)
-    txn = post_transfer(db, data.date, src, dst, data.amount, data.memo, data.reference)
+    txn = post_transfer(
+        db,
+        data.date,
+        src,
+        dst,
+        data.amount,
+        data.memo,
+        data.reference,
+        class_id=data.class_id,
+    )
     db.commit()
     db.refresh(txn)
     return _out(txn, False, _names(db, [txn]))

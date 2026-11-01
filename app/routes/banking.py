@@ -39,6 +39,7 @@ from app.schemas.banking import (
     ReconciliationCreate,
     ReconciliationUpdate,
     StatementAdd,
+    FeedAddAll,
     StatementPayout,
     StatementVendors,
     StatementCategory,
@@ -586,14 +587,26 @@ def statement_restore(txn_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/accounts/{account_id}/feed/add-all")
-def feed_add_all(account_id: int, db: Session = Depends(get_db)):
-    """Add every unmatched line that already carries a category."""
+def feed_add_all(
+    account_id: int, data: FeedAddAll = None, db: Session = Depends(get_db)
+):
+    """Add every unmatched line that already carries a category, each with
+    the class, job and vendor or customer its review row chose (#671)."""
     from app.services import bank_matching as m
 
     ba = db.query(BankAccount).filter(BankAccount.id == account_id).first()
     if not ba:
         raise HTTPException(status_code=404, detail="Bank account not found")
-    out = m.add_all(db, ba)
+    picks = {}
+    for p in (data.lines if data else []):
+        picks[p.id] = {
+            "class_id": p.class_id,
+            "job_id": p.job_id,
+            "vendor_id": p.vendor_id,
+            "customer_id": _entry_customer(db, p.customer_id),
+            "payee": p.payee or None,
+        }
+    out = m.add_all(db, ba, picks)
     db.commit()
     return out
 
