@@ -76,6 +76,53 @@ if _is_sqlite:
 
 
 # ---------------------------------------------------------------------------
+# Row locks on SQLite (#666). The routes lock a row for a read-check-write
+# with with_for_update() so two payments on one invoice cannot both pass
+# the balance check; SQLite has no row locks and SQLAlchemy's pysqlite
+# driver emits no BEGIN until the first write, so on SQLite every such
+# request read the same balance and all of them passed (four $98 payments
+# on a $100 invoice, all 201). The hook below runs before every ORM
+# statement: when it carries FOR UPDATE and the session is on SQLite, it
+# begins the transaction IMMEDIATE on the DBAPI connection, which takes
+# the database's write lock. The second request waits at that point (the
+# connect PRAGMA's busy_timeout) until the first commits, then reads the
+# balance the first one left and is refused the way PostgreSQL refuses it.
+# Reads with no lock stay as they were: WAL readers never queue behind a
+# writer. A transaction already begun (a write earlier in the request) is
+# left alone; pysqlite then issues no second BEGIN.
+# ---------------------------------------------------------------------------
+
+
+def _is_sqlite_bind(bind) -> bool:
+    return getattr(getattr(bind, "dialect", None), "name", "") == "sqlite"
+
+
+def begin_write(session) -> None:
+    """Take SQLite's write lock now (BEGIN IMMEDIATE) if this session is on
+    SQLite and has not begun a transaction on its connection yet; a no-op
+    on any other database."""
+    bind = session.get_bind()
+    if not _is_sqlite_bind(bind):
+        return
+    raw = session.connection().connection.dbapi_connection
+    if getattr(raw, "in_transaction", False):
+        return
+    raw.execute("BEGIN IMMEDIATE")
+
+
+def _lock_rows_on_sqlite(orm_execute_state) -> None:
+    stmt = orm_execute_state.statement
+    if getattr(stmt, "_for_update_arg", None) is None:
+        return
+    begin_write(orm_execute_state.session)
+
+
+from sqlalchemy import event as _event  # noqa: E402
+
+_event.listen(Session, "do_orm_execute", _lock_rows_on_sqlite)
+
+
+# ---------------------------------------------------------------------------
 # Several companies on one server (#358). Server Edition used to serve the
 # one company file DATABASE_URL names, and reaching a second meant a second
 # server or repointing this one for everybody. Now a signed-in person's

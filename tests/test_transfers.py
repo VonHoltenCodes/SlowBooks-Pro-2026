@@ -84,3 +84,54 @@ def test_list_and_void(client, seed_accounts):
         f"/api/banking/check-register?account_id={seed_accounts['1000'].id}"
     ).json()
     assert reg["balance"] == -10.0
+
+
+def test_a_transfer_with_a_class_posts_both_lines_in_it(
+    client, db_session, seed_accounts
+):
+    """#676: the Transfer dialog's class goes on the entry and on both of
+    its lines, and the register's class filter finds the transfer."""
+    cls = client.post("/api/classes", json={"name": "North Crew"}).json()
+    r = _transfer(client, seed_accounts, class_id=cls["id"])
+    assert r.status_code == 201, r.text
+    txn = db_session.query(Transaction).filter(Transaction.id == r.json()["id"]).one()
+    assert txn.class_id == cls["id"]
+    assert [ln.class_id for ln in txn.lines] == [cls["id"], cls["id"]]
+    reg = client.get(
+        f"/api/banking/check-register?account_id={seed_accounts['1000'].id}"
+        f"&class_id={cls['id']}"
+    ).json()
+    assert [e["transaction_id"] for e in reg["entries"]] == [txn.id]
+    # without one, nothing changes: no class on either line
+    r = _transfer(client, seed_accounts)
+    txn = db_session.query(Transaction).filter(Transaction.id == r.json()["id"]).one()
+    assert txn.class_id is None and {ln.class_id for ln in txn.lines} == {None}
+
+
+def test_a_register_entry_to_a_bank_account_keeps_its_class(
+    client, db_session, seed_accounts
+):
+    """#676: + Entry with a bank or card account as the category is a
+    transfer, and it used to drop the class its picker showed. Money out
+    and money in both keep it on both lines."""
+    cls = client.post("/api/classes", json={"name": "North Crew"}).json()
+    for amount in ("-125.00", "40.00"):
+        r = client.post(
+            "/api/banking/transactions",
+            json={
+                "account_id": seed_accounts["1000"].id,
+                "date": "2026-09-06",
+                "amount": amount,
+                "category_account_id": seed_accounts["2100"].id,
+                "class_id": cls["id"],
+            },
+        )
+        assert r.status_code == 201, r.text
+        txn = (
+            db_session.query(Transaction)
+            .filter(Transaction.source_type == "transfer")
+            .order_by(Transaction.id.desc())
+            .first()
+        )
+        assert txn.class_id == cls["id"], amount
+        assert [ln.class_id for ln in txn.lines] == [cls["id"], cls["id"]]

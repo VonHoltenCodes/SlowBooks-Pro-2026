@@ -256,9 +256,12 @@ account.
 
 ## Transfers
 
-**Transfer** on the Banking page or a register: date, amount, from, to.
+**Transfer** on the Banking page or a register: date, amount, from, to, and
+a class (v2.31.4), carried on both lines and shown in the Transfers list.
 DR to / CR from. Paying a card is a transfer from the bank to the card.
-`POST /api/transfers`, `GET /api/transfers`, `POST /api/transfers/{id}/void`.
+`POST /api/transfers` (`class_id`), `GET /api/transfers`,
+`POST /api/transfers/{id}/void`. A register entry whose category is a bank
+or card account posts as a transfer and keeps its class and job.
 
 ## Bank feeds and file imports: the review queue
 
@@ -285,23 +288,33 @@ uncategorised and is categorised in the review queue.
 
 1. **Duplicates are skipped** (bank transaction id / FITID, or a
    content-derived id for CSV).
-2. **Bank rules suggest a category** for lines whose payee matches a rule.
+2. **Bank rules suggest a category** for lines whose payee matches a rule,
+   and a rule can carry a vendor, a class and a job (v2.31.4), which the
+   line comes in with unless the row names its own.
    Rules never post.
 3. **Auto-match**: the line looks for the one ledger line on the account with
    its amount on its side within ±5 days; a check number narrows to entries
    carrying it as reference. Exactly one nearest candidate → linked and the
    ledger line is cleared. Two equal candidates → the line waits.
-4. Everything else is **To review** on the account:
+4. Everything else is **To review** on the account. Beside the category a
+   row takes a **Class** (once the company has a class of its own), a
+   **Job** (once it has a job) and a **Name**: a vendor for money out, a
+   customer for money in (v2.31.4); left blank, the line posts as before,
+   and a bank rule's class and job fill in where the row names none.
    - **Add** — posts it as a register entry with the category (a bank or card
      category → a transfer; a positive card line with the paying bank as
-     category is a card payment) and links it.
+     category is a card payment), the class, job and name, and links it
+     (`POST …/transactions/{id}/add {category_account_id, class_id, job_id,
+     vendor_id | payee, customer_id}`; a class or job must exist).
    - **Match** — pick from the ledger lines within 30 days with that amount.
    - **Exclude** — drop it (Restore brings it back).
    - **Add all categorised** — adds every line that carries a category and
      reports what it skipped (a closed period, for instance). A category
      picked in a line's list is saved on the line as it is picked
      (`PATCH /api/banking/transactions/{id} {category_account_id}`), so
-     Add all posts it and a reload keeps it.
+     Add all posts it and a reload keeps it; the rows' class, job and name
+     picks go with the call (`POST …/feed/add-all {lines: [{id, class_id,
+     job_id, vendor_id, customer_id, payee}]}`).
    - **Find matches** — re-runs auto-match for the feed.
    - **Rule…** — makes a bank rule from the line, for the next one like it.
    - **Payout…** — on a Stripe, PayPal or Square payout, when payments post

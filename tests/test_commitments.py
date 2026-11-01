@@ -1058,6 +1058,7 @@ def test_retainage_line_carries_the_job(
     assert lines and all(ln.job_id == job["id"] for ln in lines)
 
 
+@pytest.mark.timeout(300)  # three alembic walks of the whole chain in subprocesses
 def test_migration_upgrades_downgrades_and_backfills(tmp_path):
     db = tmp_path / "mig.db"
     env = {**os.environ, "DATABASE_URL": f"sqlite:///{db}"}

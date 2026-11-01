@@ -13,6 +13,7 @@ from app.schemas.transfers import TransferCreate, TransferResponse
 from app.services.bank_posting import post_transfer, require_bank_account, void_document
 from app.services.bank_register import voided_transaction_ids
 from app.services.closing_date import check_closing_date
+from app.services.dimensions import require_dimensions
 
 router = APIRouter(prefix="/api/transfers", tags=["transfers"])
 
@@ -36,14 +37,25 @@ def _out(txn: Transaction, voided: bool, names: dict) -> dict:
         "memo": memo,
         "reference": txn.reference or "",
         "status": "void" if voided else "recorded",
+        "class_id": txn.class_id,
+        "class_name": names.get(("class", txn.class_id), "") if txn.class_id else "",
     }
 
 
 def _names(db: Session, txns) -> dict:
     ids = {ln.account_id for t in txns for ln in t.lines}
-    if not ids:
-        return {}
-    return {a.id: a.name for a in db.query(Account).filter(Account.id.in_(ids)).all()}
+    out = {}
+    if ids:
+        out = {
+            a.id: a.name for a in db.query(Account).filter(Account.id.in_(ids)).all()
+        }
+    class_ids = {t.class_id for t in txns if t.class_id}
+    if class_ids:
+        from app.models.classes import TxnClass
+
+        for c in db.query(TxnClass).filter(TxnClass.id.in_(class_ids)).all():
+            out[("class", c.id)] = c.name
+    return out
 
 
 @router.get("", response_model=list[TransferResponse])
@@ -64,7 +76,17 @@ def create_transfer(data: TransferCreate, db: Session = Depends(get_db)):
     check_closing_date(db, data.date)
     src = require_bank_account(db, data.from_account_id)
     dst = require_bank_account(db, data.to_account_id)
-    txn = post_transfer(db, data.date, src, dst, data.amount, data.memo, data.reference)
+    require_dimensions(db, data.class_id)
+    txn = post_transfer(
+        db,
+        data.date,
+        src,
+        dst,
+        data.amount,
+        data.memo,
+        data.reference,
+        class_id=data.class_id,
+    )
     db.commit()
     db.refresh(txn)
     return _out(txn, False, _names(db, [txn]))

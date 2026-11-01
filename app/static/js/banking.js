@@ -632,6 +632,10 @@ const BankingPage = {
     // through them) and sent to the service, which computes the balance
     // brought forward under the same class test.
     _regFilter: { start_date: '', end_date: '', class_id: '' },
+    // the class column's rule and the classes, read through a guard: the
+    // register is also drawn in a test probe that loads this file alone
+    _lineClassShown() { return typeof Nonprofit !== 'undefined' && Nonprofit.lineClassShown(); },
+    _classes_() { return (typeof Nonprofit !== 'undefined' && Nonprofit._funds) || BankingPage._classes || []; },
     _regFilterId: null,  // the register it is for
 
     // The From date each register was last read from (#663), so one worked
@@ -980,17 +984,25 @@ const BankingPage = {
             }
         }
         const filterQs = Object.entries(f).filter(([, v]) => v).map(([k, v]) => `&${k}=${encodeURIComponent(v)}`).join('');
-        const [reg, overview, classes, chart, vendors, customers] = await Promise.all([
+        const [reg, overview, classes, chart, vendors, customers, jobs] = await Promise.all([
             API.get(`/banking/check-register?account_id=${id}${filterQs}`),
             API.get('/banking/overview'),
             API.get('/classes?include_archived=true').catch(() => []),
             API.get('/accounts?active_only=true').catch(() => []),
             API.get('/vendors?active_only=true').catch(() => null),
             API.get('/customers?active_only=true&tree=1').catch(() => null),
+            API.get('/jobs').catch(() => []),
         ]);
         BankingPage._accounts = chart;
         BankingPage._setVendors(vendors);
         BankingPage._customerNames = customers ? new Set(customers.map(c => c.name.toLowerCase())) : null;
+        // the class, job and name boxes of the review rows and the entry row
+        // (#671) draw from these: the classes as the forms read them
+        // (Nonprofit.lineClassShown), the jobs, the active customers
+        if (typeof Nonprofit !== 'undefined') Nonprofit._funds = Array.isArray(classes) ? classes : [];
+        BankingPage._classes = Array.isArray(classes) ? classes : [];
+        BankingPage._jobs = Array.isArray(jobs) ? jobs : [];
+        if (customers) BankingPage._customers = customers;
         const info = overview.find(a => a.account_id === id) || {};
         const feed = info.feed || null;
         const kind = reg.bank_kind;
@@ -1051,9 +1063,10 @@ const BankingPage = {
         // ready. The list reads oldest to newest, as a ledger does, with the
         // running balance down the right. A date filter keeps the row (#663:
         // a register worked from the start of the month never showed it). A
-        // class filter puts a line in its place: the row has no class box, so
-        // its entry would post with none and leave the list, and the running
-        // balance above it counts that class's lines only.
+        // class filter puts a line in its place: the running balance above it
+        // counts that class's lines only (and where the company has no class
+        // of its own the row has no class box, #671, so its entry would post
+        // with none and leave the list).
         const quickRow = f.class_id ? BankingPage._entryRowOff(!!(chosen && chosen.is_system_default))
             : BankingPage._quickEntryRow(id, kind, chart, outLabel, inLabel);
         if (!reg.entries.length) {
@@ -1145,15 +1158,20 @@ const BankingPage = {
                 <td>${escapeHtml(t.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(t.description || '')}</div></td>
                 <td class="amount" style="${t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)'}">${formatCurrency(t.amount)}</td>
                 <td>${AccountQuickAdd.picker(`<select id="cat-${t.id}" class="review-cat" data-write data-current="${t.category_account_id || ''}" aria-label="Category" onchange="BankingPage.setCategory(${t.id}, this)"><option value="">${t.category_name ? escapeHtml(t.category_name) : 'Pick a category…'}</option></select>`, 'review', { ctx: accountId })}</td>
-                <td style="white-space:nowrap;" data-write>
+                ${BankingPage._reviewDimCells(t)}
+                <td style="white-space:nowrap;" data-write><div style="display:grid; grid-template-columns:1fr 1fr; gap:4px;" data-write>
                     <button class="btn btn-sm btn-primary" onclick="BankingPage.addLine(${t.id}, ${accountId})">Add</button>
                     ${t.suggested_payout ? `<button class="btn btn-sm btn-secondary" onclick="BankingPage.showPayout(${t.id}, ${accountId})" title="Record this deposit as a ${escapeHtml(t.suggested_payout.display_name)} payout, clearing the clearing account">Payout…</button>` : ''}
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.showMatch(${t.id}, ${accountId})">Match</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.excludeLine(${t.id}, ${accountId})">Exclude</button>
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.ruleFromLine(${t.id}, ${accountId})" title="A bank rule from this payee and the category chosen">Rule…</button>
+                </div>
                 </td>
             </tr>`).join('');
         setTimeout(() => BankingPage._fillCategorySelects(kind), 0);
+        // one column for the row's picks (NEW-197: three columns pushed
+        // Match / Exclude / Rule… past the right edge at 1280)
+        const dimHeads = `<th scope="col">${[BankingPage._lineClassShown() ? T('Class') : '', (BankingPage._jobs || []).length ? T('Job') : '', 'Name'].filter(Boolean).join(' / ')}</th>`;
         return `<div class="card" style="margin-bottom:16px; border-left:4px solid var(--qb-gold);">
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
@@ -1161,10 +1179,10 @@ const BankingPage = {
                 </span>
             </div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th><th scope="col"></th></tr></thead>
-                <tbody>${rows}</tbody></table></div>
+                <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Category</th>${dimHeads}<th scope="col"></th></tr></thead>
+                <tbody>${rows}</tbody></table></div>${BankingPage._vendorDatalist('review-vendors')}
             <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
-                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category; <strong>Add all categorised</strong> posts every line that has one.
+                A category you pick is kept on the line. <strong>Add</strong> posts the line with its category and the ${BankingPage._lineClassShown() ? `${T('class').toLowerCase()}, ` : ''}${(BankingPage._jobs || []).length ? `${T('job').toLowerCase()}, ` : ''}vendor or ${T('customer').toLowerCase()} chosen beside it; <strong>Add all categorised</strong> posts every line that has one, each with its own.
                 <strong>Match</strong> links it to something you already entered.
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
@@ -1192,16 +1210,68 @@ const BankingPage = {
 
     async addLine(lineId, accountId) {
         const sel = $(`#cat-${lineId}`);
-        const body = {};
+        const picks = BankingPage._reviewPicks(lineId);
+        const body = { ...picks };
         if (sel && sel.value) body.category_account_id = parseInt(sel.value, 10);
+        if (document.getElementById(`rv-class-${lineId}`) && !ClassWarn.okValue(picks.class_id)) return;
         try {
             const added = await API.post(`/banking/transactions/${lineId}/add`, body);
             const said = added.vendor_name ? `Added to the books for ${added.vendor_name}` : 'Added to the books';
             const outside = BankingPage._outsideFilter(BankingPage._lineDate(added, lineId));
             toast(outside ? `${said}. ${outside}` : said);
             BankingPage._backToRegister(accountId);
-            BankingPage._offerFeedVendors([added]);
+            // a name typed that is no vendor's is the payee the offer names
+            BankingPage._offerFeedVendors([picks.payee ? { ...added, payee: picks.payee } : added]);
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // The review row's Class, Job and Name (#671), shown under the rules
+    // every form follows: a class once the company has one of its own
+    // (Uncategorized alone has nothing to choose; a nonprofit's funds always),
+    // a job once there are jobs. The name is the payee picker the register
+    // uses: money out, a vendor (the vendor list suggested; a name that is
+    // no vendor's posts as the payee's text); money in, a customer, whose
+    // jobs the Job box then narrows to. Left blank, the line posts as it
+    // always did: no class, no job, the vendor its payee or rule names.
+    _reviewDimCells(t) {
+        const small = 'font-size:11px; padding:2px 4px; width:150px; display:block;';
+        let html = '';
+        if (BankingPage._lineClassShown()) {
+            const opts = BankingPage._classes_().filter(c => !c.is_archived)
+                .map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join('');
+            html += `<select id="rv-class-${t.id}" class="review-class" data-write data-no-search aria-label="${T('Class')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
+        }
+        const moneyIn = parseFloat(t.amount) > 0;
+        const jobs = BankingPage._jobs || [];
+        if (jobs.length) {
+            const opts = jobs.map(j => `<option value="${j.id}" data-customer="${j.customer_id}">${escapeHtml(j.full_name || j.name)}</option>`).join('');
+            const bind = moneyIn ? ` data-customer-select="rv-customer-${t.id}"` : '';
+            html += `<select id="rv-job-${t.id}" class="review-job" data-write data-no-search${bind} aria-label="${T('Job')}, line ${t.id}" style="${small}"><option value="">— No job —</option>${opts}</select>`;
+        }
+        if (moneyIn) {
+            const opts = (BankingPage._customers || [])
+                .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
+            html += `<select id="rv-customer-${t.id}" class="review-customer" data-write aria-label="${T('Customer')}, line ${t.id}" style="${small}"><option value="">—</option>${opts}</select>`;
+        } else {
+            html += `<input type="text" id="rv-vendor-${t.id}" class="review-vendor" data-write list="review-vendors" autocomplete="off" aria-label="Vendor, line ${t.id}" placeholder="${escapeHtml(t.payee || 'Vendor')}" style="${small}">`;
+        }
+        return html ? `<td><div style="display:grid; gap:2px;">${html}</div></td>` : '';
+    },
+
+    // What a review row chose besides its category, as the add call takes it.
+    _reviewPicks(lineId) {
+        const val = (id) => { const el = document.getElementById(id); return el && el.value ? el.value : ''; };
+        const picks = {};
+        for (const [box, key] of [['rv-class', 'class_id'], ['rv-job', 'job_id'], ['rv-customer', 'customer_id']]) {
+            const v = val(`${box}-${lineId}`);
+            if (v) picks[key] = parseInt(v, 10);
+        }
+        const name = val(`rv-vendor-${lineId}`).trim();
+        if (name) {
+            const vendorId = BankingPage._payeeVendorId(name);
+            if (vendorId) picks.vendor_id = vendorId; else picks.payee = name;
+        }
+        return picks;
     },
 
     // Record a provider payout from the review queue (#584): the deposit
@@ -1378,13 +1448,19 @@ const BankingPage = {
                 const sel = document.getElementById(`cat-${t.id}`);
                 return sel ? !!sel.dataset.current : !!t.category_account_id;
             });
-            const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`);
+            // each row's own class, job and name go with it (#671)
+            const picked = Object.values(lines)
+                .map(t => ({ id: t.id, ...BankingPage._reviewPicks(t.id) }))
+                .filter(p => Object.keys(p).length > 1);
+            const r = await API.post(`/banking/accounts/${feedId}/feed/add-all`, picked.length ? { lines: picked } : undefined);
             const skipped = new Set(r.skipped.map(x => x.id));
             const outside = BankingPage._outsideFilterAll(categorised.filter(t => !skipped.has(t.id)).map(t => String(t.date || '')));
             const said = `Added ${r.added}${r.skipped.length ? `, skipped ${r.skipped.length}: ${r.skipped[0].reason}` : ''}`;
             toast(outside ? `${said}. ${outside}` : said);
             BankingPage._backToRegister(accountId);
-            BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id]).filter(Boolean));
+            const typed = Object.fromEntries(picked.filter(p => p.payee).map(p => [p.id, p.payee]));
+            BankingPage._offerFeedVendors((r.without_vendor || []).map(id => lines[id])
+                .filter(Boolean).map(t => (typed[t.id] ? { ...t, payee: typed[t.id] } : t)));
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -1452,7 +1528,7 @@ const BankingPage = {
                     <td><input type="text" id="qe-payee" list="qe-payee-vendors" autocomplete="off" aria-label="New entry payee" placeholder="Payee" style="width:100%; font-size:11px; padding:2px 4px;" onblur="BankingPage.payeeTyped(this.value, BankingPage._rowMoneyIn(), 'qe-payee')" ${key}>${BankingPage._vendorDatalist('qe-payee-vendors')}</td>
                     <td><input type="text" id="qe-memo" aria-label="New entry memo" placeholder="Memo" style="width:100%; font-size:11px; padding:2px 4px;" ${key}></td>
                     <td><input type="text" id="qe-ref" aria-label="New entry check or reference number" placeholder="Ref" style="width:60px; font-size:11px; padding:2px 4px;" ${key}></td>
-                    <td>${AccountQuickAdd.picker('<select id="qe-category" aria-label="New entry category" data-no-search ' + key + ' style="font-size:11px; padding:2px 4px; max-width:150px;"><option value="">Category…</option>' + cats + '</select>', 'register', { ctx: accountId, id: 'qe-category-add', style: 'font-size:11px; padding:2px 6px;' })}</td>
+                    <td>${AccountQuickAdd.picker('<select id="qe-category" aria-label="New entry category" data-no-search ' + key + ' style="font-size:11px; padding:2px 4px; max-width:150px;"><option value="">Category…</option>' + cats + '</select>', 'register', { ctx: accountId, id: 'qe-category-add', style: 'font-size:11px; padding:2px 6px;' })}${BankingPage._quickClassHtml(key)}</td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-out" class="money" aria-label="New entry ${escapeHtml(outLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-in" class="money" aria-label="New entry ${escapeHtml(inLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td></td><td></td>
@@ -1461,13 +1537,27 @@ const BankingPage = {
                 <tr data-write><td colspan="10" id="qe-category-host" style="padding:0; border:0;"></td></tr></tfoot>`;
     },
 
+    // The entry row's Class (#671), as + Entry has it: shown once the
+    // company has a class of its own, the default class chosen unless
+    // Settings asks for a class to be picked every time.
+    _quickClassHtml(key) {
+        if (!BankingPage._lineClassShown()) return '';
+        const classes = BankingPage._classes_().filter(c => !c.is_archived);
+        const blank = ClassWarn.enabled();
+        const opts = (blank ? `<option value="" selected>— choose a ${T('class').toLowerCase()} —</option>` : '<option value="">—</option>')
+            + classes.map(c => `<option value="${c.id}"${!blank && c.is_system_default ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+        return `<select id="qe-class" aria-label="New entry ${T('class').toLowerCase()}" data-no-search ${key} style="display:block; margin-top:2px; font-size:11px; padding:2px 4px; max-width:150px;">${opts}</select>`;
+    },
+
     // In the entry row's place while a class is chosen (#663). The
     // company's default class (Uncategorized) counts every line with no
     // class, the row's entry among them, so there the balance is the
     // reason alone.
     _entryRowOff(isDefault = false) {
         const cls = T('class').toLowerCase();
-        const why = isDefault ? `the running balance counts this ${cls} only`
+        // a company with a class of its own has a class box on the row
+        // (#671); the balance is the reason then too
+        const why = isDefault || BankingPage._lineClassShown() ? `the running balance counts this ${cls} only`
             : `it has no ${cls} box, and the running balance counts this ${cls} only`;
         return `<tfoot><tr id="reg-quick-entry-off" data-write><td colspan="10" style="padding:6px 10px; font-size:11px; color:var(--gray-500);">The entry row is hidden while a ${cls} is chosen: ${why}. Choose All ${T('classes').toLowerCase()} to use it, or post with + Entry.</td></tr></tfoot>`;
     },
@@ -1543,6 +1633,12 @@ const BankingPage = {
             description: v('qe-memo') || null,
             check_number: v('qe-ref') || null,
         };
+        // the row's class (#671), when it has the box; a transfer keeps it too
+        const classBox = document.getElementById('qe-class');
+        if (classBox) {
+            data.class_id = classBox.value ? parseInt(classBox.value, 10) : null;
+            if (!ClassWarn.okValue(data.class_id)) return;
+        }
         // a date far from today asks first, as every form does (#481),
         // unless it is the last entry's date carried over (#566)
         const dateBox = document.getElementById('qe-date');
@@ -1612,6 +1708,8 @@ const BankingPage = {
         const shownFor = !entry && ctx.accountId === accountId && String(BankingPage._regFilterId) === String(accountId)
             && BankingPage._regFilter.class_id ? ctx.classId : null;
         const classGroup = await classFormGroupHtml(shownFor || undefined);
+        // the entry's job beside its class (#671 put one on the review row)
+        const jobGroup = await jobFormGroupHtml(entry ? entry.job_id : null);
         // a new entry opens on the register's last posted date (#566); an
         // edit fills in its own
         const carried = (!entry && BankingPage._lastDate[accountId]) || '';
@@ -1633,6 +1731,7 @@ const BankingPage = {
                     <div class="form-group full-width"><label>Memo</label>
                         <input name="description"></div>
                     ${classGroup}
+                    ${jobGroup}
                     <div class="form-group" id="entry-name-group"><label>${T('Customer')} <span style="font-weight:normal; color:var(--gray-500);">(who the money came from)</span></label>
                         ${BankingPage.nameSelectHtml('entry-name', 'customer_id', null, `${T('Customer')}`)}</div>
                     <div class="form-group full-width" id="entry-splits" style="display:none;">
@@ -2028,6 +2127,7 @@ const BankingPage = {
             description: form.description.value || null,
             check_number: form.check_number.value || null,
             class_id: classIdFromForm(form),
+            job_id: jobIdFromForm(form),
             ...(splits ? { splits } : {}),
         };
         // the plain entry's name (#606): on money in only, null clears it
@@ -2283,6 +2383,8 @@ const BankingPage = {
 
     async showTransferForm(fromId = null) {
         const accounts = await API.get('/accounts?bank=1&active_only=true');
+        // the class both lines carry (#676), as on + Entry
+        const classGroup = await classFormGroupHtml();
         const opt = (a, sel) => `<option value="${a.id}" ${sel ? 'selected' : ''}>${accountLabel(a)} (${BankingPage._kindLabel(a.bank_kind).toLowerCase()})</option>`;
         const fromOpts = accounts.map(a => opt(a, a.id === fromId)).join('');
         const firstCard = accounts.find(a => a.bank_kind === 'credit_card' && a.id !== fromId);
@@ -2297,6 +2399,7 @@ const BankingPage = {
                     <div class="form-group"><label>To *</label><select name="to_account_id" required>${toOpts}</select></div>
                     <div class="form-group"><label>Reference</label><input name="reference"></div>
                     <div class="form-group"><label>Memo</label><input name="memo"></div>
+                    ${classGroup}
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
@@ -2309,6 +2412,7 @@ const BankingPage = {
         e.preventDefault();
         const form = e.target;
         if (!(await TxnWarn.ok(form))) return;
+        if (!(await ClassWarn.ok(form))) return;
         try {
             const t = await API.post('/transfers', {
                 date: form.date.value,
@@ -2317,6 +2421,7 @@ const BankingPage = {
                 amount: form.amount.value,
                 memo: form.memo.value || null,
                 reference: form.reference.value || null,
+                class_id: classIdFromForm(form),
             });
             const here = BankingPage._onRegister(t.from_account_id);
             const outside = here ? BankingPage._outsideFilter(form.date.value) : '';
@@ -2330,10 +2435,10 @@ const BankingPage = {
     async showTransfers() {
         const rows = await API.get('/transfers');
         const body = rows.length ? `<div class="table-container"><table>
-            <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">To</th><th scope="col" class="amount">Amount</th><th scope="col">Memo</th><th scope="col"></th></tr></thead>
+            <thead><tr><th scope="col">Date</th><th scope="col">From</th><th scope="col">To</th><th scope="col" class="amount">Amount</th><th scope="col">Memo</th>${rows.some(t => t.class_name) ? `<th scope="col">${T('Class')}</th>` : ''}<th scope="col"></th></tr></thead>
             <tbody>${rows.map(t => `<tr style="${t.status === 'void' ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                 <td>${formatDate(t.date)}</td><td>${escapeHtml(t.from_account_name)}</td><td>${escapeHtml(t.to_account_name)}</td>
-                <td class="amount">${formatCurrency(t.amount)}</td><td>${escapeHtml(t.memo || '')}</td>
+                <td class="amount">${formatCurrency(t.amount)}</td><td>${escapeHtml(t.memo || '')}</td>${rows.some(x => x.class_name) ? `<td>${escapeHtml(t.class_name || '')}</td>` : ''}
                 <td>${t.status === 'void' ? '' : `<button data-destructive class="btn btn-sm btn-secondary" onclick="BankingPage.voidTransfer(${t.id})">Void</button>`}</td>
             </tr>`).join('')}</tbody></table></div>` : '<p>No transfers yet.</p>';
         openModal('Transfers', body);

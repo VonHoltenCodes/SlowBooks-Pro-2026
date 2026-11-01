@@ -111,3 +111,34 @@ def test_a_journal_entry_of_its_own_still_voids(client, db_session, seed_account
     assert client.post(f"/api/journal/{entry['id']}/void").status_code == 200
     db_session.expire_all()
     _posting(db_session, "manual_void", entry["id"])
+
+
+def test_a_payments_ref_is_said_as_a_ref_not_as_its_number(
+    client, db_session, seed_accounts, seed_customer
+):
+    """2.31.2 gate, R2-2: a payment's posting carries the customer's check
+    number, not the payment's own; the refusal named it "payment 771" as an
+    invoice's is "invoice 1001". It says the Ref # now."""
+    inv = _invoice(client, seed_customer.id)
+    r = client.post(
+        "/api/payments",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-04-02",
+            "amount": "100.00",
+            "reference": "771",
+            "allocations": [{"invoice_id": inv["id"], "amount": "100.00"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    db_session.expire_all()
+    posting = _posting(db_session, "payment", r.json()["id"])
+    assert posting.reference == "771"
+
+    refused = client.post(f"/api/journal/{posting.id}/void")
+
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["detail"] == (
+        "This is a payment's posting (Ref # 771), not a journal entry of its "
+        "own. Void the payment itself; that reverses this posting with it."
+    )

@@ -3,7 +3,7 @@
 Schema reference for a SlowBooks Pro company database: one SQLite file per
 company on the desktop and Server Edition, or a PostgreSQL database. 105
 tables on a double-entry accounting foundation (Alembic head
-`4810bd59e481` in 2.31.3). For migration history, see the files under
+`95209e8d293c` in 2.31.4: `bank_rules.class_id` and `bank_rules.job_id`, after `4810bd59e481`). For migration history, see the files under
 `migrations/versions/`; for model code, see `app/models/`. The construction
 and job-cost tables are described in their own sections below the table.
 

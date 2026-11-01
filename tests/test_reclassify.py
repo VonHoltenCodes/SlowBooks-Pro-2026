@@ -583,3 +583,296 @@ def test_a_vendor_name_inside_another_word_does_not_match(
         )
     )
     assert [ln["payee"] for ln in found["lines"]] == ["ACE HARDWARE #12"]
+
+
+# ---------------------------------------------------------------------------
+# A job moves too (#674): the dry run says it, the move sets the line's job
+# (and the bill line's), the job reports follow, the job comes off, and the
+# guards the account and class moves have hold for a job move.
+# ---------------------------------------------------------------------------
+
+
+def _job(client, customer_id, name):
+    return _ok(
+        client.post("/api/jobs", json={"customer_id": customer_id, "name": name})
+    )
+
+
+def _job_figures(client):
+    rows = _ok(client.get("/api/jobs/profitability"))
+    return {r["job_id"]: r for r in rows}
+
+
+def test_a_dry_run_lists_the_job_move_and_changes_nothing(
+    client, db_session, seed_accounts, seed_customer
+):
+    accounts = seed_accounts
+    kitchen = _job(client, seed_customer.id, "Kitchen")
+    _journal(client, accounts, "6900", "2000", "40.00", "Unknown charge")
+    ids = _line_ids(client, db_session, "6900", accounts)
+    plan = _ok(
+        client.post("/api/reclassify", json={"line_ids": ids, "job_id": kitchen["id"]})
+    )
+    assert plan["dry_run"] is True and plan["count"] == 1
+    assert plan["to_job"]["id"] == kitchen["id"]
+    m = plan["moved"][0]
+    assert m["from_job"] is None
+    assert m["to_job"]["name"].endswith("Kitchen")
+    # the account stays where it was
+    assert m["from_account"]["id"] == m["to_account"]["id"] == accounts["6900"].id
+    db_session.expire_all()
+    line = db_session.get(TransactionLine, ids[0])
+    assert line.job_id is None
+
+
+def test_the_job_move_changes_the_line_the_bill_and_the_job_reports(
+    client, db_session, seed_accounts, seed_customer
+):
+    accounts = seed_accounts
+    kitchen = _job(client, seed_customer.id, "Kitchen")
+    bath = _job(client, seed_customer.id, "Bath")
+    _journal(client, accounts, "6900", "2000", "40.00", "Unknown charge")
+    bill = _bill(client, accounts, "6900", 120)
+    ids = _line_ids(client, db_session, "6900", accounts)
+    assert len(ids) == 2
+    done = _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": ids, "job_id": kitchen["id"], "dry_run": False},
+        )
+    )
+    assert done["count"] == 2 and done["skipped"] == []
+    db_session.expire_all()
+    assert {
+        ln.job_id
+        for ln in db_session.query(TransactionLine).filter(TransactionLine.id.in_(ids))
+    } == {kitchen["id"]}
+    bl = db_session.query(BillLine).filter(BillLine.bill_id == bill["id"]).one()
+    assert bl.job_id == kitchen["id"]
+    figures = _job_figures(client)
+    assert figures[kitchen["id"]]["expenses"] == 160.0
+    # the list shows the job on each line
+    listed = _lines(client, accounts, "6900")
+    assert {ln["job_id"] for ln in listed["lines"]} == {kitchen["id"]}
+
+    # on to another job: the first job's costs go with it
+    _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": ids, "job_id": bath["id"], "dry_run": False},
+        )
+    )
+    figures = _job_figures(client)
+    assert figures[bath["id"]]["expenses"] == 160.0
+    assert kitchen["id"] not in figures or figures[kitchen["id"]]["expenses"] == 0
+
+    # and off its job: the No job bucket takes it back
+    done = _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": ids, "clear_job": True, "dry_run": False},
+        )
+    )
+    assert done["count"] == 2 and done["clear_job"] is True
+    assert all(m["to_job"] is None for m in done["moved"])
+    db_session.expire_all()
+    assert all(
+        ln.job_id is None
+        for ln in db_session.query(TransactionLine).filter(TransactionLine.id.in_(ids))
+    )
+    bl = db_session.query(BillLine).filter(BillLine.bill_id == bill["id"]).one()
+    assert bl.job_id is None
+    figures = _job_figures(client)
+    assert bath["id"] not in figures or figures[bath["id"]]["expenses"] == 0
+    # nothing left to clear: already there
+    again = _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": ids, "clear_job": True, "dry_run": False},
+        )
+    )
+    assert again["count"] == 0
+    assert {s["reason"] for s in again["skipped"]} == {"already there"}
+    # the audit event names the job
+    events = _ok(client.get("/api/audit?table_name=reclassify"))
+    rows = events["entries"] if isinstance(events, dict) else events
+    assert any(e["new_values"].get("job") == "cleared" for e in rows)
+
+
+def test_the_job_move_guards_hold(client, db_session, seed_accounts, seed_customer):
+    accounts = seed_accounts
+    kitchen = _job(client, seed_customer.id, "Kitchen")
+    _journal(client, accounts, "6900", "2000", "40.00", "Old charge", day="2026-01-20")
+    ids = _line_ids(client, db_session, "6900", accounts)
+    # a job and no job together, a missing job, an inactive job
+    r = client.post(
+        "/api/reclassify",
+        json={"line_ids": ids, "job_id": kitchen["id"], "clear_job": True},
+    )
+    assert r.status_code == 400 and "not both" in r.json()["detail"]
+    r = client.post("/api/reclassify", json={"line_ids": ids, "job_id": 999999})
+    assert r.status_code == 404
+    closed = _job(client, seed_customer.id, "Old porch")
+    _ok(client.put(f"/api/jobs/{closed['id']}", json={"is_active": False}))
+    r = client.post("/api/reclassify", json={"line_ids": ids, "job_id": closed["id"]})
+    assert r.status_code == 400 and "inactive" in r.json()["detail"]
+
+    # the closing date holds a job move as it does an account move
+    _ok(
+        client.put(
+            "/api/settings",
+            json={"closing_date": "2026-02-28", "closing_date_password": OVERRIDE_PW},
+        )
+    )
+    body = {"line_ids": ids, "job_id": kitchen["id"], "dry_run": False}
+    r = client.post("/api/reclassify", json=body)
+    assert r.status_code == 403, r.text
+    db_session.expire_all()
+    assert db_session.get(TransactionLine, ids[0]).job_id is None
+    r = client.post(
+        "/api/reclassify",
+        json=body,
+        headers={"X-Closing-Date-Password": quote(OVERRIDE_PW)},
+    )
+    assert r.status_code == 200, r.text
+
+    # a voided entry's lines stay
+    entry = _journal(
+        client, accounts, "6900", "2000", "15.00", "Later", day="2026-04-02"
+    )
+    _ok(client.post(f"/api/journal/{entry['id']}/void"))
+    later = [
+        ln["id"] for ln in _lines(client, accounts, "6900", start="2026-04-01")["lines"]
+    ]
+    r = _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": later, "job_id": kitchen["id"], "dry_run": False},
+        )
+    )
+    assert r["count"] == 0 and {s["reason"] for s in r["skipped"]} == {"voided"}
+
+
+def test_a_line_whose_entry_is_on_the_job_is_not_taken_off_it(
+    client, db_session, seed_accounts, seed_customer
+):
+    accounts = seed_accounts
+    kitchen = _job(client, seed_customer.id, "Kitchen")
+    bath = _job(client, seed_customer.id, "Bath")
+    entry = _ok(
+        client.post(
+            "/api/journal",
+            json={
+                "date": "2026-03-10",
+                "description": "Tile",
+                "job_id": kitchen["id"],
+                "lines": [
+                    {"account_id": accounts["6900"].id, "debit": "50", "credit": "0"},
+                    {"account_id": accounts["2000"].id, "debit": "0", "credit": "50"},
+                ],
+            },
+        )
+    )
+    line = (
+        db_session.query(TransactionLine)
+        .filter(
+            TransactionLine.transaction_id == entry["id"],
+            TransactionLine.account_id == accounts["6900"].id,
+        )
+        .one()
+    )
+    # taking it off would leave it on the entry's job: refused, with a sentence
+    r = _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": [line.id], "clear_job": True, "dry_run": False},
+        )
+    )
+    assert r["count"] == 0
+    assert "take the job off the entry" in r["skipped"][0]["reason"]
+    # onto another job is the line's own: the reports follow it
+    _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": [line.id], "job_id": bath["id"], "dry_run": False},
+        )
+    )
+    assert _job_figures(client)[bath["id"]]["expenses"] == 50.0
+
+
+def test_a_job_cost_entrys_lines_do_not_move(client, db_session, seed_accounts):
+    """A job cost entry posts its own lines from the stored entry; moving one
+    line would leave the stored entry on the old job, so they stay."""
+    from datetime import date
+
+    from app.services.accounting import create_journal_entry
+
+    accounts = seed_accounts
+    create_journal_entry(
+        db_session,
+        date(2026, 3, 10),
+        "Job cost JC-1",
+        [
+            {"account_id": accounts["6900"].id, "debit": 30, "credit": 0},
+            {"account_id": accounts["6300"].id, "debit": 0, "credit": 30},
+        ],
+        source_type="job_cost",
+        source_id=1,
+    )
+    db_session.commit()
+    listed = _lines(client, accounts, "6900")
+    assert listed["count"] == 1 and listed["movable"] == 0
+    assert "edit the document" in listed["lines"][0]["reason"]
+
+
+def test_the_page_offers_a_job_beside_the_class():
+    from pathlib import Path
+
+    src = Path("app/static/js/reports.js").read_text(encoding="utf-8")
+    assert "API.get('/jobs')" in src
+    assert 'id="rc-to-job"' in src
+    assert "body.clear_job = true" in src and "body.job_id = parseInt(toJob, 10)" in src
+    # shown once the company has jobs
+    assert "const hasJobs = rc.lists.jobs.length > 0;" in src
+    assert '${hasJobs ? `<div class="form-group"' in src
+
+
+def test_a_line_whose_entry_is_on_the_class_is_not_taken_off_it(
+    client, db_session, seed_accounts
+):
+    # the same shape as the job: clearing the line's own class would leave
+    # it reporting under the entry's, so it is refused with the sentence
+    accounts = seed_accounts
+    cls = _ok(client.post("/api/classes", json={"name": "North Crew"}))
+    entry = _ok(
+        client.post(
+            "/api/journal",
+            json={
+                "date": "2026-03-10",
+                "description": "Tile",
+                "class_id": cls["id"],
+                "lines": [
+                    {"account_id": accounts["6900"].id, "debit": "50", "credit": "0"},
+                    {"account_id": accounts["2000"].id, "debit": "0", "credit": "50"},
+                ],
+            },
+        )
+    )
+    line = (
+        db_session.query(TransactionLine)
+        .filter(
+            TransactionLine.transaction_id == entry["id"],
+            TransactionLine.account_id == accounts["6900"].id,
+        )
+        .one()
+    )
+    r = _ok(
+        client.post(
+            "/api/reclassify",
+            json={"line_ids": [line.id], "clear_class": True, "dry_run": False},
+        )
+    )
+    assert r["moved"] == []
+    assert r["skipped"][0]["line_id"] == line.id
+    assert "North Crew" in r["skipped"][0]["reason"]
+    assert "take the class off the entry" in r["skipped"][0]["reason"]

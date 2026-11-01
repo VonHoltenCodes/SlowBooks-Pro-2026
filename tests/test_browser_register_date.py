@@ -233,8 +233,7 @@ def test_the_entry_row_stays_under_a_date_filter_not_a_class_one(browser):
     """Any From, To or class hid the entry row, so a register always worked
     from the start of the month never showed it (#663). A date filter keeps
     it, with entries in the range or none yet; a class filter puts a line
-    in its place, since the row has no class box and the running balance
-    counts that class only."""
+    in its place, since the running balance counts that class only."""
     register = {**REGISTER, "entries": []}
     page = _register_page(browser, [], "#/banking/1?start_date=2026-10-01", register)
     try:
@@ -260,10 +259,12 @@ def test_the_entry_row_stays_under_a_date_filter_not_a_class_one(browser):
             page, "#/banking/1?start_date=2026-10-01&class_id=2", "#reg-quick-entry-off"
         )
         assert page.locator("#reg-quick-entry").count() == 0
+        # the company has a class of its own, so the row has a class box
+        # (#671): the balance is the reason
         assert page.inner_text("#reg-quick-entry-off") == (
-            "The entry row is hidden while a class is chosen: it has no class box,"
-            " and the running balance counts this class only. Choose All classes"
-            " to use it, or post with + Entry."
+            "The entry row is hidden while a class is chosen: the running balance"
+            " counts this class only. Choose All classes to use it, or post with"
+            " + Entry."
         )
         page.select_option("#reg-class", "")
         page.wait_for_selector("#reg-quick-entry")
@@ -827,12 +828,21 @@ def test_a_from_typed_a_key_at_a_time_applies_once_the_bar_is_left(browser):
             "() => location.hash === '#/banking/1?start_date=2025-11-15'"
             " && document.getElementById('reg-start').value === '2025-11-15'"
         )
+        # the From is kept, the note and the focus follow the redraw: waited
+        # for, not read a frame early (a 4-core box failed here under load)
+        page.wait_for_function(
+            "() => localStorage.getItem(BankingPage._fromKey(1)) === '2025-11-15'"
+        )
         assert page.evaluate(KEPT, 1) == "2025-11-15"
-        assert "from Nov 15, 2025" in page.inner_text("#reg-filter-note")
+        page.wait_for_function(
+            "() => (document.getElementById('reg-filter-note')?.innerText || '')"
+            ".includes('from Nov 15, 2025')"
+        )
         # the register drawn again, the keyboard is past the bar, not lost
         page.wait_for_function(OUT_OF_BAR)
-        assert page.evaluate(
-            "() => !!document.getElementById('reg-quick-entry').contains(document.activeElement)"
+        page.wait_for_function(
+            "() => !!document.getElementById('reg-quick-entry')"
+            " && document.getElementById('reg-quick-entry').contains(document.activeElement)"
         )
     finally:
         page.close()

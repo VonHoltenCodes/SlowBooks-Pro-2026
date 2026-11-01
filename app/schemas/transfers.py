@@ -17,6 +17,8 @@ class TransferCreate(StrictModel):
     amount: Decimal
     memo: Optional[str] = None
     reference: Optional[str] = None
+    # the class both lines carry (#676), as a journal entry's header class
+    class_id: Optional[int] = None
 
 
 class TransferResponse(BaseModel):
@@ -30,3 +32,5 @@ class TransferResponse(BaseModel):
     memo: str
     reference: str
     status: str
+    class_id: Optional[int] = None
+    class_name: str = ""

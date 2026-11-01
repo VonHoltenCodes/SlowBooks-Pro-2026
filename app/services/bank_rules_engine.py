@@ -137,11 +137,36 @@ def rule_for(db: Session, payee: str | None):
     return next((r for r in rules if _hit(r, text, names)), None)
 
 
+def rule_dimensions(db: Session, payee: str | None) -> tuple[int | None, int | None]:
+    """(class id, job id) the rule a statement line with this payee follows
+    names (#675), each None when it names none or when the class has since
+    been archived or the job made inactive (the line then comes in without
+    it, as a line no rule names does). Like the vendor, they are not kept on
+    the statement line: Add asks the rule (bank_matching.add)."""
+    rule = rule_for(db, payee)
+    if rule is None:
+        return None, None
+    from app.models.classes import TxnClass
+    from app.models.jobs import Job
+
+    class_id = job_id = None
+    if rule.class_id:
+        cls = db.get(TxnClass, rule.class_id)
+        if cls is not None and not cls.is_archived:
+            class_id = cls.id
+    if rule.job_id:
+        job = db.get(Job, rule.job_id)
+        if job is not None and job.is_active is not False:
+            job_id = job.id
+    return class_id, job_id
+
+
 def apply_bank_rules(db: Session, bank_account_id: int | None = None) -> int:
     """Categorise unmatched statement lines by the active rules (highest
     priority first, first hit wins). Returns how many lines got a category.
-    Commits when anything changed. The vendor a rule names is not kept on
-    the line: Add asks the same rule again (bank_matching.add)."""
+    Commits when anything changed. The vendor, class and job a rule names
+    are not kept on the line: Add asks the same rule again
+    (bank_matching.add, rule_dimensions)."""
     rules = _active_rules(db)
     if not rules:
         return 0

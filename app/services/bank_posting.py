@@ -183,9 +183,12 @@ def post_transfer(
     amount: Decimal,
     memo: str | None = None,
     reference: str | None = None,
+    class_id: int | None = None,
+    job_id: int | None = None,
 ) -> Transaction:
     """Money between two bank/card accounts: DR to, CR from. Paying a card
-    is a transfer from the bank to the card."""
+    is a transfer from the bank to the card. A class (#676), and a job, go
+    on the header, so both lines carry them as a journal entry's do."""
     amount = _q(amount)
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Transfer amount must be positive")
@@ -212,6 +215,8 @@ def post_transfer(
         ],
         source_type="transfer",
         reference=reference or "",
+        class_id=class_id,
+        job_id=job_id,
     )
 
 
@@ -348,11 +353,16 @@ def post_bank_entry(
             status_code=400, detail="Category must differ from the account itself"
         )
     if not splits and category.bank_kind:
+        # a transfer keeps the class and job the entry was given (#676): the
+        # register's + Entry and the review row both offer them
+        dims = {"class_id": class_id, "job_id": job_id}
         if amount < 0:
             return post_transfer(
-                db, txn_date, account, category, -amount, memo, reference
+                db, txn_date, account, category, -amount, memo, reference, **dims
             )
-        return post_transfer(db, txn_date, category, account, amount, memo, reference)
+        return post_transfer(
+            db, txn_date, category, account, amount, memo, reference, **dims
+        )
     description, lines = bank_entry_lines(
         account, amount, category, payee, memo, splits, customer_id
     )
@@ -653,10 +663,15 @@ def replace_journal_lines(
             o.is_billable = bool(n.get("is_billable"))
             o.cost_code_id = n.get("cost_code_id")
             o.customer_id = n.get("customer_id")
-            o.job_id = n.get("job_id")
-            if o.class_id != n.get("class_id"):
-                o.class_id = n.get("class_id")
-                o.function = default_function_of(db, n.get("class_id"), fn_cache)
+            # a line naming no job takes the entry's, as create_journal_entry
+            # posts it (#672: the form's per-line "Same as header" sends null)
+            o.job_id = n.get("job_id") or job_id
+            # a line with no class of its own takes the header's, as a new
+            # entry's line does (#672 found the same for the job)
+            new_class = n.get("class_id") or class_id
+            if o.class_id != new_class:
+                o.class_id = new_class
+                o.function = default_function_of(db, new_class, fn_cache)
             elif "function" in n:
                 o.function = n["function"]
         db.flush()

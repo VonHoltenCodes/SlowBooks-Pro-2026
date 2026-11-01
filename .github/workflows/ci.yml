@@ -244,7 +244,10 @@ jobs:
           # test_reports_hide_zero.py::test_the_pdf_takes_the_choice, WeasyPrint
           # again; the other 2.31.0 tests run everywhere, the job-report
           # local-day tests pin the zone without tzset on Windows).
-          MAX_SKIPS: "194"
+          # 195 with the feed review's class/job/name browser test (#671,
+          # test_browser_review_dims.py, Chromium through playwright, which
+          # is not installed here; every browser test skips the same way).
+          MAX_SKIPS: "195"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

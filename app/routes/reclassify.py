@@ -3,8 +3,8 @@
 GET  /api/reclassify/lines   an account's lines in a period, each with
                              whether it can move and why not; vendor_id
                              or payee narrows them to one payee's (#394)
-POST /api/reclassify         move the ticked lines to an account and/or a
-                             class; dry_run (the default) answers with the
+POST /api/reclassify         move the ticked lines to an account, a class
+                             and/or a job (#674); dry_run (the default) answers with the
                              plan and changes nothing
 """
 
@@ -31,6 +31,9 @@ class ReclassifyRequest(StrictModel):
     # the class they get; None leaves it; clear_class removes the line's own
     class_id: Optional[int] = None
     clear_class: bool = False
+    # the job they go on (#674); None leaves it; clear_job takes it off
+    job_id: Optional[int] = None
+    clear_job: bool = False
     dry_run: bool = True
 
 
@@ -56,5 +59,7 @@ def reclassify(data: ReclassifyRequest, db: Session = Depends(get_db)):
         account_id=data.account_id,
         class_id=data.class_id,
         clear_class=data.clear_class,
+        job_id=data.job_id,
+        clear_job=data.clear_job,
         dry_run=data.dry_run,
     )

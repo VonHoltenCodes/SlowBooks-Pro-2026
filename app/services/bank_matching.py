@@ -273,6 +273,14 @@ def add(
     check_closing_date(db, bt.date)
     payee = payee or bt.payee
     vendor = _entry_vendor(db, bt, payee, vendor_id)
+    if not splits and (class_id is None or job_id is None):
+        # the class and job the statement line's rule names (#675), where
+        # the caller named none; a split's lines carry their own
+        from app.services.bank_rules_engine import rule_dimensions
+
+        rule_class, rule_job = rule_dimensions(db, bt.payee)
+        class_id = class_id if class_id is not None else rule_class
+        job_id = job_id if job_id is not None else rule_job
     txn = post_bank_entry(
         db,
         acct,
@@ -410,9 +418,12 @@ def restore(bt: BankTransaction) -> BankTransaction:
     return bt
 
 
-def add_all(db: Session, bank_account: BankAccount) -> dict:
+def add_all(db: Session, bank_account: BankAccount, picks: dict | None = None) -> dict:
     """Add every unmatched line that already carries a category (from a
-    rule or the user). Lines that cannot post are reported, not fatal."""
+    rule or the user). Lines that cannot post are reported, not fatal.
+    `picks` ({line id: {"class_id", "job_id", "vendor_id", "customer_id",
+    "payee"}}, #671) is what each review row chose besides its category."""
+    picks = picks or {}
     rows = (
         db.query(BankTransaction)
         .filter(
@@ -427,7 +438,7 @@ def add_all(db: Session, bank_account: BankAccount) -> dict:
     for bt in rows:
         try:
             with db.begin_nested():
-                add(db, bt)
+                add(db, bt, **picks.get(bt.id, {}))
             added += 1
         except HTTPException as exc:
             skipped.append({"id": bt.id, "reason": exc.detail})

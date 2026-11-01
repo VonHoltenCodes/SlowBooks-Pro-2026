@@ -39,6 +39,7 @@ const JournalPage = {
                     <td class="amount">${formatCurrency(e.total_credit)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="JournalPage.view(${e.id})">View</button>
+                        ${JournalPage.canEdit(e) ? `<button class="btn btn-sm btn-secondary" data-write onclick="JournalPage.editEntry(${e.id})">Edit</button>` : ''}
                         ${e.voided ? '<span class="journal-voided" style="color:var(--danger);font-weight:700;">Voided</span>' : ''}
                         ${JournalPage.canVoid(e) ? `<button data-destructive data-accountant-ok class="btn btn-sm btn-danger" onclick="JournalPage.void(${e.id})">Void</button>` : ''}
                     </td>
@@ -80,6 +81,16 @@ const JournalPage = {
         return !!e.voidable && !e.voided;
     },
 
+    // Edit on the page and in the view (#673), by the register's rule
+    // (#388): a hand-entered entry, not voided, not a reversal and not a
+    // document's posting; never for the accountant's sign-in, whose PUT the
+    // server refuses. The server says which (editable); a reconciled line
+    // or a closed period is refused on save, with its sentence.
+    canEdit(e) {
+        if (typeof App !== 'undefined' && App.isAccountant && App.isAccountant()) return false;
+        return !!e.editable && !e.voided;
+    },
+
     // The register an entry was posted from, opened with the entry in its
     // list (#663): a register opens on the From date it was last read from,
     // and that can be after this entry's date.
@@ -91,10 +102,17 @@ const JournalPage = {
 
     async view(id) {
         const entry = await API.get(`/journal/${id}`);
+        // the Cost Code column is decided by CostCodes.any(): load the list
+        // here too, not only when a form opens (2.31.4 gate, NEW-196)
+        if (CostCodes._list === null && CostCodes.load) await CostCodes.load();
         const registerHref = entry.register_account_id ? await JournalPage._registerHref(entry) : '';
+        // a Job column when a line has one (#672)
+        const jobCol = entry.lines.some(l => l.job_id);
         let linesHtml = entry.lines.map(l =>
             `<tr><td>${accountLabel(l, l.account_name)}</td>
              <td>${escapeHtml(l.description || '')}</td>
+             ${jobCol ? `<td class="je-line-job">${escapeHtml(l.job_name || '')}</td>` : ''}
+             ${CostCodes.viewCellHtml(l.cost_code_id)}
              <td class="amount">${l.debit > 0 ? formatCurrency(l.debit) : ''}</td>
              <td class="amount">${l.credit > 0 ? formatCurrency(l.credit) : ''}</td></tr>`
         ).join('');
@@ -110,7 +128,7 @@ const JournalPage = {
                 ${entry.voided ? '<div class="journal-voided" style="color:var(--danger);font-weight:700;margin-top:6px;">Voided</div>' : ''}
             </div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}<th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th></tr></thead>
+                <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${jobCol ? `<th scope="col">${T('Job')}</th>` : ''}${CostCodes.headHtml()}<th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th></tr></thead>
                 <tbody>${linesHtml}</tbody>
             </table></div>
             <div class="invoice-totals">
@@ -126,6 +144,7 @@ const JournalPage = {
                 </div>
             </div>
             <div class="form-actions">
+                ${JournalPage.canEdit(entry) ? `<button class="btn btn-secondary" data-write onclick="JournalPage.editEntry(${entry.id})">Edit</button>` : ''}
                 ${JournalPage.canVoid(entry) ? `<button data-destructive data-accountant-ok class="btn btn-danger" onclick="JournalPage.void(${entry.id})">Void</button>` : ''}
                 ${!entry.voided ? `<button class="btn btn-secondary" data-write title="Keep this entry as a memorized transaction, to enter again on a schedule" onclick="MemorizedPage.memorizeJournal(${entry.id})">Memorize</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
@@ -180,6 +199,22 @@ const JournalPage = {
 
     _lineCount: 0,
     _accounts: [],
+    _jobs: [],
+
+    // A Job per line (#672), beside the line's Class, once the company has
+    // a job (jobFormGroupHtml's rule): blank is "Same as header", the
+    // header's job, as the server posts a line that names none.
+    async loadJobs() {
+        try { JournalPage._jobs = await API.get('/jobs'); } catch (e) { JournalPage._jobs = []; }
+        return JournalPage._jobs;
+    },
+    jobHeadHtml() { return (JournalPage._jobs || []).length ? `<th scope="col">${T('Job')}</th>` : ''; },
+    jobCellHtml() {
+        const jobs = JournalPage._jobs || [];
+        if (!jobs.length) return '';
+        return `<td><select class="je-job"><option value="">Same as header</option>${jobs.map(j =>
+            `<option value="${j.id}">${escapeHtml(j.full_name || j.name)}</option>`).join('')}</select></td>`;
+    },
 
     // Edit (#388): a hand-entered journal entry opens in the journal form,
     // filled in, from its register row; Save sends it back as a PUT.
@@ -198,6 +233,7 @@ const JournalPage = {
         await CostCodes.load();
         await CostTypes.load();
         await Nonprofit.loadFunds();
+        await JournalPage.loadJobs();
         JournalPage._accounts = accounts;
         JournalPage._lineCount = 2;
 
@@ -234,12 +270,12 @@ const JournalPage = {
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Lines</h3>
                 <table class="line-items-table">
-                    <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${Nonprofit.headHtml()}<th scope="col" class="col-rate">Debit</th><th scope="col" class="col-rate">Credit</th><th scope="col" class="col-actions"></th></tr></thead>
+                    <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${JournalPage.jobHeadHtml()}${Nonprofit.headHtml()}<th scope="col" class="col-rate">Debit</th><th scope="col" class="col-rate">Credit</th><th scope="col" class="col-actions"></th></tr></thead>
                     <tbody id="je-lines">
                         <tr data-jeline="0">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
                             <td><input class="je-desc"></td>
-                            ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${Nonprofit.cellHtml('je-function')}
+                            ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                             <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
@@ -247,7 +283,7 @@ const JournalPage = {
                         <tr data-jeline="1">
                             <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
                             <td><input class="je-desc"></td>
-                            ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${Nonprofit.cellHtml('je-function')}
+                            ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                             <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                             <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
@@ -310,6 +346,14 @@ const JournalPage = {
         if (cc && l.cost_code_id != null) cc.value = l.cost_code_id;
         const ct = row.querySelector('.je-cost-type');
         if (ct && l.cost_type != null) ct.value = l.cost_type;
+        const job = row.querySelector('.je-job');
+        if (job && l.job_id != null) {
+            // an inactive job the picker doesn't list stays the line's
+            if (!Array.from(job.options).some(o => o.value === String(l.job_id))) {
+                job.insertAdjacentHTML('beforeend', `<option value="${Number(l.job_id)}">${escapeHtml(l.job_name || `Job ${l.job_id}`)}</option>`);
+            }
+            job.value = String(l.job_id);
+        }
         const fund = row.querySelector('.je-function-fund');
         if (fund && l.class_id != null) fund.value = l.class_id;
         const fn = row.querySelector('.je-function');
@@ -341,6 +385,9 @@ const JournalPage = {
                 if (row.querySelector('.je-cost-code')) line.cost_code_id = CostCodes.fromRow(row, 'je-cost-code');
                 if (row.querySelector('.je-cost-type')) line.cost_type = CostTypes.fromRow(row, 'je-cost-type');
                 if (row.querySelector('.je-function-fund')) line.class_id = Nonprofit.fundFromRow(row, 'je-function');
+                // the line's job (#672); blank posts with the header's
+                const job = row.querySelector('.je-job');
+                if (job) line.job_id = job.value ? parseInt(job.value, 10) : null;
                 lines.push(line);
             }
         });
@@ -356,7 +403,7 @@ const JournalPage = {
             <tr data-jeline="${idx}">
                 <td><select class="je-account"><option value="">--</option>${acctOpts}</select></td>
                 <td><input class="je-desc"></td>
-                            ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${Nonprofit.cellHtml('je-function')}
+                            ${CostCodes.cellHtml('je-cost-code')}${CostTypes.cellHtml('je-cost-type')}${JournalPage.jobCellHtml()}${Nonprofit.cellHtml('je-function')}
                 <td><input class="je-debit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                 <td><input class="je-credit money" type="number" step="0.01" value="0" oninput="JournalPage.recalc()"></td>
                 <td><button type="button" class="btn btn-sm btn-danger" aria-label="Remove line" onclick="this.closest('tr').remove();JournalPage.recalc()">X</button></td>
