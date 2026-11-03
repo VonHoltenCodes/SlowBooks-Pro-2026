@@ -302,6 +302,8 @@ SETTINGS_TAKEN_PARTS = {
 
 COMPANIES_TAKEN = {
     "+ New Company": ("POST", "/api/companies", {"name": "Harbor Light Catering"}),
+    # the sample company is a new company file too (#684)
+    "Try a sample company": ("POST", "/api/companies/sample", None),
     # applying an accountant's changes posts to the books (#346): an administrator's
     "Apply accountant's changes…": (
         "POST",
