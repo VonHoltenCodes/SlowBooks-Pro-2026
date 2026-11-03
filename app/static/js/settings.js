@@ -2714,8 +2714,8 @@ const SettingsPage = {
                 <td class="amount">${t.documents}</td>
                 <td class="amount">${t.elsewhere}</td>
                 <td class="actions">
-                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.editPaymentTerm(${t.id})">Edit</button>
-                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.setPaymentTermActive(${t.id}, ${!t.is_active})">${t.is_active ? 'Make Inactive' : 'Make Active'}</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write aria-label="Edit ${escapeHtml(t.name)}" onclick="SettingsPage.editPaymentTerm(${t.id})">Edit</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write aria-label="Make ${escapeHtml(t.name)} ${t.is_active ? 'inactive' : 'active'}" onclick="SettingsPage.setPaymentTermActive(${t.id}, ${!t.is_active})">${t.is_active ? 'Make Inactive' : 'Make Active'}</button>
                 </td>
             </tr>`).join('')}</tbody>
         </table></div>`;
