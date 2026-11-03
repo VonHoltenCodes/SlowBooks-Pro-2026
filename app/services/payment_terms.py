@@ -169,9 +169,15 @@ class Rule:
                 # invoice cannot be paid by Jan 31
                 return last if on <= last < due else None
             # the same month, an earlier day: no discount once that day has
-            # already passed by the document's own date
+            # already passed by the document's own date. The order is the
+            # configured days' order, decided before the clamp (#664): "by
+            # the 28th, net the 30th" clamps both to Feb 28 in February, and
+            # the discount then runs to that same day rather than vanishing.
+            # A discount day equal to the due day is refused at save.
+            if self.discount_day == self.due_day:
+                return None
             last = _day_in(due.year, due.month, self.discount_day)
-            return last if on <= last < due else None
+            return last if on <= last <= due else None
         return on + timedelta(days=self.discount_days or 0)
 
 

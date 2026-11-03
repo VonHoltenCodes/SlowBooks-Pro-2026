@@ -194,6 +194,13 @@ def _check_rule(v: dict) -> None:
             )
     elif not 1 <= when <= 31:
         _refuse("The day of the month for the discount must be 1 to 31.")
+    elif when == v["due_day"]:
+        # it could never be taken: the discount is before the due day (#664)
+        _refuse(
+            "The day of the month for the discount must be a different day "
+            "from the day it's due; a discount on the due day itself is "
+            "never early."
+        )
 
 
 def _check_name(name: str, rule: dict) -> None:
