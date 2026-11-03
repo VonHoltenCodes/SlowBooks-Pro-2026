@@ -301,10 +301,17 @@ def render_template_from_db(db: Session, template_name: str, context: dict) -> t
     tpl = db.query(EmailTemplate).filter(EmailTemplate.name == template_name).first()
     if tpl:
         env = template_env()
-        subject = env.from_string(tpl.subject_template).render(**context)
+        subject = render_subject(env, tpl.subject_template, context)
         body = env.from_string(tpl.body_template).render(**context)
         return subject, body
     return None, None
+
+
+def render_subject(env, subject_template: str, context: dict) -> str:
+    """A subject is a header, not HTML: rendered in the same sandbox with
+    autoescape off, so "Pike's Plumbing" reaches the Subject line as
+    typed rather than as "Pike&#39;s Plumbing". The body keeps autoescape."""
+    return env.overlay(autoescape=False).from_string(subject_template).render(**context)
 
 
 def template_env():
@@ -439,13 +446,30 @@ def invoice_email_label(invoice, company_settings: dict) -> str:
     return document_label(invoice, terms_for(company_settings))
 
 
+def customer_facing_company(company_settings: dict) -> dict:
+    """The company as a customer-facing email may name it (#679): secrets
+    redacted, and `company_name` reading the display name when one is set,
+    so a template saved before the setting existed, written as
+    `{{ company.company_name }}`, says the trade name on an invoice email
+    without the operator editing every saved template. The legal name stays
+    under `legal_name`; the tax and payroll forms never use this."""
+    from app.services.settings_service import redact_secrets
+
+    company = dict(redact_secrets(company_settings))
+    legal = company.get("company_name", "")
+    company["legal_name"] = legal
+    display = (company.get("display_name") or "").strip()
+    if display:
+        company["company_name"] = display
+    return company
+
+
 def invoice_email_context(invoice, company_settings: dict, pay_url: str = None) -> dict:
     """What a saved `invoice_email` template can reference.
 
     Kept in one place so the preview and the send cannot drift — the reason
     they could before is that there was no shared renderer at all.
     """
-    from app.services.settings_service import redact_secrets
     from app.services.terminology import terms_for
 
     terms = terms_for(company_settings)
@@ -457,7 +481,7 @@ def invoice_email_context(invoice, company_settings: dict, pay_url: str = None) 
         # would dump every decrypted credential into an email addressed to
         # whoever the sender chooses. Redacted at the point the context is
         # built, so no caller can forget.
-        "company": redact_secrets(company_settings),
+        "company": customer_facing_company(company_settings),
         "customer_name": (
             invoice.customer.name if invoice.customer else terms("Customer")
         ),

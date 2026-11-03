@@ -115,6 +115,7 @@ def preview_template(
         classify_blanks,
         invoice_email_context,
         recording_template_env,
+        render_subject,
     )
     from app.services.payments import enabled_providers
     from app.services.settings_service import get_all_settings
@@ -131,7 +132,7 @@ def preview_template(
     ctx = invoice_email_context(inv, company, pay_url=pay_url)
     env, resolved_to_nothing = recording_template_env()
     try:
-        subject = env.from_string(data.subject_template).render(**ctx)
+        subject = render_subject(env, data.subject_template, ctx)
         body = env.from_string(data.body_template).render(**ctx)
     except (TemplateError, Exception) as exc:
         # Everything here renders text the client supplied: a syntax error, a

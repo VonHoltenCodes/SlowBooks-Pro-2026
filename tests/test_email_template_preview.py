@@ -91,6 +91,24 @@ def test_preview_does_not_touch_the_saved_template(client, db_session, invoice):
     assert saved.subject_template == "Saved subject"
 
 
+def test_preview_subject_is_plain_text_and_the_body_is_escaped(
+    client, db_session, invoice
+):
+    """The subject goes into a mail header, so an apostrophe or an ampersand
+    reaches it as typed; the body is HTML and keeps the sandbox's escaping.
+    The preview and the send render through the same function."""
+    invoice.customer.name = "Pike's Plumbing & Heating"
+    db_session.commit()
+    r = _preview(
+        client,
+        invoice.id,
+        subject="For {{ customer_name }}",
+        body="<p>{{ customer_name }}</p>",
+    ).json()
+    assert r["subject"] == "For Pike's Plumbing & Heating"
+    assert "Pike&#39;s Plumbing &amp; Heating" in r["html_body"]
+
+
 def test_preview_escapes_customer_supplied_text(client, db_session, invoice):
     invoice.customer.name = "<img src=x onerror=alert(1)>"
     db_session.commit()

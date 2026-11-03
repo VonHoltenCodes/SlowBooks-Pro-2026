@@ -156,9 +156,42 @@ def test_the_seeded_invoice_email_template_names_the_display_name(db_session, na
     subject, body = render_invoice_email_parts(
         inv, get_all_settings(db_session), db=db_session
     )
-    # (the sandbox escapes the apostrophe in a subject, as it always has)
-    assert subject.startswith("Invoice #DBA-1 from Pike")
+    # a subject is a header, not HTML: the apostrophe arrives as typed
+    assert subject == f"Invoice #DBA-1 from {DBA}"
     assert LEGAL not in subject and LEGAL not in body
+
+
+def test_a_template_saved_before_the_setting_reads_the_display_name(db_session, named):
+    """A book that seeded its templates on an earlier release has
+    `{{ company.company_name }}` in the saved rows. On a customer's email
+    that reads the display name once one is set; the legal name is under
+    `legal_name` for a template that wants it."""
+    from app.models.email_templates import EmailTemplate
+    from app.services.email_service import render_invoice_email_parts
+
+    db_session.add(
+        EmailTemplate(
+            name="invoice_email",
+            template_type="invoice",
+            subject_template="Invoice from {{ company.company_name }}",
+            body_template="<p>{{ company.company_name }} / {{ company.legal_name }}</p>",
+        )
+    )
+    db_session.commit()
+    inv = _invoice(db_session, named)
+    subject, body = render_invoice_email_parts(
+        inv, get_all_settings(db_session), db=db_session
+    )
+    assert subject == f"Invoice from {DBA}"
+    assert f"{DBA.replace(chr(39), '&#39;')} / {LEGAL}" in body
+
+    set_setting(db_session, "display_name", "")
+    db_session.commit()
+    subject, body = render_invoice_email_parts(
+        inv, get_all_settings(db_session), db=db_session
+    )
+    assert subject == f"Invoice from {LEGAL}"
+    assert f"{LEGAL} / {LEGAL}" in body
 
 
 def test_the_statement_email_names_the_display_name(
