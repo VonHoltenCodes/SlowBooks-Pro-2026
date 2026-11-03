@@ -25,21 +25,21 @@ router = APIRouter(prefix="/api/email-templates", tags=["email-templates"])
 DEFAULT_TEMPLATES = [
     {
         "name": "invoice_email",
-        "subject_template": "{{ doc_label }} #{{ invoice.invoice_number }} from {{ company.company_name }}",
+        "subject_template": "{{ doc_label }} #{{ invoice.invoice_number }} from {{ company.display_name or company.company_name }}",
         "body_template": """<p>Dear {{ customer_name }},</p>
 <p>Please find attached {{ doc_label }} #{{ invoice.invoice_number }} for {{ invoice.total | currency }}.</p>
 <p>Payment is due by {{ invoice.due_date | fdate }}.</p>
 {% if pay_url %}<p><a href="{{ pay_url }}">Pay Online</a></p>{% endif %}
 <p>Thank you for your business.</p>
-<p>{{ company.company_name }}</p>""",
+<p>{{ company.display_name or company.company_name }}</p>""",
         "template_type": "invoice",
     },
     {
         "name": "payment_receipt",
-        "subject_template": "Payment Receipt from {{ company.company_name }}",
+        "subject_template": "Payment Receipt from {{ company.display_name or company.company_name }}",
         "body_template": """<p>Dear {{ customer_name }},</p>
 <p>We have received your payment of {{ amount | currency }}. Thank you!</p>
-<p>{{ company.company_name }}</p>""",
+<p>{{ company.display_name or company.company_name }}</p>""",
         "template_type": "payment_receipt",
     },
     {
@@ -48,16 +48,16 @@ DEFAULT_TEMPLATES = [
         "body_template": """<p>Dear {{ customer_name }},</p>
 <p>This is a friendly reminder that {{ doc_label }} #{{ invoice.invoice_number }} for {{ invoice.balance_due | currency }} was due on {{ invoice.due_date | fdate }}.</p>
 <p>Please arrange payment at your earliest convenience.</p>
-<p>{{ company.company_name }}</p>""",
+<p>{{ company.display_name or company.company_name }}</p>""",
         "template_type": "past_due",
     },
     {
         "name": "collection_letter_30",
-        "subject_template": "Payment Reminder — {{ company.company_name }}",
+        "subject_template": "Payment Reminder — {{ company.display_name or company.company_name }}",
         "body_template": """<p>Dear {{ customer_name }},</p>
 <p>Our records indicate that payment of {{ total_due | currency }} is past due. Please review the enclosed statement and remit payment promptly.</p>
 <p>If you have already sent payment, please disregard this notice.</p>
-<p>{{ company.company_name }}</p>""",
+<p>{{ company.display_name or company.company_name }}</p>""",
         "template_type": "collection",
     },
     # Nonprofit: the donor acknowledgment letter (PDF + email). Variables:

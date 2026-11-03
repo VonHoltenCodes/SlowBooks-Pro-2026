@@ -31,6 +31,12 @@ DEFAULT_SETTINGS = {
     # changes name; only what is rendered. business | nonprofit | construction
     "company_type": "business",
     "company_name": "My Company",
+    # Display name, a trade name or DBA (#679): printed in place of the company
+    # name on the customer's documents (invoice, sales receipt, estimate,
+    # statement, credit memo), the invoice and statement emails and the public
+    # pay page. Tax and payroll forms keep company_name, the legal name. Empty
+    # prints the company name, as before.
+    "display_name": "",
     # First month of the fiscal year, "1"-"12" (#444). "1" = the calendar
     # year (the default) and changes nothing. Moves reports' fiscal-year
     # presets and default periods, the dashboard's profit card and nonprofit
@@ -116,6 +122,12 @@ DEFAULT_SETTINGS = {
     # Feature 15: Company Logo
     "company_logo_path": "",
     "invoice_show_logo": "true",
+    # Logo only (#682): "true" prints the logo without the company-name
+    # heading on the customer's documents (invoice, sales receipt, estimate,
+    # statement, credit memo), for a logo that already carries the name. Only
+    # when a logo prints: without one the heading stays, so a document never
+    # goes out nameless. The address block prints either way.
+    "invoice_logo_only": "false",
     # Report PDF paper size: letter | a4
     "pdf_paper_size": "letter",
     # Pre-printed check stock (#440, from discussion #354). "plain" prints

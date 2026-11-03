@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pay Invoice #{{ inv.invoice_number }} — {{ company.get('company_name', '') }}</title>
+    <title>Pay Invoice #{{ inv.invoice_number }} — {{ company.get('display_name') or company.get('company_name', '') }}</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body {
@@ -111,7 +111,7 @@
 <body>
     <div class="pay-card">
         <div class="pay-header">
-            <h1>{{ company.get('company_name', 'Invoice') }}</h1>
+            <h1>{{ company.get('display_name') or company.get('company_name', 'Invoice') }}</h1>
             <div class="inv-number">Invoice #{{ inv.invoice_number }}</div>
         </div>
         <div class="pay-body">

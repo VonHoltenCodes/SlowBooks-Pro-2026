@@ -396,6 +396,9 @@ const SettingsPage = {
                     <div class="form-grid">
                         <div class="form-group full-width"><label>Company Name *</label>
                             <input name="company_name" value="${escapeHtml(s.company_name || '')}" required></div>
+                        <div class="form-group full-width"><label for="settings-display-name">Display name</label>
+                            <input id="settings-display-name" name="display_name" data-write aria-describedby="settings-display-name-help" value="${escapeHtml(s.display_name || '')}">
+                            <div id="settings-display-name-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Shown on invoices, estimates, statements and receipts. Tax and payroll forms keep the company name.</div></div>
                         <div class="form-group"><label>Address Line 1</label>
                             <input name="company_address1" value="${escapeHtml(s.company_address1 || '')}"></div>
                         <div class="form-group"><label>Address Line 2</label>
@@ -468,6 +471,11 @@ const SettingsPage = {
                                     Show company logo on invoices
                                 </label>
                                 <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Applies to PDF, Print, and emailed invoice attachments.</div>
+                                <label for="invoice-logo-only" style="font-weight:normal; display:block; margin-top:8px;">
+                                    <input type="checkbox" id="invoice-logo-only" name="invoice_logo_only" value="true" data-bool data-write aria-describedby="invoice-logo-only-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_logo_only === 'true' ? 'checked' : ''}>
+                                    Logo only
+                                </label>
+                                <div id="invoice-logo-only-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Print the logo without the company name heading on invoices, estimates, statements and receipts. Only applies when a logo is set.</div>
                             </div>` : ''}
                         </div>
                     </div>
@@ -2491,7 +2499,7 @@ const SettingsPage = {
                 </div>
                 <div style="font-size:10px; color:var(--text-muted); margin:8px 0;">
                     Variables: {{ invoice.invoice_number }}, {{ invoice.total }}, {{ invoice.due_date }}, {{ customer_name }},
-                    {{ company.company_name }}, {{ doc_label }}, {{ pay_url }}. Filters: | currency, | fdate
+                    {{ company.company_name }}, {{ company.display_name }}, {{ doc_label }}, {{ pay_url }}. Filters: | currency, | fdate
                     <br><span>{{ doc_label }} reads &ldquo;Invoice&rdquo; or &ldquo;Sales Receipt&rdquo; to match the document.
                     {{ pay_url }} is only set when a payment provider is enabled &mdash; guard it with {% if pay_url %}.</span>
                 </div>

@@ -687,7 +687,9 @@ def batch_email_statements(db: Session = Depends(get_db)):
     sent = 0
     failed = 0
     errors = []
-    company_name = settings.get("company_name", "") or ""
+    # the display name (DBA, #679) when one is set: the statement goes to
+    # the customer, who knows the company by it
+    company_name = settings.get("display_name") or settings.get("company_name") or ""
 
     for cid in customer_ids:
         customer = db.query(Customer).filter(Customer.id == cid).first()

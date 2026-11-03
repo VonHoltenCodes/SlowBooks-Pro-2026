@@ -553,7 +553,10 @@ def _fallback_invoice_body(invoice, company_settings: dict, ctx: dict) -> str:
     import html as _html
 
     customer_name = _html.escape(ctx["customer_name"])
-    company_name = _html.escape(company_settings.get("company_name", "Our Company"))
+    company_name = _html.escape(
+        company_settings.get("display_name")
+        or company_settings.get("company_name", "Our Company")
+    )
     invoice_number = _html.escape(str(invoice.invoice_number))
     doc_label = ctx["doc_label"]
     thanks = (
