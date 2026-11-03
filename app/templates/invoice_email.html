@@ -13,7 +13,7 @@ td { padding: 8px; border-bottom: 1px solid #eee; }
 </style></head>
 <body>
 <div class="header">
-    <h1 style="margin:0;">{{ company.get('company_name', 'Our Company') }}</h1>
+    <h1 style="margin:0;">{{ company.get('display_name') or company.get('company_name', 'Our Company') }}</h1>
 </div>
 <div class="content">
     <p>Dear {{ inv.customer.name if inv.customer else terms('Customer') }},</p>
@@ -44,7 +44,7 @@ td { padding: 8px; border-bottom: 1px solid #eee; }
     {% if thanks | lower not in (inv.notes or '') | lower %}<p>{{ thanks }}</p>{% endif %}
 </div>
 <div class="footer">
-    <p>{{ company.get('company_name', '') }}<br>
+    <p>{{ company.get('display_name') or company.get('company_name', '') }}<br>
     {{ company.get('company_address1', '') }} {{ company.get('company_city', '') }}
     {{ company.get('company_state', '') }} {{ company.get('company_zip', '') }}<br>
     {{ company.get('company_phone', '') }} | {{ company.get('company_email', '') }}</p>
