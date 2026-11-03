@@ -160,6 +160,57 @@ def test_check_says_a_form_still_matches_until_the_books_change(
     assert client.get(f"/api/document-audits/{fresh['id']}/check").json()["matches"]
 
 
+def test_check_says_the_company_changed_not_the_pay_runs(
+    client, db_session, seed_accounts, monkeypatch
+):
+    """#678: the employer block is part of the hash. A form generated before
+    the company was renamed, or its EIN corrected, differs although no pay
+    run moved; Check says which part differs."""
+    _html(monkeypatch)
+    r = client.put(
+        "/api/settings", json={"company_name": "Pike Signs", "company_tax_id": ""}
+    )
+    assert r.status_code == 200, r.text
+    emp = _employee(client)
+    _paid(client, emp["id"], "2026-03-20", 2000)
+    _generate(client, "/api/payroll/forms/941/2026/1/pdf")
+    _generate(client, f"/api/payroll/forms/w2/{emp['id']}/pdf?year=2026")
+    w2, f941 = _history(client)
+
+    r = client.put("/api/settings", json={"company_name": "Pike Signs & Co"})
+    assert r.status_code == 200, r.text
+    body = client.get(f"/api/document-audits/{f941['id']}/check").json()
+    assert body["matches"] is False and body["employer_changed"] is True
+    assert body["message"].startswith(
+        "No longer matches: the company name on the Form 941 for 2026 Q1 "
+        "changed after it was generated"
+    )
+    assert body["message"].endswith("the figures are as they were.")
+    assert "pay runs" not in body["message"]
+
+    # the EIN as well, on the W-2: both are named
+    r = client.put("/api/settings", json={"company_tax_id": "12-3456789"})
+    assert r.status_code == 200, r.text
+    body = client.get(f"/api/document-audits/{w2['id']}/check").json()
+    assert body["employer_changed"] is True
+    assert "the company name and EIN on the W-2 for Jonah Pike, 2026" in (
+        body["message"]
+    )
+    assert "pay runs" not in body["message"]
+
+    # a form generated after the rename still matches
+    _generate(client, "/api/payroll/forms/941/2026/1/pdf")
+    fresh = _history(client)[0]
+    body = client.get(f"/api/document-audits/{fresh['id']}/check").json()
+    assert body["matches"] is True and body["employer_changed"] is False
+
+    # and when the figures moved too, the pay runs are what it says
+    _paid(client, emp["id"], "2026-03-27", 2500)
+    body = client.get(f"/api/document-audits/{f941['id']}/check").json()
+    assert body["matches"] is False and body["employer_changed"] is False
+    assert "the pay runs behind it changed" in body["message"]
+
+
 def test_check_says_when_a_pay_run_in_the_period_was_voided(
     client, db_session, seed_accounts, monkeypatch
 ):

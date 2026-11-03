@@ -14,10 +14,27 @@ from sqlalchemy.orm import Session
 from app import config
 from app.services.settings_service import get_all_settings
 
+# the settings employer_block() reads (Form history's Check, #678, walks
+# their audit-log history back to find the block a form was generated with)
+EMPLOYER_SETTING_KEYS = (
+    "company_name",
+    "company_address1",
+    "company_city",
+    "company_state",
+    "company_zip",
+    "company_phone",
+    "company_email",
+    "company_tax_id",
+)
+
 
 def employer_block(db: Session) -> dict:
     """Name, address, phone, email and EIN of the company, for payroll PDFs."""
-    s = get_all_settings(db)
+    return employer_block_from(get_all_settings(db))
+
+
+def employer_block_from(s: dict) -> dict:
+    """employer_block() from a settings dict already in hand."""
     return {
         "name": s.get("company_name") or config.COMPANY_NAME,
         "address": s.get("company_address1") or config.COMPANY_ADDRESS or "",

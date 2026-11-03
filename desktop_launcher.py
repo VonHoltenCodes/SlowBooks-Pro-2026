@@ -36,6 +36,7 @@ re-executed with the internal --_serve flag (no separate Python needed).
 """
 
 import argparse
+import json
 import os
 import re
 import secrets
@@ -1901,6 +1902,244 @@ def _announce_serve_lan(port: int) -> None:
         threading.Thread(target=_popup, daemon=True).start()
 
 
+# ---------------------------------------------------------------------------
+# Window geometry (#681): the company window opens where it was closed
+# ---------------------------------------------------------------------------
+
+WINDOW_GEOMETRY_FILE = "window-geometry.json"
+DEFAULT_WINDOW_SIZE = (1280, 860)
+MIN_WINDOW_SIZE = (900, 600)
+# How much of the saved title-bar strip must land on a connected screen for the
+# saved position to count as "on screen" -- enough to grab it with the mouse.
+_GEOMETRY_GRAB_W = 100
+_GEOMETRY_GRAB_H = 40
+# Windows parks minimized windows at (-32000, -32000); never save that.
+_MINIMIZED_PARK = -30000
+
+
+def window_geometry_path() -> Path:
+    return get_data_dir() / WINDOW_GEOMETRY_FILE
+
+
+def _geometry_int(value) -> int | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or abs(value) > 1_000_000:  # NaN or absurd
+        return None
+    return int(value)
+
+
+def load_window_geometry(path: Path | None = None) -> dict | None:
+    """The saved geometry as {x, y, width, height, maximized}, or None when
+    the file is missing, unreadable or malformed. x/y may be None."""
+    path = path or window_geometry_path()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    width = _geometry_int(raw.get("width"))
+    height = _geometry_int(raw.get("height"))
+    if not width or not height or width < 0 or height < 0:
+        return None
+    x = _geometry_int(raw.get("x"))
+    y = _geometry_int(raw.get("y"))
+    if x is None or y is None:
+        x = y = None
+    return {
+        "x": x,
+        "y": y,
+        "width": width,
+        "height": height,
+        "maximized": raw.get("maximized") is True,
+    }
+
+
+def save_window_geometry(geometry: dict, path: Path | None = None) -> bool:
+    """Write the geometry atomically. Never raises: losing the window's
+    position is not worth an error on the way out."""
+    path = path or window_geometry_path()
+    clean = {
+        "x": _geometry_int(geometry.get("x")),
+        "y": _geometry_int(geometry.get("y")),
+        "width": _geometry_int(geometry.get("width")),
+        "height": _geometry_int(geometry.get("height")),
+        "maximized": geometry.get("maximized") is True,
+    }
+    if not clean["width"] or not clean["height"]:
+        return False
+    if clean["x"] is None or clean["y"] is None:
+        clean["x"] = clean["y"] = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(clean, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+        return True
+    except OSError as exc:
+        print(f"Could not save the window position: {exc}")
+        return False
+
+
+def _default_window_geometry() -> dict:
+    width, height = DEFAULT_WINDOW_SIZE
+    return {"x": None, "y": None, "width": width, "height": height, "maximized": False}
+
+
+def restore_window_geometry(saved: dict | None, screens) -> dict:
+    """Decide where the window opens. ``screens`` is a list of (x, y, width,
+    height) for every connected screen.
+
+    - Nothing saved (missing or malformed file): today's default, 1280x860,
+      placed by the OS.
+    - Never smaller than the 900x600 minimum.
+    - Saved title-bar strip at least 100x40 px on a connected screen: restore
+      it there, clamped to that screen (shrunk to fit, then shifted so the
+      whole window is on it).
+    - Not on any connected screen (a monitor since unplugged): the default.
+    - Screen list unknown (empty): the saved size, placed by the OS.
+    """
+    if not saved:
+        return _default_window_geometry()
+    width = max(int(saved["width"]), MIN_WINDOW_SIZE[0])
+    height = max(int(saved["height"]), MIN_WINDOW_SIZE[1])
+    maximized = bool(saved.get("maximized"))
+    x, y = saved.get("x"), saved.get("y")
+    if not screens:
+        return {
+            "x": None,
+            "y": None,
+            "width": width,
+            "height": height,
+            "maximized": maximized,
+        }
+    if x is None or y is None:
+        # No position saved: size only, clamped to the largest screen.
+        sx, sy, sw, sh = max(screens, key=lambda s: s[2] * s[3])
+        return {
+            "x": None,
+            "y": None,
+            "width": max(min(width, sw), MIN_WINDOW_SIZE[0]),
+            "height": max(min(height, sh), MIN_WINDOW_SIZE[1]),
+            "maximized": maximized,
+        }
+
+    def _grab_overlap(screen) -> int:
+        sx, sy, sw, sh = screen
+        ox = min(x + width, sx + sw) - max(x, sx)
+        oy = min(y + _GEOMETRY_GRAB_H, sy + sh) - max(y, sy)
+        if ox < _GEOMETRY_GRAB_W or oy < _GEOMETRY_GRAB_H:
+            return 0
+        return ox * oy
+
+    best = max(screens, key=_grab_overlap)
+    if _grab_overlap(best) == 0:
+        return _default_window_geometry()
+    sx, sy, sw, sh = best
+    # The minimum wins over a screen smaller than 900x600.
+    width = max(min(width, sw), MIN_WINDOW_SIZE[0])
+    height = max(min(height, sh), MIN_WINDOW_SIZE[1])
+    x = max(sx, min(x, sx + sw - width))
+    y = max(sy, min(y, sy + sh - height))
+    return {"x": x, "y": y, "width": width, "height": height, "maximized": maximized}
+
+
+class WindowGeometryTracker:
+    """Follows the window's move/resize/maximize events so the normal
+    (un-maximized) rectangle can be saved on close. Pure: the event handlers
+    take plain numbers, and ``clock`` is injectable for tests."""
+
+    # Maximizing or minimizing fires resize/move events around the state event
+    # (in any order: pywebview runs handlers on threads); those belong to the
+    # state change, not to the normal rectangle.
+    MAXIMIZE_SETTLE = 1.0
+
+    def __init__(self, geometry: dict, clock=time.monotonic):
+        self._clock = clock
+        self.x = geometry.get("x")
+        self.y = geometry.get("y")
+        self.width = geometry["width"]
+        self.height = geometry["height"]
+        self.maximized = bool(geometry.get("maximized"))
+        self.minimized = False
+        self._history: list[tuple[float, tuple]] = []
+
+    def _rect(self) -> tuple:
+        return (self.x, self.y, self.width, self.height)
+
+    def _remember(self) -> None:
+        now = self._clock()
+        self._history.append((now, self._rect()))
+        self._history = [h for h in self._history if now - h[0] <= 5.0][-20:]
+
+    def on_moved(self, x, y) -> None:
+        if self.maximized or self.minimized:
+            return
+        if x is None or y is None or x <= _MINIMIZED_PARK or y <= _MINIMIZED_PARK:
+            return
+        self._remember()
+        self.x, self.y = int(x), int(y)
+
+    def on_resized(self, width, height) -> None:
+        if self.maximized or self.minimized or not width or not height:
+            return
+        self._remember()
+        self.width, self.height = int(width), int(height)
+
+    def _roll_back_settle(self) -> None:
+        now = self._clock()
+        recent = [h for h in self._history if now - h[0] <= self.MAXIMIZE_SETTLE]
+        if recent:
+            self.x, self.y, self.width, self.height = recent[0][1]
+        self._history = []
+
+    def on_maximized(self) -> None:
+        self._roll_back_settle()
+        self.maximized = True
+        self.minimized = False
+
+    def on_minimized(self) -> None:
+        self._roll_back_settle()
+        self.minimized = True
+
+    def on_restored(self) -> None:
+        # Restored from minimized keeps the maximized flag; restored from
+        # maximized clears it (the move/resize events that follow refill the
+        # normal rectangle).
+        if self.minimized:
+            self.minimized = False
+        else:
+            self.maximized = False
+
+    def geometry(self) -> dict:
+        return {
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+            "maximized": self.maximized,
+        }
+
+
+def _connected_screens(webview) -> list[tuple[int, int, int, int]]:
+    try:
+        return [(s.x, s.y, s.width, s.height) for s in webview.screens]
+    except Exception as exc:  # backend without screen support
+        print(f"Could not list screens: {exc}")
+        return []
+
+
+def _track_window_geometry(window, tracker: WindowGeometryTracker, path: Path):
+    events = window.events
+    events.moved += lambda x, y: tracker.on_moved(x, y)
+    events.resized += lambda width, height: tracker.on_resized(width, height)
+    events.maximized += lambda: tracker.on_maximized()
+    events.minimized += lambda: tracker.on_minimized()
+    events.restored += lambda: tracker.on_restored()
+    events.closing += lambda: (save_window_geometry(tracker.geometry(), path), None)[1]
+
+
 def run_window(port: int, log_fh=None) -> int:
     try:
         import webview
@@ -1941,16 +2180,29 @@ def run_window(port: int, log_fh=None) -> int:
 
     _purge_stale_webview_cache(storage_dir, app_version)
 
+    # Open where it was closed last time (#681), clamped to today's screens.
+    geometry_path = window_geometry_path()
+    geometry = restore_window_geometry(
+        load_window_geometry(geometry_path), _connected_screens(webview)
+    )
     api = PickerApi(port, log_fh)
     api._window = webview.create_window(
         "SlowBooks Pro 2026",
         html=PICKER_HTML,
         js_api=api,
-        width=1280,
-        height=860,
-        min_size=(900, 600),
+        width=geometry["width"],
+        height=geometry["height"],
+        x=geometry["x"],
+        y=geometry["y"],
+        maximized=geometry["maximized"],
+        min_size=MIN_WINDOW_SIZE,
         zoomable=True,
     )
+    geometry_tracker = WindowGeometryTracker(geometry)
+    try:
+        _track_window_geometry(api._window, geometry_tracker, geometry_path)
+    except Exception as exc:  # an older pywebview without these events
+        print(f"Window position will not be remembered: {exc}")
     try:
         # Require the WebView2 (Chromium) renderer on Windows. Without this,
         # pywebview silently falls back to the legacy IE/MSHTML control on
@@ -1962,6 +2214,8 @@ def run_window(port: int, log_fh=None) -> int:
         # Blocks until the window is closed. private_mode/storage_path:
         # see the comment above where storage_dir is created.
         webview.start(gui=gui, private_mode=False, storage_path=str(storage_dir))
+        # Clean exit: save again in case the closing event never fired.
+        save_window_geometry(geometry_tracker.geometry(), geometry_path)
     except Exception as exc:
         if sys.platform == "win32":
             guidance = (
