@@ -29,6 +29,12 @@
     .address-block { flex: 1; }
     .address-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; margin-bottom: 4px; border-bottom: 1px solid #003366; padding-bottom: 2px; }
     .address-text { font-size: 9pt; color: #333; }
+    /* The balance at a glance, beside Bill To (#680): a long invoice no
+       longer sends the customer to the last page for the figure. */
+    .amount-due-box { flex: 0 0 auto; min-width: 150px; align-self: flex-start; border: 2px solid #003366; padding: 6px 10px; text-align: right; }
+    .amount-due-label { font-size: 8pt; font-weight: 700; text-transform: uppercase; color: #003366; letter-spacing: 0.05em; }
+    .amount-due-value { font-size: 14pt; font-weight: 700; color: #003366; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .amount-due-date { font-size: 8pt; color: #4a4a6a; white-space: nowrap; }
     table.line-items { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
     table.line-items th { background: #003366; color: white; padding: 5px 8px; font-size: 8pt; text-transform: uppercase; text-align: left; letter-spacing: 0.03em; }
     table.line-items th.r { text-align: right; }
@@ -134,6 +140,16 @@
                    the invoice was made or moved to it), never the customer's today. #}
                 {% set ship_country = country_line(ship_to_country if ship_to_country is defined else (inv.customer.ship_country if inv.customer else None)) %}{% if ship_country %}{{ ship_country }}{% endif %}
             </div>
+        </div>
+        {% endif %}
+        {# Amount Due (#680): the balance and the due date at the top. A pledge
+           reads Balance, as its totals row does; a paid invoice reads 0.00 and
+           keeps the box. A receipt is paid at the time of sale: no box. #}
+        {% if kind in ('Invoice', 'Pledge') %}
+        <div class="amount-due-box">
+            <div class="amount-due-label">{% if kind == 'Pledge' %}Balance{% else %}Amount Due{% endif %}</div>
+            <div class="amount-due-value">{{ (inv.balance_due or 0) | currency(cur) }}</div>
+            {% if inv.due_date %}<div class="amount-due-date">Due {{ inv.due_date | fdate }}</div>{% endif %}
         </div>
         {% endif %}
     </div>
