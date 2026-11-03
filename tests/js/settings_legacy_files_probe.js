@@ -41,6 +41,7 @@ const ctx = {
   $: () => null,
 };
 vm.createContext(ctx);
+vm.runInContext(fs.readFileSync('app/static/js/payment_terms.js', 'utf8') + '\nthis.PaymentTerms = PaymentTerms;', ctx);
 vm.runInContext(fs.readFileSync('app/static/js/settings.js', 'utf8') + '\nthis.SettingsPage = SettingsPage;', ctx);
 const S = ctx.SettingsPage;
 

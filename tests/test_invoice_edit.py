@@ -447,19 +447,20 @@ def test_editing_only_tax_rate_keeps_journal_balanced(
 from datetime import date as _date  # noqa: E402
 
 
-def test_due_date_helper_terms_math():
+def test_due_date_helper_terms_math(db_session):
     """The shared _due_date_from_terms helper covers Net N, Due on Receipt,
     and unknown terms (fallback Net 30)."""
     from app.routes.invoices import _due_date_from_terms
 
     base = _date(2026, 4, 1)
-    assert _due_date_from_terms(base, "Net 30") == _date(2026, 5, 1)
-    assert _due_date_from_terms(base, "Net 15") == _date(2026, 4, 16)
-    assert _due_date_from_terms(base, "Due on Receipt") == base  # NOT +30
-    assert _due_date_from_terms(base, "due upon receipt") == base
-    assert _due_date_from_terms(base, "Net 0") == base
-    assert _due_date_from_terms(base, "gibberish") == _date(2026, 5, 1)  # fallback
-    assert _due_date_from_terms(base, None) == _date(2026, 5, 1)
+    db = db_session
+    assert _due_date_from_terms(db, base, "Net 30") == _date(2026, 5, 1)
+    assert _due_date_from_terms(db, base, "Net 15") == _date(2026, 4, 16)
+    assert _due_date_from_terms(db, base, "Due on Receipt") == base  # NOT +30
+    assert _due_date_from_terms(db, base, "due upon receipt") == base
+    assert _due_date_from_terms(db, base, "Net 0") == base
+    assert _due_date_from_terms(db, base, "gibberish") == _date(2026, 5, 1)
+    assert _due_date_from_terms(db, base, None) == _date(2026, 5, 1)
 
 
 def test_create_invoice_due_on_receipt_is_same_day(

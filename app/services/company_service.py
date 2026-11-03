@@ -354,6 +354,9 @@ def _init_company_db(url: str, company_name: str | None = None) -> None:
                 from app.seed.fixed_assets import ensure_default_asset_type
 
                 ensure_default_asset_type(session)
+                from app.services.payment_terms import ensure_seeded
+
+                ensure_seeded(session)
                 session.commit()
     finally:
         engine.dispose()

@@ -1,6 +1,12 @@
 from datetime import date
 from typing import Optional
-from pydantic import BaseModel, field_validator, model_validator, field_serializer
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+    field_serializer,
+)
 
 from app.schemas.common import (
     StrictModel,
@@ -45,6 +51,8 @@ class RecurringCreate(StrictModel):
     start_date: date
     end_date: Optional[date] = None
     terms: str = "Net 30"
+    # An explicit pick of a list entry (#664). 1..2**63-1.
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     tax_rate: TaxRateFloat = 0
     notes: Optional[str] = None
     class_id: Optional[int] = None
@@ -64,6 +72,8 @@ class RecurringUpdate(StrictModel):
     end_date: Optional[date] = None
     is_active: Optional[bool] = None
     terms: Optional[str] = None
+    # An explicit pick of a list entry (#664). 1..2**63-1.
+    payment_term_id: Optional[int] = Field(None, ge=1, le=9223372036854775807)
     tax_rate: Optional[TaxRateFloat] = None
     notes: Optional[str] = None
     class_id: Optional[int] = None

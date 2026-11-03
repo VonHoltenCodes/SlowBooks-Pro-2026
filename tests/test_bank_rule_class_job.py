@@ -256,7 +256,9 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     db = tmp_path / "rules.db"
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == [REVISION]
+    assert script.get_heads() == [
+        "e5c1a7d3f9b2"
+    ]  # the payment terms list (#664) is the head above it
     assert script.get_revision(REVISION).down_revision == "4810bd59e481"
     command.upgrade(cfg, "head")
     engine = create_engine(f"sqlite:///{db}")

@@ -5,6 +5,77 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased
+
+**Payment terms beyond Net N** (#664). Terms were free text with one rule:
+"Net N", else 30 days, said to no one, so "2% 10 Net 30", "Net 10th" and
+"15th of following month" were all quietly due 30 days out. Settings now
+keeps a terms list, the QuickBooks shape: a standard term is due a number of
+days after the date, a date-driven term on its next day of the month
+(the one after, when the document is dated fewer than a set number of days
+before that day), and either can offer an early-payment discount. Every form that takes
+terms offers the list, and every document's due date (invoices, bills,
+recurring invoices, memorized bills, an estimate's or a PO's conversion, a
+duplicate) comes from one parser. An invoice, a bill and a recurring or
+memorized schedule are tied to the term their terms named when the person
+picked them, and keep that term's rule; a term added to the list later
+never reaches what was saved before it, even when it is saved again with
+exactly the same terms (any other text picked, even one differing only
+in case or spacing, ties it anew to the entry it names), and a term an
+invoice or bill was saved under keeps its rule and name. A duplicate and a
+schedule's next document keep their source's tie; an import ties nothing.
+Existing books don't change: Due on Receipt, Net 15, 30, 45 and 60 are on
+the list with the rules they always had, an entry is added for any other
+number of days the old parser read from text in use, and only the text the
+old parser read as exactly those days is tied to them ("net<TAB>45" was 30
+days and stays untied). Anything untied is read as the old parser read it,
+everywhere (A/P aging included); a document says what its due date is. Term
+names are stored with whitespace collapsed and invisible characters taken
+out, so a name reads, matches and parses alike. A name the app already
+reads ("Net 30", "COD") keeps its meaning. A recurring invoice whose terms
+are any of the receipt words (Due on Receipt, due upon receipt, COD, Net 0,
+in any case) is now due the day it is made; its generator had its own
+parser, which read all of them as 30 days. The discount shows on the invoice and bill and on
+their PDFs (a foreign-currency one offers none), and Receive Payments and
+Pay Bills suggest it until its date, on what the payment applies to: the
+customer's is a credit memo, ours a vendor credit, applied to the document,
+posted to the account you pick and voided with the payment. A discount the
+terms don't offer (none, after its date, more than the percent, or a second
+one) is refused unless the payment says `allow_discount_override`, which is
+an administrator's; the forms ask first, and the payment, the memo or
+credit and the audit log record who took it and why. A discount the
+customer took after a short payment is taken with that payment later
+(`POST /api/payments/{id}/discount`, and `/api/bill-payments/{id}/discount`).
+A discount is a percent of the document's total, never on a payment dated
+before the document, and never on money a payment's remainder paid later.
+**The CSV list import changes on purpose:** Terms are no longer limited to
+the five the forms offered. A row takes any term on the list (matched as
+the list matches, so "net<TAB>45" is the listed Net 45) or any terms the old
+parser reads ("Net 99", "COD", "Net 0", "Net 1_0"), kept as typed, so rows
+main refused now come in; terms nothing reads, and terms that would be due
+before their date ("Net -5"), are still refused, each naming its row. On the cash basis a discount settles its share of the
+document as a payment does, and is recomputed with the payments when the
+document is edited, so the cash Sales Tax report agrees with its ledger. An invoice or bill
+with a discount taken keeps its terms and date. On a new document, text the
+old parser did not understand now reads through the list: `net<TAB>45` and
+`net` with a no-break space before `45` are the listed Net 45, due in 45
+days where main gave 30, while a document stored with that text keeps main's
+reading until it is tied. A date-driven term's discount day that falls past
+its due day is in the month before the due month. A nonprofit's screens
+and the memo text stored with a discount it takes use its own words
+(a pledge, a donor). Migration `e5c1a7d3f9b2` (the list, seeded; nullable
+`payment_term_id` tying an invoice, bill, recurring or memorized schedule to
+its term, and nullable `discount_payment_id` / `discount_bill_payment_id`
+tying a discount to its payment; the NOT NULL flag columns
+`payments.discount_override`, `bill_payments.discount_override`,
+`credit_memos.discount_override`, `vendor_credits.discount_override` and
+`payment_allocations.from_remainder`, each default false; the indexes
+`ix_payment_terms_name_lower` on `lower(name)` and one on each of
+`invoices.payment_term_id`, `bills.payment_term_id`,
+`credit_memos.discount_payment_id` and
+`vendor_credits.discount_bill_payment_id`; its downgrade refuses while any
+discount taken against the terms still exists).
+
 ### v2.31.4 — Class and job wherever money moves, and payments that cannot double up
 
 **Simultaneous payments on one invoice no longer over-apply it** (#666). On SQLite the row lock the payment route takes was a no-op, and the driver began no transaction until the first write, so two payments sent at the same moment both read the same balance and both posted: four $98 payments on a $100 invoice all succeeded. Every row-lock site now takes the database's write lock first on SQLite; the second request waits for the first to finish, reads the balance it left and is refused, as it always was on PostgreSQL. Bill payments, batch payments, credit memos, vendor credits, deposits and the rest of the locked paths get the same.

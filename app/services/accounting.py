@@ -4,7 +4,7 @@
 # service — sum(debits) == sum(credits), exact Decimal math.
 # ============================================================================
 
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
 from sqlalchemy import func, update
@@ -110,19 +110,6 @@ def taxable_subtotal(lines) -> Decimal:
             Decimal("0"),
         )
     )
-
-
-def due_date_from_terms(
-    txn_date: date, terms: str | None, default_days: int = 30
-) -> date:
-    """Parse 'Net N' terms to a due date. Falls back to default_days on parse failure."""
-    if not terms:
-        return txn_date + timedelta(days=default_days)
-    try:
-        days = int(terms.lower().replace("net ", "").strip())
-    except ValueError:
-        days = default_days
-    return txn_date + timedelta(days=days)
 
 
 def _cost_type_of(db: Session, cost_code_id) -> str | None:

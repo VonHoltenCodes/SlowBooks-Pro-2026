@@ -16,6 +16,12 @@ from app.services.accounting import (
     _q,
 )
 from app.services.numbering import next_invoice_number
+from app.services.payment_terms import (
+    DocumentTerms,
+    document_due_date,
+    picked_term_id,
+    retie,
+)
 from app.services.closing_date import check_closing_date
 
 from app.routes.invoices._router import router
@@ -101,8 +107,10 @@ def list_invoices(
         .all()
     )
     results = []
+    terms_reader = DocumentTerms(db, "invoice")
     for inv in invoices:
         resp = InvoiceResponse.model_validate(inv)
+        terms_reader.fill(resp, inv)
         if inv.customer:
             # "Parent: Sub" for a sub-customer's, as the pickers say it
             resp.customer_name = invoice_customer_name(inv)
@@ -116,6 +124,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     resp = InvoiceResponse.model_validate(inv)
+    DocumentTerms(db, "invoice").fill(resp, inv)
     if inv.customer:
         resp.customer_name = invoice_customer_name(inv)
     return resp
@@ -144,8 +153,11 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     # The job, on the header or a line, is this customer's (NEW-36).
     refuse_other_customers_jobs(db, customer.id, data.job_id, data.lines, noun, words)
 
+    # An explicit pick of a list entry (#664): validated here, so a bad one
+    # is refused before anything is written.
+    term_id = picked_term_id(db, data.terms, data.payment_term_id)
     # Parse terms for due date (explicit due_date wins; else derive from terms)
-    due_date = data.due_date or _due_date_from_terms(data.date, data.terms)
+    due_date = data.due_date or _due_date_from_terms(db, data.date, data.terms)
     refuse_due_before_date(data.date, due_date)
     refuse_negative_lines(db, data.lines)
     resolve_line_taxable(db, data.lines, customer)
@@ -197,6 +209,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
             date=data.date,
             due_date=due_date,
             terms=data.terms,
+            payment_term_id=term_id,
             po_number=data.po_number,
             subtotal=subtotal,
             tax_rate=data.tax_rate,
@@ -277,6 +290,7 @@ def create_invoice(data: InvoiceCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(invoice)
     resp = InvoiceResponse.model_validate(invoice)
+    DocumentTerms(db, "invoice").fill(resp, invoice)
     resp.customer_name = cust_name
     resp.warnings = stock_warnings
     return resp
@@ -323,6 +337,10 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
         Invoice,
         data.model_dump(exclude_unset=True, exclude={"lines", "allow_zero_total"}),
     )
+    # a discount taken under its terms and date keeps them (#664)
+    from app.services.early_pay_discounts import refuse_moving_its_terms
+
+    refuse_moving_its_terms(db, invoice, update_data, "invoice")
     if update_data.get("customer_id") not in (None, invoice.customer_id):
         moved_to = db.get(Customer, update_data["customer_id"])
         if moved_to is None:
@@ -429,9 +447,13 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
             total, data.allow_zero_total, document_label(invoice, words).lower()
         )
         if total < invoice.amount_paid:
+            from app.services.early_pay_discounts import discounted_on
+
+            part = discounted_on(db, invoice, "invoice")
             raise HTTPException(
                 status_code=400,
-                detail="Invoice total cannot be less than the amount already paid",
+                detail="Invoice total cannot be less than the amount already paid"
+                + (f" (${invoice.amount_paid:,.2f}{part})" if part else ""),
             )
         # An edit that raises what this invoice leaves owing, or moves it to
         # another customer, asks about the credit limit as a new invoice
@@ -499,10 +521,28 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 posting.date = data.date
 
     previous_customer_id = invoice.customer_id
+    terms_before = invoice.terms
+    # An explicit pick of a list entry is set through picked_term_id below,
+    # not straight onto the column, so a bad one is refused (#664).
+    pick = update_data.pop("payment_term_id", None)
     for key, val in update_data.items():
         if key == "is_pledge" and val is None:
             continue
         setattr(invoice, key, val)
+    # Terms the person changed tie the invoice to the entry they name now
+    # (#664); the same terms sent back (the form always sends them) leave
+    # it as it was saved, tied or not.
+    terms_changed = retie(db, invoice, terms_before)
+    # An explicit pick ties it even when its text is the entry's own name,
+    # so a legacy invoice can finally follow a term added since (#664).
+    if pick is not None:
+        invoice.payment_term_id = picked_term_id(db, invoice.terms, pick)
+    # Terms changed (or a pick) and no due date sent: recompute it from the
+    # new rule, as bills.py does (#664). A recomputed date before the
+    # invoice date (Net -5) is refused, as on create.
+    if (terms_changed or pick is not None) and "due_date" not in update_data:
+        invoice.due_date = document_due_date(db, invoice)
+        refuse_due_before_date(invoice.date, invoice.due_date)
     # Moved to another customer: the Bill To whole is the new customer's
     # payer's as of now, as create makes it, the street with the name and
     # country, and the ship-to the new customer's with its country; an
@@ -521,7 +561,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     # through — without this, clearing the box would wipe the stored due
     # date to NULL. Mirror the create path: derive it from terms + date.
     if "due_date" in update_data and invoice.due_date is None:
-        invoice.due_date = _due_date_from_terms(invoice.date, invoice.terms)
+        invoice.due_date = document_due_date(db, invoice)
 
     # Date changes synchronize owned headers above without replacing splits.
     # Other accounting changes reuse the shared invoice posting authority.
@@ -647,6 +687,7 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
     db.commit()
     db.refresh(invoice)
     resp = InvoiceResponse.model_validate(invoice)
+    DocumentTerms(db, "invoice").fill(resp, invoice)
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
     resp.warnings = stock_warnings

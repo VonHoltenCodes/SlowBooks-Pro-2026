@@ -19,13 +19,14 @@ const BillQuickEntry = {
     _defaultAccountId: null,
     _lineCount: 0,
     _batch: [],
-    TERMS: ['Net 15', 'Net 30', 'Net 45', 'Net 60', 'Due on Receipt'],
 
     async render() {
         const [vendors, items, accounts] = await Promise.all([
             API.get('/vendors?active_only=true'),
             API.get('/items?active_only=true'),
             API.get('/accounts?active_only=true'),
+            // the terms list (#664), as Enter Bill offers it
+            PaymentTerms.load(),
         ]);
         BillQuickEntry._vendors = vendors;
         BillQuickEntry._items = items;
@@ -53,7 +54,7 @@ const BillQuickEntry = {
                         <input name="bill_number" id="bqe-number" placeholder="from the bill, or left blank"></div>
                     <div class="form-group"><label for="bqe-terms">Terms</label>
                         <select name="terms" id="bqe-terms" title="The vendor's terms; the due date follows from them">
-                            ${BillQuickEntry.TERMS.map(t => `<option ${t === 'Net 30' ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+                            ${PaymentTerms.optionsHtml('Net 30')}
                         </select></div>
                 </div>
                 <h3 style="margin:12px 0 8px; font-size:14px;">Lines</h3>
@@ -93,12 +94,7 @@ const BillQuickEntry = {
         const vendor = BillQuickEntry._vendors.find(v => v.id == vendorId);
         BillQuickEntry._defaultAccountId = (vendor && vendor.default_expense_account_id) || null;
         const terms = $('#bqe-terms');
-        if (vendor && vendor.terms && terms) {
-            if (![...terms.options].some(o => o.value === vendor.terms)) {
-                terms.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(vendor.terms)}">${escapeHtml(vendor.terms)}</option>`);
-            }
-            terms.value = vendor.terms;
-        }
+        if (vendor && vendor.terms && terms) PaymentTerms.choose(terms, vendor.terms);
         if (BillQuickEntry._defaultAccountId) {
             $$('#bqe-lines .line-account').forEach(sel => {
                 if (!sel.disabled && !sel.value) sel.value = BillQuickEntry._defaultAccountId;

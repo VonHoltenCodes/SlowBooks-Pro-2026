@@ -356,6 +356,8 @@ const VendorsPage = {
             vendor_type:'', license_number:'', coi_carrier:'', coi_policy_number:'', coi_expires:'',
             notes:'' };
         if (id) v = await API.get(`/vendors/${id}`);
+        // the terms list (#664); the vendor's own terms stay offered
+        await PaymentTerms.load();
 
         // Cost of goods too: a flour mill or a panel supplier is bought
         // against 5100 Materials Cost, not an expense (W-L18, F8).
@@ -397,8 +399,7 @@ const VendorsPage = {
                 <div class="form-grid" style="margin-top:16px;">
                     <div class="form-group"><label>Terms</label>
                         <select name="terms">
-                            ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                `<option ${v.terms===t?'selected':''}>${t}</option>`).join('')}
+                            ${PaymentTerms.optionsHtml(v.terms)}
                         </select></div>
                     <div class="form-group"><label>Tax ID</label>
                         <input name="tax_id" value="${escapeHtml(v.tax_id || '')}"></div>

@@ -62,6 +62,8 @@ const RecurringPage = {
             lines: [],
         };
         if (id) rec = await API.get(`/recurring/${id}`);
+        // the terms list (#664); each invoice's due date follows its rule
+        await PaymentTerms.load();
         const classGroup = await classFormGroupHtml(rec.class_id);
         if (rec.lines.length === 0) rec.lines = [{ item_id: '', description: '', quantity: 1, rate: 0 }];
         RecurringPage.lineCount = rec.lines.length;
@@ -87,8 +89,7 @@ const RecurringPage = {
                         <input name="end_date" type="date" value="${rec.end_date || ''}"></div>
                     <div class="form-group"><label>Terms</label>
                         <select name="terms" id="recurring-terms">
-                            ${['Net 15','Net 30','Net 45','Net 60','Due on Receipt'].map(t =>
-                                `<option value="${t}" ${rec.terms===t?'selected':''}>${t}</option>`).join('')}
+                            ${PaymentTerms.optionsHtml(rec.terms, null, !id || rec.payment_term_id != null)}
                         </select></div>
                     <div class="form-group"><label>Tax Rate (%)</label>
                         <input name="tax_rate" type="number" step="0.0001" value="${+((rec.tax_rate || 0) * 100).toFixed(4)}" oninput="RecurringPage.recalc()"></div>
@@ -137,7 +138,7 @@ const RecurringPage = {
         const customer = RecurringPage._customers.find(c => c.id == customerId);
         const termsField = $('#recurring-terms');
         if (customer && termsField && customer.terms) {
-            termsField.value = customer.terms;
+            PaymentTerms.choose(termsField, customer.terms);
         }
         RecurringPage.recalc();
     },
@@ -181,10 +182,14 @@ const RecurringPage = {
                 line_order: i,
             });
         });
+        // the terms text, and the id of the list entry when one is picked, so
+        // a list pick whose name matches legacy text ties the schedule (#665)
+        const termSel = PaymentTerms.selection(form.terms);
         const data = {
             frequency: form.frequency.value,
             end_date: form.end_date.value || null,
-            terms: form.terms.value,
+            terms: termSel.terms,
+            payment_term_id: termSel.payment_term_id,
             tax_rate: (parseFloat(form.tax_rate.value) || 0) / 100,
             notes: form.notes.value || null,
             class_id: classIdFromForm(form),

@@ -516,7 +516,9 @@ def test_a_bills_payments_are_listed_with_it_and_one_can_be_voided(
 
     listed = client.get(f"/api/bill-payments?bill_id={a_bill['id']}").json()
     assert [p["id"] for p in listed] == [paid["id"]]
-    assert listed[0]["allocations"] == [{"bill_id": a_bill["id"], "amount": "450.00"}]
+    assert listed[0]["allocations"] == [
+        {"bill_id": a_bill["id"], "amount": "450.00", "can_take_discount": False}
+    ]
     assert client.get(f"/api/bills/{a_bill['id']}").json()["status"] == "paid"
 
     r = client.post(f"/api/bill-payments/{paid['id']}/void")

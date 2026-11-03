@@ -44,8 +44,9 @@ def test_the_new_customer_form_starts_on_the_default_terms():
     form = _form()
     assert "API.get('/settings')" in form
     assert "c.terms = settings.default_terms" in form
-    # a customer on terms outside the fixed list keeps them when edited
-    assert "termChoices.unshift(c.terms)" in form
+    # the terms list (#664), and a customer on terms off it keeps them when
+    # edited (PaymentTerms.optionsHtml adds the record's own)
+    assert "PaymentTerms.optionsHtml(c.terms)" in form
 
 
 def test_a_negative_credit_limit_is_refused(client, seed_accounts):

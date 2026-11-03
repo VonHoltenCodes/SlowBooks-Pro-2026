@@ -10,6 +10,7 @@ from pydantic import (
     ConfigDict,
     Field,
     PlainSerializer,
+    StrictInt,
     StringConstraints,
     field_validator,
 )
@@ -266,3 +267,31 @@ def _tax_rate_json(value) -> str:
 TaxRateOut = Annotated[
     Decimal, PlainSerializer(_tax_rate_json, return_type=str, when_used="json")
 ]
+
+
+# The most a discount can be: the money columns are Numeric(15, 2).
+DISCOUNT_MAX = Decimal("9999999999999.99")
+
+
+def _check_discount(value):
+    """An early-payment discount (#664) in a sentence when it is past what
+    a money column holds (1e30 was a 500 when the route rounded it). Whole
+    cents are checked where it is taken, beside the account."""
+    if value is None:
+        return value
+    if abs(value) > DISCOUNT_MAX:
+        raise ValueError(f"A discount is at most ${DISCOUNT_MAX:,.2f}.")
+    return value
+
+
+Discount = Annotated[Decimal, AfterValidator(_check_discount)]
+
+
+# A row id a request carries, for a column stored as a signed 64-bit integer.
+# StrictInt refuses a bool (``true`` was read as id 1) and a string; the
+# bounds keep an id out of the range that overflowed SQLite with a 500
+# (#665: discount_account_id/invoice_id/bill_id of 2**63 or more). The 422's
+# sentence names the field ("Discount account must be ... or less.").
+BIGINT_MAX = 9223372036854775807
+
+StrictId = Annotated[StrictInt, Field(ge=1, le=BIGINT_MAX)]

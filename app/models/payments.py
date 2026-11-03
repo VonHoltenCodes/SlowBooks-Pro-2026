@@ -12,6 +12,7 @@ from sqlalchemy import (
     Text,
     Boolean,
     ForeignKey,
+    false,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -35,6 +36,12 @@ class Payment(Base):
     notes = Column(Text, nullable=True)
     transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
     is_voided = Column(Boolean, default=False)
+    # An early-payment discount taken against the terms (#664): the payment
+    # said allow_discount_override, and the note says who and on what.
+    discount_override = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
+    discount_override_note = Column(Text, nullable=True)
 
     # Multi-currency: document currency + rate it was booked at (GL is home)
     currency = Column(String(3), nullable=True)
@@ -61,6 +68,12 @@ class PaymentAllocation(Base):
         Integer, ForeignKey("invoices.id", ondelete="RESTRICT"), nullable=False
     )
     amount = Column(Numeric(15, 2), nullable=False)
+    # Applied later from the payment's remainder (POST /payments/{id}/apply),
+    # not when the payment was received: no early-payment discount goes with
+    # it (#665).
+    from_remainder = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     payment = relationship("Payment", back_populates="allocations")
     invoice = relationship("Invoice", backref="payment_allocations")

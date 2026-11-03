@@ -25,6 +25,7 @@ from app.schemas.pay_applications import ReleaseRetainageRequest
 from app.services.accounting import _q, compute_line_totals
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_po_number
+from app.services.payment_terms import term_id_for
 from app.services.request_utils import content_disposition
 from app.services.purchase_posting import (
     expense_account_for,
@@ -531,7 +532,8 @@ def release_retainage(
         po_id=po.id,
         date=when,
         terms=terms,
-        due_date=_due_date_from_terms(when, terms),
+        payment_term_id=term_id_for(db, terms),
+        due_date=_due_date_from_terms(db, when, terms),
         subtotal=amount,
         tax_rate=Decimal("0"),
         tax_amount=Decimal("0"),
@@ -801,7 +803,8 @@ def convert_to_bill(
         # The vendor's terms, and the due date they give — a converted bill
         # had "Net 30" and no due date, so it never aged (macbase1 F10).
         terms=terms,
-        due_date=_due_date_from_terms(bill_date, terms),
+        payment_term_id=term_id_for(db, terms),
+        due_date=_due_date_from_terms(db, bill_date, terms),
         subtotal=subtotal,
         tax_rate=po.tax_rate,
         tax_amount=tax_amount,

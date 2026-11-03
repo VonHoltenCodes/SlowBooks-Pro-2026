@@ -82,6 +82,41 @@ and job-cost tables are described in their own sections below the table.
 | `restriction_releases` | Releases from restriction between net-asset classes |
 | `jobs`, `job_budgets`, `job_costs`, `job_cost_lines`, `job_cost_to_complete`, `job_deposits`, `cost_codes`, `cost_types`, `equipment`, `trade_packages`, `trade_package_sections`, `sov_lines`, `change_orders`, `change_order_lines`, `pay_applications`, `pay_application_lines`, `lien_waivers` | Jobs, job costing and construction mode: described section by section below |
 
+## payment_terms (#664)
+
+The terms list. `name` (String(50), unique; what a document's own `terms`
+column holds, so free text from before the list still reads), `kind`
+(`standard` · `date_driven`), `net_days` (standard: due this many days after
+the date), `due_day` and `cutoff_days` (date-driven: due on that day of the
+month, the next month's when the document is dated fewer than `cutoff_days`
+before it), `discount_percent` (Numeric(5,2)) with `discount_days`
+(standard) or `discount_day` (date-driven), and `is_active`. `invoices`,
+`bills`, `recurring_invoices` and `memorized_transactions` gain
+`payment_term_id` (FK payment_terms, nullable): the entry their terms named
+when the person picked them, whose rule gives their discount; NULL for text
+that named none then, read as the old parser read it, so a term added later
+never reaches it. `payments` and `bill_payments` gain `discount_override`
+and `discount_override_note`, and `credit_memos` and `vendor_credits`
+`discount_override`: a discount taken against the terms. A
+discount taken
+in Receive Payments is a credit memo with `credit_memos.discount_payment_id`
+(FK payments) and one taken in Pay Bills a vendor credit with
+`vendor_credits.discount_bill_payment_id` (FK bill_payments).
+`payment_allocations` gains `from_remainder` (Boolean, NOT NULL, default
+false): an allocation applied later from a payment's remainder, which takes
+no early-payment discount (`bill_payment_allocations` has no such column).
+The discount-override flags (`payments.discount_override`,
+`bill_payments.discount_override`, `credit_memos.discount_override`,
+`vendor_credits.discount_override`) are Boolean NOT NULL default false.
+Migration `e5c1a7d3f9b2_payment_terms_list` (seeds the five form terms and an entry for any other number of days the
+old parser read from text in use, and ties what that parser read as exactly
+those days). It adds `ix_payment_terms_name_lower` on `lower(name)` (one
+entry per name whatever the case) and indexes on `invoices.payment_term_id`,
+`bills.payment_term_id`, `credit_memos.discount_payment_id` and
+`vendor_credits.discount_bill_payment_id`. The downgrade drops the table and
+every column and index it added, and refuses while any discount taken
+against the terms still exists.
+
 ## jobs (Customer:Job / Projects)
 
 | column | notes |

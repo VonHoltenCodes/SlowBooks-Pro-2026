@@ -68,6 +68,10 @@ class MemorizedTransaction(Base):
     # that vendor already has one.
     bill_number = Column(String(100), nullable=True)
     terms = Column(String(50), nullable=True)
+    # The list entry these terms named when the template was saved (#664):
+    # each document it makes is tied to it. NULL for text that named none
+    # then, read as the old parser read it, never the list.
+    payment_term_id = Column(Integer, ForeignKey("payment_terms.id"), nullable=True)
     tax_rate = Column(Numeric(7, 6), nullable=False, default=0)
     notes = Column(Text, nullable=True)
 
