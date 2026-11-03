@@ -122,6 +122,12 @@ DEFAULT_SETTINGS = {
     # Feature 15: Company Logo
     "company_logo_path": "",
     "invoice_show_logo": "true",
+    # Logo only (#682): "true" prints the logo without the company-name
+    # heading on the customer's documents (invoice, sales receipt, estimate,
+    # statement, credit memo), for a logo that already carries the name. Only
+    # when a logo prints: without one the heading stays, so a document never
+    # goes out nameless. The address block prints either way.
+    "invoice_logo_only": "false",
     # Report PDF paper size: letter | a4
     "pdf_paper_size": "letter",
     # Pre-printed check stock (#440, from discussion #354). "plain" prints

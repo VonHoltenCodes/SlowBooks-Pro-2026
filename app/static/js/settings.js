@@ -471,6 +471,11 @@ const SettingsPage = {
                                     Show company logo on invoices
                                 </label>
                                 <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Applies to PDF, Print, and emailed invoice attachments.</div>
+                                <label for="invoice-logo-only" style="font-weight:normal; display:block; margin-top:8px;">
+                                    <input type="checkbox" id="invoice-logo-only" name="invoice_logo_only" value="true" data-bool data-write aria-describedby="invoice-logo-only-help" style="width:auto; vertical-align:middle; margin-right:6px;" ${s.invoice_logo_only === 'true' ? 'checked' : ''}>
+                                    Logo only
+                                </label>
+                                <div id="invoice-logo-only-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Print the logo without the company name heading on invoices, estimates, statements and receipts. Only applies when a logo is set.</div>
                             </div>` : ''}
                         </div>
                     </div>

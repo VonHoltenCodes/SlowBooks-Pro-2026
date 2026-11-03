@@ -50,8 +50,11 @@
     <div class="header">
         <div>
             {% if company_logo_data_uri %}<img class="company-logo" src="{{ company_logo_data_uri }}" alt="">{% endif %}
-            {# The display name (DBA, #679) when one is set; tax and payroll forms keep the legal name. #}
+            {# The display name (DBA, #679) when one is set; tax and payroll forms keep the legal name.
+               Logo only (#682) leaves the heading out, but only when a logo printed. #}
+            {% if not (company_logo_data_uri and company.invoice_logo_only == 'true') %}
             <div class="company-name">{{ company.display_name or company.company_name }}</div>
+            {% endif %}
             <div class="company-info">
                 {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
                 {% if company.company_address2 %}{{ company.company_address2 }}<br>{% endif %}
