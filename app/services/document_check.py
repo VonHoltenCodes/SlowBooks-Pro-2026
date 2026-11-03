@@ -8,6 +8,13 @@
 # pay runs behind the form are as they were; a different one means they
 # changed after it was generated. A voided pay run in the form's period is
 # said as well.
+#
+# The hash covers the employer block (company name, address, EIN) as well as
+# the figures, so a form generated before the company was renamed differs
+# although no pay run moved (#678). Before blaming the pay runs, Check walks
+# the employer settings back through the audit log and tries each earlier
+# block with today's figures: when one reproduces the hash, the sentence says
+# the company details on the form changed and the figures are as they were.
 # ============================================================================
 
 from __future__ import annotations
@@ -18,10 +25,16 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from app.models.audit import AuditLog
 from app.models.document_audit import DocumentAudit
 from app.models.payroll import Employee, PayRun, PayRunStatus, PayStub
+from app.models.settings import DEFAULT_SETTINGS, Settings
 from app.services.document_audit import form_content_hash
-from app.services.payroll_documents import employer_block
+from app.services.payroll_documents import (
+    EMPLOYER_SETTING_KEYS,
+    employer_block_from,
+)
+from app.services.settings_service import get_all_settings
 from app.services.tax_forms.form_940 import compute_940
 from app.services.tax_forms.form_941 import compute_941
 from app.services.tax_forms.w2_w3 import compute_w2, compute_w3
@@ -97,6 +110,75 @@ def _voided_runs(db: Session, parsed: dict) -> int:
     return q.distinct().count()
 
 
+# how far back through the settings audit log Check looks for an earlier
+# employer block: plenty for renames, bounded for a long-lived file
+_EMPLOYER_HISTORY_LIMIT = 500
+
+# what each employer-block field is called in the sentence
+_EMPLOYER_FIELD_NAMES = {
+    "name": "company name",
+    "ein": "EIN",
+    "address": "address",
+    "city": "address",
+    "state": "address",
+    "zip": "address",
+    "phone": "phone number",
+    "email": "email address",
+}
+
+
+def _earlier_employer_blocks(db: Session, settings_now: dict) -> list[dict]:
+    """Every employer block the company had before today's, newest first,
+    rebuilt by undoing the audit log's changes to the employer settings one
+    at a time. Empty when the log has none."""
+    keys = set(EMPLOYER_SETTING_KEYS)
+    key_of = {
+        row.id: row.key
+        for row in db.query(Settings.id, Settings.key).filter(Settings.key.in_(keys))
+    }
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.table_name == "settings")
+        .order_by(AuditLog.id.desc())
+        .limit(_EMPLOYER_HISTORY_LIMIT)
+        .all()
+    )
+    state = dict(settings_now)
+    current = employer_block_from(state)
+    blocks: list[dict] = []
+    for log in logs:
+        old = log.old_values if isinstance(log.old_values, dict) else {}
+        new = log.new_values if isinstance(log.new_values, dict) else {}
+        key = key_of.get(log.record_id) or old.get("key") or new.get("key")
+        if key not in keys:
+            continue
+        key_of.setdefault(log.record_id, key)
+        if log.action == "INSERT":
+            # before the row existed the setting read as its default
+            state[key] = DEFAULT_SETTINGS.get(key)
+        elif log.action in ("UPDATE", "DELETE") and "value" in old:
+            state[key] = old["value"]
+        else:
+            continue
+        block = employer_block_from(state)
+        if block != current and block not in blocks:
+            blocks.append(block)
+    return blocks
+
+
+def _changed_employer_fields(then: dict, now: dict) -> str:
+    """ "company name and EIN" — what differs between two employer blocks."""
+    names: list[str] = []
+    for field, label in _EMPLOYER_FIELD_NAMES.items():
+        if (then.get(field) or "") != (now.get(field) or "") and label not in names:
+            names.append(label)
+    if not names:
+        return "company details"
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
 def recheck(db: Session, audit: DocumentAudit) -> dict:
     """Re-figure the form from today's books and compare its hash with the
     one it was generated with. `matches` is None when it cannot be
@@ -134,8 +216,10 @@ def recheck(db: Session, audit: DocumentAudit) -> dict:
             return compute_940(db, parsed["year"], legacy=legacy)
         return compute_941(db, parsed["year"], parsed["quarter"], legacy=legacy)
 
-    company = employer_block(db)
-    current = form_content_hash(company, figure(False))
+    settings_now = get_all_settings(db)
+    company = employer_block_from(settings_now)
+    figures = figure(False)
+    current = form_content_hash(company, figures)
     matches = current == audit.content_hash
     # A form generated before 2.29.0 was figured the earlier way (each
     # paycheck's gross toward the wage bases, one state line, the 2026
@@ -143,22 +227,48 @@ def recheck(db: Session, audit: DocumentAudit) -> dict:
     # books it still matches when nothing behind it changed; the sentence
     # then says today's figures differ, which may call for a corrected form.
     figured_then = False
-    if not matches and form_content_hash(company, figure(True)) == audit.content_hash:
-        matches = figured_then = True
+    legacy = None
+    if not matches:
+        legacy = figure(True)
+        if form_content_hash(company, legacy) == audit.content_hash:
+            matches = figured_then = True
+    # Not the figures but the employer block (#678): the same figures with
+    # the company as it read earlier reproduce the hash.
+    employer_then = None
+    if not matches:
+        for block in _earlier_employer_blocks(db, settings_now):
+            if form_content_hash(block, figures) == audit.content_hash:
+                employer_then = block
+                break
+            if form_content_hash(block, legacy) == audit.content_hash:
+                employer_then, figured_then = block, True
+                break
     voided = _voided_runs(db, parsed)
     out.update(current_hash=current, matches=matches, voided_runs=voided)
     out["figured_before_2_29"] = figured_then
+    out["employer_changed"] = employer_then is not None
     # the row says when, in the reader's own time; the sentence says who
     by = f" by {audit.username}" if audit.username else ""
-    if figured_then:
+    figured_differently = (
+        "SlowBooks figures this form "
+        "differently now (each paycheck's taxable wages, after Section 125 "
+        "and the like, toward the wage bases; the year's own Social Security "
+        "wage base; one state line per state), and re-figured today it comes "
+        "out differently. If it was filed, check whether a corrected form is "
+        "needed."
+    )
+    if employer_then is not None:
+        fields = _changed_employer_fields(employer_then, company)
+        out["message"] = (
+            f"No longer matches: the {fields} on the {form} for {subject} "
+            f"changed after it was generated{by}; the figures are as they were."
+        )
+        if figured_then:
+            out["message"] += " " + figured_differently
+    elif figured_then:
         out["message"] = (
             f"Matches the books: the pay runs behind the {form} for {subject} are "
-            f"as they were when it was generated{by}. SlowBooks figures this form "
-            "differently now (each paycheck's taxable wages, after Section 125 "
-            "and the like, toward the wage bases; the year's own Social Security "
-            "wage base; one state line per state), and re-figured today it comes "
-            "out differently. If it was filed, check whether a corrected form is "
-            "needed."
+            f"as they were when it was generated{by}. " + figured_differently
         )
     elif out["matches"]:
         out["message"] = (
