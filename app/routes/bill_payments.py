@@ -29,6 +29,7 @@ from app.services.accounting import (
 from app.services import cash_basis
 from app.services.check_numbers import refuse_duplicate
 from app.services.closing_date import check_closing_date
+from app.services.dimensions import require_dimensions
 from app.services import request_keys
 from app.services.audit import _actor
 from app.schemas.common import BIGINT_MAX
@@ -58,7 +59,7 @@ def list_bill_payments(
     payments = q.order_by(BillPayment.date.desc(), BillPayment.id.desc()).all()
     results = []
     for p in payments:
-        resp = BillPaymentResponse.model_validate(p)
+        resp = _validated(db, p)
         if p.vendor:
             resp.vendor_name = p.vendor.name
         _fill_can_take(db, p, resp)
@@ -79,11 +80,22 @@ def get_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
     )
     if not p:
         raise HTTPException(status_code=404, detail="Bill payment not found")
-    resp = BillPaymentResponse.model_validate(p)
+    resp = _validated(db, p)
     if p.vendor:
         resp.vendor_name = p.vendor.name
     resp.discounts = _discounts(db, p)
     _fill_can_take(db, p, resp)
+    return resp
+
+
+def _validated(db: Session, payment: BillPayment) -> BillPaymentResponse:
+    """The payment as the screens read it, its class named (#686)."""
+    resp = BillPaymentResponse.model_validate(payment)
+    if payment.class_id:
+        from app.models.classes import TxnClass
+
+        cls = db.get(TxnClass, payment.class_id)
+        resp.class_name = cls.name if cls else None
     return resp
 
 
@@ -149,6 +161,8 @@ def create_bill_payment(
     vendor = db.query(Vendor).filter(Vendor.id == data.vendor_id).first()
     if not vendor:
         raise HTTPException(status_code=404, detail="Vendor not found")
+    # the payment's class (#686): one that exists and is not archived
+    require_dimensions(db, data.class_id)
 
     # A Sub whose certificate of insurance had expired by the payment date is
     # not paid without an explicit override, which the payment records (#553).
@@ -233,6 +247,7 @@ def create_bill_payment(
         exchange_rate=pay_rate,
         coi_override=coi_note is not None,
         coi_override_note=coi_note,
+        class_id=data.class_id,
     )
     db.add(payment)
     db.flush()
@@ -360,18 +375,22 @@ def create_bill_payment(
         cash_home = to_home(data.amount, pay_rate)
         unallocated = Decimal(str(data.amount)) - Decimal(str(alloc_total))
         ap_home = sum(ap_home_debits, Decimal("0")) + to_home(unallocated, pay_rate)
+        # The payment's class (#686) goes on its own lines, not the
+        # header: the cash-basis lines below keep the bills' classes.
         journal_lines = [
             {
                 "account_id": ap_id,
                 "debit": ap_home,
                 "credit": Decimal("0"),
                 "description": f"Bill payment to {vendor.name}",
+                "class_id": payment.class_id,
             },
             {
                 "account_id": bank_id,
                 "debit": Decimal("0"),
                 "credit": cash_home,
                 "description": f"Bill payment to {vendor.name}",
+                "class_id": payment.class_id,
             },
         ]
         # Realized FX: settling A/P cheaper than booked = gain (credit),
@@ -385,6 +404,7 @@ def create_bill_payment(
                     "debit": -residual if residual < 0 else Decimal("0"),
                     "credit": residual if residual > 0 else Decimal("0"),
                     "description": f"Realized FX on bill payment to {vendor.name}",
+                    "class_id": payment.class_id,
                 }
             )
         # The cash-basis reading of this payment (#483): the bills' expense,
@@ -409,7 +429,7 @@ def create_bill_payment(
 
     db.flush()
     db.refresh(payment)
-    resp = BillPaymentResponse.model_validate(payment)
+    resp = _validated(db, payment)
     resp.vendor_name = vendor.name
     resp.discounts = _discounts(db, payment)
     request_keys.finish(db, replay, 201, resp.model_dump(mode="json"), response)
@@ -518,7 +538,7 @@ def add_discount(
     )
     db.flush()
     db.refresh(payment)
-    resp = BillPaymentResponse.model_validate(payment)
+    resp = _validated(db, payment)
     resp.vendor_name = payment.vendor.name if payment.vendor else None
     resp.discounts = _discounts(db, payment)
     request_keys.finish(db, replay, 200, resp.model_dump(mode="json"), response)
@@ -541,7 +561,7 @@ def update_bill_payment_memo(
     payment.notes = (data.notes or "").strip() or None
     db.commit()
     db.refresh(payment)
-    resp = BillPaymentResponse.model_validate(payment)
+    resp = _validated(db, payment)
     if payment.vendor:
         resp.vendor_name = payment.vendor.name
     return resp
@@ -635,7 +655,7 @@ def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
     payment.is_voided = True
     db.commit()
     db.refresh(payment)
-    resp = BillPaymentResponse.model_validate(payment)
+    resp = _validated(db, payment)
     if payment.vendor:
         resp.vendor_name = payment.vendor.name
     return resp

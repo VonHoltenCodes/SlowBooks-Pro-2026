@@ -318,12 +318,14 @@ def test_the_dropdown_opens_the_class_page_by_id_with_the_name_escaped():
 # ── R12's substitute: BillPaymentCreate.class_id ──────────────────────────
 
 
-def test_a_bill_payment_no_longer_takes_a_class_or_a_job(client, seed_accounts):
+def test_a_bill_payment_takes_a_class_but_no_job(client, seed_accounts):
+    """v2.22.0 (#234) refused both; 2.31.5 (#686) gives the payment a class
+    of its own, carried on its lines. A job is still refused."""
     from app.schemas.bills import BillPaymentCreate, BillPaymentResponse
 
-    assert "class_id" not in BillPaymentCreate.model_fields
+    assert "class_id" in BillPaymentCreate.model_fields
     assert "job_id" not in BillPaymentCreate.model_fields
-    assert "class_id" not in BillPaymentResponse.model_fields
+    assert "class_id" in BillPaymentResponse.model_fields
     vendor = client.post("/api/vendors", json={"name": "Ridge Supply"}).json()
     body = {
         "vendor_id": vendor["id"],
@@ -331,11 +333,13 @@ def test_a_bill_payment_no_longer_takes_a_class_or_a_job(client, seed_accounts):
         "amount": 10,
         "allocations": [],
     }
-    r = client.post("/api/bill-payments", json={**body, "class_id": 1})
+    r = client.post("/api/bill-payments", json={**body, "job_id": 1})
     assert r.status_code == 422, r.text
+    r = client.post("/api/bill-payments", json={**body, "class_id": 999999})
+    assert r.status_code == 404, r.text
     r = client.post("/api/bill-payments", json=body)
     assert r.status_code == 201, r.text
-    assert "class_id" not in r.json()
+    assert r.json()["class_id"] is None
 
 
 # ── the router ────────────────────────────────────────────────────────────

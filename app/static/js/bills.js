@@ -163,6 +163,7 @@ const BillsPage = {
                 <strong>Date:</strong> ${formatDate(p.date)}<br>
                 <strong>Paid by:</strong> ${escapeHtml(how)}<br>
                 <strong>Amount:</strong> ${formatCurrency(p.amount)}<br>
+                ${p.class_name ? `<strong>${T('Class')}:</strong> ${escapeHtml(p.class_name)}<br>` : ''}
                 <strong>Status:</strong> ${p.is_voided ? statusBadge('void') : 'Paid'}
                 ${p.coi_override ? `<br><strong>COI override:</strong> ${escapeHtml(p.coi_override_note || 'Paid with an expired certificate of insurance')}` : ''}
             </div>
@@ -941,6 +942,8 @@ const BillsPage = {
             API.get('/accounts?bank=1&active_only=true'),
             // where an early-payment discount we take posts (#664)
             API.get('/accounts?active_only=true'),
+            // the payment's class (#686)
+            PaymentClass.load(),
         ]);
         BillsPage._payBills = bills;
         // every unpaid or part-paid bill, not just the newest page (#191)
@@ -986,6 +989,7 @@ const BillsPage = {
                         </select></div>
                     <div class="form-group"><label>Check #</label>
                         <input name="check_number"></div>
+                    ${PaymentClass.groupHtml('pay-class')}
                 </div>
                 ${onlyNote}
                 <div class="table-container" style="margin-top:12px;"><table>
@@ -1008,6 +1012,19 @@ const BillsPage = {
         $$('.pay-check').forEach(cb => {
             cb.addEventListener('change', () => BillsPage.fillPayRow(cb));
         });
+        $$('.pay-amount').forEach(i => i.addEventListener('input', () => BillsPage.followPayClass()));
+    },
+
+    // The Class box follows the bills paid (#686): their class when every
+    // one has the same, else the default.
+    followPayClass() {
+        const select = document.getElementById('pay-class');
+        if (!select) return;
+        const paid = [...$$('.pay-amount')]
+            .filter(i => (parseFloat(i.value) || 0) > 0)
+            .map(i => (BillsPage._payBills || []).find(b => String(b.id) === i.dataset.bill))
+            .filter(Boolean);
+        PaymentClass.follow(select, paid.map(b => b.class_id));
     },
 
     // One ticked row: its discount suggested from the bill's terms and the
@@ -1023,6 +1040,7 @@ const BillsPage = {
         const balance = Math.round((parseFloat(cb.dataset.balance) || 0) * 100);
         amtInput.value = cb.checked ? ((balance - disc) / 100).toFixed(2) : '0';
         BillsPage.payDiscountChanged();
+        BillsPage.followPayClass();
     },
 
     // A new payment date: the ticked rows' discounts are suggested again.
@@ -1089,6 +1107,7 @@ const BillsPage = {
             if (!confirm(`Certificate of insurance expired: ${who}.\n\nA sub without a current certificate leaves you exposed if someone is hurt on the job. Pay anyway? The payment will be recorded as paid with an expired COI.`)) return;
         }
         if (!(await TxnWarn.ok(form))) return;
+        if (!(await ClassWarn.ok(form))) return;
 
         const paid = [];
         const written = [];  // the ids of the payments made, for Print Checks
@@ -1111,6 +1130,7 @@ const BillsPage = {
                     pay_from_account_id: fromId,
                     allocations: v.allocations,
                     discount_account_id: v.discounted ? discountAccountId : null,
+                    class_id: classIdFromForm(form),
                 };
                 if (v.coiExpires && v.coiExpires < form.date.value) body.coi_override = true;
                 // a check number the paying account already has (#481):

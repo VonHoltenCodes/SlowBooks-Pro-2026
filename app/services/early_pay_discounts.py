@@ -345,6 +345,8 @@ def post_customer_discount(
         account.id,
         "early-payment discount on",
         discount_payment_id=payment.id,
+        # the payment's class on the memo and its lines (#686)
+        class_id=getattr(payment, "class_id", None),
     )
     cm.discount_override = bool(override)
     return cm
@@ -368,6 +370,10 @@ def post_vendor_discount(
     from app.services.numbering import next_vendor_credit_number
 
     memo = f"Early-payment discount on bill {bill.bill_number}{_terms_words(bill)}"
+    # The payment's class (#686), else the bill's as before, on the credit
+    # and its two lines; the header keeps the bill's, so the cash-basis
+    # lines read the bill's lines as they did.
+    cls_id = getattr(payment, "class_id", None) or bill.class_id
     if override:
         memo = (memo + f" (taken against its terms: {override})")[:300]
     vc = None
@@ -384,7 +390,7 @@ def post_vendor_discount(
             amount_applied=amount,
             balance_remaining=Decimal("0"),
             notes=memo,
-            class_id=bill.class_id,
+            class_id=cls_id,
             job_id=bill.job_id,
             status=VendorCreditStatus.APPLIED,
             discount_bill_payment_id=payment.id,
@@ -427,12 +433,14 @@ def post_vendor_discount(
                 "debit": amount,
                 "credit": Decimal("0"),
                 "description": memo,
+                "class_id": cls_id,
             },
             {
                 "account_id": account.id,
                 "debit": Decimal("0"),
                 "credit": amount,
                 "description": memo,
+                "class_id": cls_id,
             },
         ]
         # read on the cash basis too: it settles that part of the bill (#664)

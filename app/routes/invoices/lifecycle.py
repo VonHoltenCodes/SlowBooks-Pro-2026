@@ -376,12 +376,16 @@ def post_applied_credit(
     account_id: int,
     what: str,
     discount_payment_id: int | None = None,
+    class_id: int | None = None,
 ):
     """A credit memo for `amount` applied to `inv` at once, flushed and not
     committed: DR `account_id` / CR A/R. A write-off (Bad Debt Expense) and
     an early-payment discount (#664: the account the payment named, and
     the payment it was taken with) are both this. `what` names it in the
-    entry's description ("write-off of")."""
+    entry's description ("write-off of"). `class_id`, a discount's payment's
+    class (#686), goes on the memo and its two lines in place of the
+    invoice's; the header keeps the invoice's, so the cash-basis lines read
+    the invoice's lines as they did."""
     from app.models.credit_memos import (
         CreditApplication,
         CreditMemo,
@@ -407,7 +411,7 @@ def post_applied_credit(
             amount_applied=amount,
             balance_remaining=Decimal("0"),
             notes=memo,
-            class_id=inv.class_id,
+            class_id=class_id or inv.class_id,
             job_id=inv.job_id,
             status=CreditMemoStatus.APPLIED,
             is_write_off=discount_payment_id is None,
@@ -451,12 +455,14 @@ def post_applied_credit(
                 "debit": amount,
                 "credit": Decimal("0"),
                 "description": memo,
+                "class_id": class_id,
             },
             {
                 "account_id": ar_id,
                 "debit": Decimal("0"),
                 "credit": amount,
                 "description": memo,
+                "class_id": class_id,
             },
         ]
         # An early-payment discount reads on the cash basis too (#664):
