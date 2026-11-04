@@ -3,6 +3,7 @@
 administrator's; a bookkeeper could still upload or remove it. Settings
 also had no way to remove a logo once uploaded."""
 
+import base64
 import io
 import shutil
 from pathlib import Path
@@ -14,10 +15,10 @@ from fastapi.testclient import TestClient
 from app.main import app
 
 ROOT = Path(__file__).resolve().parents[1]
-PNG = (
-    b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
-    b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc\xf8\xff"
-    b"\xff?\x00\x05\xfe\x02\xfe\xa7\x35\x81\x84\x00\x00\x00\x00IEND\xaeB`\x82"
+# a whole 1x1 PNG with good chunk checksums: the upload verifies a raster
+# logo before keeping it (NEW-201)
+PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 )
 
 

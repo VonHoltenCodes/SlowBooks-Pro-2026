@@ -19,6 +19,7 @@ desktop app makes them, and switch the app between them the way the
 company picker does.
 """
 
+import base64
 import io
 import os
 import shutil
@@ -44,8 +45,13 @@ from app.services.audit import register_audit_hooks
 # constant keeps it apart from the username for the secret scanner.
 _NO_PASSWORD = "x"
 
-PNG_ACME = b"\x89PNG\r\n\x1a\n" + b"acme-red-logo"
-PNG_BRAVO = b"\x89PNG\r\n\x1a\n" + b"bravo-blue-logo"
+# whole PNGs (the upload decodes a raster logo before keeping it, NEW-201),
+# each told apart by the bytes after its end
+_PNG_1PX = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
+PNG_ACME = _PNG_1PX + b"acme-red-logo"
+PNG_BRAVO = _PNG_1PX + b"bravo-blue-logo"
 VIEWER_PW = "viewer-password-1"
 KEEPER_PW = "keeper-password-1"
 
