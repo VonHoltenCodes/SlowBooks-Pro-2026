@@ -17,7 +17,13 @@ import pytest
 pytest.importorskip("playwright.sync_api")
 
 from tests.test_browser_grid import _open_at  # noqa: E402
-from tests.test_browser_keyboard import _ax, _open_dialog  # noqa: E402
+from tests.test_browser_keyboard import (  # noqa: E402
+    GOLD,
+    RING,
+    SETTLED,
+    _ax,
+    _open_dialog,
+)
 from tests.test_browser_register_date import _register_page  # noqa: E402
 from tests.test_theme_contrast import (  # noqa: E402,F401  (the fixtures)
     _theme,
@@ -190,6 +196,17 @@ def test_the_tape_is_named_for_its_box_and_its_total_is_a_polite_status(
         assert page.get_attribute("#qmath-status", "aria-live") == "polite"
         assert page.inner_text("#qmath-status") == "= 19.75"
         assert page.evaluate("() => document.activeElement.id") == "qmath-input"
+        # the focused tape draws the keyboard's ring in both themes (W-111):
+        # its own look had beaten the field's focus rule, which took the
+        # outline away and left nothing to show where focus was
+        for theme in ("light", "dark"):
+            _theme(page, theme)
+            page.evaluate(SETTLED)
+            ring = page.evaluate(RING)
+            assert ring["at"] == "qmath-input" and ring["keyboard"], ring
+            assert ring["outline"] == f"2px solid {GOLD[theme]}", (theme, ring)
+            assert ring["offset"] == "2px", (theme, ring)
+        _theme(page, "light")
         # inside the dialog (its modal reading takes it in), not a dialog itself
         assert page.evaluate(
             "() => document.getElementById('modal').contains(document.getElementById('qmath'))"

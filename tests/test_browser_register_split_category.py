@@ -38,3 +38,26 @@ def test_the_category_box_goes_away_while_the_split_lines_show(browser):
         assert page.inner_text("#entry-split-toggle") == "Split this entry…"
     finally:
         page.close()
+
+
+def test_a_second_split_takes_the_category_boxs_new_pick(browser):
+    """W-110: split, undo, pick another category, split again: the first
+    line is the new pick, not the account it held from the first split."""
+    posted = []
+    page = _register_page(browser, posted)
+    try:
+        page.click("text=+ Entry")
+        page.wait_for_selector("#entry-payee")
+        page.select_option("#entry-category", "2")
+        page.click("#entry-split-toggle")
+        page.wait_for_selector("#entry-split-rows tr")
+        assert page.input_value("#entry-split-rows tr:first-child .split-cat") == "2"
+        page.click("#entry-split-toggle")
+        assert page.is_visible("#entry-category-group")
+
+        page.select_option("#entry-category", "3")
+        page.click("#entry-split-toggle")
+        assert not page.is_visible("#entry-category-group")
+        assert page.input_value("#entry-split-rows tr:first-child .split-cat") == "3"
+    finally:
+        page.close()

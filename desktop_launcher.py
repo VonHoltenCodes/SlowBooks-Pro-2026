@@ -417,6 +417,10 @@ def start_server(
 # How long the launcher keeps waiting past its timeout after the server's
 # start-up progress note last changed (#693).
 STARTUP_STALL_SECONDS = 300
+# How often the wait reads the progress note and asks /health, and how long
+# one /health probe may take (W-109).
+HEALTH_POLL_SECONDS = 0.5
+HEALTH_PROBE_SECONDS = 0.5
 
 
 def startup_progress_path() -> Path:
@@ -451,20 +455,18 @@ def wait_for_health(
     seen = None
     changed_at = None
     while True:
+        started = time.monotonic()
         if proc.poll() is not None:
             return False  # server process died
-        try:
-            with urllib.request.urlopen(url, timeout=2) as resp:
-                if resp.status == 200:
-                    return True
-        except OSError:
-            pass
-        now = time.monotonic()
+        # The note first, every pass, and a short probe (W-109): on Windows a
+        # refused loopback connect waits out the whole timeout, so with the
+        # probe first at 2 s the note was read only every 2.5 s and a quick
+        # step never reached the picker or launcher.log.
         if progress_path is not None:
             state = startup_progress.read(progress_path)
             if state is not None and state != seen:
                 seen = state
-                changed_at = now
+                changed_at = started
                 text = startup_progress.describe(state)
                 print(f"Starting up: {text}")
                 if on_progress is not None and text:
@@ -472,9 +474,17 @@ def wait_for_health(
                         on_progress(text)
                     except Exception:
                         pass  # the status line is a courtesy
+        try:
+            with urllib.request.urlopen(url, timeout=HEALTH_PROBE_SECONDS) as resp:
+                if resp.status == 200:
+                    return True
+        except OSError:
+            pass
+        now = time.monotonic()
         if now >= deadline and (changed_at is None or now - changed_at >= stall):
             return False
-        time.sleep(0.5)
+        # about twice a second, the probe's own wait counted in
+        time.sleep(max(0.0, HEALTH_POLL_SECONDS - (now - started)))
 
 
 def stop_server(proc: subprocess.Popen | None) -> None:
