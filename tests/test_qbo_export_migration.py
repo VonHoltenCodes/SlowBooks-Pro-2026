@@ -151,8 +151,9 @@ def test_the_trial_balance_reads_and_names_its_basis():
     text = (FIXTURES / "Trial_balance.csv").read_text()
     balances, errors = qbo.parse_tb(text)
     assert errors == []
-    assert balances["operating account"] == 4010
-    assert balances["company visa"] == -120
+    # names as written; the engine keys them as it keys the journal (#690)
+    assert balances["Operating Account"] == 4010
+    assert balances["Company Visa"] == -120
     assert "total" not in balances
     assert qbo.trial_balance_basis(text) == "cash"
     assert (
@@ -384,3 +385,134 @@ def test_the_page_takes_a_zip_or_a_workbook():
     )
     assert 'accept=".csv,.txt,.xlsx,.zip"' in js
     assert "upload the Export data zip as downloaded" in js
+
+
+def _sheet(rows) -> bytes:
+    """A small report workbook, cells as QuickBooks Online writes them."""
+    openpyxl = pytest.importorskip("openpyxl")
+    book = openpyxl.Workbook()
+    for row in rows:
+        book.active.append([cell if cell != "" else None for cell in row])
+    out = io.BytesIO()
+    book.save(out)
+    return out.getvalue()
+
+
+@pytest.mark.parametrize(
+    "parent", ["Payroll Liabilities", "Payroll Liabilities (2100)"]
+)
+def test_a_sub_account_the_two_files_spell_differently_carries_its_opening_balance(
+    client, db_session, seed_accounts, parent
+):
+    # The Balance Sheet lists the child indented under its parent, the Trial
+    # Balance writes it Parent:Child with a "(940)" suffix; the journal never
+    # posts to it, so its balance is an opening balance. The import used to
+    # drop it and post a short opening entry, answered as HTTP 500 (#690).
+    footer = "Tuesday, Nov 03, 2026 09:00:00 AM GMT-6 - Accrual Basis"
+    balance_sheet = [
+        ["Invented Payroll Co"],
+        ["Balance Sheet"],
+        ["", "Total"],
+        ["ASSETS"],
+        ["   Current Assets"],
+        ["      Bank Accounts"],
+        ["         Payroll Checking", "=150.00"],
+        ["      Total Bank Accounts", "=150.00"],
+        ["LIABILITIES AND EQUITY"],
+        ["   Liabilities"],
+        ["      Current Liabilities"],
+        ["         Other Current Liabilities"],
+        [f"            {parent}"],
+        ["               Federal Unemployment (940)", "=100.00"],
+        [f"            Total {parent}", "=100.00"],
+        ["   Equity"],
+        ["      Net Income", "=50.00"],
+        [""],
+        [footer],
+    ]
+    profit_and_loss = [
+        ["Invented Payroll Co"],
+        ["Profit and Loss"],
+        ["", "Total"],
+        ["Income"],
+        ["   Payroll Service Fees", "=50.00"],
+        ["Total Income", "=50.00"],
+        ["Net Income", "=50.00"],
+        [""],
+        [footer],
+    ]
+    journal = [
+        ["", "Invented Payroll Co"],
+        ["", "Journal"],
+        [
+            "",
+            "Date",
+            "Transaction Type",
+            "Num",
+            "Name",
+            "Memo/Description",
+            "Account",
+            "Debit",
+            "Credit",
+        ],
+        ["", "03/02/2026", "Deposit", "", "", "Fee", "Payroll Checking", "=50.00"],
+        ["", "", "", "", "", "Fee", "Payroll Service Fees", "", "=50.00"],
+        ["", "", "", "", "", "", "", "=50.00", "=50.00"],
+        [""],
+    ]
+    trial_balance = [
+        ["Invented Payroll Co"],
+        ["Trial Balance"],
+        ["", "Debit", "Credit"],
+        ["Payroll Checking", "=150.00"],
+        ["Payroll Liabilities:Federal Unemployment (940)", "", "=100.00"],
+        ["Payroll Service Fees", "", "=50.00"],
+        ["TOTAL", "=150.00", "=150.00"],
+        [""],
+        [footer],
+    ]
+    xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    files = [
+        ("files", (name, io.BytesIO(_sheet(rows)), xlsx))
+        for name, rows in (
+            ("Balance_sheet.xlsx", balance_sheet),
+            ("Profit_and_loss.xlsx", profit_and_loss),
+            ("Journal.xlsx", journal),
+            ("Trial_balance.xlsx", trial_balance),
+        )
+    ]
+    data = client.post("/api/migration/qbo_export/dry-run", files=files).json()
+    assert data["ok"] is True, data["errors"]
+    assert len(data["opening_balances"]) == 2
+    for _, (_, fh, _) in files:
+        fh.seek(0)
+    resp = client.post("/api/migration/qbo_export/import", files=files)
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True, data["errors"]
+
+    child = (
+        db_session.query(Account)
+        .filter(Account.name == f"{parent}:Federal Unemployment (940)")
+        .one()
+    )
+    assert child.parent_id is not None
+    assert db_session.get(Account, child.parent_id).name.startswith(
+        "Payroll Liabilities"
+    )
+    # one account, not a second one for the Trial Balance's spelling
+    assert (
+        db_session.query(Account)
+        .filter(Account.name.like("%Federal Unemployment%"))
+        .count()
+        == 1
+    )
+    opening = (
+        db_session.query(Transaction)
+        .filter(Transaction.source_type == "opening_balance")
+        .one()
+    )
+    lines = db_session.query(TransactionLine).filter_by(transaction_id=opening.id).all()
+    assert len(lines) == 2
+    assert sum(ln.debit for ln in lines) == sum(ln.credit for ln in lines) == 100
+    assert {ln.account_id for ln in lines if ln.credit == 100} == {child.id}

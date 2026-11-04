@@ -280,12 +280,21 @@ def parse_coa(
                     )
         stack.append((indent, name, is_account))
     by_name = {a["name"].lower(): a for a in accounts}
+    # an account the books name another way ("Parent:Child (940)" beside the
+    # report's indented child) is the same account, not a new one (#690)
+    by_key = {strip_code_suffix(a["name"]): a for a in accounts}
     for name in also:
         key = name.strip().lower()
         if not key or key in by_name or key in _ARITHMETIC:
             continue
+        if strip_code_suffix(name) in by_key:
+            continue
         parent = name.rsplit(":", 1)[0] if ":" in name else ""
-        parent_spec = by_name.get(parent.lower()) if parent else None
+        parent_spec = (
+            by_name.get(parent.lower()) or by_key.get(strip_code_suffix(parent))
+            if parent
+            else None
+        )
         if parent_spec is not None:
             acct_type, parent_name = parent_spec["type"], parent_spec["name"]
         else:
@@ -319,6 +328,7 @@ def parse_coa(
         }
         accounts.append(spec)
         by_name[key] = spec
+        by_key.setdefault(strip_code_suffix(name), spec)
     return accounts, errors
 
 
@@ -510,7 +520,9 @@ def parse_tb(csv_text: str) -> tuple[dict, list[str]]:
         except Exception as exc:
             errors.append(f"Trial balance row {n}: {exc}")
             continue
-        balances[strip_code_suffix(name)] = net
+        # the name as written: the engine keys it as it keys the journal
+        # (strip_code_suffix), and names it so if the chart lacks it (#690)
+        balances[name] = balances.get(name, Decimal("0")) + net
     return balances, errors
 
 

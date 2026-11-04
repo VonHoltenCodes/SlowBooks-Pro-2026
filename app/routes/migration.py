@@ -22,6 +22,7 @@ from app.services import (
     xero_import,
     zoho_import,
 )
+from app.services.safe_errors import DataProblem
 from app.services.settings_service import set_setting
 from app.services.upload_limits import read_limited
 
@@ -211,6 +212,15 @@ def _add_to_bundle(bundle: dict, kind: str, name: str, text: str) -> None:
             bundle[kind] = text
 
 
+def _refused(db: Session, exc: DataProblem) -> HTTPException:
+    """A problem with the books the import found on its way in (an entry out
+    of balance, an account it cannot place) is the person's to read: a 422
+    with its words, nothing kept, for every source (#690). It used to
+    surface as a bare HTTP 500."""
+    db.rollback()
+    return HTTPException(status_code=422, detail=exc.user_text)
+
+
 @router.get("/sources")
 def list_sources():
     return [{"key": key, "label": label} for key, (label, _, _) in SOURCES.items()]
@@ -222,7 +232,10 @@ async def migration_dry_run(
 ):
     _, module, _ = _source(source)
     bundle = await bundle_from_uploads(files, module.classify_filename)
-    return module.dry_run(db, bundle)
+    try:
+        return module.dry_run(db, bundle)
+    except DataProblem as e:
+        raise _refused(db, e)
 
 
 @router.post("/{source}/import")
@@ -231,7 +244,10 @@ async def migration_import(
 ):
     _, module, chart_source = _source(source)
     bundle = await bundle_from_uploads(files, module.classify_filename)
-    result = module.run_import(db, bundle)
+    try:
+        result = module.run_import(db, bundle)
+    except DataProblem as e:
+        raise _refused(db, e)
     if result["ok"]:
         from datetime import date
 

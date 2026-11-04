@@ -625,3 +625,143 @@ def test_a_header_only_chart_beside_a_good_ledger_blames_the_chart_alone(
     assert data["ok"] is False
     assert any("No chart of accounts records" in e for e in data["errors"]), data
     assert not any("No general ledger records" in e for e in data["errors"]), data
+
+
+def _opening_bundle(tb: dict):
+    """A one-journal bundle whose trial balance differs from it by ``tb``'s
+    extra balances: the residuals become opening balances (#690)."""
+    from datetime import date
+    from decimal import Decimal
+
+    chart = [
+        {
+            "name": "Float Account",
+            "code": None,
+            "type": AccountType.ASSET,
+            "description": "",
+            "parent": None,
+        },
+        {
+            "name": "Staff Withholding",
+            "code": None,
+            "type": AccountType.LIABILITY,
+            "description": "",
+            "parent": None,
+        },
+        {
+            "name": "Fee Income",
+            "code": None,
+            "type": AccountType.INCOME,
+            "description": "",
+            "parent": None,
+        },
+    ]
+    row = {"date": date(2026, 3, 2), "reference": "J1", "journal": "J1"}
+    gl = [
+        [
+            {**row, "account": "Float Account", "debit": Decimal("50"), "credit": 0},
+            {**row, "account": "Fee Income", "debit": 0, "credit": Decimal("50")},
+        ]
+    ]
+    balances = {"Float Account": Decimal("150"), "Fee Income": Decimal("-50")}
+    balances.update(tb)
+    parsers = {
+        "coa": lambda _t: (chart, []),
+        "gl": lambda _t: (gl, []),
+        "tb": lambda _t: (dict(balances), []),
+    }
+    return {"coa": "x", "gl": "x", "tb": "x"}, parsers
+
+
+def test_a_trial_balance_account_the_chart_files_lack_is_planned_or_named(
+    db_session, seed_accounts
+):
+    """Every opening-balance account is in the planned chart (#690): a
+    sub-account of one the chart has is planned under it and said so; one
+    that cannot be placed is named and the import refuses before writing.
+    The apply used to skip it and post a short opening entry."""
+    from decimal import Decimal
+
+    from app.services.migration_common import dry_run_bundle, run_import_bundle
+
+    # a sub-account of a chart account: planned, with its parent's type
+    bundle, parsers = _opening_bundle(
+        {"Staff Withholding:Federal Unemployment (940)": Decimal("-100")}
+    )
+    verdict = dry_run_bundle(db_session, bundle, parsers, "Test", "ob_src")
+    assert verdict["ok"] is True, verdict["errors"]
+    assert any(
+        "Staff Withholding:Federal Unemployment (940)" in w
+        and "sub-account of 'Staff Withholding'" in w
+        for w in verdict["warnings"]
+    ), verdict["warnings"]
+    result = run_import_bundle(db_session, bundle, parsers, "ob_src", "Test")
+    assert result["ok"] is True, result["errors"]
+    child = (
+        db_session.query(Account)
+        .filter(Account.name == "Staff Withholding:Federal Unemployment (940)")
+        .one()
+    )
+    assert child.account_type == AccountType.LIABILITY
+    assert db_session.get(Account, child.parent_id).name == "Staff Withholding"
+    opening = (
+        db_session.query(Transaction)
+        .filter(Transaction.source_type == "opening_balance")
+        .one()
+    )
+    _assert_balanced(db_session, [opening])
+    lines = db_session.query(TransactionLine).filter_by(transaction_id=opening.id)
+    assert {ln.account_id for ln in lines if ln.credit == 100} == {child.id}
+
+
+def test_a_trial_balance_account_that_cannot_be_placed_refuses_the_import(
+    db_session, seed_accounts
+):
+    from decimal import Decimal
+
+    from app.services.migration_common import dry_run_bundle, run_import_bundle
+
+    bundle, parsers = _opening_bundle({"Mystery Holding (77)": Decimal("-100")})
+    verdict = dry_run_bundle(db_session, bundle, parsers, "Test", "ob_src")
+    assert verdict["ok"] is False
+    assert any(
+        "Mystery Holding (77)" in e and "chart files do not list" in e
+        for e in verdict["errors"]
+    ), verdict["errors"]
+    before = db_session.query(Account).count()
+    result = run_import_bundle(db_session, bundle, parsers, "ob_src", "Test")
+    assert result["ok"] is False and result["imported_journals"] == 0
+    assert db_session.query(Account).count() == before
+    assert _journals(db_session, "ob_src") == []
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.source_type == "opening_balance")
+        .count()
+        == 0
+    )
+
+
+@pytest.mark.parametrize("step", ["dry-run", "import"])
+def test_a_data_problem_inside_the_import_is_a_422_with_its_words(
+    client, seed_accounts, monkeypatch, step
+):
+    """A DataProblem the import body raises (an entry out of balance) is the
+    person's to read, for every source: 422 with its text, not 500 (#690)."""
+    from app.routes import migration
+    from app.services.safe_errors import DataProblem
+
+    message = "Debits and credits must be equal: this entry is out of balance by $3.00"
+
+    def refuse(db, bundle):
+        raise DataProblem(message)
+
+    for _, module, _ in migration.SOURCES.values():
+        monkeypatch.setattr(module, "dry_run", refuse)
+        monkeypatch.setattr(module, "run_import", refuse)
+    for source in migration.SOURCES:
+        resp = client.post(
+            f"/api/migration/{source}/{step}",
+            files=_files(**{"chart.csv": SAGE_COA, "generalledger.csv": SAGE_GL}),
+        )
+        assert resp.status_code == 422, (source, resp.text)
+        assert resp.json()["detail"] == message
