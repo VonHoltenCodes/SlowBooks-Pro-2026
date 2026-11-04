@@ -1773,7 +1773,7 @@ const BankingPage = {
                         ${BankingPage._vendorDatalist('entry-payee-vendors')}</div>
                     <div class="form-group"><label>Check / ref #</label>
                         <input name="check_number"></div>
-                    <div class="form-group full-width"><label>Category * <span style="font-weight:normal; color:var(--gray-500);">(the other side of the entry; a bank or card account makes it a transfer)</span></label>
+                    <div class="form-group full-width" id="entry-category-group"><label>Category * <span style="font-weight:normal; color:var(--gray-500);">(the other side of the entry; a bank or card account makes it a transfer)</span></label>
                         ${AccountQuickAdd.picker(`<select name="category_account_id" id="entry-category"><option value="">Select…</option>${catOpts}</select>`, 'register', { ctx: accountId, id: 'entry-category-add', label: 'Add a new account…' })}</div>
                     <div class="form-group full-width"><label>Memo</label>
                         <input name="description"></div>
@@ -1983,7 +1983,17 @@ const BankingPage = {
         // each line names its own; the entry's single name is for a plain entry
         const nameGroup = document.getElementById('entry-name-group');
         if (nameGroup) nameGroup.style.display = open ? 'none' : '';
+        // the single Category box is for a plain entry too: a split's first
+        // line is the category the entry posts under, so the box goes away
+        // while the lines show, its pick carried to the first line, and comes
+        // back with the first line's account when the split is undone
+        const catGroup = document.getElementById('entry-category-group');
+        const cat = document.getElementById('entry-category');
+        if (catGroup) catGroup.style.display = open ? 'none' : '';
         if (open && !document.querySelectorAll('#entry-split-rows tr').length) { BankingPage.addSplitRow(); BankingPage.addSplitRow(); }
+        const first = document.querySelector('#entry-split-rows tr .split-cat');
+        if (open && cat && first && cat.value && !first.value) first.value = cat.value;
+        if (!open && cat && first && first.value) cat.value = first.value;
         BankingPage.splitNote();
     },
     // The Name (customer, a donor in a nonprofit) on a deposit line (#606):

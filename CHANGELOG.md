@@ -19,6 +19,8 @@ on what the software does, not on what sprint shipped what.
 
 **Arithmetic in every amount box** (#696, from discussion #692). Type `+`, `-`, `*` or `/` after a figure in any amount box and a small calculator tape opens under it holding the sum so far; `=` or Enter puts the result in the box and the form's totals follow, Tab puts it in and moves on, Escape leaves the box as it was. Division by zero or an unfinished sum says so and waits. The tape's input is named for its box, the running result is announced, and the arithmetic is exact decimal (0.1 + 0.2 is 0.30), no `eval`.
 
+**Found on the way:** the register's + Entry dialog kept its Category box in view while a split was open, where it was ignored (a user asked which one counted); the box now goes away while the split lines show, its pick carried to the first line, and comes back with the first line's account when the split is undone.
+
 ### v2.31.5 — Real payment terms, a sample company to try, and the window where you left it
 
 **Payment terms beyond Net N** (#664). Terms were free text with one rule:
