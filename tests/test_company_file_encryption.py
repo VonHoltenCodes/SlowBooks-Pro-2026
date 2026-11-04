@@ -331,7 +331,7 @@ def test_the_launcher_has_the_key_before_it_touches_the_file(monkeypatch, tmp_pa
         )[1],
     )
     monkeypatch.setattr(
-        dl, "wait_for_health", lambda proc, port, host="127.0.0.1": True
+        dl, "wait_for_health", lambda proc, port, host="127.0.0.1", **_: True
     )
     dl.launch_company("books.db", 3999, persist=False)
     assert order == ["key", "probe", ("migrate", KEY), ("start", KEY)]

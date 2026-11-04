@@ -414,15 +414,43 @@ def start_server(
     )
 
 
+# How long the launcher keeps waiting past its timeout after the server's
+# start-up progress note last changed (#693).
+STARTUP_STALL_SECONDS = 300
+
+
+def startup_progress_path() -> Path:
+    """The note the server's one-time start-up jobs write (#693), next to
+    launcher.log in the data folder."""
+    from app.services import startup_progress
+
+    return get_data_dir() / startup_progress.FILENAME
+
+
 def wait_for_health(
     proc: subprocess.Popen,
     port: int,
     timeout: float = 120,
     host: str = "127.0.0.1",
+    progress_path: Path | None = None,
+    on_progress=None,
+    stall: float = STARTUP_STALL_SECONDS,
 ) -> bool:
+    """Wait for /health to answer 200.
+
+    Past ``timeout`` it keeps waiting as long as the server is alive and its
+    start-up progress note (``progress_path``) changed within the last
+    ``stall`` seconds (#693): a big company file catching up its cash-basis
+    lines takes longer than two minutes, and stopping the server halfway
+    meant it never opened. ``on_progress(text)`` is called with the note's
+    text each time it changes."""
+    from app.services import startup_progress
+
     url = f"http://{host}:{port}/health"
     deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
+    seen = None
+    changed_at = None
+    while True:
         if proc.poll() is not None:
             return False  # server process died
         try:
@@ -431,8 +459,22 @@ def wait_for_health(
                     return True
         except OSError:
             pass
+        now = time.monotonic()
+        if progress_path is not None:
+            state = startup_progress.read(progress_path)
+            if state is not None and state != seen:
+                seen = state
+                changed_at = now
+                text = startup_progress.describe(state)
+                print(f"Starting up: {text}")
+                if on_progress is not None and text:
+                    try:
+                        on_progress(text)
+                    except Exception:
+                        pass  # the status line is a courtesy
+        if now >= deadline and (changed_at is None or now - changed_at >= stall):
+            return False
         time.sleep(0.5)
-    return False
 
 
 def stop_server(proc: subprocess.Popen | None) -> None:
@@ -468,8 +510,12 @@ def launch_company(
     bind_host: str = "127.0.0.1",
     persist: bool = True,
     key: bytes | None = None,
+    on_progress=None,
 ) -> subprocess.Popen:
     """Point the app at a company file, migrate it, and start the server.
+
+    ``on_progress(text)`` gets the server's start-up progress (#693) while
+    the launcher waits for it, for the picker's status line.
 
     ``key`` is the company file's key when the picker unlocked it (#290:
     an administrator's sign-in or the recovery key); otherwise the key is
@@ -525,14 +571,33 @@ def launch_company(
 
     migrate(db_url, output=output, key=key)
 
+    from app.services import startup_progress
+
+    progress_path = startup_progress_path()
+    startup_progress.clear(progress_path)  # a note from an earlier run
+    if on_progress is not None:
+        on_progress("")
     proc = start_server(db_url, port, output=output, bind_host=bind_host, key=key)
     # 0.0.0.0 includes loopback; a specific interface bind does not.
     health_host = "127.0.0.1" if bind_host in ("127.0.0.1", "0.0.0.0") else bind_host
-    if not wait_for_health(proc, port, host=health_host):
+    if not wait_for_health(
+        proc,
+        port,
+        host=health_host,
+        progress_path=progress_path,
+        on_progress=on_progress,
+    ):
         stop_server(proc)
+        last = startup_progress.describe(startup_progress.read(progress_path))
         raise RuntimeError(
             f"Server did not become healthy on port {port}. "
-            "The server's own message is in launcher.log in the data folder "
+            + (
+                f"Its last start-up step was: {last} "
+                f"(see {progress_path.name} in the data folder). "
+                if last
+                else ""
+            )
+            + "The server's own message is in launcher.log in the data folder "
             "(a setting in .env it refuses is named there); otherwise check for "
             "another app using the port, then try again."
         )
@@ -651,7 +716,9 @@ async function unlock() {
   var btn = document.getElementById('unlock-btn');
   btn.disabled = true;
   setStatus('Unlocking… this takes a moment.');
+  var stopWatch = watchStartup();
   var result = await window.pywebview.api.unlock_company(unlocking, user, pass, recovery);
+  stopWatch();
   if (result && result.success) {
     window.location.href = result.url;
     return;
@@ -668,6 +735,17 @@ function setStatus(msg, isError) {
   const el = document.getElementById('status');
   el.textContent = msg || '';
   el.className = isError ? 'error' : '';
+}
+// A big company file catches up once at its first start on a new version
+// (#693); say what it is doing while the open waits.
+function watchStartup() {
+  var timer = setInterval(async function () {
+    try {
+      var s = await window.pywebview.api.startup_status();
+      if (s && s.text) setStatus(s.text + '…');
+    } catch (e) {}
+  }, 1000);
+  return function () { clearInterval(timer); };
 }
 function setBusy(busy) {
   document.getElementById('createbtn').disabled = busy;
@@ -712,7 +790,9 @@ async function openCompany(file, name) {
   // Name the company: the list greys out while this runs, and a greyed list
   // with a generic line read as "all companies unavailable" (2.14.0 gate).
   setStatus('Opening ' + (name || 'company') + '… first open can take a minute.');
+  const stopWatch = watchStartup();
   const result = await window.pywebview.api.open_company(file);
+  stopWatch();
   if (result && result.success) {
     // Navigate from JS, only AFTER the call above has resolved -- doing
     // this from Python instead (mid-call) would navigate the window
@@ -1163,6 +1243,7 @@ class PickerApi:
         # company — must not, or you could never leave.
         self._auto_open = True
         self._log_fh = log_fh
+        self._startup_status = ""  # the server's start-up note (#693)
 
     def open_document_html(self, title: str, html: str) -> dict:
         """Show already-fetched, already-authenticated HTML (an invoice/
@@ -1399,6 +1480,14 @@ class PickerApi:
             return {"success": False, "error": str(exc)}
         return {"success": True, "path": str(dest)}
 
+    def _set_startup_status(self, text: str) -> None:
+        self._startup_status = text
+
+    def startup_status(self) -> dict:
+        """What the server is doing while a company opens (#693): the
+        picker shows it under the list while open_company is waiting."""
+        return {"text": self._startup_status}
+
     def list_companies(self) -> dict:
         from app.services import company_service
 
@@ -1461,7 +1550,12 @@ class PickerApi:
         navigate AFTER the call resolves avoids the race entirely.
         """
         try:
-            self._server = launch_company(filename, self._port, output=self._log_fh)
+            self._server = launch_company(
+                filename,
+                self._port,
+                output=self._log_fh,
+                on_progress=self._set_startup_status,
+            )
         except LockedCompany as exc:
             # the desktop's own key (#290): the picker asks for an
             # administrator's sign-in, or the recovery key
@@ -1505,7 +1599,11 @@ class PickerApi:
             return {"success": False, "locked": True, "error": str(exc)}
         try:
             self._server = launch_company(
-                filename, self._port, output=self._log_fh, key=key
+                filename,
+                self._port,
+                output=self._log_fh,
+                key=key,
+                on_progress=self._set_startup_status,
             )
         except Exception as exc:
             return {"success": False, "error": str(exc)}
