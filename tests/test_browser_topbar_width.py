@@ -52,7 +52,9 @@ def test_the_company_name_keeps_its_room_beside_contact_support(browser, width):
     assert got["support"] >= 80, got  # the button still says Contact support
     assert got["right"] <= width, got
     assert got["overflow"] <= 0, got
-    assert got["clock"] == ("none" if width < 1366 else "block"), got
+    assert got["clock"] == (
+        "none" if width < 1400 else "block"
+    ), got  # W-105: tight below 1400
     assert got["signOut"] <= width, got
     # The quick-entry buttons stay wherever they fit (2.31.1 gate W-87:
     # Windows' own default window is a 1264px page, and hiding all five

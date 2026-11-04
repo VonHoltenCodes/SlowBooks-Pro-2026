@@ -454,12 +454,16 @@ body {
 @media (max-width: 1109px) {
     #topbar .tb-btn[data-action] { display: none; }
 }
-@media (max-width: 1365px) {
+/* Below 1400 the bar tightens (2.31.5 round 2, W-105: with the Hide
+   sidebar control the bar ran 38 px past a 1366 window and 8 px past
+   Windows' 1264 default under WebView2's wider fonts; the clock and the
+   brand's year go first, then the spacing) */
+@media (max-width: 1399px) {
     #topbar-clock { display: none; }
     .topbar-brand span { display: none; }
-    .topbar-brand { margin-right: 8px; }
-    #topbar .tb-sep { margin: 0 3px; }
-    #topbar .tb-btn { padding-left: 8px; padding-right: 8px; }
+    .topbar-brand { margin-right: 6px; }
+    #topbar .tb-sep { margin: 0 2px; }
+    #topbar .tb-btn { padding-left: 6px; padding-right: 6px; }
 }
 
 /* ========================================================================

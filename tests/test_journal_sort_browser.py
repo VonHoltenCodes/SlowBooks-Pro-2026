@@ -88,6 +88,24 @@ def test_sort_is_named_and_kept_and_the_range_narrows_the_list(
         assert box.input_value() == "2026-10-15"
         _ranged(page, "0 entries in this date range")
 
+        # a blur that fires with the keyboard already on a row's button (Tab
+        # out of the To box) leaves it on the count line, not on <body>
+        # (2.31.5 round 2, W-104)
+        page.evaluate(
+            "() => { document.getElementById('journal-from').value = '';"
+            " document.getElementById('journal-to').value = '';"
+            " return JournalPage.setRange(); }"  # every row back
+        )
+        settle(page, handled)
+        page.evaluate(
+            "() => { document.querySelector('#journal-list button').focus();"
+            " document.getElementById('journal-from').value = '2025-12-01';"
+            " document.getElementById('journal-to').value = '2026-01-05';"
+            " return JournalPage.setRange(); }"
+        )
+        settle(page, handled)
+        assert page.evaluate("document.activeElement.id") == "journal-count"
+
         page.get_by_label("From", exact=True).fill("2025-01-01")
         page.get_by_label("From", exact=True).press("Enter")
         settle(page, handled)

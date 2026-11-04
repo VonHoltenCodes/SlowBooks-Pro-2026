@@ -816,7 +816,7 @@ def collection_letters(
                 if send_email(
                     db=db,
                     to_email=customer.email,
-                    subject=f"{type_labels.get(letter_type, 'Collection Notice')} — {settings.get('company_name', '')}",
+                    subject=f"{type_labels.get(letter_type, 'Collection Notice')} — {settings.get('display_name') or settings.get('company_name', '')}",
                     html_body=f"<p>Dear {html.escape(customer.name)},</p><p>Please see the attached collection notice regarding your outstanding balance of ${total_due:,.2f}.</p>",
                     attachment_bytes=pdf_bytes,
                     attachment_name=f"Collection_{letter_type}day_{customer.name}.pdf",

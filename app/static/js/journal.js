@@ -138,7 +138,12 @@ const JournalPage = {
         const ranged = !!(JournalPage._from || JournalPage._to);
         if (count) count.textContent = `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}${ranged ? ' in this date range' : ''}`;
         const host = document.getElementById('journal-list');
+        // Tab out of a date box can land on a row's button just before the
+        // blur redraws the rows under it (2.31.5 round 2, W-104): then the
+        // keyboard goes to the count line, which says what the range did.
+        const inRows = !!(host && document.activeElement && host.contains(document.activeElement));
         if (host) host.innerHTML = JournalPage.listHtml(entries, ranged);
+        if (inRows && count) { count.setAttribute('tabindex', '-1'); count.focus(); }
     },
 
     // the list again, the keyboard back on the control that changed it
