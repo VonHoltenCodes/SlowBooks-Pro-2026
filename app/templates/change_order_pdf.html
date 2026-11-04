@@ -35,7 +35,7 @@
     <div class="header">
         <div>
             {% if company_logo_data_uri %}<img class="company-logo" src="{{ company_logo_data_uri }}" alt="">{% endif %}
-            <div class="company-name">{{ company.company_name }}</div>
+            <div class="company-name">{{ company.display_name or company.company_name }}</div>
             <div class="company-info">
                 {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
                 {% set company_city = city_line(company.company_city, company.company_state, company.company_zip) %}

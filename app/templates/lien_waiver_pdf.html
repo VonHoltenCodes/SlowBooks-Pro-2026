@@ -21,7 +21,7 @@
 </head>
 <body>
     {% if company_logo_data_uri %}<img class="company-logo" src="{{ company_logo_data_uri }}" alt="">{% endif %}
-    <div class="company-name">{{ company.company_name }}</div>
+    <div class="company-name">{{ company.display_name or company.company_name }}</div>
     <div class="company-info">
         {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
         {% set company_city = city_line(company.company_city, company.company_state, company.company_zip) %}
@@ -32,7 +32,7 @@
     <div class="status">{{ 'Effective only when the payment below is received.' if conditional else 'The payment below has been received.' }}</div>
 
     <table class="facts">
-        <tr><td class="label">Claimant</td><td>{{ company.company_name }}</td></tr>
+        <tr><td class="label">Claimant</td><td>{{ company.display_name or company.company_name }}</td></tr>
         <tr><td class="label">Owner</td><td>{{ owner }}</td></tr>
         <tr><td class="label">Project</td><td>{{ project }}</td></tr>
         <tr><td class="label">Payment</td><td>{{ waiver.amount | currency }}{% if payment and payment.date %}, dated {{ payment.date | fdate }}{% endif %}</td></tr>
@@ -52,7 +52,7 @@
     {% if waiver.notes %}<p>{{ waiver.notes }}</p>{% endif %}
 
     <div class="sign">
-        <div class="line">{{ waiver.signed_by or '' }}<br>Signed for {{ company.company_name }}</div>
+        <div class="line">{{ waiver.signed_by or '' }}<br>Signed for {{ company.display_name or company.company_name }}</div>
         <div class="line" style="margin-top:28px; width:200px;">Date</div>
     </div>
     <div class="note">Some states require their own form of lien waiver. Check yours before relying on this one.</div>
