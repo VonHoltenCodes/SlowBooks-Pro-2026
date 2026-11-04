@@ -95,8 +95,79 @@ def sniff_reader(csv_text: str) -> csv.DictReader:
 
 
 def strip_code_suffix(name: str) -> str:
-    """'Name (Code)' → 'name' for cross-file account matching."""
-    return name.split("(")[0].strip().lower()
+    """An account's matching key, the one every side of an import uses (the
+    chart files, the journal, the trial balance): 'Name (Code)' → 'name',
+    and the same for each level of a 'Parent:Child' path, so
+    'Payroll Liabilities (2100):Federal Unemployment (940)' and
+    'Payroll Liabilities:Federal Unemployment' are one account (#690).
+    Before #690 only the text before the first '(' was kept, which cut a
+    parent's suffix off together with every child under it."""
+    return ":".join(part.split("(")[0].strip() for part in name.lower().split(":"))
+
+
+def _account_keys(db: Session, accounts: list[dict]) -> dict:
+    """{matching key → (name, type)} for the accounts in the books and the
+    chart files' specs: the planned chart, as the import will have it."""
+    keys: dict = {}
+    for acct in db.query(Account).all():
+        keys.setdefault(strip_code_suffix(acct.name), (acct.name, acct.account_type))
+    for spec in accounts:
+        keys.setdefault(strip_code_suffix(spec["name"]), (spec["name"], spec["type"]))
+    return keys
+
+
+def _opening_accounts(
+    db: Session, accounts: list[dict], opening_balances: list[dict]
+) -> tuple[list[dict], list[str], list[str]]:
+    """The accounts the opening balances need that the chart files do not
+    list (#690): (specs to create, notes, names that cannot be planned).
+
+    A trial balance may name an account the Balance Sheet and the P&L leave
+    out. A sub-account of one the chart has is planned under it, with its
+    parent's type; any other is named, and the import refuses, rather than
+    dropping its balance from the opening journal at apply. Decided the same
+    way for the dry run and the apply."""
+    keys = _account_keys(db, accounts)
+    extra: list[dict] = []
+    notes: list[str] = []
+    missing: list[str] = []
+    # parents before their children, so a missing parent can be planned first
+    for entry in sorted(opening_balances, key=lambda e: e["account"].count(":")):
+        if entry["account"] in keys:
+            continue
+        name = (entry.get("name") or entry["account"]).strip()
+        parent = name.rsplit(":", 1)[0] if ":" in name else ""
+        found = keys.get(strip_code_suffix(parent)) if parent else None
+        if found is None:
+            missing.append(name)
+            continue
+        parent_name, acct_type = found
+        extra.append(
+            {
+                "code": None,
+                "name": name,
+                "type": acct_type,
+                "description": None,
+                "bank_kind": None,
+                "detail_type": None,
+                "parent": parent_name,
+            }
+        )
+        keys[entry["account"]] = (name, acct_type)
+        notes.append(
+            f"Account {name!r} is on the trial balance but not in the chart "
+            f"files; it will be created as a sub-account of {parent_name!r} "
+            f"({_value(acct_type)}) to carry its opening balance"
+        )
+    return extra, notes, missing
+
+
+def _missing_problem(missing: list[str]) -> str:
+    return (
+        f"The trial balance has a balance on {len(missing)} account(s) that the "
+        f"chart files do not list: {', '.join(repr(n) for n in missing)}. Add "
+        f"them to the chart of accounts with their type, then import again"
+    )
 
 
 # ── The engine ───────────────────────────────────────────────────────────
@@ -353,6 +424,7 @@ def dry_run_bundle(
     known = {a["name"].lower() for a in accounts}
     known |= {strip_code_suffix(a["name"]) for a in accounts}
     known |= {a.name.lower() for a in db.query(Account).all()}
+    known |= {strip_code_suffix(a.name) for a in db.query(Account).all()}
 
     # A journal whose every line is 0.00 "balances" — and then posts nothing.
     # That is what an unrecognised amount column looks like from here: the
@@ -417,8 +489,16 @@ def dry_run_bundle(
 
     opening_balances: list[dict] = []
     if "tb" in bundle and "tb" in parsers:
-        tb, tb_errors = parsers["tb"](bundle["tb"])
+        tb_read, tb_errors = parsers["tb"](bundle["tb"])
         errors.extend(tb_errors)
+        # the trial balance keyed the way the journal is (#690); a name as
+        # the file wrote it is kept for an account the chart lacks
+        tb: dict[str, Decimal] = {}
+        tb_names: dict[str, str] = {}
+        for raw_name, net in tb_read.items():
+            key = strip_code_suffix(raw_name)
+            tb[key] = tb.get(key, Decimal("0")) + net
+            tb_names.setdefault(key, raw_name)
         if not tb:
             header = (bundle["tb"].lstrip("\ufeff").splitlines() or [""])[0]
             errors.append(
@@ -446,7 +526,8 @@ def dry_run_bundle(
             # to exactly zero or that post fails mid-import.
             if _q(abs(sum(d for _, d in residuals))) == 0:
                 opening_balances = [
-                    {"account": name, "amount": float(diff)} for name, diff in residuals
+                    {"account": name, "name": tb_names[name], "amount": float(diff)}
+                    for name, diff in residuals
                 ]
                 warnings.append(
                     f"Trial balance differs from the journals on "
@@ -464,6 +545,15 @@ def dry_run_bundle(
         # A dialect that set the trial balance aside (one on the cash basis,
         # beside an accrual journal) has said so in a note of its own.
         warnings.append("No trial balance file supplied — balance verification skipped")
+
+    # Every account an opening balance lands on is in the planned chart, or
+    # is planned now, or the import is refused with its name (#690): the
+    # apply used to skip one it could not find and post a short entry.
+    extra, notes, missing = _opening_accounts(db, accounts, opening_balances)
+    accounts = accounts + extra
+    warnings.extend(notes)
+    if missing:
+        errors.append(_missing_problem(missing))
 
     # Preview the parent rules the import applies (#416): the same plan the
     # apply follows, so the inheritance and refusal warnings — identical
@@ -495,6 +585,20 @@ def run_import_bundle(
         return {**verdict, "imported_accounts": 0, "imported_journals": 0}
 
     accounts, _ = parsers["coa"](bundle["coa"])
+    # the accounts the dry run planned for the opening balances (#690),
+    # created with the chart; one it could not plan refuses before writing
+    extra, _, missing = _opening_accounts(
+        db, accounts, verdict.get("opening_balances") or []
+    )
+    if missing:
+        return {
+            **verdict,
+            "ok": False,
+            "errors": list(verdict["errors"]) + [_missing_problem(missing)],
+            "imported_accounts": 0,
+            "imported_journals": 0,
+        }
+    accounts = accounts + extra
     created = 0
     warnings = list(verdict.get("warnings") or [])
     by_name: dict[str, Account] = {a.name.lower(): a for a in db.query(Account).all()}
@@ -533,6 +637,11 @@ def run_import_bundle(
         made[decision["index"]] = acct
         by_name[spec["name"].lower()] = acct
         created += 1
+    # the matching key of every account, books' and new (#690): what the
+    # trial balance and the journal's "Name (Code)" forms resolve through
+    by_key: dict[str, Account] = {}
+    for acct in by_name.values():
+        by_key.setdefault(strip_code_suffix(acct.name), acct)
 
     journals, _ = parsers["gl"](bundle["gl"])
 
@@ -543,10 +652,14 @@ def run_import_bundle(
 
         first_date = min(group[0]["date"] for group in journals if group)
         ob_lines = []
+        unresolved = []
         for entry in verdict["opening_balances"]:
             amount = _q(Decimal(str(entry["amount"])))
-            acct = by_name.get(entry["account"])
-            if acct is None or amount == 0:
+            acct = by_name.get(entry["account"]) or by_key.get(entry["account"])
+            if acct is None:
+                unresolved.append(entry.get("name") or entry["account"])
+                continue
+            if amount == 0:
                 continue
             ob_lines.append(
                 {
@@ -556,6 +669,10 @@ def run_import_bundle(
                     "description": f"Opening balance — {acct.name}",
                 }
             )
+        if unresolved:
+            # never a short opening entry (#690); nothing is committed yet
+            db.rollback()
+            raise DataProblem(_missing_problem(unresolved))
         opening_desc = f"{source_label} migration — opening balances"
         already_opened = (
             db.query(Transaction.id)
@@ -586,7 +703,7 @@ def run_import_bundle(
             # suffix); the stripped form covers "Name (Code)" GL exports.
             acct = (
                 by_name.get(row["account"].lower())
-                or by_name[strip_code_suffix(row["account"])]
+                or by_key[strip_code_suffix(row["account"])]
             )
             debit = _q(row["debit"])
             credit = _q(row["credit"])
