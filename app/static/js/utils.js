@@ -890,6 +890,292 @@ const DateKeys = {
 };
 document.addEventListener('keydown', DateKeys.handle, true);
 
+// QuickMath (#696), as QuickBooks Desktop has it: +, -, * or / typed in an
+// amount box that already holds a figure opens a calculator tape under the
+// box, its first term the box's figure ("12.50 + "). The tape is a text
+// box (a number box shows no expression and reports none). = or Enter
+// works the sum out and puts it in the amount box, rounded to the box's
+// own places, with the box's input and change events, so the line and the
+// form total follow; Tab does the same and moves on; Escape closes the
+// tape and leaves the amount as it was. A minus typed in an empty box is
+// still a sign. One delegated handler, as DateKeys.
+const QuickMath = {
+    // The sum as a fraction of BigInts [numerator, denominator], worked out
+    // exactly (no eval): a recursive descent over numbers, + - * / and
+    // parentheses, * and / before + and -. { value } or { error } where the
+    // error is 'divide' (by zero), 'unfinished' (an operator or a
+    // parenthesis waiting for more) or 'invalid' (anything else).
+    evaluate(text) {
+        const src = String(text == null ? '' : text)
+            .replace(/[−–]/g, '-').replace(/×/g, '*').replace(/÷/g, '/');
+        const tokens = [];
+        const re = /\s*(?:(\d[\d,]*\.?\d*|\.\d+)|([-+*/()]))/y;
+        let at = 0;
+        while (at < src.length) {
+            if (/^\s*$/.test(src.slice(at))) break;
+            re.lastIndex = at;
+            const m = re.exec(src);
+            if (!m) return { error: 'invalid' };
+            tokens.push(m[1] !== undefined ? { num: QuickMath._parse(m[1].replace(/,/g, '')) } : { op: m[2] });
+            at = re.lastIndex;
+        }
+        if (!tokens.length) return { error: 'unfinished' };
+        let i = 0;
+        const fail = (kind) => { throw new Error(kind); };
+        const peek = () => tokens[i];
+        const factor = () => {
+            const t = tokens[i++];
+            if (!t) fail('unfinished');
+            if (t.op === '-') { const [n, d] = factor(); return [-n, d]; }
+            if (t.op === '+') return factor();
+            if (t.op === '(') {
+                const v = sum();
+                if (!peek()) fail('unfinished');
+                if (peek().op !== ')') fail('invalid');
+                i++;
+                return v;
+            }
+            if (t.num) return t.num;
+            return fail('invalid');
+        };
+        const term = () => {
+            let v = factor();
+            while (peek() && (peek().op === '*' || peek().op === '/')) {
+                const op = tokens[i++].op;
+                const w = factor();
+                if (op === '*') v = QuickMath._norm(v[0] * w[0], v[1] * w[1]);
+                else {
+                    if (w[0] === 0n) fail('divide');
+                    v = QuickMath._norm(v[0] * w[1], v[1] * w[0]);
+                }
+            }
+            return v;
+        };
+        const sum = () => {
+            let v = term();
+            while (peek() && (peek().op === '+' || peek().op === '-')) {
+                const op = tokens[i++].op;
+                const w = term();
+                const n = op === '+' ? v[0] * w[1] + w[0] * v[1] : v[0] * w[1] - w[0] * v[1];
+                v = QuickMath._norm(n, v[1] * w[1]);
+            }
+            return v;
+        };
+        try {
+            const value = sum();
+            if (i < tokens.length) return { error: 'invalid' };
+            return { value };
+        } catch (e) {
+            if (/^(divide|unfinished|invalid)$/.test(e.message)) return { error: e.message };
+            throw e;
+        }
+    },
+    _parse(s) {
+        const [whole, frac = ''] = s.split('.');
+        return QuickMath._norm(BigInt((whole || '0') + frac), 10n ** BigInt(frac.length));
+    },
+    _norm(n, d) {
+        if (d < 0n) { n = -n; d = -d; }
+        let a = n < 0n ? -n : n, b = d;
+        while (b) [a, b] = [b, a % b];
+        return a > 1n ? [n / a, d / a] : [n, d];
+    },
+    // The fraction as the box shows a figure: rounded half away from zero
+    // to `places`, and never fewer than two decimals ("150.00").
+    format(value, places = 2) {
+        const [n, d] = value;
+        const scale = 10n ** BigInt(places);
+        const abs = n < 0n ? -n : n;
+        let q = (abs * scale) / d;
+        if ((abs * scale) % d * 2n >= d) q += 1n;
+        let digits = q.toString().padStart(places + 1, '0');
+        let out = places ? `${digits.slice(0, -places)}.${digits.slice(-places)}` : digits;
+        if (places > 2) out = out.replace(/0+$/, '').replace(/\.(\d?)$/, (m, x) => `.${x.padEnd(2, '0')}`);
+        return (n < 0n && q > 0n ? '-' : '') + out;
+    },
+    // The sum worked out for the box: { text } or { error, message }.
+    result(expr, places = 2) {
+        const r = QuickMath.evaluate(expr);
+        if (r.error) return { error: r.error, message: QuickMath.MESSAGES[r.error] };
+        return { text: QuickMath.format(r.value, places) };
+    },
+    MESSAGES: {
+        divide: 'This divides by zero. Change the sum, or press Escape to keep the amount as it was.',
+        unfinished: 'The sum is not finished. Add a number, or press Escape to keep the amount as it was.',
+        invalid: 'Only numbers, + - * / and parentheses work here. Fix the sum, or press Escape.',
+    },
+    // The boxes it works in: an amount (step 0.01, or a money field such as
+    // a line's rate) that can be typed in.
+    isAmountBox(el) {
+        if (!el || el.tagName !== 'INPUT' || el.type !== 'number') return false;
+        if (el.readOnly || el.disabled) return false;
+        const step = el.getAttribute ? el.getAttribute('step') : el.step;
+        return step === '0.01' || !!(el.classList && el.classList.contains('money'));
+    },
+    // The box's decimal places: its step's, two at least.
+    places(el) {
+        const step = String((el.getAttribute ? el.getAttribute('step') : el.step) || '');
+        const m = /^0?\.(\d+)$/.exec(step);
+        return Math.max(2, m ? m[1].length : 2);
+    },
+    // What the box is called, for the tape's own name: its label, its
+    // aria-label, or a line table's column ("Rate, line 2").
+    boxName(el) {
+        const clean = (s) => String(s || '').replace(/\s+/g, ' ').replace(/\s*\*\s*$/, '').trim();
+        const aria = clean(el.getAttribute('aria-label'));
+        if (aria) return aria;
+        const by = el.getAttribute('aria-labelledby');
+        if (by) {
+            const t = clean(by.split(/\s+/).map(id => (document.getElementById(id) || {}).textContent || '').join(' '));
+            if (t) return t;
+        }
+        if (el.labels && el.labels.length) {
+            const t = clean(el.labels[0].textContent);
+            if (t) return t;
+        }
+        const cell = el.closest && el.closest('td');
+        const table = cell && cell.closest('table');
+        if (table && table.tHead && table.tHead.rows.length) {
+            const head = table.tHead.rows[table.tHead.rows.length - 1].cells[cell.cellIndex];
+            const t = clean(head && head.textContent);
+            const row = cell.parentElement;
+            const body = row && row.parentElement;
+            const n = body && body.tagName === 'TBODY' ? [...body.rows].indexOf(row) + 1 : 0;
+            if (t) return n > 0 ? `${t}, line ${n}` : t;
+        }
+        return clean(el.placeholder) || 'the amount';
+    },
+    _open: null,
+    // The keydown handler: opens the tape from an amount box, and keeps the
+    // tape's own keys. True when the key was taken.
+    handle(e) {
+        const open = QuickMath._open;
+        if (open && e.target === open.input) return QuickMath._tapeKey(e, open);
+        const el = e.target;
+        if (!QuickMath.isAmountBox(el) || e.ctrlKey || e.altKey || e.metaKey || e.isComposing) return false;
+        if (!['+', '-', '*', '/'].includes(e.key)) return false;
+        if (typeof placeDecimal === 'function') placeDecimal(el);
+        if (String(el.value).trim() === '') return false;  // a leading minus is a sign
+        e.preventDefault();
+        e.stopPropagation();
+        QuickMath.show(el, e.key);
+        return true;
+    },
+    _tapeKey(e, open) {
+        e.stopPropagation();  // the tape's keys are its own: no dialog Escape, no form Enter
+        if (e.key === 'Escape') { e.preventDefault(); QuickMath.close(true); return true; }
+        if (e.key === 'Enter' || e.key === '=') { e.preventDefault(); QuickMath.commit(); return true; }
+        if (e.key === 'Tab') { e.preventDefault(); QuickMath.commit(e.shiftKey ? -1 : 1); return true; }
+        if (e.ctrlKey || e.metaKey || e.altKey || e.isComposing) return false;
+        if (e.code === 'NumpadDecimal' && e.key !== '.') {
+            e.preventDefault();
+            open.input.setRangeText('.', open.input.selectionStart, open.input.selectionEnd, 'end');
+            open.input.dispatchEvent(new Event('input', { bubbles: true }));
+            return true;
+        }
+        if (e.key.length === 1 && !/[\d.,+\-*/() ]/.test(e.key)) { e.preventDefault(); return true; }
+        return false;
+    },
+    show(box, op) {
+        QuickMath.close(false);
+        const tape = document.createElement('div');
+        tape.className = 'qmath';
+        tape.id = 'qmath';
+        const name = `Calculator for ${QuickMath.boxName(box)}`;
+        tape.innerHTML = `<input id="qmath-input" class="qmath-input" type="text" inputmode="decimal"
+                autocomplete="off" spellcheck="false" aria-describedby="qmath-hint qmath-status">
+            <div id="qmath-status" class="qmath-status" role="status" aria-live="polite"></div>
+            <div id="qmath-hint" class="qmath-hint">Enter or = puts it in · Esc cancels</div>`;
+        const input = tape.querySelector('input');
+        input.setAttribute('aria-label', name);
+        input.value = `${box.value} ${op} `;
+        // in the box's own place in the page, so a dialog's name and its
+        // modal reading take it in; outside a label that wraps the box
+        const wrap = box.closest('label');
+        (wrap || box).insertAdjacentElement('afterend', tape);
+        const open = { box, tape, input, status: tape.querySelector('.qmath-status'), places: QuickMath.places(box) };
+        open.place = () => QuickMath._place(open);
+        open.left = () => setTimeout(() => {
+            if (QuickMath._open !== open) return;
+            if (!box.isConnected || (document.activeElement !== input && !tape.contains(document.activeElement))) {
+                QuickMath.close(false);
+            }
+        }, 0);
+        QuickMath._open = open;
+        input.addEventListener('input', () => QuickMath._preview(open));
+        input.addEventListener('focusout', open.left);
+        window.addEventListener('scroll', open.place, true);
+        window.addEventListener('resize', open.place);
+        QuickMath._place(open);
+        input.focus();
+        const end = input.value.length;
+        input.setSelectionRange(end, end);
+    },
+    // Under the box (over it near the bottom of the window), inside the
+    // window from side to side, as the type-ahead's list sits.
+    _place(open) {
+        const { box, tape } = open;
+        if (!box.isConnected) { QuickMath.close(false); return; }
+        const r = box.getBoundingClientRect();
+        const w = Math.min(260, window.innerWidth - 8);
+        tape.style.width = `${w}px`;
+        tape.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - w - 4))}px`;
+        const h = tape.offsetHeight || 70;
+        const below = window.innerHeight - r.bottom - 4;
+        if (below < h && r.top - 4 > below) tape.style.top = `${Math.max(4, r.top - h - 2)}px`;
+        else tape.style.top = `${r.bottom + 2}px`;
+    },
+    // The running total, said politely as the sum is typed; nothing while
+    // it is unfinished (a sentence only when = asks for the total).
+    _preview(open) {
+        const r = QuickMath.result(open.input.value, open.places);
+        open.tape.classList.remove('qmath--error');
+        open.input.removeAttribute('aria-invalid');
+        open.status.textContent = r.error ? '' : `= ${r.text}`;
+    },
+    // Works the sum out into the box and closes; `move` (1 or -1) goes on
+    // to the next or previous field, as Tab. A sum that cannot be worked
+    // out says why and the tape stays open.
+    commit(move) {
+        const open = QuickMath._open;
+        if (!open) return false;
+        const r = QuickMath.result(open.input.value, open.places);
+        if (r.error) {
+            open.tape.classList.add('qmath--error');
+            open.input.setAttribute('aria-invalid', 'true');
+            open.status.textContent = r.message;
+            return false;
+        }
+        const box = open.box;
+        QuickMath.close(false);
+        box.value = r.text;
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+        box.dispatchEvent(new Event('change', { bubbles: true }));
+        if (!move) { focusFor(box, true); return true; }
+        const modal = box.closest('#modal');
+        const root = modal || document.body;
+        const stops = _tabStops(root, box);
+        const i = stops.indexOf(box);
+        let next = i < 0 ? null : stops[i + move];
+        if (!next && modal && stops.length) next = stops[(i + move + stops.length) % stops.length];
+        if (next) _tabTo(next); else focusFor(box, true);
+        return true;
+    },
+    // Takes the tape away; `refocus` puts the caret back in the box.
+    close(refocus) {
+        const open = QuickMath._open;
+        if (!open) return;
+        QuickMath._open = null;
+        window.removeEventListener('scroll', open.place, true);
+        window.removeEventListener('resize', open.place);
+        open.input.removeEventListener('focusout', open.left);
+        const hadFocus = document.activeElement === open.input;
+        open.tape.remove();
+        if (refocus || hadFocus) focusFor(open.box, true);
+    },
+};
+document.addEventListener('keydown', QuickMath.handle, true);
+
 // opts.wide: a form whose rows are wider than a dialog — the line-item
 // tables with ten or eleven columns (job cost entry). The default 700px
 // dialog clipped the last columns of that table with no scrollbar (#174).

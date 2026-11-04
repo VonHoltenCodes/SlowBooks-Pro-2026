@@ -3243,6 +3243,47 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
     .cbx-opt[aria-selected="true"] { outline: 2px solid Highlight; outline-offset: -2px; }
 }
 
+/* The calculator tape under an amount box (QuickMath, #696): fixed to the
+   window, as the type-ahead's list, so no table or dialog clips it; its
+   width never wider than the window less a margin (320 px phones). */
+.qmath {
+    position: fixed;
+    z-index: 450;
+    box-sizing: border-box;
+    max-width: calc(100vw - 8px);
+    padding: 4px;
+    background: var(--panel-bg);
+    color: var(--text-primary);
+    border: 1px solid var(--qb-navy);
+    box-shadow: 0 4px 14px rgba(0, 20, 50, 0.22);
+    font-family: var(--font);
+    font-size: 11px;
+    text-align: left;
+}
+#qmath-input {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 0;
+    padding: 3px 5px;
+    font-family: var(--font-mono, monospace);
+    font-size: 12px;
+    text-align: right;
+    color: var(--text-primary);
+    background: var(--panel-bg);
+    border: 1px solid var(--input-border);
+}
+.qmath-status {
+    min-height: 1.3em;
+    margin-top: 3px;
+    text-align: right;
+    font-weight: 700;
+    overflow-wrap: anywhere;
+}
+.qmath--error .qmath-status { color: var(--danger); font-weight: 400; text-align: left; }
+.qmath--error #qmath-input { border-color: var(--danger); }
+.qmath-hint { color: var(--text-secondary); font-size: 10px; }
+
 /* ============================================================================
  * A FIELD'S FOCUS, everywhere on a page and in a dialog
  * The blue border and the pale ground, never the browser's ring or the
