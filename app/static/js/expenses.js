@@ -8,6 +8,8 @@
  */
 const ExpensesPage = {
     _vendors: [],
+    // the vendor-list choice standing for a payee with no vendor (W-101)
+    PAYEE: '__payee__',
     _accounts: [],
 
     async render() {
@@ -133,8 +135,18 @@ const ExpensesPage = {
         Replace.set(form, 'memo', x.memo || '');
         Replace.set(form, 'class_id', x.class_id || '');
         Replace.set(form, 'job_id', x.job_id || '');
+        // the payee carries over (W-101): an expense with a payee and no
+        // vendor (one that came in over the API) replaces as one, its
+        // payee standing in the vendor list as its own choice
+        form.dataset.replacePayee = x.payee || '';
+        form.dataset.replaceVendor = x.vendor_id ? String(x.vendor_id) : '';
         const vendor = document.getElementById('expense-vendor');
         if (vendor && x.vendor_id) vendor.value = String(x.vendor_id);
+        else if (vendor && x.payee) {
+            const after = vendor.querySelector(`option[value="${VendorQuickAdd.NEW}"]`) || vendor.options[0];
+            after.insertAdjacentHTML('afterend', `<option value="${ExpensesPage.PAYEE}">${escapeHtml(x.payee)} (payee, no vendor)</option>`);
+            vendor.value = ExpensesPage.PAYEE;
+        }
         $('#expense-lines').innerHTML = '';
         (x.lines || []).forEach(l => ExpensesPage.addLine(l));
         if (!(x.lines || []).length) ExpensesPage.addLine();
@@ -335,10 +347,17 @@ const ExpensesPage = {
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form, { rows: '#expense-lines tr', cls: 'line-function' }))) return;
         try {
-            const vendorId = await VendorQuickAdd.ensure('expense-vendor');
+            const vendorSel = document.getElementById('expense-vendor');
+            const payeeOnly = !!vendorSel && vendorSel.value === ExpensesPage.PAYEE;
+            const vendorId = payeeOnly ? null : await VendorQuickAdd.ensure('expense-vendor');
+            // a replacement keeps the payee while its vendor is the one it had
+            const payee = form.dataset.replacePayee
+                && (payeeOnly || String(vendorId) === form.dataset.replaceVendor)
+                ? form.dataset.replacePayee : null;
             const body = {
                 date: form.date.value,
                 vendor_id: vendorId,
+                payee,
                 paid_from_account_id: paidFrom,
                 amount: parseFloat(form.amount.value),
                 lines,
