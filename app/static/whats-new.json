@@ -1,4 +1,15 @@
 {
+  "2.31.6": {
+    "title": "Ctrl+F, arithmetic in the amount box, and the big file that would not open",
+    "items": [
+      "Large company files open after an upgrade: the missing ledger indexes are added, and while the app catches up older records at its first start the company picker shows what it is doing instead of giving up after two minutes.",
+      "A QuickBooks Online export whose trial balance spells a sub-account differently from the balance sheet now imports with that account's opening balance; an account the import cannot place is named in the dry run, and any import problem comes back as a readable message instead of HTTP 500.",
+      "The job's Cost Detail tab has Save PDF and Save CSV.",
+      "The bank and card register has a Hide voided box that hides voided entries and their reversals, says how many it hid, and stays as you left it.",
+      "In the desktop app Ctrl+F (⌘F on a Mac) opens Search, and Search finds transactions by memo, reference or check number, or by amount.",
+      "Type +, −, × or ÷ after an amount in any amount box and a calculator tape opens; = or Enter puts the result in, Tab puts it in and moves on, Escape leaves the amount as it was."
+    ]
+  },
   "2.31.5": {
     "title": "Real payment terms, a sample company to try, and the window where you left it",
     "items": [
