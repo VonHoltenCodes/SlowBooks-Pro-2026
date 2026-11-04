@@ -1916,6 +1916,14 @@ _GEOMETRY_GRAB_W = 100
 _GEOMETRY_GRAB_H = 40
 # Windows parks minimized windows at (-32000, -32000); never save that.
 _MINIMIZED_PARK = -30000
+# macOS (NEW-199): pywebview's "maximized" there is full screen and its
+# maximize() is a resize to the screen, so a saved maximized flag never comes
+# back as a real maximize. A resize that fills a screen -- full screen, our own
+# maximize(), a title-bar zoom -- is not a new normal size. "Fills" allows a
+# few pixels of rounding across and the menu bar (up to 38 px on a notched
+# Mac) plus those few pixels down.
+_MAC_FILL_SLACK_W = 8
+_MAC_FILL_SLACK_H = 48
 
 
 def window_geometry_path() -> Path:
@@ -1988,9 +1996,11 @@ def _default_window_geometry() -> dict:
     return {"x": None, "y": None, "width": width, "height": height, "maximized": False}
 
 
-def restore_window_geometry(saved: dict | None, screens) -> dict:
+def restore_window_geometry(
+    saved: dict | None, screens, platform: str | None = None
+) -> dict:
     """Decide where the window opens. ``screens`` is a list of (x, y, width,
-    height) for every connected screen.
+    height) for every connected screen; ``platform`` defaults to sys.platform.
 
     - Nothing saved (missing or malformed file): today's default, 1280x860,
       placed by the OS.
@@ -2000,12 +2010,16 @@ def restore_window_geometry(saved: dict | None, screens) -> dict:
       whole window is on it).
     - Not on any connected screen (a monitor since unplugged): the default.
     - Screen list unknown (empty): the saved size, placed by the OS.
+    - macOS: never opens maximized. pywebview's maximize there is only a
+      screen-sized resize, not full screen, so the saved normal rectangle
+      opens instead; the green button brings full screen back.
     """
     if not saved:
         return _default_window_geometry()
+    platform = platform or sys.platform
     width = max(int(saved["width"]), MIN_WINDOW_SIZE[0])
     height = max(int(saved["height"]), MIN_WINDOW_SIZE[1])
-    maximized = bool(saved.get("maximized"))
+    maximized = bool(saved.get("maximized")) and platform != "darwin"
     x, y = saved.get("x"), saved.get("y")
     if not screens:
         return {
@@ -2049,15 +2063,28 @@ def restore_window_geometry(saved: dict | None, screens) -> dict:
 class WindowGeometryTracker:
     """Follows the window's move/resize/maximize events so the normal
     (un-maximized) rectangle can be saved on close. Pure: the event handlers
-    take plain numbers, and ``clock`` is injectable for tests."""
+    take plain numbers, and ``clock`` is injectable for tests.
+
+    On macOS (``platform`` "darwin") a resize that fills one of ``screens``
+    counts as a maximize: the normal rectangle is kept, and moves are ignored
+    until the window is resized to something smaller again."""
 
     # Maximizing or minimizing fires resize/move events around the state event
     # (in any order: pywebview runs handlers on threads); those belong to the
     # state change, not to the normal rectangle.
     MAXIMIZE_SETTLE = 1.0
 
-    def __init__(self, geometry: dict, clock=time.monotonic):
+    def __init__(
+        self,
+        geometry: dict,
+        clock=time.monotonic,
+        screens=(),
+        platform: str | None = None,
+    ):
         self._clock = clock
+        self._screens = list(screens or ())
+        self._mac = (platform or sys.platform) == "darwin"
+        self._filling = False
         self.x = geometry.get("x")
         self.y = geometry.get("y")
         self.width = geometry["width"]
@@ -2074,8 +2101,15 @@ class WindowGeometryTracker:
         self._history.append((now, self._rect()))
         self._history = [h for h in self._history if now - h[0] <= 5.0][-20:]
 
+    def _fills_a_screen(self, width, height) -> bool:
+        return any(
+            abs(width - sw) <= _MAC_FILL_SLACK_W
+            and abs(height - sh) <= _MAC_FILL_SLACK_H
+            for _sx, _sy, sw, sh in self._screens
+        )
+
     def on_moved(self, x, y) -> None:
-        if self.maximized or self.minimized:
+        if self.maximized or self.minimized or self._filling:
             return
         if x is None or y is None or x <= _MINIMIZED_PARK or y <= _MINIMIZED_PARK:
             return
@@ -2085,6 +2119,13 @@ class WindowGeometryTracker:
     def on_resized(self, width, height) -> None:
         if self.maximized or self.minimized or not width or not height:
             return
+        if self._mac:
+            if self._fills_a_screen(width, height):
+                # A zoom to the screen: drop the moves it fired just before.
+                self._roll_back_settle()
+                self._filling = True
+                return
+            self._filling = False
         self._remember()
         self.width, self.height = int(width), int(height)
 
@@ -2183,9 +2224,8 @@ def run_window(port: int, log_fh=None) -> int:
 
     # Open where it was closed last time (#681), clamped to today's screens.
     geometry_path = window_geometry_path()
-    geometry = restore_window_geometry(
-        load_window_geometry(geometry_path), _connected_screens(webview)
-    )
+    screens = _connected_screens(webview)
+    geometry = restore_window_geometry(load_window_geometry(geometry_path), screens)
     api = PickerApi(port, log_fh)
     api._window = webview.create_window(
         "SlowBooks Pro 2026",
@@ -2199,7 +2239,7 @@ def run_window(port: int, log_fh=None) -> int:
         min_size=MIN_WINDOW_SIZE,
         zoomable=True,
     )
-    geometry_tracker = WindowGeometryTracker(geometry)
+    geometry_tracker = WindowGeometryTracker(geometry, screens=screens)
     try:
         _track_window_geometry(api._window, geometry_tracker, geometry_path)
     except Exception as exc:  # an older pywebview without these events
