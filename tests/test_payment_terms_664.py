@@ -319,8 +319,19 @@ def test_a_term_on_a_document_keeps_its_rule_and_name(
     assert "2% 10 Net 30" not in [
         t["name"] for t in client.get("/api/payment-terms").json()
     ]
-    inv = _invoice(client, seed_customer.id, "2% 10 Net 30")
-    assert inv["discount_date"] == "2026-10-15"
+    # a new document can't be saved under it (W-102); the one saved under
+    # it before keeps its tie
+    r = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-10-05",
+            "terms": "2% 10 Net 30",
+            "lines": [{"description": "Service", "quantity": 1, "rate": "100.00"}],
+        },
+    )
+    assert r.status_code == 422
+    assert '"2% 10 Net 30" is inactive' in r.json()["detail"]
 
 
 def test_a_term_nothing_carries_can_change(client):

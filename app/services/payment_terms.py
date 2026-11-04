@@ -445,6 +445,10 @@ def link_terms(db: Session, doc) -> None:
     changes them (retie)."""
     with db.no_autoflush:
         term = find_term(db, doc.terms)
+    # a new tie to an inactive term is refused (W-102); one the document
+    # already has (its terms retyped) stands
+    if term is not None and term.id != doc.payment_term_id:
+        refuse_inactive(term)
     doc.payment_term_id = term.id if term is not None else None
 
 
@@ -613,6 +617,27 @@ def term_id_for(db: Session, text: Optional[str]) -> Optional[int]:
     return term.id if term is not None else None
 
 
+def inactive_sentence(term: PaymentTerm) -> str:
+    return (
+        f'"{term.name}" is inactive on the terms list, so nothing new can be '
+        "saved under it. Choose other terms, or an administrator can make it "
+        "active again under Settings > Payment Terms."
+    )
+
+
+def refuse_inactive(term: PaymentTerm) -> None:
+    """The terms of a new document, or terms a person changes on one, may
+    name only an active entry (W-102): the forms offer no inactive term,
+    and the API now refuses what they don't offer, 422 naming it. A
+    document saved under it before keeps its tie; find_term still matches
+    inactive entries for that."""
+    if term.is_active:
+        return
+    from fastapi import HTTPException
+
+    raise HTTPException(status_code=422, detail=inactive_sentence(term))
+
+
 def picked_term_id(
     db: Session, text: Optional[str], payment_term_id: Optional[int]
 ) -> Optional[int]:
@@ -625,7 +650,12 @@ def picked_term_id(
     deliberate tie, so the identical-text rule that leaves a copy untied
     does not apply to it."""
     if payment_term_id is None:
-        return term_id_for(db, text)
+        with db.no_autoflush:
+            term = find_term(db, text)
+        if term is None:
+            return None
+        refuse_inactive(term)
+        return term.id
     from fastapi import HTTPException
 
     term = db.get(PaymentTerm, payment_term_id)
