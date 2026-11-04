@@ -147,7 +147,7 @@ Tab.*
 | Alt+H | Dashboard |
 | Alt+D | Toggle dark mode |
 | `[` outside a field | Hide or show the sidebar (v2.31.5) |
-| Ctrl+K (⌘K on a Mac), or `/` outside a field | Search |
+| Ctrl+K (⌘K on a Mac), or `/` outside a field; in the desktop app Ctrl+F (⌘F) too (in a browser Ctrl+F stays the browser's find in page) | Search |
 | Ctrl+S | Save the open form |
 | Ctrl+Enter | Submit Quick Entry |
 | Escape | Close the dialog (in a date field: leave the field first) |

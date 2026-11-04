@@ -131,6 +131,23 @@ def test_the_alt_shortcuts_compare_the_keys_position_and_cmd_k_finds():
     assert "((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k')" in keys
 
 
+def test_ctrl_f_finds_only_in_the_desktop_window():
+    """#695: the desktop app has no find bar, so Ctrl+F (⌘F) is its search
+    there; in a browser it stays the browser's find in page."""
+    app = _src("app.js")
+    keys = app[app.index("// Keyboard shortcuts.") :]
+    keys = keys[: keys.index("// Close search dropdown")]
+    assert (
+        "const desktopFind = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F') && App.inDesktopShell();"
+        in keys
+    )
+    assert "|| desktopFind ||" in keys
+    shim = _src("desktop_shim.js")
+    assert "inShell: inDesktopShell," in shim
+    assert "window.SlowbooksDesktop.inShell()" in app
+    assert "...(App.inDesktopShell() ? [`${mod}+F`] : [])" in app
+
+
 # ── NEW-30 ────────────────────────────────────────────────────────────────
 
 

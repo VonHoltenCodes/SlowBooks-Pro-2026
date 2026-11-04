@@ -270,6 +270,19 @@ const App = {
         if (typeof n === 'number' && n < App._nShown) history.forward(); else history.back();
     },
     isMac() { return typeof navigator !== 'undefined' && /Mac|iP(hone|ad|od)/.test(navigator.platform || ''); },
+    // The desktop window (desktop_shim.js), where Ctrl+F (⌘F) is the app's
+    // search; in a browser it stays the browser's find in page (#695).
+    inDesktopShell() { return !!(window.SlowbooksDesktop && window.SlowbooksDesktop.inShell && window.SlowbooksDesktop.inShell()); },
+    // The search box names its keys to a screen reader: Ctrl+K (⌘K) and /,
+    // and Ctrl+F (⌘F) in the desktop window. Again once pywebview is ready,
+    // which on a Mac is after the page has drawn.
+    labelSearchKeys() {
+        const search = $('#global-search');
+        if (!search) return;
+        const mod = App.isMac() ? 'Meta' : 'Control';
+        const keys = [`${mod}+K`, ...(App.inDesktopShell() ? [`${mod}+F`] : []), '/'];
+        search.setAttribute('aria-keyshortcuts', keys.join(' '));
+    },
     // What a toolbar button says about its shortcut: the hover reads
     // "Enter Bill (Alt+B)" — "(⌥B)" on a Mac, where Alt is Option — and a
     // screen reader hears the ARIA token, which stays Alt+B everywhere
@@ -1986,6 +1999,25 @@ const App = {
         else if (e.key === 'ArrowUp') { e.preventDefault(); focusFor(i > 0 ? items[i - 1] : $('#global-search'), true); }
         else if (e.key === 'Escape') { e.preventDefault(); closeSearchDropdown(); $('#global-search')?.focus(); }
     },
+    // A Transactions hit (#695): "Check #1042 · 09/02/2026 · City Water ·
+    // August water · $125.00", and "(void)" on one that was voided.
+    _searchTransactions: [],
+    searchTransactionText(t) {
+        const word = sourceWord(t.source_type, t.source_kind) + (t.reference ? ` #${t.reference}` : '');
+        const memo = t.memo || t.description;
+        const said = [word, formatDate(t.date), t.payee, memo !== t.payee ? memo : '', formatCurrency(t.total)]
+            .filter(Boolean).join(' · ');
+        return t.voided ? `${said} (void)` : said;
+    },
+    async openSearchTransaction(id) {
+        const t = (App._searchTransactions || []).find(x => x.id === id);
+        if (!t) return;
+        if (t.source_type === 'bank_entry' && t.register_account_id && typeof BankingPage !== 'undefined') {
+            App.navigate(await BankingPage.hrefShowing(t.register_account_id, t.date));
+            return;
+        }
+        App.navigate(String(t.link || `#/journal/${t.id}`).replace(/^\//, ''));
+    },
     async globalSearch(query) {
         const dropdown = $('#search-results');
         if (!dropdown) return;
@@ -2021,7 +2053,14 @@ const App = {
                       text: (i) => doc(i.bill_number, i.vendor_name, i.total) },
                     { key: 'payments', label: 'Payments', onClick: (item) => `PaymentsPage.view(${item.id});closeSearchDropdown();`,
                       text: (i) => doc(formatDate(i.date), i.customer_name, i.amount) },
+                    // any posting by its memo, reference, check number or
+                    // amount (#695): it opens as a drill-down's line does,
+                    // a bank entry on its register; only the id crosses
+                    // into the attribute
+                    { key: 'transactions', label: 'Transactions', onClick: (item) => `App.openSearchTransaction(${Number(item.id)});closeSearchDropdown();`,
+                      text: (t) => App.searchTransactionText(t) },
                 ];
+                App._searchTransactions = results.transactions || [];
                 for (const sec of sections) {
                     const items = results[sec.key];
                     if (items && items.length > 0) {
@@ -2513,6 +2552,7 @@ const App = {
         }
         const search = $('#global-search');
         if (search) search.placeholder = Terms.text(search.placeholder);
+        App.labelSearchKeys();
         const np = Terms.isNonprofit();
         const con = Terms.isConstruction();
         // a sidebar item keeps its own mark for this (see syncSidebarHidden)
@@ -2802,13 +2842,19 @@ const App = {
             // is modal, the search lies under its overlay, and its hits
             // opened behind the dialog where they could be neither read nor
             // clicked (macOS gate NEW-45). Close the dialog, then search.
-            if (((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') || (e.key === '/' && !e.target.closest('input,textarea,select'))) {
+            // Ctrl+F (⌘F) too in the desktop window, which has no find bar
+            // for it to open (#695); in a browser it is the browser's.
+            const desktopFind = (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'f' || e.key === 'F') && App.inDesktopShell();
+            if (((e.ctrlKey || e.metaKey) && !e.altKey && e.key === 'k') || desktopFind || (e.key === '/' && !e.target.closest('input,textarea,select'))) {
                 const overlay = $('#modal-overlay');
-                if (overlay && !overlay.classList.contains('hidden')) { if (e.key === 'k') e.preventDefault(); return; }
+                if (overlay && !overlay.classList.contains('hidden')) { if (e.key === 'k' || desktopFind) e.preventDefault(); return; }
                 const search = $('#global-search');
                 if (search) { search.focus(); e.preventDefault(); }
             }
         });
+
+        // the search box's keys, once the desktop window says it is one
+        window.addEventListener('pywebviewready', () => App.labelSearchKeys());
 
         // Close search dropdown on click outside
         document.addEventListener('click', (e) => {

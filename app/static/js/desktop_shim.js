@@ -229,6 +229,10 @@
 
     window.SlowbooksDesktop = {
         saveFile: saveFile,
+        // whether this page is in the desktop window: there Ctrl+F (⌘F)
+        // finds with the app's search, there being no browser find bar
+        // to fall through to (#695)
+        inShell: inDesktopShell,
         zoom: { handle: zoomKey, wheel: zoomWheel, apply: applyZoom, read: readZoom, restore: restoreZoom },
     };
 
