@@ -41,7 +41,25 @@ ALL_FIVE = [
 
 
 @pytest.mark.parametrize(
-    "width", [884, 900, 1024, 1109, 1110, 1249, 1250, 1264, 1279, 1280, 1366, 1600]
+    "width",
+    [
+        884,
+        900,
+        1024,
+        1109,
+        1110,
+        1249,
+        1250,
+        1264,
+        1279,
+        1280,
+        1366,
+        1400,
+        1403,
+        1409,
+        1410,
+        1600,
+    ],
 )
 def test_the_company_name_keeps_its_room_beside_contact_support(browser, width):
     page = _open(browser, width, 800, "#/")
@@ -53,7 +71,7 @@ def test_the_company_name_keeps_its_room_beside_contact_support(browser, width):
     assert got["right"] <= width, got
     assert got["overflow"] <= 0, got
     assert got["clock"] == (
-        "none" if width < 1400 else "block"
+        "none" if width < 1410 else "block"
     ), got  # W-105: tight below 1400
     assert got["signOut"] <= width, got
     # The quick-entry buttons stay wherever they fit (2.31.1 gate W-87:
