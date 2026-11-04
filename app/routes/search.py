@@ -8,18 +8,24 @@
 # total or balance due, sales receipts, credit memos and estimates by
 # total, payments by amount. Searching 612.30 found nothing (2.17.3
 # exploratory test, W-L8).
+#
+# Transactions (#695): QuickBooks Desktop's Find reaches every posting by
+# its memo, reference number or amount. A check by its number, a journal
+# entry or register entry by its memo, an expense by its reference, a bill
+# payment by its check number are found here, each opening its document as
+# the report drill-downs do (a bank entry, its register).
 # ============================================================================
 
 import re
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import false
+from sqlalchemy import false, func, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.accounts import Account
-from app.models.bills import Bill, BillStatus
+from app.models.bills import Bill, BillPayment, BillStatus
 from app.models.classes import TxnClass
 from app.models.contacts import Customer, Vendor
 from app.models.credit_memos import CreditMemo
@@ -27,6 +33,13 @@ from app.models.items import Item
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.estimates import Estimate
 from app.models.payments import Payment
+from app.models.transactions import Transaction, TransactionLine
+from app.services.bank_register import (
+    payees_for,
+    references_for,
+    source_link,
+    voided_transaction_ids,
+)
 
 router = APIRouter(prefix="/api/search", tags=["search"])
 
@@ -295,4 +308,88 @@ def unified_search(q: str = Query(min_length=2), db: Session = Depends(get_db)):
             for p in payments
         ]
 
+    txns = _transactions(db, pattern, amount)
+    if txns:
+        results["transactions"] = txns
+
     return results
+
+
+# Postings a section above already lists by number and amount: an invoice
+# (a sales receipt's too), a bill, a credit memo, a customer payment.
+_OWN_SECTION = ("invoice", "bill", "credit_memo", "payment")
+# A void's reversal, an edit's or an applied payment's adjustment: not a
+# transaction of its own (the voided one is listed, and says so).
+_SIDE_POSTINGS = ("_void", "_edit", "_apply")
+
+
+def _transactions(db: Session, pattern: str, amount):
+    """Posted transactions whose memo, description, reference or check
+    number holds the text, or whose total is the amount to the cent; newest
+    first. Voided ones are found too, marked."""
+    total = (
+        select(func.coalesce(func.sum(TransactionLine.debit), 0))
+        .where(TransactionLine.transaction_id == Transaction.id)
+        .scalar_subquery()
+    )
+    line_memo = (
+        select(TransactionLine.id)
+        .where(
+            TransactionLine.transaction_id == Transaction.id,
+            TransactionLine.description.ilike(pattern),
+        )
+        .exists()
+    )
+    bp_check = select(BillPayment.id).where(BillPayment.check_number.ilike(pattern))
+    kind = func.coalesce(Transaction.source_type, "")
+    query = db.query(Transaction, total).filter(
+        kind.notin_(_OWN_SECTION),
+        *[~kind.endswith(end, autoescape=True) for end in _SIDE_POSTINGS],
+        Transaction.description.ilike(pattern)
+        | Transaction.memo.ilike(pattern)
+        | Transaction.reference.ilike(pattern)
+        | line_memo
+        | ((kind == "bill_payment") & Transaction.source_id.in_(bp_check))
+        | _is_amount(total, amount),
+    )
+    rows = (
+        query.order_by(Transaction.date.desc(), Transaction.id.desc())
+        .limit(LIMIT_PER)
+        .all()
+    )
+    if not rows:
+        return []
+    txns = [t for t, _ in rows]
+    ids = [t.id for t in txns]
+    voided = voided_transaction_ids(db, ids)
+    payees = payees_for(db, txns)
+    refs = references_for(db, txns)
+    # a bank entry opens its register: the bank or card account it is on
+    registers = dict(
+        db.query(TransactionLine.transaction_id, TransactionLine.account_id)
+        .join(Account, Account.id == TransactionLine.account_id)
+        .filter(
+            TransactionLine.transaction_id.in_(
+                [t.id for t in txns if t.source_type == "bank_entry"] or [0]
+            ),
+            Account.bank_kind.isnot(None),
+        )
+        .all()
+    )
+    return [
+        {
+            "id": t.id,
+            "date": t.date.isoformat(),
+            "source_type": t.source_type or "journal",
+            "source_kind": t.source_kind,
+            "reference": refs.get(t.id, ""),
+            "description": t.description or "",
+            "memo": t.memo or "",
+            "payee": payees.get(t.id, ""),
+            "total": float(tot or 0),
+            "voided": t.id in voided,
+            "link": source_link(t) or f"/#/journal/{t.id}",
+            "register_account_id": registers.get(t.id),
+        }
+        for t, tot in rows
+    ]

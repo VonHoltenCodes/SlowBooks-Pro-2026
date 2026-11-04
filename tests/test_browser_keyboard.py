@@ -20,6 +20,8 @@ bakery's books of tests/test_theme_contrast.py (2.22.0 gate, round 2):
   fires, on any platform (W-6), and over a form being filled in Alt+N, P,
   Q and H do nothing from any of its controls, as Back does; ⌘K finds
   like Ctrl+K; Ctrl+Alt (AltGr) is left alone.
+- #695: Ctrl+F (⌘F) finds in the desktop window and is the browser's own
+  find in a browser; the search box names its keys (aria-keyshortcuts).
 - NEW-30: the toolbar's Back, enabled only while an app page is behind,
   with Alt+← (⌘[ on a Mac); a reload keeps it.
 - NEW-32: no dialog opens with focus on Void or Delete; a dialog whose
@@ -426,6 +428,59 @@ def test_the_alt_shortcuts_go_by_the_keys_position_and_cmd_k_finds(
         page.evaluate("() => document.body.focus()")
         page.keyboard.press("Control+KeyK")
         assert page.evaluate("() => document.activeElement.id") == "global-search"
+    finally:
+        page.close()
+
+
+# ── #695: Ctrl+F finds in the desktop app, not in a browser ──────────────
+
+PRESS = """([key, code, mods]) => { const e = new KeyboardEvent('keydown',
+    { key, code, bubbles: true, cancelable: true, ...mods });
+    document.body.dispatchEvent(e); return e.defaultPrevented; }"""
+BLUR = "() => document.activeElement && document.activeElement.blur()"
+SEARCH_KEYS = (
+    "() => document.getElementById('global-search').getAttribute('aria-keyshortcuts')"
+)
+
+
+def test_ctrl_f_finds_in_the_desktop_app_and_is_the_browsers_in_a_browser(
+    browser, company, books
+):
+    page, handled = _open(browser, company)
+    try:
+        _visit(page, handled, "#/customers")
+        mod = "Meta" if page.evaluate("() => App.isMac()") else "Control"
+        # a browser: Ctrl+F (⌘F) is its own find in page, left alone
+        assert page.evaluate("() => App.inDesktopShell()") is False
+        assert page.evaluate(SEARCH_KEYS) == f"{mod}+K /"
+        page.evaluate(BLUR)
+        for mods in ({"ctrlKey": True}, {"metaKey": True}):
+            assert page.evaluate(PRESS, ["f", "KeyF", mods]) is False
+            assert page.evaluate("() => document.activeElement.id") != "global-search"
+        # the desktop window (pywebview): Ctrl+F and ⌘F find, as Ctrl+K does
+        page.evaluate(
+            "() => { window.pywebview = { api: {} };"
+            " window.dispatchEvent(new Event('pywebviewready')); }"
+        )
+        assert page.evaluate("() => App.inDesktopShell()") is True
+        assert page.evaluate(SEARCH_KEYS) == f"{mod}+K {mod}+F /"
+        for mods in ({"ctrlKey": True}, {"metaKey": True}):
+            page.evaluate(BLUR)
+            assert page.evaluate(PRESS, ["f", "KeyF", mods]) is True
+            assert page.evaluate("() => document.activeElement.id") == "global-search"
+        # Ctrl+Alt+F (AltGr) types a character and is left alone
+        page.evaluate(BLUR)
+        assert (
+            page.evaluate(PRESS, ["f", "KeyF", {"ctrlKey": True, "altKey": True}])
+            is False
+        )
+        assert page.evaluate("() => document.activeElement.id") != "global-search"
+        # over an open dialog it does nothing but keep the window's own
+        page.evaluate("() => openModal('A dialog', '<p>Hello</p>')")
+        page.wait_for_function(MODAL_SHOWN)
+        assert page.evaluate(PRESS, ["f", "KeyF", {"ctrlKey": True}]) is True
+        assert page.evaluate("() => document.activeElement.id") != "global-search"
+        page.evaluate("() => closeModal()")
     finally:
         page.close()
 
