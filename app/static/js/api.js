@@ -16,7 +16,10 @@ const API = {
                 // so a retry after a lost response books it once (#292)
                 headers: Object.assign({ 'Content-Type': 'application/json' }, headers || {}),
             };
-            const companyId = localStorage.getItem('slowbooks_company');
+            // null-safe: a window with no storage (WebKitGTK in pywebview's
+            // private mode has a null localStorage) still makes every request
+            let companyId = null;
+            try { companyId = window.localStorage ? window.localStorage.getItem('slowbooks_company') : null; } catch (e) { companyId = null; }
             if (companyId) opts.headers['X-Company-Id'] = companyId;
             // Percent-encoded: a header value cannot carry every character
             // a password can.
@@ -89,7 +92,7 @@ const API = {
         try {
             if (typeof BroadcastChannel === 'function') {
                 if (!API._channel) API._channel = new BroadcastChannel('slowbooks-books');
-                API._channel.postMessage({ company: localStorage.getItem('slowbooks_company') || '', path });
+                API._channel.postMessage({ company: (window.localStorage && window.localStorage.getItem('slowbooks_company')) || '', path });
             }
         } catch (e) { /* no channel: this window still hears its own */ }
     },

@@ -3246,9 +3246,10 @@ const SettingsPage = {
     // Honors a sessionStorage hint from other pages (e.g., Analytics' gear)
     // requesting that the Settings page open scrolled to a specific section.
     scrollToFocus() {
-        const target = sessionStorage.getItem('settings_focus');
+        let target = null;
+        try { target = window.sessionStorage ? window.sessionStorage.getItem('settings_focus') : null; } catch (e) { target = null; }
         if (!target) return;
-        sessionStorage.removeItem('settings_focus');
+        try { window.sessionStorage.removeItem('settings_focus'); } catch (e) { /* nothing kept */ }
         const el = document.getElementById(target);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     },

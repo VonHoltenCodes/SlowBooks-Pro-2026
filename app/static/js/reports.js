@@ -322,7 +322,9 @@ const ReportsPage = {
                 // once there are more than a handful; the choice sticks.
                 let collapsed = false;
                 try { collapsed = localStorage.getItem('sb_saved_reports_collapsed') === '1'; } catch (e) { /* ignore */ }
-                if (saved.length > 6 && localStorage.getItem('sb_saved_reports_collapsed') === null) collapsed = true;
+                let chosen = null;
+                try { chosen = window.localStorage ? window.localStorage.getItem('sb_saved_reports_collapsed') : null; } catch (e) { chosen = null; }
+                if (saved.length > 6 && chosen === null) collapsed = true;
                 const period = (p) => !p ? '' : (p.as_of_date ? `as of ${escapeHtml(p.as_of_date)}` : (p.start_date ? `${escapeHtml(p.start_date)} → ${escapeHtml(p.end_date || '')}` : (p.period ? escapeHtml(String(p.period).replace(/_/g, ' ')) : '')));
                 const names = await ReportsPage._savedNames(saved);
                 const rows = saved.slice().sort((a, b) => a.name.localeCompare(b.name)).map(s => `

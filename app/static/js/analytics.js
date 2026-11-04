@@ -863,7 +863,7 @@ const AnalyticsPage = {
   // rendered page — otherwise the next nav click to Analytics is a no-op
   // because the hash never moved off "#/analytics".
   _openAiSettings() {
-    sessionStorage.setItem("settings_focus", "settings-ai");
+    try { if (window.sessionStorage) window.sessionStorage.setItem("settings_focus", "settings-ai"); } catch (e) { /* the page opens unscrolled */ }
     if (location.hash === "#/settings") {
       // Already on the URL we want — force a re-render + scroll
       App.navigate("#/settings");
