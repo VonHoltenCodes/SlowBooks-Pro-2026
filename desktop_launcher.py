@@ -1996,18 +1996,30 @@ def _default_window_geometry() -> dict:
     return {"x": None, "y": None, "width": width, "height": height, "maximized": False}
 
 
+def _split_screen(screen) -> tuple[tuple, tuple]:
+    """A screen entry is (x, y, width, height), or that followed by the work
+    area (x, y, width, height) -- the screen less the taskbar -- where the
+    platform reports one. Returns (screen, work area)."""
+    full = tuple(screen[:4])
+    work = tuple(screen[4:8]) if len(screen) >= 8 else full
+    return full, work
+
+
 def restore_window_geometry(
     saved: dict | None, screens, platform: str | None = None
 ) -> dict:
     """Decide where the window opens. ``screens`` is a list of (x, y, width,
-    height) for every connected screen; ``platform`` defaults to sys.platform.
+    height) for every connected screen, each optionally followed by its work
+    area (see _split_screen); ``platform`` defaults to sys.platform.
 
     - Nothing saved (missing or malformed file): today's default, 1280x860,
       placed by the OS.
     - Never smaller than the 900x600 minimum.
     - Saved title-bar strip at least 100x40 px on a connected screen: restore
-      it there, clamped to that screen (shrunk to fit, then shifted so the
-      whole window is on it).
+      it there, clamped to that screen's work area (shrunk to fit, then
+      shifted so the whole window is on it and clear of the taskbar). When
+      several screens qualify, the one holding the window's top-left corner
+      wins; failing that, the one with the most title bar on it.
     - Not on any connected screen (a monitor since unplugged): the default.
     - Screen list unknown (empty): the saved size, placed by the OS.
     - macOS: never opens maximized. pywebview's maximize there is only a
@@ -2029,9 +2041,10 @@ def restore_window_geometry(
             "height": height,
             "maximized": maximized,
         }
+    screens = [_split_screen(s) for s in screens]
     if x is None or y is None:
         # No position saved: size only, clamped to the largest screen.
-        sx, sy, sw, sh = max(screens, key=lambda s: s[2] * s[3])
+        _full, (sx, sy, sw, sh) = max(screens, key=lambda s: s[0][2] * s[0][3])
         return {
             "x": None,
             "y": None,
@@ -2041,17 +2054,24 @@ def restore_window_geometry(
         }
 
     def _grab_overlap(screen) -> int:
-        sx, sy, sw, sh = screen
+        sx, sy, sw, sh = screen[0]
         ox = min(x + width, sx + sw) - max(x, sx)
         oy = min(y + _GEOMETRY_GRAB_H, sy + sh) - max(y, sy)
         if ox < _GEOMETRY_GRAB_W or oy < _GEOMETRY_GRAB_H:
             return 0
         return ox * oy
 
-    best = max(screens, key=_grab_overlap)
-    if _grab_overlap(best) == 0:
+    def _holds_corner(screen) -> bool:
+        sx, sy, sw, sh = screen[0]
+        return sx <= x < sx + sw and sy <= y < sy + sh
+
+    grabbable = [s for s in screens if _grab_overlap(s)]
+    if not grabbable:
         return _default_window_geometry()
-    sx, sy, sw, sh = best
+    # An oversized window overlaps its neighbour more than its own screen.
+    holding = [s for s in grabbable if _holds_corner(s)]
+    best = holding[0] if holding else max(grabbable, key=_grab_overlap)
+    sx, sy, sw, sh = best[1]
     # The minimum wins over a screen smaller than 900x600.
     width = max(min(width, sw), MIN_WINDOW_SIZE[0])
     height = max(min(height, sh), MIN_WINDOW_SIZE[1])
@@ -2172,6 +2192,57 @@ def _connected_screens(webview) -> list[tuple[int, int, int, int]]:
         return []
 
 
+def _windows_work_areas(screens) -> list[tuple]:
+    """Each (x, y, width, height) screen followed by its work area -- the
+    monitor less the taskbar -- from MonitorFromPoint/GetMonitorInfoW. A
+    screen whose work area cannot be read, or does not sit inside it, keeps
+    the whole screen. Windows only; never raises."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class _MonitorInfo(ctypes.Structure):
+            _fields_ = [
+                ("cbSize", wintypes.DWORD),
+                ("rcMonitor", wintypes.RECT),
+                ("rcWork", wintypes.RECT),
+                ("dwFlags", wintypes.DWORD),
+            ]
+
+        user32 = ctypes.windll.user32
+        user32.MonitorFromPoint.restype = wintypes.HMONITOR
+        user32.MonitorFromPoint.argtypes = [wintypes.POINT, wintypes.DWORD]
+        user32.GetMonitorInfoW.restype = wintypes.BOOL
+        user32.GetMonitorInfoW.argtypes = [
+            wintypes.HMONITOR,
+            ctypes.POINTER(_MonitorInfo),
+        ]
+    except Exception as exc:
+        print(f"Could not read the screen work areas: {exc}")
+        return list(screens)
+    monitor_defaulttonull = 0
+    result = []
+    for sx, sy, sw, sh in screens:
+        work = (sx, sy, sw, sh)
+        try:
+            centre = wintypes.POINT(int(sx + sw // 2), int(sy + sh // 2))
+            monitor = user32.MonitorFromPoint(centre, monitor_defaulttonull)
+            info = _MonitorInfo()
+            info.cbSize = ctypes.sizeof(_MonitorInfo)
+            if monitor and user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+                r = info.rcWork
+                wx, wy, ww, wh = r.left, r.top, r.right - r.left, r.bottom - r.top
+                inside = (
+                    sx <= wx and sy <= wy and wx + ww <= sx + sw and wy + wh <= sy + sh
+                )
+                if ww > 0 and wh > 0 and inside:
+                    work = (wx, wy, ww, wh)
+        except Exception as exc:
+            print(f"Could not read a screen's work area: {exc}")
+        result.append((sx, sy, sw, sh) + work)
+    return result
+
+
 def _track_window_geometry(window, tracker: WindowGeometryTracker, path: Path):
     events = window.events
     events.moved += lambda x, y: tracker.on_moved(x, y)
@@ -2225,7 +2296,9 @@ def run_window(port: int, log_fh=None) -> int:
     # Open where it was closed last time (#681), clamped to today's screens.
     geometry_path = window_geometry_path()
     screens = _connected_screens(webview)
-    geometry = restore_window_geometry(load_window_geometry(geometry_path), screens)
+    # Clamp to the work area, clear of the taskbar, where Windows reports one.
+    placement = _windows_work_areas(screens) if sys.platform == "win32" else screens
+    geometry = restore_window_geometry(load_window_geometry(geometry_path), placement)
     api = PickerApi(port, log_fh)
     api._window = webview.create_window(
         "SlowBooks Pro 2026",

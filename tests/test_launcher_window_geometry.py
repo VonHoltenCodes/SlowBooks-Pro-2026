@@ -279,3 +279,59 @@ def test_screen_sized_resize_is_a_normal_size_off_mac():
     )
     tracker.on_resized(1920, 1080)
     assert (tracker.width, tracker.height) == (1920, 1080)
+
+
+# --- W-100: the screen holding the corner, clamped to its work area ---------
+
+TASKBAR = 48
+
+
+def _with_work_area(x, y, w, h):
+    return (x, y, w, h, x, y, w, h - TASKBAR)
+
+
+THREE_SCREENS = [
+    _with_work_area(-1920, 0, 1920, 1080),
+    _with_work_area(0, 0, 1920, 1080),
+    _with_work_area(1920, 0, 1920, 1080),
+]
+
+
+def test_oversized_window_stays_on_the_screen_holding_its_corner():
+    # 1920 px of title bar on the right-hand screen beats 1820 on the centre
+    # one, but the top-left corner is on the centre screen.
+    saved = _saved(x=100, y=50, width=5000, height=3000)
+    geometry = dl.restore_window_geometry(saved, THREE_SCREENS, platform="win32")
+    assert geometry == _saved(x=0, y=0, width=1920, height=1080 - TASKBAR)
+
+
+def test_corner_off_every_screen_falls_back_to_the_most_title_bar():
+    # Top-left just left of the screens; the title bar lands on both, most
+    # of it on the left-hand one.
+    saved = _saved(x=50, y=100, width=3000, height=900)
+    two = [(100, 0, 1920, 1080), (2020, 0, 1920, 1080)]
+    geometry = dl.restore_window_geometry(saved, two)
+    assert geometry == _saved(x=100, y=100, width=1920, height=900)
+
+
+def test_window_low_on_the_screen_is_shifted_clear_of_the_taskbar():
+    screen = [_with_work_area(0, 0, 1920, 1080)]
+    work_bottom = 1080 - TASKBAR
+    # Title bar 20 px above the taskbar line: pulled up onto the work area.
+    saved = _saved(x=200, y=work_bottom - 20, width=1400, height=900)
+    geometry = dl.restore_window_geometry(saved, screen, platform="win32")
+    assert geometry == _saved(x=200, y=work_bottom - 900, width=1400, height=900)
+    # Taller than the work area: shrunk to it, not to the screen.
+    saved = _saved(x=0, y=0, width=1400, height=1080)
+    geometry = dl.restore_window_geometry(saved, screen, platform="win32")
+    assert geometry["height"] == work_bottom
+    # No saved position: the size is clamped to the work area too.
+    saved = _saved(x=None, y=None, width=1400, height=1080)
+    geometry = dl.restore_window_geometry(saved, screen, platform="win32")
+    assert geometry["height"] == work_bottom
+
+
+def test_work_areas_off_windows_keep_the_screen():
+    if dl.sys.platform == "win32":
+        return
+    assert dl._windows_work_areas([(0, 0, 1920, 1080)]) == [(0, 0, 1920, 1080)]
