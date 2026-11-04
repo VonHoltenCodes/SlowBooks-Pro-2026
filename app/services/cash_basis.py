@@ -1043,52 +1043,80 @@ class _Progress:
     """Counts the backfill's writes and commits every BACKFILL_BATCH of them
     so a big book never holds one long write transaction."""
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, on_progress=None):
         self.db = db
         self.pending = 0
         self.failed = 0
+        # on_progress(label, done, total) after each payment (#693): the
+        # start-up writes it where the desktop launcher reads it.
+        self.on_progress = on_progress
+
+    def note(self, text: str, done: int | None = None, total: int | None = None):
+        if self.on_progress is None:
+            return
+        try:
+            self.on_progress(text, done, total)
+        except Exception:
+            pass  # a progress note is never a reason to stop
+
+    def _report(self, label: str, done: int, total: int) -> None:
+        self.note(f"Catching up cash-basis lines ({label}s)", done, total)
 
     def run(self, payments, make_lines, label: str) -> int:
         """Write the cash lines of each payment inside its own savepoint:
         one broken payment is logged by id and skipped, the rest go on."""
         wrote = 0
-        for payment in payments:
-            payment_id = payment.id  # read before a failure expires the row
-            try:
-                with self.db.begin_nested():
-                    txn, lines = make_lines(self.db, payment)
-                    if not lines:
-                        continue
-                    append_cash_lines(self.db, txn, lines)
-            except Exception:
-                self.failed += 1
-                log.exception(
-                    "Cash-basis backfill skipped %s %s (entry %s)",
-                    label,
-                    payment_id,
-                    getattr(payment, "transaction_id", None),
-                )
-                continue
-            wrote += 1
-            self.pending += 1
-            if self.pending >= BACKFILL_BATCH:
-                self.db.commit()
-                self.pending = 0
+        payments = list(payments)
+        total = len(payments)
+        if total:
+            self._report(label, 0, total)
+        for done, payment in enumerate(payments, start=1):
+            if self._one(payment, make_lines, label):
+                wrote += 1
+            self._report(label, done, total)
         return wrote
 
+    def _one(self, payment, make_lines, label: str) -> bool:
+        payment_id = payment.id  # read before a failure expires the row
+        try:
+            with self.db.begin_nested():
+                txn, lines = make_lines(self.db, payment)
+                if not lines:
+                    return False
+                append_cash_lines(self.db, txn, lines)
+        except Exception:
+            self.failed += 1
+            log.exception(
+                "Cash-basis backfill skipped %s %s (entry %s)",
+                label,
+                payment_id,
+                getattr(payment, "transaction_id", None),
+            )
+            return False
+        self.pending += 1
+        if self.pending >= BACKFILL_BATCH:
+            self.db.commit()
+            self.pending = 0
+        return True
 
-def backfill(db: Session) -> dict:
+
+def backfill(db: Session, on_progress=None) -> dict:
     """Tag the accrual entries and write the cash lines of every payment
     that has none (#483). Idempotent: a second run finds nothing. Commits
     as it goes (every BACKFILL_BATCH payments) and a payment that fails is
     logged and skipped, not fatal. Returns counts for the start-up log:
-    tagged, payments, bill_payments and failed."""
+    tagged, payments, bill_payments and failed.
+
+    ``on_progress(label, done, total)``, when given, is called as each
+    payment is done (#693): the start-up passes the note the desktop
+    launcher reads while it waits."""
     from app.services.accounting import get_ap_account_id, get_ar_account_id
     from app.services.control_accounts import MissingControlAccount
 
+    progress = _Progress(db, on_progress)
+    progress.note("Tagging accrual lines for cash basis")
     tagged = _tag_accrual_entries(db)
     db.commit()
-    progress = _Progress(db)
     payments = bills = 0
 
     try:

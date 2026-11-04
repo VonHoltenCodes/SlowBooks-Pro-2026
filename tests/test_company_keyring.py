@@ -212,7 +212,7 @@ def _launch_stubs(monkeypatch, path):
         )[1],
     )
     monkeypatch.setattr(
-        dl, "wait_for_health", lambda proc, port, host="127.0.0.1": True
+        dl, "wait_for_health", lambda proc, port, host="127.0.0.1", **_: True
     )
     return started
 

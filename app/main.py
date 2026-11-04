@@ -575,6 +575,7 @@ async def lifespan(app: FastAPI):
     # payment, SimpleFIN secrets) on first boot after upgrading, and drop
     # the rows of a retired integration's settings.
     try:
+        from app.services import startup_progress
         from app.services.settings_service import (
             remove_retired_settings,
             upgrade_plaintext_secrets,
@@ -602,6 +603,8 @@ async def lifespan(app: FastAPI):
             # from the ledger once here; books that agree have nothing to do.
             from app.services.accounting import rebuild_stored_balances
 
+            # #693: the desktop launcher waits while this note changes
+            startup_progress.report("Checking account balances against the ledger")
             fixed = rebuild_stored_balances(_db)
             if fixed:
                 print(
@@ -611,7 +614,7 @@ async def lifespan(app: FastAPI):
             # accrual tags and the cash-basis lines of its payments once.
             from app.services.cash_basis import backfill as cash_basis_backfill
 
-            done = cash_basis_backfill(_db)
+            done = cash_basis_backfill(_db, on_progress=startup_progress.report)
             if done["tagged"] or done["payments"] or done["bill_payments"]:
                 print(
                     "Cash basis: tagged %d accrual line(s), wrote cash lines for "
@@ -627,6 +630,7 @@ async def lifespan(app: FastAPI):
                 )
         finally:
             _db.close()
+            startup_progress.clear()
     except Exception:
         pass  # never block boot on the upgrader
     # #605 (2.31.1 gate W-66): enter what is due when the app opens, and
