@@ -454,11 +454,11 @@ body {
 @media (max-width: 1109px) {
     #topbar .tb-btn[data-action] { display: none; }
 }
-/* Below 1400 the bar tightens (2.31.5 round 2, W-105: with the Hide
+/* Below 1410 the bar tightens (2.31.5 round 2, W-105: with the Hide
    sidebar control the bar ran 38 px past a 1366 window and 8 px past
    Windows' 1264 default under WebView2's wider fonts; the clock and the
    brand's year go first, then the spacing) */
-@media (max-width: 1399px) {
+@media (max-width: 1409px) {  /* round 3, W-107: at 1400-1403 the clock and year came back 1-4 px too soon; it fits from 1404 */
     #topbar-clock { display: none; }
     .topbar-brand span { display: none; }
     .topbar-brand { margin-right: 6px; }
