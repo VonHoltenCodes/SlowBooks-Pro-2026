@@ -63,18 +63,38 @@ def test_sort_is_named_and_kept_and_the_range_narrows_the_list(
         assert ids.index(early) < ids.index(late)
 
         # the range: both ends inclusive; the count follows it
+        # a range takes effect when the box is left or Enter is pressed, never
+        # while it is being typed into (2.31.5 gate, W-99): the date box
+        # fires `change` on the first year digit, and a redraw then ate the
+        # rest of the year
         page.get_by_label("From", exact=True).fill("2026-01-05")
+        page.get_by_label("From", exact=True).press("Enter")
         settle(page, handled)
         page.get_by_label("To", exact=True).fill("2026-01-05")
+        page.get_by_label("To", exact=True).press("Enter")
         settle(page, handled)
+        _ranged(page, "1 entry in this date range")
         assert page.evaluate(IDS) == [early]
         assert page.inner_text("#journal-count") == "1 entry in this date range"
         assert page.get_by_label("From", exact=True).input_value() == "2026-01-05"
 
+        # typed a digit at a time, as skytech did: the box keeps every digit
+        # and the range applies once, on Enter
+        box = page.get_by_label("From", exact=True)
+        box.focus()  # the month segment first, as a click on it does
+        page.keyboard.type("10152026")
+        page.keyboard.press("Enter")
+        settle(page, handled)
+        assert box.input_value() == "2026-10-15"
+        _ranged(page, "0 entries in this date range")
+
         page.get_by_label("From", exact=True).fill("2025-01-01")
+        page.get_by_label("From", exact=True).press("Enter")
         settle(page, handled)
         page.get_by_label("To", exact=True).fill("2025-01-31")
+        page.get_by_label("To", exact=True).press("Enter")
         settle(page, handled)
+        _ranged(page, "0 entries in this date range")
         assert page.evaluate(IDS) == []
         assert "No journal entries in this date range" in page.inner_text(
             "#page-content"
@@ -82,3 +102,13 @@ def test_sort_is_named_and_kept_and_the_range_narrows_the_list(
         assert page.inner_text("#journal-count") == "0 entries in this date range"
     finally:
         page.close()
+
+
+def _ranged(page, count_text):
+    """The list is drawn again on its own (W-99), after the request the
+    range makes: wait for the count line to say so."""
+    page.wait_for_function(
+        "t => document.querySelector('#journal-count').textContent === t",
+        arg=count_text,
+        timeout=5000,
+    )

@@ -511,6 +511,19 @@ def _create_missing_tables(target=None) -> None:
     Base.metadata.create_all(bind=checked)
 
 
+def _seed_payment_terms(db) -> None:
+    """A company made through company_service gets its starting payment
+    terms there (#664), and one made before 2.31.5 gets them from the
+    migration. A database that create_all built on its own (a native
+    install started without `alembic upgrade head`) has neither, and every
+    form would offer only the terms typed so far. Seeds an empty table only;
+    a list in use is never touched. Runs at startup."""
+    from app.services.payment_terms import ensure_seeded
+
+    ensure_seeded(db)
+    db.commit()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """App lifespan. Replaces the deprecated @app.on_event("startup") hook
@@ -548,6 +561,16 @@ async def lifespan(app: FastAPI):
             )
     except Exception:
         pass  # a diagnostic, never a reason not to boot
+    # The payment terms list (#664): see _seed_payment_terms.
+    try:
+        _db = SessionLocal()
+        try:
+            _seed_payment_terms(_db)
+        finally:
+            _db.close()
+    except Exception:
+        # the forms still take typed terms; never a reason not to boot
+        logging.getLogger(__name__).warning("payment terms seed skipped", exc_info=True)
     # At-rest upgrade: encrypt any legacy plaintext credential rows (SMTP,
     # payment, SimpleFIN secrets) on first boot after upgrading, and drop
     # the rows of a retired integration's settings.

@@ -678,10 +678,14 @@ def books_fixture(client, seed_accounts, db_session):
     without Playwright and took every importer of the fixture with it
     (2.22.0 Windows gate, W-2). A company file has its Uncategorized class
     from the migration that made the table, and no read makes it (#662),
-    so the books start with it."""
+    so the books start with it. The payment terms list (#664) is the same:
+    the migration or company_service writes a company's starting terms and
+    no read makes them, so the forms' terms selects would offer nothing."""
     from app.services.classes_service import uncategorized_class_id
+    from app.services.payment_terms import ensure_seeded
     from tests.bakery_books import seed_books
 
     uncategorized_class_id(db_session)
+    ensure_seeded(db_session)
     db_session.commit()
     return seed_books(client, seed_accounts)

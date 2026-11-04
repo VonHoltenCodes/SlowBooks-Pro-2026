@@ -536,7 +536,13 @@ def render_invoice_email_parts(
     not only nonprofit installs (#140, third part).
     """
     ctx = invoice_email_context(invoice, company_settings, pay_url=pay_url)
-    default_subject = f"{ctx['doc_label']} #{invoice.invoice_number}"
+    # The subject names the company as the seeded template does (2.31.5
+    # gate, NEW-200 / C-1): a company that never loaded the default
+    # templates sent "Invoice #1001" with no name.
+    company_name = ctx["company"].get("company_name") or ""
+    default_subject = f"{ctx['doc_label']} #{invoice.invoice_number}" + (
+        f" from {company_name}" if company_name else ""
+    )
 
     body = None
     tpl_subject = None

@@ -555,6 +555,10 @@ body {
 @media (max-width: 700px) {
     #sidebar-toggle { display: none; }
 }
+/* The toggle is a glyph, not a word: it takes the bar's button height and
+   no more width than the glyph needs, so the five quick-entry buttons keep
+   fitting a 1366 window (the bar's budget above). */
+#topbar .tb-btn.tb-sidebar-toggle { padding-left: 4px; padding-right: 4px; margin: 0; font-size: 13px; line-height: 1; }
 .tb-btn.tb-sidebar-toggle[aria-pressed="true"] { background: rgba(0,0,0,0.08); border-color: var(--text-secondary); }
 
 .nav-link {

@@ -719,7 +719,7 @@ const DataEntryPrefs = {
         if (typeof fetch !== 'function') return Promise.resolve();
         const headers = {};
         try {
-            const company = localStorage.getItem('slowbooks_company');
+            const company = Store.get('slowbooks_company');
             if (company) headers['X-Company-Id'] = company;
         } catch (e) { /* no storage */ }
         return fetch('/api/preferences/data_entry', { credentials: 'same-origin', headers })
@@ -1024,6 +1024,17 @@ document.addEventListener('keydown', modalKeydown);
 function statusBadge(status) {
     return `<span class="badge badge-${status}">${status}</span>`;
 }
+
+// Per-computer conveniences live in localStorage. Under WebKitGTK in
+// pywebview's private mode `window.localStorage` is null, and a browser with
+// storage blocked throws on touching it; either way the app must start and
+// simply forget the preference (2.31.5 gate: the Linux desktop window died
+// at start on a null localStorage). Every read and write goes through here.
+const Store = {
+    get(key) { try { return window.localStorage ? window.localStorage.getItem(key) : null; } catch (e) { return null; } },
+    set(key, value) { try { if (window.localStorage) window.localStorage.setItem(key, value); } catch (e) { /* this page load only */ } },
+    remove(key) { try { if (window.localStorage) window.localStorage.removeItem(key); } catch (e) { /* nothing kept */ } },
+};
 
 function escapeHtml(str) {
     str = String(str ?? '');

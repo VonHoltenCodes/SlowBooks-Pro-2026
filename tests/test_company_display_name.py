@@ -161,6 +161,27 @@ def test_the_seeded_invoice_email_template_names_the_display_name(db_session, na
     assert LEGAL not in subject and LEGAL not in body
 
 
+def test_the_default_subject_names_the_display_name_without_a_saved_template(
+    db_session, named
+):
+    """A company that never loaded the default email templates sent
+    "Invoice #1001" with no company name (2.31.5 gate, NEW-200 / C-1): the
+    built-in subject names the display name, else the company name."""
+    from app.services.email_service import render_invoice_email_parts
+
+    inv = _invoice(db_session, named)
+    subject, _ = render_invoice_email_parts(
+        inv, get_all_settings(db_session), db=db_session
+    )
+    assert subject == f"Invoice #DBA-1 from {DBA}"
+    set_setting(db_session, "display_name", "")
+    db_session.commit()
+    subject, _ = render_invoice_email_parts(
+        inv, get_all_settings(db_session), db=db_session
+    )
+    assert subject == f"Invoice #DBA-1 from {LEGAL}"
+
+
 def test_a_template_saved_before_the_setting_reads_the_display_name(db_session, named):
     """A book that seeded its templates on an earlier release has
     `{{ company.company_name }}` in the saved rows. On a customer's email

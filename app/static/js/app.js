@@ -1264,7 +1264,7 @@ const App = {
         const current = document.documentElement.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem('slowbooks-theme', next);
+        Store.set('slowbooks-theme', next);
         const btn = $('#theme-toggle');
         if (btn) btn.innerHTML = next === 'dark' ? '&#9788;' : '&#9790;';
         // Canvas ink is painted, not styled: a chart on screen keeps the old
@@ -1275,7 +1275,7 @@ const App = {
     },
 
     loadTheme() {
-        const saved = localStorage.getItem('slowbooks-theme');
+        const saved = Store.get('slowbooks-theme');
         if (saved === 'dark') {
             document.documentElement.setAttribute('data-theme', 'dark');
             const btn = $('#theme-toggle');
@@ -2610,8 +2610,8 @@ const App = {
         }
         if (keep) {
             try {
-                if (hide) localStorage.setItem(App.SIDEBAR_HIDDEN_KEY, '1');
-                else localStorage.removeItem(App.SIDEBAR_HIDDEN_KEY);
+                if (hide) Store.set(App.SIDEBAR_HIDDEN_KEY, '1');
+                else Store.remove(App.SIDEBAR_HIDDEN_KEY);
             } catch (e) { /* this page load only */ }
         }
     },

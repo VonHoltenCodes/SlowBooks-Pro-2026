@@ -2071,11 +2071,14 @@ def test_the_ring_clears_3_to_1_on_every_ground_it_meets_as_painted(
                 page.evaluate(SETTLED)
                 buttons.append(page.evaluate(RING)["at"])
                 _both_themes(page, ("toolbar", buttons[-1]), TOOLBAR_GOLD, bar=True)
-        # every button on the bar, the lit Back first among them
+        # every button on the bar: Hide sidebar first (2.31.5, #688), then
+        # the lit Back
         on_bar = page.evaluate(
             "() => [...document.querySelectorAll('#topbar button.tb-btn')].filter(b => !b.disabled && b.offsetParent).length"
         )
-        assert buttons[0] == "back-btn" and len(buttons) == on_bar, buttons
+        assert (
+            buttons[:2] == ["sidebar-toggle", "back-btn"] and len(buttons) == on_bar
+        ), buttons
         # A/R Aging: a customer's row link, a button, the dialog's ×
         _visit(page, handled, "#/reports/ar-aging?as_of_date=2026-09-30")
         page.wait_for_function(MODAL_SHOWN)
@@ -2139,7 +2142,7 @@ def test_a_sidebar_link_draws_the_ring_on_all_four_sides_as_painted(
         _sidebar(page, handled, "#/customers")
         # the menu's own Customers link, not the Open group's (#336) above it
         page.focus('#sidebar .nav-link[data-page="customers"]')
-        page.keyboard.press("Shift+Tab")
+        _tab_to_link(page, "Shift+Tab")
         for href in ("#/", "#/customers", "#/jobs"):
             at = page.evaluate("() => document.activeElement.getAttribute('href')")
             assert at == href, (at, href)
@@ -2147,9 +2150,19 @@ def test_a_sidebar_link_draws_the_ring_on_all_four_sides_as_painted(
                 "() => document.activeElement.closest('#sidebar') !== null"
             )
             _both_themes(page, ("sidebar", href), GOLD, NAV_HALO)
-            page.keyboard.press("Tab")
+            _tab_to_link(page, "Tab")
     finally:
         page.close()
+
+
+def _tab_to_link(page, key):
+    """Tab (or Shift+Tab) to the next sidebar link, past a section heading:
+    the headings are buttons since 2.31.5 (#688), one tab stop each."""
+    for _ in range(4):
+        page.keyboard.press(key)
+        if page.evaluate("() => document.activeElement.hasAttribute('href')"):
+            return
+    raise AssertionError("no sidebar link within four tab stops")
 
 
 # The controls' own rings: a search result's blue, inside its edge; the
