@@ -210,3 +210,128 @@ def test_tracker_saves_through_the_closing_event(tmp_path):
     # A closing handler that returns False would cancel the close.
     assert window.events.closing.handlers[0]() is None
     assert dl.load_window_geometry(path) == _saved(12, 34, 1000, 700)
+
+
+# --- macOS (NEW-199): maximized there is full screen ------------------------
+
+MAC_SCREEN = [(0, 0, 1440, 900)]
+
+
+def test_mac_never_opens_maximized_but_gets_its_normal_size_back():
+    saved = _saved(x=100, y=50, width=1150, height=800, maximized=True)
+    geometry = dl.restore_window_geometry(saved, MAC_SCREEN, platform="darwin")
+    assert geometry == _saved(x=100, y=50, width=1150, height=800)
+    # Unknown screens and no saved position: still not maximized.
+    for screens, x in (([], None), (MAC_SCREEN, None)):
+        saved = _saved(x=x, y=x, width=1150, height=800, maximized=True)
+        geometry = dl.restore_window_geometry(saved, screens, platform="darwin")
+        assert geometry["maximized"] is False
+
+
+def test_windows_and_linux_still_open_maximized():
+    saved = _saved(maximized=True)
+    for platform in ("win32", "linux"):
+        geometry = dl.restore_window_geometry(saved, ONE_SCREEN, platform=platform)
+        assert geometry == saved
+
+
+def test_mac_title_bar_zoom_keeps_the_normal_size():
+    clock = _Clock()
+    start = _saved(x=100, y=50, width=1150, height=800)
+    tracker = dl.WindowGeometryTracker(
+        start, clock=clock, screens=MAC_SCREEN, platform="darwin"
+    )
+    clock.now += 30
+    tracker.on_moved(0, 25)  # the zoom's own move, just before its resize...
+    clock.now += 0.1
+    tracker.on_resized(1440, 875)  # ...to the screen less the menu bar
+    tracker.on_moved(0, 25)  # and one just after it
+    assert tracker.geometry() == start
+    tracker.on_resized(1440, 900)  # exactly the screen (our old maximize())
+    assert tracker.geometry() == start
+    # Zoomed back out: sizes count again.
+    clock.now += 30
+    tracker.on_resized(1200, 820)
+    tracker.on_moved(140, 60)
+    assert tracker.geometry() == _saved(x=140, y=60, width=1200, height=820)
+
+
+def test_mac_full_screen_close_saves_the_normal_size(tmp_path):
+    clock = _Clock()
+    start = _saved(x=100, y=50, width=1150, height=800)
+    tracker = dl.WindowGeometryTracker(
+        start, clock=clock, screens=MAC_SCREEN, platform="darwin"
+    )
+    clock.now += 30
+    tracker.on_resized(1440, 900)
+    tracker.on_maximized()  # windowDidEnterFullScreen_
+    path = tmp_path / "window-geometry.json"
+    dl.save_window_geometry(tracker.geometry(), path)
+    reopened = dl.restore_window_geometry(
+        dl.load_window_geometry(path), MAC_SCREEN, platform="darwin"
+    )
+    assert reopened == start
+
+
+def test_screen_sized_resize_is_a_normal_size_off_mac():
+    tracker = dl.WindowGeometryTracker(
+        DEFAULT, clock=_Clock(), screens=ONE_SCREEN, platform="win32"
+    )
+    tracker.on_resized(1920, 1080)
+    assert (tracker.width, tracker.height) == (1920, 1080)
+
+
+# --- W-100: the screen holding the corner, clamped to its work area ---------
+
+TASKBAR = 48
+
+
+def _with_work_area(x, y, w, h):
+    return (x, y, w, h, x, y, w, h - TASKBAR)
+
+
+THREE_SCREENS = [
+    _with_work_area(-1920, 0, 1920, 1080),
+    _with_work_area(0, 0, 1920, 1080),
+    _with_work_area(1920, 0, 1920, 1080),
+]
+
+
+def test_oversized_window_stays_on_the_screen_holding_its_corner():
+    # 1920 px of title bar on the right-hand screen beats 1820 on the centre
+    # one, but the top-left corner is on the centre screen.
+    saved = _saved(x=100, y=50, width=5000, height=3000)
+    geometry = dl.restore_window_geometry(saved, THREE_SCREENS, platform="win32")
+    assert geometry == _saved(x=0, y=0, width=1920, height=1080 - TASKBAR)
+
+
+def test_corner_off_every_screen_falls_back_to_the_most_title_bar():
+    # Top-left just left of the screens; the title bar lands on both, most
+    # of it on the left-hand one.
+    saved = _saved(x=50, y=100, width=3000, height=900)
+    two = [(100, 0, 1920, 1080), (2020, 0, 1920, 1080)]
+    geometry = dl.restore_window_geometry(saved, two)
+    assert geometry == _saved(x=100, y=100, width=1920, height=900)
+
+
+def test_window_low_on_the_screen_is_shifted_clear_of_the_taskbar():
+    screen = [_with_work_area(0, 0, 1920, 1080)]
+    work_bottom = 1080 - TASKBAR
+    # Title bar 20 px above the taskbar line: pulled up onto the work area.
+    saved = _saved(x=200, y=work_bottom - 20, width=1400, height=900)
+    geometry = dl.restore_window_geometry(saved, screen, platform="win32")
+    assert geometry == _saved(x=200, y=work_bottom - 900, width=1400, height=900)
+    # Taller than the work area: shrunk to it, not to the screen.
+    saved = _saved(x=0, y=0, width=1400, height=1080)
+    geometry = dl.restore_window_geometry(saved, screen, platform="win32")
+    assert geometry["height"] == work_bottom
+    # No saved position: the size is clamped to the work area too.
+    saved = _saved(x=None, y=None, width=1400, height=1080)
+    geometry = dl.restore_window_geometry(saved, screen, platform="win32")
+    assert geometry["height"] == work_bottom
+
+
+def test_work_areas_off_windows_keep_the_screen():
+    if dl.sys.platform == "win32":
+        return
+    assert dl._windows_work_areas([(0, 0, 1920, 1080)]) == [(0, 0, 1920, 1080)]
