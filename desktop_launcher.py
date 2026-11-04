@@ -690,8 +690,9 @@ async function refresh() {
   }
   list.innerHTML = info.companies.map(function (c) {
     const last = c.file === info.last_opened ? ' <span class="open">last opened</span>' : '';
+    const sample = c.sample ? ' <span class="open">sample</span>' : '';
     return '<div class="company" data-file="' + esc(c.file) + '">' +
-      '<div><div class="name">' + esc(c.name) + last + '</div>' +
+      '<div><div class="name">' + esc(c.name) + sample + last + '</div>' +
       '<div class="file">' + esc(c.file) + '</div></div>' +
       '<div class="open">Open &rsaquo;</div></div>';
   }).join('');

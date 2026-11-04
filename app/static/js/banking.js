@@ -2715,6 +2715,7 @@ const BankingPage = {
                     <td>${r.status === 'completed' ? `Completed ${r.completed_at ? formatDate(r.completed_at) : ''}` : 'In progress'}</td>
                     <td style="white-space:nowrap;">${r.status === 'completed'
                         ? `<button class="btn btn-sm btn-secondary" onclick="BankingPage.showReconReport(${r.id})">Report</button>
+                           <button class="btn btn-sm btn-secondary" onclick="window.open('/api/banking/reconciliations/${r.id}/print', '_blank')">Print</button>
                            <button class="btn btn-sm btn-secondary" onclick="window.open('/api/banking/reconciliations/${r.id}/pdf', '_blank')">Save PDF</button>`
                         : `<button class="btn btn-sm btn-primary" onclick="closeModal(); BankingPage.showReconcileView(${r.id})">Continue</button>`}</td>
                 </tr>`).join('')}</tbody></table></div>` : '<p>No reconciliations for this account yet.</p>';
@@ -2757,6 +2758,7 @@ const BankingPage = {
                 ${summary}${detail}
                 <div class="form-actions">
                     <button class="btn btn-secondary" onclick="BankingPage._closeReconReport()">Close</button>
+                    <button class="btn btn-secondary" onclick="window.open('/api/banking/reconciliations/${reconId}/print', '_blank')">Print</button>
                     <button class="btn btn-primary" onclick="window.open('/api/banking/reconciliations/${reconId}/pdf', '_blank')">Save PDF</button>
                 </div>`);
         } catch (err) { toast(err.message, 'error'); }

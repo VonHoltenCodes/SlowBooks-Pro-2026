@@ -42,6 +42,14 @@ _VALID_DB_NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,62}")
 # NO path separators, NO ".." — validated before any path is constructed.
 _COMPANY_FILENAME_RE = re.compile(r"[a-z0-9][a-z0-9_-]{0,62}\.db")
 
+# The sample company (#684): Henry Brown's Auto Body Shop, IRS Publication
+# 583. The picker names the file a sample; the books carry the business's
+# own name. A server (Postgres) install marks the row by its description.
+SAMPLE_COMPANY_NAME = "Sample: Henry Brown's Auto Body Shop"
+SAMPLE_BOOKS_NAME = "Henry Brown's Auto Body Shop"
+SAMPLE_DATABASE_NAME = "sample_henry_brown"
+SAMPLE_DESCRIPTION = "Sample company: IRS Publication 583, to try the app with"
+
 
 def _is_sqlite() -> bool:
     return DATABASE_URL.startswith("sqlite")
@@ -192,6 +200,7 @@ def manifest_list_companies() -> list[dict]:
             "name": c.get("name", ""),
             "file": c.get("file", ""),
             "is_current": bool(c.get("file")) and c.get("file") == current,
+            "sample": bool(c.get("sample")),
         }
         for c in _read_manifest()["companies"]
     ]
@@ -232,6 +241,11 @@ def sync_manifest_name(company_name: str | None) -> bool:
     manifest = _read_manifest()
     changed = False
     for entry in manifest["companies"]:
+        if entry.get("sample") and name == SAMPLE_BOOKS_NAME:
+            # A sample's file is named "Sample: …" on the picker while its
+            # books carry the business's own name (#684); the two differ
+            # on purpose until someone renames the books.
+            continue
         if entry.get("file") == current and entry.get("name") != name:
             entry["name"] = name
             changed = True
@@ -362,8 +376,14 @@ def _init_company_db(url: str, company_name: str | None = None) -> None:
         engine.dispose()
 
 
-def manifest_create_company(name: str) -> dict:
-    """Create a new company file: migrate it, seed it, register it."""
+def manifest_create_company(
+    name: str, *, books_name: str | None = None, sample: bool = False
+) -> dict:
+    """Create a new company file: migrate it, seed it, register it.
+
+    ``books_name`` is the name written into the books when it differs from
+    the picker's (the sample company, #684); ``sample`` marks the manifest
+    entry as one."""
     name = (name or "").strip()
     if not name:
         return {"success": False, "error": "Company name is required"}
@@ -395,7 +415,7 @@ def manifest_create_company(name: str) -> dict:
     companies_dir().mkdir(parents=True, exist_ok=True)
     url = "sqlite:///" + db_path.as_posix()
     try:
-        _init_company_db(url, company_name=name)
+        _init_company_db(url, company_name=books_name or name)
     except Exception:
         logger.exception("Failed to create company database %s", filename)
         db_path.unlink(missing_ok=True)
@@ -404,7 +424,10 @@ def manifest_create_company(name: str) -> dict:
             "error": "Failed to create company database. Check logs for details.",
         }
 
-    manifest["companies"].append({"name": name, "file": filename})
+    entry = {"name": name, "file": filename}
+    if sample:
+        entry["sample"] = True
+    manifest["companies"].append(entry)
     if not manifest.get("last_opened"):
         manifest["last_opened"] = filename
     _write_manifest(manifest)
@@ -460,6 +483,7 @@ def list_companies(db: Session) -> list[dict]:
                     c.last_accessed.isoformat() if c.last_accessed else None
                 ),
                 "is_current": is_current,
+                "sample": c.description == SAMPLE_DESCRIPTION,
             }
         )
     if current_db and not found_current:
@@ -474,6 +498,7 @@ def list_companies(db: Session) -> list[dict]:
                 "description": "the database this server is connected to",
                 "last_accessed": None,
                 "is_current": True,
+                "sample": False,
             },
         )
     return rows
@@ -488,11 +513,17 @@ def _current_database_name() -> str | None:
 
 
 def create_company(
-    db: Session, name: str, database_name: str = None, description: str = None
+    db: Session,
+    name: str,
+    database_name: str = None,
+    description: str = None,
+    *,
+    books_name: str | None = None,
+    sample: bool = False,
 ) -> dict:
     """Create a new company database (Postgres DB or SQLite file per mode)."""
     if _is_sqlite():
-        return manifest_create_company(name)
+        return manifest_create_company(name, books_name=books_name, sample=sample)
 
     if not database_name:
         return {"success": False, "error": "Database name is required"}
@@ -532,7 +563,7 @@ def create_company(
         # both do. A create_all-only database would boot with zero accounts
         # and no alembic version stamp, so future upgrades would not apply
         # cleanly.
-        _init_company_db(base_url + database_name, company_name=name)
+        _init_company_db(base_url + database_name, company_name=books_name or name)
 
         # Register in master DB
         company = Company(
@@ -558,3 +589,110 @@ def create_company(
 def get_company_db_url(database_name: str) -> str:
     """Get the full database URL for a company."""
     return _base_url() + database_name
+
+
+def _seed_sample_db(url: str) -> dict:
+    """Build Henry Brown's books in the new company database at ``url``,
+    opened the way _init_company_db opens it to seed the chart."""
+    from app.seed.irs_sample import apply_company_settings, seed_sample
+
+    engine = create_engine(url)
+    try:
+        with Session(engine) as session:
+            try:
+                apply_company_settings(session)
+                made = seed_sample(session)
+                session.commit()
+            except Exception:
+                session.rollback()
+                raise
+    finally:
+        engine.dispose()
+    return made
+
+
+def _drop_manifest_entry(filename: str) -> None:
+    manifest = _read_manifest()
+    manifest["companies"] = [
+        c for c in manifest["companies"] if c.get("file") != filename
+    ]
+    if manifest.get("last_opened") == filename:
+        manifest["last_opened"] = (
+            manifest["companies"][0]["file"] if manifest["companies"] else None
+        )
+    _write_manifest(manifest)
+
+
+def create_sample_company(db: Session) -> dict:
+    """Try a sample company (#684): a new company file named "Sample: Henry
+    Brown's Auto Body Shop", made the way + New Company makes one, then
+    filled with Henry Brown's books (app/seed/irs_sample.py). A second is
+    numbered; the company this request works in is never opened."""
+    if _is_sqlite():
+        taken = {c.get("file") for c in _read_manifest()["companies"]}
+        name = SAMPLE_COMPANY_NAME
+        n = 1
+        while True:
+            filename = company_filename_for(name)
+            path = company_db_path(filename) if filename else None
+            if (
+                filename not in taken
+                and path is not None
+                and not path.exists()
+                and company_name_taken_by(name) is None
+            ):
+                break
+            n += 1
+            name = f"{SAMPLE_COMPANY_NAME} {n}"
+        result = manifest_create_company(
+            name, books_name=SAMPLE_BOOKS_NAME, sample=True
+        )
+        if not result.get("success"):
+            return result
+        url = "sqlite:///" + path.as_posix()
+        try:
+            made = _seed_sample_db(url)
+        except Exception:
+            logger.exception("Failed to build the sample books in %s", filename)
+            _drop_manifest_entry(filename)
+            for suffix in ("", "-wal", "-shm"):
+                Path(str(path) + suffix).unlink(missing_ok=True)
+            return {
+                "success": False,
+                "error": "Failed to build the sample company. Check logs for details.",
+            }
+        return {**result, "sample": True, "made": _counts(made)}
+
+    from app.models.companies import Company
+
+    taken = {c.database_name for c in db.query(Company).all()}
+    current = _current_database_name()
+    name, database_name, n = SAMPLE_COMPANY_NAME, SAMPLE_DATABASE_NAME, 1
+    while database_name in taken or database_name == current:
+        n += 1
+        name = f"{SAMPLE_COMPANY_NAME} {n}"
+        database_name = f"{SAMPLE_DATABASE_NAME}_{n}"
+    result = create_company(
+        db,
+        name,
+        database_name,
+        SAMPLE_DESCRIPTION,
+        books_name=SAMPLE_BOOKS_NAME,
+        sample=True,
+    )
+    if not result.get("success"):
+        return result
+    try:
+        made = _seed_sample_db(get_company_db_url(database_name))
+    except Exception:
+        logger.exception("Failed to build the sample books in %s", database_name)
+        return {
+            "success": False,
+            "error": "The sample company was created but its books could not be "
+            "filled in. Check server logs for details.",
+        }
+    return {**result, "name": name, "sample": True, "made": _counts(made)}
+
+
+def _counts(made: dict) -> dict:
+    return {k: (str(v) if not isinstance(v, int) else v) for k, v in made.items()}

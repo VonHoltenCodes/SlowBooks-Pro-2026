@@ -2,6 +2,7 @@
 # PDF generation — WeasyPrint + Jinja2 templates.
 # ============================================================================
 
+from contextvars import ContextVar
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
@@ -90,6 +91,12 @@ def __getattr__(name):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
+# A report's Print page (#683) is the HTML its PDF is rendered from: the
+# print route runs the PDF route with this set, and render_pdf hands the
+# page over here instead of rendering it (app/routes/_print.py).
+_print_capture: ContextVar[list | None] = ContextVar("pdf_print_capture", default=None)
+
+
 def render_pdf(html_str: str) -> bytes:
     """Every PDF the app produces goes through here. PDF/UA-1 makes the
     output *tagged* — headings, tables and reading order are exposed to
@@ -97,6 +104,14 @@ def render_pdf(html_str: str) -> bytes:
     a W-2 or an invoice readable to a blind user. Falls back to a plain PDF
     if the installed WeasyPrint can't do the variant, so a render never
     fails on an environment quirk."""
+    capture = _print_capture.get()
+    if capture is not None:
+        capture.append(html_str)
+        return b""
+    return _write_pdf(html_str)
+
+
+def _write_pdf(html_str: str) -> bytes:
     HTML, _ = _weasyprint()
     doc = HTML(string=html_str, url_fetcher=_get_fetcher())
     try:

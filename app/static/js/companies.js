@@ -51,6 +51,7 @@ const CompaniesPage = {
                     ${!ac.is_copy && ac.can_make ? '<button class="btn btn-secondary" data-admin data-write onclick="CompaniesPage.showSendToAccountant()">Send to accountant…</button> ' : ''}
                     ${!ac.is_copy ? '<button class="btn btn-secondary" data-admin data-write onclick="CompaniesPage.showApplyChanges()">Apply accountant\'s changes…</button> ' : ''}
                     ${CompaniesPage._isDesktop() && !ac.is_copy ? '<button class="btn btn-secondary" data-admin data-write onclick="CompaniesPage.showOpenCopy()">Open accountant\'s copy…</button> ' : ''}
+                    ${!ac.is_copy ? '<button class="btn btn-secondary" data-admin data-write onclick="CompaniesPage.trySample(this)">Try a sample company</button> ' : ''}
                     <button class="btn btn-primary" data-admin onclick="CompaniesPage.showCreate()">+ New Company</button>
                 </div>
             </div>
@@ -74,7 +75,7 @@ const CompaniesPage = {
             for (const c of companies) {
                 const fileLabel = c.file || c.database_name || '';
                 html += `<div class="card">
-                    <div class="card-header">${escapeHtml(c.name)}${c.is_current ? ' <span style="font-size:9px;color:var(--text-success);">(currently open)</span>' : ''}</div>
+                    <div class="card-header">${escapeHtml(c.name)}${c.sample ? ' <span class="badge badge-draft" data-sample style="font-size:9px;">Sample</span>' : ''}${c.is_current ? ' <span style="font-size:9px;color:var(--text-success);">(currently open)</span>' : ''}</div>
                     <div style="font-size:10px;color:var(--text-muted);">${escapeHtml(fileLabel)}</div>
                     ${c.description ? `<div style="font-size:11px;margin-top:4px;">${escapeHtml(c.description)}</div>` : ''}
                     ${c.last_accessed ? `<div style="font-size:9px;color:var(--text-light);margin-top:4px;">Last accessed: ${new Date(c.last_accessed).toLocaleDateString()}</div>` : ''}
@@ -236,6 +237,29 @@ const CompaniesPage = {
             if (apply) apply.classList.add('hidden');
             toastPosted(`${done.counts.posted} entr${done.counts.posted === 1 ? 'y' : 'ies'} posted as adjusting entries`);
         } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Try a sample company (#684): Henry Brown's Auto Body Shop, IRS
+    // Publication 583, made as a company file of its own beside this one.
+    async trySample(btn) {
+        if (btn) { btn.disabled = true; btn.textContent = 'Making the sample…'; }
+        toast("Setting up Henry Brown's Auto Body Shop — this takes a few seconds.");
+        try {
+            const made = await API.post('/companies/sample', {});
+            let serves = false;
+            if (made && made.file && !CompaniesPage._isDesktop()) {
+                try { serves = ((await API.get('/auth/status')).companies || []).length > 1; } catch (err) { /* said below */ }
+            }
+            toast(CompaniesPage._isDesktop()
+                ? `${made.name} is on the picker. Switch company… opens it.`
+                : serves
+                ? `${made.name} is ready. Open it here; this company is left as it was.`
+                : `${made.name} was created as its own database${made.database_name ? ` (${made.database_name})` : ''}. To open it, run a second server pointed at that database, or point this one at it and restart (docs/operations.md, "Several companies on a server").`);
+            App.navigate('#/companies');
+        } catch (err) {
+            toast(err.message, 'error');
+            if (btn) { btn.disabled = false; btn.textContent = 'Try a sample company'; }
+        }
     },
 
     showCreate() {
