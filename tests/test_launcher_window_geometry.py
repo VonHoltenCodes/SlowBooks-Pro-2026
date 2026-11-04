@@ -84,8 +84,10 @@ def test_on_screen_restores_as_saved():
 
 
 def test_on_second_screen_restores_there():
+    # platform named: on a Mac the default is darwin, where maximized is
+    # never restored (NEW-199), and this is the Windows/Linux rule (NEW-202)
     saved = _saved(x=2200, y=200, width=1600, height=1000, maximized=True)
-    assert dl.restore_window_geometry(saved, TWO_SCREENS) == saved
+    assert dl.restore_window_geometry(saved, TWO_SCREENS, platform="win32") == saved
 
 
 def test_disconnected_monitor_falls_back_to_default():
