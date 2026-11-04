@@ -450,3 +450,14 @@ def void_credit_memo_unchecked(db: Session, cm: CreditMemo) -> None:
     cm.balance_remaining = Decimal("0")
     cm.status = CreditMemoStatus.VOID
     db.flush()
+
+
+@router.post("/{cm_id}/replace", response_model=CreditMemoResponse)
+def replace_credit_memo(
+    cm_id: int, data: CreditMemoCreate, db: Session = Depends(get_db)
+):
+    """Change a credit memo (#689): void it and post `data` in its place, the
+    two linked, under the void's refusals."""
+    from app.services.replace_transaction import replace
+
+    return replace(db, "credit_memo", cm_id, data)

@@ -468,8 +468,8 @@ def test_books_from_before_2_9_get_the_default_asset_type_at_the_upgrade(tmp_pat
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("407d52f22d78").down_revision == "d7b3f9a1c5e2"
     assert script.get_heads() == [
-        "e5c1a7d3f9b2"
-    ]  # the payment terms list (#664) is the head above it
+        "c4e8a1f7d2b6"
+    ]  # the void-and-replace links (#689) are the head above it
     command.upgrade(cfg, "407d52f22d78")
     types, accounts = _after_upgrade(db)
     expense = accounts["Depreciation Expense"]

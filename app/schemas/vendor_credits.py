@@ -110,4 +110,8 @@ class VendorCreditResponse(BaseModel):
     # hand ("Widget: 2 on hand; this credit takes it to -3."). The credit
     # posted; this says what it did. Empty otherwise: a void puts stock back.
     warnings: list[str] = []
+    # Void-and-replace (#689): the vendor credit this one replaced, and the one that
+    # replaced it (this one is then void).
+    replaces_id: Optional[int] = None
+    replaced_by_id: Optional[int] = None
     model_config = {"from_attributes": True}

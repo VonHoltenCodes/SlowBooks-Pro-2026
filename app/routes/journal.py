@@ -373,7 +373,11 @@ def get_journal_entry(
     lines_data = []
     for line in txn_lines:
         lines_data.append(_line_dict(line, accounts.get(line.account_id), jobs))
-    voided = reversed_already(db, txn)
+    # a card charge's or a transfer's own void (#689: the one a replace
+    # leaves) as well as a journal's
+    from app.services.bank_register import voided_transaction_ids
+
+    voided = reversed_already(db, txn) or txn.id in voided_transaction_ids(db, [txn.id])
     recon = reconciled_on(db, txn)
     # A bank entry is edited in its register, not here: the page says so
     # and links back to the bank or card account it was posted from (the
@@ -411,6 +415,8 @@ def get_journal_entry(
         reconciled_note=_reconciled_sentence(recon) if recon else None,
         register_account_id=register.id if register is not None else None,
         register_account_name=register.name if register is not None else "",
+        replaces_id=txn.replaces_id,
+        replaced_by_id=txn.replaced_by_id,
     )
 
 

@@ -77,6 +77,12 @@ class Transaction(Base):
     # negative). A later file that holds the whole transaction is offered as
     # its replacement. NULL on every other entry.
     source_difference = Column(Numeric(15, 2), nullable=True)
+    # Void-and-replace (#689): a posted expense, card charge or transfer with no edit of its own is
+    # changed by voiding it and posting a new one; each names the other.
+    # Plain ids, no foreign key: both rows always stay (a void keeps the
+    # original). NULL on everything else.
+    replaces_id = Column(Integer, nullable=True)
+    replaced_by_id = Column(Integer, nullable=True)
 
     # Class tracking dimension (QB-style); NULL groups with Uncategorized
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)

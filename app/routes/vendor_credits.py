@@ -471,3 +471,14 @@ def void_vendor_credit_unchecked(db: Session, vc: VendorCredit) -> None:
     vc.balance_remaining = Decimal("0")
     vc.status = VendorCreditStatus.VOID
     db.flush()
+
+
+@router.post("/{vc_id}/replace", response_model=VendorCreditResponse)
+def replace_vendor_credit(
+    vc_id: int, data: VendorCreditCreate, db: Session = Depends(get_db)
+):
+    """Change a vendor credit (#689): void it and post `data` in its place, the
+    two linked, under the void's refusals."""
+    from app.services.replace_transaction import replace
+
+    return replace(db, "vendor_credit", vc_id, data)

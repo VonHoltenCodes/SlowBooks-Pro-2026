@@ -121,3 +121,7 @@ class JournalEntryResponse(BaseModel):
     # from, so the page can say where it is edited. Empty for the rest.
     register_account_id: Optional[int] = None
     register_account_name: str = ""
+    # Void-and-replace (#689): a card charge or transfer (each viewed as its
+    # journal entry) the entry replaced, and the one that replaced it.
+    replaces_id: Optional[int] = None
+    replaced_by_id: Optional[int] = None

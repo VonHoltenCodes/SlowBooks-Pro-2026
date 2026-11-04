@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from app.models.accounts import Account, AccountType
 from app.models.transactions import Transaction, TransactionLine
+from app.services.edit_targets import edit_target
 from app.services import cash_basis
 from app.services.bank_register import (
     DEBIT_NORMAL,
@@ -169,6 +170,8 @@ def pl_detail_lines(
                 "source_link": link,
                 "voided": txn.id in voided
                 or bool((txn.source_type or "").endswith("_void")),
+                # what the line's Edit opens (#689); None: Open only
+                "edit": edit_target(txn, txn.id in voided),
             }
         )
     for block in blocks.values():

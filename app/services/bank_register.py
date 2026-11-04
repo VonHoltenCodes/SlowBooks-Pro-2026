@@ -18,6 +18,7 @@ from app.models.bills import BillPayment
 from app.models.contacts import Customer, Vendor
 from app.models.payments import Payment
 from app.models.transactions import Transaction, TransactionLine
+from app.services.edit_targets import edit_target
 from app.services.entry_text import BANK_ENTRY_HEADER
 
 DEBIT_NORMAL = {AccountType.ASSET, AccountType.EXPENSE, AccountType.COGS}
@@ -485,6 +486,8 @@ def account_register(
                 "reconciliation_id": tl.reconciliation_id,
                 "voided": txn.id in voided
                 or bool((txn.source_type or "").endswith("_void")),
+                # what the line's Edit opens (#689); None: Open only
+                "edit": edit_target(txn, txn.id in voided),
             }
         )
     period_net = (

@@ -327,6 +327,9 @@ class BillPaymentResponse(BaseModel):
     amount: Decimal = Decimal("0")
     method: Optional[str] = None
     check_number: Optional[str] = None
+    # the account it was paid from, which Pay Bills fills in when it opens to
+    # change the payment (#689)
+    pay_from_account_id: Optional[int] = None
     notes: Optional[str] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
@@ -342,6 +345,10 @@ class BillPaymentResponse(BaseModel):
     # A discount taken against the terms (#665): who, on what, and why.
     discount_override: bool = False
     discount_override_note: Optional[str] = None
+    # Void-and-replace (#689): the bill payment this one replaced, and the one that
+    # replaced it (this one is then void).
+    replaces_id: Optional[int] = None
+    replaced_by_id: Optional[int] = None
     model_config = {"from_attributes": True}
 
 

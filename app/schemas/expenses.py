@@ -74,8 +74,17 @@ class ExpenseResponse(BaseModel):
     expense_account_name: str = ""
     lines: list[ExpenseLineOut] = []
     paid_from_account_name: str = ""
+    # the paid-from account and the header's class and job, which the form
+    # fills in when it opens to change the expense (#689)
+    paid_from_account_id: Optional[int] = None
+    class_id: Optional[int] = None
+    job_id: Optional[int] = None
     amount: float
     reference: str = ""
     memo: str = ""
     status: str = "recorded"  # "recorded" | "void"
     printable: bool = False  # paid from a bank account and not void: Print Check
+    # Void-and-replace (#689): the expense this one replaced, and the one that
+    # replaced it (this one is then void).
+    replaces_id: Optional[int] = None
+    replaced_by_id: Optional[int] = None

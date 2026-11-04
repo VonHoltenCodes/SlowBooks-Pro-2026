@@ -113,6 +113,11 @@ def _serialize(
             and credit_line.account is not None
             and credit_line.account.bank_kind == "bank"
         ),
+        replaces_id=txn.replaces_id,
+        replaced_by_id=txn.replaced_by_id,
+        paid_from_account_id=credit_line.account_id if credit_line else None,
+        class_id=txn.class_id,
+        job_id=txn.job_id,
     )
 
 
@@ -344,3 +349,18 @@ def create_expense(
     db.commit()
     db.refresh(txn)
     return _serialize(txn, db)
+
+
+@router.post("/{expense_id}/replace", response_model=ExpenseResponse)
+def replace_expense(
+    expense_id: int,
+    data: ExpenseCreate,
+    db: Session = Depends(get_db),
+    allow_duplicate_check_number: bool = Query(False),
+):
+    """Change a recorded expense (#689): void it and post `data` in its
+    place, the two linked. The void's refusals stand (a reconciled line, a
+    closed period), in its words."""
+    from app.services.replace_transaction import replace
+
+    return replace(db, "expense", expense_id, data, allow_duplicate_check_number)
