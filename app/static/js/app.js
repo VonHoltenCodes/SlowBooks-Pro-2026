@@ -1264,7 +1264,7 @@ const App = {
         const current = document.documentElement.getAttribute('data-theme');
         const next = current === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
-        Store.set('slowbooks-theme', next);
+        App._pref('slowbooks-theme', next);
         const btn = $('#theme-toggle');
         if (btn) btn.innerHTML = next === 'dark' ? '&#9788;' : '&#9790;';
         // Canvas ink is painted, not styled: a chart on screen keeps the old
@@ -1274,8 +1274,23 @@ const App = {
         document.dispatchEvent(new CustomEvent('slowbooks:themechange', { detail: { theme: next } }));
     },
 
+    // A per-computer preference, through utils.js's null-safe Store when
+    // it is loaded (the page) and a null-safe read or write of its own when
+    // it is not (the node probes load this file alone): `value` undefined
+    // reads, null removes, anything else writes.
+    _pref(key, value) {
+        const store = typeof Store !== 'undefined' ? Store : {
+            get: k => { try { return window.localStorage ? window.localStorage.getItem(k) : null; } catch (e) { return null; } },
+            set: (k, v) => { try { if (window.localStorage) window.localStorage.setItem(k, v); } catch (e) { /* this load only */ } },
+            remove: k => { try { if (window.localStorage) window.localStorage.removeItem(k); } catch (e) { /* nothing kept */ } },
+        };
+        if (value === undefined) return store.get(key);
+        if (value === null) store.remove(key); else store.set(key, value);
+        return value;
+    },
+
     loadTheme() {
-        const saved = Store.get('slowbooks-theme');
+        const saved = App._pref('slowbooks-theme');
         if (saved === 'dark') {
             document.documentElement.setAttribute('data-theme', 'dark');
             const btn = $('#theme-toggle');
@@ -2610,8 +2625,7 @@ const App = {
         }
         if (keep) {
             try {
-                if (hide) Store.set(App.SIDEBAR_HIDDEN_KEY, '1');
-                else Store.remove(App.SIDEBAR_HIDDEN_KEY);
+                App._pref(App.SIDEBAR_HIDDEN_KEY, hide ? '1' : null);
             } catch (e) { /* this page load only */ }
         }
     },
