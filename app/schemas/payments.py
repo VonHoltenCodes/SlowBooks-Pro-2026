@@ -50,6 +50,9 @@ class PaymentCreate(StrictModel):
     # its date, more than its percent, or a second one (#664). Each refusal
     # names this field.
     allow_discount_override: StrictBool = False
+    # The class the payment's own lines carry (#686): the bank, A/R and the
+    # discounts taken with it. Unknown is 404, archived 400, as a transfer.
+    class_id: Optional[int] = None
 
 
 class PaymentApply(StrictModel):
@@ -104,6 +107,9 @@ class PaymentResponse(BaseModel):
     # A discount taken against the terms (#665): who, on what, and why.
     discount_override: bool = False
     discount_override_note: Optional[str] = None
+    # its class (#686), and the class's name for the view
+    class_id: Optional[int] = None
+    class_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

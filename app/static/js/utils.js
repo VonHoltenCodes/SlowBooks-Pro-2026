@@ -1660,6 +1660,42 @@ function classIdFromForm(form) {
     return v ? parseInt(v) : null;
 }
 
+// A payment's Class (#686): Receive Payments and Pay Bills, under the rule
+// the register's entry row and the feed's rows follow (#671). Shown once
+// the company has a class of its own; the default class chosen unless
+// Settings asks for a class to be picked every time, and the documents'
+// own class when every one applied has the same. A class the person picks
+// stays picked.
+const PaymentClass = {
+    _classes: [],
+    async load() {
+        try { PaymentClass._classes = await API.get('/classes'); } catch (e) { PaymentClass._classes = []; }
+        return PaymentClass._classes;
+    },
+    shown() { return (PaymentClass._classes || []).some(c => !c.is_system_default && !c.is_archived); },
+    groupHtml(id) {
+        if (!PaymentClass.shown()) return '';
+        const blank = ClassWarn.enabled();
+        const opts = (blank ? `<option value="" selected>— choose a ${T('class').toLowerCase()} —</option>` : '')
+            + PaymentClass._classes.filter(c => !c.is_archived)
+                .map(c => `<option value="${c.id}"${!blank && c.is_system_default ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('');
+        return `<div class="form-group"><label for="${id}">${T('Class')}</label>
+            <select id="${id}" name="class_id" data-write data-no-search onchange="this.dataset.edited = '1'">${opts}</select></div>`;
+    },
+    // `classIds`: the class of each document applied (null for none)
+    follow(select, classIds) {
+        if (!select || select.dataset.edited) return;
+        const ids = [...new Set((classIds || []).map(v => (v ? String(v) : '')))];
+        const has = v => [...select.options].some(o => o.value === v);
+        let want = ids.length === 1 && ids[0] && has(ids[0]) ? ids[0] : null;
+        if (want === null) {
+            const def = (PaymentClass._classes || []).find(c => c.is_system_default);
+            want = ClassWarn.enabled() || !def || !has(String(def.id)) ? '' : String(def.id);
+        }
+        if (has(want)) select.value = want;
+    },
+};
+
 // ---------------------------------------------------------------------------
 // Job-costing dimension — shared "Customer: Job" dropdown for entry forms.
 // Lists every active job; when the form has a customer select (pass its id),

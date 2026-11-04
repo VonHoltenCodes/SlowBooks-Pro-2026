@@ -32,6 +32,7 @@ from app.services.accounting import (
     void_line_memo,
 )
 from app.services.closing_date import check_closing_date
+from app.services.dimensions import require_dimensions
 from app.services.payments.clearing import (
     DISPLAY_NAMES,
     PROVIDER_NAMES,
@@ -75,6 +76,11 @@ def _response(payment: Payment, customer_name: str = None) -> PaymentResponse:
         customer_name = payment.customer.name
     resp.customer_name = customer_name
     resp.discounts = _discounts(payment)
+    if payment.class_id and db is not None:
+        from app.models.classes import TxnClass
+
+        cls = db.get(TxnClass, payment.class_id)
+        resp.class_name = cls.name if cls else None
     return resp
 
 
@@ -181,6 +187,8 @@ def create_payment(
     customer = db.query(Customer).filter(Customer.id == data.customer_id).first()
     if not customer:
         raise HTTPException(status_code=404, detail="Customer not found")
+    # the payment's class (#686): one that exists and is not archived
+    require_dimensions(db, data.class_id)
 
     # Reject non-positive amounts at the boundary; otherwise create_journal_entry
     # raises ValueError on the AR/bank line, which the framework surfaces as a
@@ -276,6 +284,7 @@ def create_payment(
         reference=data.reference,
         deposit_to_account_id=data.deposit_to_account_id,
         notes=data.notes,
+        class_id=data.class_id,
     )
     db.add(payment)
     db.flush()
@@ -387,18 +396,22 @@ def create_payment(
         # relieves at the payment rate.
         unallocated = Decimal(str(data.amount)) - Decimal(str(alloc_total))
         ar_home = sum(ar_home_credits, Decimal("0")) + to_home(unallocated, pay_rate)
+        # The payment's class (#686) goes on its own lines, not the
+        # header: the cash-basis lines below keep the invoices' classes.
         journal_lines = [
             {
                 "account_id": deposit_id,
                 "debit": cash_home,
                 "credit": Decimal("0"),
                 "description": f"Payment from {customer.name}",
+                "class_id": payment.class_id,
             },
             {
                 "account_id": ar_id,
                 "debit": Decimal("0"),
                 "credit": ar_home,
                 "description": f"Payment from {customer.name}",
+                "class_id": payment.class_id,
             },
         ]
         # Realized FX: cash settled at a different rate than the invoice
@@ -412,6 +425,7 @@ def create_payment(
                     "debit": -residual if residual < 0 else Decimal("0"),
                     "credit": residual if residual > 0 else Decimal("0"),
                     "description": f"Realized FX on payment from {customer.name}",
+                    "class_id": payment.class_id,
                 }
             )
         # The cash-basis reading of this payment (#483): the invoices'
@@ -574,12 +588,14 @@ def apply_payment(payment_id: int, data: PaymentApply, db: Session = Depends(get
                 "debit": amt,
                 "credit": Decimal("0"),
                 "description": f"Realized FX on payment from {cname}",
+                "class_id": payment.class_id,
             },
             {
                 "account_id": ar_id if loss else fx_id,
                 "debit": Decimal("0"),
                 "credit": amt,
                 "description": f"Realized FX on payment from {cname}",
+                "class_id": payment.class_id,
             },
         ]
         create_journal_entry(

@@ -1167,7 +1167,7 @@ def import_transactions(
                     # re-import reported "Duplicates skipped 1" for three.
                     counts["duplicates_skipped"] += 1
             elif trns_type == "PAYMENT":
-                result = _import_payment(db, trns, spls, sub_customers)
+                result = _import_payment(db, trns, spls, sub_customers, warnings)
                 if result:
                     counts["payments"] += 1
                     if not result.transaction_id:
@@ -1903,7 +1903,7 @@ def _import_invoice(
 
 
 def _import_payment(
-    db: Session, trns: dict, spls: list, sub_customers: bool = False
+    db: Session, trns: dict, spls: list, sub_customers: bool = False, warnings=None
 ) -> Payment:
     """Create a Payment from IIF TRNS/SPL data."""
     ref = trns.get("DOCNUM", "").strip()
@@ -1964,12 +1964,16 @@ def _import_payment(
         if uf_id:
             deposit_acct = db.query(Account).filter(Account.id == uf_id).first()
 
+    # the payment's class (#686): the TRNS row's CLASS, else the one its
+    # split rows share, as the export writes it
+    class_id, _line_classes = _block_classes(db, trns, spls, warnings)
     payment = Payment(
         customer_id=customer.id,
         date=pmt_date or date.today(),
         amount=amount,
         reference=ref or None,
         deposit_to_account_id=deposit_acct.id if deposit_acct else None,
+        class_id=class_id,
     )
     db.add(payment)
     db.flush()
@@ -2009,12 +2013,14 @@ def _import_payment(
                 "debit": amount,
                 "credit": Decimal("0"),
                 "description": f"Payment from {cust_name}",
+                "class_id": class_id,
             },
             {
                 "account_id": ar_id,
                 "debit": Decimal("0"),
                 "credit": amount,
                 "description": f"Payment from {cust_name}",
+                "class_id": class_id,
             },
         ]
         txn = create_journal_entry(

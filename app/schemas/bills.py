@@ -275,11 +275,11 @@ class BillPaymentCreate(StrictModel):
     check_number: Optional[str] = None
     pay_from_account_id: Optional[int] = None
     notes: Optional[str] = None
-    # No class_id or job_id (v2.22.0, #234): the schema accepted both and the
-    # route dropped them — BillPayment has no column and the payment's
-    # journal never carried them — so a client that sent one was told
-    # nothing. Nothing sends them (Pay Bills offers neither), and a body
-    # that does is now refused like any other unknown field.
+    # The class the payment's own lines carry (#686): the bank, A/P and the
+    # discounts taken with it. Unknown is 404, archived 400, as a transfer.
+    # No job_id (v2.22.0, #234): a body that sends one is refused like any
+    # other unknown field.
+    class_id: Optional[int] = None
     currency: Optional[str] = None
     exchange_rate: Optional[Decimal] = None
     # Pay a Sub whose COI has expired anyway (#553); recorded on the payment.
@@ -342,6 +342,9 @@ class BillPaymentResponse(BaseModel):
     # A discount taken against the terms (#665): who, on what, and why.
     discount_override: bool = False
     discount_override_note: Optional[str] = None
+    # its class (#686), and the class's name for the view
+    class_id: Optional[int] = None
+    class_name: Optional[str] = None
     model_config = {"from_attributes": True}
 
 

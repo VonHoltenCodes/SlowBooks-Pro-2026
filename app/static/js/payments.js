@@ -97,6 +97,7 @@ const PaymentsPage = {
                 ${p.reference ? `<strong>Reference:</strong> ${escapeHtml(p.reference)}<br>` : ''}
                 ${p.notes ? `<strong>Notes:</strong> ${escapeHtml(p.notes)}<br>` : ''}
                 ${p.deposited_in ? `<strong>Deposited:</strong> in ${escapeHtml(p.deposited_in)}<br>` : ''}
+                ${p.class_name ? `<strong>${T('Class')}:</strong> ${escapeHtml(p.class_name)}<br>` : ''}
             </div>
             ${allocHtml}
             ${unapplied > 0 ? `<div style="margin:12px 0; padding:8px 10px; border-radius:4px; background:#fff4d6; color:#7a5500;">
@@ -213,6 +214,8 @@ const PaymentsPage = {
         const [customers, accounts] = await Promise.all([
             API.get('/customers?active_only=true&tree=1'),
             API.get('/accounts'),
+            // the payment's class (#686)
+            PaymentClass.load(),
         ]);
         const bankAccts = accounts.filter(a => a.bank_kind === 'bank');
         PaymentsPage._accounts = accounts;
@@ -243,6 +246,7 @@ const PaymentsPage = {
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
                             <option value="">--</option>${bankOpts}</select></div>
+                    ${PaymentClass.groupHtml('payment-class')}
                     <div class="form-group full-width"><label>Notes</label>
                         <textarea name="notes"></textarea></div>
                 </div>
@@ -474,7 +478,20 @@ const PaymentsPage = {
         return null;
     },
 
+    // The Class box follows the invoices applied (#686): their class when
+    // every one has the same, else the default.
+    _followClass() {
+        const select = document.getElementById('payment-class');
+        if (!select) return;
+        const applied = [...$$('#payment-invoices .alloc-amount')]
+            .filter(i => PaymentsPage._cents(i.value) > 0)
+            .map(i => (PaymentsPage._invoices || []).find(inv => String(inv.id) === i.dataset.invoice))
+            .filter(Boolean);
+        PaymentClass.follow(select, applied.map(inv => inv.class_id));
+    },
+
     _updateAllocStatus() {
+        PaymentsPage._followClass();
         const { total, allocated, remaining } = PaymentsPage._remainingCents();
         // Money left over is kept as a customer credit only when the user
         // says so: the box appears with the amount and starts unticked.
@@ -705,9 +722,11 @@ const PaymentsPage = {
             notes: form.notes.value || null,
             allocations,
             discount_account_id: discountAccountId,
+            class_id: classIdFromForm(form),
         };
 
         if (!(await TxnWarn.ok(form))) return;
+        if (!(await ClassWarn.ok(form))) return;
 
         // One key per form: a second Save while the first is in flight is
         // ignored, and a Save sent again after a lost response answers with

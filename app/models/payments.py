@@ -42,6 +42,9 @@ class Payment(Base):
         Boolean, nullable=False, default=False, server_default=false()
     )
     discount_override_note = Column(Text, nullable=True)
+    # The class the payment's own posted lines carry (#686): the bank, A/R
+    # and any early-payment discount taken with it. None posts as before.
+    class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
 
     # Multi-currency: document currency + rate it was booked at (GL is home)
     currency = Column(String(3), nullable=True)

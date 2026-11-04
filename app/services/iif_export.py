@@ -1417,6 +1417,8 @@ def export_bill_payments(
         )
         ref = _iif_clean(bp.check_number or "")
         memo = _iif_text(bp.notes or "")
+        # the payment's class (#686) on both rows, as a transfer's
+        cls = _class_name(db, bp.class_id)
         lines += _iif_line(
             [
                 "TRNS",
@@ -1427,7 +1429,7 @@ def export_bill_payments(
                 str(-paid),
                 ref,
                 memo,
-                "",
+                cls,
             ]
         )
         lines += _iif_line(
@@ -1440,7 +1442,7 @@ def export_bill_payments(
                 str(paid),
                 ref,
                 memo,
-                "",
+                cls,
             ]
         )
         lines += _iif_line(["ENDTRNS"])
