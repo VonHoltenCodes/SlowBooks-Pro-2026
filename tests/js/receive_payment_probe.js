@@ -55,6 +55,10 @@ const ctx = {
     get: async () => [],
   },
   confirm: (q) => { ctx.asked = q; return true; },
+  // utils.js helpers the form calls since #686 (the probe loads payments.js alone)
+  ClassWarn: { ok: async () => true },
+  classIdFromForm: () => null,
+  PaymentClass: { follow() {} },
   location: { hash: '#/payments' },
 };
 vm.createContext(ctx);

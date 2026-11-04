@@ -2249,7 +2249,7 @@ const TxnEdit = {
         const title = t.replace
             ? `Edit this ${word}: saving voids it and posts the new one in its place`
             : `Edit this ${word}`;
-        return ` <button type="button" class="btn btn-sm btn-secondary txn-edit" data-write data-edit-kind="${escapeHtml(t.kind)}" aria-label="Edit ${escapeHtml(word)} ${id}" title="${escapeHtml(title)}" onclick="TxnEdit.open('${escapeHtml(t.kind)}', ${id})" style="padding:0 6px; font-size:10px;">Edit</button>`;
+        return ` <button type="button" class="btn btn-sm btn-secondary txn-edit" data-write data-edit-kind="${escapeHtml(t.kind)}" aria-label="Edit ${escapeHtml(word)} ${id}" title="${escapeHtml(title)}" onclick="TxnEdit.open(this.dataset.editKind, ${id})" style="padding:0 6px; font-size:10px;">Edit</button>`;
     },
     async open(kind, id) {
         try {
@@ -2291,6 +2291,18 @@ const Replace = {
         form.insertAdjacentHTML('afterbegin', note);
         const title = document.getElementById('modal-title');
         if (title) title.textContent = `Edit ${word.charAt(0).toUpperCase()}${word.slice(1)} #${Number(id)}`;
+    },
+    // Where each kind's replace posts, one literal per kind (the wiring
+    // test reads these; the forms build the same path from the create's
+    // path plus suffix()).
+    REPLACE_PATHS: {
+        expense: id => `/api/expenses/${id}/replace`,
+        cc_charge: id => `/api/cc-charges/${id}/replace`,
+        transfer: id => `/api/transfers/${id}/replace`,
+        credit_memo: id => `/api/credit-memos/${id}/replace`,
+        vendor_credit: id => `/api/vendor-credits/${id}/replace`,
+        payment: id => `/api/payments/${id}/replace`,
+        bill_payment: id => `/api/bill-payments/${id}/replace`,
     },
     // what follows the create's path where the form posts: '' for a new
     // record, '/12/replace' for the marked one

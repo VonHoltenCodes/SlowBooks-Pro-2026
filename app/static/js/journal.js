@@ -19,14 +19,15 @@ const JournalPage = {
     },
 
     listPath() {
-        const params = new URLSearchParams();
-        if (JournalPage._show === 'adjusting') params.set('adjusting', 'true');
-        if (JournalPage._from) params.set('start_date', JournalPage._from);
-        if (JournalPage._to) params.set('end_date', JournalPage._to);
+        // built by hand: the node probes have no URLSearchParams
+        const parts = [];
+        if (JournalPage._from) parts.push('start_date=' + encodeURIComponent(JournalPage._from));
+        if (JournalPage._to) parts.push('end_date=' + encodeURIComponent(JournalPage._to));
         const sort = JournalPage.sortChoice();
-        if (sort !== 'date') params.set('sort', sort);
-        const qs = params.toString();
-        return '/journal' + (qs ? '?' + qs : '');
+        if (sort !== 'date') parts.push('sort=' + encodeURIComponent(sort));
+        const base = JournalPage._show === 'adjusting' ? '/journal?adjusting=true' : '/journal';
+        if (!parts.length) return base;
+        return base + (base.includes('?') ? '&' : '?') + parts.join('&');
     },
 
     async render() {

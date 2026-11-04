@@ -535,6 +535,7 @@ const PaymentsPage = {
     // The Class box follows the invoices applied (#686): their class when
     // every one has the same, else the default.
     _followClass() {
+        if (typeof document === 'undefined') return;  // the form probe has no DOM
         const select = document.getElementById('payment-class');
         if (!select) return;
         const applied = [...$$('#payment-invoices .alloc-amount')]

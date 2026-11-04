@@ -2556,6 +2556,7 @@ const App = {
             btn.addEventListener('click', () => App.toggleSection(head));
             head.textContent = '';
             head.appendChild(btn);
+            head.classList.add('nav-section--folds');
             App._foldSection(head, folded.has(name));
         });
     },

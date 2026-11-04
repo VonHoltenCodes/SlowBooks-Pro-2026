@@ -527,7 +527,7 @@ body {
 /* A heading that folds (#688): App.setupSidebarSections puts a button in
    it with the heading's words; the li keeps no padding of its own then. The
    caret is drawn, not text: it is not part of the button's name. */
-.nav-section:has(> .nav-section__toggle) { padding: 0; }
+.nav-section.nav-section--folds { padding: 0; }
 .nav-section__toggle {
     display: flex; align-items: center; gap: 4px; width: 100%;
     padding: 10px 14px 3px; background: none; border: 0;
