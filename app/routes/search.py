@@ -376,6 +376,32 @@ def _transactions(db: Session, pattern: str, amount):
         )
         .all()
     )
+    # The words found (2.31.6, W-112): a bank entry keeps its memo
+    # on its lines and its payee (or "Bank entry") on the description, the
+    # memo column empty, so one found by its memo was listed with none. With
+    # no memo of its own the result says the description or the line's memo,
+    # whichever holds the text searched, so it shows the words it matched.
+    line_words = {}
+    for txn_id, words in (
+        db.query(TransactionLine.transaction_id, TransactionLine.description)
+        .filter(
+            TransactionLine.transaction_id.in_(ids),
+            TransactionLine.description.ilike(pattern),
+        )
+        .order_by(TransactionLine.id)
+        .all()
+    ):
+        line_words.setdefault(txn_id, words)
+    text = pattern.strip("%").lower()
+
+    def _memo(t):
+        if t.memo:
+            return t.memo
+        for words in (t.description, line_words.get(t.id)):
+            if words and text in words.lower():
+                return words
+        return t.description or line_words.get(t.id) or ""
+
     return [
         {
             "id": t.id,
@@ -384,7 +410,7 @@ def _transactions(db: Session, pattern: str, amount):
             "source_kind": t.source_kind,
             "reference": refs.get(t.id, ""),
             "description": t.description or "",
-            "memo": t.memo or "",
+            "memo": _memo(t),
             "payee": payees.get(t.id, ""),
             "total": float(tot or 0),
             "voided": t.id in voided,

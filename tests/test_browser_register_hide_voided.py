@@ -162,3 +162,48 @@ def test_the_box_and_the_count_read_in_both_themes(browser, theme):
             assert ratio >= 4.5, (theme, sel, ratio)
     finally:
         page.close()
+
+
+def test_a_voided_entry_asked_for_is_shown_and_the_choice_is_kept(browser):
+    """W-113: a search's "(void)" hit opens the register with show_voided=1.
+    With Hide voided the choice kept, that load draws the voided rows, the
+    box unticked for the visit and the count saying why; the choice kept
+    stays on, and the next load hides them again."""
+    page = _page(browser)
+    try:
+        page.get_by_role("checkbox", name="Hide voided").click()
+        page.wait_for_selector("#reg-voided-note")
+        assert page.evaluate(ROWS) == [71, 73, 75]
+        kept = "() => Store.get(BankingPage._hideVoidedKey())"
+        assert page.evaluate(kept) == "1"
+
+        # the link a "(void)" hit builds carries the ask
+        href = page.evaluate(
+            "() => BankingPage.hrefShowing(1, '2026-09-14', { showVoided: true })"
+        )
+        assert "show_voided=1" in href
+        assert "show_voided" not in page.evaluate(
+            "() => BankingPage.hrefShowing(1, '2026-09-14')"
+        )
+
+        page.evaluate("(h) => App.navigate(h)", href)
+        page.wait_for_function(
+            "() => document.querySelectorAll('#page-content tr[data-txn]').length === 5"
+        )
+        assert page.evaluate(ROWS) == [71, 72, 73, 74, 75]
+        assert not page.get_by_role("checkbox", name="Hide voided").is_checked()
+        assert (
+            page.inner_text("#reg-voided-note")
+            == "2 voided rows shown: a voided entry was asked for"
+        )
+        # the choice kept is untouched, and the ask is not kept in the address
+        assert page.evaluate(kept) == "1"
+        assert "show_voided" not in page.evaluate("() => location.hash")
+
+        # the next load is the choice kept again
+        page.reload()
+        page.wait_for_selector("#reg-hide-voided")
+        assert page.get_by_role("checkbox", name="Hide voided").is_checked()
+        assert page.evaluate(ROWS) == [71, 73, 75]
+    finally:
+        page.close()

@@ -746,12 +746,15 @@ const BankingPage = {
     // (#663): on the From it keeps, as any link to it opens, unless that is
     // after the entry's date and would leave the entry out; then from the
     // entry's own date. With no From kept it opens on every date.
-    async hrefShowing(accountId, date) {
+    // `showVoided` (a voided entry asked for, W-113) adds show_voided=1: that
+    // load draws the voided rows though Hide voided is the choice kept.
+    async hrefShowing(accountId, date, { showVoided = false } = {}) {
         await BankingPage._openCompany();
         const id = Number(accountId);
         const from = BankingPage._lastFrom(id);
         const start = from && date && from > date ? String(date) : from;
-        return `#/banking/${id}${start ? `?start_date=${encodeURIComponent(start)}` : ''}`;
+        const q = [start ? `start_date=${encodeURIComponent(start)}` : '', showVoided ? 'show_voided=1' : ''].filter(Boolean).join('&');
+        return `#/banking/${id}${q ? `?${q}` : ''}`;
     },
 
     _regFilterFrom(query) {
@@ -1083,10 +1086,21 @@ const BankingPage = {
         // reversal (posted on the void's date) come to nothing, so past
         // the pair each row shown has the ledger's balance, and a row
         // between them reads as the rows shown add up, a void as nothing.
-        const hideVoided = BankingPage._hidingVoided();
+        // A voided entry asked for (a search's "(void)" hit, W-113) comes
+        // with show_voided=1: this load draws the voided rows and shows the
+        // box unticked, the choice kept untouched; the address drops it
+        // (_regUrl), so the next draw hides them again.
+        const askedVoided = q.show_voided === '1' && BankingPage._hidingVoided();
+        const hideVoided = !askedVoided && BankingPage._hidingVoided();
         const shown = hideVoided ? BankingPage._withoutVoided(reg.entries) : reg.entries;
         const hiddenCount = reg.entries.length - shown.length;
-        const hiddenNote = hiddenCount ? `<p id="reg-voided-note" role="status" style="font-size:11px; color:var(--gray-600); margin:6px 0 0;">${hiddenCount} ${hiddenCount === 1 ? 'row' : 'rows'} hidden: voided entries and their reversals</p>` : '';
+        const voidedCount = askedVoided ? reg.entries.filter(e => e.voided).length : 0;
+        const noteStyle = 'font-size:11px; color:var(--gray-600); margin:6px 0 0;';
+        const hiddenNote = hiddenCount
+            ? `<p id="reg-voided-note" role="status" style="${noteStyle}">${hiddenCount} ${hiddenCount === 1 ? 'row' : 'rows'} hidden: voided entries and their reversals</p>`
+            : voidedCount
+                ? `<p id="reg-voided-note" role="status" style="${noteStyle}">${voidedCount} voided ${voidedCount === 1 ? 'row' : 'rows'} shown: a voided entry was asked for</p>`
+                : '';
         // From and To apply on Enter or once the bar is left, a pick from the
         // calendar at once (#663: regFiltersKey)
         const dateBox = `onpointerdown="BankingPage.regDatePointer(this)" onchange="BankingPage.regDateChanged(this, ${id})"`;
@@ -1986,13 +2000,16 @@ const BankingPage = {
         // the single Category box is for a plain entry too: a split's first
         // line is the category the entry posts under, so the box goes away
         // while the lines show, its pick carried to the first line, and comes
-        // back with the first line's account when the split is undone
+        // back with the first line's account when the split is undone. The
+        // box's pick wins over whatever the first line held from an earlier
+        // split: split, undo, pick another category, split again, and the
+        // first line is the new pick (2.31.6, W-110)
         const catGroup = document.getElementById('entry-category-group');
         const cat = document.getElementById('entry-category');
         if (catGroup) catGroup.style.display = open ? 'none' : '';
         if (open && !document.querySelectorAll('#entry-split-rows tr').length) { BankingPage.addSplitRow(); BankingPage.addSplitRow(); }
         const first = document.querySelector('#entry-split-rows tr .split-cat');
-        if (open && cat && first && cat.value && !first.value) first.value = cat.value;
+        if (open && cat && first && cat.value) first.value = cat.value;
         if (!open && cat && first && first.value) cat.value = first.value;
         BankingPage.splitNote();
     },

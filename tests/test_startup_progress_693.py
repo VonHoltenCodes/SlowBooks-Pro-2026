@@ -167,6 +167,58 @@ def test_with_no_progress_the_timeout_holds(tmp_path, monkeypatch):
     assert ok is False and 120 <= clock["now"] <= 121
 
 
+def test_the_note_is_read_twice_a_second_though_a_refused_probe_waits(
+    tmp_path, monkeypatch
+):
+    """W-109: on Windows a refused loopback connect takes the probe's whole
+    timeout. The wait reads the note before the probe on every pass, gives
+    the probe half a second, and counts that wait in its sleep, so the note
+    is still read about twice a second and a step that lasts half a second
+    reaches on_progress."""
+    note = tmp_path / startup_progress.FILENAME
+    seen, probes, reads = [], [], []
+
+    def server(now):
+        # a new step every half second for the first ten seconds
+        if now <= 10:
+            _write(note, int(now * 2), 20)
+
+    clock = _fake_world(monkeypatch, server)
+
+    def refuse_slowly(*a, **k):
+        probes.append(k.get("timeout"))
+        clock["now"] += k.get("timeout") or 0
+        server(clock["now"])
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(dl.urllib.request, "urlopen", refuse_slowly)
+    real_read = startup_progress.read
+
+    def read(path):
+        reads.append(clock["now"])
+        return real_read(path)
+
+    monkeypatch.setattr(startup_progress, "read", read)
+    ok = dl.wait_for_health(
+        _Proc(),
+        3001,
+        timeout=120,
+        progress_path=note,
+        on_progress=seen.append,
+        stall=60,
+    )
+    assert ok is False
+    assert set(probes) == {0.5}
+    gaps = [b - a for a, b in zip(reads, reads[1:])]
+    assert max(gaps) <= 0.5 + 1e-9, max(gaps)
+    # about twice a second over the two minutes and the minute past the last step
+    assert 2 * 120 <= len(reads) <= 2 * 131, len(reads)
+    # every half-second step was seen, none skipped
+    assert seen == [
+        f"Catching up cash-basis lines (payments), {n} of 20" for n in range(1, 21)
+    ]
+
+
 def test_the_wait_ends_when_health_answers(tmp_path, monkeypatch):
     note = tmp_path / startup_progress.FILENAME
     healthy = {"yes": False}

@@ -3311,6 +3311,21 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
     }
 }
 
+/* The calculator tape's input (#696) draws the keyboard's ring, the
+   gold with its halo as every control at the top of the sheet: its own
+   look (#qmath-input, an id) beat the field's focus rule above, so with
+   the outline gone a focused tape showed nothing at all (2.31.6, W-111).
+   An id with :focus-visible, after the field's rule, so it wins over both. */
+#qmath-input:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 8px var(--focus-halo);
+    position: relative;
+}
+@media (forced-colors: active) {
+    #qmath-input:focus-visible { outline: 2px solid Highlight; }
+}
+
 /* Enter Bill: the vendor's summary beside the form (#601); below the form
    on a narrow window. */
 .bill-with-summary { display: flex; gap: 16px; align-items: flex-start; }

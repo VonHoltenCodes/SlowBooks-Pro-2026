@@ -134,6 +134,29 @@ def test_a_check_by_its_number_opens_on_its_register(client, books):
     assert hit["payee"] == "City Water" and hit["date"] == "2026-09-02"
 
 
+def test_a_bank_entry_by_its_memo_shows_the_memo(client, books, seed_accounts):
+    """W-112: a bank entry keeps its memo on its lines, not the memo column
+    the result read, so one found by its memo was listed with none."""
+    hit = _txns(client, "august wat")[books["check"]]
+    assert hit["memo"] == "August water" and hit["payee"] == "City Water"
+    # a memo with no payee: the description is the "Bank entry" sentinel
+    acct = seed_accounts
+    plain = _post(
+        client,
+        "/api/banking/transactions",
+        {
+            "account_id": acct["1000"].id,
+            "date": "2026-09-08",
+            "amount": "-19.99",
+            "category_account_id": acct["6000"].id,
+            "description": "Gutter brackets",
+        },
+    )
+    hit = _txns(client, "gutter")[plain["id"]]
+    assert hit["source_type"] == "bank_entry"
+    assert hit["memo"] == "Gutter brackets"
+
+
 def test_a_journal_entry_by_its_memo(client, books):
     hits = _txns(client, "quarterly insur")
     assert set(hits) == {books["journal"]}
@@ -235,5 +258,8 @@ def test_the_dropdown_lists_and_opens_them():
     js = (ROOT / "app/static/js/app.js").read_text(encoding="utf-8")
     assert "key: 'transactions', label: 'Transactions'" in js
     assert "App.openSearchTransaction(${Number(item.id)})" in js
-    assert "BankingPage.hrefShowing(t.register_account_id, t.date)" in js
+    assert (
+        "BankingPage.hrefShowing(t.register_account_id, t.date, { showVoided: !!t.voided })"
+        in js
+    )
     assert "return t.voided ? `${said} (void)` : said;" in js

@@ -2013,7 +2013,9 @@ const App = {
         const t = (App._searchTransactions || []).find(x => x.id === id);
         if (!t) return;
         if (t.source_type === 'bank_entry' && t.register_account_id && typeof BankingPage !== 'undefined') {
-            App.navigate(await BankingPage.hrefShowing(t.register_account_id, t.date));
+            // a "(void)" hit opens with its voided rows drawn though Hide
+            // voided is ticked (W-113), for that visit only
+            App.navigate(await BankingPage.hrefShowing(t.register_account_id, t.date, { showVoided: !!t.voided }));
             return;
         }
         App.navigate(String(t.link || `#/journal/${t.id}`).replace(/^\//, ''));
