@@ -5,7 +5,7 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
-### Unreleased
+### v2.31.5 — Real payment terms, a sample company to try, and the window where you left it
 
 **Payment terms beyond Net N** (#664). Terms were free text with one rule:
 "Net N", else 30 days, said to no one, so "2% 10 Net 30", "Net 10th" and
@@ -75,6 +75,20 @@ tying a discount to its payment; the NOT NULL flag columns
 `credit_memos.discount_payment_id` and
 `vendor_credits.discount_bill_payment_id`; its downgrade refuses while any
 discount taken against the terms still exists).
+
+**The February corner of a date-driven term, and a term that could never discount** (#664, follow-up). "By the 28th, net the 30th" clamped both days to February 28 and offered no discount on a February invoice, "by the 29th, net the 31st" the same; the order is now decided from the days as set, before the month shortens them, so the discount runs to the clamped due day. A term whose discount day is its due day is refused when saved, with the sentence. Each row of the terms list in Settings names its own Edit and Make Inactive buttons.
+
+**A display name on customer documents, the legal name on the forms** (#679). A company doing business under a trade name sets a **Display name** beside the company name (Settings → Company); invoices, sales receipts, estimates, statements, credit memos, the emails that carry them and the public pay page read it, and the W-2, W-3, 941, 940, 1099 and pay stubs keep the company name. Empty by default. A saved email template written as `{{ company.company_name }}` says the display name on a customer's email too, with the legal name under `{{ company.legal_name }}`; and a template's subject is now rendered as the text it is, not HTML, so "Pike's Plumbing" no longer reaches the Subject line as "Pike&#39;s Plumbing".
+
+**The logo alone, and Amount Due up top** (#682, #680). **Logo only** (Settings → Company, beside Show company logo on invoices) prints the customer documents with the logo and no company-name heading, the address block kept; with no logo the heading prints as before. The invoice PDF carries an **Amount Due** box beside Bill To, with the balance due and its due date (a pledge reads Balance; a paid invoice reads $0.00; a sales receipt or donation receipt, paid at the time of sale, has none).
+
+**The desktop window opens where you closed it** (#681). Size, position and maximized are kept in `window-geometry.json` in the data folder, written when the window closes; a saved position counts only when its title bar lands on a screen that is connected (a window saved on a monitor since unplugged comes back at the default), the window is shrunk to the screen when larger, never below 900×600, and the default is used when nothing was saved.
+
+**Form history's Check after a rename** (#678). A form whose company name or EIN changed after it was generated is no longer said to have had its pay runs change: Check walks the settings' audit log back and says which of the two changed, "the figures are as they were"; a pay run that did change still says so.
+
+**Print on reports** (#683). Every report with Save PDF has **Print** beside it, the reconciliation report included: `GET /api/reports/{report}/print` (and `/api/banking/reconciliations/{id}/print`) answers the page the PDF is made from with the print dialog opening on load, the same query string and the same role check as the PDF, as the documents' Print has done.
+
+**A sample company to try the app with** (#684). **Try a sample company** on the Companies page (`POST /api/companies/sample`, administrators) builds Henry Brown's Auto Body Shop, the example business of IRS Publication 583 (8 customers, 13 vendors, 8 items, 10 invoices, 5 payments, 3 estimates, every one with its journal entries, dated this year), in its own company file marked Sample in the picker; a second one is numbered; the company you are in is never touched. The `scripts/seed_irs_mock_data.py` script now calls the same code.
 
 ### v2.31.4 — Class and job wherever money moves, and payments that cannot double up
 

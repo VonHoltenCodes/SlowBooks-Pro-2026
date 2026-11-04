@@ -331,6 +331,8 @@ Open **http://localhost:3001**.
 
 ### Optional: Load demo data
 
+In the app, **Try a sample company** on the Companies page builds Henry Brown's Auto Body Shop (the IRS Publication 583 example) as its own company file. From a checkout, the same data can be seeded into the current database:
+
 ```bash
 python scripts/seed_irs_mock_data.py
 ```

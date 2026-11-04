@@ -1,4 +1,15 @@
 {
+  "2.31.5": {
+    "title": "Real payment terms, a sample company to try, and the window where you left it",
+    "items": [
+      "Payment terms are a list in Settings, the QuickBooks shape: Net N, a day of the month, and an early-payment discount on either; invoices, bills, recurring and memorized documents take their due date and discount from the term, and Receive Payments and Pay Bills offer the discount until its date.",
+      "A Display name for the company prints on invoices, estimates, statements and receipts while the tax and payroll forms keep the legal name; the customer documents can print the logo alone; an invoice shows Amount Due near the top.",
+      "The desktop window opens at the size and place you closed it.",
+      "Every report with Save PDF has a Print button beside it.",
+      "Try a sample company on the Companies page builds a worked example business in its own file, so there is something to look at before your own books are in.",
+      "Form history's Check no longer blames the pay runs after the company name or EIN changed."
+    ]
+  },
   "2.31.4": {
     "title": "Class and job wherever money moves, and payments that cannot double up",
     "items": [
