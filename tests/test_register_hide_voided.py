@@ -88,4 +88,4 @@ def test_the_register_hides_voided_rows_only_when_chosen():
     hidden = got["hidden"]
     assert hidden["checked"] is True
     assert hidden["rows"] == [[71, "$1000.00"], [73, "$900.00"], [75, "$860.00"]]
-    assert hidden["note"] == "2 voided entries hidden"
+    assert hidden["note"] == "2 rows hidden: voided entries and their reversals"

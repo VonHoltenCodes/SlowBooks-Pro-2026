@@ -94,7 +94,7 @@ def test_hide_voided_is_named_reached_by_tab_and_remembered(browser):
         page.wait_for_selector("#reg-voided-note")
         assert page.evaluate(ROWS) == [71, 73, 75]
         note = page.locator("#reg-voided-note")
-        assert note.inner_text() == "2 voided entries hidden"
+        assert note.inner_text() == "2 rows hidden: voided entries and their reversals"
         assert note.get_attribute("role") == "status"
         # the keyboard is back on the box, its state checked
         assert page.evaluate("() => document.activeElement.id") == "reg-hide-voided"

@@ -1086,7 +1086,7 @@ const BankingPage = {
         const hideVoided = BankingPage._hidingVoided();
         const shown = hideVoided ? BankingPage._withoutVoided(reg.entries) : reg.entries;
         const hiddenCount = reg.entries.length - shown.length;
-        const hiddenNote = hiddenCount ? `<p id="reg-voided-note" role="status" style="font-size:11px; color:var(--gray-600); margin:6px 0 0;">${hiddenCount} voided ${hiddenCount === 1 ? 'entry' : 'entries'} hidden</p>` : '';
+        const hiddenNote = hiddenCount ? `<p id="reg-voided-note" role="status" style="font-size:11px; color:var(--gray-600); margin:6px 0 0;">${hiddenCount} ${hiddenCount === 1 ? 'row' : 'rows'} hidden: voided entries and their reversals</p>` : '';
         // From and To apply on Enter or once the bar is left, a pick from the
         // calendar at once (#663: regFiltersKey)
         const dateBox = `onpointerdown="BankingPage.regDatePointer(this)" onchange="BankingPage.regDateChanged(this, ${id})"`;
