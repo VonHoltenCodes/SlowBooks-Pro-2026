@@ -55,12 +55,17 @@ from app.models.accounts import AccountType, DetailType
 from app.models.contacts import Customer, Vendor
 from app.services.account_label import label_for
 from app.services.migration_common import (
+    _missing_problem,
+    books_by_name,
     dry_run_bundle,
     parse_amount,
     parse_date,
+    planned_sub_account_note,
     run_import_bundle,
+    spec_path,
     strip_code_suffix,
 )
+from app.services.safe_errors import DataProblem
 
 LABEL = "QuickBooks Online export"
 SOURCE_TYPE = "qbo_export_import"
@@ -158,6 +163,9 @@ _BASIS = re.compile(r"\b(cash|accrual)\s+basis\b", re.I)
 # What parse_coa inferred about accounts the reports hide, for the dry run
 # to say (the engine's parser contract returns accounts and errors only).
 _COA_NOTES: list[str] = []
+# Trial-balance accounts with a balance that parse_coa could not place (no
+# parent the chart has): the import refuses them by name (#690, W-108).
+_COA_UNPLACED: list[str] = []
 
 
 def classify_filename(name: str) -> str | None:
@@ -189,7 +197,10 @@ def _cell(row: list[str], i: int) -> str:
 
 
 def parse_coa(
-    csv_text: str, also: tuple[str, ...] = (), ordered: tuple[str, ...] = ()
+    csv_text: str,
+    also: tuple[str, ...] = (),
+    ordered: tuple[str, ...] = (),
+    amounts: dict | None = None,
 ) -> tuple[list[dict], list[str]]:
     """Accounts from one or both reports (the route joins them). A row with
     a label and a figure is an account; a labelled row with no figure is a
@@ -199,14 +210,25 @@ def parse_coa(
     ``also`` names accounts the books use (the Journal's, the Trial
     Balance's) that the reports may not show: QuickBooks Online leaves a
     zero-balance row off the Balance Sheet and the Profit and Loss. A
-    sub-account of one the reports do show takes its parent's type; a
-    top-level one takes the type of its neighbour in ``ordered`` (the
-    Trial Balance's names, in the chart's order), and with neither it is
-    named, for the person to add first."""
+    sub-account of one the reports do show is planned under it with its
+    parent's type, and a Trial Balance account so planned is noted in the
+    engine's words (#690). Any other is placed by the type of its neighbour
+    in ``ordered`` (the Trial Balance's names, in the chart's order) when
+    the accrual Trial Balance's ``amounts`` give it no balance (a
+    zero-balance row the reports leave off); one with a balance is not
+    placed, and the import refuses it by name (W-108). With neither it is
+    named, for the person to add first.
+
+    A sub-account is named by its leaf ("Federal Unemployment (940)"), its
+    parent set, and carries its full "Parent:Child" ``path``, the name the
+    Journal and the Trial Balance write and the import matches it by: the
+    statements join the parents' names to it (NEW-203)."""
     accounts: list[dict] = []
     errors: list[str] = []
     notes = _COA_NOTES
     notes.clear()
+    unplaced = _COA_UNPLACED
+    unplaced.clear()
     seen: set[str] = set()
     stack: list[tuple[int, str, bool]] = []  # (indent, name, is_account)
     in_report = False
@@ -259,7 +281,8 @@ def parse_coa(
                     accounts.append(
                         {
                             "code": None,
-                            "name": full,
+                            "name": name,
+                            "path": full,
                             "type": acct_type,
                             "description": None,
                             "bank_kind": kind,
@@ -279,10 +302,11 @@ def parse_coa(
                         }
                     )
         stack.append((indent, name, is_account))
-    by_name = {a["name"].lower(): a for a in accounts}
+    by_name = {spec_path(a).lower(): a for a in accounts}
     # an account the books name another way ("Parent:Child (940)" beside the
     # report's indented child) is the same account, not a new one (#690)
-    by_key = {strip_code_suffix(a["name"]): a for a in accounts}
+    by_key = {strip_code_suffix(spec_path(a)): a for a in accounts}
+    on_tb = {n.strip().lower() for n in ordered}
     for name in also:
         key = name.strip().lower()
         if not key or key in by_name or key in _ARITHMETIC:
@@ -296,12 +320,29 @@ def parse_coa(
             else None
         )
         if parent_spec is not None:
-            acct_type, parent_name = parent_spec["type"], parent_spec["name"]
+            acct_type, parent_path = parent_spec["type"], spec_path(parent_spec)
+            leaf = name.rsplit(":", 1)[1].strip()
+            path = f"{parent_path}:{leaf}"
+            if key in on_tb:
+                # the engine's own words (#690): one note, and the engine
+                # finds the account planned here and plans no second one
+                notes.append(
+                    planned_sub_account_note(name.strip(), parent_path, acct_type)
+                )
         else:
+            balance = (amounts or {}).get(name.strip(), Decimal("0"))
+            if amounts is not None and key in on_tb and balance != 0:
+                # A balance on an account with no parent the chart has: not
+                # a zero row the reports left off. Guessing its type would
+                # put the balance on a made-up top-level account; it is
+                # named and the import refuses (W-108, #690).
+                unplaced.append(name.strip())
+                continue
             # The Trial Balance lists accounts in the chart's order, assets
             # through expenses: the nearest listed neighbour the reports do
             # show says what kind this one is.
-            acct_type, parent_name = _type_from_neighbours(name, ordered, by_name), None
+            acct_type = _type_from_neighbours(name, ordered, by_name, by_key)
+            parent_path, leaf, path = None, name.strip(), name.strip()
             if acct_type is None:
                 errors.append(
                     f"Account {name!r} is in the books but not on the Balance Sheet "
@@ -317,31 +358,39 @@ def parse_coa(
             )
         spec = {
             "code": None,
-            "name": name.strip(),
+            "name": leaf,
+            "path": path,
             "type": acct_type,
             "description": None,
             "bank_kind": None,
             # a sub-account takes its parent's (the model's rule); a
             # top-level one guessed from its neighbours, the default
             "detail_type": None,
-            "parent": parent_name,
+            "parent": parent_path,
         }
         accounts.append(spec)
         by_name[key] = spec
+        by_name.setdefault(path.lower(), spec)
         by_key.setdefault(strip_code_suffix(name), spec)
     return accounts, errors
 
 
-def _type_from_neighbours(name: str, listed: tuple[str, ...], by_name: dict):
+def _type_from_neighbours(
+    name: str, listed: tuple[str, ...], by_name: dict, by_key: dict | None = None
+):
     """The type of the nearest account before ``name`` in ``listed`` (the
-    Trial Balance's order) that the chart knows, else the nearest after."""
+    Trial Balance's order) that the chart knows, else the nearest after; a
+    neighbour the Trial Balance spells another way is found by its matching
+    key (#690)."""
     lowered = [n.strip().lower() for n in listed]
     key = name.strip().lower()
     if key not in lowered:
         return None
     i = lowered.index(key)
     for j in list(range(i - 1, -1, -1)) + list(range(i + 1, len(lowered))):
-        spec = by_name.get(lowered[j])
+        spec = by_name.get(lowered[j]) or (by_key or {}).get(
+            strip_code_suffix(lowered[j])
+        )
         if spec is not None:
             return spec["type"]
     return None
@@ -803,11 +852,14 @@ def _receivable_name(bundle: dict, groups: list[list[dict]]) -> str | None:
     under Accounts Receivable (if there are several, the one the Journal's
     invoices post to), else the account the invoices debit."""
     saved = list(_COA_NOTES)  # parse_coa keeps its notes for the dry run
+    saved_unplaced = list(_COA_UNPLACED)
     try:
         accounts, _ = parse_coa(bundle.get("coa", ""))
     finally:
         _COA_NOTES[:] = saved
-    listed = [a["name"] for a in accounts if a.get("receivable")]
+        _COA_UNPLACED[:] = saved_unplaced
+    # the path, the name the Journal posts to (NEW-203)
+    listed = [spec_path(a) for a in accounts if a.get("receivable")]
     used: dict[str, int] = {}
     for group in groups:
         if group and group[0]["journal"].startswith("Invoice "):
@@ -922,11 +974,8 @@ def _carry_plan(db: Session, bundle: dict) -> dict:
             f"{name} is on the A/R Aging Detail report but not on the Customer "
             "list: the customer is created with the carried-over documents"
         )
-    receivable_id = (
-        db.query(Account.id).filter(Account.name == receivable).scalar()
-        if receivable
-        else None
-    )
+    found = books_by_name(db).get(receivable.lower()) if receivable else None
+    receivable_id = found.id if found is not None else None
     here = {
         inv.invoice_number: inv.customer.qb_name
         for inv in db.query(Invoice).options(joinedload(Invoice.customer))
@@ -1026,7 +1075,6 @@ def _import_carried(db: Session, plan: dict) -> tuple[int, int]:
     1100 debited, the receivable account credited), each unapplied
     payment for its open part, unapplied (its posting: the receivable
     account debited, 1100 credited). Returns (invoices, payments)."""
-    from app.models.accounts import Account
     from app.models.invoices import Invoice, InvoiceLine, InvoiceStatus
     from app.models.payments import Payment
     from app.routes.invoices.helpers import _post_invoice_journal
@@ -1035,7 +1083,7 @@ def _import_carried(db: Session, plan: dict) -> tuple[int, int]:
 
     if not (plan["invoices"] or plan["payments"]):
         return 0, 0
-    receivable = db.query(Account).filter(Account.name == plan["receivable"]).one()
+    receivable = books_by_name(db)[plan["receivable"].lower()]
     ar_id = get_ar_account_id(db)
     item = _carry_item(db, receivable.id)
     from app.services.jobs_service import resolve_customer_and_job
@@ -1194,8 +1242,11 @@ def _parsers(bundle: dict) -> dict:
     also = _names_in_use(bundle)
     tb_text = bundle.get("tb") or bundle.get("tb_names_only")
     ordered = tuple(_tb_names(tb_text)) if tb_text else ()
+    # the accrual Trial Balance's figures, the ones the opening balances
+    # come from: a cash-basis one is set aside and gives none
+    amounts = parse_tb(bundle["tb"])[0] if "tb" in bundle else None
     return {
-        "coa": lambda text: parse_coa(text, also, ordered),
+        "coa": lambda text: parse_coa(text, also, ordered, amounts),
         "gl": parse_gl,
         "tb": parse_tb,
     }
@@ -1239,10 +1290,26 @@ def _counts(db: Session, bundle: dict) -> dict:
     }
 
 
+def _unplaced_problem(errors: list[str]) -> str | None:
+    """The refusal for the Trial Balance accounts parse_coa could not place
+    (W-108), unless the engine has already named them in its own words."""
+    unplaced = list(_COA_UNPLACED)
+    if not unplaced:
+        return None
+    problem = _missing_problem(unplaced)
+    if any("do not list" in e and all(repr(n) in e for n in unplaced) for e in errors):
+        return None
+    return problem
+
+
 def dry_run(db: Session, bundle: dict) -> dict:
     prepared, notes = _prepare(bundle)
     verdict = dry_run_bundle(db, prepared, _parsers(prepared), LABEL, SOURCE_TYPE)
     verdict["warnings"] = notes + list(_COA_NOTES) + verdict["warnings"]
+    unplaced = _unplaced_problem(verdict["errors"])
+    if unplaced:
+        verdict["errors"] = verdict["errors"] + [unplaced]
+        verdict["ok"] = False
     verdict.update(_counts(db, bundle))
     plan = _carry_plan(db, bundle)
     verdict["errors"] = verdict["errors"] + plan["errors"]
@@ -1268,7 +1335,14 @@ def run_import(db: Session, bundle: dict) -> dict:
             refused.update(imported_open_invoices=0, imported_unapplied_payments=0)
         return refused
     prepared, notes = _prepare(bundle)
-    result = run_import_bundle(db, prepared, _parsers(prepared), SOURCE_TYPE, LABEL)
+    parsers = _parsers(prepared)
+    if "coa" in prepared:
+        # a balance the chart has no place for refuses before anything is
+        # written, as a 422 with its names (#690, W-108)
+        parsers["coa"](prepared["coa"])
+        if _COA_UNPLACED:
+            raise DataProblem(_missing_problem(list(_COA_UNPLACED)))
+    result = run_import_bundle(db, prepared, parsers, SOURCE_TYPE, LABEL)
     result["warnings"] = notes + list(_COA_NOTES) + result["warnings"] + plan["notes"]
     result.update(_counts(db, bundle))
     invoices = payments = 0

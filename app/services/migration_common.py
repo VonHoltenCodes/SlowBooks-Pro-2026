@@ -105,14 +105,69 @@ def strip_code_suffix(name: str) -> str:
     return ":".join(part.split("(")[0].strip() for part in name.lower().split(":"))
 
 
+def spec_path(spec: dict) -> str:
+    """A chart spec's full 'Parent:Child' path, the name every side of an
+    import matches it by. A dialect that names a sub-account by its leaf
+    (the QuickBooks Online export, NEW-203) gives the path beside the name;
+    for the others the name is the path."""
+    return spec.get("path") or spec["name"]
+
+
+def account_paths(db: Session) -> list[tuple[Account, str]]:
+    """Every account in the books with its 'Parent:Child' path: the names
+    up its parent chain joined by ':' (a top-level account's path is its
+    name). An account named by its leaf under a parent is found by the
+    path the journal and the trial balance write (NEW-203)."""
+    accounts = db.query(Account).all()
+    by_id = {a.id: a for a in accounts}
+    out = []
+    for acct in accounts:
+        parts: list[str] = []
+        seen: set = set()
+        cur = acct
+        while cur is not None and cur.id not in seen:
+            seen.add(cur.id)
+            parts.append(cur.name)
+            cur = by_id.get(cur.parent_id)
+        out.append((acct, ":".join(reversed(parts))))
+    return out
+
+
+def books_by_name(db: Session) -> dict:
+    """{lowercased path or name → Account}: paths first, so a leaf name
+    never stands in for a top-level account the path names."""
+    pairs = account_paths(db)
+    found: dict = {}
+    for acct, path in pairs:
+        found.setdefault(path.lower(), acct)
+    for acct, _ in pairs:
+        found.setdefault(acct.name.lower(), acct)
+    return found
+
+
+def planned_sub_account_note(name: str, parent_name: str, acct_type) -> str:
+    """The words for a trial-balance account planned under its parent
+    (#690), one sentence for the engine and for a dialect that plans it."""
+    return (
+        f"Account {name!r} is on the trial balance but not in the chart "
+        f"files; it will be created as a sub-account of {parent_name!r} "
+        f"({_value(acct_type)}) to carry its opening balance"
+    )
+
+
 def _account_keys(db: Session, accounts: list[dict]) -> dict:
     """{matching key → (name, type)} for the accounts in the books and the
-    chart files' specs: the planned chart, as the import will have it."""
+    chart files' specs: the planned chart, as the import will have it. The
+    name is the one a spec's "parent" resolves through (the path)."""
     keys: dict = {}
-    for acct in db.query(Account).all():
+    pairs = account_paths(db)
+    for acct, path in pairs:
+        keys.setdefault(strip_code_suffix(path), (path, acct.account_type))
+    for acct, _ in pairs:
         keys.setdefault(strip_code_suffix(acct.name), (acct.name, acct.account_type))
     for spec in accounts:
-        keys.setdefault(strip_code_suffix(spec["name"]), (spec["name"], spec["type"]))
+        path = spec_path(spec)
+        keys.setdefault(strip_code_suffix(path), (path, spec["type"]))
     return keys
 
 
@@ -154,11 +209,7 @@ def _opening_accounts(
             }
         )
         keys[entry["account"]] = (name, acct_type)
-        notes.append(
-            f"Account {name!r} is on the trial balance but not in the chart "
-            f"files; it will be created as a sub-account of {parent_name!r} "
-            f"({_value(acct_type)}) to carry its opening balance"
-        )
+        notes.append(planned_sub_account_note(name, parent_name, acct_type))
     return extra, notes, missing
 
 
@@ -302,13 +353,13 @@ def _plan_accounts(db: Session, accounts: list[dict]) -> list[dict]:
     accounts are planned parents first, so a child listed above its parent
     still links and a grandchild inherits through its parent's settled detail
     type. Returns one decision per account to create, in creation order."""
-    in_books = {a.name.lower(): a for a in db.query(Account).all()}
+    in_books = books_by_name(db)
     used_numbers = {
         n for (n,) in db.query(Account.account_number).all() if n is not None
     }
     new_index: dict[str, int] = {}
     for i, spec in enumerate(accounts):
-        key = spec["name"].lower()
+        key = spec_path(spec).lower()
         if key not in in_books and key not in new_index:
             new_index[key] = i
 
@@ -421,10 +472,11 @@ def dry_run_bundle(
                 f"The file's header row is: {header[:300]}"
             )
 
-    known = {a["name"].lower() for a in accounts}
-    known |= {strip_code_suffix(a["name"]) for a in accounts}
-    known |= {a.name.lower() for a in db.query(Account).all()}
-    known |= {strip_code_suffix(a.name) for a in db.query(Account).all()}
+    known = {spec_path(a).lower() for a in accounts}
+    known |= {strip_code_suffix(spec_path(a)) for a in accounts}
+    for acct, path in account_paths(db):
+        known |= {acct.name.lower(), strip_code_suffix(acct.name)}
+        known |= {path.lower(), strip_code_suffix(path)}
 
     # A journal whose every line is 0.00 "balances" — and then posts nothing.
     # That is what an unrecognised amount column looks like from here: the
@@ -562,14 +614,16 @@ def dry_run_bundle(
         if decision["warning"]:
             warnings.append(decision["warning"])
 
-    existing = {a.name.lower() for a in db.query(Account).all()}
+    existing = set(books_by_name(db))
     return {
         "ok": not errors,
         "errors": errors,
         "warnings": warnings,
         "accounts": len(accounts),
         # the chart's accounts not in the books yet: what an import would make
-        "new_accounts": len([a for a in accounts if a["name"].lower() not in existing]),
+        "new_accounts": len(
+            [a for a in accounts if spec_path(a).lower() not in existing]
+        ),
         "journals": len(journals),
         "duplicate_journals": len(duplicates),
         "opening_balances": opening_balances,
@@ -601,7 +655,9 @@ def run_import_bundle(
     accounts = accounts + extra
     created = 0
     warnings = list(verdict.get("warnings") or [])
-    by_name: dict[str, Account] = {a.name.lower(): a for a in db.query(Account).all()}
+    # the books' accounts by path, then by name (NEW-203)
+    by_name: dict[str, Account] = books_by_name(db)
+    new_paths: list[tuple[str, Account]] = []
     # The dry run's plan, parents first. Its parent warnings are already in
     # `warnings` (carried from the verdict), so they are not added twice.
     made: dict[int, Account] = {}
@@ -635,11 +691,17 @@ def run_import_bundle(
                 f"as {detail_label(acct.detail_type)}"
             )
         made[decision["index"]] = acct
-        by_name[spec["name"].lower()] = acct
+        by_name[spec_path(spec).lower()] = acct
+        new_paths.append((spec_path(spec), acct))
         created += 1
+    for _, acct in new_paths:
+        by_name.setdefault(acct.name.lower(), acct)
     # the matching key of every account, books' and new (#690): what the
-    # trial balance and the journal's "Name (Code)" forms resolve through
+    # trial balance and the journal's "Name (Code)" forms resolve through,
+    # paths before leaf names (NEW-203)
     by_key: dict[str, Account] = {}
+    for acct, path in account_paths(db):
+        by_key.setdefault(strip_code_suffix(path), acct)
     for acct in by_name.values():
         by_key.setdefault(strip_code_suffix(acct.name), acct)
 
