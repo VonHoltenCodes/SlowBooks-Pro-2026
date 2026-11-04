@@ -49,6 +49,7 @@ const VendorCreditsPage = {
                 <tbody>${lines}</tbody>
             </table></div>
             <p style="margin-top:8px;">Total ${formatCurrency(c.total)} &middot; applied ${formatCurrency(c.amount_applied)} &middot; remaining <strong>${formatCurrency(c.balance_remaining)}</strong></p>
+            ${typeof Replace === 'undefined' ? '' : Replace.links(c, 'vendor_credit', n => `#/vendor-credits/${n}`)}
             <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
         // the document's own address, so Back returns to the list and the Open group lists it (NEW-164)
         if (App.documentAddress) App.documentAddress(`#/vendor-credits/${Number(id)}`);
@@ -162,6 +163,41 @@ const VendorCreditsPage = {
         return PurchaseLines.cents(subtotal + tax);
     },
 
+    // Edit from a report line (#689): the form filled in with the credit;
+    // Save voids it (its applications given back to their bills) and posts
+    // the new one in its place. What the form has no box for (the bill it
+    // was for, the job) rides along on the form and goes back with it.
+    async replace(id) {
+        const c = await API.get(`/vendor-credits/${id}`);
+        if (c.status === 'void') { toast('This vendor credit is void; there is nothing to change.', 'error'); return; }
+        await VendorCreditsPage.showForm();
+        const form = $('#vc-form');
+        if (!form) return;
+        Replace.set(form, 'vendor_id', c.vendor_id);
+        Replace.set(form, 'date', c.date);
+        Replace.set(form, 'ref_number', c.ref_number || '');
+        Replace.set(form, 'tax_rate', +((parseFloat(c.tax_rate) || 0) * 100).toFixed(4));
+        Replace.set(form, 'class_id', c.class_id || '');
+        Replace.set(form, 'notes', c.notes || '');
+        if (c.original_bill_id) form.dataset.originalBillId = String(c.original_bill_id);
+        if (c.job_id) form.dataset.jobId = String(c.job_id);
+        $('#vc-lines').innerHTML = '';
+        VendorCreditsPage.lineCount = 0;
+        (c.lines || []).forEach(l => {
+            VendorCreditsPage.addLine();
+            const rows = $$('#vc-lines tr');
+            const row = rows[rows.length - 1];
+            if (l.item_id) row.querySelector('.line-item').value = String(l.item_id);
+            if (l.account_id) row.querySelector('.line-account').value = String(l.account_id);
+            row.querySelector('.line-desc').value = l.description || '';
+            row.querySelector('.line-qty').value = Number(l.quantity);
+            row.querySelector('.line-rate').value = Number(l.rate);
+        });
+        if (!(c.lines || []).length) VendorCreditsPage.addLine();
+        VendorCreditsPage.recalc();
+        Replace.mark(form, 'vendor_credit', id);
+    },
+
     async save(e) {
         e.preventDefault();
         const form = e.target;
@@ -194,7 +230,11 @@ const VendorCreditsPage = {
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {
-            const saved = await API.post('/vendor-credits', {
+            const carried = {};
+            if (form.dataset.originalBillId) carried.original_bill_id = parseInt(form.dataset.originalBillId);
+            if (form.dataset.jobId) carried.job_id = parseInt(form.dataset.jobId);
+            const saved = await API.post('/vendor-credits' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), {
+                ...carried,
                 vendor_id: parseInt(form.vendor_id.value),
                 date: form.date.value,
                 ref_number: form.ref_number.value || null,
@@ -203,7 +243,8 @@ const VendorCreditsPage = {
                 class_id: classIdFromForm(form),
                 lines,
             });
-            toastPosted('Vendor credit created');
+            if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Vendor credit voided and replaced by vendor credit ${saved.credit_number || `#${saved.id}`}`);
+            else toastPosted('Vendor credit created');
             // stock the return took below what was on hand (W-74): posted, and said
             for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             closeModal();

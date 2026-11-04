@@ -531,7 +531,12 @@ def test_with_the_setting_on_a_credit_past_the_stock_is_refused_and_nothing_post
 
 def test_the_vendor_credits_page_shows_the_warnings():
     src = _source("js/vendor_credits.js")
-    assert "const saved = await API.post('/vendor-credits', {" in src
+    # a new credit posts to /vendor-credits; one changed from a report line
+    # to its /replace (#689), with the same warnings
+    assert (
+        "const saved = await API.post('/vendor-credits' + (typeof Replace === "
+        "'undefined' ? '' : Replace.suffix(form)), {" in src
+    )
     assert (
         "for (const w of (saved && saved.warnings) || []) toast(w, 'warning');" in src
     )

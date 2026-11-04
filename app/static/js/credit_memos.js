@@ -64,6 +64,7 @@ const CreditMemosPage = {
                 <div class="total-row grand-total"><span class="label">Remaining</span><span class="value">${formatCurrency(cm.balance_remaining)}</span></div>
             </div>
             ${cm.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(cm.notes)}</p>` : ''}
+            ${typeof Replace === 'undefined' ? '' : Replace.links(cm, 'credit_memo', n => `#/credit-memos/${n}`)}
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/credit-memos/${cm.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/credit-memos/${cm.id}/print-preview','_blank')">Print</button>
@@ -225,6 +226,50 @@ const CreditMemosPage = {
         return t;
     },
 
+    // Edit from a report line (#689): the form filled in with the memo; Save
+    // voids it (its applications given back to their invoices) and posts
+    // the new one in its place.
+    async replace(id) {
+        const cm = await API.get(`/credit-memos/${id}`);
+        if (cm.status === 'void') { toast('This credit memo is void; there is nothing to change.', 'error'); return; }
+        await CreditMemosPage.showForm();
+        const form = $('#cm-form');
+        if (!form) return;
+        Replace.set(form, 'customer_id', cm.customer_id);
+        await CreditMemosPage.customerSelected(cm.customer_id);
+        const inv = $('#cm-invoice-select');
+        if (inv && cm.original_invoice_id) {
+            if (![...inv.options].some(o => o.value === String(cm.original_invoice_id))) {
+                inv.insertAdjacentHTML('beforeend', `<option value="${Number(cm.original_invoice_id)}">${T('Invoice')} #${Number(cm.original_invoice_id)}</option>`);
+            }
+            inv.value = String(cm.original_invoice_id);
+        }
+        Replace.set(form, 'date', cm.date);
+        Replace.set(form, 'tax_rate', +((parseFloat(cm.tax_rate) || 0) * 100).toFixed(4));
+        Replace.set(form, 'class_id', cm.class_id || '');
+        Replace.set(form, 'notes', cm.notes || '');
+        $('#cm-lines').innerHTML = '';
+        CreditMemosPage.lineCount = 0;
+        const taxed = parseFloat(cm.tax_amount) > 0;
+        (cm.lines || []).forEach(l => {
+            const idx = CreditMemosPage.lineCount;
+            CreditMemosPage.addLine();
+            const row = $(`[data-cmline="${idx}"]`);
+            if (!row) return;
+            if (l.item_id) row.querySelector('.line-item').value = String(l.item_id);
+            row.querySelector('.line-desc').value = l.description || '';
+            row.querySelector('.line-qty').value = Number(l.quantity);
+            row.querySelector('.line-rate').value = Number(l.rate);
+            const tax = row.querySelector('.line-taxable');
+            if (tax) tax.checked = taxed;
+            const cls = row.querySelector('select.line-class');
+            if (cls && l.class_id) cls.value = String(l.class_id);
+        });
+        if (!(cm.lines || []).length) CreditMemosPage.addLine();
+        CreditMemosPage.recalc();
+        Replace.mark(form, 'credit_memo', id);
+    },
+
     async save(e) {
         e.preventDefault();
         const form = e.target;
@@ -254,9 +299,10 @@ const CreditMemosPage = {
         try {
             // $0.00 asks "Save it anyway?" first (SalesLines.sendAllowingZero)
             const saved = await SalesLines.sendAllowingZero(flags =>
-                API.post('/credit-memos', { ...data, ...flags }));
+                API.post('/credit-memos' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), { ...data, ...flags }));
             if (!saved) return;
-            toastPosted('Credit memo created');
+            if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Credit memo voided and replaced by credit memo ${saved.memo_number || `#${saved.id}`}`);
+            else toastPosted('Credit memo created');
             closeModal();
             App.navigate('#/credit-memos');
         } catch (err) { toast(err.message, 'error'); }

@@ -74,13 +74,37 @@ const CCChargesPage = {
             </form>`);
     },
 
+    // Edit from a report line (#689): the form filled in with the charge
+    // (read off its journal entry); Save voids it and posts the new one.
+    async replace(id) {
+        const entry = await API.get(`/journal/${id}`);
+        if (entry.voided) { toast('This charge is void; there is nothing to change.', 'error'); return; }
+        await CCChargesPage.showForm();
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        const spent = (entry.lines || []).find(l => l.debit > 0) || {};
+        const card = (entry.lines || []).find(l => l.credit > 0) || {};
+        const payee = (entry.description || '').startsWith('CC Charge: ') ? entry.description.slice(11) : '';
+        Replace.set(form, 'date', entry.date);
+        Replace.set(form, 'payee', payee);
+        Replace.set(form, 'account_id', spent.account_id);
+        Replace.set(form, 'card_account_id', card.account_id);
+        Replace.set(form, 'amount', Number(spent.debit || 0).toFixed(2));
+        Replace.set(form, 'reference', entry.reference || '');
+        Replace.set(form, 'memo', spent.description && spent.description !== payee ? spent.description : '');
+        Replace.set(form, 'class_id', entry.class_id || '');
+        Replace.set(form, 'job_id', entry.job_id || '');
+        if (spent.function) Replace.set(form, 'function', spent.function);
+        Replace.mark(form, 'cc_charge', id);
+    },
+
     async save(e) {
         e.preventDefault();
         const form = e.target;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {
-            await API.post('/cc-charges', {
+            const r = await API.post('/cc-charges' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), {
                 date: form.date.value,
                 payee: form.payee.value || null,
                 account_id: parseInt(form.account_id.value),
@@ -92,7 +116,8 @@ const CCChargesPage = {
                 ...Nonprofit.formPayload(form),
                 job_id: jobIdFromForm(form),
             });
-            toastPosted('Credit card charge recorded');
+            if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Charge voided and replaced by charge #${r.transaction_id}`);
+            else toastPosted('Credit card charge recorded');
             closeModal();
             App.navigate('#/cc-charges');
         } catch (err) { toast(err.message, 'error'); }

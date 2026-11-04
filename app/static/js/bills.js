@@ -165,6 +165,7 @@ const BillsPage = {
                 <strong>Amount:</strong> ${formatCurrency(p.amount)}<br>
                 <strong>Status:</strong> ${p.is_voided ? statusBadge('void') : 'Paid'}
                 ${p.coi_override ? `<br><strong>COI override:</strong> ${escapeHtml(p.coi_override_note || 'Paid with an expired certificate of insurance')}` : ''}
+                ${typeof Replace === 'undefined' ? '' : Replace.links(p, 'bill_payment', n => `#/bill-payments/${n}`)}
             </div>
             ${rows ? `<div class="table-container"><table>
                 <thead><tr><th scope="col">Bill #</th><th scope="col">Date</th><th scope="col" class="amount">Applied</th><th scope="col"></th></tr></thead>
@@ -933,6 +934,39 @@ const BillsPage = {
 
     // `vendorId`: only that vendor's open bills, from the vendor's own page
     // (#223, NEW-21); the list says so and offers every vendor's.
+    // Edit from a report line (#689): Pay Bills for the payment's vendor,
+    // filled in; the bills it paid are offered at the balance its void gives
+    // back, with the amounts and discounts it took. Save voids it and posts
+    // the new one in its place.
+    async replacePayment(id) {
+        const p = await API.get(`/bill-payments/${id}`);
+        if (p.is_voided) { toast('This bill payment is void; there is nothing to change.', 'error'); return; }
+        const back = {};
+        for (const a of p.allocations || []) back[a.bill_id] = (back[a.bill_id] || 0) + (parseFloat(a.amount) || 0);
+        for (const d of p.discounts || []) back[d.bill_id] = (back[d.bill_id] || 0) + (parseFloat(d.amount) || 0);
+        BillsPage._giveBack = back;
+        try { await BillsPage.showPayForm(p.vendor_id); } finally { BillsPage._giveBack = null; }
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        Replace.set(form, 'pay_from_account_id', p.pay_from_account_id || '');
+        Replace.set(form, 'date', p.date);
+        Replace.set(form, 'method', p.method || 'check');
+        Replace.set(form, 'check_number', p.check_number || '');
+        for (const a of p.allocations || []) {
+            const cb = document.querySelector(`.pay-check[data-bill="${Number(a.bill_id)}"]`);
+            if (cb) cb.checked = true;
+            const amt = document.querySelector(`.pay-amount[data-bill="${Number(a.bill_id)}"]`);
+            if (amt) amt.value = Number(a.amount).toFixed(2);
+        }
+        for (const d of p.discounts || []) {
+            const disc = document.querySelector(`.pay-discount[data-bill="${Number(d.bill_id)}"]`);
+            if (disc) disc.value = Number(d.amount).toFixed(2);
+        }
+        BillsPage.payDiscountChanged();
+        Replace.mark(form, 'bill_payment', id);
+    },
+    _giveBack: null,
+
     async showPayForm(vendorId = null) {
         BillsPage._payKey = null; // a new form, a new key (#292)
         const [vendors, bills, accounts, allAccounts] = await Promise.all([
@@ -942,6 +976,16 @@ const BillsPage = {
             // where an early-payment discount we take posts (#664)
             API.get('/accounts?active_only=true'),
         ]);
+        // replacing a bill payment (#689): the bills it paid, at the balance
+        // its void gives back
+        for (const [billId, amt] of Object.entries(BillsPage._giveBack || {})) {
+            let bill = bills.find(b => String(b.id) === String(billId));
+            if (!bill) {
+                try { bill = await API.get(`/bills/${Number(billId)}`); } catch (e) { bill = null; }
+                if (bill) bills.push(bill);
+            }
+            if (bill) bill.balance_due = Math.round(((parseFloat(bill.balance_due) || 0) + amt) * 100) / 100;
+        }
         BillsPage._payBills = bills;
         // every unpaid or part-paid bill, not just the newest page (#191)
         const openBills = vendorId ? bills.filter(b => b.vendor_id == vendorId) : bills;
@@ -1115,7 +1159,9 @@ const BillsPage = {
                 if (v.coiExpires && v.coiExpires < form.date.value) body.coi_override = true;
                 // a check number the paying account already has (#481):
                 // keep it, or go back to the form with nothing paid
-                const post = q => API.post('/bill-payments', body, q ? { query: q } : null,
+                // Edit from a report line (#689): one vendor, the payment replaced
+                if ((typeof Replace !== 'undefined' && Replace.replacing(form)) && byVendor.size > 1) throw new Error('A replacement pays one vendor: the vendor of the payment it replaces.');
+                const post = q => API.post('/bill-payments' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), body, q ? { query: q } : null,
                     { 'Idempotency-Key': `${BillsPage._payKey}:${vendorId}${body.allow_discount_override ? ':override' : ''}` });
                 // a discount the vendor's terms don't offer is the person's
                 // call: asked, and sent again with the override (#664)
@@ -1132,7 +1178,8 @@ const BillsPage = {
                 written.push(done.id);
             }
             BillsPage._payKey = null;
-            toastPosted(byVendor.size > 1 ? `Bills paid: ${byVendor.size} payments, one per vendor` : 'Bills paid');
+            if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Bill payment voided and replaced by bill payment #${written[0]}`);
+            else toastPosted(byVendor.size > 1 ? `Bills paid: ${byVendor.size} payments, one per vendor` : 'Bills paid');
             closeModal();
             await App.navigate('#/bills');
             // checks written with no number wait to be printed together: the

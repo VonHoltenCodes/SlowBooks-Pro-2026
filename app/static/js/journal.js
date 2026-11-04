@@ -100,6 +100,15 @@ const JournalPage = {
         try { return await BankingPage.hrefShowing(id, entry.date); } catch (e) { return `#/banking/${id}`; }
     },
 
+    // A card charge or a transfer changed from a report line (#689) is
+    // viewed as its journal entry: "Replaced by …" / "Replaces …", each to
+    // the other's own address.
+    _replaceLinks(entry) {
+        const kinds = { cc_charge: n => `#/cc-charges/${n}`, transfer: n => `#/banking/transfers/${n}` };
+        const href = kinds[entry.source_type];
+        return href && typeof Replace !== 'undefined' ? Replace.links(entry, entry.source_type, href) : '';
+    },
+
     async view(id) {
         const entry = await API.get(`/journal/${id}`);
         // the Cost Code column is decided by CostCodes.any(): load the list
@@ -126,6 +135,7 @@ const JournalPage = {
                 ${entry.posted_by ? `<strong>Posted by:</strong> ${escapeHtml(entry.posted_by)}` : ''}
                 ${entry.register_account_id ? `<div id="journal-register-note" style="margin-top:6px; color:var(--gray-500);">Posted from the bank register of <a href="${escapeHtml(registerHref)}">${escapeHtml(entry.register_account_name)}</a>; edit it there.</div>` : ''}
                 ${entry.voided ? '<div class="journal-voided" style="color:var(--danger);font-weight:700;margin-top:6px;">Voided</div>' : ''}
+                ${JournalPage._replaceLinks(entry)}
             </div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Account</th><th scope="col">Description</th>${jobCol ? `<th scope="col">${T('Job')}</th>` : ''}${CostCodes.headHtml()}<th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th></tr></thead>

@@ -2408,13 +2408,32 @@ const BankingPage = {
             </form>`);
     },
 
+    // Edit from a report line (#689): the Transfer form filled in; Save
+    // voids the transfer and posts the new one in its place.
+    async replaceTransfer(id) {
+        const t = (await API.get('/transfers')).find(x => x.id === Number(id));
+        if (!t) { toast('Transfer not found', 'error'); return; }
+        if (t.status === 'void') { toast('This transfer is void; there is nothing to change.', 'error'); return; }
+        await BankingPage.showTransferForm(t.from_account_id);
+        const form = document.querySelector('#modal-body form');
+        if (!form) return;
+        Replace.set(form, 'date', t.date);
+        Replace.set(form, 'amount', Number(t.amount).toFixed(2));
+        Replace.set(form, 'from_account_id', t.from_account_id);
+        Replace.set(form, 'to_account_id', t.to_account_id);
+        Replace.set(form, 'reference', t.reference || '');
+        Replace.set(form, 'memo', t.memo || '');
+        Replace.set(form, 'class_id', t.class_id || '');
+        Replace.mark(form, 'transfer', id);
+    },
+
     async saveTransfer(e) {
         e.preventDefault();
         const form = e.target;
         if (!(await TxnWarn.ok(form))) return;
         if (!(await ClassWarn.ok(form))) return;
         try {
-            const t = await API.post('/transfers', {
+            const t = await API.post('/transfers' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), {
                 date: form.date.value,
                 from_account_id: parseInt(form.from_account_id.value, 10),
                 to_account_id: parseInt(form.to_account_id.value, 10),
@@ -2425,7 +2444,8 @@ const BankingPage = {
             });
             const here = BankingPage._onRegister(t.from_account_id);
             const outside = here ? BankingPage._outsideFilter(form.date.value) : '';
-            toastPosted(outside ? `Transfer posted. ${outside}` : 'Transfer posted');
+            if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Transfer voided and replaced by transfer #${t.id}${outside ? `. ${outside}` : ''}`);
+            else toastPosted(outside ? `Transfer posted. ${outside}` : 'Transfer posted');
             if (here) { await BankingPage._showSaved(t.from_account_id, t.id, outside); return; }
             closeModal();
             BankingPage.go(`#/banking/${t.from_account_id}`);
