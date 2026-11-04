@@ -9,3 +9,9 @@ from app.routes.reports import duplicates  # noqa: F401  registers routes (#414)
 from app.routes.reports import items  # noqa: F401  registers routes (#435)
 from app.routes.reports import pl_detail  # noqa: F401  registers routes (#477)
 from app.routes.reports import construction  # noqa: F401  registers routes (#556)
+
+# A Print page beside every report PDF (#683): registered last, once every
+# module above has added its routes.
+from app.routes._print import add_print_routes  # noqa: E402
+
+PRINT_ROUTES = add_print_routes(router)

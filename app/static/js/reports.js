@@ -2423,17 +2423,22 @@ const ReportsPage = {
                 </div>
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" onclick="ReportsPage.openStatement(event, 'print')">Print</button>
                     <button type="submit" class="btn btn-primary">Generate PDF</button>
                 </div>
             </form>`);
     },
 
-    openStatement(e) {
+    // Generate PDF submits the form; Print (#683) opens the same statement
+    // as a page that brings up the print dialog.
+    openStatement(e, kind = 'pdf') {
         e.preventDefault();
-        const form = e.target;
+        const form = e.target.form || e.target;
+        if (!form.reportValidity()) return;
         const cid = form.customer_id.value;
         const asOf = form.as_of_date.value || todayISO();
-        window.open(`/api/reports/customer-statement/${cid}/pdf?as_of_date=${asOf}`, "_blank");
+        if (kind === 'print') window.open(`/api/reports/customer-statement/${cid}/print?as_of_date=${asOf}`, "_blank");
+        else window.open(`/api/reports/customer-statement/${cid}/pdf?as_of_date=${asOf}`, "_blank");
         closeModal();
     },
 
@@ -3705,6 +3710,7 @@ ReportsPage.reconciliationReports = async function () {
             <td>${r.completed_at ? formatDate(r.completed_at) : ''}</td>
             <td class="actions" style="white-space:nowrap;">
                 <button type="button" class="btn btn-sm btn-secondary" onclick="BankingPage.showReconReport(${r.id}, ReportsPage.reconciliationReports)">View</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="window.open('/api/banking/reconciliations/${r.id}/print', '_blank')">Print</button>
                 <button type="button" class="btn btn-sm btn-secondary" onclick="window.open('/api/banking/reconciliations/${r.id}/pdf', '_blank')">Save PDF</button>
             </td>
         </tr>`).join('')}</tbody></table></div>`
@@ -3716,10 +3722,16 @@ ReportsPage.reconciliationReports = async function () {
 // Financial statements pack — one PDF with P&L, Balance Sheet, Trial Balance.
 ReportsPage.financialStatementsPdf = async function (prefill) {
     await ReportsPage.openPeriodModal("Financial Statements Pack", ReportsPage.defaultPeriod(), async (_period, range) => {
-        window.open(`/api/reports/financial-statements/pdf?start_date=${range.start}&end_date=${range.end}`, '_blank');
+        const qs = `start_date=${range.start}&end_date=${range.end}`;
+        window.open(`/api/reports/financial-statements/pdf?${qs}`, '_blank');
         // Said for both: a browser opens a tab, the desktop app saves the PDF,
         // opens it in a window of its own and says where it saved it (F24).
-        return `<div style="font-size:12px;">The statements pack has opened as a PDF —
+        // Print (#683) beside Save PDF: the pack as a page to print.
+        return `<div style="text-align:right; margin-bottom:6px;">
+                <button type="button" class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/financial-statements/print?${qs}','_blank')">Print</button>
+                <button type="button" class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/financial-statements/pdf?${qs}','_blank')">Save PDF</button>
+            </div>
+            <div style="font-size:12px;">The statements pack has opened as a PDF —
             ${T('P&L')} and Trial Balance for ${escapeHtml(range.start)} — ${escapeHtml(range.end)},
             ${T('Balance Sheet')} as of ${escapeHtml(range.end)}. Paper size follows
             Settings → Report PDF Paper Size.</div>`;
@@ -4261,9 +4273,11 @@ ReportsPage.restoreDuplicate = async function (id) {
 };
 
 // Save PDF and Save CSV for a report with both routes; a report with only
-// a CSV (the agings, #393) passes kinds = ['csv'].
+// a CSV (the agings, #393) passes kinds = ['csv']. Print sits beside Save
+// PDF (#683): the page the PDF is drawn from, opening the print dialog.
 ReportsPage._exportButtons = function (path, qs, kinds = ['pdf', 'csv']) {
-    const pdf = kinds.includes('pdf') ? `<button class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/${path}/pdf?${qs}','_blank')">Save PDF</button>` : '';
+    const pdf = kinds.includes('pdf') ? `<button class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/${path}/print?${qs}','_blank')">Print</button>
+        <button class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/${path}/pdf?${qs}','_blank')">Save PDF</button>` : '';
     const csv = kinds.includes('csv') ? `<button class="btn btn-sm btn-secondary" onclick="window.open('/api/reports/${path}/csv?${qs}','_blank')">Save CSV</button>` : '';
     return `<div style="text-align:right; margin-bottom:6px; margin-left:auto;">
         ${pdf}

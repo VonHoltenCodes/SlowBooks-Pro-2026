@@ -24,7 +24,7 @@ STYLE_CSS = ROOT / "app" / "static" / "css" / "style.css"
 def _statement_dialog() -> str:
     js = REPORTS_JS.read_text(encoding="utf-8")
     start = js.index("async customerStatementPicker()")
-    return js[start : js.index("openStatement(e)", start)]
+    return js[start : js.index("openStatement(e, kind", start)]
 
 
 def test_the_customer_select_cannot_push_the_date_out_of_the_dialog():

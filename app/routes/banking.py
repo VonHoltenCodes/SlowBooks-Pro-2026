@@ -10,6 +10,7 @@ from typing import Optional
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -1354,6 +1355,15 @@ def reconciliation_report_pdf(recon_id: int, db: Session = Depends(get_db)):
             )
         },
     )
+
+
+# The reconciliation report as a page that opens the print dialog (#683):
+# the PDF route above, answering the HTML its PDF is rendered from.
+@router.get("/reconciliations/{recon_id}/print", response_class=HTMLResponse)
+def reconciliation_report_print(recon_id: int, db: Session = Depends(get_db)):
+    from app.routes._print import print_page
+
+    return print_page(reconciliation_report_pdf)(recon_id=recon_id, db=db)
 
 
 @router.delete("/reconciliations/{recon_id}")
