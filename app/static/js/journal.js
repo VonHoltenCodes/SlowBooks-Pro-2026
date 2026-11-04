@@ -5,8 +5,34 @@ const JournalPage = {
     // 'adjusting' shows the accountant's adjusting entries alone (#341)
     _show: 'all',
 
+    // The list's Sort (#687): 'date' (entry date, as before) or 'entered'
+    // (newest entered first), kept per computer; the From / To range
+    // holds for this visit only.
+    _SORT_KEY: 'slowbooks-journal-sort',
+    _from: '',
+    _to: '',
+
+    sortChoice() {
+        let v = '';
+        try { v = localStorage.getItem(JournalPage._SORT_KEY) || ''; } catch (e) { /* the default */ }
+        return v === 'entered' ? 'entered' : 'date';
+    },
+
+    listPath() {
+        const params = new URLSearchParams();
+        if (JournalPage._show === 'adjusting') params.set('adjusting', 'true');
+        if (JournalPage._from) params.set('start_date', JournalPage._from);
+        if (JournalPage._to) params.set('end_date', JournalPage._to);
+        const sort = JournalPage.sortChoice();
+        if (sort !== 'date') params.set('sort', sort);
+        const qs = params.toString();
+        return '/journal' + (qs ? '?' + qs : '');
+    },
+
     async render() {
-        const entries = await API.get(JournalPage._show === 'adjusting' ? '/journal?adjusting=true' : '/journal');
+        const entries = await API.get(JournalPage.listPath());
+        const sort = JournalPage.sortChoice();
+        const ranged = !!(JournalPage._from || JournalPage._to);
         // The accountant's sign-in keeps this page's own controls (#340):
         // the server lets it post journal entries and void its own.
         let html = `
@@ -14,16 +40,34 @@ const JournalPage = {
                 <h2>Journal Entries</h2>
                 <button class="btn btn-primary" data-accountant-ok onclick="JournalPage.showForm()">+ New Journal Entry</button>
             </div>
-            <div class="form-group" style="max-width:260px; margin-bottom:12px;">
-                <label for="journal-show">Show</label>
-                <select id="journal-show" data-no-search data-readonly-ok onchange="JournalPage.setShow(this.value)">
-                    <option value="all" ${JournalPage._show === 'all' ? 'selected' : ''}>All entries</option>
-                    <option value="adjusting" ${JournalPage._show === 'adjusting' ? 'selected' : ''}>Adjusting entries only</option>
-                </select>
-            </div>`;
+            <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:flex-end; margin-bottom:12px;">
+                <div class="form-group" style="max-width:260px; margin-bottom:0;">
+                    <label for="journal-show">Show</label>
+                    <select id="journal-show" data-no-search data-readonly-ok onchange="JournalPage.setShow(this.value)">
+                        <option value="all" ${JournalPage._show === 'all' ? 'selected' : ''}>All entries</option>
+                        <option value="adjusting" ${JournalPage._show === 'adjusting' ? 'selected' : ''}>Adjusting entries only</option>
+                    </select>
+                </div>
+                <div class="form-group" style="max-width:260px; margin-bottom:0;">
+                    <label for="journal-sort">Sort</label>
+                    <select id="journal-sort" data-no-search data-readonly-ok onchange="JournalPage.setSort(this.value)">
+                        <option value="date" ${sort === 'date' ? 'selected' : ''}>By entry date</option>
+                        <option value="entered" ${sort === 'entered' ? 'selected' : ''}>By date entered</option>
+                    </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label for="journal-from">From</label>
+                    <input type="date" id="journal-from" data-readonly-ok value="${escapeHtml(JournalPage._from)}" onchange="JournalPage.setRange()">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                    <label for="journal-to">To</label>
+                    <input type="date" id="journal-to" data-readonly-ok value="${escapeHtml(JournalPage._to)}" onchange="JournalPage.setRange()">
+                </div>
+            </div>
+            <p id="journal-count" role="status" style="color:var(--gray-500); margin:0 0 8px;">${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}${ranged ? ' in this date range' : ''}</p>`;
 
         if (entries.length === 0) {
-            html += `<div class="empty-state"><p>${JournalPage._show === 'adjusting' ? 'No adjusting entries' : 'No journal entries yet'}</p></div>`;
+            html += `<div class="empty-state"><p>${ranged ? 'No journal entries in this date range' : JournalPage._show === 'adjusting' ? 'No adjusting entries' : 'No journal entries yet'}</p></div>`;
         } else {
             html += `<div class="table-container"><table>
                 <thead><tr><th scope="col">ID</th><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th><th scope="col">Posted by</th>
@@ -53,6 +97,27 @@ const JournalPage = {
     setShow(value) {
         JournalPage._show = value === 'adjusting' ? 'adjusting' : 'all';
         App.navigate('#/journal');
+    },
+
+    async setSort(value) {
+        try { localStorage.setItem(JournalPage._SORT_KEY, value === 'entered' ? 'entered' : 'date'); } catch (e) { /* this view only */ }
+        await JournalPage._redraw('journal-sort');
+    },
+
+    async setRange() {
+        const from = document.getElementById('journal-from');
+        const to = document.getElementById('journal-to');
+        const was = document.activeElement && document.activeElement.id;
+        JournalPage._from = (from && from.value) || '';
+        JournalPage._to = (to && to.value) || '';
+        await JournalPage._redraw(was === 'journal-to' ? 'journal-to' : 'journal-from');
+    },
+
+    // the list again, the keyboard back on the control that changed it
+    async _redraw(focusId) {
+        await App.navigate('#/journal');
+        const el = document.getElementById(focusId);
+        if (el) el.focus();
     },
 
     // "Adjusting" beside an adjusting entry's description (#341)
