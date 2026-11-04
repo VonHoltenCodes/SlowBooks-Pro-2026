@@ -14,7 +14,7 @@ Books that already have the columns are left as they are; downgrade drops
 them.
 
 Revision ID: c4e8a1f7d2b6
-Revises: e5c1a7d3f9b2
+Revises: f6a9d3c27e51
 Create Date: 2026-11-03
 """
 

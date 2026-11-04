@@ -615,7 +615,7 @@ def test_the_migration_adds_the_links_and_walks_back(tmp_path):
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_revision("c4e8a1f7d2b6").down_revision == "e5c1a7d3f9b2"
+    assert script.get_revision("c4e8a1f7d2b6").down_revision == "f6a9d3c27e51"
     tables = (
         "transactions",
         "payments",
