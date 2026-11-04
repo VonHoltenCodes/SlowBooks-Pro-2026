@@ -575,6 +575,8 @@
 }
 [data-theme="dark"] .cbx-opt[aria-selected="true"] { background: #2b4a78; color: #ffffff; }
 [data-theme="dark"] .cbx-opt[aria-selected="true"] .cbx-in { color: #c8d0dc; }
+[data-theme="dark"] .qmath { box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5); }
+[data-theme="dark"] #qmath-input { background: #14161c; }
 
 /* The P&L by Class / by Job grid (R1): the frozen Account column keeps its
    own ground, as the pay-run view's does; the column gone to is a deeper
