@@ -416,6 +416,10 @@ const JobsPage = {
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(true)">Expand all</button>
                 <button class="btn btn-sm btn-secondary" onclick="JobsPage.expandAll(false)">Collapse all</button>
                 <span>Click a type or code to open it; click the line count to see the posted lines; click a line to open its document.</span>
+                <span style="margin-left:auto;display:flex;gap:6px">
+                    <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('pdf')" title="The tree as shown, for this period">Save PDF</button>
+                    <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('csv')" title="Every type and cost code, for this period">Save CSV</button>
+                </span>
             </div>
             <div class="table-container"><table class="data-table job-tree" style="font-size:12px">${head}<tbody>${body}</tbody>${foot}</table></div>`;
     },
@@ -475,6 +479,20 @@ const JobsPage = {
 
     async toggle(key) { JobsPage._open.has(key) ? JobsPage._open.delete(key) : JobsPage._open.add(key); await JobsPage.setTab('costs'); },
     async toggleLines(key) { JobsPage._showLines.has(key) ? JobsPage._showLines.delete(key) : JobsPage._showLines.add(key); await JobsPage.setTab('costs'); },
+    // Save PDF / Save CSV of the Cost Detail tab (#691): the period on screen;
+    // the PDF prints the rows that are open, the CSV every row.
+    saveCostTree(kind) {
+        const id = JobsPage._job.id;
+        const qs = new URLSearchParams(JobsPage._periodQs().replace(/^\?/, ''));
+        let url = `/api/jobs/${id}/cost-tree/csv`;
+        if (kind === 'pdf') {
+            url = `/api/jobs/${id}/cost-tree/pdf`;
+            qs.set('expanded', [...JobsPage._open].join(','));
+        }
+        const q = qs.toString();
+        window.open(q ? `${url}?${q}` : url, '_blank');
+    },
+
     async expandAll(open) {
         const tree = await JobsPage.loadTree();
         JobsPage._open = new Set();

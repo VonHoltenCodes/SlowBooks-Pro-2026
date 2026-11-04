@@ -11,7 +11,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.transactions import LEDGER_BASIS_OPTION, READ_ALL
@@ -212,6 +212,61 @@ def get_job_cost_tree(
     level with budget / committed / actual / projected / variance."""
     _get(db, job_id)
     return job_cost_tree(db, job_id, start_date, end_date)
+
+
+def _cost_tree_filename(job_id: int, start_date, end_date, ext: str) -> str:
+    dates = "".join(f"_{d}" for d in (start_date, end_date) if d)
+    return f"job-cost-detail_{job_id}{dates or '_job-to-date'}.{ext}"
+
+
+@router.get("/{job_id}/cost-tree/pdf")
+def get_job_cost_tree_pdf(
+    job_id: int,
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    expanded: Optional[str] = Query(
+        default=None,
+        description="The tab's expanded rows, comma-separated (type:<code>, "
+        "code:<id>); left out, every row prints",
+    ),
+    db: Session = Depends(get_db),
+):
+    """The Cost Detail tab as a landscape PDF (#691): the same figures as
+    /cost-tree for the same dates, laid out as the tab shows them."""
+    from app.routes.reports.construction import cost_tree_sections
+    from app.routes.reports.financial import _pdf_response
+
+    job = _get(db, job_id)
+    tree = job_cost_tree(db, job_id, start_date, end_date)
+    opened = None if expanded is None else {k for k in expanded.split(",") if k}
+    return _pdf_response(
+        cost_tree_sections(tree, job.full_name, opened),
+        db,
+        _cost_tree_filename(job_id, start_date, end_date, "pdf"),
+        landscape=True,
+    )
+
+
+@router.get("/{job_id}/cost-tree/csv")
+def get_job_cost_tree_csv(
+    job_id: int,
+    request: Request,
+    start_date: Optional[date] = Query(default=None),
+    end_date: Optional[date] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """The Cost Detail tab as a CSV (#691): a row per type and per cost code,
+    fully expanded, then the Total row."""
+    from app.routes.reports.construction import cost_tree_csv
+    from app.routes.reports.financial import _company_name, _csv_download
+
+    job = _get(db, job_id)
+    tree = job_cost_tree(db, job_id, start_date, end_date)
+    return _csv_download(
+        cost_tree_csv(tree, job.full_name, _company_name(db)),
+        _cost_tree_filename(job_id, start_date, end_date, "csv"),
+        request,
+    )
 
 
 def _budget_response(row: JobBudget) -> JobBudgetResponse:

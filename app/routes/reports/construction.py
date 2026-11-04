@@ -1127,3 +1127,171 @@ def job_budget_vs_actual_csv(
     return _csv_download(
         out.getvalue(), f"job-budget-vs-actual_{start_date}_{end_date}.csv", request
     )
+
+
+# ── Job Cost Detail (#691): the job's Cost Detail tab, saved ─────────────
+
+_COST_TREE_COLUMNS = [
+    {"key": "original", "label": "Original", "kind": "money"},
+    {"key": "changes", "label": "Changes", "kind": "money"},
+    {"key": "revised", "label": "Budget", "kind": "money"},
+    {"key": "committed", "label": "Committed", "kind": "money"},
+    {"key": "actual", "label": "Actual", "kind": "money"},
+    {"key": "projected", "label": "Projected", "kind": "money"},
+    {"key": "variance", "label": "Variance", "kind": "money"},
+    {"key": "pct_used", "label": "% Used", "kind": "pct"},
+    {"key": "est_revenue", "label": "Est. Rev", "kind": "money"},
+    {"key": "act_revenue", "label": "Act. Rev", "kind": "money"},
+]
+
+
+def cost_tree_period(tree: dict) -> str:
+    """The period line: Job to date, or the dates the actuals were read for."""
+    start, end = tree.get("start_date"), tree.get("end_date")
+    if start and end:
+        return f"{start} — {end}"
+    if end:
+        return f"Job to date through {end}"
+    if start:
+        return f"From {start}"
+    return "Job to date"
+
+
+def _cost_tree_shows_uncoded(un: dict) -> bool:
+    f = un["figures"]
+    return bool(un["lines"]) or any(f[c["key"]] for c in _COST_TREE_COLUMNS)
+
+
+def _cost_tree_rows(tree: dict, opened=None) -> list[dict]:
+    """Every row of the tree in the tab's order: each cost type, its codes
+    (depth-first, children under their parent), its "No cost code" row, then
+    the whole-job budget. `opened` is the tab's set of expanded keys
+    (`type:<code>`, `code:<id>`); None means every row."""
+
+    def is_open(key):
+        return opened is None or key in opened
+
+    rows = []
+
+    def walk(node, ty, depth):
+        rows.append(
+            {
+                "kind": "code",
+                "cost_type": ty["name"],
+                "code": node["code"],
+                "name": node["name"],
+                "label": f"{node['code']} {node['name']}"
+                + ("" if node["is_active"] else " (inactive)"),
+                "depth": depth,
+                "figures": node["figures"],
+            }
+        )
+        if is_open(f"code:{node['id']}"):
+            for ch in node["children"]:
+                walk(ch, ty, depth + 1)
+
+    for ty in tree["types"]:
+        rows.append(
+            {
+                "kind": "type",
+                "cost_type": ty["name"],
+                "code": "",
+                "name": ty["name"],
+                "label": ty["name"],
+                "depth": 0,
+                "figures": ty["figures"],
+            }
+        )
+        if not is_open(f"type:{ty['cost_type']}"):
+            continue
+        for node in ty["codes"]:
+            walk(node, ty, 1)
+        if _cost_tree_shows_uncoded(ty["uncoded"]):
+            rows.append(
+                {
+                    "kind": "uncoded",
+                    "cost_type": ty["name"],
+                    "code": "",
+                    "name": "No cost code",
+                    "label": "No cost code",
+                    "depth": 1,
+                    "figures": ty["uncoded"]["figures"],
+                }
+            )
+    jl = tree["job_level_budget"]
+    if jl["original"] or jl["changes"] or jl["est_revenue"]:
+        rows.append(
+            {
+                "kind": "joblevel",
+                "cost_type": "",
+                "code": "",
+                "name": "Whole-job budget (not by code)",
+                "label": "Whole-job budget (not by code)",
+                "depth": 0,
+                "figures": jl,
+            }
+        )
+    return rows
+
+
+_COST_TREE_NOTE = (
+    "Budgets and committed cost are job to date; actual cost and revenue are "
+    "for the period."
+)
+
+
+def cost_tree_sections(tree: dict, job_name: str, opened=None) -> list[dict]:
+    """The Cost Detail tab as one landscape grid: types bold, codes indented
+    by level, the totals row last."""
+    cols = _COST_TREE_COLUMNS
+    rows = []
+    for r in _cost_tree_rows(tree, opened):
+        row = {
+            "cells": [r["label"]]
+            + [_pdf_cell(r["figures"][c["key"]], c["kind"]) for c in cols]
+        }
+        if r["kind"] == "type":
+            row["style"] = "subtotal"
+        elif r["depth"]:
+            row["indent"] = r["depth"]
+        rows.append(row)
+    t = tree["totals"]
+    rows.append(
+        {
+            "cells": ["Total"] + [_pdf_cell(t[c["key"]], c["kind"]) for c in cols],
+            "style": "grand-total",
+        }
+    )
+    dated = tree.get("start_date") or tree.get("end_date")
+    return [
+        {
+            "title": f"Job Cost Detail — {job_name}",
+            "period": cost_tree_period(tree),
+            "columns": ["Cost type › code"] + [c["label"] for c in cols],
+            "text_columns": 1,
+            "rows": rows,
+            "note": _COST_TREE_NOTE if dated else None,
+        }
+    ]
+
+
+def cost_tree_csv(tree: dict, job_name: str, company: str) -> str:
+    """Every row of the tree, fully expanded: Cost type | Code | Name | Level
+    and the tab's figures, then the Total row."""
+    cols = _COST_TREE_COLUMNS
+    out = io.StringIO()
+    w = _SafeWriter(out)
+    _preamble(w, company, f"Job Cost Detail — {job_name}", cost_tree_period(tree))
+    w.writerow(["Cost type", "Code", "Name", "Level"] + [c["label"] for c in cols])
+    for r in _cost_tree_rows(tree):
+        w.writerow(
+            [r["cost_type"], r["code"], r["name"], r["depth"]]
+            + [_csv_cell(r["figures"][c["key"]], c["kind"]) for c in cols]
+        )
+    t = tree["totals"]
+    w.writerow(
+        ["Total", "", "", ""] + [_csv_cell(t[c["key"]], c["kind"]) for c in cols]
+    )
+    if tree.get("start_date") or tree.get("end_date"):
+        w.writerow([_COST_TREE_NOTE])
+    return out.getvalue()
