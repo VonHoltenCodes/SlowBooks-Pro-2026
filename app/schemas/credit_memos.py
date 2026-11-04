@@ -103,4 +103,8 @@ class CreditMemoResponse(BaseModel):
     discount_override: bool = False
     lines: list[CreditMemoLineResponse] = []
     created_at: Optional[datetime] = None
+    # Void-and-replace (#689): the credit memo this one replaced, and the one that
+    # replaced it (this one is then void).
+    replaces_id: Optional[int] = None
+    replaced_by_id: Optional[int] = None
     model_config = {"from_attributes": True}

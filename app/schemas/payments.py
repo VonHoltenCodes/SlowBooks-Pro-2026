@@ -110,6 +110,10 @@ class PaymentResponse(BaseModel):
     # its class (#686), and the class's name for the view
     class_id: Optional[int] = None
     class_name: Optional[str] = None
+    # Void-and-replace (#689): the payment this one replaced, and the one that
+    # replaced it (this one is then void).
+    replaces_id: Optional[int] = None
+    replaced_by_id: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

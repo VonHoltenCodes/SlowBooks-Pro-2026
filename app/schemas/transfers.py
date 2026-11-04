@@ -34,3 +34,7 @@ class TransferResponse(BaseModel):
     status: str
     class_id: Optional[int] = None
     class_name: str = ""
+    # Void-and-replace (#689): the transfer this one replaced, and the one that
+    # replaced it (this one is then void).
+    replaces_id: Optional[int] = None
+    replaced_by_id: Optional[int] = None

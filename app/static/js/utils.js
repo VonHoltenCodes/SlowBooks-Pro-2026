@@ -2219,3 +2219,99 @@ if (typeof MutationObserver === 'function' && typeof document !== 'undefined' &&
     new MutationObserver(() => nameFields(document)).observe(document.body, { childList: true, subtree: true });
     nameFields(document);
 }
+
+// ---------------------------------------------------------------------------
+// Edit from a report line (#689). Every drill-down line (a statement's, a
+// total's, the P&L Detail's, the General Ledger's) carries `edit` from the
+// server (app/services/edit_targets.py): {kind, id, replace}. Edit sits
+// beside the line's link and opens that kind's own form. An invoice, a
+// bill, a deposit, a hand-entered journal entry and a register entry edit
+// in place; an expense, a card charge, a transfer, a credit memo, a vendor
+// credit, a payment and a bill payment open their form filled in, and Save
+// voids the original and posts the new one (POST /api/<kind>/{id}/replace),
+// the two linked. The accountant's sign-in and a read-only one see the
+// link only: Edit is data-write, which App.hideWriteControls hides.
+// ---------------------------------------------------------------------------
+const TxnEdit = {
+    WORDS: {
+        invoice: 'invoice', bill: 'bill', deposit: 'deposit', journal: 'journal entry',
+        bank_entry: 'register entry', expense: 'expense', cc_charge: 'card charge',
+        transfer: 'transfer', credit_memo: 'credit memo', vendor_credit: 'vendor credit',
+        payment: 'payment', bill_payment: 'bill payment',
+    },
+    // the line's Edit, or nothing (Open only)
+    button(e) {
+        const t = e && e.edit;
+        if (!t || !Object.hasOwn(TxnEdit.WORDS, String(t.kind))) return '';
+        const id = Number(t.id);
+        if (!Number.isInteger(id) || id <= 0) return '';
+        const word = TxnEdit.WORDS[t.kind];
+        const title = t.replace
+            ? `Edit this ${word}: saving voids it and posts the new one in its place`
+            : `Edit this ${word}`;
+        return ` <button type="button" class="btn btn-sm btn-secondary txn-edit" data-write data-edit-kind="${escapeHtml(t.kind)}" aria-label="Edit ${escapeHtml(word)} ${id}" title="${escapeHtml(title)}" onclick="TxnEdit.open('${escapeHtml(t.kind)}', ${id})" style="padding:0 6px; font-size:10px;">Edit</button>`;
+    },
+    async open(kind, id) {
+        try {
+            switch (kind) {
+                case 'invoice': return await InvoicesPage.showForm(id);
+                case 'bill': return await BillsPage.showForm(id);
+                case 'deposit': return await DepositsPage.editDeposit(id);
+                case 'journal': return await JournalPage.editEntry(id);
+                case 'bank_entry': {
+                    const entry = await API.get(`/banking/entries/${id}`);
+                    return await BankingPage.showEntryForm(entry.account_id, entry);
+                }
+                case 'expense': return await ExpensesPage.replace(id);
+                case 'cc_charge': return await CCChargesPage.replace(id);
+                case 'transfer': return await BankingPage.replaceTransfer(id);
+                case 'credit_memo': return await CreditMemosPage.replace(id);
+                case 'vendor_credit': return await VendorCreditsPage.replace(id);
+                case 'payment': return await PaymentsPage.replace(id);
+                case 'bill_payment': return await BillsPage.replacePayment(id);
+                default: toast('This line has no edit; open it instead', 'error');
+            }
+        } catch (err) { toast(err.message, 'error'); }
+    },
+};
+
+// Void-and-replace on a kind's own form (#689): the form opened by Edit is
+// marked with the record it replaces; its Save posts to /replace and says
+// so; a view names the record on the other side of the link.
+const Replace = {
+    // the open form, filled in, now saves as a replacement for `id`
+    mark(form, kind, id) {
+        if (!form) return;
+        const word = TxnEdit.WORDS[kind] || 'transaction';
+        form.dataset.replaceOf = String(Number(id));
+        form.dataset.replaceKind = kind;
+        const submit = form.querySelector('button[type="submit"]');
+        if (submit) submit.textContent = 'Void and Replace';
+        const note = `<p class="replace-note" role="note" style="margin:0 0 8px; font-size:11px; color:var(--gray-500);">Saving voids ${escapeHtml(word)} #${Number(id)} and posts this one in its place; the two are linked. A reconciled line or a closed period stops it, as a void does.</p>`;
+        form.insertAdjacentHTML('afterbegin', note);
+        const title = document.getElementById('modal-title');
+        if (title) title.textContent = `Edit ${word.charAt(0).toUpperCase()}${word.slice(1)} #${Number(id)}`;
+    },
+    // what follows the create's path where the form posts: '' for a new
+    // record, '/12/replace' for the marked one
+    suffix(form) {
+        const id = form && form.dataset ? form.dataset.replaceOf : '';
+        return id ? `/${Number(id)}/replace` : '';
+    },
+    replacing(form) { return !!(form && form.dataset && form.dataset.replaceOf); },
+    // "Replaced by …" / "Replaces …" on a record's view; `href(id)` is the
+    // kind's own address
+    links(rec, kind, href) {
+        if (!rec) return '';
+        const word = TxnEdit.WORDS[kind] || 'transaction';
+        const out = [];
+        if (rec.replaced_by_id) out.push(`<div class="replaced-by" style="margin-top:4px;">Replaced by <a href="${escapeHtml(href(Number(rec.replaced_by_id)))}">${escapeHtml(word)} #${Number(rec.replaced_by_id)}</a></div>`);
+        if (rec.replaces_id) out.push(`<div class="replaces" style="margin-top:4px;">Replaces <a href="${escapeHtml(href(Number(rec.replaces_id)))}">${escapeHtml(word)} #${Number(rec.replaces_id)}</a> (void)</div>`);
+        return out.join('');
+    },
+    // set a select or input by name, if the form has it
+    set(form, name, value) {
+        const el = form && form.querySelector(`[name="${name}"]`);
+        if (el && value !== undefined && value !== null) el.value = String(value);
+    },
+};

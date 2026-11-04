@@ -659,3 +659,20 @@ def void_bill_payment(bill_payment_id: int, db: Session = Depends(get_db)):
     if payment.vendor:
         resp.vendor_name = payment.vendor.name
     return resp
+
+
+@router.post("/{bill_payment_id}/replace", response_model=BillPaymentResponse)
+def replace_bill_payment(
+    bill_payment_id: int,
+    data: BillPaymentCreate,
+    db: Session = Depends(get_db),
+    allow_duplicate_check_number: bool = Query(False),
+):
+    """Change a bill payment (#689): void it (its discounts with it, its
+    bills given back their balances) and post `data` in its place, the two
+    linked, under the void's refusals: a closed period, a reconciled check."""
+    from app.services.replace_transaction import replace
+
+    return replace(
+        db, "bill_payment", bill_payment_id, data, allow_duplicate_check_number
+    )

@@ -63,6 +63,12 @@ class CreditMemo(Base):
     # taken with. Posts to the discount account the payment named; voiding
     # the payment voids it.
     discount_payment_id = Column(Integer, ForeignKey("payments.id"), nullable=True)
+    # Void-and-replace (#689): a posted credit memo with no edit of its own is
+    # changed by voiding it and posting a new one; each names the other.
+    # Plain ids, no foreign key: both rows always stay (a void keeps the
+    # original). NULL on everything else.
+    replaces_id = Column(Integer, nullable=True)
+    replaced_by_id = Column(Integer, nullable=True)
     # Taken against the terms with allow_discount_override (#664).
     discount_override = Column(
         Boolean, nullable=False, default=False, server_default=false()

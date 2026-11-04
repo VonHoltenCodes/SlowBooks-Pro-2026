@@ -105,6 +105,7 @@ const PaymentsPage = {
                 <button class="btn btn-sm btn-primary" style="margin-left:8px;" onclick="PaymentsPage.showApplyCredit('payment', ${p.id}, ${p.customer_id})">Apply to ${T('Invoices')}</button>
             </div>` : ''}
             ${p.is_voided ? '<div style="color:var(--danger);font-weight:700;margin:12px 0;">This payment has been voided.</div>' : ''}
+            ${typeof Replace === 'undefined' ? '' : Replace.links(p, 'payment', n => `#/payments/${n}`)}
             <div class="form-actions">
                 ${ack && ack.eligible ? `<button class="btn btn-secondary" onclick="window.open('/api/donors/gifts/payment/${p.id}/acknowledgment/pdf','_blank')">Acknowledgment (PDF)</button>
                 <button class="btn btn-secondary" onclick="Donors.emailAcknowledgment('payment', ${p.id})">Email Acknowledgment</button>` : ''}
@@ -209,8 +210,47 @@ const PaymentsPage = {
 
     _cents(v) { return Math.round((parseFloat(v) || 0) * 100); },
 
+    // Edit from a report line (#689): Record Payment filled in with the
+    // payment; Save voids it (its invoices given their balances back, its
+    // discounts with it) and posts the new one in its place. The invoices it
+    // paid are offered at the balance the void gives back, the amounts it
+    // applied filled in.
+    async replace(id) {
+        const p = await API.get(`/payments/${id}`);
+        if (p.is_voided) { toast('This payment is void; there is nothing to change.', 'error'); return; }
+        await PaymentsPage.showForm();
+        const form = $('#payment-form');
+        if (!form) return;
+        const back = {};
+        for (const a of p.allocations || []) back[a.invoice_id] = (back[a.invoice_id] || 0) + (parseFloat(a.amount) || 0);
+        for (const d of p.discounts || []) back[d.invoice_id] = (back[d.invoice_id] || 0) + (parseFloat(d.amount) || 0);
+        PaymentsPage._giveBack = back;
+        Replace.set(form, 'customer_id', p.customer_id);
+        Replace.set(form, 'date', p.date);
+        Replace.set(form, 'amount', Number(p.amount).toFixed(2));
+        Replace.set(form, 'method', p.method || '');
+        Replace.set(form, 'check_number', p.check_number || '');
+        Replace.set(form, 'reference', p.reference || '');
+        Replace.set(form, 'deposit_to_account_id', p.deposit_to_account_id || '');
+        Replace.set(form, 'notes', p.notes || '');
+        await PaymentsPage.loadInvoices(p.customer_id);
+        for (const a of p.allocations || []) {
+            const input = document.querySelector(`#payment-invoices .alloc-amount[data-invoice="${Number(a.invoice_id)}"]`);
+            if (input) input.value = Number(a.amount).toFixed(2);
+        }
+        for (const d of p.discounts || []) {
+            const input = document.querySelector(`#payment-invoices .alloc-discount[data-invoice="${Number(d.invoice_id)}"]`);
+            if (input) { input.value = Number(d.amount).toFixed(2); PaymentsPage._discountChanged(input); }
+        }
+        if ((parseFloat(p.unapplied) || 0) > 0 && $('#keep-credit')) $('#keep-credit').checked = true;
+        PaymentsPage._updateAllocStatus();
+        Replace.mark(form, 'payment', id);
+    },
+    _giveBack: null,
+
     async showForm(_ignoredId = null, prefillCustomerId = null) {
         PaymentsPage._requestKey = null; // a new form, a new key (#292)
+        PaymentsPage._giveBack = null;
         const [customers, accounts] = await Promise.all([
             API.get('/customers?active_only=true&tree=1'),
             API.get('/accounts'),
@@ -287,6 +327,20 @@ const PaymentsPage = {
             (credits && credits.home_currency)
             || (typeof App !== 'undefined' && App.settings && App.settings.home_currency)
             || 'USD').toUpperCase();
+        // replacing a payment (#689): the invoices it paid, at the balance
+        // its void gives back
+        const back = PaymentsPage._giveBack || {};
+        for (const [invId, amt] of Object.entries(back)) {
+            let inv = invoices.find(i => String(i.id) === String(invId));
+            if (!inv) {
+                try { inv = await API.get(`/invoices/${Number(invId)}`); } catch (e) { inv = null; }
+                if (inv) invoices.push(inv);
+            }
+            if (inv && !inv._givenBack) {
+                inv.balance_due = Math.round(((parseFloat(inv.balance_due) || 0) + amt) * 100) / 100;
+                inv._givenBack = true;
+            }
+        }
         const open = PaymentsPage._openInvoices(invoices);
         PaymentsPage._currencies = [...new Set(open.map(i => (i.currency || PaymentsPage._home).toUpperCase()))];
         if (PaymentsPage._currencyFor !== String(customerId)
@@ -736,19 +790,21 @@ const PaymentsPage = {
         const button = form.querySelector ? form.querySelector('button[type="submit"]') : null;
         if (button) button.disabled = true;
         if (!PaymentsPage._requestKey) PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
+        let saved = null;
         try {
             try {
-                await API.post('/payments', data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
+                saved = await API.post('/payments' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
             } catch (err) {
                 // a discount the terms don't offer is the person's call:
                 // asked, and sent again with the override (#664)
                 if (!PaymentTerms.asksOverride(err, data)) throw err;
                 data.allow_discount_override = true;
                 PaymentsPage._requestKey = App.requestKey ? App.requestKey() : 'k-' + Date.now();
-                await API.post('/payments', data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
+                saved = await API.post('/payments' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), data, null, { 'Idempotency-Key': PaymentsPage._requestKey });
             }
             PaymentsPage._requestKey = null;
-            toastPosted('Payment recorded');
+            if ((typeof Replace !== 'undefined' && Replace.replacing(form)) && saved) toastPosted(`Payment voided and replaced by payment #${saved.id}`);
+            else toastPosted('Payment recorded');
             App.refresh();
         } catch (err) {
             toast(err.message, 'error');

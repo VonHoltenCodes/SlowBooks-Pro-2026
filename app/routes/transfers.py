@@ -39,6 +39,8 @@ def _out(txn: Transaction, voided: bool, names: dict) -> dict:
         "status": "void" if voided else "recorded",
         "class_id": txn.class_id,
         "class_name": names.get(("class", txn.class_id), "") if txn.class_id else "",
+        "replaces_id": txn.replaces_id,
+        "replaced_by_id": txn.replaced_by_id,
     }
 
 
@@ -107,3 +109,14 @@ def void_transfer(transfer_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(txn)
     return _out(txn, True, _names(db, [txn]))
+
+
+@router.post("/{transfer_id}/replace", response_model=TransferResponse)
+def replace_transfer(
+    transfer_id: int, data: TransferCreate, db: Session = Depends(get_db)
+):
+    """Change a transfer (#689): void it and post `data` in its place, the
+    two linked, under the void's refusals."""
+    from app.services.replace_transaction import replace
+
+    return replace(db, "transfer", transfer_id, data)

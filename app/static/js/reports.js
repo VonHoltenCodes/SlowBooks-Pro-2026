@@ -762,7 +762,7 @@ const ReportsPage = {
                     <td>${escapeHtml(e.payee || '')}</td>
                     <td>${escapeHtml(e.reference || '')}</td>
                     <td>${escapeHtml(e.description || '')}</td>
-                    <td>${src}${e.voided ? ' <span class="badge badge-void" style="text-decoration:none;">void</span>' : ''}</td>
+                    <td>${src}${e.voided ? ' <span class="badge badge-void" style="text-decoration:none;">void</span>' : ''}${TxnEdit.button(e)}</td>
                     <td class="amount">${e.debit > 0 ? formatCurrency(e.debit) : ''}</td>
                     <td class="amount">${e.credit > 0 ? formatCurrency(e.credit) : ''}</td>
                     <td class="amount">${formatCurrency(e.running_balance)}</td>
@@ -900,7 +900,7 @@ const ReportsPage = {
                 return `<tr${e.voided ? ' class="row--void" style="color:var(--text-muted); text-decoration:line-through;"' : ''}>
                     <td>${formatDate(e.date)}</td>
                     <td>${escapeHtml(e.account_label || '')}</td>
-                    <td><a href="${escapeHtml(link)}" data-row-key="line:${escapeHtml(String(e.line_id))}" aria-label="${escapeHtml(words)}" onclick="ReportsPage._leaveFrom(this)" style="color:var(--text-link); text-decoration:none;">${escapeHtml(e.type)}</a>${e.voided ? ' <span class="badge badge-void" style="text-decoration:none;">void</span>' : ''}</td>
+                    <td><a href="${escapeHtml(link)}" data-row-key="line:${escapeHtml(String(e.line_id))}" aria-label="${escapeHtml(words)}" onclick="ReportsPage._leaveFrom(this)" style="color:var(--text-link); text-decoration:none;">${escapeHtml(e.type)}</a>${e.voided ? ' <span class="badge badge-void" style="text-decoration:none;">void</span>' : ''}${TxnEdit.button(e)}</td>
                     <td>${escapeHtml(e.num || '')}</td>
                     <td>${escapeHtml(e.name || '')}</td>
                     <td>${escapeHtml(e.memo || '')}</td>
@@ -1694,7 +1694,7 @@ const ReportsPage = {
             const name = `${e.type}${e.num ? ` ${e.num}` : ''}, ${formatDate(e.date)}`;
             const type = `<a href="${escapeHtml(link)}" data-row-key="line:${escapeHtml(String(e.line_id))}" aria-label="${escapeHtml(name)}" onclick="ReportsPage._leaveFrom(this)" style="color:var(--text-link); text-decoration:none;">${escapeHtml(e.type)}</a>`;
             return `<tr${e.voided ? ' class="row--void" style="color:var(--text-muted); text-decoration:line-through;"' : ''}>
-                <td style="padding-left:${pad(depth)}px;">${type}${e.voided ? ' <span class="badge badge-void" style="text-decoration:none;">void</span>' : ''}</td>
+                <td style="padding-left:${pad(depth)}px;">${type}${e.voided ? ' <span class="badge badge-void" style="text-decoration:none;">void</span>' : ''}${TxnEdit.button(e)}</td>
                 <td>${formatDate(e.date)}</td>
                 <td>${escapeHtml(e.num || '')}</td>
                 <td>${escapeHtml(e.name || '')}</td>
@@ -2087,11 +2087,17 @@ const ReportsPage = {
                         <thead><tr><th scope="col">Date</th><th scope="col">Description</th><th scope="col">Reference</th><th scope="col">Source</th><th scope="col">${T('Class')}</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th><th scope="col" class="amount">Balance</th></tr></thead><tbody>`;
                     html += `<tr style="color:var(--gray-500);"><td></td><td colspan="6">Balance brought forward</td><td class="amount">${formatCurrency(acct.opening_balance)}</td></tr>`;
                     for (const e of acct.entries) {
-                        html += `<tr>
+                        // the line opens its transaction and edits it (#689)
+                        const word = sourceWord(e.source_type, e.source_kind);
+                        const link = e.source_link || (e.transaction_id ? `/#/journal/${e.transaction_id}` : '');
+                        const src = link
+                            ? `<a href="${escapeHtml(link)}" class="gl-line-link" data-row-key="line:${escapeHtml(String(e.line_id || e.transaction_id || ''))}" onclick="ReportsPage._leaveFrom(this)" style="color:var(--text-link); text-decoration:none;">${escapeHtml(word)}</a>`
+                            : escapeHtml(word);
+                        html += `<tr${e.voided ? ' class="row--void" style="color:var(--text-muted);"' : ''}>
                             <td>${formatDate(e.date)}</td>
                             <td>${escapeHtml(e.description)}</td>
                             <td>${escapeHtml(e.reference)}</td>
-                            <td style="font-size:10px; color:var(--gray-500);">${escapeHtml(sourceWord(e.source_type, e.source_kind))}</td>
+                            <td style="font-size:10px; color:var(--gray-500);">${src}${e.voided ? ' <span class="badge badge-void">void</span>' : ''}${TxnEdit.button(e)}</td>
                             <td style="font-size:10px;">${escapeHtml(e.class_name || '')}</td>
                             <td class="amount">${e.debit > 0 ? formatCurrency(e.debit) : ""}</td>
                             <td class="amount">${e.credit > 0 ? formatCurrency(e.credit) : ""}</td>

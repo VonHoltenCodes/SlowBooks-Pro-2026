@@ -184,6 +184,12 @@ class BillPayment(Base):
     # The class the payment's own posted lines carry (#686): the bank, A/P
     # and any early-payment discount taken with it. None posts as before.
     class_id = Column(Integer, ForeignKey("classes.id"), nullable=True)
+    # Void-and-replace (#689): a posted bill payment with no edit of its own is
+    # changed by voiding it and posting a new one; each names the other.
+    # Plain ids, no foreign key: both rows always stay (a void keeps the
+    # original). NULL on everything else.
+    replaces_id = Column(Integer, nullable=True)
+    replaced_by_id = Column(Integer, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

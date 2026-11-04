@@ -118,6 +118,30 @@ const ExpensesPage = {
         ScanHelper.wire(ExpensesPage._applyScan, ExpensesPage._applyScanField, ExpensesPage._scanFieldTarget);
     },
 
+    // Edit from a report line (#689): the form filled in with the expense;
+    // Save voids it and posts the new one in its place.
+    async replace(id) {
+        const x = await API.get(`/expenses/${id}`);
+        if (x.status === 'void') { toast('This expense is void; there is nothing to change.', 'error'); return; }
+        await ExpensesPage.showForm();
+        const form = $('#expense-form');
+        if (!form) return;
+        Replace.set(form, 'date', x.date);
+        Replace.set(form, 'paid_from_account_id', x.paid_from_account_id);
+        Replace.set(form, 'amount', Number(x.amount).toFixed(2));
+        Replace.set(form, 'reference', x.reference || '');
+        Replace.set(form, 'memo', x.memo || '');
+        Replace.set(form, 'class_id', x.class_id || '');
+        Replace.set(form, 'job_id', x.job_id || '');
+        const vendor = document.getElementById('expense-vendor');
+        if (vendor && x.vendor_id) vendor.value = String(x.vendor_id);
+        $('#expense-lines').innerHTML = '';
+        (x.lines || []).forEach(l => ExpensesPage.addLine(l));
+        if (!(x.lines || []).length) ExpensesPage.addLine();
+        ExpensesPage.recalc();
+        Replace.mark(form, 'expense', id);
+    },
+
     vendorSelected(vendorId) {
         if (!vendorId || vendorId === VendorQuickAdd.NEW) return;
         const vendor = ExpensesPage._vendors.find(v => v.id == vendorId);
@@ -325,10 +349,11 @@ const ExpensesPage = {
             };
             // a check number the bank account already has (#481)
             const result = await CheckNumberWarn.send(
-                q => API.post('/expenses', body, q ? { query: q } : undefined), form.reference);
+                q => API.post('/expenses' + (typeof Replace === 'undefined' ? '' : Replace.suffix(form)), body, q ? { query: q } : undefined), form.reference);
             if (!result) return;
             await ScanHelper.attachAfterSave('expense', result.id);
-            toastPosted('Expense recorded');
+            if ((typeof Replace !== 'undefined' && Replace.replacing(form))) toastPosted(`Expense voided and replaced by expense #${result.id}`);
+            else toastPosted('Expense recorded');
             closeModal();
             App.navigate('#/expenses');
         } catch (err) { toast(err.message, 'error'); }
@@ -360,6 +385,7 @@ const ExpensesPage = {
                 <strong>Amount:</strong> ${formatCurrency(x.amount)}<br>
                 ${x.reference ? `<strong>Reference:</strong> ${escapeHtml(x.reference)}<br>` : ''}
                 ${x.memo ? `<strong>Memo:</strong> ${escapeHtml(x.memo).replace(/\n/g, '<br>')}<br>` : ''}
+                ${typeof Replace === 'undefined' ? '' : Replace.links(x, 'expense', n => `#/expenses/${n}`)}
             </div>
             <div style="margin-top:12px; border-top:1px solid var(--gray-300); padding-top:8px;">
                 <div style="font-weight:700; font-size:12px; margin-bottom:4px;">Attachments</div>

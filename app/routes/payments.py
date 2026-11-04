@@ -994,3 +994,16 @@ def void_payment_unchecked(
     resp = _response(payment)
     resp.warning = payout_warning
     return resp
+
+
+@router.post("/{payment_id}/replace", response_model=PaymentResponse)
+def replace_payment(
+    payment_id: int, data: PaymentCreate, db: Session = Depends(get_db)
+):
+    """Change a received payment (#689): void it (its discounts with it, its
+    invoices given back their balances) and post `data` in its place, the
+    two linked, under the void's refusals: a closed period, money already
+    deposited, a deposit a payment application applied."""
+    from app.services.replace_transaction import replace
+
+    return replace(db, "payment", payment_id, data)

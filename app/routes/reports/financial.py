@@ -1091,6 +1091,10 @@ def general_ledger(
 
     entries_by_account = {}
     chart = _chart_index(db)
+    from app.services.bank_register import source_link, voided_transaction_ids
+    from app.services.edit_targets import edit_target
+
+    gl_voided = voided_transaction_ids(db, {txn.id for _, txn, _ in results})
     for tl, txn, acct in results:
         key = acct.id
         if key not in entries_by_account:
@@ -1123,6 +1127,14 @@ def general_ledger(
                 "source_kind": txn.source_kind,
                 "class_name": class_names.get(tl.class_id or txn.class_id)
                 or uncat_name,
+                # the line opens its transaction and edits it (#689), as
+                # the drill-down's lines do
+                "line_id": tl.id,
+                "transaction_id": txn.id,
+                "source_link": source_link(txn) or f"/#/journal/{txn.id}",
+                "voided": txn.id in gl_voided
+                or bool((txn.source_type or "").endswith("_void")),
+                "edit": edit_target(txn, txn.id in gl_voided),
             }
         )
         a["total_debit"] += tl.debit

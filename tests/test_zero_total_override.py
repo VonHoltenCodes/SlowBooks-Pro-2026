@@ -261,7 +261,11 @@ def test_every_zero_total_form_sends_through_the_question():
     save = cm[cm.index("    async save(e) {") :]
     save = save[: save.index("    async showApply(")]
     assert "SalesLines.sendAllowingZero(flags =>" in save
-    assert "API.post('/credit-memos', { ...data, ...flags })" in save
+    # a memo changed from a report line posts to its /replace (#689)
+    assert (
+        "API.post('/credit-memos' + (typeof Replace === 'undefined' ? '' : "
+        "Replace.suffix(form)), { ...data, ...flags })" in save
+    )
 
     est = (JS / "estimates.js").read_text(encoding="utf-8")
     convert = est[est.index("    async convert(id) {") :]
