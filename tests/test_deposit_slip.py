@@ -7,9 +7,15 @@ took (who, number, method, amount), the checks and cash subtotalled, and
 the total, tagged like every other document; a void deposit's says VOID.
 """
 
+import base64
+
 import pytest
 
 from app.services import pdf_service
+
+# a whole 1x1 PNG: the upload decodes a raster logo before keeping it
+# (NEW-201)
+PNG_1PX_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 
 
 @pytest.fixture
@@ -91,12 +97,12 @@ def test_a_void_deposits_slip_says_so(client, deposit, monkeypatch):
 def test_the_slip_carries_the_company_logo(client, deposit, monkeypatch):
     r = client.post(
         "/api/uploads/logo",
-        files={"file": ("logo.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+        files={"file": ("logo.png", base64.b64decode(PNG_1PX_B64), "image/png")},
     )
     assert r.status_code == 200, r.text
     monkeypatch.setattr(pdf_service, "render_pdf", lambda html, **kw: html.encode())
     html = client.get(f"/api/deposits/{deposit['id']}/pdf").text
-    assert "data:image/png;base64,iVBORw0KGgo=" in html
+    assert f"data:image/png;base64,{PNG_1PX_B64}" in html
 
 
 def test_a_missing_deposit_is_404(client, seed_accounts):

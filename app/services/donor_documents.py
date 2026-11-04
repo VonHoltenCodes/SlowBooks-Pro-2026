@@ -39,7 +39,7 @@ def irs_statement(
     fair_value_amount    value of goods/services the donor received back
     in_kind_descriptions the property given, when the gift is not cash
     """
-    name = (company or {}).get("company_name") or "the organization"
+    name = _org_name(company)
     ein = (company or {}).get("company_tax_id") or ""
     tail = f" {name}" + (f" (EIN {ein})" if ein else "") + f". {RETAIN}"
 
@@ -169,12 +169,14 @@ def invoice_pdf_context(inv, company: dict) -> dict:
 # ── gifts: one shape for a receipt, a payment, or property ───────────────
 
 ACK_TEMPLATE_NAME = "donation_acknowledgment"
-ACK_SUBJECT = "Thank you for your gift to {{ company.company_name }}"
+ACK_SUBJECT = (
+    "Thank you for your gift to {{ company.display_name or company.company_name }}"
+)
 ACK_BODY = """<p>{{ donor.salutation or ('Dear ' ~ donor_name) }},</p>
 <p>Thank you for your {% if gift.in_kind_lines %}generous gift{% else %}contribution of {{ gift.amount | currency }}{% endif %} on {{ gift.date | fdate }}{% if gift.number %} ({{ gift.number }}){% endif %}. Your support makes our work possible.</p>
 <p>{{ irs.text }}</p>
 <p>With gratitude,</p>
-<p>{{ company.company_name }}</p>"""
+<p>{{ company.display_name or company.company_name }}</p>"""
 
 
 class NotAGift(ValueError):
@@ -299,6 +301,17 @@ def load_gift(db, kind: str, gift_id: int) -> dict:
     raise LookupError("Unknown gift kind")
 
 
+def _org_name(company: Optional[dict]) -> str:
+    """The organization as a donor's letter and statement name it: the
+    display name when one is set, else the company name (#679)."""
+    company = company or {}
+    return (
+        (company.get("display_name") or "").strip()
+        or company.get("company_name")
+        or "the organization"
+    )
+
+
 def gift_irs(company: dict, gift: dict) -> dict:
     if gift["in_kind_lines"]:
         descs = [
@@ -320,28 +333,29 @@ def render_acknowledgment(db, company: dict, customer, gift: dict) -> tuple[str,
     'donation_acknowledgment' (Settings -> Email Templates), falling back
     to the built-in text when the row has not been seeded. Rendered in the
     sandboxed environment, autoescaped."""
-    from app.services.settings_service import redact_secrets
-
-    from jinja2.sandbox import SandboxedEnvironment
-
-    from app.services.email_service import render_template_from_db
-    from app.services.pdf_service import _format_currency, _format_date
+    from app.services.email_service import (
+        customer_facing_company,
+        render_subject,
+        render_template_from_db,
+        template_env,
+    )
 
     context = {
         "donor": customer,
         "donor_name": customer.name,
         "customer_name": customer.name,
-        # GHSA-c3v4-f43f-4wqm — see settings_service.redact_secrets.
-        "company": redact_secrets(company),
+        # GHSA-c3v4-f43f-4wqm — see settings_service.redact_secrets; the
+        # display name in company_name too, so a template saved before the
+        # setting says the trade name (#679)
+        "company": customer_facing_company(company),
         "gift": gift,
         "irs": gift_irs(company, gift),
     }
     subject, body = render_template_from_db(db, ACK_TEMPLATE_NAME, context)
     if subject is None:
-        env = SandboxedEnvironment(autoescape=True)
-        env.filters["currency"] = _format_currency
-        env.filters["fdate"] = _format_date
-        subject = env.from_string(ACK_SUBJECT).render(**context)
+        env = template_env()
+        # a subject is a header: "Pike's Plumbing" as typed, not escaped
+        subject = render_subject(env, ACK_SUBJECT, context)
         body = env.from_string(ACK_BODY).render(**context)
     return subject, body
 
@@ -490,7 +504,7 @@ def collect_gifts(db, customer_id: int, year: int) -> dict:
 
 
 def giving_statement_irs_text(company: dict, totals: dict) -> str:
-    name = (company or {}).get("company_name") or "the organization"
+    name = _org_name(company)
     ein = (company or {}).get("company_tax_id") or ""
     base = (
         f"This statement summarizes contributions received by {name}"

@@ -4,6 +4,7 @@ is not a receipt's own payment (kind=payment: a pledge payment or an
 unapplied gift), property (kind=in-kind), or an income line of a bank
 deposit that names the donor (kind=bank-entry)."""
 
+import html
 import logging
 from datetime import date
 from typing import Optional
@@ -272,6 +273,8 @@ def giving_statements_batch_email(
 ):
     """Email each donor their statement (skipping those who opted out)."""
     company = get_all_settings(db)
+    # the donor's email names the display name when one is set (#679)
+    org = (company.get("display_name") or "").strip() or company.get("company_name", "")
     sent = failed = skipped = 0
     errors: list[str] = []
     for customer in _donors_with_gifts(db, data.year, data.customer_ids):
@@ -289,11 +292,11 @@ def giving_statements_batch_email(
             ok = send_email(
                 db=db,
                 to_email=customer.email,
-                subject=f"Your {data.year} giving statement from {company.get('company_name', '')}".strip(),
+                subject=f"Your {data.year} giving statement from {org}".strip(),
                 html_body=(
                     f"<p>{customer.salutation or 'Dear ' + customer.name},</p>"
                     f"<p>Thank you for your support in {data.year}. Your giving statement is attached.</p>"
-                    f"<p>{company.get('company_name', '')}</p>"
+                    f"<p>{html.escape(org)}</p>"
                 ),
                 attachment_bytes=pdf,
                 attachment_name=f"GivingStatement_{data.year}.pdf",

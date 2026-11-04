@@ -37,6 +37,34 @@ _LOGO_EXT_BY_TYPE = file_store.LOGO_TYPES
 _LOGO_MAX_BYTES = 5 * 1024 * 1024  # 5 MB — generous for a logo, blocks abuse
 
 
+DAMAGED_IMAGE = (
+    "The image file is cut short or damaged; export it again and upload that."
+)
+
+
+def _refuse_damaged_image(content: bytes) -> None:
+    """A raster logo is decoded whole before it is kept (2.31.5 gate
+    NEW-201): a PNG cut short passed the type, empty and size checks, and
+    every PDF that carries the logo then failed in WeasyPrint ("Truncated
+    File Read"). SVG is not decoded here.
+
+    verify() reads a PNG through to its end chunk and checks every chunk;
+    it is what catches the cut-short PNG, since WeasyPrint turns on Pillow's
+    LOAD_TRUNCATED_IMAGES for the whole process and load() alone then
+    passes it. load() then decodes the pixels."""
+    import io
+
+    from PIL import Image
+
+    try:
+        with Image.open(io.BytesIO(content)) as img:
+            img.verify()
+        with Image.open(io.BytesIO(content)) as img:
+            img.load()
+    except Exception:
+        raise HTTPException(status_code=400, detail=DAMAGED_IMAGE)
+
+
 @router.post("/logo")
 async def upload_logo(
     request: Request, file: UploadFile = File(...), db: Session = Depends(get_db)
@@ -60,6 +88,9 @@ async def upload_logo(
             detail=f"Logo is too large ({len(content) // 1024} KB). "
             f"Maximum {_LOGO_MAX_BYTES // (1024 * 1024)} MB.",
         )
+
+    if content_type != "image/svg+xml":
+        _refuse_damaged_image(content)
 
     row = file_store.replace_logo(db, content, content_type)
     db.commit()

@@ -21,6 +21,7 @@ names a server the test may create a scratch database on (for example
 postgresql:///postgres as a local superuser).
 """
 
+import base64
 import hashlib
 import io
 import os
@@ -554,7 +555,13 @@ def test_the_app_keeps_and_serves_files_on_postgresql(
         )
 
         # the logo, replaced; the PDF embeds the company's own
-        png = b"\x89PNG\r\n\x1a\npostgres-logo"
+        # a whole PNG: the upload verifies a raster logo (NEW-201)
+        png = (
+            base64.b64decode(
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+            )
+            + b"postgres-logo"
+        )
         r = client.post(
             "/api/uploads/logo",
             files={"file": ("logo.png", io.BytesIO(png), "image/png")},

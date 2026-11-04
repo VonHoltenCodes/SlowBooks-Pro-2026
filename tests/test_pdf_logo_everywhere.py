@@ -2,12 +2,17 @@
 new-hire report only. Every customer-facing document gets it now — the
 render helper attaches the logo, each template's header shows it."""
 
+import base64
+
 import pytest
 
 from app.services import pdf_service
 
-PNG = b"\x89PNG\r\n\x1a\n"
-DATA_URI = "data:image/png;base64,iVBORw0KGgo="
+# a whole PNG: the upload decodes a raster logo before keeping it (NEW-201)
+PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
+DATA_URI = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 
 
 @pytest.fixture
