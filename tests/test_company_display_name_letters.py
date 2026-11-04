@@ -41,6 +41,13 @@ def _assert_display(html: str):
     assert LEGAL not in html
 
 
+def _assert_display_with_the_legal_name_beside_the_ein(html: str):
+    """The heading and signature read the display name; the one sentence
+    that carries the EIN names the organization as the IRS knows it."""
+    assert f'<div class="company-name">{DBA_HTML}</div>' in html, html[:400]
+    assert html.count(LEGAL) == 1, html.count(LEGAL)
+
+
 def _invoice(client, customer_id):
     r = client.post(
         "/api/invoices",
@@ -95,7 +102,7 @@ def test_the_acknowledgment_letter_prints_the_display_name(
     inv = _donation(client, seed_customer.id)
     r = client.get(f"/api/donors/gifts/invoice/{inv['id']}/acknowledgment/pdf")
     assert r.status_code == 200, r.text
-    _assert_display(r.text)
+    _assert_display_with_the_legal_name_beside_the_ein(r.text)
     # the built-in body signs with it, the signature line names it
     assert r.text.count(DBA_HTML) >= 3
 
@@ -116,7 +123,8 @@ def test_the_acknowledgment_subject_and_body_name_the_display_name(
     )
     assert subject == f"Thank you for your gift to {DBA}"
     assert f"<p>{DBA_HTML}</p>" in body
-    assert LEGAL not in subject + body
+    assert LEGAL not in subject
+    assert body.count(LEGAL) == 1  # the IRS sentence, beside the EIN
 
 
 def test_the_giving_statement_prints_the_display_name(
@@ -125,7 +133,7 @@ def test_the_giving_statement_prints_the_display_name(
     _donation(client, seed_customer.id)
     r = client.get(f"/api/donors/{seed_customer.id}/giving-statement/pdf?year=2026")
     assert r.status_code == 200, r.text[:200]
-    _assert_display(r.text)
+    _assert_display_with_the_legal_name_beside_the_ein(r.text)
 
 
 def test_the_giving_statement_email_names_the_display_name(
@@ -206,9 +214,11 @@ def test_the_lien_waiver_prints_the_display_name(
     html = pdf_service.render_lien_waiver_html(
         row, row.payment, db_session.get(Job, row.job_id), get_all_settings(db_session)
     )
-    _assert_display(html)
-    # the claimant and the signature block name it too
-    assert html.count(DBA_HTML) == 3
+    # the heading reads the display name; the Claimant row and the
+    # signature name the entity that signs, the legal name
+    assert f'<div class="company-name">{DBA_HTML}</div>' in html
+    assert html.count(DBA_HTML) == 1
+    assert html.count(LEGAL) == 2
 
 
 def test_without_a_display_name_the_letters_print_the_company_name(

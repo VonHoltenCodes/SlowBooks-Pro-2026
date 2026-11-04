@@ -39,7 +39,7 @@ def irs_statement(
     fair_value_amount    value of goods/services the donor received back
     in_kind_descriptions the property given, when the gift is not cash
     """
-    name = _org_name(company)
+    name = _legal_name(company)
     ein = (company or {}).get("company_tax_id") or ""
     tail = f" {name}" + (f" (EIN {ein})" if ein else "") + f". {RETAIN}"
 
@@ -312,6 +312,14 @@ def _org_name(company: Optional[dict]) -> str:
     )
 
 
+def _legal_name(company: Optional[dict]) -> str:
+    """The organization as the IRS knows it, for the sentence that carries
+    the EIN: the company name, never the display name (#679; a trade name
+    beside the EIN is not the registered organization)."""
+    company = company or {}
+    return company.get("company_name") or "the organization"
+
+
 def gift_irs(company: dict, gift: dict) -> dict:
     if gift["in_kind_lines"]:
         descs = [
@@ -504,7 +512,7 @@ def collect_gifts(db, customer_id: int, year: int) -> dict:
 
 
 def giving_statement_irs_text(company: dict, totals: dict) -> str:
-    name = _org_name(company)
+    name = _legal_name(company)
     ein = (company or {}).get("company_tax_id") or ""
     base = (
         f"This statement summarizes contributions received by {name}"
