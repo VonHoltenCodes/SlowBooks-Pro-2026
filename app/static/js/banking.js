@@ -694,6 +694,42 @@ const BankingPage = {
         } catch (e) { /* not kept: the next visit opens on every date */ }
     },
 
+    // Hide voided (#694): the register leaves out its voided entries and
+    // the reversals that voided them (the service marks both `voided`),
+    // off unless chosen. Kept in this browser by sign-in, as the From is,
+    // for every register and company: a way of reading the register, not a
+    // filter of one account's. Store (utils.js) survives a window with no
+    // localStorage; the guard, a probe that loads this file alone.
+    _hideVoidedKey() {
+        const owner = (typeof App !== 'undefined' && App._tabsOwner) || '';
+        const bar = owner.indexOf('|');
+        return `slowbooks-register-hide-voided:${bar < 0 ? '' : owner.slice(0, bar)}`;
+    },
+    _hidingVoided() {
+        return typeof Store !== 'undefined' && Store.get(BankingPage._hideVoidedKey()) === '1';
+    },
+    _withoutVoided(entries) {
+        let off = 0;
+        const shown = [];
+        for (const e of entries) {
+            if (e.voided) { off += Number(e.amount) || 0; continue; }
+            shown.push(off ? { ...e, balance: Math.round((Number(e.balance) - off) * 100) / 100 } : e);
+        }
+        return shown;
+    },
+    // The box changed: kept, and the register drawn again on its own
+    // filter and scroll, the keyboard back on the box.
+    async regHideVoided(box, id) {
+        if (typeof Store !== 'undefined') {
+            if (box.checked) Store.set(BankingPage._hideVoidedKey(), '1');
+            else Store.remove(BankingPage._hideVoidedKey());
+        }
+        const keyboard = typeof App !== 'undefined' && typeof App.keyboardFocus === 'function' && App.keyboardFocus();
+        await BankingPage._backToRegister(id);
+        const again = document.getElementById('reg-hide-voided');
+        if (again) focusFor(again, keyboard);
+    },
+
     // A date the register takes from its boxes, its address or the From it
     // keeps (#663): a real date in a year the books can hold, 1900 to 2199
     // (the years a request may carry, app/schemas/common.py). A year typed
@@ -1041,6 +1077,16 @@ const BankingPage = {
 
         const classOpts = classes.map(c => `<option value="${c.id}"${String(c.id) === f.class_id ? ' selected' : ''}>${escapeHtml(c.name)}${c.is_archived ? ' (archived)' : ''}</option>`).join('');
         const filtered = !!(f.start_date || f.end_date || f.class_id);
+        // voided entries and their reversals left out of the rows drawn
+        // (#694). The running balance is the service's, from every line,
+        // less what the voided lines above a row moved it: a void and its
+        // reversal (posted on the void's date) come to nothing, so past
+        // the pair each row shown has the ledger's balance, and a row
+        // between them reads as the rows shown add up, a void as nothing.
+        const hideVoided = BankingPage._hidingVoided();
+        const shown = hideVoided ? BankingPage._withoutVoided(reg.entries) : reg.entries;
+        const hiddenCount = reg.entries.length - shown.length;
+        const hiddenNote = hiddenCount ? `<p id="reg-voided-note" role="status" style="font-size:11px; color:var(--gray-600); margin:6px 0 0;">${hiddenCount} voided ${hiddenCount === 1 ? 'entry' : 'entries'} hidden</p>` : '';
         // From and To apply on Enter or once the bar is left, a pick from the
         // calendar at once (#663: regFiltersKey)
         const dateBox = `onpointerdown="BankingPage.regDatePointer(this)" onchange="BankingPage.regDateChanged(this, ${id})"`;
@@ -1053,6 +1099,7 @@ const BankingPage = {
                 <input type="date" id="reg-end" value="${escapeHtml(f.end_date)}" ${dateBox}>
                 <label for="reg-class" style="font-size:11px;">${T('Class')}</label>
                 <select id="reg-class" data-no-search onchange="BankingPage.regFilterChanged(${id})"><option value="">All ${T('classes').toLowerCase()}</option>${classOpts}</select>
+                <label for="reg-hide-voided" style="font-size:11px; display:inline-flex; align-items:center; gap:4px;"><input type="checkbox" id="reg-hide-voided"${hideVoided ? ' checked' : ''} onchange="BankingPage.regHideVoided(this, ${id})">Hide voided</label>
                 ${filtered ? `<button type="button" class="btn btn-sm btn-secondary" onclick="BankingPage.regClear(${id})">Clear</button>` : ''}
                 ${filtered ? `<span id="reg-filter-note" style="font-size:11px; color:var(--gray-500);">Showing ${reg.class_name ? `${T('class').toLowerCase()} <strong>${escapeHtml(reg.class_name)}</strong>` : 'every ' + T('class').toLowerCase()}${f.start_date ? ` from ${formatDate(f.start_date)}` : ''}${f.end_date ? ` to ${formatDate(f.end_date)}` : ''}: the running balance counts these lines${reg.class_name ? ` only — the account's whole balance is ${formatCurrency(reg.balance)}` : ''}.</span>` : ''}
             </div>`;
@@ -1076,7 +1123,7 @@ const BankingPage = {
                     <th scope="col" class="amount">${outLabel}</th><th scope="col" class="amount">${inLabel}</th><th scope="col" class="amount">Balance</th><th scope="col"></th><th scope="col"></th>
                 </tr></thead><tbody></tbody>${quickRow}</table></div>`;
         } else {
-            const rows = reg.entries.slice().map(e => `
+            const rows = shown.map(e => `
                 <tr data-txn="${e.transaction_id}" style="${e.voided ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
                     <td>${formatDate(e.date)}</td>
                     <td>${escapeHtml(e.payee || '')}</td>
@@ -1099,7 +1146,7 @@ const BankingPage = {
                     <th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref #</th><th scope="col">Type</th>
                     <th scope="col" class="amount">${outLabel}</th><th scope="col" class="amount">${inLabel}</th><th scope="col" class="amount">Balance</th>
                     <th scope="col" title="✓ cleared · R reconciled">✓</th><th scope="col"></th>
-                </tr></thead><tbody>${opening}${rows}</tbody>${quickRow}</table></div>`;
+                </tr></thead><tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}`;
         }
         return html;
     },
