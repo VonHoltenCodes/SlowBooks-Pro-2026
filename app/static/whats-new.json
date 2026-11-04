@@ -7,7 +7,11 @@
       "The desktop window opens at the size and place you closed it.",
       "Every report with Save PDF has a Print button beside it.",
       "Try a sample company on the Companies page builds a worked example business in its own file, so there is something to look at before your own books are in.",
-      "Form history's Check no longer blames the pay runs after the company name or EIN changed."
+      "Form history's Check no longer blames the pay runs after the company name or EIN changed.",
+      "A customer payment and a bill payment take a class, carried on their own posted lines.",
+      "The Journal Entries list sorts by entry date or date entered and narrows to a date range.",
+      "Sidebar sections fold, and the whole sidebar hides and returns with one control (or the [ key).",
+      "Every line in a report's drill-down and on the General Ledger has Edit; a kind with no edit of its own is voided and replaced in one step, each naming the other."
     ]
   },
   "2.31.4": {
