@@ -760,6 +760,8 @@ const App = {
         $$('.nav-link').forEach(link => {
             link.classList.toggle('active', link.dataset.page === route.page);
         });
+        // its sidebar section open, when the page changed (#688)
+        App.openSectionOf(route.page);
 
         // Status bar
         App.setStatus(`Loading ${route.label}...`);
@@ -2470,7 +2472,11 @@ const App = {
 
     applyTerminology() {
         for (const r of Object.values(App.routes)) r.label = T(r.label);
-        $$('#sidebar .nav-section').forEach(el => { el.textContent = T(el.textContent.trim()); });
+        // a heading that folds (#688) keeps its button: the words are its
+        $$('#sidebar .nav-section').forEach(el => {
+            const target = el.querySelector('.nav-section__toggle') || el;
+            target.textContent = T(target.textContent.trim());
+        });
         $$('#sidebar .nav-link').forEach(a => {
             const t = [...a.childNodes].find(n => n.nodeType === 3 && n.textContent.trim());
             if (t) t.textContent = ' ' + T(t.textContent.trim());
@@ -2507,7 +2513,127 @@ const App = {
         App.syncSidebarHidden();
     },
 
+    // ---- Sidebar sections that fold, and Hide sidebar (#688) --------------
+    // Each section heading is a button that folds or opens the items under
+    // it; the folded ones are kept per computer, by the heading's words as
+    // index.html has them (before the company's vocabulary renames them).
+    // The section holding the page shown is open whenever the page changes,
+    // the first page included; that opens it for the moment and keeps the
+    // stored choice. Hide sidebar, in the top bar and on `[`, puts the
+    // whole menu away and the page takes the width; kept per computer. On
+    // a phone-width window (700px and under) the sidebar is as it was:
+    // the control is not shown there and the stored choice does not apply.
+    SECTIONS_KEY: 'slowbooks-sidebar-folded',
+    SIDEBAR_HIDDEN_KEY: 'slowbooks-sidebar-hidden',
+    _sectionPage: null,
+
+    _sectionHeads() { return [...$$('#sidebar .nav-links > li.nav-section')]; },
+
+    // the items under a heading, to the next heading
+    _sectionItems(head) {
+        const items = [];
+        let li = head.nextElementSibling;
+        while (li && !li.classList.contains('nav-section')) { items.push(li); li = li.nextElementSibling; }
+        return items;
+    },
+
+    _foldedSections() {
+        let v = [];
+        try { v = JSON.parse(localStorage.getItem(App.SECTIONS_KEY) || '[]'); } catch (e) { v = []; }
+        return new Set(Array.isArray(v) ? v.map(String) : []);
+    },
+
+    setupSidebarSections() {
+        const folded = App._foldedSections();
+        App._sectionHeads().forEach(head => {
+            if (head.querySelector('.nav-section__toggle')) return;
+            const name = head.textContent.trim();
+            head.dataset.section = name;
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'nav-section__toggle';
+            btn.textContent = name;
+            btn.addEventListener('click', () => App.toggleSection(head));
+            head.textContent = '';
+            head.appendChild(btn);
+            App._foldSection(head, folded.has(name));
+        });
+    },
+
+    _foldSection(head, fold) {
+        const btn = head.querySelector('.nav-section__toggle');
+        if (btn) btn.setAttribute('aria-expanded', fold ? 'false' : 'true');
+        head.classList.toggle('nav-section--folded', fold);
+        const items = App._sectionItems(head);
+        // the keyboard is never left inside a folded section
+        const active = document.activeElement;
+        if (fold && active && items.some(li => li.contains(active)) && btn) btn.focus();
+        items.forEach(li => li.classList.toggle('nav-folded', fold));
+    },
+
+    toggleSection(head) {
+        const fold = !head.classList.contains('nav-section--folded');
+        App._foldSection(head, fold);
+        const folded = App._foldedSections();
+        if (fold) folded.add(head.dataset.section); else folded.delete(head.dataset.section);
+        try { localStorage.setItem(App.SECTIONS_KEY, JSON.stringify([...folded])); } catch (e) { /* this page load only */ }
+    },
+
+    // the section holding a page, opened (not stored)
+    openSectionOf(page) {
+        if (page === App._sectionPage) return;
+        App._sectionPage = page;
+        const link = page && [...$$('#sidebar .nav-link')].find(a => a.dataset && a.dataset.page === page);
+        const li = link && link.parentElement;
+        if (!li || !li.classList || !li.classList.contains('nav-folded')) return;
+        let head = li.previousElementSibling;
+        while (head && !head.classList.contains('nav-section')) head = head.previousElementSibling;
+        if (head) App._foldSection(head, false);
+    },
+
+    _phoneWidth() {
+        return typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 700px)').matches;
+    },
+
+    sidebarHidden() { return !!document.body && document.body.classList.contains('sidebar-hidden'); },
+
+    setSidebarHidden(hide, keep = true) {
+        const sidebar = $('#sidebar');
+        const btn = $('#sidebar-toggle');
+        // the keyboard is not left in a menu that went away
+        if (hide && sidebar && sidebar.contains(document.activeElement) && btn) btn.focus();
+        if (document.body) document.body.classList.toggle('sidebar-hidden', !!hide);
+        if (btn) {
+            btn.setAttribute('aria-pressed', hide ? 'true' : 'false');
+            btn.title = `${hide ? 'Show the sidebar' : 'Hide the sidebar'} ([)`;
+        }
+        if (keep) {
+            try {
+                if (hide) localStorage.setItem(App.SIDEBAR_HIDDEN_KEY, '1');
+                else localStorage.removeItem(App.SIDEBAR_HIDDEN_KEY);
+            } catch (e) { /* this page load only */ }
+        }
+    },
+
+    toggleSidebar() {
+        if (App._phoneWidth()) return;
+        App.setSidebarHidden(!App.sidebarHidden());
+    },
+
+    setupSidebarToggle() {
+        const btn = $('#sidebar-toggle');
+        if (btn && !btn.dataset.wired) {
+            btn.dataset.wired = '1';
+            btn.addEventListener('click', () => App.toggleSidebar());
+        }
+        let hidden = false;
+        try { hidden = localStorage.getItem(App.SIDEBAR_HIDDEN_KEY) === '1'; } catch (e) { /* shown */ }
+        App.setSidebarHidden(hidden, false);
+    },
+
     init() {
+        App.setupSidebarSections();
+        App.setupSidebarToggle();
         window.addEventListener('hashchange', () => App.navigate(location.hash));
         // Back or Forward: the dialog over the page left closes as the
         // history moves, before the page gone to renders (App.navigate
@@ -2647,6 +2773,12 @@ const App = {
             if (leaves('KeyH')) { App.navigate('#/'); e.preventDefault(); }
             // Alt+D: toggle dark mode (Feature 12)
             if (letter('KeyD')) { App.toggleTheme(); e.preventDefault(); }
+            // [: hide or show the sidebar (#688), outside a field and not
+            // over a form being filled in; ⌘[ is the Mac's Back, so only
+            // the bare key
+            if (e.key === '[' && !e.altKey && !e.ctrlKey && !e.metaKey && !editing && !App.editingDialog()) {
+                if (!App._phoneWidth()) { App.toggleSidebar(); e.preventDefault(); }
+            }
             // Escape: close modal (not the Escape that closes a date
             // field's calendar: utils.js escapeLeavesPicker, NEW-33)
             if (e.key === 'Escape' && !escapeLeavesPicker(e)) { closeModal(); }

@@ -69,6 +69,11 @@
         <!-- Toolbar -->
         <div id="topbar">
             <div class="topbar-brand">Slowbooks Pro <span>2026</span></div>
+            <!-- Hide sidebar (#688): the menu put away, the page takes the
+                 width; pressed while hidden, pressed again shows it. Kept
+                 per computer (app.js App.setSidebarHidden). Not shown on a
+                 phone-width window, where the sidebar stays as it was. -->
+            <button class="tb-btn tb-sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Hide sidebar" aria-pressed="false" aria-keyshortcuts="[" title="Hide the sidebar ([)"><span aria-hidden="true">&#9776;</span></button>
             <!-- Back, within the app: enabled while an app page is behind
                  (app.js App.canGoBack); the desktop window has no Back of
                  its own. Shortcut and title are set per platform at start.

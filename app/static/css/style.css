@@ -524,6 +524,39 @@ body {
     font-weight: 700;
 }
 
+/* A heading that folds (#688): App.setupSidebarSections puts a button in
+   it with the heading's words; the li keeps no padding of its own then. The
+   caret is drawn, not text: it is not part of the button's name. */
+.nav-section:has(> .nav-section__toggle) { padding: 0; }
+.nav-section__toggle {
+    display: flex; align-items: center; gap: 4px; width: 100%;
+    padding: 10px 14px 3px; background: none; border: 0;
+    color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit;
+    text-align: left; cursor: pointer;
+}
+.nav-section__toggle::after {
+    content: "\25BE";
+    content: "\25BE" / "";
+    margin-left: auto; font-size: 9px;
+}
+.nav-section__toggle[aria-expanded="false"]::after {
+    content: "\25B8";
+    content: "\25B8" / "";
+}
+.nav-section__toggle:hover { color: #ffffff; }
+#sidebar .nav-section__toggle:focus-visible { outline: 2px solid var(--qb-gold); outline-offset: -3px; }
+.nav-links > li.nav-folded { display: none; }
+
+/* Hide sidebar (#688): on a window wider than a phone's only; at 700px and
+   under the sidebar is as it was and the control is not offered. */
+@media (min-width: 701px) {
+    body.sidebar-hidden #sidebar { display: none; }
+}
+@media (max-width: 700px) {
+    #sidebar-toggle { display: none; }
+}
+.tb-btn.tb-sidebar-toggle[aria-pressed="true"] { background: rgba(0,0,0,0.08); border-color: var(--text-secondary); }
+
 .nav-link {
     display: flex;
     align-items: center;
