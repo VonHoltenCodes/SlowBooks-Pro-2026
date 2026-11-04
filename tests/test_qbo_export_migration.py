@@ -102,12 +102,17 @@ def test_the_chart_comes_from_the_two_reports_typed_and_nested():
     assert by_name["Opening Balance Equity"]["type"] == AccountType.EQUITY
     assert by_name["Commission Income"]["type"] == AccountType.INCOME
     assert by_name["Office Supplies"]["type"] == AccountType.EXPENSE
-    # a sub-account keeps QuickBooks' Parent:Child name and knows its parent
-    assert by_name["Advertising:Facebook"]["parent"] == "Advertising"
-    assert by_name["Commission Income:Referral Fees"]["parent"] == "Commission Income"
+    # a sub-account is named by its leaf and knows its parent; its full
+    # Parent:Child path is what the Journal and the Trial Balance write, and
+    # the statements join the parent's name to the leaf (NEW-203)
+    assert by_name["Facebook"]["parent"] == "Advertising"
+    assert by_name["Facebook"]["path"] == "Advertising:Facebook"
+    assert by_name["Referral Fees"]["parent"] == "Commission Income"
+    assert by_name["Referral Fees"]["path"] == "Commission Income:Referral Fees"
+    assert not any(":" in a["name"] for a in accounts)
     # a parent with no activity of its own is a bare heading over its children
     assert by_name["Promotional"]["type"] == AccountType.EXPENSE
-    assert by_name["Promotional:Flyers"]["parent"] == "Promotional"
+    assert by_name["Flyers"]["parent"] == "Promotional"
     # report arithmetic is not an account
     for total in ("Net Income", "Gross Profit", "Net Operating Income", "TOTAL ASSETS"):
         assert total not in by_name
@@ -197,7 +202,7 @@ def test_the_bundle_imports_the_chart_the_journals_and_the_contacts(
         + (FIXTURES / "Profit_and_loss.csv").read_text()
     )
     seeded = {a.name.lower() for a in db_session.query(Account).all()}
-    already = {a["name"].lower() for a in parsed} & seeded
+    already = {a["path"].lower() for a in parsed} & seeded
     assert "undeposited funds" in already
     resp = client.post("/api/migration/qbo_export/import", files=_csv_files())
     data = resp.json()
@@ -209,9 +214,7 @@ def test_the_bundle_imports_the_chart_the_journals_and_the_contacts(
     )
     assert data["imported_journals"] == 19
     assert data["imported_customers"] == 2 and data["imported_vendors"] == 4
-    facebook = (
-        db_session.query(Account).filter(Account.name == "Advertising:Facebook").one()
-    )
+    facebook = db_session.query(Account).filter(Account.name == "Facebook").one()
     advertising = db_session.query(Account).filter(Account.name == "Advertising").one()
     assert facebook.parent_id == advertising.id
     assert facebook.account_number is None
@@ -219,9 +222,7 @@ def test_the_bundle_imports_the_chart_the_journals_and_the_contacts(
     assert (
         visa.bank_kind == "credit_card" and visa.account_type == AccountType.LIABILITY
     )
-    postcards = (
-        db_session.query(Account).filter(Account.name == "Advertising:Postcards").one()
-    )
+    postcards = db_session.query(Account).filter(Account.name == "Postcards").one()
     assert (
         postcards.parent_id == advertising.id
     )  # hidden by the P&L, typed by its parent
@@ -398,17 +399,20 @@ def _sheet(rows) -> bytes:
     return out.getvalue()
 
 
-@pytest.mark.parametrize(
-    "parent", ["Payroll Liabilities", "Payroll Liabilities (2100)"]
-)
-def test_a_sub_account_the_two_files_spell_differently_carries_its_opening_balance(
-    client, db_session, seed_accounts, parent
-):
-    # The Balance Sheet lists the child indented under its parent, the Trial
-    # Balance writes it Parent:Child with a "(940)" suffix; the journal never
-    # posts to it, so its balance is an opening balance. The import used to
-    # drop it and post a short opening entry, answered as HTTP 500 (#690).
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+_GHOST = "Ghost Holdings:Mystery Account (777)"
+
+
+def _payroll_files(parent, *, listed=True, ghost=None, packed="loose"):
+    """A small export: the Balance Sheet lists Federal Unemployment (940)
+    indented under ``parent`` (unless ``listed`` is False), the Trial
+    Balance writes it "Payroll Liabilities:Federal Unemployment (940)" with
+    a 100.00 credit, and the journal never posts to it, so its balance is
+    an opening balance. ``ghost`` adds a Trial Balance row for an account
+    whose parent is in neither report, with that credit. ``packed`` is
+    "loose" (four workbooks) or "zip" (them in one zip)."""
     footer = "Tuesday, Nov 03, 2026 09:00:00 AM GMT-6 - Accrual Basis"
+    child = [["               Federal Unemployment (940)", "=100.00"]] if listed else []
     balance_sheet = [
         ["Invented Payroll Co"],
         ["Balance Sheet"],
@@ -423,7 +427,7 @@ def test_a_sub_account_the_two_files_spell_differently_carries_its_opening_balan
         ["      Current Liabilities"],
         ["         Other Current Liabilities"],
         [f"            {parent}"],
-        ["               Federal Unemployment (940)", "=100.00"],
+        *child,
         [f"            Total {parent}", "=100.00"],
         ["   Equity"],
         ["      Net Income", "=50.00"],
@@ -460,20 +464,22 @@ def test_a_sub_account_the_two_files_spell_differently_carries_its_opening_balan
         ["", "", "", "", "", "", "", "=50.00", "=50.00"],
         [""],
     ]
+    checking = 150 + (ghost or 0)
+    ghost_row = [] if ghost is None else [[_GHOST, "", f"={ghost:.2f}"]]
     trial_balance = [
         ["Invented Payroll Co"],
         ["Trial Balance"],
         ["", "Debit", "Credit"],
-        ["Payroll Checking", "=150.00"],
+        ["Payroll Checking", f"={checking:.2f}"],
         ["Payroll Liabilities:Federal Unemployment (940)", "", "=100.00"],
+        *ghost_row,
         ["Payroll Service Fees", "", "=50.00"],
-        ["TOTAL", "=150.00", "=150.00"],
+        ["TOTAL", f"={checking:.2f}", f"={checking:.2f}"],
         [""],
         [footer],
     ]
-    xlsx = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    files = [
-        ("files", (name, io.BytesIO(_sheet(rows)), xlsx))
+    books = [
+        (name, _sheet(rows))
         for name, rows in (
             ("Balance_sheet.xlsx", balance_sheet),
             ("Profit_and_loss.xlsx", profit_and_loss),
@@ -481,32 +487,25 @@ def test_a_sub_account_the_two_files_spell_differently_carries_its_opening_balan
             ("Trial_balance.xlsx", trial_balance),
         )
     ]
-    data = client.post("/api/migration/qbo_export/dry-run", files=files).json()
-    assert data["ok"] is True, data["errors"]
-    assert len(data["opening_balances"]) == 2
-    for _, (_, fh, _) in files:
-        fh.seek(0)
-    resp = client.post("/api/migration/qbo_export/import", files=files)
-    assert resp.status_code == 200, resp.text
-    data = resp.json()
-    assert data["ok"] is True, data["errors"]
+    if packed == "zip":
+        zipped = io.BytesIO()
+        with zipfile.ZipFile(zipped, "w") as archive:
+            for name, data in books:
+                archive.writestr(name, data)
+        return lambda: [
+            (
+                "files",
+                (
+                    "Invented Payroll Co.zip",
+                    io.BytesIO(zipped.getvalue()),
+                    "application/zip",
+                ),
+            )
+        ]
+    return lambda: [("files", (n, io.BytesIO(d), _XLSX)) for n, d in books]
 
-    child = (
-        db_session.query(Account)
-        .filter(Account.name == f"{parent}:Federal Unemployment (940)")
-        .one()
-    )
-    assert child.parent_id is not None
-    assert db_session.get(Account, child.parent_id).name.startswith(
-        "Payroll Liabilities"
-    )
-    # one account, not a second one for the Trial Balance's spelling
-    assert (
-        db_session.query(Account)
-        .filter(Account.name.like("%Federal Unemployment%"))
-        .count()
-        == 1
-    )
+
+def _opening_lands_on(db_session, child):
     opening = (
         db_session.query(Transaction)
         .filter(Transaction.source_type == "opening_balance")
@@ -516,3 +515,162 @@ def test_a_sub_account_the_two_files_spell_differently_carries_its_opening_balan
     assert len(lines) == 2
     assert sum(ln.debit for ln in lines) == sum(ln.credit for ln in lines) == 100
     assert {ln.account_id for ln in lines if ln.credit == 100} == {child.id}
+
+
+def _planned(warnings):
+    return [w for w in warnings if "is on the trial balance but not in the chart" in w]
+
+
+@pytest.mark.parametrize("packed", ["loose", "zip"])
+@pytest.mark.parametrize(
+    "parent", ["Payroll Liabilities", "Payroll Liabilities (2100)"]
+)
+def test_a_sub_account_the_two_files_spell_differently_carries_its_opening_balance(
+    client, db_session, seed_accounts, parent, packed
+):
+    # GATE case A. The Balance Sheet lists the child indented under its
+    # parent, the Trial Balance writes it Parent:Child with a "(940)"
+    # suffix: one account. The import used to drop it and post a short
+    # opening entry, answered as HTTP 500 (#690).
+    files = _payroll_files(parent, packed=packed)
+    data = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert len(data["opening_balances"]) == 2
+    assert _planned(data["warnings"]) == []  # the chart has it: nothing planned
+    resp = client.post("/api/migration/qbo_export/import", files=files())
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True, data["errors"]
+
+    # named by its leaf under its parent (NEW-203), one account for both
+    # spellings
+    child = (
+        db_session.query(Account)
+        .filter(Account.name == "Federal Unemployment (940)")
+        .one()
+    )
+    assert db_session.get(Account, child.parent_id).name == parent
+    assert (
+        db_session.query(Account)
+        .filter(Account.name.like("%Federal Unemployment%"))
+        .count()
+        == 1
+    )
+    _opening_lands_on(db_session, child)
+
+
+@pytest.mark.parametrize("packed", ["loose", "zip"])
+def test_a_trial_balance_sub_account_the_reports_leave_off_is_planned_with_one_note(
+    client, db_session, seed_accounts, packed
+):
+    # GATE case B (W-108): the Balance Sheet does not list the sub-account.
+    # It is planned under its parent and said so, in the engine's words,
+    # once; it used to be placed with no word.
+    files = _payroll_files("Payroll Liabilities", listed=False, packed=packed)
+    data = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert _planned(data["warnings"]) == [
+        "Account 'Payroll Liabilities:Federal Unemployment (940)' is on the trial "
+        "balance but not in the chart files; it will be created as a sub-account "
+        "of 'Payroll Liabilities' (liability) to carry its opening balance"
+    ], data["warnings"]
+    resp = client.post("/api/migration/qbo_export/import", files=files())
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["ok"] is True, data["errors"]
+    assert len(_planned(data["warnings"])) == 1, data["warnings"]
+    child = (
+        db_session.query(Account)
+        .filter(Account.name.like("%Federal Unemployment%"))
+        .one()
+    )
+    assert child.name == "Federal Unemployment (940)"
+    assert child.account_type == AccountType.LIABILITY
+    assert db_session.get(Account, child.parent_id).name == "Payroll Liabilities"
+    _opening_lands_on(db_session, child)
+
+
+@pytest.mark.parametrize("packed", ["loose", "zip"])
+def test_a_balance_on_an_account_with_no_known_parent_refuses_the_import(
+    client, db_session, seed_accounts, packed
+):
+    # GATE case C (W-108): the parent is in neither report and the Trial
+    # Balance carries a balance on it. It used to be typed from its
+    # neighbours and made a top-level account; it is named and refused.
+    files = _payroll_files("Payroll Liabilities", ghost=100, packed=packed)
+    data = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert data["ok"] is False
+    named = [e for e in data["errors"] if _GHOST in e]
+    assert len(named) == 1 and "chart files do not list" in named[0], data["errors"]
+    assert not any(_GHOST in w for w in data["warnings"]), data["warnings"]
+    accounts = db_session.query(Account).count()
+    resp = client.post("/api/migration/qbo_export/import", files=files())
+    assert resp.status_code == 422, resp.text
+    assert _GHOST in resp.json()["detail"]
+    assert db_session.query(Account).count() == accounts
+    assert db_session.query(Transaction).count() == 0
+
+
+@pytest.mark.parametrize("packed", ["loose", "zip"])
+def test_a_zero_row_with_no_known_parent_is_typed_by_its_neighbours(
+    client, db_session, seed_accounts, packed
+):
+    # the same account at 0.00: a zero row the reports leave off, placed by
+    # its Trial Balance neighbour (2.27.0's rule), with its note
+    files = _payroll_files("Payroll Liabilities", ghost=0, packed=packed)
+    data = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert any(
+        _GHOST in w and "liability account" in w for w in data["warnings"]
+    ), data["warnings"]
+    resp = client.post("/api/migration/qbo_export/import", files=files())
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["ok"] is True, resp.json()["errors"]
+    ghost = db_session.query(Account).filter(Account.name == _GHOST).one()
+    assert ghost.account_type == AccountType.LIABILITY and ghost.parent_id is None
+
+
+def test_the_statements_name_an_imported_sub_account_once(
+    client, db_session, seed_accounts
+):
+    # NEW-203: the export named the sub-account "Payroll Liabilities:Federal
+    # Unemployment (940)" and set its parent, so the statements, which join
+    # the parents' names to the account's, printed the parent twice
+    files = _payroll_files("Payroll Liabilities")
+    data = client.post("/api/migration/qbo_export/import", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    once = "Payroll Liabilities: Federal Unemployment (940)"
+    tb = client.get(
+        "/api/reports/trial-balance?start_date=2026-01-01&end_date=2026-12-31"
+    ).json()
+    paths = [row["account_path"] for row in tb["items"]]
+    assert once in paths, paths
+    assert not any("Payroll Liabilities: Payroll Liabilities" in p for p in paths)
+    bs = client.get("/api/reports/balance-sheet?as_of_date=2026-12-31").json()
+    rows = [row["account_path"] for row in bs["liabilities"]]
+    assert once in rows, rows
+    assert not any("Payroll Liabilities: Payroll Liabilities" in r for r in rows)
+
+
+def test_a_leaf_name_under_another_parent_is_another_account(
+    client, db_session, seed_accounts
+):
+    # the books already have a top-level "Federal Unemployment (940)": the
+    # export's, under Payroll Liabilities, is a second account, and the
+    # Trial Balance's "Payroll Liabilities:Federal Unemployment (940)" lands
+    # on it, not on the top-level one (NEW-203)
+    other = Account(name="Federal Unemployment (940)", account_type=AccountType.EXPENSE)
+    db_session.add(other)
+    db_session.commit()
+    files = _payroll_files("Payroll Liabilities")
+    data = client.post("/api/migration/qbo_export/import", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    both = (
+        db_session.query(Account)
+        .filter(Account.name == "Federal Unemployment (940)")
+        .all()
+    )
+    assert len(both) == 2
+    child = next(a for a in both if a.id != other.id)
+    assert db_session.get(Account, child.parent_id).name == "Payroll Liabilities"
+    _opening_lands_on(db_session, child)
