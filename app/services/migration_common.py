@@ -197,15 +197,20 @@ def _opening_accounts(
             missing.append(name)
             continue
         parent_name, acct_type = found
+        # named by its leaf under the parent, the path kept beside it, so the
+        # statements print the parent once (NEW-203) and the trial balance's
+        # "Parent:Child" spelling still finds it
+        leaf = name.rsplit(":", 1)[1].strip() or name
         extra.append(
             {
                 "code": None,
-                "name": name,
+                "name": leaf,
                 "type": acct_type,
                 "description": None,
                 "bank_kind": None,
                 "detail_type": None,
                 "parent": parent_name,
+                "path": name,
             }
         )
         keys[entry["account"]] = (name, acct_type)

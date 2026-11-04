@@ -699,9 +699,11 @@ def test_a_trial_balance_account_the_chart_files_lack_is_planned_or_named(
     assert result["ok"] is True, result["errors"]
     child = (
         db_session.query(Account)
-        .filter(Account.name == "Staff Withholding:Federal Unemployment (940)")
+        .filter(Account.name == "Federal Unemployment (940)")
         .one()
     )
+    # named by its leaf under the parent (NEW-203), the statements print
+    # "Staff Withholding: Federal Unemployment (940)" once
     assert child.account_type == AccountType.LIABILITY
     assert db_session.get(Account, child.parent_id).name == "Staff Withholding"
     opening = (
