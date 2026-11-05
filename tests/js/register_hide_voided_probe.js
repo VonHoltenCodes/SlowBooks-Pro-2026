@@ -68,16 +68,28 @@ function memoryStorage(seed) {
   return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, String(v)), removeItem: (k) => m.delete(k) };
 }
 
+// The words of a rendered fragment: tags stripped until none is left, so a
+// tag split by another (the way CodeQL reads one pass) cannot survive.
+function textOf(fragment) {
+  let s = fragment;
+  let before;
+  do {
+    before = s;
+    s = s.replace(/<[^>]*>/g, '');
+  } while (s !== before);
+  return s.trim();
+}
+
 async function read(ctx) {
   const html = await ctx.BankingPage.renderRegister('5');
   const rows = [];
   for (const tr of html.match(/<tr data-txn="\d+"[\s\S]*?<\/tr>/g) || []) {
     const txn = Number(tr.match(/data-txn="(\d+)"/)[1]);
     const cells = tr.match(/<td[^>]*>[\s\S]*?<\/td>/g) || [];
-    rows.push([txn, cells[7].replace(/<[^>]+>/g, '').trim()]);
+    rows.push([txn, textOf(cells[7])]);
   }
   const box = (html.match(/<input type="checkbox" id="reg-hide-voided"[^>]*>/) || [''])[0];
-  const label = (html.match(/<label for="reg-hide-voided"[\s\S]*?<\/label>/) || [''])[0].replace(/<[^>]+>/g, '').trim();
+  const label = textOf((html.match(/<label for="reg-hide-voided"[\s\S]*?<\/label>/) || [''])[0]);
   const note = (html.match(/<p id="reg-voided-note"[^>]*>([^<]*)<\/p>/) || [null, null])[1];
   return { rows, checked: / checked/.test(box), label, note };
 }
