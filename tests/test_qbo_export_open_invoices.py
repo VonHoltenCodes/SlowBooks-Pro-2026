@@ -8,10 +8,14 @@ the open balance sat on that account with nothing behind it. QuickBooks
 Online's A/R Aging Detail report (Reports → A/R Aging Detail → Export to
 Excel), uploaded beside the zip, lists what was open: each invoice with its
 number, dates and open balance, and each payment not (fully) applied. They
-are carried over as invoices and unapplied payments whose postings move the
-open balance from the export's receivable account to 1100, so the aging and
-every customer's balance are right and that account ends at zero; no income
-is touched, the sales being in the history already.
+are carried over as invoices and unapplied payments, so the aging and every
+customer's balance are right; no income is touched, the sales being in the
+history already. When the report carries all the Journal leaves on the
+export's receivable account, that account is 1100 itself and no empty one
+is left beside it (#704); otherwise the documents' postings move the open
+balance from it to 1100. An invoice the Journal holds at a larger total is
+carried at that total, with the part paid as a payment applied to it
+(#711).
 
 The fixture is the Sutehk sample's report in the layout of the real
 download the importer was built against (that company's report, every row
@@ -19,6 +23,7 @@ matched to its Journal block, stays private).
 """
 
 import io
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -112,10 +117,17 @@ def test_the_dry_run_counts_them_and_checks_them_against_the_journal(
     data = client.post("/api/migration/qbo_export/dry-run", files=_files()).json()
     assert data["ok"] is True, data["errors"]
     assert data["open_invoices"] == 2 and data["unapplied_payments"] == 2
+    # the report carries all the Journal leaves on the receivable: it is
+    # 1100 here, and no second receivable account is made (#704)
     assert any(
         "come to 525.00, what the Journal leaves on Accounts Receivable (A/R): "
-        "they move to 1100 Accounts Receivable" in w
-        and "ends at zero" in w
+        "Accounts Receivable (A/R) is 1100 Accounts Receivable here" in w
+        and "no second receivable account is made" in w
+        for w in data["warnings"]
+    ), data["warnings"]
+    # 1003 is in the Journal at 800.00: carried at that total (#711)
+    assert any(
+        "1 of the open invoices is carried at its total from the Journal" in w
         for w in data["warnings"]
     ), data["warnings"]
     assert db_session.query(Invoice).count() == 0
@@ -137,13 +149,20 @@ def test_the_open_invoices_and_unapplied_payments_come_across(
     assert partly.customer.name == "Dana Reyes - CUST"
     assert partly.date.isoformat() == "2026-08-20"
     assert partly.due_date.isoformat() == "2026-09-19"
-    assert partly.status == InvoiceStatus.SENT
-    assert partly.total == Decimal("500.00") and partly.balance_due == Decimal("500.00")
+    # the Journal holds it at 800.00: carried at that total, with the 300.00
+    # paid on it (the Journal's payment of 09/25) applied (#711)
+    assert partly.status == InvoiceStatus.PARTIAL
+    assert partly.total == Decimal("800.00")
+    assert partly.amount_paid == Decimal("300.00")
+    assert partly.balance_due == Decimal("500.00")
     assert partly.tax_amount == 0
     (line,) = partly.lines
     assert line.item.name == qbo.CARRY_ITEM
-    assert "invoice 1003" in line.description
-    assert "for 800.00, 500.00 of it open" in line.description
+    assert line.description == "QuickBooks Online invoice 1003 of 08/20/2026"
+    (paid,) = [a.payment for a in partly.payment_allocations]
+    assert paid.amount == Decimal("300.00") and paid.date.isoformat() == "2026-09-25"
+    assert invoices["1004"].status == InvoiceStatus.SENT
+    assert invoices["1004"].total == Decimal("275.00")
     assert invoices["1004"].balance_due == Decimal("275.00")
     assert invoices["1004"].due_date.isoformat() == "2026-09-02"
     payments = {
@@ -154,10 +173,29 @@ def test_the_open_invoices_and_unapplied_payments_come_across(
     assert "a payment of 600.00, 150.00 of it not applied" in sam.notes
     dana = payments[("Dana Reyes - CUST", "2026-10-01")]
     assert dana.amount == Decimal("100.00") and dana.allocations == []
-    # the open balance moved: the export's receivable account ends at zero,
-    # 1100 holds what was open, with the documents behind it
-    assert _balance(client, name="Accounts Receivable (A/R)") == 0
+    # the export's receivable is 1100 here (#704): no second account beside
+    # it, 1100 holds what was open, with the documents behind it, and they
+    # posted nothing of their own (the history put it there)
+    assert (
+        db_session.query(Account)
+        .filter(Account.name == "Accounts Receivable (A/R)")
+        .count()
+        == 0
+    )
+    assert (
+        db_session.query(Account)
+        .filter(Account.account_type == AccountType.ASSET)
+        .filter(Account.name.like("Accounts Receivable%"))
+        .count()
+        == 1
+    )
     assert _balance(client, number="1100") == Decimal("525.00")
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.source_type.in_(("invoice", "payment")))
+        .count()
+        == 0
+    )
     aging = client.get("/api/reports/ar-aging", params={"as_of_date": "2026-10-15"})
     totals = aging.json()["totals"]
     assert Decimal(str(totals["total"])) == Decimal("525.00")
@@ -173,11 +211,11 @@ def test_the_open_invoices_and_unapplied_payments_come_across(
     )
     assert carried == 0
     item = db_session.query(Item).filter(Item.name == qbo.CARRY_ITEM).one()
-    assert item.income_account_id == (
-        db_session.query(Account.id)
-        .filter(Account.name == "Accounts Receivable (A/R)")
-        .scalar()
-    )
+    assert item.income_account_id == seed_accounts["1100"].id
+    # on the carried invoices, in no item picker (#711)
+    assert item.is_active is False
+    picker = client.get("/api/items", params={"active_only": "true"}).json()
+    assert qbo.CARRY_ITEM not in [i["name"] for i in picker]
 
 
 def test_a_second_upload_carries_nothing_twice(client, db_session, seed_accounts):
@@ -191,7 +229,8 @@ def test_a_second_upload_carries_nothing_twice(client, db_session, seed_accounts
         for w in again["warnings"]
     ), again["warnings"]
     assert db_session.query(Invoice).count() == 2
-    assert db_session.query(Payment).count() == 2
+    # two unapplied payments, and the paid part of 1003
+    assert db_session.query(Payment).count() == 3
     assert _balance(client, number="1100") == Decimal("525.00")
     dry = client.post("/api/migration/qbo_export/dry-run", files=_files()).json()
     assert dry["open_invoices"] == 0 and dry["unapplied_payments"] == 0
@@ -206,6 +245,7 @@ def test_a_carried_payment_applies_to_a_carried_invoice(
         db_session.query(Payment)
         .join(Customer, Customer.id == Payment.customer_id)
         .filter(Customer.name == "Dana Reyes - CUST")
+        .filter(Payment.date == date(2026, 10, 1))
         .one()
     )
     resp = client.post(
@@ -219,15 +259,50 @@ def test_a_carried_payment_applies_to_a_carried_invoice(
     assert _balance(client, number="1100") == Decimal("525.00")
 
 
+def _short_report():
+    """The report without Dana's 10/01 payment: it carries 625.00 where the
+    Journal leaves 525.00, so the export's receivable stays an account of
+    its own and the carried documents post their move to 1100."""
+    text = (FIXTURES / AGING).read_text()
+    return (
+        "\n".join(ln for ln in text.splitlines() if ",10/01/2026,Payment," not in ln)
+        + "\n"
+    )
+
+
 def test_voiding_a_carried_invoice_moves_its_balance_back(
     client, db_session, seed_accounts
 ):
-    _imported(client)
+    data = client.post(
+        "/api/migration/qbo_export/import", files=_files(_short_report())
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    assert _balance(client, number="1100") == Decimal("625.00")
+    assert _balance(client, name="Accounts Receivable (A/R)") == Decimal("-100.00")
     invoice = db_session.query(Invoice).filter(Invoice.invoice_number == "1004").one()
     resp = client.post(f"/api/invoices/{invoice.id}/void")
     assert resp.status_code == 200, resp.text
-    assert _balance(client, number="1100") == Decimal("250.00")
-    assert _balance(client, name="Accounts Receivable (A/R)") == Decimal("275.00")
+    assert _balance(client, number="1100") == Decimal("350.00")
+    assert _balance(client, name="Accounts Receivable (A/R)") == Decimal("175.00")
+
+
+def test_voiding_a_carried_invoice_on_1100_posts_nothing(
+    client, db_session, seed_accounts
+):
+    # the receivable is 1100 here (#704): the carried invoice posted nothing
+    # of its own, so its void reverses nothing; its balance is the history's
+    _imported(client)
+    invoice = db_session.query(Invoice).filter(Invoice.invoice_number == "1004").one()
+    assert invoice.transaction_id is None
+    resp = client.post(f"/api/invoices/{invoice.id}/void")
+    assert resp.status_code == 200, resp.text
+    assert (
+        db_session.query(Transaction)
+        .filter(Transaction.source_type == "invoice_void")
+        .count()
+        == 0
+    )
+    assert _balance(client, number="1100") == Decimal("525.00")
 
 
 def test_new_invoices_continue_past_the_carried_numbers(
@@ -329,17 +404,46 @@ def test_a_renamed_receivable_account_is_found_by_its_section(
     ).json()
     assert data["ok"] is True, data["errors"]
     assert data["imported_open_invoices"] == 2
-    assert _balance(client, name="Trade Receivables") == 0
+    # found, and landed on 1100 (#704)
+    assert db_session.query(Account).filter_by(name="Trade Receivables").count() == 0
+    assert _balance(client, number="1100") == Decimal("525.00")
+
+
+def test_a_renamed_receivable_the_report_does_not_empty_stays_its_own(
+    client, db_session, seed_accounts
+):
+    rename = {"Accounts Receivable (A/R)": "Trade Receivables"}
+    data = client.post(
+        "/api/migration/qbo_export/import",
+        files=_files(_short_report(), replace=rename),
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    assert _balance(client, name="Trade Receivables") == Decimal("-100.00")
+    assert _balance(client, number="1100") == Decimal("625.00")
+
+
+def test_a_receivable_named_like_1100_lands_on_it(client, db_session, seed_accounts):
+    # the report carries all the Journal leaves: the history on 1100 is the
+    # open balance, and the documents post nothing more (#704)
+    control = db_session.query(Account).filter(Account.account_number == "1100").one()
+    rename = {"Accounts Receivable (A/R)": control.name}
+    data = client.post(
+        "/api/migration/qbo_export/import", files=_files(replace=rename)
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    assert data["imported_open_invoices"] == 2
     assert _balance(client, number="1100") == Decimal("525.00")
 
 
 def test_a_receivable_named_like_1100_is_refused_before_anything_is_written(
     client, db_session, seed_accounts
 ):
+    # a report that does not carry it all would count the invoices twice
     control = db_session.query(Account).filter(Account.account_number == "1100").one()
     rename = {"Accounts Receivable (A/R)": control.name}
     data = client.post(
-        "/api/migration/qbo_export/import", files=_files(replace=rename)
+        "/api/migration/qbo_export/import",
+        files=_files(_short_report(), replace=rename),
     ).json()
     assert data["ok"] is False
     assert any("would count twice" in e for e in data["errors"]), data["errors"]

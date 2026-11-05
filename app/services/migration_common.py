@@ -145,6 +145,27 @@ def books_by_name(db: Session) -> dict:
     return found
 
 
+def onto_accounts(db: Session, accounts: list[dict]) -> dict:
+    """{lowercased path → Account} for the chart specs a dialect maps onto
+    an account the books have (a spec's "onto", an account id): QuickBooks
+    Online's "Accounts Payable (A/P)" lands on the 2000 control (#704). Such
+    a spec is not created; the journal, the trial balance and any child of
+    it resolve to that account. A path the books already hold (an earlier
+    import made it) keeps its own account."""
+    in_books = books_by_name(db)
+    found: dict = {}
+    for spec in accounts:
+        if spec.get("onto") is None:
+            continue
+        path = spec_path(spec).lower()
+        if path in in_books:
+            continue
+        acct = db.get(Account, spec["onto"])
+        if acct is not None:
+            found.setdefault(path, acct)
+    return found
+
+
 def planned_sub_account_note(name: str, parent_name: str, acct_type) -> str:
     """The words for a trial-balance account planned under its parent
     (#690), one sentence for the engine and for a dialect that plans it."""
@@ -359,6 +380,8 @@ def _plan_accounts(db: Session, accounts: list[dict]) -> list[dict]:
     still links and a grandchild inherits through its parent's settled detail
     type. Returns one decision per account to create, in creation order."""
     in_books = books_by_name(db)
+    for path, acct in onto_accounts(db, accounts).items():
+        in_books.setdefault(path, acct)  # mapped onto it: not created (#704)
     used_numbers = {
         n for (n,) in db.query(Account.account_number).all() if n is not None
     }
@@ -619,7 +642,7 @@ def dry_run_bundle(
         if decision["warning"]:
             warnings.append(decision["warning"])
 
-    existing = set(books_by_name(db))
+    existing = set(books_by_name(db)) | set(onto_accounts(db, accounts))
     return {
         "ok": not errors,
         "errors": errors,
@@ -662,6 +685,9 @@ def run_import_bundle(
     warnings = list(verdict.get("warnings") or [])
     # the books' accounts by path, then by name (NEW-203)
     by_name: dict[str, Account] = books_by_name(db)
+    onto = onto_accounts(db, accounts)
+    for path, acct in onto.items():
+        by_name.setdefault(path, acct)
     new_paths: list[tuple[str, Account]] = []
     # The dry run's plan, parents first. Its parent warnings are already in
     # `warnings` (carried from the verdict), so they are not added twice.
@@ -706,6 +732,8 @@ def run_import_bundle(
     # paths before leaf names (NEW-203)
     by_key: dict[str, Account] = {}
     for acct, path in account_paths(db):
+        by_key.setdefault(strip_code_suffix(path), acct)
+    for path, acct in onto.items():
         by_key.setdefault(strip_code_suffix(path), acct)
     for acct in by_name.values():
         by_key.setdefault(strip_code_suffix(acct.name), acct)
