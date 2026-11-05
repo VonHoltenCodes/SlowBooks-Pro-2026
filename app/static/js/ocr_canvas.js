@@ -72,7 +72,7 @@ const OcrCanvas = {
                     Click a colored box to change or re-read it.
                 </span>
             </div>
-            <div style="max-height:min(420px, 55vh); overflow:auto; border:1px solid var(--gray-200);">
+            <div style="max-height:min(420px, calc(55vh / var(--ui-scale, 1))); overflow:auto; border:1px solid var(--gray-200);">
                 <canvas id="ocr-canvas" style="display:block; cursor:crosshair;"></canvas>
             </div>
             <div id="ocr-field-picker" style="display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; align-items:center;">
@@ -387,7 +387,9 @@ const OcrCanvas = {
         canvas._ocrBound = true;
         const pos = evt => {
             const r = canvas.getBoundingClientRect();
-            return { x: evt.clientX - r.left, y: evt.clientY - r.top };
+            // the canvas's own pixels, whatever the text size (text_size.js)
+            const kx = r.width ? canvas.width / r.width : 1, ky = r.height ? canvas.height / r.height : 1;
+            return { x: (evt.clientX - r.left) * kx, y: (evt.clientY - r.top) * ky };
         };
         canvas.addEventListener('mousedown', evt => {
             const p = pos(evt);
@@ -412,7 +414,8 @@ const OcrCanvas = {
             this._drag = null;
             const w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
             const r = canvas.getBoundingClientRect();
-            if (w < 6 && h < 6) { this._click({ x: evt.clientX - r.left, y: evt.clientY - r.top }); this._draw(); return; }
+            const kx = r.width ? canvas.width / r.width : 1, ky = r.height ? canvas.height / r.height : 1;
+            if (w < 6 && h < 6) { this._click({ x: (evt.clientX - r.left) * kx, y: (evt.clientY - r.top) * ky }); this._draw(); return; }
             const s = this._scale;
             this._pendingBox = {
                 left: Math.max(0, Math.round(Math.min(d.x0, d.x1) / s)),

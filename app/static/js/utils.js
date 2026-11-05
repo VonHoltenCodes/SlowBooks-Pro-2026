@@ -1116,12 +1116,16 @@ const QuickMath = {
     _place(open) {
         const { box, tape } = open;
         if (!box.isConnected) { QuickMath.close(false); return; }
-        const r = box.getBoundingClientRect();
-        const w = Math.min(260, window.innerWidth - 8);
+        // in the page's pixels, as the type-ahead's list (Combobox._place)
+        const z = typeof SlowbooksTextSize !== 'undefined' ? SlowbooksTextSize.ratio() : 1;
+        const raw = box.getBoundingClientRect();
+        const r = { left: raw.left / z, top: raw.top / z, bottom: raw.bottom / z };
+        const winW = window.innerWidth / z, winH = window.innerHeight / z;
+        const w = Math.min(260, winW - 8);
         tape.style.width = `${w}px`;
-        tape.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - w - 4))}px`;
+        tape.style.left = `${Math.max(4, Math.min(r.left, winW - w - 4))}px`;
         const h = tape.offsetHeight || 70;
-        const below = window.innerHeight - r.bottom - 4;
+        const below = winH - r.bottom - 4;
         if (below < h && r.top - 4 > below) tape.style.top = `${Math.max(4, r.top - h - 2)}px`;
         else tape.style.top = `${r.bottom + 2}px`;
     },

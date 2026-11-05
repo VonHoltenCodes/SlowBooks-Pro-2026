@@ -92,10 +92,17 @@ or Alt+D.*
 - **Sortable lists say how they are sorted** (v2.31.1): a column heading that
   sorts a list (the Invoices list, among others) is a button, and the sort is
   announced (`aria-sort`).
-- **The window zooms** (v2.30.0): Ctrl and + or −, Ctrl+0 to reset, or Ctrl
-  and the mouse wheel (⌘ on a Mac) scale the whole desktop window, and the
-  level is kept between launches. A text-size setting that leaves the sidebar
-  alone is still to come.
+- **Text size** (v2.31.8): Settings → My Preferences → Text size makes the
+  text 100%, 115%, 125% or 150% of its usual size, in a browser and in the
+  desktop app alike. It is kept on that computer, for every company and
+  sign-in, and is there from the first moment a page shows, the sign-in
+  screen included. At every size the sidebar scrolls inside itself, the
+  bottom bar stays in the window, a dialog keeps its title and its buttons
+  in view while the form scrolls between them, and wide tables scroll
+  sideways in their own box; printing and PDFs are never enlarged. In the
+  desktop app Ctrl and + or −, Ctrl+0 to go back to 100%, and Ctrl and the
+  mouse wheel (⌘ on a Mac) step through the same four sizes. A window zoom
+  set in an earlier version was carried over to the nearest size.
 - **A sound when a transaction posts**, optional and per sign-in (v2.29.1):
   Settings → Sounds. Off by default.
 - **Enter moves between fields** on request (v2.29.1): Settings → My
@@ -170,8 +177,7 @@ a screen reader hears it (v2.22.2).
 - Keyboard ordering is offered everywhere a mouse drag exists: document
   lines have **Move line up**, **Move line down** and **Insert line below**
   beside the drag handle (v2.31.0), and the dashboard's cards use arrow
-  buttons. What is still open is a text-size setting of the app's own; the
-  window zoom above is the way to larger text today.
+  buttons.
 
 ## Tell us
 

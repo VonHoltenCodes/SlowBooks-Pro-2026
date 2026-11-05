@@ -264,7 +264,25 @@ const SettingsPage = {
             + box('pref-report-refresh', null, 'Refresh reports automatically',
                 'An open report runs again after a change to the books, here or in another window, and when you come back to the window. '
                 + 'Off: use the report&rsquo;s Refresh button.', 'SettingsPage.saveReportRefresh(this)')
+            + SettingsPage._textSizeHtml()
             + '</div>';
+    },
+
+    // Text size (#717): kept on this computer, not with the sign-in, and
+    // set at once (text_size.js), so it has no Save either.
+    _textSizeHtml() {
+        const sizes = typeof SlowbooksTextSize !== 'undefined' ? SlowbooksTextSize : null;
+        const now = sizes ? sizes.read() : 100;
+        const keys = typeof App !== 'undefined' && App.isMac && App.isMac() ? '&#8984;' : 'Ctrl';
+        return '<div class="form-group" style="margin:10px 0 6px;">'
+            + '<label for="pref-text-size">Text size</label>'
+            + '<select id="pref-text-size" data-text-size-control data-readonly-ok aria-describedby="pref-text-size-hint" style="width:auto; max-width:120px;"'
+            + ' onchange="SlowbooksTextSize.apply(this.value)">'
+            + [100, 115, 125, 150].map(n => '<option value="' + n + '"' + (n === now ? ' selected' : '') + '>' + n + '%</option>').join('')
+            + '</select>'
+            + '<div id="pref-text-size-hint" style="font-size:11px; color:var(--text-muted); margin-top:2px;">'
+            + 'Makes the text larger on this computer, for every company and sign-in. '
+            + 'In the desktop app, ' + keys + ' and + or &minus; change it too, and ' + keys + ' and 0 puts it back to 100%.</div></div>';
     },
 
     loadMyPreferences() {

@@ -1,21 +1,39 @@
-// The desktop zoom keys (#597): Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac) set
-// the document's CSS zoom by tenths between 0.5 and 2, and the level is
-// kept in localStorage so it holds across pages and launches. pywebview's
-// zoomable=True only gives Ctrl + wheel, so desktop_shim.js does the keys.
+// The desktop zoom keys (#597) step the Text size setting (#717):
+// Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac) and Ctrl + wheel go through
+// 100, 115, 125 and 150 percent and write the one setting Settings → My
+// Preferences shows (text_size.js), kept in localStorage per computer. The
+// size is applied from <head> on every page, in a browser too; the keys and
+// the wheel are taken in the desktop shell only. Before 2.31.8 the keys kept
+// a free zoom level (slowbooks.desktop.zoom, 0.5 to 2.0); it is carried over
+// once to the nearest size.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 
-function load({ desktop = true, stored = {}, userAgent } = {}) {
+const JS = path.join(__dirname, '../../app/static/js');
+const KEY = 'slowbooks.textsize';
+const OLD = 'slowbooks.desktop.zoom';
+
+function load({ desktop = true, stored = {}, userAgent, shim = true } = {}) {
     const storage = Object.assign({}, stored);
     const listeners = {};
     const listen = (name, fn) => { (listeners[name] = listeners[name] || []).push(fn); };
+    const attrs = {};
+    const control = { value: '' };
     const context = {
         window: { open() {}, addEventListener: listen, pywebview: desktop ? { api: {} } : undefined },
         navigator: { userAgent: userAgent || (desktop ? 'WebView2' : 'Firefox') },
-        document: { addEventListener: listen, documentElement: { style: {} } },
+        document: {
+            addEventListener: listen,
+            querySelectorAll: sel => (sel === 'select[data-text-size-control]' ? [control] : []),
+            documentElement: {
+                style: {},
+                setAttribute: (k, v) => { attrs[k] = String(v); },
+                removeAttribute: k => { delete attrs[k]; },
+            },
+        },
         localStorage: {
             getItem: k => (k in storage ? storage[k] : null),
             setItem: (k, v) => { storage[k] = String(v); },
@@ -24,12 +42,15 @@ function load({ desktop = true, stored = {}, userAgent } = {}) {
         setTimeout() {},
         URL,
     };
+    context.window.localStorage = context.localStorage;
     vm.createContext(context);
-    const js = fs.readFileSync(path.join(__dirname, '../../app/static/js/desktop_shim.js'), 'utf8');
-    vm.runInContext(js, context);
+    vm.runInContext(fs.readFileSync(path.join(JS, 'text_size.js'), 'utf8'), context);
+    if (shim) vm.runInContext(fs.readFileSync(path.join(JS, 'desktop_shim.js'), 'utf8'), context);
     return {
-        zoom: context.window.SlowbooksDesktop.zoom,
-        style: context.document.documentElement.style,
+        zoom: shim ? context.window.SlowbooksDesktop.zoom : null,
+        sizes: context.window.SlowbooksTextSize,
+        size: () => attrs['data-text-size'],
+        control,
         storage,
         window: context.window,
         fire: (name, event) => (listeners[name] || []).forEach(fn => fn(event)),
@@ -44,51 +65,58 @@ function key(k, mods = {}) {
     return Object.assign({ key: k, code: '', prevented: false, preventDefault() { this.prevented = true; } }, mods);
 }
 
-test('Ctrl + and Ctrl - step a tenth, Ctrl 0 resets, and the level is remembered', () => {
-    const { zoom, style, storage } = load();
+test('Ctrl + and Ctrl - step through the four sizes, Ctrl 0 resets, and the size is kept', () => {
+    const { zoom, size, storage, control } = load();
     const plus = key('=', { ctrlKey: true });
     assert.equal(zoom.handle(plus), true);
     assert.equal(plus.prevented, true);
-    assert.equal(style.zoom, '1.1');
-    assert.equal(storage['slowbooks.desktop.zoom'], '1.1');
+    assert.equal(size(), '115');
+    assert.equal(storage[KEY], '115');
+    assert.equal(control.value, '115');  // the Settings control follows
     assert.equal(zoom.handle(key('+', { ctrlKey: true, shiftKey: true })), true);
-    assert.equal(style.zoom, '1.2');
+    assert.equal(size(), '125');
     assert.equal(zoom.handle(key('-', { ctrlKey: true })), true);
     assert.equal(zoom.handle(key('_', { ctrlKey: true, shiftKey: true })), true);
-    // back at 1 nothing is set and nothing is stored
-    assert.equal(style.zoom, '');
-    assert.equal('slowbooks.desktop.zoom' in storage, false);
+    // back at 100 nothing is set and nothing is stored
+    assert.equal(size(), undefined);
+    assert.equal(KEY in storage, false);
+    // 100 is the smallest
     assert.equal(zoom.handle(key('-', { ctrlKey: true })), true);
-    assert.equal(style.zoom, '0.9');
+    assert.equal(size(), undefined);
     // the numpad's keys, and Cmd on a Mac
     assert.equal(zoom.handle(key('+', { ctrlKey: true, code: 'NumpadAdd' })), true);
+    assert.equal(zoom.handle(key('+', { metaKey: true, code: 'NumpadAdd' })), true);
     assert.equal(zoom.handle(key('-', { metaKey: true, code: 'NumpadSubtract' })), true);
-    assert.equal(style.zoom, '0.9');
+    assert.equal(size(), '115');
     const reset = key('0', { metaKey: true });
     assert.equal(zoom.handle(reset), true);
     assert.equal(reset.prevented, true);
-    assert.equal(style.zoom, '');
-    assert.equal('slowbooks.desktop.zoom' in storage, false);
+    assert.equal(size(), undefined);
+    assert.equal(KEY in storage, false);
 });
 
-test('the level stops at 0.5 and 2.0', () => {
-    const { zoom, style } = load();
-    for (let i = 0; i < 15; i++) zoom.handle(key('=', { ctrlKey: true }));
-    assert.equal(style.zoom, '2');
-    for (let i = 0; i < 20; i++) zoom.handle(key('-', { ctrlKey: true }));
-    assert.equal(style.zoom, '0.5');
+test('the size stops at 150', () => {
+    const { zoom, size } = load();
+    for (let i = 0; i < 10; i++) zoom.handle(key('=', { ctrlKey: true }));
+    assert.equal(size(), '150');
+    for (let i = 0; i < 10; i++) zoom.handle(key('-', { ctrlKey: true }));
+    assert.equal(size(), undefined);
 });
 
-test('a stored level is applied on load, in the desktop shell only', () => {
-    const stored = { 'slowbooks.desktop.zoom': '1.3' };
-    assert.equal(load({ stored }).style.zoom, '1.3');
-    assert.equal(load({ stored, desktop: false }).style.zoom, undefined);
-    // a bad stored value reads as 1
-    assert.equal(load({ stored: { 'slowbooks.desktop.zoom': '9' } }).style.zoom, undefined);
+test('a stored size is applied on load, in the desktop shell and in a browser', () => {
+    const stored = { [KEY]: '125' };
+    assert.equal(load({ stored }).size(), '125');
+    assert.equal(load({ stored, desktop: false }).size(), '125');
+    // and on Windows, where the shell cannot be told at load time (W-46)
+    assert.equal(load({ stored, desktop: false, userAgent: 'Edg/156' }).size(), '125');
+    // a value that is not one of the four reads as 100
+    for (const bad of ['9', '130', 'big', '']) {
+        assert.equal(load({ stored: { [KEY]: bad } }).size(), undefined, bad);
+    }
 });
 
 test('any other key passes untouched, and so does every key in a browser', () => {
-    const { zoom, style } = load();
+    const { zoom, size } = load();
     for (const e of [
         key('='), key('s', { ctrlKey: true }), key('k', { ctrlKey: true }),
         key('0'), key('=', { ctrlKey: true, altKey: true }), key('1', { ctrlKey: true }),
@@ -96,28 +124,29 @@ test('any other key passes untouched, and so does every key in a browser', () =>
         assert.equal(zoom.handle(e), false);
         assert.equal(e.prevented, false);
     }
-    assert.equal(style.zoom, undefined);
+    assert.equal(size(), undefined);
     const browser = load({ desktop: false });
     const e = key('=', { ctrlKey: true });
     assert.equal(browser.zoom.handle(e), false);
     assert.equal(e.prevented, false);
+    assert.equal(browser.size(), undefined);
 });
 
-test('Ctrl + wheel steps the same level, a notch at a time, in the shell only (NEW-186)', () => {
-    const { zoom, style, storage } = load();
+test('Ctrl + wheel steps the same setting, a notch at a time, in the shell only (NEW-186)', () => {
+    const { zoom, size, storage } = load();
     const up = wheel(-100, { ctrlKey: true });
     assert.equal(zoom.wheel(up), true);
     assert.equal(up.prevented, true);  // WebView2's own zoom stays out of it
-    assert.equal(style.zoom, '1.1');
-    assert.equal(storage['slowbooks.desktop.zoom'], '1.1');
+    assert.equal(size(), '115');
+    assert.equal(storage[KEY], '115');
     // a trackpad's run of small deltas adds up to one notch
     for (const d of [-20, -20]) assert.equal(zoom.wheel(wheel(d, { metaKey: true })), true);
-    assert.equal(style.zoom, '1.1');
+    assert.equal(size(), '115');
     zoom.wheel(wheel(-20, { metaKey: true }));
-    assert.equal(style.zoom, '1.2');
+    assert.equal(size(), '125');
     zoom.wheel(wheel(100, { ctrlKey: true }));
     zoom.wheel(wheel(100, { ctrlKey: true }));
-    assert.equal(style.zoom, '');
+    assert.equal(size(), undefined);
     // a plain scroll, and every wheel in a browser, pass untouched
     const plain = wheel(-100);
     assert.equal(zoom.wheel(plain), false);
@@ -128,18 +157,30 @@ test('Ctrl + wheel steps the same level, a notch at a time, in the shell only (N
     assert.equal(e.prevented, false);
 });
 
-test('on Windows the stored level comes back when pywebview announces itself (W-46)', () => {
-    // WebView2's user agent has no "WebView2", and window.pywebview is not
-    // there yet when the shim loads: nothing can be applied at load time
-    const stored = { 'slowbooks.desktop.zoom': '1.3' };
-    const page = load({ desktop: false, stored, userAgent: 'Mozilla/5.0 Chrome/156.0.0.0 Safari/537.36 Edg/156.0.0.0' });
-    assert.equal(page.style.zoom, undefined);
-    page.window.pywebview = { api: {} };
-    page.fire('pywebviewready');
-    assert.equal(page.style.zoom, '1.3');
-    // nothing stored: nothing applied
-    const fresh = load({ desktop: false, userAgent: 'Edg/156' });
-    fresh.window.pywebview = { api: {} };
-    fresh.fire('pywebviewready');
-    assert.equal(fresh.style.zoom, undefined);
+test('a zoom level from before 2.31.8 is carried over once to the nearest size', () => {
+    const cases = [
+        ['1.1', '115'], ['1.2', '115'], ['1.3', '125'], ['1.4', '150'], ['1.5', '150'],
+        ['2', '150'], ['1', undefined], ['0.7', undefined],
+    ];
+    for (const [level, size] of cases) {
+        const page = load({ stored: { [OLD]: level } });
+        assert.equal(page.size(), size, level);
+        assert.equal(OLD in page.storage, false, level);
+        assert.equal(page.storage[KEY], size, level);
+    }
+    // a size already set wins over the old level, which still goes
+    const both = load({ stored: { [OLD]: '1.5', [KEY]: '115' } });
+    assert.equal(both.size(), '115');
+    assert.equal(OLD in both.storage, false);
+    // a broken old level is dropped
+    const bad = load({ stored: { [OLD]: '9' } });
+    assert.equal(bad.size(), undefined);
+    assert.equal(OLD in bad.storage, false);
+});
+
+test('ratio() is 1 where nothing can be measured', () => {
+    const { sizes } = load({ shim: false });
+    assert.equal(sizes.ratio(), 1);
+    assert.deepEqual(Array.from(sizes.SIZES), [100, 115, 125, 150]);
+    assert.equal(sizes.nearest(1.3), 125);
 });
