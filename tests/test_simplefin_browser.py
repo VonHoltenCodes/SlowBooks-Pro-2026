@@ -15,7 +15,7 @@ sync_api = pytest.importorskip("playwright.sync_api")
 
 
 def test_a_bookkeeper_syncs_with_the_saved_mapping(client, db_session, monkeypatch):
-    """A bookkeeper sees the mapping locked with a sentence saying why, and
+    """A bookkeeper reads the mapping as text with a sentence saying why, and
     Sync Now and Fetch older history import through the administrator's
     mapping without posting /map (an administrator's route since #384)."""
     from tests.test_rbac_users import _login_as, _mk_user
@@ -69,17 +69,15 @@ def test_a_bookkeeper_syncs_with_the_saved_mapping(client, db_session, monkeypat
         try:
             page.goto("http://testserver/#/banking")
             page.locator("#splash-dismiss").click()
-            mapping = page.get_by_role("combobox", name="Import Demo Checking into")
-            mapping.wait_for()
-            assert mapping.is_disabled()
-            assert (
-                mapping.locator("option:checked")
-                .inner_text()
-                .startswith("Synced Checking")
-            )
-            assert page.locator(".simplefin-reverse").is_disabled()
+            # the mapping as text, not a greyed dropdown (#718)
+            mapped = page.locator(".feed-imports-into")
+            mapped.wait_for()
+            assert mapped.inner_text() == "Synced Checking"
+            assert page.locator("select.simplefin-map").count() == 0
+            assert page.locator(".simplefin-reverse").count() == 0
+            page.get_by_text("As the bank sends them", exact=True).wait_for()
             page.get_by_text(
-                "An administrator chooses which bank account each feed imports into",
+                "Only an administrator can change where a feed imports.",
                 exact=False,
             ).wait_for()
             assert (

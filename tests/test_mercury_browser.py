@@ -112,7 +112,7 @@ def test_connect_map_sync_review_and_disconnect_in_browser(
 
 
 def test_a_bookkeeper_syncs_with_the_saved_mapping(client, db_session, bank, transport):
-    """A bookkeeper sees the mapping locked with a sentence saying why, and
+    """A bookkeeper reads the mapping as text with a sentence saying why, and
     Sync imports through the administrator's mapping without posting /map."""
     from tests.test_mercury import connect_and_map
     from tests.test_rbac_users import _login_as, _mk_user
@@ -157,16 +157,13 @@ def test_a_bookkeeper_syncs_with_the_saved_mapping(client, db_session, bank, tra
         try:
             page.goto("http://testserver/#/banking")
             page.locator("#splash-dismiss").click()
-            mapping = page.get_by_role("combobox", name="Import My LLC into")
-            mapping.wait_for()
-            assert mapping.is_disabled()
-            # the chart account the feed imports into, the feed's own name after it
-            # (2.31.1: the list offers the chart's bank accounts)
-            assert (
-                mapping.locator("option:checked").inner_text().endswith("(Mercury LLC)")
-            )
+            # the chart account the feed imports into, as text (#718)
+            mapped = page.locator(".feed-imports-into")
+            mapped.wait_for()
+            assert mapped.inner_text().endswith("Checking")
+            assert page.locator("select.mercury-map").count() == 0
             page.get_by_text(
-                "An administrator chooses which bank account each Mercury account",
+                "Only an administrator can change where a feed imports.",
                 exact=False,
             ).wait_for()
             assert (

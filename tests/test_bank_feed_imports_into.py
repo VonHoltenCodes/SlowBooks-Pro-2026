@@ -127,22 +127,25 @@ def test_the_page_offers_the_chart_and_says_what_to_do_when_it_is_empty():
     js = (ROOT / "app/static/js/banking.js").read_text(encoding="utf-8")
     assert "_importOptions(rows, feeds, mapped, kinds) {" in js
     assert 'opts.push(`<option value="acct:${a.account_id}"' in js
+    # each section's row cell draws the list (#718: or says why it is empty)
     assert (
-        "BankingPage._importOptions(rows, feeds, feed.account_map[a.id], ['bank'])"
+        "BankingPage._importCell('mercury', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank'])"
         in js
     )
     assert (
-        "BankingPage._importOptions(\n                rows, feeds, feed.account_map[sfId], ['bank', 'credit_card'])"
+        "BankingPage._importCell('simplefin', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank', 'credit_card'])"
         in js
     )
+    assert "const opts = BankingPage._importOptions(rows, feeds, mapped, kinds);" in js
     # both saves send a chart account as ledger_mapping
     assert (
         "await API.post('/simplefin/map', { mapping, ledger_mapping, reversed });" in js
     )
     assert "await API.post('/mercury/map', { mapping, ledger_mapping });" in js
-    # the hint for a chart with no bank account, on both sections
-    assert js.count("BankingPage._noBankAccountHint(") == 2
-    assert "Add one with <strong>+ New Bank Account</strong> above" in js
+    # a row with nothing to offer says so in the row, with both ways out
+    assert "No account in your chart is marked as ${what} yet." in js
+    assert ">+ New bank account</button>" in js
+    assert ">Use an account I already have…</button>" in js
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -193,8 +196,8 @@ console.log(JSON.stringify({ mercury, simplefin }));
     assert '<option value="acct:7" selected>' in mercury
     assert 'value="acct:8"' not in mercury
     assert '<option value="feed:9">Old Savings</option>' in mercury
-    assert "Mercury Checking" in mercury and "The chart has no" not in mercury
+    assert "Mercury Checking" in mercury and "No account in your chart" not in mercury
     # SimpleFIN: bank and card accounts, the unlisted feed record kept and chosen
     assert 'value="acct:7"' in simplefin and 'value="acct:8"' in simplefin
     assert '<option value="feed:9" selected>Old Savings</option>' in simplefin
-    assert "Demo Checking" in simplefin and "The chart has no" not in simplefin
+    assert "Demo Checking" in simplefin and "No account in your chart" not in simplefin

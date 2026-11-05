@@ -153,6 +153,8 @@ def test_import_file_offers_the_feed_on_its_own_account():
     ofx = re.search(r"async showOFXImport\(accountId\).*?\n    },\n", JS, re.S).group(0)
     assert "BankingPage.showAccountForm(accountId)" in ofx
     form = re.search(
-        r"async showAccountForm\(accountId = null\).*?\n    },\n", JS, re.S
+        r"async showAccountForm\(accountId = null, feedRow = null\).*?\n    },\n",
+        JS,
+        re.S,
     ).group(0)
     assert "free.some(a => a.id === accountId)) sel.value = String(accountId);" in form
