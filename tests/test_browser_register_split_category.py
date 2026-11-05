@@ -73,22 +73,26 @@ def test_the_split_lines_fit_the_dialog_with_no_sideways_scroll(browser):
     try:
         page.click("text=+ Entry")
         page.wait_for_selector("#entry-payee")
-        assert not page.evaluate("document.getElementById('modal').classList.contains('modal--wide')")
+        assert not page.evaluate(
+            "document.getElementById('modal').classList.contains('modal--wide')"
+        )
         page.click("#entry-split-toggle")
         page.wait_for_selector("#entry-split-rows tr")
-        assert page.evaluate("document.getElementById('modal').classList.contains('modal--wide')")
-        fits = page.evaluate(
-            """() => {
+        assert page.evaluate(
+            "document.getElementById('modal').classList.contains('modal--wide')"
+        )
+        fits = page.evaluate("""() => {
                 const box = document.getElementById('entry-splits');
                 const table = box.querySelector('table');
                 const body = document.getElementById('modal-body');
                 return table.scrollWidth <= box.clientWidth + 1 && body.scrollWidth <= body.clientWidth + 1;
-            }"""
-        )
+            }""")
         assert fits, page.evaluate(
             "() => [document.querySelector('#entry-splits table').scrollWidth, document.getElementById('entry-splits').clientWidth, document.getElementById('modal-body').scrollWidth, document.getElementById('modal-body').clientWidth]"
         )
         page.click("#entry-split-toggle")
-        assert not page.evaluate("document.getElementById('modal').classList.contains('modal--wide')")
+        assert not page.evaluate(
+            "document.getElementById('modal').classList.contains('modal--wide')"
+        )
     finally:
         page.close()
