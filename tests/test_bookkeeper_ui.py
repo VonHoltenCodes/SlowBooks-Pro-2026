@@ -153,6 +153,9 @@ SETTINGS_KEPT = {
     "My Preferences › #pref-report-refresh": [
         ("PUT", "/api/preferences/reports", {"value": {"auto_refresh": False}}, 200)
     ],
+    # Text size (#717) is kept on the computer, not with the sign-in: it
+    # sends nothing, and every role sets it.
+    "My Preferences › #pref-text-size": [],
 }
 # The page's own reads: what it shows loads for a bookkeeper
 SETTINGS_READS = [

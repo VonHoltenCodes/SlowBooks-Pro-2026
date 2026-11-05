@@ -148,7 +148,7 @@ def _check_frame(m, where):
 PAGES = [
     ("dashboard", "#/", "#page-content .dashboard, #page-content"),
     ("invoices", "#/invoices", "#page-content table"),
-    ("settings", "#/settings", "#settings-my-preferences"),
+    ("settings", "#/settings", "#settings-tab-preferences"),
 ]
 
 
@@ -243,6 +243,7 @@ def test_the_settings_control_sets_the_size_and_this_computer_keeps_it(
 ):
     page, handled = _open(browser, company, "#/settings", "100")
     try:
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#pref-text-size")
         assert page.input_value("#pref-text-size") == "100"
         assert (
@@ -273,6 +274,7 @@ def test_the_desktop_keys_and_wheel_step_the_same_setting(browser, company, book
     page, handled = _open(browser, company, "#/settings", "100")
     try:
         page.evaluate("() => { window.pywebview = { api: {} }; }")
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#pref-text-size")
         page.click("#page-content h2, #page-content .page-header")
         seen = []

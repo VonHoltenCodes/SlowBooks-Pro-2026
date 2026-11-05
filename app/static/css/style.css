@@ -2441,7 +2441,7 @@ tr.clickable { cursor: pointer; }
     top: 0;
     flex: 0 0 180px;
     width: 180px;
-    max-height: calc(100vh - var(--topbar-height) - var(--statusbar-height) - 48px);
+    max-height: calc(100vh / var(--ui-scale) - var(--topbar-height) - var(--statusbar-height) - 48px);
     overflow-y: auto;
     background: var(--panel-bg);
     border: 1px solid var(--panel-border);

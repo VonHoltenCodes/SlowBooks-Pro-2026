@@ -92,7 +92,8 @@ or Alt+D.*
 - **Sortable lists say how they are sorted** (v2.31.1): a column heading that
   sorts a list (the Invoices list, among others) is a button, and the sort is
   announced (`aria-sort`).
-- **Text size** (v2.31.8): Settings → My Preferences → Text size makes the
+- **Text size** (v2.31.8): Settings → Preferences → My Preferences → Text size
+  makes the
   text 100%, 115%, 125% or 150% of its usual size, in a browser and in the
   desktop app alike. It is kept on that computer, for every company and
   sign-in, and is there from the first moment a page shows, the sign-in
