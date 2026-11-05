@@ -23,7 +23,7 @@ const BudgetsPage = {
         let rows = '';
         for (const acct of budgetAccounts) {
             rows += `<tr data-acct="${acct.id}">
-                <td style="font-weight:600; white-space:nowrap;">${accountLabel(acct, null, ' ')}</td>`;
+                <td class="budget-acct" title="${accountLabel(acct, null, ' ')}">${accountLabel(acct, null, ' ')}</td>`;
             for (let m = 1; m <= 12; m++) {
                 const val = budgetMap[acct.id]?.[m] || '';
                 rows += `<td><input type="number" step="0.01" class="budget-cell" data-write data-acct="${acct.id}" data-month="${m}"
@@ -46,10 +46,10 @@ const BudgetsPage = {
             <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
                 Enter monthly budget amounts for each account. Click "Save All" to persist changes.
             </p>
-            <div class="table-container" style="overflow-x:auto;">
-                <table style="font-size:11px;">
+            <div class="table-container table-container--frozen">
+                <table class="table--frozen budget-grid">
                     <thead><tr>
-                        <th scope="col" style="min-width:180px;">Account</th>
+                        <th scope="col">Account</th>
                         ${months.map(m => `<th scope="col" class="amount" style="min-width:80px;">${m}</th>`).join('')}
                     </tr></thead>
                     <tbody>${rows || '<tr><td colspan="13">No budgetable accounts found</td></tr>'}</tbody>
@@ -89,10 +89,11 @@ const BudgetsPage = {
                 return '<div class="empty-state"><p>No budgets set for this year. Enter budgets first.</p></div>';
             }
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            let html = '<div style="overflow-x:auto;">';
+            // the same frozen account column and month row as the budget grid
+            let html = '<div class="table-container table-container--frozen budget-variance"><div class="budget-variance__sheet">';
             for (const acct of data.accounts) {
-                html += `<h3 style="margin:12px 0 4px; font-size:12px; color:var(--qb-navy);">${accountLabel(acct, acct.account_name, ' — ')}</h3>`;
-                html += `<table style="font-size:10px; margin-bottom:12px;"><thead><tr><th scope="col"></th>`;
+                html += `<h3 class="budget-variance__acct">${accountLabel(acct, acct.account_name, ' — ')}</h3>`;
+                html += `<table class="table--frozen budget-variance__table"><thead><tr><th scope="col"></th>`;
                 html += months.map(m => `<th scope="col" class="amount">${m}</th>`).join('');
                 html += '<th scope="col" class="amount" style="font-weight:700;">Total</th></tr></thead><tbody>';
                 html += '<tr><td>Budget</td>';
@@ -110,7 +111,7 @@ const BudgetsPage = {
                 html += `<td class="amount" style="font-weight:700; color:${totalColor}">${formatCurrency(acct.total_variance)}</td></tr>`;
                 html += '</tbody></table>';
             }
-            html += '</div>';
+            html += '</div></div>';
             return html;
         }, "Dates", false, { view: 'budget-vs-actual', params: { year }, prefill, step: false });
     },

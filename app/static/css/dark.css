@@ -597,3 +597,9 @@
     border-left-color: #e0a840;
     color: #e8d9b0;
 }
+
+/* The frozen first column of a months grid (Budgets, #702) keeps its row's
+   own ground, as the pay-run view's does. */
+[data-theme="dark"] .table--frozen tbody tr:nth-child(even) td:first-child { background: #181a22; }
+[data-theme="dark"] .table--frozen tbody tr:hover td:first-child { background: #222838; }
+[data-theme="dark"] .budget-variance__acct { color: var(--qb-navy); }
