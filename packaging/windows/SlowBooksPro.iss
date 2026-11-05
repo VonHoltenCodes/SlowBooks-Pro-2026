@@ -248,8 +248,8 @@ begin
     Why := 'Installing or updating it for everyone on this computer needs an administrator, ' +
       'and this install is for you only.';
   SuppressibleMsgBox('SlowBooks Pro 2026 is installed, but its window needs the Microsoft Edge ' +
-    'WebView2 runtime version ' + MinWebView2 + ' or later, and this computer has ' + Found + '.' +
-    #13#10#13#10 + Why + #13#10#13#10 +
+    'WebView2 runtime version ' + MinWebView2 + ' or later, and this computer has ' + Found + '.' + #13#10#13#10 +
+    Why + #13#10#13#10 +
     'Install or update it from Microsoft: ' + WebView2Page + ' (the Evergreen Bootstrapper), ' +
     'or ask an administrator to. Until then, SlowBooks offers to open in your web browser.',
     mbInformation, MB_OK, IDOK);

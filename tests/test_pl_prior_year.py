@@ -225,9 +225,14 @@ def test_balance_sheet_compare_prior_year(client, seed_accounts, seed_customer):
 
     # the computed net-income line lines up across the two years by name,
     # and stays at the end of equity
+    # (2.31.7, #708: this fiscal year's net income; the years before it are
+    # Retained Earnings, the line above, so the two still add to 500)
     ni = d["equity"][-1]
-    assert ni["account_id"] is None
-    assert ni["amount"] == 500.0 and ni["prior_amount"] == 200.0
+    assert ni["account_id"] is None and ni["line"] == "net_income"
+    assert ni["amount"] == 300.0 and ni["prior_amount"] == 200.0
+    re_line = d["equity"][-2]
+    assert re_line["account_id"] is None and re_line["line"] == "retained_earnings"
+    assert re_line["amount"] == 200.0 and not re_line.get("prior_amount")
     assert d["prior"]["total_equity"] == 200.0
 
 

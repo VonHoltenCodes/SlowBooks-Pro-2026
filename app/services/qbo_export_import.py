@@ -1544,7 +1544,10 @@ def void_carried_posting(db: Session, *, invoice=None, payment=None) -> str | No
         if not is_carried_invoice(db, invoice):
             return None
         amount = Decimal(str(invoice.balance_due or 0))
-        what = f"Invoice {invoice.invoice_number}"
+        from app.services.donor_documents import document_label
+        from app.services.terminology import terms_from_db
+
+        what = f"{document_label(invoice, terms_from_db(db))} {invoice.invoice_number}"
         source_type, source_id = "invoice_void", invoice.id
         reference = invoice.invoice_number or ""
     else:

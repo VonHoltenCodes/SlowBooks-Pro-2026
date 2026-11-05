@@ -219,3 +219,31 @@ def test_ci_still_builds_and_signs_the_installer_the_same_way():
     assert "Sign installer SlowBooksPro-Setup-x64.exe (Trusted Signing)" in yml
     assert "trusted-signing-account-name: easyamp-signing" in yml
     assert _directives().get("OutputBaseFilename") == "SlowBooksPro-Setup-x64"
+
+
+def test_no_line_begins_with_a_hash_character_constant():
+    """ISCC's preprocessor reads a line that begins with '#' as a directive
+    ("Unknown preprocessor directive", the 2.31.7 round-1 build): a Pascal
+    character constant such as #13#10 must not start a line."""
+    import re
+    from pathlib import Path
+
+    iss = Path(__file__).resolve().parents[1] / "packaging/windows/SlowBooksPro.iss"
+    known = (
+        "#define",
+        "#if",
+        "#ifdef",
+        "#ifndef",
+        "#else",
+        "#endif",
+        "#include",
+        "#expr",
+        "#pragma",
+        "#emit",
+    )
+    bad = [
+        f"{n}: {line.strip()[:60]}"
+        for n, line in enumerate(iss.read_text(encoding="utf-8").splitlines(), 1)
+        if re.match(r"\s*#", line) and not line.strip().lower().startswith(known)
+    ]
+    assert bad == [], "\n".join(bad)
