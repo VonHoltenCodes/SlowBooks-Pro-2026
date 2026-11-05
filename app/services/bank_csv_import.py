@@ -27,7 +27,6 @@ from sqlalchemy.orm import Session
 
 from app.models.banking import BankTransaction
 from app.services.accounting import _q
-from app.services.bank_rules_engine import apply_bank_rules
 from app.services.safe_errors import DataProblem
 
 logger = logging.getLogger(__name__)
@@ -814,22 +813,13 @@ def import_csv_transactions(
 
     transactions = result["transactions"]
     assign_import_ids(result["format"], transactions)
-    imported = 0
-    skipped = 0
+    # a line already on the account, from this CSV or from an OFX or a
+    # feed of the same month, is a duplicate (#705)
+    from app.services.bank_dedupe import drop_already_imported
 
-    for txn in transactions:
-        existing = (
-            db.query(BankTransaction)
-            .filter(
-                BankTransaction.bank_account_id == bank_account_id,
-                BankTransaction.import_id == txn["import_id"],
-            )
-            .first()
-        )
-        if existing:
-            skipped += 1
-            continue
-
+    fresh, skipped = drop_already_imported(db, bank_account_id, transactions)
+    new_rows = []
+    for txn in fresh:
         description = (txn.get("description", "") or "")[:500]
         fee = txn.get("fee")
         if fee:
@@ -849,21 +839,20 @@ def import_csv_transactions(
             match_status="unmatched",
         )
         db.add(bt)
-        imported += 1
+        new_rows.append(bt)
+    imported = len(new_rows)
 
     db.commit()
 
-    matched = 0
-    if imported > 0:
-        apply_bank_rules(db, bank_account_id)
-        from app.services.ofx_import import _auto_match_new
+    from app.services.ofx_import import finish_import
 
-        matched = _auto_match_new(db, bank_account_id)
+    matched, in_books = finish_import(db, bank_account_id, new_rows)
 
     return {
         "imported": imported,
         "skipped": skipped,
         "matched": matched,
+        "already_in_books": in_books,
         "errors": [],
         "total": len(transactions),
         "format": result["format"],

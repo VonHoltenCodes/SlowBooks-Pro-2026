@@ -176,59 +176,61 @@ def import_transactions(
     transactions: list[dict],
     import_source: str = "ofx",
 ) -> dict:
-    """Import parsed transactions, deduplicating by FITID.
+    """Import parsed transactions, skipping any line the account already
+    has: by FITID, or by date, amount and description when an earlier
+    import of the same month came as a CSV or from a feed (#705).
 
     Shared by the OFX upload path and the SimpleFIN feed (which passes
     import_source="simplefin" and SimpleFIN transaction ids as fitids).
     """
-    imported = 0
-    skipped = 0
+    from app.services.bank_dedupe import drop_already_imported
 
-    for txn in transactions:
-        fitid = txn.get("fitid", "")
-
-        # Dedup by FITID
-        if fitid:
-            existing = (
-                db.query(BankTransaction)
-                .filter(
-                    BankTransaction.bank_account_id == bank_account_id,
-                    BankTransaction.import_id == fitid,
-                )
-                .first()
-            )
-            if existing:
-                skipped += 1
-                continue
-
+    fresh, skipped = drop_already_imported(db, bank_account_id, transactions)
+    new_rows = []
+    for txn in fresh:
         bt = BankTransaction(
             bank_account_id=bank_account_id,
             date=txn["date"],
             amount=txn["amount"],
             payee=txn.get("payee", ""),
             description=txn.get("memo", ""),
-            import_id=fitid,
+            import_id=txn.get("fitid", ""),
             import_source=import_source,
             match_status="unmatched",
         )
         db.add(bt)
-        imported += 1
+        new_rows.append(bt)
 
     db.commit()
 
-    matched = 0
-    if imported > 0:
-        # rules suggest a category; then each new line looks for the one
-        # posting the ledger already has for it (issue #114)
-        apply_bank_rules(db, bank_account_id)
-        matched = _auto_match_new(db, bank_account_id)
+    matched, in_books = finish_import(db, bank_account_id, new_rows)
 
     return {
-        "imported": imported,
+        "imported": len(new_rows),
         "skipped": skipped,
         "matched": matched,
+        "already_in_books": in_books,
         "total": len(transactions),
     }
+
+
+def finish_import(db: Session, bank_account_id: int, new_rows) -> tuple[int, int]:
+    """After an import: rules suggest a category; each new line looks for
+    the one posting the ledger already has for it (issue #114); a new line
+    whose posting an earlier statement line already holds is set aside, not
+    left as "not in the books" (#705). Returns (matched, already in books)."""
+    if not new_rows:
+        return 0, 0
+    from app.models.banking import BankAccount
+    from app.services.bank_dedupe import set_aside_already_in_books
+
+    apply_bank_rules(db, bank_account_id)
+    matched = _auto_match_new(db, bank_account_id)
+    ba = db.query(BankAccount).filter(BankAccount.id == bank_account_id).first()
+    in_books = set_aside_already_in_books(db, ba, new_rows) if ba else 0
+    if in_books:
+        db.commit()
+    return matched, in_books
 
 
 def _auto_match_new(db: Session, bank_account_id: int) -> int:

@@ -41,6 +41,7 @@ from app.schemas.banking import (
     ReconciliationUpdate,
     StatementAdd,
     FeedAddAll,
+    FeedExcludeAll,
     StatementPayout,
     StatementVendors,
     StatementCategory,
@@ -635,8 +636,39 @@ def feed_auto_match(account_id: int, db: Session = Depends(get_db)):
         .all()
     )
     n = m.auto_match(db, ba, rows)
+    # a line whose posting another statement line already holds (the same
+    # month imported again in another format) is in the books (#705)
+    from app.services.bank_dedupe import set_aside_already_in_books
+
+    in_books = set_aside_already_in_books(db, ba, rows)
     db.commit()
-    return {"matched": n}
+    return {"matched": n, "already_in_books": in_books}
+
+
+@router.post("/accounts/{account_id}/feed/exclude-all")
+def feed_exclude_all(
+    account_id: int, data: FeedExcludeAll, db: Session = Depends(get_db)
+):
+    """Exclude every statement line the review list shows (#705): the ids
+    it sends, each one this feed's and still waiting for review. A line
+    matched or added meanwhile is left alone. Returns how many."""
+    ba = db.query(BankAccount).filter(BankAccount.id == account_id).first()
+    if not ba:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    rows = (
+        db.query(BankTransaction)
+        .filter(
+            BankTransaction.bank_account_id == ba.id,
+            BankTransaction.id.in_(data.line_ids or [-1]),
+            BankTransaction.match_status == "unmatched",
+            BankTransaction.transaction_line_id.is_(None),
+        )
+        .all()
+    )
+    for bt in rows:
+        bt.match_status = "excluded"
+    db.commit()
+    return {"excluded": len(rows)}
 
 
 def _entry_vendor(db: Session, vendor_id, payee):

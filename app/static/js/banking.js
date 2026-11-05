@@ -1237,6 +1237,7 @@ const BankingPage = {
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.excludeAll(${feedId}, ${accountId})" aria-label="Exclude all ${review.length} statement line${review.length === 1 ? '' : 's'} shown" title="Set aside every line in this list; each can be restored">Exclude all shown</button>
                 </span>
             </div>
             <div class="table-container"><table>
@@ -1445,6 +1446,21 @@ const BankingPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // Exclude all shown (#705): every line the review list shows, after
+    // a confirm that says how many. A month imported twice, or a year of
+    // lines from before the books began, was one Exclude per line.
+    async excludeAll(feedId, accountId) {
+        const ids = Object.keys(BankingPage._reviewLines || {}).map(Number).filter(Number.isFinite);
+        if (!ids.length) return;
+        const n = ids.length;
+        if (!confirm(`Exclude all ${n} statement line${n === 1 ? '' : 's'} shown? They leave To review and nothing is posted.`)) return;
+        try {
+            const r = await API.post(`/banking/accounts/${feedId}/feed/exclude-all`, { line_ids: ids });
+            toast(`Excluded ${r.excluded} statement line${r.excluded === 1 ? '' : 's'}`);
+            BankingPage._backToRegister(accountId);
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     async restoreLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/restore`);
@@ -1528,7 +1544,8 @@ const BankingPage = {
     async findMatches(feedId, accountId) {
         try {
             const r = await API.post(`/banking/accounts/${feedId}/feed/auto-match`);
-            toast(`Matched ${r.matched} statement line${r.matched === 1 ? '' : 's'}`);
+            const inBooks = r.already_in_books ? `; ${r.already_in_books} already in the books through an earlier statement line` : '';
+            toast(`Matched ${r.matched} statement line${r.matched === 1 ? '' : 's'}${inBooks}`);
             BankingPage._backToRegister(accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -3057,7 +3074,8 @@ const BankingPage = {
             const resp = await fetch(endpoint, { method: 'POST', body: formData });
             if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
-            toast(`Imported ${data.imported} (${data.skipped} duplicates skipped, ${data.matched || 0} matched to the books)`);
+            const inBooks = data.already_in_books ? `, ${data.already_in_books} already in the books` : '';
+            toast(`Imported ${data.imported} (${data.skipped} duplicates skipped, ${data.matched || 0} matched to the books${inBooks})`);
             closeModal();
             BankingPage._backToRegister(accountId);
         } catch (err) {

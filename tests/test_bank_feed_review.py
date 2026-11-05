@@ -113,7 +113,7 @@ def test_ambiguity_stays_unmatched_and_a_check_number_breaks_the_tie(
     bt.check_number = "1042"
     db_session.commit()
     r = client.post(f"/api/banking/accounts/{feed['id']}/feed/auto-match")
-    assert r.json() == {"matched": 1}
+    assert r.json()["matched"] == 1
     db_session.refresh(bt)
     assert bt.transaction_id == b["id"] and bt.transaction_id != a["id"]
 
