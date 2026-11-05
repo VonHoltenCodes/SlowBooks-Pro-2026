@@ -246,6 +246,9 @@ class InvoiceResponse(BaseModel):
     # sale took past what was on hand ("Widget: 2 on hand; this sale takes
     # it to -4."). The sale posted; this says what it did. Empty otherwise.
     warnings: list[str] = []
+    # On a void: where the balance went, as a sentence (an invoice the
+    # QuickBooks Online import carried over, #704).
+    notice: Optional[str] = None
     is_sales_receipt: bool = False
     is_pledge: bool = False
     fair_value_amount: Optional[Decimal] = None

@@ -1438,10 +1438,161 @@ def _import_carried(db: Session, plan: dict) -> tuple[int, int]:
         db.add(payment)
         db.flush()
         payment_posting(payment, who, amount, "Unapplied payment carried over")
+    if not post:
+        # the name a void of one of them moves its balance to (#704)
+        from app.services.settings_service import set_setting
+
+        set_setting(db, RECEIVABLE_SETTING, plan["receivable"])
     # on the carried invoices, in no picker (#711)
     item.is_active = False
     db.flush()
     return len(plan["invoices"]), len(plan["payments"])
+
+
+# ── voiding a document carried onto 1100 (#704) ────────────────────────────
+#
+# With the export's receivable on 1100 itself, a carried invoice or payment
+# has no posting of its own: its balance is in 1100 by the history. A void
+# takes it off the A/R aging, so it also moves the amount off 1100, to
+# QuickBooks Online's own receivable account (by the name the export used,
+# made when first needed), as the carry-over through that account did
+# before: the aging still equals 1100, and nothing leaves the books.
+
+RECEIVABLE_SETTING = "qbo_export_receivable_name"
+_DEFAULT_RECEIVABLE = "Accounts Receivable (A/R)"
+
+
+def _ar_control(db: Session):
+    from app.models.accounts import Account
+    from app.services.accounting import get_ar_account_id
+
+    try:
+        return db.get(Account, get_ar_account_id(db))
+    except Exception:  # MissingControlAccount: nothing carried onto it
+        return None
+
+
+def is_carried_invoice(db: Session, invoice) -> bool:
+    """An invoice the carry-over wrote onto 1100 with no posting."""
+    if invoice.transaction_id is not None:
+        return False
+    control = _ar_control(db)
+    if control is None:
+        return False
+    return any(
+        line.item is not None
+        and line.item.name == CARRY_ITEM
+        and line.item.income_account_id == control.id
+        for line in invoice.lines
+    )
+
+
+def is_carried_payment(db: Session, payment) -> bool:
+    """A customer payment the carry-over wrote onto 1100 with no posting:
+    an unapplied credit, or the paid part of an invoice."""
+    if payment.transaction_id is not None:
+        return False
+    control = _ar_control(db)
+    if control is None or payment.deposit_to_account_id != control.id:
+        return False
+    notes = payment.notes or ""
+    return notes.startswith(_PAID_PART) or notes.startswith(
+        "Carried over from QuickBooks Online"
+    )
+
+
+def _receivable_account(db: Session, control):
+    """QuickBooks Online's receivable account, made now if the books lack
+    it: an Other Current Asset, not a control."""
+    from app.models.accounts import Account, AccountType, DetailType
+    from app.services.settings_service import get_setting_raw
+
+    name = (get_setting_raw(db, RECEIVABLE_SETTING) or "").strip()
+    name = name or _DEFAULT_RECEIVABLE
+    found = books_by_name(db).get(name.lower())
+    if found is not None and found.id == control.id:
+        # the export named it as 1100 is named here
+        name = f"{name} (QuickBooks Online)"
+        found = books_by_name(db).get(name.lower())
+    if found is not None:
+        return found
+    account = Account(
+        name=name[:200],
+        account_type=AccountType.ASSET,
+        detail_type=DetailType.OTHER_CURRENT_ASSET.value,
+        description=(
+            "QuickBooks Online's receivable: the balances of carried-over "
+            "invoices and customer credits voided here."
+        ),
+    )
+    db.add(account)
+    db.flush()
+    return account
+
+
+def void_carried_posting(db: Session, *, invoice=None, payment=None) -> str | None:
+    """For a carried document voided: the entry that moves what the void
+    takes off the aging off 1100 (an invoice's open balance to QuickBooks'
+    receivable; a payment's amount back from it), dated today. Returns the
+    sentence for the person, or None for any other document. Call it
+    before the document's own amounts change."""
+    from datetime import date
+
+    from app.services.accounting import create_journal_entry
+
+    if invoice is not None:
+        if not is_carried_invoice(db, invoice):
+            return None
+        amount = Decimal(str(invoice.balance_due or 0))
+        what = f"Invoice {invoice.invoice_number}"
+        source_type, source_id = "invoice_void", invoice.id
+        reference = invoice.invoice_number or ""
+    else:
+        if payment is None or not is_carried_payment(db, payment):
+            return None
+        amount = Decimal(str(payment.amount or 0))
+        what = "Payment" + (f" {payment.reference}" if payment.reference else "")
+        source_type, source_id = "payment_void", payment.id
+        reference = payment.reference or ""
+    if amount <= 0:
+        return None
+    control = _ar_control(db)
+    receivable = _receivable_account(db, control)
+    memo = f"VOID {what}, carried over from QuickBooks Online"
+    off_control = invoice is not None  # an invoice leaves 1100; a payment returns
+    create_journal_entry(
+        db,
+        date.today(),
+        memo,
+        [
+            {
+                "account_id": receivable.id if off_control else control.id,
+                "debit": amount,
+                "credit": Decimal("0"),
+                "description": memo,
+            },
+            {
+                "account_id": control.id if off_control else receivable.id,
+                "debit": Decimal("0"),
+                "credit": amount,
+                "description": memo,
+            },
+        ],
+        source_type=source_type,
+        source_id=source_id,
+        reference=reference,
+    )
+    control_name = label_for(control, db)
+    if off_control:
+        return (
+            f"{what} was carried over from QuickBooks Online: its {amount:,.2f} "
+            f"moved from {control_name} to {receivable.name}, where it sat in "
+            "QuickBooks Online."
+        )
+    return (
+        f"{what} was carried over from QuickBooks Online: its {amount:,.2f} "
+        f"moved from {receivable.name} back to {control_name}."
+    )
 
 
 # ── the engine's hooks ─────────────────────────────────────────────────────

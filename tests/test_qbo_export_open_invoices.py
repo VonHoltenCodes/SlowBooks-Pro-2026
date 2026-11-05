@@ -286,23 +286,26 @@ def test_voiding_a_carried_invoice_moves_its_balance_back(
     assert _balance(client, name="Accounts Receivable (A/R)") == Decimal("175.00")
 
 
-def test_voiding_a_carried_invoice_on_1100_posts_nothing(
+def test_voiding_a_carried_invoice_on_1100_moves_it_to_the_export_receivable(
     client, db_session, seed_accounts
 ):
-    # the receivable is 1100 here (#704): the carried invoice posted nothing
-    # of its own, so its void reverses nothing; its balance is the history's
+    # the receivable is 1100 here (#704) and the carried invoice has no
+    # posting of its own: its void moves its balance off 1100 to the
+    # export's receivable account, made then, so the aging still equals 1100
     _imported(client)
+    assert (
+        db_session.query(Account).filter_by(name="Accounts Receivable (A/R)").count()
+        == 0
+    )
     invoice = db_session.query(Invoice).filter(Invoice.invoice_number == "1004").one()
     assert invoice.transaction_id is None
     resp = client.post(f"/api/invoices/{invoice.id}/void")
     assert resp.status_code == 200, resp.text
-    assert (
-        db_session.query(Transaction)
-        .filter(Transaction.source_type == "invoice_void")
-        .count()
-        == 0
-    )
-    assert _balance(client, number="1100") == Decimal("525.00")
+    assert "moved from 1100 Accounts Receivable" in resp.json()["notice"]
+    assert _balance(client, number="1100") == Decimal("250.00")
+    assert _balance(client, name="Accounts Receivable (A/R)") == Decimal("275.00")
+    aging = client.get("/api/reports/ar-aging", params={"as_of_date": "2099-12-31"})
+    assert Decimal(str(aging.json()["totals"]["total"])) == Decimal("250.00")
 
 
 def test_new_invoices_continue_past_the_carried_numbers(
