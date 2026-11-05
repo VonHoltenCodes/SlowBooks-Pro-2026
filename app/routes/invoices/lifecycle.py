@@ -94,6 +94,13 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
         db, invoice, document_label(invoice, terms_from_db(db)).lower()
     )
 
+    # An invoice the QuickBooks Online import carried onto 1100 with no
+    # posting: its balance moves off 1100 to QuickBooks' receivable, so the
+    # aging still equals 1100 (#704)
+    from app.services.qbo_export_import import void_carried_posting
+
+    notice = void_carried_posting(db, invoice=invoice)
+
     # Create reversing journal entry if original had one
     if invoice.transaction_id:
         from app.models.transactions import TransactionLine
@@ -209,6 +216,7 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
     DocumentTerms(db, "invoice").fill(resp, invoice)
     if invoice.customer:
         resp.customer_name = invoice_customer_name(invoice)
+    resp.notice = notice
     return resp
 
 

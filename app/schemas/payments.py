@@ -99,6 +99,9 @@ class PaymentResponse(BaseModel):
     # On a void: a caution the screen shows, e.g. the payment was already
     # paid out by its provider (#584). The void still went through.
     warning: Optional[str] = None
+    # On a void: where the balance went, as a sentence (a payment the
+    # QuickBooks Online import carried over, #704).
+    notice: Optional[str] = None
     # On the single-payment read: an online payment whose processing fee is
     # booked, so the Void confirm can ask whether the provider refunded it.
     has_provider_fee: bool = False

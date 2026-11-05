@@ -885,6 +885,12 @@ def void_payment_unchecked(
     # ledger import's posting, not one of its own.
     refuse_void_if_deposited(db, payment, qbo_documents.money_in_posting(db, payment))
     qbo_documents.void_payment_import_posting(db, payment)
+    # A payment the QuickBooks Online import carried onto 1100 with no
+    # posting: its amount moves back onto 1100 from QuickBooks' receivable,
+    # so the aging still equals 1100 (#704)
+    from app.services.qbo_export_import import void_carried_posting
+
+    notice = void_carried_posting(db, payment=payment)
     # The QuickBooks Online sales receipt this payment is the payment half
     # of, if any: it is voided with it (below), as the Sales Receipts page
     # does, so it is never left open with nothing in A/R.
@@ -993,6 +999,7 @@ def void_payment_unchecked(
     db.refresh(payment)
     resp = _response(payment)
     resp.warning = payout_warning
+    resp.notice = notice
     return resp
 
 

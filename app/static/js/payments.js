@@ -191,6 +191,8 @@ const PaymentsPage = {
             const r = await API.post(`/payments/${id}/void${query}`);
             if (ask) closeModal();
             toast('Payment voided');
+            // where the balance went: one carried over from QuickBooks Online
+            if (r && r.notice) toast(r.notice);
             // e.g. already paid out by its online provider (#584)
             if (r && r.warning) toast(r.warning, 'error');
             App.refresh();

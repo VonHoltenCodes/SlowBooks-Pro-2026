@@ -685,11 +685,13 @@ def test_a_leaf_name_under_another_parent_is_another_account(
 _FOOTER = "Tuesday, Nov 03, 2026 09:00:00 AM GMT-6 - Accrual Basis"
 
 
-def _controls_export(*, aging=True, journal_invoice=True):
+def _controls_export(*, aging=True, journal_invoice=True, more=False):
     """The export as loose workbooks. ``aging`` adds the A/R Aging Detail
     report (invoice 1001 open for 740.00 of 1,240.00); ``journal_invoice``
     False numbers the Journal's invoice 999, so the Journal does not hold
-    the report's invoice."""
+    the report's invoice. ``more`` adds Cedar Hollow's other two open
+    invoices (1141 for 5,750.00 and 1148 for 8,090.00, nothing paid) and a
+    300.00 customer payment not applied."""
     num = "1001" if journal_invoice else "999"
     balance_sheet = [
         ["Invented Landscaping Co"],
@@ -767,14 +769,45 @@ def _controls_export(*, aging=True, journal_invoice=True):
         ["", "", "", "", "", "", "", "=500.00", "=500.00"],
         [""],
     ]
+    extra_customers, extra_aging = [], []
+    if more:
+        for day, number, who, amount in (
+            ("10/01/2026", "1141", "Oakview Terrace HOA", "5750.00"),
+            ("10/17/2026", "1148", "Tom & Becca Lindqvist", "8090.00"),
+        ):
+            journal += [
+                ["", day, "Invoice", number, who, "Services"]
+                + ["Accounts Receivable (A/R)", f"={amount}"],
+                ["", "", "", "", "", "Services", "Installation", "", f"={amount}"],
+                ["", "", "", "", "", "", "", f"={amount}", f"={amount}"],
+                [""],
+            ]
+            extra_customers.append(["", who, "", "", who])
+            extra_aging.append(
+                ["", day, "Invoice", number, who, day, amount[:-3], amount[:-3]]
+            )
+        journal += [
+            ["", "10/20/2026", "Payment", "880", "Oakview Terrace HOA", "Deposit"]
+            + ["Checking", "=300.00"],
+            ["", "", "", "", "", "Deposit", "Accounts Receivable (A/R)", "", "=300.00"],
+            ["", "", "", "", "", "", "", "=300.00", "=300.00"],
+            [""],
+        ]
+        extra_aging.append(
+            ["", "10/20/2026", "Payment", "880", "Oakview Terrace HOA", "10/20/2026"]
+            + ["-300", "-300"]
+        )
+    checking, receivable, income = (
+        ("500.00", "14280.00", "15080.00") if more else ("200.00", "740.00", "1240.00")
+    )
     trial_balance = [
         ["Invented Landscaping Co"],
         ["Trial Balance"],
         ["", "Debit", "Credit"],
-        ["Checking", "=200.00"],
-        ["Accounts Receivable (A/R)", "=740.00"],
+        ["Checking", f"={checking}"],
+        ["Accounts Receivable (A/R)", f"={receivable}"],
         ["Accounts Payable (A/P)", "", "=300.00"],
-        ["Installation", "", "=1240.00"],
+        ["Installation", "", f"={income}"],
         ["Job Materials", "=600.00"],
         ["TOTAL", "=1540.00", "=1540.00"],
         [""],
@@ -785,6 +818,7 @@ def _controls_export(*, aging=True, journal_invoice=True):
         ["", "Customer Contact List"],
         ["", "Customer", "Phone Numbers", "Email", "Full Name", "Billing Address"],
         ["", "Walt Okafor", "Mobile: (815) 555-0182", "walt@example.com", "Walt"],
+        *extra_customers,
     ]
     vendors = [
         ["", "Invented Landscaping Co"],
@@ -813,6 +847,7 @@ def _controls_export(*, aging=True, journal_invoice=True):
         ["61 - 90 days past due"],
         ["", "08/14/2026", "Invoice", "1001", "Walt Okafor", "08/29/2026"]
         + ["1240", "740"],
+        *extra_aging,
         ["Total for 61 - 90 days past due", "", "", "", "", "", "=G7", "=H7"],
         ["TOTAL", "", "", "", "", "", "=G8", "=H8"],
     ]
@@ -997,3 +1032,129 @@ def test_the_employee_list_comes_in_as_employees(client, db_session, seed_accoun
     again = client.post("/api/migration/qbo_export/import", files=files()).json()
     assert again["imported_employees"] == 0
     assert db_session.query(Employee).count() == 3
+
+
+# ── voiding what was carried onto 1100 (#704) ─────────────────────────────
+
+
+def _ar_and_qbo(client):
+    """(1100's balance, QuickBooks' receivable's balance or None)."""
+    control = qbo_ = None
+    for account in client.get("/api/accounts").json():
+        if account["account_number"] == "1100":
+            control = Decimal(str(account["balance"]))
+        elif account["name"] == "Accounts Receivable (A/R)":
+            qbo_ = Decimal(str(account["balance"]))
+    return control, qbo_
+
+
+def _aging_total(client):
+    aging = client.get("/api/reports/ar-aging", params={"as_of_date": "2099-12-31"})
+    return Decimal(str(aging.json()["totals"]["total"]))
+
+
+def _holds(client, before_sum):
+    control, qbo_ = _ar_and_qbo(client)
+    assert _aging_total(client) == control
+    assert control + (qbo_ or 0) == before_sum
+
+
+def test_voiding_what_was_carried_onto_1100_keeps_the_aging_on_1100(
+    client, db_session, seed_accounts
+):
+    from app.models.invoices import Invoice
+    from app.models.payments import Payment
+    from app.models.transactions import Transaction, TransactionLine
+
+    data = client.post(
+        "/api/migration/qbo_export/import", files=_controls_export(more=True)()
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    assert data["imported_open_invoices"] == 3
+    assert data["imported_unapplied_payments"] == 1
+    control, qbo_ = _ar_and_qbo(client)
+    assert control == Decimal("14280.00") and qbo_ is None  # made at the first void
+    assert _aging_total(client) == control
+    whole = control
+
+    def invoice(number):
+        return db_session.query(Invoice).filter_by(invoice_number=number).one()
+
+    # the single-line invoice: its open balance leaves 1100 for QuickBooks'
+    # receivable, made now as an Other Current Asset that is no control
+    resp = client.post(f"/api/invoices/{invoice('1141').id}/void")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["notice"] == (
+        "Invoice 1141 was carried over from QuickBooks Online: its 5,750.00 moved "
+        "from 1100 Accounts Receivable to Accounts Receivable (A/R), where it sat "
+        "in QuickBooks Online."
+    )
+    _holds(client, whole)
+    made = db_session.query(Account).filter_by(name="Accounts Receivable (A/R)").one()
+    assert made.account_type == AccountType.ASSET
+    assert made.detail_type == "other_current_asset" and made.account_number is None
+    entry = (
+        db_session.query(Transaction)
+        .filter_by(source_type="invoice_void", source_id=invoice("1141").id)
+        .one()
+    )
+    lines = db_session.query(TransactionLine).filter_by(transaction_id=entry.id).all()
+    assert {(ln.account_id, ln.debit, ln.credit) for ln in lines} == {
+        (made.id, Decimal("5750.00"), Decimal("0")),
+        (seed_accounts["1100"].id, Decimal("0"), Decimal("5750.00")),
+    }
+    assert "carried over from QuickBooks Online" in entry.description
+
+    # the invoice carried at its total: its payment goes first, as for any
+    refused = client.post(f"/api/invoices/{invoice('1001').id}/void")
+    assert refused.status_code == 400
+    assert "Void the payment(s) first" in refused.json()["detail"]
+    paid = invoice("1001").payment_allocations[0].payment
+    resp = client.post(f"/api/payments/{paid.id}/void")
+    assert resp.status_code == 200, resp.text
+    assert "moved from Accounts Receivable (A/R) back to 1100" in resp.json()["notice"]
+    _holds(client, whole)
+    db_session.expire_all()
+    assert invoice("1001").balance_due == Decimal("1240.00")
+    resp = client.post(f"/api/invoices/{invoice('1001').id}/void")
+    assert resp.status_code == 200, resp.text
+    _holds(client, whole)
+
+    # the customer credit not applied
+    credit = (
+        db_session.query(Payment)
+        .filter(Payment.reference == "880", Payment.is_voided.isnot(True))
+        .one()
+    )
+    resp = client.post(f"/api/payments/{credit.id}/void")
+    assert resp.status_code == 200, resp.text
+    _holds(client, whole)
+    control, qbo_ = _ar_and_qbo(client)
+    assert control == Decimal("8090.00")  # 1148, still open
+    assert qbo_ == whole - control
+    assert (
+        db_session.query(Account).filter_by(name="Accounts Receivable (A/R)").count()
+        == 1
+    )
+
+
+def test_a_void_of_a_carried_document_keeps_the_closed_period(
+    client, db_session, seed_accounts
+):
+    from app.models.invoices import Invoice
+
+    data = client.post(
+        "/api/migration/qbo_export/import", files=_controls_export(more=True)()
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    from app.services.settings_service import set_setting
+
+    set_setting(db_session, "closing_date", "2026-12-31")
+    db_session.commit()
+    number = db_session.query(Invoice).filter_by(invoice_number="1141").one().id
+    resp = client.post(f"/api/invoices/{number}/void")
+    assert resp.status_code in (400, 403, 409, 422), resp.text
+    assert (
+        db_session.query(Account).filter_by(name="Accounts Receivable (A/R)").count()
+        == 0
+    )

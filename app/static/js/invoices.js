@@ -515,8 +515,10 @@ const InvoicesPage = {
     async void(id) {
         if (!confirm('Void this invoice? This cannot be undone.')) return;
         try {
-            await API.post(`/invoices/${id}/void`);
+            const r = await API.post(`/invoices/${id}/void`);
             toast(`${T('Invoice')} voided`);
+            // where the balance went: one carried over from QuickBooks Online
+            if (r && r.notice) toast(r.notice);
             App.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },
