@@ -1459,7 +1459,8 @@ const SettingsPage = {
         SettingsPage._recoveryFile = result.recovery_file || result.recovery_key;
         openModal('Your recovery key', `
             <p style="margin:0 0 8px;">${escapeHtml(lead)} <strong>This recovery key is shown once.</strong> It opens the company file,
-                and every backup of it, if every administrator's password is lost. Anyone holding it can read the books, so keep it
+                and every backup of it, if every administrator's password is lost, and then lets you set a new administrator password.
+                Anyone holding it can read the books, so keep it
                 where the backups are not: a safe, a password manager, a sealed envelope.</p>
             <p style="margin:0 0 12px; font-family:var(--mono, monospace); font-size:16px; letter-spacing:0.04em; text-align:center;
                 padding:10px; border:1px solid var(--gray-200); border-radius:4px; user-select:all;" id="recovery-key-words">${escapeHtml(result.recovery_key)}</p>
