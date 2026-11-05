@@ -467,7 +467,7 @@ Canonical list of security measures lives in [SECURITY.md](../SECURITY.md); engi
 - **Global Search** — Unified server-side search across customers, vendors, items, invoices, sales receipts, estimates, bills, credit memos, payments, accounts and classes, and (v2.31.6, #695) a **Transactions** section: a check by its number, a journal or register entry by its memo, an expense by its reference, a bill payment by its check number, or any posted transaction by its amount to the cent, each opening its own document, a voided one marked. Ctrl+K (⌘K), `/` outside a field, and in the desktop app Ctrl+F (⌘F)
 - **Attachments** — Upload files (PDF, images, text, CSV, Word, Excel, zip) to invoices, bills, expenses, estimates, purchase orders, vendor credits, vendors, customers, journal entries (v2.22.3, #281; the receipt behind a manual entry, such as an owner paying a business expense personally) and register entries (v2.31.0, #600), with MIME type and extension validation; the files live inside the company file, so a backup carries them
 - **Bank Rules** — Auto-categorize imported bank transactions with pattern-matching rules
-- **Budgets** — Create and track budgets by account and period with actual-vs-budget comparison. The account column stays in place and the month headers at the top while the grid scrolls, in Budget vs Actual too, and the page prints whole, landscape (v2.31.7, #702)
+- **Budgets** — Create and track budgets by account and period with actual-vs-budget comparison. The account column stays in place and the month headers at the top while the grid scrolls, in Budget vs Actual too; **Print** on the page and in Budget vs Actual opens the sheet (every account, twelve months, landscape, the month row on each page) with the print dialog (v2.31.7, #702)
 - **Email Templates** — Customizable templates for the invoice email, the payment receipt, the past-due reminder, the collection letter and a nonprofit's donor acknowledgment
 
 ## UI
@@ -842,6 +842,7 @@ Shared parameters on the statements: `basis=accrual|cash` (#483), `hide_zero=tru
 | `/api/uploads/logo/{id}` | GET | The logo image, from the company's database |
 | `/api/attachments/{type}/{id}` · `/api/attachments/{id}` · `/api/attachments/download/{id}` | GET, POST / DELETE / GET | List and add a document's attachments; remove one; download one |
 | `/api/budgets` (+`/bulk`, `/variance`) | GET, POST | Budgets by account and period, set in bulk, with the actual-vs-budget variance |
+| `/api/budgets/print`, `/api/budgets/variance/print` | GET | The budget sheet (`year`, `account_id`) and Budget vs Actual (`year`, required) as a page that opens the print dialog on load, from the report PDFs' template (#702) |
 | `/api/accounts/rebuild-balances` | POST | Recompute the stored account balances from the ledger (#490; also runs at start) |
 | `/api/email-templates` | GET, POST, PUT, DELETE | Custom email template management |
 | `/api/invoice-messages` | GET, POST, PUT, DELETE | Saved messages, one the default per kind; `?kind=invoice` (default) or `?kind=giving_statement` filters the list (#392, #415; writes: administrator) |
