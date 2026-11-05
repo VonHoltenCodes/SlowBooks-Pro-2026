@@ -1994,6 +1994,11 @@ const BankingPage = {
         box.style.display = open ? '' : 'none';
         const toggle = document.getElementById('entry-split-toggle');
         if (toggle) toggle.textContent = open ? 'Not a split' : 'Split this entry…';
+        // six columns of lines are wider than the 700px dialog: the dialog
+        // takes the line-item tables' width while the split shows, so no
+        // sideways scroll (NEW-204, the owner's, 2.31.6 gate)
+        const modal = document.getElementById('modal');
+        if (modal && modal.contains(box)) modal.classList.toggle('modal--wide', open);
         // each line names its own; the entry's single name is for a plain entry
         const nameGroup = document.getElementById('entry-name-group');
         if (nameGroup) nameGroup.style.display = open ? 'none' : '';
@@ -2115,7 +2120,7 @@ const BankingPage = {
         const n = body.querySelectorAll('tr').length + 1;
         body.insertAdjacentHTML('beforeend', `<tr>
             <td><select class="split-cat" aria-label="Split line ${n} account" data-no-search><option value="">Select…</option>${BankingPage._splitCats || ''}</select></td>
-            <td class="amount"><input class="split-amt money" type="number" step="0.01" aria-label="Split line ${n} amount" oninput="BankingPage.splitNote()" style="width:100px; text-align:right;"></td>
+            <td class="amount"><input class="split-amt money" type="number" step="0.01" aria-label="Split line ${n} amount" oninput="BankingPage.splitNote()" style="text-align:right;"></td>
             <td style="text-align:center;"><input class="split-fee" type="checkbox" aria-label="Split line ${n} taken out" title="A fee the processor kept, or a refund netted against a check: this line goes the other way from the entry" onchange="BankingPage.splitNote()"></td>
             ${BankingPage.nameCellHtml('split-name', null, `${T('Customer')}, line ${n}`)}${Nonprofit.classCellHtml('split', null)}
             <td><input class="split-memo" type="text" aria-label="Split line ${n} memo"></td>

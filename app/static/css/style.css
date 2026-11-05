@@ -1339,6 +1339,16 @@ a:hover { text-decoration: underline; }
     width: calc(100% - 12px);
     max-width: 1280px;
 }
+/* The register entry's split lines (NEW-204, 2.31.6 gate): six columns
+   share the dialog's width, the controls filling their cells, so the table
+   never scrolls sideways while the dialog is wide. */
+#entry-splits table { table-layout: fixed; width: 100%; }
+#entry-splits th:first-child { width: 26%; }
+#entry-splits th.amount { width: 12%; }
+#entry-splits th:last-child { width: 34px; }
+#entry-splits td input, #entry-splits td select { width: 100%; min-width: 0; box-sizing: border-box; }
+#entry-splits td { padding-left: 3px; padding-right: 3px; overflow: hidden; }
+
 /* ...and the room inside it for the table: a narrower margin at the sides.
    A construction company's bill has eleven columns (cost code, cost type,
    class and the billable mark beside the usual seven) and still scrolled at
