@@ -1,0 +1,263 @@
+"""The Budgets grid in a real browser (#702): its twelve months scroll
+sideways under a frozen account column, and the month row stays at the top
+while the accounts scroll under it, so a late month still says which account
+each row is. The same for Budget vs Actual. Tab into a month off screen
+brings it in whole, clear of the frozen column. The frozen cells meet AA in
+both themes. The API is stubbed; the page is the real one
+(tests/test_browser_ui.py's fixtures)."""
+
+import pytest
+
+sync_api = pytest.importorskip("playwright.sync_api")
+
+from tests.test_browser_ui import _open  # noqa: E402
+from tests.test_theme_contrast import (  # noqa: E402
+    AA,
+    _theme,
+    browser_fixture,  # noqa: F401  (the fixture)
+    contrast,
+)
+
+# 26 accounts: more than one screen of rows, with a long name or two
+ACCOUNTS = [
+    {
+        "id": i,
+        "name": name,
+        "account_number": str(6000 + i * 10),
+        "account_type": kind,
+        "is_active": True,
+    }
+    for i, (name, kind) in enumerate(
+        [
+            ("Sales", "income"),
+            ("Service Income", "income"),
+            ("Materials", "cogs"),
+            ("Subcontractors", "cogs"),
+            ("Advertising and Promotion", "expense"),
+            ("Automobile", "expense"),
+            ("Bank Service Charges", "expense"),
+            ("Computer and Internet Expenses", "expense"),
+            ("Depreciation Expense", "expense"),
+            ("Insurance Expense", "expense"),
+            ("Meals and Entertainment", "expense"),
+            ("Office Supplies", "expense"),
+            ("Professional Fees", "expense"),
+            ("Rent Expense", "expense"),
+            ("Repairs and Maintenance", "expense"),
+            ("Telephone Expense", "expense"),
+            ("Travel Expense", "expense"),
+            ("Utilities", "expense"),
+            ("Dues and Subscriptions", "expense"),
+            ("Freight and Delivery", "expense"),
+            ("Licenses and Permits", "expense"),
+            ("Postage and Delivery", "expense"),
+            ("Small Tools and Equipment", "expense"),
+            ("Uniforms", "expense"),
+            ("Waste Removal", "expense"),
+            ("Workers Compensation", "expense"),
+        ],
+        start=1,
+    )
+]
+BUDGETS = [
+    {"account_id": a["id"], "month": m, "amount": 1000 + a["id"] * 10 + m}
+    for a in ACCOUNTS
+    for m in range(1, 13)
+]
+
+
+def _variance():
+    accounts = []
+    for a in ACCOUNTS[:4]:
+        months = [
+            {"month": m, "budget": 1000.0, "actual": 900.0 + m, "variance": 100.0 - m}
+            for m in range(1, 13)
+        ]
+        accounts.append(
+            {
+                "account_id": a["id"],
+                "account_name": a["name"],
+                "account_number": a["account_number"],
+                "months": months,
+                "total_budget": 12000.0,
+                "total_actual": sum(x["actual"] for x in months),
+                "total_variance": sum(x["variance"] for x in months),
+            }
+        )
+    return {"year": 2026, "accounts": accounts}
+
+
+def _budgets(browser, width, height=800):
+    page = _open(browser, width, height, "#/")
+    page.route("**/api/accounts*", lambda r: r.fulfill(json=ACCOUNTS))
+    page.route("**/api/budgets/variance*", lambda r: r.fulfill(json=_variance()))
+    page.route(
+        "**/api/budgets?*",
+        lambda r: r.fulfill(json=BUDGETS),
+    )
+    page.goto(page.url.split("#")[0] + "#/budgets")
+    page.wait_for_selector(".budget-grid tbody tr:nth-child(15)")
+    return page
+
+
+# Where the frozen cells are, once the box is scrolled as asked: every first
+# cell inside the box's left edge with a ground of its own (no figure shows
+# through it), every month header inside its top edge, the corner over both.
+FROZEN = """([sel, toEnd]) => {
+    const box = document.querySelector(sel);
+    if (toEnd) { box.scrollLeft = box.scrollWidth; box.scrollTop = box.scrollHeight; }
+    const b = box.getBoundingClientRect();
+    const opaque = (el) => {
+        const c = getComputedStyle(el).backgroundColor;
+        const m = c.match(/[\\d.]+/g) || [];
+        return getComputedStyle(el).backgroundImage !== 'none'
+            || (m.length >= 3 && (m.length < 4 || +m[3] === 1));
+    };
+    const first = [...box.querySelectorAll('tbody tr')]
+        .map(tr => tr.cells[0])
+        .filter(td => { const r = td.getBoundingClientRect();
+                        return r.bottom > b.top && r.top < b.bottom; });
+    const heads = [...box.querySelectorAll('thead th')]
+        .filter(th => { const r = th.getBoundingClientRect();
+                        return r.right > b.left && r.left < b.right; });
+    const corner = box.querySelector('thead th:first-child');
+    const cr = corner.getBoundingClientRect();
+    const atCorner = document.elementFromPoint(cr.left + 4, cr.top + 4);
+    return {
+        scrollsX: box.scrollWidth > box.clientWidth,
+        scrollsY: box.scrollHeight > box.clientHeight,
+        scrolledX: box.scrollLeft, scrolledY: box.scrollTop,
+        first: first.map(td => ({ text: td.textContent.trim(),
+            left: td.getBoundingClientRect().left, opaque: opaque(td) })),
+        heads: heads.map(th => ({ top: th.getBoundingClientRect().top, opaque: opaque(th) })),
+        boxLeft: b.left + box.clientLeft, boxTop: b.top + box.clientTop,
+        cornerOnTop: corner === atCorner || corner.contains(atCorner),
+    };
+}"""
+
+
+def _assert_frozen(view, where):
+    assert view["scrolledX"] > 0, where
+    assert view["first"], where
+    for cell in view["first"]:
+        assert abs(cell["left"] - view["boxLeft"]) <= 1, (where, cell)
+        assert cell["opaque"], (where, cell)
+    for th in view["heads"]:
+        assert th["opaque"], (where, th)
+    assert view["cornerOnTop"], where
+
+
+@pytest.mark.parametrize("width", [1280, 900])
+def test_the_account_column_stays_put_while_the_months_scroll(browser, width):
+    page = _budgets(browser, width)
+    try:
+        view = page.evaluate(FROZEN, [".table-container--frozen", True])
+        assert view["scrollsX"], f"twelve months should be wider than {width}"
+        assert view["scrollsY"], "twenty-six accounts should scroll under the months"
+        _assert_frozen(view, width)
+        # the last rows are in view, still named
+        assert any(c["text"].endswith("Workers Compensation") for c in view["first"])
+        # and the month row is held at the top of the box
+        assert view["scrolledY"] > 0
+        for th in view["heads"]:
+            assert abs(th["top"] - view["boxTop"]) <= 1, th
+        # striped and hovered rows keep a ground of their own too
+        page.hover(".budget-grid tbody tr:last-child td:first-child")
+        view = page.evaluate(FROZEN, [".table-container--frozen", False])
+        _assert_frozen(view, f"{width} hover")
+    finally:
+        page.close()
+
+
+# A late month's box after Tab: wholly in the box, right of the frozen column
+# and below the month row.
+FOCUSED = """() => {
+    const a = document.activeElement, box = a.closest('.table-container--frozen');
+    const r = a.getBoundingClientRect(), b = box.getBoundingClientRect();
+    const col = box.querySelector('thead th:first-child').getBoundingClientRect();
+    const head = box.querySelector('thead').getBoundingClientRect();
+    return { month: a.dataset.month, acct: a.dataset.acct,
+             left: r.left, right: r.right, top: r.top, bottom: r.bottom,
+             colRight: col.right, headBottom: head.bottom,
+             boxRight: b.left + box.clientLeft + box.clientWidth,
+             boxBottom: b.top + box.clientTop + box.clientHeight };
+}"""
+
+
+@pytest.mark.parametrize("width", [1280, 900])
+def test_tab_brings_a_late_month_in_clear_of_the_frozen_column(browser, width):
+    page = _budgets(browser, width)
+    try:
+        # forward: from November of a row low in the grid to December
+        page.focus('.budget-cell[data-acct="16"][data-month="11"]')
+        page.keyboard.press("Tab")
+        # then back across the row to January, and up to the row above
+        stops = [page.evaluate(FOCUSED)]
+        for _ in range(12):
+            page.keyboard.press("Shift+Tab")
+            stops.append(page.evaluate(FOCUSED))
+        assert stops[0]["month"] == "12" and stops[0]["acct"] == "16"
+        assert stops[11]["month"] == "1" and stops[12]["month"] == "12"
+        assert stops[12]["acct"] == "15"
+        for s in stops:
+            assert s["left"] >= s["colRight"] - 0.5, (width, s)
+            assert s["right"] <= s["boxRight"] + 0.5, (width, s)
+            assert s["top"] >= s["headBottom"] - 0.5, (width, s)
+            assert s["bottom"] <= s["boxBottom"] + 0.5, (width, s)
+    finally:
+        page.close()
+
+
+# The frozen cells' words against their own ground (the cell's, else its
+# row's, else the box's), plain and hovered.
+FROZEN_TEXT = """(sel) => {
+    const box = document.querySelector(sel);
+    const ground = (el) => {
+        for (let e = el; e; e = e.parentElement) {
+            const c = getComputedStyle(e).backgroundColor;
+            if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
+        }
+        return 'rgb(255, 255, 255)';
+    };
+    return [...box.querySelectorAll('tbody tr')].slice(0, 4).map(tr => tr.cells[0])
+        .map(td => ({ text: td.textContent.trim(), color: getComputedStyle(td).color,
+                      ground: getComputedStyle(td).backgroundColor,
+                      row: ground(td.parentElement) }));
+}"""
+
+
+@pytest.mark.parametrize("theme", ["light", "dark"])
+def test_the_frozen_cells_meet_aa_in_both_themes(browser, theme):
+    page = _budgets(browser, 1280)
+    try:
+        _theme(page, theme)
+        page.evaluate(
+            "() => { const b = document.querySelector("
+            "'.table-container--frozen'); b.scrollLeft = b.scrollWidth; }"
+        )
+        cells = page.evaluate(FROZEN_TEXT, ".table-container--frozen")
+        page.hover(".budget-grid tbody tr:nth-child(2) td:first-child")
+        cells += page.evaluate(FROZEN_TEXT, ".table-container--frozen")
+        for c in cells:
+            assert contrast(c["color"], c["ground"]) >= AA, (theme, c)
+            # the frozen cell's ground is its row's, striped or hovered
+            assert c["ground"] == c["row"], (theme, c)
+
+        # Budget vs Actual: the same frozen column, and its words at AA
+        page.evaluate("() => BudgetsPage.showVariance()")
+        page.wait_for_selector("#modal-body .budget-variance__table")
+        _theme(page, theme)
+        view = page.evaluate(FROZEN, ["#modal-body .table-container--frozen", True])
+        assert view["scrollsX"]
+        _assert_frozen(view, f"variance {theme}")
+        for c in page.evaluate(FROZEN_TEXT, "#modal-body .table-container--frozen"):
+            assert contrast(c["color"], c["ground"]) >= AA, (theme, c)
+        # each account's heading holds to the box's left edge too
+        lefts = page.evaluate("""() => {
+            const box = document.querySelector('#modal-body .table-container--frozen');
+            const b = box.getBoundingClientRect().left + box.clientLeft;
+            return [...box.querySelectorAll('.budget-variance__acct')]
+                .map(h => h.getBoundingClientRect().left - b); }""")
+        assert lefts and all(abs(x) <= 1 for x in lefts), lefts
+    finally:
+        page.close()

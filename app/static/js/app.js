@@ -310,7 +310,19 @@ const App = {
     revealInTable(e) {
         const a = e.target, c = a && a.closest && a.closest('.table-container');
         if (!c || a === c || c.id === 'grid-scroll' || !App.keyboardFocus()) return;
+        // a months grid with a frozen first column and header row (Budgets,
+        // #702) scrolls the stop out from under them: its scroll padding
+        // (style.css .table-container--frozen) is their width and height
+        const frozen = c.classList.contains('table-container--frozen');
+        if (frozen) {
+            const t = a.closest('table'), corner = t && t.querySelector('thead th:first-child');
+            if (corner) {
+                c.style.setProperty('--frozen-col', `${corner.offsetWidth}px`);
+                c.style.setProperty('--frozen-head', `${t.tHead.offsetHeight}px`);
+            }
+        }
         if (c.scrollWidth > c.clientWidth) a.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        else if (frozen && c.scrollHeight > c.clientHeight) a.scrollIntoView({ block: 'nearest', inline: 'nearest' });
     },
 
     // A table wider than its container with no control in it (Benefits'
