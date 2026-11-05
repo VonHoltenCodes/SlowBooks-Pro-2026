@@ -49,7 +49,7 @@ const ClassesPage = {
     // custom range; a period or date that is not one is said so and ignored.
     _periodFrom(query, fallback) {
         const q = query || {};
-        const known = ReportsPage.periodOptions('').includes(`value="${q.period}"`);
+        const known = ReportsPage.periodOptions('', { allDates: false }).includes(`value="${q.period}"`);
         if (q.period && !known) toast(`period in the address is not one of the choices (${q.period}) — ignored`, 'error');
         const { start_date: start, end_date: end } = datesFromQuery(q);
         const period = known ? q.period : ((start || end) ? 'custom' : fallback);
@@ -83,7 +83,7 @@ const ClassesPage = {
     _periodBarHtml(idPrefix, state, onChange) {
         return `
             <label for="${idPrefix}-period" style="font-size:11px;">Period</label>
-            <select id="${idPrefix}-period" data-no-search onchange="${onChange}">${ReportsPage.periodOptions(state.period)}</select>
+            <select id="${idPrefix}-period" data-no-search onchange="${onChange}">${ReportsPage.periodOptions(state.period, { allDates: false })}</select>
             <span id="${idPrefix}-custom" style="display:${state.period === 'custom' ? 'inline-flex' : 'none'}; gap:6px; align-items:center; font-size:11px;">
                 <label for="${idPrefix}-start">From</label>
                 <input type="date" id="${idPrefix}-start" value="${escapeHtml(state.start)}" onchange="${onChange}">

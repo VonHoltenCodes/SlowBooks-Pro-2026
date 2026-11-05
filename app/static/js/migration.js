@@ -6,6 +6,8 @@
 const MigrationPage = {
     _dryRunOk: false,
     _preselect: null,
+    _dryRunData: null,   // the passing dry run's counts: what Import will write
+    _importing: false,   // an import is running; a second click does nothing
 
     async render(preselect) {
         MigrationPage._dryRunOk = false;
@@ -50,7 +52,9 @@ const MigrationPage = {
     },
 
     reset() {
+        if (MigrationPage._importing) return;
         MigrationPage._dryRunOk = false;
+        MigrationPage._dryRunData = null;
         const btn = $('#migration-import-btn');
         if (btn) btn.disabled = true;
         const out = $('#migration-result');
@@ -117,22 +121,62 @@ const MigrationPage = {
             if (!resp.ok) throw new Error(await API.responseError(resp, 'Dry run failed'));
             const data = await resp.json();
             MigrationPage._dryRunOk = data.ok;
+            MigrationPage._dryRunData = data.ok ? data : null;
             $('#migration-import-btn').disabled = !data.ok;
             MigrationPage._renderResult(data, false);
         } catch (err) { toast(err.message, 'error'); }
     },
 
+    // The line Import shows while it runs (#706): what is being written,
+    // from the passing dry run's counts, and how long it has been going.
+    // The import is one request and the server reports nothing until it is
+    // done, so the line counts the seconds rather than the journals.
+    _progressText(seconds) {
+        const data = MigrationPage._dryRunData;
+        const what = data ? MigrationPage._list(MigrationPage._counts(data, false)) : 'your books';
+        return `Importing ${what}… ${seconds} s so far. A large file takes a minute or so; `
+            + 'keep this page open until the result shows here.';
+    },
+
     async doImport() {
+        if (MigrationPage._importing) return;
         if (!MigrationPage._dryRunOk) { toast('Run a passing dry run first', 'error'); return; }
         const fd = MigrationPage._formData();
         if (!fd) return;
         const source = $('#migration-source').value;
+        const btn = $('#migration-import-btn');
+        const out = $('#migration-result');
+        const started = Date.now();
+        const status = () => {
+            const line = document.getElementById('migration-progress');
+            if (line) line.textContent = MigrationPage._progressText(Math.floor((Date.now() - started) / 1000));
+        };
+        MigrationPage._importing = true;
+        if (btn) { btn.disabled = true; btn.textContent = 'Importing…'; btn.setAttribute('aria-busy', 'true'); }
+        if (out) {
+            out.innerHTML = `<div id="migration-progress" role="status" aria-live="polite">${escapeHtml(MigrationPage._progressText(0))}</div>`;
+        }
+        const timer = setInterval(status, 1000);
         try {
             const resp = await fetch(`/api/migration/${source}/import`, { method: 'POST', body: fd });
             if (!resp.ok) throw new Error(await API.responseError(resp, 'Import failed'));
             const data = await resp.json();
+            // the result takes the dry run's place; no toast on top of it
             MigrationPage._renderResult(data, true);
-            if (data.ok) toast(`Imported ${MigrationPage._list(MigrationPage._counts(data, true))}`);
-        } catch (err) { toast(err.message, 'error'); }
+            if (data.ok) { MigrationPage._dryRunOk = false; MigrationPage._dryRunData = null; }
+        } catch (err) {
+            if (out) {
+                out.innerHTML = `<strong style="color:var(--danger);">Import failed:</strong> ${escapeHtml(err.message)}`;
+            }
+            toast(err.message, 'error');
+        } finally {
+            clearInterval(timer);
+            MigrationPage._importing = false;
+            if (btn) {
+                btn.textContent = 'Import';
+                btn.setAttribute('aria-busy', 'false');
+                btn.disabled = !MigrationPage._dryRunOk;
+            }
+        }
     },
 };

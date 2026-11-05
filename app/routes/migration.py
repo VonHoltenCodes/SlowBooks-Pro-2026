@@ -158,6 +158,43 @@ def _members(filename: str, content: bytes) -> list[tuple[str, bytes]]:
     return members
 
 
+def _looks_like(names: list[str], chosen) -> str | None:
+    """The one other source whose file names these are, when exactly one
+    reads every one of them (an A/R Aging Detail report is QuickBooks
+    Online's; #706), else None."""
+    matches = [
+        label
+        for label, module, _ in SOURCES.values()
+        if module.classify_filename is not chosen
+        and all(module.classify_filename(name) for name in names)
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _unclassified_text(names: list[str], classify) -> str:
+    """Files the chosen source cannot place by name, said in a sentence
+    (#706: it printed a Python list)."""
+    if len(names) == 1:
+        head = f"Could not tell what {names[0]} is from its name"
+    else:
+        listed = ", ".join(names[:-1]) + f" and {names[-1]}"
+        head = f"Could not tell what {listed} are from their names"
+    other = _looks_like(names, classify)
+    if other:
+        these = "it looks" if len(names) == 1 else "these look"
+        export = other if other.endswith(" export") else f"{other} export"
+        return (
+            f"{head}; {these} like a {export}. Choose {other} under "
+            f"Coming from, or leave {'it' if len(names) == 1 else 'them'} out."
+        )
+    return (
+        f"{head}. This source reads files whose names say what they hold: "
+        f"the chart of accounts ('chart' or 'accounts'), the ledger "
+        f"('ledger', 'journal' or 'transactions'), or the trial balance "
+        f"('trial')."
+    )
+
+
 async def bundle_from_uploads(files: list[UploadFile], classify) -> dict:
     bundle: dict[str, str] = {}
     unrecognized = []
@@ -182,11 +219,7 @@ async def bundle_from_uploads(files: list[UploadFile], classify) -> dict:
     if unrecognized:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Could not classify files by name: {unrecognized}. Expected "
-                f"filenames containing 'chart'/'accounts', "
-                f"'ledger'/'journal'/'transactions', or 'trial'."
-            ),
+            detail=_unclassified_text(unrecognized, classify),
         )
     return bundle
 
