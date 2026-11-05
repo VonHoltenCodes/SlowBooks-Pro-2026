@@ -228,6 +228,14 @@ class Row:
     path: str | None = None  # hledger only: the full colon path
     active: bool | None = None
     synthesized: bool = False  # an hledger parent the file never listed
+    # CSV: the row's full "Parent:Child" path, when the file says where it
+    # sits (a top-level row is its own name); None with a Parent column
+    csv_path: str | None = None
+    # CSV: the parent came from the name, written "Parent:Child" the
+    # QuickBooks way with the Parent column blank (W-119)
+    colon_parent: bool = False
+    # ... and the row gave no type: it takes its parent's
+    type_from_parent: bool = False
 
 
 @dataclass
@@ -409,6 +417,20 @@ def _parse_csv(text: str, errors: list[str]) -> tuple[list[Row], list[str], str]
                 rows.append(row)
             continue
         number = cell("number") or None
+        # "Landscaping Services:Installation" with the Parent column blank
+        # is QuickBooks' way of writing a sub-account: Installation under
+        # Landscaping Services (W-119). A Parent column, when filled, wins.
+        explicit_parent = cell("parent") or None
+        colon_parent = None
+        csv_path = None
+        if not explicit_parent:
+            segments = [s.strip() for s in name.split(":")]
+            if len(segments) > 1 and all(segments):
+                colon_parent = ":".join(segments[:-1])
+                name = segments[-1]
+                csv_path = ":".join(segments)
+            else:
+                csv_path = name
         typed = _norm_type(cell("type"))
         detail = _norm_detail(cell("detail_type"))
         if cell("detail_type") and detail is None:
@@ -435,6 +457,8 @@ def _parse_csv(text: str, errors: list[str]) -> tuple[list[Row], list[str], str]
             continue
         elif detail:
             acct_type, bank_kind = BASE_TYPE_OF[DetailType(detail)].value, None
+        elif colon_parent:
+            acct_type, bank_kind = None, None  # the parent's, at planning
         else:
             acct_type, bank_kind = _type_from_number(number), None
             if not acct_type:
@@ -457,11 +481,14 @@ def _parse_csv(text: str, errors: list[str]) -> tuple[list[Row], list[str], str]
                 name=name[:200],
                 type=acct_type,
                 number=number[:20] if number else None,
-                parent_ref=cell("parent") or None,
+                parent_ref=explicit_parent or colon_parent,
                 description=(cell("description") or None),
                 bank_kind=bank_kind,
                 detail_type=detail,
                 active=active,
+                csv_path=csv_path,
+                colon_parent=colon_parent is not None,
+                type_from_parent=colon_parent is not None and acct_type is None,
             )
         )
     if hledger_balance:
@@ -511,6 +538,84 @@ def _posted(db: Session, account_id: int) -> int:
     )
 
 
+# the key a CSV row's full path is resolved under, apart from names and numbers
+_PATH_KEY = "\0path:"
+
+
+def _book_paths(existing: list[Account]) -> dict[str, Account]:
+    """The books' accounts by their full "Parent:Child" path, lowercased."""
+    by_id = {a.id: a for a in existing}
+
+    def path(a: Account, depth: int = 0) -> str:
+        parent = by_id.get(a.parent_id)
+        if parent is None or depth > 10:
+            return a.name.strip()
+        return f"{path(parent, depth + 1)}:{a.name.strip()}"
+
+    paths: dict[str, Account] = {}
+    for a in existing:
+        paths.setdefault(path(a).lower(), a)
+    return paths
+
+
+def _colon_parent_hit(parent: str, resolved: dict, book_paths: dict, by_name: dict):
+    """Where a "Parent:Child" row's parent is: a row of the file at that
+    path, else the books' account at it (a one-word parent may be any
+    account of that name)."""
+    hit = resolved.get(_PATH_KEY + parent.lower())
+    if hit is not None:
+        return hit
+    acct = book_paths.get(parent.lower())
+    if acct is None and ":" not in parent:
+        acct = by_name.get(parent.strip().lower())
+    return ("existing", acct.id) if acct is not None else None
+
+
+def _settle_colon_rows(
+    rows: list[Row], book_paths: dict, by_name: dict
+) -> dict[int, str]:
+    """Rows written "Parent:Child" (W-119): each one's parent must be in
+    the books or the file, whatever order the file lists them in; one
+    whose parent is in neither is returned (index → the parent's path) to
+    be refused by name. A row that gave no type takes its parent's."""
+    file_paths: dict[str, int] = {}
+    for i, r in enumerate(rows):
+        if r.csv_path:
+            file_paths.setdefault(r.csv_path.lower(), i)
+    missing: dict[int, str] = {}
+
+    def settle(i: int, seen: frozenset = frozenset()) -> str | None:
+        """The row's type once its parent is found, None when it cannot be."""
+        r = rows[i]
+        if i in missing or i in seen:
+            return None
+        if not r.colon_parent:
+            return r.type
+        parent = r.parent_ref
+        at = file_paths.get(parent.lower())
+        if at is not None:
+            ptype = settle(at, seen | {i})
+            if ptype is None:
+                missing[i] = parent
+                return None
+        else:
+            acct = book_paths.get(parent.lower())
+            if acct is None and ":" not in parent:
+                acct = by_name.get(parent.strip().lower())
+            if acct is None:
+                missing[i] = parent
+                return None
+            ptype = acct.account_type.value
+        if r.type_from_parent and r.type is None:
+            r.type = ptype
+        return r.type
+
+    for i, r in enumerate(rows):
+        if r.colon_parent:
+            settle(i)
+    return missing
+
+
 def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
     rows, errors, fmt = parse_chart(text)
     plan = Plan(format=fmt, errors=list(errors), replace=replace)
@@ -524,6 +629,8 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
     for a in existing:
         by_name.setdefault(a.name.strip().lower(), a)
     numbers = _Numbers(set(by_number))
+    book_paths = _book_paths(existing)
+    missing_parent = _settle_colon_rows(rows, book_paths, by_name)
     # a company that does not use account numbers brings a numberless row
     # in unnumbered instead of handing it the next free number (#567)
     numbered = use_account_numbers(db)
@@ -546,6 +653,15 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
             "note": "",
         }
         target: Account | None = None
+        if i in missing_parent:
+            entry["action"] = "error"
+            entry["note"] = (
+                f"parent '{missing_parent[i]}' is not in the chart or the file, "
+                f"so this row was not imported"
+            )
+            entry["_row"] = r
+            plan.rows.append(entry)
+            continue
         # 1. the file gives a number we already have
         if r.number and r.number in by_number:
             target = by_number[r.number]
@@ -571,8 +687,19 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
                     target = by_number[alias]
                     if alias == "2100":
                         credit_card_claimed = True
-        # 3. an account with exactly this name
-        if target is None:
+        # 3. an account with exactly this name; a "Parent:Child" row, the
+        #    account at that path (a leaf name alone may be another
+        #    parent's sub-account, or a top-level account of its own)
+        if target is None and r.colon_parent:
+            same = book_paths.get(r.csv_path.lower())
+            if same is not None and same.id not in matched:
+                if (
+                    not r.number
+                    or not same.account_number
+                    or same.account_number == r.number
+                ):
+                    target = same
+        elif target is None:
             same = by_name.get(r.name.strip().lower())
             if same is not None and same.id not in matched:
                 if (
@@ -624,7 +751,12 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
             )
             if r.number:
                 resolved[r.number] = ("existing", target.id)
-            resolved[r.name.lower()] = ("existing", target.id)
+            if r.colon_parent:
+                resolved.setdefault(r.name.lower(), ("existing", target.id))
+            else:
+                resolved[r.name.lower()] = ("existing", target.id)
+            if r.csv_path:
+                resolved[_PATH_KEY + r.csv_path.lower()] = ("existing", target.id)
         else:
             # A new row may not land on a control-account number under a
             # foreign name or type — it would silently become where that
@@ -653,7 +785,7 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
             entry["note"] = entry["note"] or (
                 "parent of a listed account" if r.synthesized else ""
             )
-            twin = by_name.get(r.name.strip().lower())
+            twin = None if r.colon_parent else by_name.get(r.name.strip().lower())
             if twin is not None:
                 entry["note"] = (entry["note"] + "; " if entry["note"] else "") + (
                     f"an account named '{twin.name}' already exists"
@@ -664,7 +796,12 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
                 resolved[r.path] = ("new", i)
             if number:
                 resolved[number] = ("new", i)
-            resolved[r.name.lower()] = ("new", i)
+            if r.colon_parent:
+                resolved.setdefault(r.name.lower(), ("new", i))
+            else:
+                resolved[r.name.lower()] = ("new", i)
+            if r.csv_path:
+                resolved[_PATH_KEY + r.csv_path.lower()] = ("new", i)
         entry["detail_type"] = _planned_detail(r, target, entry)
         entry["_row"] = r
         plan.rows.append(entry)
@@ -672,7 +809,18 @@ def plan_chart_import(db: Session, text: str, replace: bool = False) -> Plan:
     # parent links, now that every row has a home
     for entry in plan.rows:
         r: Row = entry["_row"]
-        if not r.parent_ref:
+        if not r.parent_ref or entry["action"] == "error":
+            continue
+        if r.colon_parent:
+            hit = _colon_parent_hit(r.parent_ref, resolved, book_paths, by_name)
+            if hit is None:
+                entry["action"] = "error"
+                entry["note"] = (
+                    f"parent '{r.parent_ref}' is not in the chart or the file, "
+                    f"so this row was not imported"
+                )
+            else:
+                entry["_parent"] = hit
             continue
         key = r.parent_ref if r.path else r.parent_ref.strip().lower()
         hit = resolved.get(r.parent_ref) or resolved.get(key)

@@ -126,7 +126,18 @@ const MigrationPage = {
             MigrationPage._dryRunData = data.ok ? data : null;
             $('#migration-import-btn').disabled = !data.ok;
             MigrationPage._renderResult(data, false);
-        } catch (err) { toast(err.message, 'error'); }
+        } catch (err) {
+            // a refusal (a file it cannot place, another source's export)
+            // reads on the page where the result goes, not only as a toast
+            MigrationPage._dryRunOk = false;
+            MigrationPage._dryRunData = null;
+            $('#migration-import-btn').disabled = true;
+            const out = $('#migration-result');
+            if (out) {
+                out.innerHTML = `<strong style="color:var(--danger);">Dry run failed:</strong> ${escapeHtml(err.message)}`;
+            }
+            toast(err.message, 'error');
+        }
     },
 
     // The line Import shows while it runs (#706): what is being written,

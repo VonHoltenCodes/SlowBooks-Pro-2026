@@ -743,3 +743,112 @@ def test_replace_shows_a_kept_rows_parent_by_its_new_name(
         "7300",
         "Workshop Costs",
     )
+
+
+# --- "Parent:Child" names, the QuickBooks way (W-119) -----------------------
+
+
+def _accounts_by_name(db):
+    db.expire_all()
+    return {a.name: a for a in db.query(Account).all()}
+
+
+def test_a_parent_child_name_nests_under_its_parent_whatever_the_order(
+    client, db_session, seed_accounts
+):
+    # the child before its parent, a grandchild before both, and a row with
+    # no type taking its parent's; the Parent column is blank throughout
+    text = (
+        "Account,Type,Parent,Description\n"
+        "Landscaping Services:Installation,Income,,Plantings and beds\n"
+        "Vehicle Expenses:Fuel:Diesel,,,\n"
+        "Landscaping Services,Income,,\n"
+        "Vehicle Expenses,Expense,,\n"
+        "Vehicle Expenses:Fuel,,,\n"
+        "Payroll Liabilities:State Taxes (IL),Other Current Liability,,\n"
+    )
+    r = _upload(client, text, dry_run=0)
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["errors"] == [] and out["row_errors"] == 0, out
+    accts = _accounts_by_name(db_session)
+    assert not [n for n in accts if ":" in n]
+    install = accts["Installation"]
+    assert install.parent.name == "Landscaping Services"
+    assert install.account_type.value == "income"
+    assert install.description == "Plantings and beds"
+    diesel = accts["Diesel"]
+    assert (
+        diesel.parent.name == "Fuel" and diesel.parent.parent.name == "Vehicle Expenses"
+    )
+    assert diesel.account_type.value == "expense"
+    assert accts["Fuel"].account_type.value == "expense"
+    # a parent already in the books (the seeded chart's)
+    state = accts["State Taxes (IL)"]
+    assert state.parent.name == "Payroll Liabilities"
+    # the same file again finds every account at its path: nothing new
+    again = _upload(client, text, dry_run=1).json()
+    assert again["created"] == 0 and again["row_errors"] == 0, again
+
+
+def test_a_parent_child_name_whose_parent_is_nowhere_is_refused_by_name(
+    client, db_session, seed_accounts
+):
+    text = (
+        "Account,Type\n"
+        "Snow Removal,Income\n"
+        "Snow Services:Salting,Income\n"
+        "Snow Services:Salting:Bulk,,\n"
+    )
+    out = _upload(client, text, dry_run=0).json()
+    rows = {row["name"]: row for row in out["rows"]}
+    assert rows["Salting"]["action"] == "error"
+    assert "parent 'Snow Services' is not in the chart or the file" in (
+        rows["Salting"]["note"]
+    )
+    assert rows["Bulk"]["action"] == "error"
+    assert "parent 'Snow Services:Salting'" in rows["Bulk"]["note"]
+    accts = _accounts_by_name(db_session)
+    assert "Salting" not in accts and "Bulk" not in accts
+    assert "Snow Services:Salting" not in accts
+    assert "Snow Removal" in accts
+
+
+def test_an_explicit_parent_column_still_wins_over_the_colon(
+    client, db_session, seed_accounts
+):
+    text = (
+        "Number,Name,Type,Parent\n"
+        "7300,Shop Costs,expense,\n"
+        "7310,Odd:Name,expense,7300\n"
+    )
+    out = _upload(client, text, dry_run=0).json()
+    assert out["row_errors"] == 0, out
+    nums = _by_number(db_session)
+    assert nums["7310"].name == "Odd:Name"
+    assert nums["7310"].parent.account_number == "7300"
+
+
+def test_items_still_find_a_nested_income_account_by_its_path(
+    client, db_session, seed_accounts
+):
+    from app.models.items import Item
+
+    text = (
+        "Account,Type\n"
+        "Landscaping Services,Income\n"
+        "Landscaping Services:Installation,Income\n"
+    )
+    assert _upload(client, text, dry_run=0).json()["row_errors"] == 0
+    items = "Item,Rate,Income account\nMulch Installed,95.00,Landscaping Services:Installation\n"
+    r = client.post(
+        "/api/csv/import/items",
+        files={"file": ("items.csv", io.BytesIO(items.encode()), "text/csv")},
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["errors"] == [], r.json()
+    db_session.expire_all()
+    item = db_session.query(Item).filter(Item.name == "Mulch Installed").one()
+    income = db_session.get(Account, item.income_account_id)
+    assert income.name == "Installation"
+    assert income.parent.name == "Landscaping Services"
