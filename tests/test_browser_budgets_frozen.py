@@ -433,3 +433,93 @@ def test_budget_vs_actual_prints_its_dialog_not_the_page_behind(browser):
             assert a["name"] in text, a["name"]
     finally:
         page.close()
+
+
+# Print (NEW-208): the desktop app has no print menu, so each sheet has a
+# Print button that opens its print page (/api/budgets/print, a report's
+# Print, #683). window.open is stubbed to read what it was asked to open.
+STUB_OPEN = """() => {
+    window.__opened = [];
+    window.open = (url, target) => { window.__opened.push([url, target]); return null; };
+}"""
+
+
+def _tab_to(page, selector, limit=80):
+    """Tab from where focus is until `selector` has it; the stops taken."""
+    for n in range(1, limit + 1):
+        page.keyboard.press("Tab")
+        if page.evaluate(f"() => document.activeElement.matches({selector!r})"):
+            return n
+    raise AssertionError(f"Tab never reached {selector}")
+
+
+def test_each_print_button_opens_its_print_page(browser):
+    page = _budgets(browser, 1280)
+    try:
+        page.evaluate(STUB_OPEN)
+        year = page.evaluate("() => BudgetsPage._year")
+
+        # the page's: a real button named Print, reached by Tab from the
+        # year's buttons, before Save All
+        button = page.get_by_role("button", name="Print", exact=True)
+        assert button.count() == 1
+        assert button.evaluate("b => b.tagName") == "BUTTON"
+        order = page.evaluate("""() => [...document.querySelectorAll(
+            '.page-header .btn-group button')].map(b => b.textContent.trim())""")
+        assert order.index("Print") < order.index("Save All"), order
+        page.focus(".page-header .btn-group button")
+        _tab_to(page, "#budgets-print-btn")
+        page.keyboard.press("Enter")
+        assert page.evaluate("() => window.__opened") == [
+            [f"/api/budgets/print?year={year}", "_blank"]
+        ]
+
+        # another year: the year the page shows
+        page.evaluate("() => BudgetsPage.changeYear(-1)")
+        page.wait_for_selector(f".page-header >> text={year - 1}")
+        page.evaluate(STUB_OPEN)
+        page.click("#budgets-print-btn")
+        assert page.evaluate("() => window.__opened") == [
+            [f"/api/budgets/print?year={year - 1}", "_blank"]
+        ]
+
+        # Budget vs Actual's, in its dialog
+        page.evaluate(STUB_OPEN)
+        page.evaluate("() => BudgetsPage.showVariance()")
+        page.wait_for_selector("#modal-body .budget-variance__table")
+        dialog = page.locator("#modal")
+        printing = dialog.get_by_role("button", name="Print", exact=True)
+        assert printing.count() == 1
+        page.focus("#report-period-select")
+        _tab_to(page, "#budget-variance-print-btn")
+        page.keyboard.press("Enter")
+        assert page.evaluate("() => window.__opened") == [
+            [f"/api/budgets/variance/print?year={year - 1}", "_blank"]
+        ]
+    finally:
+        page.close()
+
+
+@pytest.mark.parametrize("role", ["readonly", "accountant"])
+def test_the_print_buttons_stay_for_the_reading_roles(browser, role):
+    """Printing reads only: the read-only and accountant sign-ins keep both
+    Print buttons."""
+    page = _open(browser, 1280, 800, "#/")
+    page.route("**/api/accounts*", lambda r: r.fulfill(json=ACCOUNTS))
+    page.route("**/api/budgets/variance*", lambda r: r.fulfill(json=_variance()))
+    page.route("**/api/budgets?*", lambda r: r.fulfill(json=BUDGETS))
+    page.evaluate("(role) => App.setRole(role)", role)
+    page.goto(page.url.split("#")[0] + "#/budgets")
+    page.wait_for_selector(".budget-grid tbody tr:nth-child(15)")
+    try:
+        assert page.evaluate("() => App.isLocked()")
+        # the role's pass has run: Save All is gone, Print stays
+        assert not page.is_visible(".page-header button:text-is('Save All')")
+        assert page.is_visible("#budgets-print-btn")
+        assert page.is_enabled("#budgets-print-btn")
+        page.evaluate("() => BudgetsPage.showVariance()")
+        page.wait_for_selector("#modal-body .budget-variance__table")
+        assert page.is_visible("#budget-variance-print-btn")
+        assert page.is_enabled("#budget-variance-print-btn")
+    finally:
+        page.close()

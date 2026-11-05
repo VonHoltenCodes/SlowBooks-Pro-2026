@@ -634,9 +634,18 @@ def generate_report_pdf(
     and international installs both print natively; `landscape` turns the
     page on its side for a grid with a column per class or job (#232).
     """
+    return render_pdf(render_report_html(sections, company_settings, landscape))
+
+
+def render_report_html(
+    sections: list, company_settings: dict, landscape: bool = False
+) -> str:
+    """The page a report PDF is rendered from (report_pdf.html), for a
+    print page that has no PDF route of its own to run (the Budgets sheet
+    and Budget vs Actual, NEW-208)."""
     from datetime import date
 
-    html_str = _render(
+    return _render(
         "report_pdf.html",
         company_settings,
         sections=sections,
@@ -644,4 +653,3 @@ def generate_report_pdf(
         landscape=landscape,
         generated_on=date.today().isoformat(),
     )
-    return render_pdf(html_str)
