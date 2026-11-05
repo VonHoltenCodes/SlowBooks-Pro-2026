@@ -262,6 +262,10 @@ const PaymentsPage = {
 
         const custOpts = customers.map(c => `<option value="${c.id}"${prefillCustomerId === c.id ? ' selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
         const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+        // A blank Deposit To posts to Undeposited Funds (1200) — say so, the
+        // way QuickBooks names it, when the company has that account (#709).
+        const undeposited = accounts.some(a => a.is_control && a.account_number === '1200');
+        const blankDeposit = undeposited ? 'Undeposited Funds (deposit later)' : '--';
 
         openModal('Record Payment', `
             <form id="payment-form" onsubmit="PaymentsPage.save(event)">
@@ -285,7 +289,7 @@ const PaymentsPage = {
                         <input name="reference"></div>
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
-                            <option value="">--</option>${bankOpts}</select></div>
+                            <option value="">${blankDeposit}</option>${bankOpts}</select></div>
                     ${PaymentClass.groupHtml('payment-class')}
                     <div class="form-group full-width"><label>Notes</label>
                         <textarea name="notes"></textarea></div>

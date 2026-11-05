@@ -25,7 +25,12 @@ const BatchPaymentsPage = {
             byCustomer[cname].push(inv);
         }
 
-        const acctOpts = accounts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+        // A blank Deposit To posts to Undeposited Funds (1200): the first
+        // option names it, so the account itself is not listed again (#709).
+        const isUndeposited = a => a.is_control && a.account_number === '1200';
+        const blankDeposit = accounts.some(isUndeposited) ? 'Undeposited Funds (deposit later)' : '--';
+        const acctOpts = accounts.filter(a => !isUndeposited(a))
+            .map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
 
         let html = `
             <div class="page-header">
@@ -36,7 +41,7 @@ const BatchPaymentsPage = {
                     <div class="form-group"><label>Payment Date *</label>
                         <input name="date" type="date" required value="${todayISO()}"></div>
                     <div class="form-group"><label>Deposit To</label>
-                        <select name="deposit_to_account_id"><option value="">Undeposited Funds</option>${acctOpts}</select></div>
+                        <select name="deposit_to_account_id"><option value="">${blankDeposit}</option>${acctOpts}</select></div>
                     <div class="form-group"><label>Method</label>
                         <select name="method">
                             <option value="check">Check</option><option value="cash">Cash</option>
