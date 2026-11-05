@@ -2436,6 +2436,7 @@ def run_window(port: int, log_fh=None) -> int:
         gui = "edgechromium" if sys.platform == "win32" else None
         # Blocks until the window is closed. private_mode/storage_path:
         # see the comment above where storage_dir is created.
+        install_mac_print_panel()
         webview.start(gui=gui, private_mode=False, storage_path=str(storage_dir))
         # Clean exit: save again in case the closing event never fired.
         save_window_geometry(geometry_tracker.geometry(), geometry_path)
@@ -2967,6 +2968,88 @@ def _repair_schema(argv) -> int:
         print(f"dropped (empty) : {', '.join(result.dropped)}")
     print(f"result          : {'OK' if result.ok else 'FAILED'} - {result.message}")
     return 0 if result.ok else 1
+
+
+def install_mac_print_panel() -> bool:
+    """On a Mac, give a document window's print panel an orientation, a paper
+    size and a scale, and start it landscape when the sheet asks (NEW-209).
+
+    pywebview's ``BrowserView.print_webview`` prints a copy of the shared
+    print info (portrait, fit to width) with the panel's default options,
+    which offer no orientation; WebKit also ignores a sheet's
+    ``@page { size: landscape }``. So the Budgets sheets, twelve months
+    wide, printed portrait with no way to turn them. This replaces that one
+    function with the same steps plus two: the page says how it wants to be
+    printed with ``<html data-print-orientation="landscape">`` (read through
+    the web view before the panel opens), and the panel shows Orientation,
+    Paper Size and Scale for the person to change. Anything unexpected
+    falls back to pywebview's own. Returns whether it was installed."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import AppKit
+        import Foundation
+        from webview.platforms.cocoa import BrowserView
+    except Exception:
+        return False
+    if getattr(BrowserView.print_webview, "_slowbooks", False):
+        return True
+    original = BrowserView.print_webview
+
+    def run(webview, landscape: bool) -> None:
+        info = AppKit.NSPrintInfo.sharedPrintInfo().copy()
+        if landscape:
+            info.setOrientation_(AppKit.NSPaperOrientationLandscape)
+        # the settings pywebview takes from Safari
+        info.setHorizontalPagination_(AppKit.NSFitPagination)
+        info.setHorizontallyCentered_(Foundation.NO)
+        info.setVerticallyCentered_(Foundation.NO)
+        bounds = info.imageablePageBounds()
+        paper = info.paperSize()
+        if Foundation.NSWidth(bounds) > paper.width:
+            bounds.origin.x = 0
+            bounds.size.width = paper.width
+        if Foundation.NSHeight(bounds) > paper.height:
+            bounds.origin.y = 0
+            bounds.size.height = paper.height
+        info.setBottomMargin_(Foundation.NSMinY(bounds))
+        info.setTopMargin_(
+            paper.height - Foundation.NSMinY(bounds) - Foundation.NSHeight(bounds)
+        )
+        info.setLeftMargin_(Foundation.NSMinX(bounds))
+        info.setRightMargin_(
+            paper.width - Foundation.NSMinX(bounds) - Foundation.NSWidth(bounds)
+        )
+        operation = webview._printOperationWithPrintInfo_(info)
+        panel = operation.printPanel()
+        panel.setOptions_(
+            panel.options()
+            | AppKit.NSPrintPanelShowsOrientation
+            | AppKit.NSPrintPanelShowsPaperSize
+            | AppKit.NSPrintPanelShowsScaling
+        )
+        operation.runOperationModalForWindow_delegate_didRunSelector_contextInfo_(
+            webview.window(), None, None, None
+        )
+
+    def print_webview(webview):
+        def asked(result, error):
+            try:
+                run(webview, str(result or "").strip().lower() == "landscape")
+            except Exception:
+                original(webview)
+
+        try:
+            webview.evaluateJavaScript_completionHandler_(
+                "document.documentElement.getAttribute('data-print-orientation')||''",
+                asked,
+            )
+        except Exception:
+            original(webview)
+
+    print_webview._slowbooks = True
+    BrowserView.print_webview = staticmethod(print_webview)
+    return True
 
 
 def main() -> int:

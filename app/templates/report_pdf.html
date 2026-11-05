@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en"{% if landscape %} data-print-orientation="landscape"{% endif %}>
 <head>
     <title>{{ (sections[0].title if sections and sections[0].title else 'Report') }}</title>
     <meta charset="utf-8">

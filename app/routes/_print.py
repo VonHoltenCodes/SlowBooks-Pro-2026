@@ -21,9 +21,10 @@ from fastapi.responses import HTMLResponse
 # didFinishNavigation and then fires "pywebviewready"), so printing at
 # onload opened no dialog there, ever (NEW-208, 2.31.7 gate). There the
 # page prints once, at pywebviewready or a moment after load, whichever
-# comes first. A Print button on the sheet, not printed, starts it again.
+# comes first. A Print button on the sheet (bottom right, clear of the
+# header; not printed) starts it again.
 PRINT_SCRIPT = (
-    "<style>.sb-print-again{position:fixed;top:8px;right:8px;z-index:9;"
+    "<style>.sb-print-again{position:fixed;bottom:10px;right:10px;z-index:9;"
     "font:13px sans-serif;padding:4px 14px;cursor:pointer}"
     "@media print{.sb-print-again{display:none}}</style>"
     '<button type="button" class="sb-print-again" id="sb-print-again">Print</button>'
