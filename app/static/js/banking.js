@@ -3000,7 +3000,7 @@ const BankingPage = {
             const amtCls = t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)';
             const said = ['Cleared', formatDate(t.date), t.payee || t.description, formatCurrency(t.amount)].filter(Boolean).join(', ');
             return `<tr ${cls} data-line="${t.id}">
-                <td><input type="checkbox" id="recon-line-${t.id}" ${t.reconciled ? 'checked' : ''} aria-label="${escapeHtml(said)}"
+                <td><input type="checkbox" data-write id="recon-line-${t.id}" ${t.reconciled ? 'checked' : ''} aria-label="${escapeHtml(said)}"
                     onchange="BankingPage.toggleCleared(${reconId}, ${t.id}, this)"></td>
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || t.description || '')}${t.matched ? ' <span title="matched to a statement line" style="color:var(--text-success);">●</span>' : ''}</td>

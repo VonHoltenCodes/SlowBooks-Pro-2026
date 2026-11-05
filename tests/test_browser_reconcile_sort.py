@@ -241,7 +241,8 @@ def test_the_other_headings_sort_and_say_so(browser):
 
 
 def test_a_read_only_sign_in_sorts_too(browser):
-    """Sorting reads the list: the headings stay buttons for every role."""
+    """Sorting reads the list: the headings stay buttons for every role,
+    while the ticks, which write, are locked."""
     page, _ = _page(browser)
     try:
         page.evaluate(
@@ -253,6 +254,13 @@ def test_a_read_only_sign_in_sorts_too(browser):
             ".filter(b => b.offsetParent !== null).length"
         )
         assert shown == 4
+        # the ticks are writes: shown, and locked (a read-only sign-in was
+        # offered them enabled and refused by the server on a click)
+        ticks = page.evaluate(
+            "() => [...document.querySelectorAll('#recon-view input[id^=recon-line-]')]"
+            ".map(b => b.disabled)"
+        )
+        assert ticks and all(ticks)
         page.get_by_role("button", name="Ref #", exact=True).click()
         page.wait_for_function(
             "() => document.querySelector('#recon-view thead th:nth-child(4)')"
