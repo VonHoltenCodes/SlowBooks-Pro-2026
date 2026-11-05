@@ -42,6 +42,14 @@ its uninstaller (Settings → Apps) in your own account; no administrator
 password is asked for. You do not need to run it "as administrator" or from
 another account, and the installer can stay in your Downloads folder.
 
+- **The first page always offers "Install for me only" first**, also when
+  the installer was started with *Run as administrator*. An administrator
+  who wants the Program Files install chooses **Install for all users** on
+  that page (or runs the installer with `/ALLUSERS`).
+- **Answering No at the administrator prompt closes the installer** without
+  installing anything and without a message: that is Windows declining the
+  elevation, not an error. Run the installer again and choose **Install for
+  me only**, which needs no administrator.
 - **Your books are in the same place either way**:
   `%LOCALAPPDATA%\SlowBooksPro`. Switching between a per-user and an
   all-users install keeps them.
