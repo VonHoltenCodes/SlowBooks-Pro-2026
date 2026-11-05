@@ -96,21 +96,16 @@ const BankingPage = {
                     <button class="btn btn-primary" type="submit">Connect Mercury</button>
                 </form>`;
         } else {
-            const banks = rows.filter(a => a.bank_kind === 'bank');
             const tableRows = feed.accounts.map(a => `<tr data-mercury-account="${escapeHtml(a.id)}">
                 <td>${escapeHtml(a.name)} ${a.last_four ? '••••' + escapeHtml(a.last_four) : ''}</td>
                 <td class="amount mercury-current">${escapeHtml(a.balance)} USD</td>
                 <td class="amount mercury-available">${escapeHtml(a.available_balance)} USD</td>
                 <td class="amount mercury-inflight">${a.in_flight_balance === undefined ? '—' : escapeHtml(a.in_flight_balance) + ' USD'}</td>
-                <td><select class="mercury-map" data-mercury-id="${escapeHtml(a.id)}" data-admin
-                    aria-label="Import ${escapeHtml(a.name)} into">
-                    ${BankingPage._importOptions(rows, feeds, feed.account_map[a.id], ['bank'])}
-                </select></td></tr>`).join('');
+                <td>${BankingPage._importCell('mercury', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank'])}</td></tr>`).join('');
             body = `<p>Sync posted deposits and withdrawals into <em>To review</em>.
                 Match them to payments already recorded, or review and add them to your books.
                 Syncing does not mark invoices paid.</p>
-                ${!banks.length ? BankingPage._noBankAccountHint('bank account') : ''}
-                <p class="form-hint hidden" data-admin-note>An administrator chooses which bank account each Mercury account imports into${Object.keys(feed.account_map || {}).length ? '.' : '; until one does, Sync has nothing to import.'}</p>
+                <p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)}</p>
                 <p>${feed.last_sync ? 'Last successful sync: ' + escapeHtml(feed.last_sync.replace('T', ' ')) : 'Not synced yet.'}</p>
                 <div class="table-container"><table id="mercury-balances">
                     <thead><tr><th scope="col">Mercury account</th><th scope="col" class="amount">Current balance</th><th scope="col" class="amount">Available</th><th scope="col" class="amount">Incoming transfers</th><th scope="col">Imports into</th></tr></thead>
@@ -235,12 +230,7 @@ const BankingPage = {
         e.preventDefault();
         const button = e.target.querySelector('button[type=submit]');
         const since = $('#mercury-since').value;
-        const mapping = {}, ledger_mapping = {};
-        document.querySelectorAll('.mercury-map').forEach(sel => {
-            const [kind, id] = BankingPage._importChoice(sel.value);
-            if (kind === 'acct') ledger_mapping[sel.dataset.mercuryId] = id;
-            else if (kind === 'feed') mapping[sel.dataset.mercuryId] = id;
-        });
+        const { mapping, ledger_mapping } = BankingPage._feedMapping('mercury');
         button.disabled = true;
         button.textContent = 'Syncing…';
         try {
@@ -344,8 +334,154 @@ const BankingPage = {
         return m ? [m[1], parseInt(m[2], 10)] : ['none', 0];
     },
 
-    _noBankAccountHint(what) {
-        return `<p>The chart has no ${what} yet. Add one with <strong>+ New Bank Account</strong> above, or mark an account in the Chart of Accounts as a bank account, then choose it here.</p>`;
+    // Whether this sign-in may change where a feed imports (#384's rule:
+    // the map routes are an administrator's). The sections are also drawn
+    // in a test probe that loads this file without app.js.
+    _mayMap() { return typeof App === 'undefined' || App.isAdmin(); },
+
+    // The sentence a sign-in that may not change the mapping reads above the
+    // table (#718), shown by App.adminPass.
+    _onlyAdminMaps(accountMap) {
+        return 'Only an administrator can change where a feed imports.' +
+            (Object.keys(accountMap || {}).length ? '' : ' Until one chooses an account, Sync has nothing to import.');
+    },
+
+    // A feed row's "Imports into" cell (#718). A dropdown with nothing in it
+    // but "— not imported —" looked broken: an administrator spent a week
+    // unable to map a connected feed whose checking account sat in the chart
+    // as a plain asset. With nothing to offer, the row says why and offers
+    // both ways out (+ New bank account, or making an account already in the
+    // chart a bank account); with a list, the second sits under it for an
+    // account that is not in it. A sign-in that may not change the mapping
+    // reads it as text, never a greyed dropdown.
+    _importCell(source, rowId, rowName, rows, feeds, mapped, kinds) {
+        if (!BankingPage._mayMap()) {
+            const acct = mapped && rows.find(r => r.feed && r.feed.bank_account_id === mapped);
+            const rec = !acct && mapped && feeds.find(b => b.id === mapped);
+            const shown = acct ? accountLabel(acct) : rec ? escapeHtml(rec.account_name || rec.name) : 'Not imported';
+            return `<span class="feed-imports-into">${shown}</span>`;
+        }
+        const opts = BankingPage._importOptions(rows, feeds, mapped, kinds);
+        const data = `data-source="${source}" data-row="${escapeHtml(rowId)}" data-row-name="${escapeHtml(rowName)}"`;
+        const useOwn = `<button type="button" class="btn btn-secondary btn-sm" data-admin ${data}
+            onclick="BankingPage.showUseOwnAccount(this)">Use an account I already have…</button>`;
+        const attrs = source === 'mercury'
+            ? `class="mercury-map" data-mercury-id="${escapeHtml(rowId)}"`
+            : `class="simplefin-map" data-sfid="${escapeHtml(rowId)}"`;
+        if (!/<option value="(acct|feed):/.test(opts)) {
+            const what = kinds.includes('credit_card') ? 'a bank or credit-card account' : 'a bank account';
+            return `<p class="feed-no-bank" style="margin:0 0 6px;">No account in your chart is marked as ${what} yet.</p>
+                <div class="btn-group">
+                    <button type="button" class="btn btn-primary btn-sm" data-admin ${data}
+                        onclick="BankingPage.newAccountForFeed(this)">+ New bank account</button>
+                    ${useOwn}
+                </div>`;
+        }
+        return `<select ${attrs} data-admin aria-label="Import ${escapeHtml(rowName)} into">${opts}</select>
+            <div style="margin-top:4px;">${useOwn}</div>`;
+    },
+
+    // The mapping the page's dropdowns hold, as the map routes take it: a
+    // chart account under ledger_mapping, a feed record under mapping, a
+    // row "— not imported —" (or with no dropdown) left out, which unmaps it.
+    _feedMapping(source) {
+        const key = source === 'mercury' ? 'mercuryId' : 'sfid';
+        const mapping = {}, ledger_mapping = {};
+        document.querySelectorAll(source === 'mercury' ? '.mercury-map' : '.simplefin-map').forEach(sel => {
+            const [kind, id] = BankingPage._importChoice(sel.value);
+            if (kind === 'acct') ledger_mapping[sel.dataset[key]] = id;
+            else if (kind === 'feed') mapping[sel.dataset[key]] = id;
+        });
+        return { mapping, ledger_mapping };
+    },
+
+    // Save the mapping with one row pointed at a chart account: the map
+    // routes replace the whole map, so the other rows go as the page has them.
+    async _mapFeedRow(source, rowId, accountId) {
+        const { mapping, ledger_mapping } = BankingPage._feedMapping(source);
+        delete mapping[rowId];
+        ledger_mapping[rowId] = accountId;
+        if (source === 'mercury') {
+            await API.post('/mercury/map', { mapping, ledger_mapping });
+            return;
+        }
+        const reversed = [...document.querySelectorAll('.simplefin-reverse')]
+            .filter(box => box.checked).map(box => box.dataset.sfid);
+        await API.post('/simplefin/map', { mapping, ledger_mapping, reversed });
+    },
+
+    // + New bank account from a feed row: the usual dialog, and the account
+    // it makes is where that row imports when the dialog is done.
+    newAccountForFeed(btn) {
+        const { source, row, rowName } = btn.dataset;
+        BankingPage.showAccountForm(null, { source, row, rowName });
+    },
+
+    // "Use an account I already have…" (#718): the chart's asset accounts
+    // (and its liability accounts, for a feed that takes credit cards) that
+    // are not bank or card accounts yet. The pick becomes a Bank (or Credit
+    // card) account through the chart's own route, PUT /accounts/:id, and
+    // the row is mapped to it through the feed's map route.
+    async showUseOwnAccount(btn) {
+        const { source, row, rowName } = btn.dataset;
+        const cards = source !== 'mercury';
+        let accounts;
+        try { accounts = await API.get('/accounts?active_only=true'); }
+        catch (err) { toast(err.message, 'error'); return; }
+        const fits = (a) => !a.bank_kind && !a.is_control && a.is_active !== false && (
+            (a.account_type === 'asset' && a.detail_type !== 'accounts_receivable') ||
+            (cards && a.account_type === 'liability' && a.detail_type !== 'accounts_payable'));
+        const choices = accounts.filter(fits);
+        BankingPage._ownChoices = choices;
+        if (!choices.length) {
+            openModal('Use an account I already have', `
+                <p>Your chart has no ${cards ? 'asset or liability' : 'asset'} account that could become ${cards ? 'a bank or credit-card' : 'a bank'} account.
+                    Use <strong>+ New bank account</strong> instead.</p>
+                <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button></div>`);
+            return;
+        }
+        const group = (label, type) => {
+            const list = choices.filter(a => a.account_type === type);
+            return list.length ? `<optgroup label="${label}">${list.map(a =>
+                `<option value="${a.id}">${accountLabel(a)}</option>`).join('')}</optgroup>` : '';
+        };
+        openModal('Use an account I already have', `
+            <form onsubmit="BankingPage.useOwnAccount(event)" data-source="${escapeHtml(source)}" data-row="${escapeHtml(row)}" data-row-name="${escapeHtml(rowName)}">
+                <p>Choose the account in your chart that ${escapeHtml(rowName)} is. It becomes ${cards ? 'a bank account (or a credit-card account, for a liability)' : 'a bank account'}
+                    with a register, and this feed imports into it.</p>
+                <div class="form-group"><label for="own-account">Account</label>
+                    <select id="own-account" name="account_id" required>
+                        ${group(cards ? 'Asset accounts: become bank accounts' : 'Asset accounts', 'asset')}
+                        ${cards ? group('Liability accounts: become credit-card accounts', 'liability') : ''}
+                    </select></div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Use this account</button>
+                </div>
+            </form>`);
+    },
+
+    async useOwnAccount(e) {
+        e.preventDefault();
+        const form = e.target;
+        const { source, row, rowName } = form.dataset;
+        const acct = (BankingPage._ownChoices || []).find(a => a.id === Number(form.account_id.value));
+        if (!acct) return;
+        const kind = acct.account_type === 'liability' ? 'credit_card' : 'bank';
+        const what = kind === 'bank' ? 'a bank account' : 'a credit-card account';
+        if (!confirm(`${accountWords(acct)} will become ${what} and get a register. ${rowName} will import into it.`)) return;
+        const button = form.querySelector('button[type=submit]');
+        button.disabled = true;
+        try {
+            await API.put(`/accounts/${acct.id}`, { detail_type: kind, bank_kind: kind });
+            await BankingPage._mapFeedRow(source, row, acct.id);
+            closeModal();
+            toast(`${accountWords(acct)} is now ${what}. ${rowName} imports into it.`);
+            BankingPage.go('#/banking');
+        } catch (err) {
+            button.disabled = false;
+            toast(err.message, 'error');
+        }
     },
 
     _renderFeedSection(feed, feeds, rows = []) {
@@ -371,16 +507,17 @@ const BankingPage = {
                     </div>
                 </form>`;
         } else {
-            const options = (sfId) => BankingPage._importOptions(
-                rows, feeds, feed.account_map[sfId], ['bank', 'credit_card']);
             const reversed = new Set(feed.reversed || []);
+            const mayMap = BankingPage._mayMap();
+            const signs = (sfId) => mayMap
+                ? `<label style="font-size:11px; white-space:nowrap;"><input type="checkbox" data-sfid="${escapeHtml(sfId)}" class="simplefin-reverse" data-admin
+                        ${reversed.has(sfId) ? 'checked' : ''}> Reverse signs</label>`
+                : `<span style="font-size:11px;">${reversed.has(sfId) ? 'Signs reversed' : 'As the bank sends them'}</span>`;
             const tableRows = feed.accounts.map(a => `<tr>
                     <td>${escapeHtml(a.name)}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(a.org || '')}</div></td>
                     <td class="amount">${escapeHtml(a.balance)} ${escapeHtml(a.currency)}</td>
-                    <td><select data-sfid="${escapeHtml(a.id)}" class="simplefin-map" data-admin
-                        aria-label="Import ${escapeHtml(a.name)} into">${options(a.id)}</select></td>
-                    <td><label style="font-size:11px; white-space:nowrap;"><input type="checkbox" data-sfid="${escapeHtml(a.id)}" class="simplefin-reverse" data-admin
-                        ${reversed.has(a.id) ? 'checked' : ''}> Reverse signs</label></td>
+                    <td>${BankingPage._importCell('simplefin', a.id, a.name, rows, feeds, feed.account_map[a.id], ['bank', 'credit_card'])}</td>
+                    <td>${signs(a.id)}</td>
                 </tr>`).join('');
             body = `
                 <p style="font-size:12px; margin-bottom:8px;">
@@ -393,8 +530,7 @@ const BankingPage = {
                     If a feed shows a bank account's balance as negative and its deposits as withdrawals,
                     tick <em>Reverse signs</em> for it before syncing.
                 </p>
-                ${!rows.some(a => a.bank_kind === 'bank' || a.bank_kind === 'credit_card') ? BankingPage._noBankAccountHint('bank or credit-card account') : ''}
-                <p class="form-hint hidden" data-admin-note>An administrator chooses which bank account each feed imports into and whether its signs are reversed${Object.keys(feed.account_map || {}).length ? '.' : '; until one does, Sync has nothing to import.'}</p>
+                <p class="form-hint hidden" data-admin-note>${BankingPage._onlyAdminMaps(feed.account_map)} The administrator also sets whether a feed's signs are reversed.</p>
                 <div class="table-container"><table>
                     <thead><tr><th scope="col">Bank feed</th><th scope="col" class="amount">Balance</th><th scope="col">Imports into</th><th scope="col">Amounts</th></tr></thead>
                     <tbody>${tableRows}</tbody>
@@ -421,12 +557,7 @@ const BankingPage = {
     },
 
     async saveSimpleFINMap() {
-        const mapping = {}, ledger_mapping = {};
-        document.querySelectorAll('.simplefin-map').forEach(sel => {
-            const [kind, id] = BankingPage._importChoice(sel.value);
-            if (kind === 'acct') ledger_mapping[sel.dataset.sfid] = id;
-            else mapping[sel.dataset.sfid] = kind === 'feed' ? id : 0;
-        });
+        const { mapping, ledger_mapping } = BankingPage._feedMapping('simplefin');
         const reversed = [...document.querySelectorAll('.simplefin-reverse')]
             .filter(box => box.checked).map(box => box.dataset.sfid);
         await API.post('/simplefin/map', { mapping, ledger_mapping, reversed });
@@ -505,13 +636,18 @@ const BankingPage = {
     // `accountId`: the account a register's Import file asked for, chosen in
     // the list when it has no feed yet (2.31.2 gate, NEW-189: it opened on
     // 1000 Checking, the list's first, for every imported account).
-    async showAccountForm(accountId = null) {
+    // `feedRow` ({source, row, rowName}): a bank feed row's + New bank
+    // account (#718); the account the dialog makes is where it imports.
+    async showAccountForm(accountId = null, feedRow = null) {
+        BankingPage._accountFormFeedRow = feedRow;
         const [bankAccts, feeds] = await Promise.all([
             API.get('/accounts?bank=1&active_only=true'),
             API.get('/banking/accounts'),
         ]);
         const taken = new Set(feeds.map(f => f.account_id));
-        const free = bankAccts.filter(a => !taken.has(a.id));
+        // Mercury feeds bank accounts only
+        const bankOnly = !!feedRow && feedRow.source === 'mercury';
+        const free = bankAccts.filter(a => !taken.has(a.id) && (!bankOnly || a.bank_kind === 'bank'));
         const opts = free.map(a => `<option value="${a.id}">${accountLabel(a)} (${BankingPage._kindLabel(a.bank_kind)})</option>`).join('');
         openModal('New Bank Account', `
             <form onsubmit="BankingPage.saveAccount(event)">
@@ -525,7 +661,7 @@ const BankingPage = {
                             <div class="form-group"><label>Account name</label><input name="new_name"></div>
                             <div class="form-group"><label>Account number</label><input name="new_number" placeholder="e.g. 1020"></div>
                             <div class="form-group"><label>Kind</label>
-                                <select name="new_kind"><option value="bank">Bank (asset)</option><option value="credit_card">Credit card (liability)</option></select></div>
+                                <select name="new_kind"><option value="bank">Bank (asset)</option>${bankOnly ? '' : '<option value="credit_card">Credit card (liability)</option>'}</select></div>
                         </div>
                     </div>
                     <div class="form-group"><label>Feed / statement name *</label>
@@ -618,7 +754,15 @@ const BankingPage = {
                 }
                 await API.post('/banking/accounts', { ...body, post_difference: true });
             }
-            toast('Bank account created');
+            const feedRow = BankingPage._accountFormFeedRow;
+            BankingPage._accountFormFeedRow = null;
+            if (feedRow) {
+                // the page under the dialog still holds the other rows' choices
+                await BankingPage._mapFeedRow(feedRow.source, feedRow.row, parseInt(accountId, 10));
+                toast(`Bank account created. ${feedRow.rowName} imports into it.`);
+            } else {
+                toast('Bank account created');
+            }
             closeModal();
             BankingPage.go('#/banking');
         } catch (err) { toast(err.message, 'error'); }

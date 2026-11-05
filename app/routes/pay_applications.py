@@ -55,6 +55,13 @@ router = APIRouter(prefix="/api/pay-applications", tags=["pay-applications"])
 
 _ZERO = Decimal("0")
 _OPEN = ("draft", "submitted")
+# What New pay application answers on a job with no schedule of values (#714);
+# the Pay apps tab shows the same sentence in place of the New button.
+NO_SOV_MESSAGE = (
+    "This job has no schedule of values yet: set the contract on the job's "
+    "Contract tab (Build from accepted estimate, or add the lines by hand), "
+    "then bill against it here."
+)
 
 
 class _LineInput:
@@ -336,6 +343,11 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
     job = db.get(Job, data.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
+    # An application bills against the schedule of values, one line per SOV
+    # line: with none it had no lines, and the form opened on an empty grid
+    # with nothing to type an amount into (#714).
+    if not job.sov_lines:
+        raise HTTPException(status_code=409, detail=NO_SOV_MESSAGE)
     # Only one draft/submitted application per job at a time.
     open_one = (
         db.query(PayApplication)

@@ -24,7 +24,17 @@ to your SimpleFIN bridge over HTTPS.
    shown again, anywhere.
 5. Map each bridge account: the **Imports into** list offers every bank and
    credit-card account in your chart, and picking one makes the feed for it
-   when you save the mapping (since 2.31.1). Tick **Reverse signs** on a feed
+   when you save the mapping (since 2.31.1). An account is offered once its
+   detail type is Bank or Credit Card. If none is, the row says "No account
+   in your chart is marked as a bank or credit-card account yet." and offers
+   **+ New bank account** (the account it makes is where that feed imports)
+   and **Use an account I already have…**, which lists your chart's asset
+   and liability accounts: the one you pick becomes a Bank (or Credit Card)
+   account with a register, and the feed imports into it. The same button
+   sits under the list when your account is not in it, which is the usual
+   case for a checking account added to the chart as a plain asset. A
+   sign-in other than the administrator's sees where each feed imports as
+   text. Tick **Reverse signs** on a feed
    whose bridge reports money out as positive. Then click **Sync Now**
    whenever you want fresh transactions.
 

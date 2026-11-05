@@ -1244,18 +1244,32 @@ const JobsPage = {
 
     async payAppsHtml() {
         const job = JobsPage._job;
-        const [list, deposits] = await Promise.all([
+        const [list, deposits, contract] = await Promise.all([
             API.get(`/pay-applications?job_id=${job.id}`),
             API.get(`/jobs/${job.id}/deposits`).catch(() => ({ deposits: [], received: 0, applied: 0, unapplied: 0 })),
+            API.get(`/jobs/${job.id}/contract`).catch(() => null),
         ]);
         JobsPage._paList = list;
         JobsPage._paDeposits = deposits;
-        return JobsPage.paLogHtml(list)
+        // an application bills the schedule of values line by line (#714)
+        const hasSov = !contract || (contract.sov || []).length > 0;
+        return JobsPage.paLogHtml(list, hasSov)
             + `<div id="pa-form-area" style="margin-top:16px"></div>`
             + JobsPage.depositsBlockHtml(deposits);
     },
 
-    paLogHtml(list) {
+    // The Pay apps tab's sentence for a job with no schedule of values
+    // (#714), the one POST /pay-applications refuses with: New pay
+    // application made an application with no lines, an empty grid with
+    // nothing to type an amount into, and a contractor took it for a broken
+    // form. It stands where the New button would, and links to Contract.
+    paNoSovHtml() {
+        return `<p id="pa-no-sov" role="note" style="margin:0 0 8px">This job has no schedule of values yet: set the contract on the job's
+            <a href="#" onclick="event.preventDefault(); JobsPage.setTab('contract')">Contract tab</a>
+            (Build from accepted estimate, or add the lines by hand), then bill against it here.</p>`;
+    },
+
+    paLogHtml(list, hasSov = true) {
         list = list || [];
         const m = JobsPage.money;
         const body = list.map(a => {
@@ -1274,9 +1288,9 @@ const JobsPage = {
                 <td style="white-space:nowrap">${JobsPage.paRowActions(a)}</td>
             </tr>`;
         }).join('');
-        return `<div class="form-actions" data-write style="justify-content:flex-start;margin-bottom:8px">
+        return `${hasSov ? `<div class="form-actions" data-write style="justify-content:flex-start;margin-bottom:8px">
                 <button class="btn btn-primary" onclick="JobsPage.paNew()">+ New pay application</button>
-            </div>
+            </div>` : JobsPage.paNoSovHtml()}
             <div class="table-container"><table class="data-table" id="pa-log" style="font-size:12px">
                 <thead><tr>
                     <th scope="col">No</th><th scope="col">Period</th><th scope="col">Status</th>

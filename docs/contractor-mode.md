@@ -505,6 +505,14 @@ application** — the contractor's periodic bill against the contract, the
 counterpart to a commercial payment application and its line detail (#555).
 Each application bills a period; approving it creates the invoice.
 
+**A job needs a schedule of values first.** An application has one line per
+SOV line, so on a job with none the Pay apps tab says "This job has no
+schedule of values yet: set the contract on the job's Contract tab (Build
+from accepted estimate, or add the lines by hand), then bill against it
+here." in place of **+ New pay application**, with a link to the Contract
+tab, and `POST /api/pay-applications` refuses with 409 and the same sentence
+(#714).
+
 **The application and its math.** Every SOV line (work, allowance, contingency
 and change-order lines all bill the same way) carries, per period:
 
