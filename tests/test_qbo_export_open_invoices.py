@@ -343,6 +343,26 @@ def test_a_carried_invoices_lines_are_not_edited(client, db_session, seed_accoun
     assert _balance(client, number="1100") == before
     aging = client.get("/api/reports/ar-aging", params={"as_of_date": "2099-12-31"})
     assert Decimal(str(aging.json()["totals"]["total"])) == before
+    # W-118: a change to a line's description alone is a change too, refused
+    # with the same sentence rather than answered 200 and dropped
+    stored = [ln.description for ln in invoice.lines]
+    worded = [dict(line) for line in same]
+    worded[0]["description"] = worded[0]["description"] + " (spring)"
+    resp = client.put(f"/api/invoices/{invoice.id}", json={"lines": worded})
+    assert resp.status_code == 409, resp.text
+    assert "carried over from QuickBooks Online" in resp.json()["detail"]
+    db_session.expire_all()
+    invoice = db_session.get(Invoice, invoice.id)
+    assert [ln.description for ln in invoice.lines] == stored
+    # a line with no description and one sent blank are the same: no change
+    invoice.lines[0].description = None
+    db_session.commit()
+    blank = [dict(line) for line in same]
+    blank[0]["description"] = ""
+    resp = client.put(f"/api/invoices/{invoice.id}", json={"lines": blank})
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+    assert db_session.get(Invoice, invoice.id).transaction_id is None
 
 
 def test_new_invoices_continue_past_the_carried_numbers(

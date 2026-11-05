@@ -343,15 +343,18 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
 
         if is_carried_invoice(db, invoice):
             # the form sends every line as stored: the same lines are no
-            # change, and are left out so nothing is posted for them
-            sent = [
-                (ln.item_id, _q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))))
-                for ln in data.lines
-            ]
-            stored = [
-                (ln.item_id, _q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))))
-                for ln in invoice.lines
-            ]
+            # change, and are left out so nothing is posted for them; a
+            # line's words count as much as its figures (W-118: a changed
+            # description answered 200 and was dropped)
+            def as_sent(ln):
+                return (
+                    ln.item_id,
+                    _q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))),
+                    ln.description or "",
+                )
+
+            sent = [as_sent(ln) for ln in data.lines]
+            stored = [as_sent(ln) for ln in invoice.lines]
             if sent != stored:
                 raise HTTPException(
                     status_code=409,

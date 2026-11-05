@@ -2161,7 +2161,8 @@ const App = {
         },
         accounts: {
             template: 'chart-of-accounts-template.csv',
-            columns: 'Number, Name, Type, Parent, Description, Active',
+            // a Name written Parent:Child with Parent blank is a sub-account (W-119)
+            columns: 'Number, Name (a sub-account may be written Parent:Child, its type left blank to take the parent\'s), Type, Parent, Description, Active',
         },
     },
 

@@ -685,13 +685,14 @@ def test_a_leaf_name_under_another_parent_is_another_account(
 _FOOTER = "Tuesday, Nov 03, 2026 09:00:00 AM GMT-6 - Accrual Basis"
 
 
-def _controls_export(*, aging=True, journal_invoice=True, more=False):
+def _controls_export(*, aging=True, journal_invoice=True, more=False, bill_paid=False):
     """The export as loose workbooks. ``aging`` adds the A/R Aging Detail
     report (invoice 1001 open for 740.00 of 1,240.00); ``journal_invoice``
     False numbers the Journal's invoice 999, so the Journal does not hold
     the report's invoice. ``more`` adds Cedar Hollow's other two open
     invoices (1141 for 5,750.00 and 1148 for 8,090.00, nothing paid) and a
-    300.00 customer payment not applied."""
+    300.00 customer payment not applied. ``bill_paid`` pays the 300.00
+    bill from Checking, leaving nothing on Accounts Payable (A/P)."""
     num = "1001" if journal_invoice else "999"
     balance_sheet = [
         ["Invented Landscaping Co"],
@@ -800,13 +801,29 @@ def _controls_export(*, aging=True, journal_invoice=True, more=False):
     checking, receivable, income = (
         ("500.00", "14280.00", "15080.00") if more else ("200.00", "740.00", "1240.00")
     )
+    payable_row = ["Accounts Payable (A/P)", "", "=300.00"]
+    if bill_paid:
+        journal += [
+            ["", "08/20/2026", "Bill Payment (Check)", "", "Brookside", "Plants"]
+            + ["Accounts Payable (A/P)", "=300.00"],
+            ["", "", "", "", "", "Plants", "Checking", "", "=300.00"],
+            ["", "", "", "", "", "", "", "=300.00", "=300.00"],
+            [""],
+        ]
+        checking = f"{Decimal(checking) - 300:.2f}"
+        payable_row = ["Accounts Payable (A/P)", "", ""]
+        for row in balance_sheet:
+            if row[0].strip() in ("Accounts Payable (A/P)", "Total Accounts Payable"):
+                row[1] = "=0.00"
+            elif row[0].strip() == "Checking":
+                row[1] = f"={checking}"
     trial_balance = [
         ["Invented Landscaping Co"],
         ["Trial Balance"],
         ["", "Debit", "Credit"],
         ["Checking", f"={checking}"],
         ["Accounts Receivable (A/R)", f"={receivable}"],
-        ["Accounts Payable (A/P)", "", "=300.00"],
+        payable_row,
         ["Installation", "", f"={income}"],
         ["Job Materials", "=600.00"],
         ["TOTAL", "=1540.00", "=1540.00"],
@@ -924,6 +941,42 @@ def test_the_payable_account_lands_on_the_ap_control(
     ]
     assert after["id"] == payable["id"]
     assert Decimal(str(after["balance"])) == Decimal("350.00")
+
+
+_AP_NOTE = (
+    "The export brings 300.00 owed to vendors as a balance on 2000 Accounts "
+    "Payable, with no bills behind it. A/P Aging lists only bills entered "
+    "here, so it will not show that 300.00 until those bills are entered "
+    "here or paid off against 2000 Accounts Payable."
+)
+
+
+def test_the_payable_balance_is_said_to_have_no_bills_behind_it(
+    client, db_session, seed_accounts
+):
+    # W-117: the export brings A/P's balance and none of its open bills;
+    # the dry run and the import result say so, with the amount
+    files = _controls_export()
+    dry = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert dry["ok"] is True, dry["errors"]
+    assert _AP_NOTE in dry["warnings"], dry["warnings"]
+    data = client.post("/api/migration/qbo_export/import", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert _AP_NOTE in data["warnings"], data["warnings"]
+
+
+def test_no_payable_note_when_nothing_is_owed(client, db_session, seed_accounts):
+    files = _controls_export(bill_paid=True)
+    dry = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert dry["ok"] is True, dry["errors"]
+    assert not any("A/P Aging" in w for w in dry["warnings"]), dry["warnings"]
+    data = client.post("/api/migration/qbo_export/import", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert not any("A/P Aging" in w for w in data["warnings"]), data["warnings"]
+    (payable,) = [
+        a for a in _account_named(client, "payable") if a["account_number"] == "2000"
+    ]
+    assert Decimal(str(payable["balance"])) == 0
 
 
 def test_no_empty_receivable_is_left_beside_1100(client, db_session, seed_accounts):

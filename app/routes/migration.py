@@ -171,22 +171,44 @@ def _looks_like(names: list[str], chosen) -> str | None:
     return matches[0] if len(matches) == 1 else None
 
 
-def _unclassified_text(names: list[str], classify) -> str:
-    """Files the chosen source cannot place by name, said in a sentence
-    (#706: it printed a Python list)."""
+def _export_name(label: str) -> str:
+    return label if label.endswith(" export") else f"{label} export"
+
+
+def _another_source_sentence(label: str) -> str:
+    """What the dry run says when the whole upload is another source's
+    export and the chosen source is missing a file it needs (#706)."""
+    return (
+        f"These look like a {_export_name(label)}: choose {label} under "
+        f"Coming from and run the dry run again."
+    )
+
+
+def _names_in_a_sentence(names: list[str]) -> str:
     if len(names) == 1:
-        head = f"Could not tell what {names[0]} is from its name"
-    else:
-        listed = ", ".join(names[:-1]) + f" and {names[-1]}"
-        head = f"Could not tell what {listed} are from their names"
+        return f"Could not tell what {names[0]} is from its name"
+    listed = ", ".join(names[:-1]) + f" and {names[-1]}"
+    return f"Could not tell what {listed} are from their names"
+
+
+def _unclassified_text(
+    names: list[str], classify, every_name: list[str] | None = None
+) -> str:
+    """Files the chosen source cannot place by name, said in a sentence
+    (#706: it printed a Python list). `every_name` is the whole upload, a
+    zip's members included: when it is all another source's, that is said
+    too."""
+    head = _names_in_a_sentence(names)
     other = _looks_like(names, classify)
     if other:
         these = "it looks" if len(names) == 1 else "these look"
-        export = other if other.endswith(" export") else f"{other} export"
         return (
-            f"{head}; {these} like a {export}. Choose {other} under "
+            f"{head}; {these} like a {_export_name(other)}. Choose {other} under "
             f"Coming from, or leave {'it' if len(names) == 1 else 'them'} out."
         )
+    whole = _looks_like(every_name, classify) if every_name else None
+    if whole:
+        return f"{head}. {_another_source_sentence(whole)}"
     return (
         f"{head}. This source reads files whose names say what they hold: "
         f"the chart of accounts ('chart' or 'accounts'), the ledger "
@@ -195,18 +217,37 @@ def _unclassified_text(names: list[str], classify) -> str:
     )
 
 
-async def bundle_from_uploads(files: list[UploadFile], classify) -> dict:
+class Upload:
+    """What the files came to: the bundle the source reads, every file's
+    name (a zip's members included), and the zip members the source could
+    not place, which are left out rather than refused (a vendor's bundle
+    may carry files it has no use for)."""
+
+    def __init__(self, bundle: dict, names: list[str], left_out: list[str]):
+        self.bundle = bundle
+        self.names = names
+        self.left_out = left_out
+
+    def missing_required(self) -> bool:
+        return "coa" not in self.bundle or "gl" not in self.bundle
+
+
+async def bundle_from_uploads(files: list[UploadFile], classify) -> Upload:
     bundle: dict[str, str] = {}
     unrecognized = []
+    left_out = []
+    names = []
     for file in files:
         content = await read_limited(file, label=f"Migration file {file.filename}")
         zipped = (file.filename or "").lower().endswith(".zip")
         for name, data in _members(file.filename, content):
+            names.append(name)
             kind = classify(name)
-            if kind == "skip" or (not kind and zipped):
-                continue  # a file the source says to leave alone, or a zip's stray
+            if kind == "skip":
+                continue  # a file the source says to leave alone
             if not kind:
-                unrecognized.append(name)
+                # a zip's stray is left out and named; a loose file refused
+                (left_out if zipped else unrecognized).append(name)
                 continue
             if name.lower().endswith(".xlsx"):
                 text = _sheet_as_csv(data)
@@ -219,9 +260,27 @@ async def bundle_from_uploads(files: list[UploadFile], classify) -> dict:
     if unrecognized:
         raise HTTPException(
             status_code=400,
-            detail=_unclassified_text(unrecognized, classify),
+            detail=_unclassified_text(left_out + unrecognized, classify, names),
         )
-    return bundle
+    return Upload(bundle, names, left_out)
+
+
+def _say_what_was_left(result: dict, upload: Upload, classify) -> dict:
+    """The zip members left out, named in the result; and when the import
+    cannot go ahead for want of a file while every file is another
+    source's, the result says which source (#706, W-114)."""
+    if upload.left_out:
+        result["warnings"] = [
+            f"{_names_in_a_sentence(upload.left_out)}, so "
+            f"{'it was' if len(upload.left_out) == 1 else 'they were'} left out."
+        ] + list(result.get("warnings") or [])
+    if not result.get("ok") and upload.missing_required():
+        other = _looks_like(upload.names, classify)
+        if other:
+            result["errors"] = [_another_source_sentence(other)] + list(
+                result.get("errors") or []
+            )
+    return result
 
 
 def _add_to_bundle(bundle: dict, kind: str, name: str, text: str) -> None:
@@ -245,13 +304,20 @@ def _add_to_bundle(bundle: dict, kind: str, name: str, text: str) -> None:
             bundle[kind] = text
 
 
-def _refused(db: Session, exc: DataProblem) -> HTTPException:
+def _refused(
+    db: Session, exc: DataProblem, upload: Upload | None = None, classify=None
+) -> HTTPException:
     """A problem with the books the import found on its way in (an entry out
     of balance, an account it cannot place) is the person's to read: a 422
     with its words, nothing kept, for every source (#690). It used to
     surface as a bare HTTP 500."""
     db.rollback()
-    return HTTPException(status_code=422, detail=exc.user_text)
+    detail = exc.user_text
+    if upload is not None and upload.missing_required():
+        other = _looks_like(upload.names, classify)
+        if other:
+            detail = f"{detail} {_another_source_sentence(other)}"
+    return HTTPException(status_code=422, detail=detail)
 
 
 @router.get("/sources")
@@ -264,11 +330,13 @@ async def migration_dry_run(
     source: str, files: list[UploadFile] = File(...), db: Session = Depends(get_db)
 ):
     _, module, _ = _source(source)
-    bundle = await bundle_from_uploads(files, module.classify_filename)
+    classify = module.classify_filename
+    upload = await bundle_from_uploads(files, classify)
     try:
-        return module.dry_run(db, bundle)
+        result = module.dry_run(db, upload.bundle)
     except DataProblem as e:
-        raise _refused(db, e)
+        raise _refused(db, e, upload, classify)
+    return _say_what_was_left(result, upload, classify)
 
 
 @router.post("/{source}/import")
@@ -276,11 +344,13 @@ async def migration_import(
     source: str, files: list[UploadFile] = File(...), db: Session = Depends(get_db)
 ):
     _, module, chart_source = _source(source)
-    bundle = await bundle_from_uploads(files, module.classify_filename)
+    classify = module.classify_filename
+    upload = await bundle_from_uploads(files, classify)
     try:
-        result = module.run_import(db, bundle)
+        result = module.run_import(db, upload.bundle)
     except DataProblem as e:
-        raise _refused(db, e)
+        raise _refused(db, e, upload, classify)
+    result = _say_what_was_left(result, upload, classify)
     if result["ok"]:
         from datetime import date
 

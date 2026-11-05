@@ -175,6 +175,9 @@ _COA_NOTES: list[str] = []
 # Trial-balance accounts with a balance that parse_coa could not place (no
 # parent the chart has): the import refuses them by name (#690, W-108).
 _COA_UNPLACED: list[str] = []
+# The export's payable account, mapped onto 2000, as (its path, the
+# control's name in a sentence), for the A/P note (W-117).
+_COA_PAYABLE: list[tuple[str, str]] = []
 
 
 def classify_filename(name: str) -> str | None:
@@ -1662,9 +1665,11 @@ def _onto_controls(db: Session, accounts: list[dict], plan: dict | None) -> None
             if spec_path(spec).lower() == wanted:
                 spec["onto"] = get_ar_account_id(db)
     landed = onto_accounts(db, mapped)
+    _COA_PAYABLE.clear()
     for spec in mapped:
         control = landed.get(spec_path(spec).lower())
         if control is not None:
+            _COA_PAYABLE.append((spec_path(spec), label_for(control, db)))
             _COA_NOTES.append(
                 f"{spec_path(spec)} is {label_for(control, db)} here: its balance "
                 "lands there, and no second payable account is made."
@@ -1743,13 +1748,60 @@ def _unplaced_problem(errors: list[str]) -> str | None:
     return problem
 
 
+def _payable_balance(prepared: dict, path: str) -> Decimal:
+    """What the export leaves owed on its payable account, a credit as a
+    positive figure: the accrual Trial Balance's, else the Journal's sum."""
+    key = strip_code_suffix(path)
+    if "tb" in prepared:
+        balances, _ = parse_tb(prepared["tb"])
+        found = [v for n, v in balances.items() if strip_code_suffix(n) == key]
+        if found:
+            return -sum(found, Decimal("0"))
+    total = Decimal("0")
+    if "gl" in prepared:
+        groups, _ = parse_gl(prepared["gl"])
+        for group in groups:
+            for row in group:
+                if strip_code_suffix(row["account"]) == key:
+                    total += (row["credit"] or Decimal("0")) - (
+                        row["debit"] or Decimal("0")
+                    )
+    return total
+
+
+def _payable_note(prepared: dict) -> list[str]:
+    """W-117: the export brings the payable account's balance and none of
+    the bills behind it, so A/P Aging cannot show it; said when it is not
+    zero."""
+    if len(_COA_PAYABLE) != 1:
+        return []
+    path, control = _COA_PAYABLE[0]
+    owed = _payable_balance(prepared, path)
+    if not owed:
+        return []
+    what = (
+        f"{owed:,.2f} owed to vendors"
+        if owed > 0
+        else f"{-owed:,.2f} paid to vendors ahead of their bills"
+    )
+    return [
+        f"The export brings {what} as a balance on {control}, with no bills "
+        f"behind it. A/P Aging lists only bills entered here, so it will not "
+        f"show that {abs(owed):,.2f} until those bills are entered here or "
+        f"paid off against {control}."
+    ]
+
+
 def dry_run(db: Session, bundle: dict) -> dict:
     plan = _carry_plan(db, bundle)
     prepared, notes = _prepare(bundle)
+    _COA_PAYABLE.clear()
     verdict = dry_run_bundle(
         db, prepared, _parsers(prepared, db, plan), LABEL, SOURCE_TYPE
     )
-    verdict["warnings"] = notes + list(_COA_NOTES) + verdict["warnings"]
+    verdict["warnings"] = (
+        notes + list(_COA_NOTES) + _payable_note(prepared) + verdict["warnings"]
+    )
     unplaced = _unplaced_problem(verdict["errors"])
     if unplaced:
         verdict["errors"] = verdict["errors"] + [unplaced]
@@ -1779,6 +1831,7 @@ def run_import(db: Session, bundle: dict) -> dict:
             refused.update(imported_open_invoices=0, imported_unapplied_payments=0)
         return refused
     prepared, notes = _prepare(bundle)
+    _COA_PAYABLE.clear()
     parsers = _parsers(prepared, db, plan)
     if "coa" in prepared:
         # a balance the chart has no place for refuses before anything is
@@ -1787,7 +1840,13 @@ def run_import(db: Session, bundle: dict) -> dict:
         if _COA_UNPLACED:
             raise DataProblem(_missing_problem(list(_COA_UNPLACED)))
     result = run_import_bundle(db, prepared, parsers, SOURCE_TYPE, LABEL)
-    result["warnings"] = notes + list(_COA_NOTES) + result["warnings"] + plan["notes"]
+    result["warnings"] = (
+        notes
+        + list(_COA_NOTES)
+        + _payable_note(prepared)
+        + result["warnings"]
+        + plan["notes"]
+    )
     result.update(_counts(db, bundle))
     invoices = payments = 0
     if result["ok"]:
