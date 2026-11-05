@@ -43,7 +43,7 @@ const BudgetsPage = {
                     <button class="btn btn-secondary" onclick="BudgetsPage.showVariance()">View Variance</button>
                 </div>
             </div>
-            <p style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
+            <p class="budget-hint" style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
                 Enter monthly budget amounts for each account. Click "Save All" to persist changes.
             </p>
             <div class="table-container table-container--frozen">

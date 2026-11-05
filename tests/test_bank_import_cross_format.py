@@ -215,7 +215,7 @@ def test_a_line_whose_posting_an_earlier_line_holds_is_in_the_books(
     assert out["imported"] == 1 and out["matched"] == 0
     assert out["already_in_books"] == 1
     bt = db_session.query(BankTransaction).filter_by(import_id="BANKREF-1").one()
-    assert bt.match_status == "excluded"
+    assert bt.match_status == "in_books"
     assert bt.id not in {t["id"] for t in _to_review(client, feed)}
 
 
@@ -329,3 +329,119 @@ def test_exclude_all_shown_excludes_the_lines_sent(
 def test_exclude_all_shown_needs_a_feed(client):
     r = client.post("/api/banking/accounts/999999/feed/exclude-all", json={})
     assert r.status_code == 404
+
+
+# Show excluded (W-116): the review list's excluded lines, each with why,
+# and Restore bringing one back to To review.
+
+
+def _set_aside_one(client, db_session, feed):
+    """The CSV month, then a bank-reference line the books already hold
+    (set aside by the import) and one the user excludes."""
+    _csv_import(client, feed)
+    import_transactions(
+        db_session,
+        feed["id"],
+        [
+            {
+                "fitid": "BANKREF-9",
+                "date": date(2026, 10, 2),
+                "amount": Decimal("-310.00"),
+                "payee": "CHK #2201 CLEARED",
+                "memo": "",
+            }
+        ],
+    )
+    in_books = db_session.query(BankTransaction).filter_by(import_id="BANKREF-9").one()
+    mine = next(t for t in _to_review(client, feed) if t["payee"].startswith("CORNER"))
+    r = client.post(f"/api/banking/transactions/{mine['id']}/exclude")
+    assert r.status_code == 200, r.text
+    return in_books.id, mine["id"]
+
+
+def _excluded(client, feed):
+    r = client.get(f"/api/banking/accounts/{feed['id']}/feed/excluded")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_show_excluded_lists_each_line_with_why(client, db_session, feed, booked):
+    in_books, mine = _set_aside_one(client, db_session, feed)
+    out = _excluded(client, feed)
+    assert out["count"] == 2
+    by_id = {line["id"]: line for line in out["lines"]}
+    assert by_id[in_books]["reason"] == "in_books"
+    assert by_id[in_books]["reason_text"] == (
+        "already in the books: same date and amount as a matched line"
+    )
+    assert by_id[in_books]["date"] == "2026-10-02"
+    assert Decimal(by_id[in_books]["amount"]) == Decimal("-310.00")
+    assert by_id[in_books]["payee"] == "CHK #2201 CLEARED"
+    assert by_id[mine]["reason"] == "excluded"
+    assert by_id[mine]["reason_text"] == "excluded by you"
+    # status=excluded still finds both; neither is in To review
+    statused = client.get(
+        f"/api/banking/transactions?bank_account_id={feed['id']}&status=excluded"
+    ).json()
+    assert {t["id"] for t in statused} == {in_books, mine}
+    assert not {in_books, mine} & {t["id"] for t in _to_review(client, feed)}
+
+
+def test_restore_brings_either_back_to_review(client, db_session, feed, booked):
+    in_books, mine = _set_aside_one(client, db_session, feed)
+    for line_id in (in_books, mine):
+        r = client.post(f"/api/banking/transactions/{line_id}/restore")
+        assert r.status_code == 200, r.text
+        assert r.json()["match_status"] == "unmatched"
+    assert {in_books, mine} <= {t["id"] for t in _to_review(client, feed)}
+    assert _excluded(client, feed) == {"count": 0, "lines": []}
+    # restored once, a line is no longer excluded
+    assert client.post(f"/api/banking/transactions/{in_books}/restore").status_code
+    assert (
+        client.post(f"/api/banking/transactions/{in_books}/restore").status_code == 400
+    )
+
+
+def test_exclude_all_shown_lines_are_listed_as_yours(client, db_session, feed):
+    _csv_import(client, feed)
+    ids = [t["id"] for t in _to_review(client, feed)]
+    r = client.post(
+        f"/api/banking/accounts/{feed['id']}/feed/exclude-all",
+        json={"line_ids": ids},
+    )
+    assert r.json()["excluded"] == len(ids)
+    out = _excluded(client, feed)
+    assert out["count"] == len(ids)
+    assert {line["reason"] for line in out["lines"]} == {"excluded"}
+
+
+def test_another_feeds_lines_are_not_listed(client, db_session, feed):
+    from app.models.banking import BankAccount
+
+    ba = BankAccount(name="Savings feed", bank_name="x")  # not linked
+    db_session.add(ba)
+    db_session.commit()
+    other = {"id": ba.id}
+    _csv_import(client, other)
+    for t in _to_review(client, other):
+        client.post(f"/api/banking/transactions/{t['id']}/exclude")
+    assert _excluded(client, feed)["count"] == 0
+    assert _excluded(client, other)["count"] == len(LINES)
+    assert client.get("/api/banking/accounts/999999/feed/excluded").status_code == 404
+
+
+@pytest.mark.parametrize("role", ["readonly", "accountant"])
+def test_a_locked_sign_in_reads_the_list_but_cannot_restore(
+    client, db_session, feed, booked, role
+):
+    from tests.test_accountant_role import _login_as, _mk_user
+
+    in_books, _mine = _set_aside_one(client, db_session, feed)
+    _mk_user(db_session, f"see-{role}", "see-password-123", role)
+    _login_as(client, f"see-{role}", "see-password-123")
+    assert _excluded(client, feed)["count"] == 2
+    r = client.post(f"/api/banking/transactions/{in_books}/restore")
+    assert r.status_code == 403, r.text
+    bt = db_session.get(BankTransaction, in_books)
+    db_session.refresh(bt)
+    assert bt.match_status == "in_books"

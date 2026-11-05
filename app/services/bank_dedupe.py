@@ -132,6 +132,13 @@ def drop_already_imported(
     return fresh, len(transactions) - len(fresh)
 
 
+# The status of a statement line set aside as already in the books: an
+# exclusion the import made, not the user (W-116). String(20) holds it; no
+# migration. Everything that reads "excluded" reads it as one (EXCLUDED).
+IN_BOOKS = "in_books"
+EXCLUDED = ("excluded", IN_BOOKS)
+
+
 def set_aside_already_in_books(db: Session, bank_account: BankAccount, rows) -> int:
     """Statement lines whose posting another statement line already holds.
 
@@ -139,7 +146,10 @@ def set_aside_already_in_books(db: Session, bank_account: BankAccount, rows) -> 
     auto-match window, while a line outside `rows` on the same account
     with the same date and amount is matched: the books have it already,
     through that line. It is set aside (excluded, so it can be restored)
-    rather than left in To review as "not in the books". Returns how many."""
+    rather than left in To review as "not in the books". Its status says
+    why, "in_books" beside the "excluded" of a line the user set aside, so
+    the review list's Show excluded can say which (W-116). Returns how
+    many."""
     from app.services.bank_matching import AUTO_WINDOW_DAYS, candidate_lines
 
     if not bank_account.account_id:
@@ -171,6 +181,6 @@ def set_aside_already_in_books(db: Session, bank_account: BankAccount, rows) -> 
         ):
             continue
         used.add(holder.id)
-        bt.match_status = "excluded"
+        bt.match_status = IN_BOOKS
         n += 1
     return n

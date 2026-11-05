@@ -78,8 +78,9 @@ class BankTransaction(Base):
     # OFX/QFX import fields (Feature 18)
     import_id = Column(String(100), nullable=True)  # OFX FITID for dedup
     import_source = Column(String(50), nullable=True)  # e.g. "ofx", "qfx"
-    # "unmatched" | "auto" | "manual" | "added" | "excluded"
-    # (auto/manual = linked to an existing posting; added = posted from here)
+    # "unmatched" | "auto" | "manual" | "added" | "excluded" | "in_books"
+    # (auto/manual = linked to an existing posting; added = posted from here;
+    # in_books = excluded by an import as already in the books, W-116)
     match_status = Column(String(20), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
