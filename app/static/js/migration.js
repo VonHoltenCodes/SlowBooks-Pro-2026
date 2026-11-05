@@ -68,8 +68,8 @@ const MigrationPage = {
     // "13 journals", "1 journal": a count with its word.
     _n(count, word) { return `${count} ${word}${count === 1 ? '' : 's'}`; },
 
-    // What the result counts: accounts and journals always, customers and
-    // vendors when the source brings lists (the QuickBooks Online export).
+    // What the result counts: accounts and journals always, customers,
+    // vendors and employees when the source brings lists (the QuickBooks Online export).
     // A dry run counts what an import would make: the chart's accounts not
     // in the books yet, and the journals not already imported.
     _counts(data, imported) {
@@ -83,6 +83,8 @@ const MigrationPage = {
         const vendors = imported ? data.imported_vendors : data.vendors;
         if (customers != null) parts.push(n(customers, 'customer'));
         if (vendors != null) parts.push(n(vendors, 'vendor'));
+        const employees = imported ? data.imported_employees : data.employees;
+        if (employees != null) parts.push(n(employees, 'employee'));
         // QuickBooks Online's A/R Aging Detail report, when it came with the export
         const open = imported ? data.imported_open_invoices : data.open_invoices;
         const unapplied = imported ? data.imported_unapplied_payments : data.unapplied_payments;
