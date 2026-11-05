@@ -15,8 +15,11 @@ its other bank activity. The connector only reads Mercury; it cannot send money.
    and copy it. See [Mercury's token guide](https://docs.mercury.com/docs/getting-started).
 2. In SlowBooks, sign in as an administrator and open **Banking**. In
    **Bank Feed (Mercury)**, paste the token and click **Connect Mercury**.
-3. Create a bank account with **+ New Bank Account** if needed. Map each Mercury
-   account to its corresponding SlowBooks bank account. The company books must
+3. Map each Mercury account to its corresponding SlowBooks bank account under
+   **Imports into**. When the chart has no account marked as a bank account,
+   the row says so and offers **+ New bank account** and **Use an account I
+   already have…**, which turns an asset account already in your chart into a
+   bank account and maps the feed to it. The company books must
    use USD; each Mercury account needs a separate bank feed linked to a bank
    ledger account.
 4. Choose **Import transactions posted since** and click **Sync Mercury**.
