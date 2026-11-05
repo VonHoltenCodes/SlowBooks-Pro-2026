@@ -3,6 +3,7 @@
 # Feature 6: Non-posting vendor documents
 # ============================================================================
 
+from app.routes._print import print_html
 from decimal import Decimal
 from typing import Optional
 
@@ -375,12 +376,7 @@ def po_pdf(po_id: int, db: Session = Depends(get_db)):
 def po_print_preview(po_id: int, db: Session = Depends(get_db)):
     """The purchase order as a page that opens the print dialog."""
     _, html_str = _po_html(db, po_id)
-    return HTMLResponse(
-        content=html_str.replace(
-            "</body>",
-            "<script>window.onload=function(){window.print();}</script></body>",
-        )
-    )
+    return HTMLResponse(content=print_html(html_str))
 
 
 def _commitment_retainage(db: Session, po: PurchaseOrder):

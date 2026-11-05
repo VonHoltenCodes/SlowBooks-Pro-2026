@@ -3,6 +3,7 @@
 # Feature 5: DR Income, DR Sales Tax, CR AR — reverses invoice entry
 # ============================================================================
 
+from app.routes._print import print_html
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -122,9 +123,7 @@ def credit_memo_print_preview(cm_id: int, db: Session = Depends(get_db)):
 
     cm = _memo_or_404(db, cm_id)
     html_str = _render("credit_memo_pdf.html", get_settings(db), cm=cm)
-    html_str = html_str.replace(
-        "</body>", "<script>window.onload=function(){window.print();}</script></body>"
-    )
+    html_str = print_html(html_str)
     return HTMLResponse(content=html_str)
 
 

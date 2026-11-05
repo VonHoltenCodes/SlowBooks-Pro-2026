@@ -14,7 +14,29 @@ import inspect
 
 from fastapi.responses import HTMLResponse
 
-PRINT_SCRIPT = "<script>window.onload=function(){window.print();}</script>"
+# One script for every print page (reports, documents, the Budgets sheets).
+# In a browser it prints at load. In the desktop app the page is a document
+# window: on a Mac a WKWebView's own window.print() does nothing, and the
+# shell's print hook is put in only after load (pywebview injects it at
+# didFinishNavigation and then fires "pywebviewready"), so printing at
+# onload opened no dialog there, ever (NEW-208, 2.31.7 gate). There the
+# page prints once, at pywebviewready or a moment after load, whichever
+# comes first. A Print button on the sheet, not printed, starts it again.
+PRINT_SCRIPT = (
+    "<style>.sb-print-again{position:fixed;top:8px;right:8px;z-index:9;"
+    "font:13px sans-serif;padding:4px 14px;cursor:pointer}"
+    "@media print{.sb-print-again{display:none}}</style>"
+    '<button type="button" class="sb-print-again" id="sb-print-again">Print</button>'
+    "<script>(function(){var done=false;"
+    "function go(){if(done)return;done=true;window.print();}"
+    "var shell=!/^https?:$/.test(location.protocol)||!!window.pywebview;"
+    "if(shell){window.addEventListener('pywebviewready',go);"
+    "window.addEventListener('load',function(){setTimeout(go,1500);});}"
+    "else{window.addEventListener('load',go);}"
+    "var b=document.getElementById('sb-print-again');"
+    "if(b)b.addEventListener('click',function(){window.print();});"
+    "})();</script>"
+)
 
 
 def print_html(html_str: str) -> str:

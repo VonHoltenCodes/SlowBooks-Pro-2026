@@ -1,5 +1,6 @@
 """The invoice logo preference is shared by PDF, Print, and attachments."""
 
+from app.routes._print import PRINT_SCRIPT
 from datetime import date
 
 import pytest
@@ -83,12 +84,7 @@ def test_preference_controls_pdf_print_and_email_attachment(
         assert "LOGO-1" in html
         assert "Test Customer" in html
     assert pdf == attachment
-    assert (
-        preview.replace(
-            "<script>window.onload=function(){window.print();}</script>", ""
-        )
-        == pdf
-    )
+    assert preview.replace(PRINT_SCRIPT, "") == pdf
     assert captured["attachment_name"] == "Invoice_LOGO-1.pdf"
 
 

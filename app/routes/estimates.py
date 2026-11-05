@@ -3,6 +3,7 @@
 # then marks the estimate CONVERTED. PDFs are rendered with WeasyPrint.
 # ============================================================================
 
+from app.routes._print import print_html
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
@@ -618,9 +619,7 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
 
     # The PDF's own renderer: one set of filters and helpers for both.
     html_str = _render("estimate_pdf.html", company, est=est)
-    html_str = html_str.replace(
-        "</body>", "<script>window.onload=function(){window.print();}</script></body>"
-    )
+    html_str = print_html(html_str)
     return HTMLResponse(content=html_str)
 
 

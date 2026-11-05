@@ -1,3 +1,4 @@
+from app.routes._print import print_html
 from typing import Optional as _Optional
 
 from pydantic import Field
@@ -65,9 +66,7 @@ def invoice_print_preview(invoice_id: int, db: Session = Depends(get_db)):
     # one set of filters and helpers, and the same logo preference.
     html_str = render_invoice_html(inv, company)
     # Wrap with auto-print script
-    html_str = html_str.replace(
-        "</body>", "<script>window.onload=function(){window.print();}</script></body>"
-    )
+    html_str = print_html(html_str)
     return HTMLResponse(content=html_str)
 
 

@@ -3,6 +3,7 @@
 # Feature 1: DR Expense, CR AP (2000) on create; DR AP, CR Bank on payment
 # ============================================================================
 
+from app.routes._print import print_html
 import re
 from decimal import Decimal
 
@@ -154,12 +155,7 @@ def bill_pdf(bill_id: int, db: Session = Depends(get_db)):
 def bill_print_preview(bill_id: int, db: Session = Depends(get_db)):
     """The bill as a page that opens the print dialog."""
     _, html_str = _bill_html(db, bill_id)
-    return HTMLResponse(
-        content=html_str.replace(
-            "</body>",
-            "<script>window.onload=function(){window.print();}</script></body>",
-        )
-    )
+    return HTMLResponse(content=print_html(html_str))
 
 
 def _default_bill_number(db: Session, vendor: Vendor, date) -> str:

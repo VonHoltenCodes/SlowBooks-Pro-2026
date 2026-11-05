@@ -8,6 +8,7 @@
 # payments back on the list. See services/undeposited_funds.py.
 # ============================================================================
 
+from app.routes._print import print_html
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -281,9 +282,7 @@ def deposit_print_preview(deposit_id: int, db: Session = Depends(get_db)):
 
     detail = get_deposit(deposit_id, db)
     html_str = render_deposit_html(detail.model_dump(), get_all_settings(db))
-    html_str = html_str.replace(
-        "</body>", "<script>window.onload=function(){window.print();}</script></body>"
-    )
+    html_str = print_html(html_str)
     return HTMLResponse(content=html_str)
 
 
