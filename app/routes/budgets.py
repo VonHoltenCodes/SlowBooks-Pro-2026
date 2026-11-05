@@ -4,7 +4,10 @@
 # ============================================================================
 
 
+from datetime import date
+
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func as sqlfunc
 
@@ -154,3 +157,125 @@ def budget_variance(
         )
 
     return {"year": year, "accounts": result}
+
+
+# ── Print pages (NEW-208, #702) ──────────────────────────────────────────
+# The desktop app has no print menu, so a page's Print button opens one of
+# these in a window of its own, as a report's Print does (#683): the
+# report PDF's template and stylesheet, landscape, the month row at the top
+# of every page, and the print dialog on load.
+
+MONTHS = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
+# the accounts the Budgets page has a row for (budgets.js)
+BUDGET_TYPES = ("expense", "income", "cogs")
+
+
+def _account_words(db: Session, name: str, number, sep: str) -> str:
+    """The account as the page names it: its number first when the company
+    uses numbers (accountLabel in utils.js)."""
+    from app.services.settings_service import use_account_numbers
+
+    if number and use_account_numbers(db):
+        return sep.join([str(number), name or ""])
+    return name or ""
+
+
+def _print_response(db: Session, section: dict) -> HTMLResponse:
+    from app.routes._print import print_html
+    from app.services.pdf_service import render_report_html
+    from app.services.settings_service import get_all_settings
+
+    html_str = render_report_html([section], get_all_settings(db), landscape=True)
+    return HTMLResponse(content=print_html(html_str))
+
+
+@router.get("/print", response_class=HTMLResponse)
+def print_budgets(
+    year: int = Query(default=None),
+    account_id: int = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """The Budgets sheet for a year, as a page that opens the print dialog:
+    every account the page has a row for, its twelve months. No year is
+    this year's sheet."""
+    from app.routes.accounts import list_accounts
+    from app.routes.reports.financial import _money
+
+    year = year or date.today().year
+    accounts = [a for a in list_accounts(db=db) if a.account_type in BUDGET_TYPES]
+    if account_id:
+        accounts = [a for a in accounts if a.id == account_id]
+    amounts: dict = {}
+    for b in list_budgets(year=year, account_id=account_id, db=db):
+        amounts.setdefault(b.account_id, {})[b.month] = b.amount
+    rows = []
+    for a in accounts:
+        mine = amounts.get(a.id, {})
+        rows.append(
+            {
+                "cells": [_account_words(db, a.name, a.account_number, " ")]
+                + [_money(mine[m]) if mine.get(m) else "" for m in range(1, 13)]
+            }
+        )
+    return _print_response(
+        db,
+        {
+            "title": "Budgets",
+            "period": str(year),
+            "columns": ["Account"] + MONTHS,
+            "rows": rows,
+            "note": None if rows else "No budgetable accounts found.",
+        },
+    )
+
+
+@router.get("/variance/print", response_class=HTMLResponse)
+def print_budget_variance(
+    year: int = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Budget vs Actual for a year, as its dialog shows it, as a page that
+    opens the print dialog: each account's Budget, Actual and Variance by
+    month with the total."""
+    from app.routes.reports.financial import _money
+
+    data = budget_variance(year=year, db=db)
+    rows = []
+    for acct in data["accounts"]:
+        rows.append(
+            {
+                "cells": [
+                    _account_words(
+                        db, acct["account_name"], acct["account_number"], " — "
+                    )
+                ]
+                + [""] * 13,
+                "style": "group",
+            }
+        )
+        for label, key in (
+            ("Budget", "budget"),
+            ("Actual", "actual"),
+            ("Variance", "variance"),
+        ):
+            rows.append(
+                {
+                    "cells": [label]
+                    + [_money(m[key]) for m in acct["months"]]
+                    + [_money(acct["total_" + key])],
+                    "indent": 1,
+                    **({"style": "subtotal"} if key == "variance" else {}),
+                }
+            )
+    return _print_response(
+        db,
+        {
+            "title": "Budget vs Actual",
+            "period": str(year),
+            "columns": [""] + MONTHS + ["Total"],
+            "rows": rows,
+            "note": (
+                None if rows else "No budgets set for this year. Enter budgets first."
+            ),
+        },
+    )

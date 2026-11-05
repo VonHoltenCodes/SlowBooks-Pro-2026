@@ -39,6 +39,8 @@ const BudgetsPage = {
                     <button class="btn btn-secondary" onclick="BudgetsPage.changeYear(-1)">&laquo; ${year-1}</button>
                     <span style="padding:6px 12px; font-weight:700;">${year}</span>
                     <button class="btn btn-secondary" onclick="BudgetsPage.changeYear(1)">${year+1} &raquo;</button>
+                    <button type="button" class="btn btn-secondary" id="budgets-print-btn" onclick="BudgetsPage.print()"
+                        title="Print the ${year} budgets: every account, all twelve months">Print</button>
                     <button class="btn btn-primary" onclick="BudgetsPage.saveAll()">Save All</button>
                     <button class="btn btn-secondary" onclick="BudgetsPage.showVariance()">View Variance</button>
                 </div>
@@ -55,6 +57,26 @@ const BudgetsPage = {
                     <tbody>${rows || '<tr><td colspan="13">No budgetable accounts found</td></tr>'}</tbody>
                 </table>
             </div>`;
+    },
+
+    // Print (NEW-208): the desktop app has no print menu, so the sheet
+    // opens as a page of its own that brings up the print dialog, as a
+    // report's Print does (#683) -- the app's document window in the
+    // desktop shell, a tab in a browser. Printing reads only: every role.
+    printUrl(variance = false) {
+        const year = encodeURIComponent(BudgetsPage._year);
+        return variance ? `/api/budgets/variance/print?year=${year}` : `/api/budgets/print?year=${year}`;
+    },
+
+    print(variance = false) {
+        window.open(BudgetsPage.printUrl(variance), '_blank');
+    },
+
+    _variancePrintButton() {
+        return `<div style="text-align:right; margin-bottom:6px; margin-left:auto;">
+            <button type="button" class="btn btn-sm btn-secondary" id="budget-variance-print-btn" onclick="BudgetsPage.print(true)"
+                title="Print Budget vs Actual for ${BudgetsPage._year}">Print</button>
+        </div>`;
     },
 
     changeYear(delta) {
@@ -86,11 +108,11 @@ const BudgetsPage = {
         await ReportsPage.openPeriodModal(`Budget vs Actual — ${year}`, 'this_year', async () => {
             const data = await API.get(`/budgets/variance?year=${year}`);
             if (data.accounts.length === 0) {
-                return '<div class="empty-state"><p>No budgets set for this year. Enter budgets first.</p></div>';
+                return BudgetsPage._variancePrintButton() + '<div class="empty-state"><p>No budgets set for this year. Enter budgets first.</p></div>';
             }
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
             // the same frozen account column and month row as the budget grid
-            let html = '<div class="table-container table-container--frozen budget-variance"><div class="budget-variance__sheet">';
+            let html = BudgetsPage._variancePrintButton() + '<div class="table-container table-container--frozen budget-variance"><div class="budget-variance__sheet">';
             for (const acct of data.accounts) {
                 html += `<h3 class="budget-variance__acct">${accountLabel(acct, acct.account_name, ' — ')}</h3>`;
                 html += `<table class="table--frozen budget-variance__table"><thead><tr><th scope="col"></th>`;

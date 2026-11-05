@@ -48,4 +48,8 @@
         border-bottom: 3px double #1a1a2e; font-size: 11px;
     }
     .section-break { page-break-before: always; }
+    {# a long sheet goes over pages a whole row at a time, the column
+       headings again at the top of each (NEW-208) #}
+    table.report thead { display: table-header-group; }
+    table.report tr { break-inside: avoid; page-break-inside: avoid; }
 </style>
