@@ -47,8 +47,21 @@ refresh stays on it). Every posting on the account — expenses, deposits,
 bill payments, customer payments, payroll, card charges, transfers, register
 entries, journal entries — with payee, reference (a bill payment's check
 number included), type, a link to the document, the running balance, and a
-✓ when a statement line has cleared it or **R** when a reconciliation has
-closed it.
+✓ when it has cleared or **R** when a reconciliation has closed it.
+
+**Marking a line cleared by hand.** Keeping the register against online
+banking, without a formal reconciliation, you can tick each entry as it
+posts at the bank: click the ✓ cell of the row (or Tab to it and press Space
+or Enter), and the cell shows ✓; click again to take the mark off. It is the
+same mark a bank-feed match or a reconciliation tick sets, so the next
+reconciliation opens with the line already ticked and counted in its cleared
+figure (when it is dated on or before the statement date; a later one waits,
+still ticked, for the reconciliation that reaches it), and unticking it there
+takes the ✓ off in the register too. A line marked **R** belongs to a
+completed reconciliation and cannot be changed here; a voided entry cannot be
+marked. A read-only or accountant's sign-in sees the marks but cannot change
+them, and every change is in the audit log. `POST
+/api/banking/registers/{account_id}/lines/{line_id}/cleared {cleared}`.
 
 **+ Entry** posts a register entry: date, amount (sign per the rule), payee,
 check/ref number, **category** (required — the other side of the entry),

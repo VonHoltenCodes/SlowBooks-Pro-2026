@@ -1151,7 +1151,7 @@ const BankingPage = {
                     <td class="amount">${e.payment > 0 ? formatCurrency(e.payment) : ''}</td>
                     <td class="amount">${e.deposit > 0 ? formatCurrency(e.deposit) : ''}</td>
                     <td class="amount" style="font-weight:700;">${formatCurrency(e.balance)}</td>
-                    <td style="text-align:center;">${e.reconciliation_id ? 'R' : (e.cleared ? '✓' : '')}</td>
+                    <td style="text-align:center;">${BankingPage._clearedCell(e, id)}</td>
                     <td style="white-space:nowrap;">${BankingPage._printCheckButton(e)}${BankingPage._editButton(e, id)}${e.voidable ? `<button data-destructive class="btn btn-sm btn-secondary" onclick="BankingPage.voidEntry('${e.source_type}', ${e.transaction_id}, ${id})">Void</button>` : ''}</td>
                 </tr>`).join('');
             // oldest first, so the balance brought forward (a start date's
@@ -1167,6 +1167,57 @@ const BankingPage = {
                 </tr></thead><tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}`;
         }
         return html;
+    },
+
+    // The register's ✓ column (#715): R for a line a completed
+    // reconciliation holds, ✓ for one cleared, blank otherwise. For a sign-in
+    // that writes, the mark on a line no reconciliation holds is a button that
+    // clears it, or takes the mark off, by hand, as in QuickBooks Desktop's
+    // register: the same flag a feed match or a reconciliation tick sets. A
+    // voided entry gets no button; a read-only or accountant's sign-in sees
+    // the mark only (data-write, App.hideWriteControls, as elsewhere).
+    _clearedCell(e, accountId) {
+        if (e.reconciliation_id) {
+            return `<span title="Reconciled: a completed reconciliation holds this line's cleared mark">R</span>`;
+        }
+        const mark = e.cleared ? '✓' : '';
+        const locked = typeof App !== 'undefined' && typeof App.isLocked === 'function' && App.isLocked();
+        if (locked || e.voided || !e.line_id) {
+            return e.cleared ? `<span title="Cleared">✓</span>` : '';
+        }
+        const name = escapeHtml(BankingPage._clearedName(e));
+        return `<button type="button" class="reg-cleared" data-write data-line="${e.line_id}" data-cleared="${e.cleared ? '1' : ''}"
+            data-name="${name}" aria-label="${e.cleared ? `Mark ${name} not cleared` : `Mark ${name} cleared`}"
+            title="${e.cleared ? 'Cleared. Click to mark it not cleared' : 'Not cleared. Click to mark it cleared'}"
+            style="min-width:22px; height:20px; padding:0 4px; border:1px solid var(--gray-300); border-radius:3px; background:transparent; color:inherit; font:inherit; cursor:pointer; line-height:1;"
+            onclick="BankingPage.toggleRegCleared(this, ${Number(accountId)}, ${Number(e.line_id)})">${mark}</button>`;
+    },
+    // What the ✓ button is named for (#715): "check 1042", or the kind of
+    // entry, its date and amount where it has no number.
+    _clearedName(e) {
+        const check = e.reference && Number(e.payment) > 0 && (e.source_type === 'bank_entry' || e.source_type === 'expense');
+        const word = check ? 'check' : sourceWord(e.source_type, e.source_kind).toLowerCase();
+        if (e.reference) return `${word} ${e.reference}`;
+        const amount = Number(e.payment) > 0 ? e.payment : e.deposit;
+        return `${word} of ${formatDate(e.date)}${e.payee ? ` to ${e.payee}` : ''}, ${formatCurrency(amount)}`;
+    },
+    async toggleRegCleared(btn, accountId, lineId) {
+        const want = btn.dataset.cleared !== '1';
+        btn.disabled = true;
+        try {
+            const res = await API.post(`/banking/registers/${accountId}/lines/${lineId}/cleared`, { cleared: want });
+            const on = !!res.cleared;
+            const name = btn.dataset.name || '';
+            btn.textContent = on ? '✓' : '';
+            btn.dataset.cleared = on ? '1' : '';
+            btn.setAttribute('aria-label', on ? `Mark ${name} not cleared` : `Mark ${name} cleared`);
+            btn.title = on ? 'Cleared. Click to mark it not cleared' : 'Not cleared. Click to mark it cleared';
+        } catch (err) {
+            toast(err.message, 'error');
+        } finally {
+            btn.disabled = false;
+            focusFor(btn, typeof App !== 'undefined' && typeof App.keyboardFocus === 'function' && App.keyboardFocus());
+        }
     },
 
     // Where a register line opens: the document behind it, or — for a

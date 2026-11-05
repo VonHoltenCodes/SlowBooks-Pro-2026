@@ -265,6 +265,55 @@ def toggle(db: Session, recon: Reconciliation, line_id: int) -> TransactionLine:
     return line
 
 
+def set_register_cleared(
+    db: Session, account_id: int, line_id: int, cleared: bool
+) -> TransactionLine:
+    """The ✓ column of the register, set by hand (#715), as QuickBooks
+    Desktop's register does for someone who ticks each entry off against
+    online banking and never runs a reconciliation. It is the same flag a
+    bank-feed match or a reconciliation tick sets, so the next
+    reconciliation opens with the line ticked (and counted in its cleared
+    figure) when it is dated on or before the statement date, and unticking
+    it there clears it here too. A line a completed reconciliation stamped
+    keeps its mark; a voided entry, or the reversal that voided it, is not
+    marked cleared (unmarking one a reconciliation ticked is allowed). The
+    change is in the audit log through the ORM hook (an UPDATE of
+    transaction_lines naming `cleared`)."""
+    from app.services.bank_register import voided_transaction_ids
+
+    acct = require_bank_account(db, account_id)
+    line = db.query(TransactionLine).filter(TransactionLine.id == line_id).first()
+    if not line or line.account_id != acct.id:
+        raise HTTPException(
+            status_code=404, detail=f"That line is not in the {acct.name} register."
+        )
+    if line.reconciliation_id:
+        recon = db.get(Reconciliation, line.reconciliation_id)
+        when = (
+            f" of the statement dated {date_text(recon.statement_date)}"
+            if recon and recon.statement_date
+            else ""
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This line is in the completed reconciliation{when}, which "
+                "holds its cleared mark."
+            ),
+        )
+    txn = db.get(Transaction, line.transaction_id)
+    voided = (txn.source_type or "").endswith("_void") or bool(
+        voided_transaction_ids(db, [txn.id])
+    )
+    if cleared and voided:
+        raise HTTPException(
+            status_code=400, detail="A voided entry cannot be marked cleared."
+        )
+    if bool(line.cleared) != cleared:
+        line.cleared = cleared
+    return line
+
+
 def mark_all(db: Session, recon: Reconciliation, cleared: bool, through=None) -> int:
     """Tick, or untick, every line the session shows at once (#258): the
     lines on the account up to the statement date (and up to `through`,

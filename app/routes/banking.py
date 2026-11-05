@@ -1455,6 +1455,29 @@ def abandon_reconciliation(recon_id: int, db: Session = Depends(get_db)):
     return {"status": "abandoned", "reconciliation_id": recon_id}
 
 
+class RegisterCleared(StrictModel):
+    cleared: bool
+
+
+@router.post("/registers/{account_id}/lines/{line_id}/cleared")
+def set_register_cleared(
+    account_id: int, line_id: int, data: RegisterCleared, db: Session = Depends(get_db)
+):
+    """The register's ✓ set by hand (#715): the line's cleared flag, the one
+    a feed match or a reconciliation tick sets. Refused for a line in a
+    completed reconciliation and for marking a voided entry; the read-only
+    and accountant's sign-ins are refused by the role gate (app.main)."""
+    from app.services import reconciliation as rc
+
+    line = rc.set_register_cleared(db, account_id, line_id, data.cleared)
+    db.commit()
+    return {
+        "line_id": line.id,
+        "cleared": bool(line.cleared),
+        "reconciliation_id": line.reconciliation_id,
+    }
+
+
 @router.get("/check-register")
 def check_register(
     account_id: int = None,
