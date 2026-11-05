@@ -348,7 +348,13 @@ Banking → an account → **Reconcile**: statement date and ending balance (for
 a card, the amount owed). The session lists the ledger lines on the account
 up to that date that no completed reconciliation holds; matched statement
 lines arrive ticked; **Mark all**, **Clear all** and **Mark through that
-date** tick in bulk. **Beginning balance** is the prior completed statement's
+date** tick in bulk. The list is in date order; click **Date**, **Payee /
+Description**, **Ref #** or **Amount** to sort it by that column, and again
+to reverse it. Ref # sorts check numbers as numbers (check 998 before check
+1002), other references after them as text, and lines with none last. The
+order holds while you tick lines, mark them all, show only the lines through
+a date or change the statement, and the page stays where you were; it is
+remembered for the account on this computer. **Beginning balance** is the prior completed statement's
 balance; **difference** = statement − (beginning + cleared). Finish when the
 difference is zero: the cleared lines are stamped with the reconciliation
 and locked. **Abandon** drops the session and keeps the ticks. One open

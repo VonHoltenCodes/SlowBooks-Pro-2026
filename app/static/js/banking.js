@@ -2763,18 +2763,100 @@ const BankingPage = {
         const only = document.getElementById('recon-only-through');
         if (only && only.checked) BankingPage.reconShowThrough(reconId, value);
     },
+    // The order of the reconcile list (#716): any of its four columns,
+    // ascending or descending, as QuickBooks Desktop's reconcile window
+    // sorts; date order (the server's) until a heading is pressed. Kept per
+    // account in this browser, scoped as the register's From is, so a
+    // statement worked by check number opens that way next month too.
+    _RECON_SORTS: ['date', 'payee', 'ref', 'amount'],
+    _reconSortKey(accountId) {
+        const key = BankingPage._fromKey(accountId);
+        return key ? key.replace('slowbooks-register-from:', 'slowbooks-reconcile-sort:') : null;
+    },
+    _reconSortNow: {},  // this page load's choice, where none can be kept
+    _reconSortFor(accountId) {
+        const key = BankingPage._reconSortKey(accountId);
+        const now = BankingPage._reconSortNow[key || `:${accountId}`];
+        if (now) return now;
+        try {
+            const kept = key && typeof Store !== 'undefined' ? JSON.parse(Store.get(key) || 'null') : null;
+            if (kept && BankingPage._RECON_SORTS.includes(kept.column) && ['asc', 'desc'].includes(kept.direction)) return kept;
+        } catch (e) { /* not kept: date order */ }
+        return { column: 'date', direction: 'asc' };
+    },
+    // Ref # is a check number: numbers compare as numbers (998 before
+    // 1002), a number before a reference that is not one, text as text, and
+    // a line with none last whichever way the column is sorted. A tie keeps
+    // the server's order (date, then entry).
+    _reconSorted(rows, sort) {
+        const text = (t) => {
+            if (sort.column === 'payee') return String(t.payee || t.description || '').trim();
+            if (sort.column === 'ref') return String(t.check_number || '').trim();
+            return '';
+        };
+        const sign = sort.direction === 'desc' ? -1 : 1;
+        const cmp = (a, b) => {
+            if (sort.column === 'date') return a.date < b.date ? -1 : a.date > b.date ? 1 : 0;
+            if (sort.column === 'amount') return Number(a.amount) - Number(b.amount);
+            const x = text(a), y = text(b);
+            if (sort.column === 'ref') {
+                const nx = /^\d+$/.test(x), ny = /^\d+$/.test(y);
+                if (nx && ny) return Number(x) - Number(y);
+                if (nx !== ny) return nx ? -1 : 1;
+            }
+            return x.toLowerCase().localeCompare(y.toLowerCase());
+        };
+        return rows.map((t, i) => [t, i]).sort(([a, i], [b, j]) => {
+            if (sort.column === 'payee' || sort.column === 'ref') {
+                const ea = !text(a), eb = !text(b);
+                if (ea !== eb) return ea ? 1 : -1;
+            }
+            return sign * cmp(a, b) || i - j;
+        }).map(([t]) => t);
+    },
+    _reconHead(reconId, accountId, sort, column, label, cls = '') {
+        const on = sort.column === column;
+        const ariaSort = on ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none';
+        const arrow = on ? ` <span class="sort-arrow" aria-hidden="true">${sort.direction === 'asc' ? '▲' : '▼'}</span>` : '';
+        return `<th scope="col" class="${['sortable', on ? 'sort-active' : '', cls].filter(Boolean).join(' ')}" aria-sort="${ariaSort}">`
+            + `<button type="button" class="th-sort" id="recon-sort-${column}" onclick="BankingPage.reconSortBy(${reconId}, ${Number(accountId)}, '${column}')">${label}${arrow}</button></th>`;
+    },
+    // A heading pressed: that column ascending, or the other way if it is
+    // the column already sorted on.
+    reconSortBy(reconId, accountId, column) {
+        if (!BankingPage._RECON_SORTS.includes(column)) return;
+        const now = BankingPage._reconSortFor(accountId);
+        const next = { column, direction: now.column === column && now.direction === 'asc' ? 'desc' : 'asc' };
+        const key = BankingPage._reconSortKey(accountId);
+        BankingPage._reconSortNow[key || `:${accountId}`] = next;
+        if (key && typeof Store !== 'undefined') Store.set(key, JSON.stringify(next));
+        return BankingPage.showReconcileView(reconId);
+    },
     async showReconcileView(reconId) {
-        const data = await API.get(`/banking/reconciliations/${reconId}/transactions`);
+        const [data] = await Promise.all([
+            API.get(`/banking/reconciliations/${reconId}/transactions`),
+            BankingPage._openCompany(),  // whose order is kept
+        ]);
+        // Drawn again (a tick, Mark all, the Through filter, Change…, a
+        // heading): the list keeps its order, the page its scroll, and the
+        // keyboard its place (#716).
+        const again = !!document.querySelector(`#recon-view[data-recon="${Number(reconId)}"]`);
+        const box = document.getElementById('content');
+        const top = box ? box.scrollTop : 0;
+        const focusedId = again && document.activeElement ? document.activeElement.id : '';
+        const keyboard = typeof App !== 'undefined' && typeof App.keyboardFocus === 'function' && App.keyboardFocus();
+        const sort = BankingPage._reconSortFor(data.account_id);
         const through = BankingPage._reconThrough[reconId] || '';
         const day = through || BankingPage._reconDay[reconId] || data.statement_date;
-        const shown = through ? data.transactions.filter(t => t.date <= through) : data.transactions;
+        const inReach = through ? data.transactions.filter(t => t.date <= through) : data.transactions;
+        const shown = BankingPage._reconSorted(inReach, sort);
         const hidden = data.transactions.length - shown.length;
         const rows = shown.map(t => {
             const cls = t.reconciled ? 'style="background:var(--primary-light);"' : '';
             const amtCls = t.amount >= 0 ? 'color:var(--text-success)' : 'color:var(--text-danger)';
             const said = ['Cleared', formatDate(t.date), t.payee || t.description, formatCurrency(t.amount)].filter(Boolean).join(', ');
-            return `<tr ${cls}>
-                <td><input type="checkbox" ${t.reconciled ? 'checked' : ''} aria-label="${escapeHtml(said)}"
+            return `<tr ${cls} data-line="${t.id}">
+                <td><input type="checkbox" id="recon-line-${t.id}" ${t.reconciled ? 'checked' : ''} aria-label="${escapeHtml(said)}"
                     onchange="BankingPage.toggleCleared(${reconId}, ${t.id}, this)"></td>
                 <td>${formatDate(t.date)}</td>
                 <td>${escapeHtml(t.payee || t.description || '')}${t.matched ? ' <span title="matched to a statement line" style="color:var(--text-success);">●</span>' : ''}</td>
@@ -2785,6 +2867,7 @@ const BankingPage = {
         const balanced = Math.abs(data.difference) < 0.01;
         const diffColor = balanced ? 'var(--success)' : 'var(--danger)';
         $('#page-content').innerHTML = `
+            <div id="recon-view" data-recon="${Number(reconId)}">
             <div class="page-header">
                 <h2>Reconcile — statement of ${formatDate(data.statement_date)}</h2>
                 <div class="btn-group">
@@ -2820,10 +2903,16 @@ const BankingPage = {
                 <button class="btn btn-sm btn-secondary" onclick="BankingPage.markAll(${reconId}, false)">Clear all</button>
             </div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col" style="width:30px;"></th><th scope="col">Date</th><th scope="col">Payee / Description</th><th scope="col">Ref #</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <thead><tr><th scope="col" style="width:30px;"></th>${BankingPage._reconHead(reconId, data.account_id, sort, 'date', 'Date')}${BankingPage._reconHead(reconId, data.account_id, sort, 'payee', 'Payee / Description')}${BankingPage._reconHead(reconId, data.account_id, sort, 'ref', 'Ref #')}${BankingPage._reconHead(reconId, data.account_id, sort, 'amount', 'Amount', 'amount')}</tr></thead>
                 <tbody>${rows || '<tr><td colspan="5" style="text-align:center;">No ledger lines up to this date</td></tr>'}</tbody>
             </table></div>
-            <div id="recon-through-note" role="status" style="font-size:11px; color:var(--gray-500); margin-top:6px;">${hidden ? `${hidden} later line${hidden === 1 ? '' : 's'} hidden (dated after ${formatDate(through)}); the figures above count the whole session` : ''}</div>`;
+            <div id="recon-through-note" role="status" style="font-size:11px; color:var(--gray-500); margin-top:6px;">${hidden ? `${hidden} later line${hidden === 1 ? '' : 's'} hidden (dated after ${formatDate(through)}); the figures above count the whole session` : ''}</div>
+            </div>`;
+        if (again && box) box.scrollTop = top;
+        const back = focusedId ? document.getElementById(focusedId) : null;
+        if (back) {
+            try { back.focus({ preventScroll: true, ...(keyboard ? { focusVisible: true } : {}) }); } catch (e) { /* stays where it is */ }
+        }
     },
 
     // The statement's ending balance and date can be corrected while the
