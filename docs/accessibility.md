@@ -104,8 +104,8 @@ or Alt+D.*
   mouse wheel (⌘ on a Mac) step through the same four sizes. A window zoom
   set in an earlier version was carried over to the nearest size.
 - **A sound when a transaction posts**, optional and per sign-in (v2.29.1):
-  Settings → Sounds. Off by default.
-- **Enter moves between fields** on request (v2.29.1): Settings → My
+  Settings → Preferences → Sounds. Off by default.
+- **Enter moves between fields** on request (v2.29.1): Settings → Preferences → My
   Preferences, for people used to the way desktop bookkeeping software has
   always done it.
 - **The top bar names its shortcuts** (v2.31.1): Home (Alt+H) and the rest
@@ -113,6 +113,13 @@ or Alt+D.*
 - **A long problem list is one Tab stop** (v2.31.2): the QuickBooks import's
   list of problems to tick is walked with the arrow keys, and the keyboard's
   ring follows, on Windows and on a Mac.
+- **Company Settings is a list of groups** (v2.31.8): the list down the left
+  is a tab list, one Tab stop. The arrow keys move along it, Enter or Space
+  opens a group and puts the focus on its first heading, and the panel is
+  named by the group showing. A group with unsaved changes says so after its
+  name. *Find a setting*, above the list, finds a setting by its heading or
+  its field's name in every group, since one group at a time leaves the
+  browser's own Find nothing to search.
 - **Every data table declares its column headers** (`scope="col"`).
 - **Icon-only buttons** (remove a line, delete an attachment, close a dialog)
   carry accessible names.

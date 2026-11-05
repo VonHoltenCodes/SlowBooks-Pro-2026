@@ -186,7 +186,7 @@ for you to tick the ones to accept and leave the rest:
 - **Transactions in a closed period**: a notice, with nothing to tick, of
   how many are dated on or before the closing date and which dates. They
   are left out and the rest imports; to bring them in, move the closing
-  date (Settings > Closing Date) and import the file again.
+  date (Settings > Company > Closing Date) and import the file again.
 
 Each list has Select all and Select none, and is one stop for Tab however
 long: the arrow keys move from row to row (in the accounts, Tab goes on to
@@ -532,7 +532,7 @@ under Uncategorized is a posting QuickBooks had no class on either.
   not name that has never been posted to. Either way, an account with
   history is kept: delete nothing by hand that a transaction still uses.
   If your business does not number its accounts, untick **Settings →
-  Company Information → Use account numbers** after the import: the
+  Company → Company Information → Use account numbers** after the import: the
   starter accounts keep their numbers, but nothing prints them.
 - Spot-check **Reports → Trial Balance** against the same report in
   QuickBooks as of your cutover date (mind the date range — set it to
@@ -556,7 +556,7 @@ under Uncategorized is a posting QuickBooks had no class on either.
 ## Leaving QuickBooks Contractor Edition
 
 If your file is a QuickBooks Desktop **Contractor Edition** company, set
-SlowBooks to the matching mode after you import: **Settings → Company
+SlowBooks to the matching mode after you import: **Settings → Company → Company
 Information → Company Type → Construction**. It changes no data and can be switched back at any time. What
 it does:
 

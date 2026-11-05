@@ -559,6 +559,7 @@ def test_the_warn_setting_asks_before_saving_without_a_class(
         page, handled = _open_at(browser, company, "#/settings")
         page.on("dialog", on_dialog)
         try:
+            page.click("#settings-tab-lists")  # its group (#720)
             page.wait_for_selector("#class-warn-blank")
             box = page.get_by_label("Warn when a transaction is saved without a class")
             assert box.is_checked()
@@ -624,6 +625,7 @@ def test_the_warn_setting_asks_before_saving_without_a_class(
 
             # Settings: the box, by keyboard, and Save Settings turns it off
             _visit(page, handled, "#/settings")
+            page.click("#settings-tab-lists")  # its group (#720)
             page.wait_for_selector("#class-warn-blank")
             box = page.get_by_label("Warn when a transaction is saved without a class")
             box.focus()

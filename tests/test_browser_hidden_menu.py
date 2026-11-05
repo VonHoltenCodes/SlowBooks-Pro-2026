@@ -47,6 +47,7 @@ def _untick(page, keys):
 def _back_to_settings(page, handled):
     _visit(page, handled, "#/customers")
     _visit(page, handled, "#/settings")
+    page.click("#settings-tab-preferences")  # its group (#720)
     page.wait_for_selector("#hidden-menu-choices input[data-show-menu]")
 
 
@@ -54,6 +55,7 @@ def test_hide_some_leave_return_hide_more_then_show_one(browser, company, books)
     every = FIRST + MORE
     page, handled = _open_at(browser, company, "#/settings")
     try:
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#hidden-menu-choices input[data-show-menu]")
         boxes = page.evaluate(BOXES)
         # everything ticked (shown) to start with
@@ -98,6 +100,7 @@ def test_a_stored_key_the_page_does_not_offer_is_kept(browser, company, books):
     )
     page, handled = _open_at(browser, company, "#/settings")
     try:
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#hidden-menu-choices input[data-show-menu]")
         boxes = page.evaluate(BOXES)
         assert "in-kind-gifts" not in boxes and boxes["jobs"] is False
@@ -120,6 +123,7 @@ def test_a_nonprofit_keeps_an_unticked_nonprofit_item_hidden_after_reload(
     company.put("/api/settings", json={"hidden_menu": json.dumps(["in-kind-gifts"])})
     page, handled = _open_at(browser, company, "#/settings")
     try:
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#hidden-menu-choices input[data-show-menu]")
         assert page.evaluate(SIDEBAR_HIDDEN, ["in-kind-gifts", "releases"]) == [
             "in-kind-gifts"
@@ -129,6 +133,7 @@ def test_a_nonprofit_keeps_an_unticked_nonprofit_item_hidden_after_reload(
         page.reload()
         page.wait_for_function("window.App && document.readyState === 'complete'")
         settle(page, handled)
+        # (the group opened above is remembered across the reload)
         page.wait_for_selector("#hidden-menu-choices input[data-show-menu]")
         assert page.evaluate(SIDEBAR_HIDDEN, ["in-kind-gifts", "releases"]) == [
             "in-kind-gifts"
@@ -205,6 +210,7 @@ def test_a_save_while_the_saved_toast_shows_still_saves(browser, company, books)
     the button's centre reaches the button and the change is saved."""
     page, handled = _open_sized(browser, company, "#/settings", 1280, 800)
     try:
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#hidden-menu-choices input[data-show-menu]")
         _untick(page, FIRST[:1])
         page.click("#settings-save-btn")

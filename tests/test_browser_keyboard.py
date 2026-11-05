@@ -2399,6 +2399,12 @@ def test_focus_in_a_wide_table_spills_nothing(browser, company, books):
             page.set_viewport_size({"width": width, "height": 800})
             for route in ("#/jobs", "#/settings", "#/fixed-assets"):
                 _visit(page, handled, route)
+                if route == "#/settings":  # the first table's group, shown (#720)
+                    page.evaluate(
+                        """() => SettingsPage.showSetting([...document.querySelectorAll(
+                            '#page-content .table-container')].find(c =>
+                            c.querySelector('tbody button, tbody a[href]')), { focus: false })"""
+                    )
                 rest = page.evaluate(SPILL)
                 assert rest["overflow"] == "auto hidden", (width, route, rest)
                 # a mouse's focus: the button pressed, not released
@@ -2752,7 +2758,7 @@ def test_tab_through_settings_never_lands_under_its_save_bar(browser, company, b
     notes box too, which the browser brings only its caret line into view
     for) and every stop is what the browser finds at its middle; Tab still
     reaches the bar's Save; and a mouse's press on a control the bar half
-    covers scrolls nothing — a button, and at 1440 x 900 a click into the
+    covers scrolls nothing — a button, and at 1440 x 480 a click into the
     invoice notes box (a text box takes :focus-visible on a click too, and
     the page moved under the click: final review), which Tab then still
     brings clear."""
@@ -2764,25 +2770,33 @@ def test_tab_through_settings_never_lands_under_its_save_bar(browser, company, b
             _visit(page, handled, "#/settings")
             page.wait_for_selector("#settings-savebar")
             settle(page, handled)
-            page.evaluate(
-                "() => _tabStops(document.getElementById('page-content'), null)[0].focus()"
-            )
             stops, bad, saved = 0, [], False
-            for _ in range(400):
-                page.keyboard.press("Tab")
-                at = page.evaluate(SAVEBAR_STOP)
-                if at is None:
-                    break
-                stops += 1
-                if at["own"]:
-                    saved = saved or at["at"] == "settings-save-btn"
-                    continue
-                if at["size"] and (at["over"] > 0.5 or not at["found"]):
-                    bad.append((at["at"], round(at["over"], 1), at["found"]))
+            # Settings shows one group at a time (#720): walked group by group
+            groups = page.evaluate(
+                "() => [...document.querySelectorAll('#settings-groups [role=\"tab\"]')]"
+                ".filter(t => !t.hidden).map(t => t.dataset.groupTab)"
+            )
+            for group in groups:
+                page.evaluate("(g) => SettingsPage.openGroup(g)", group)
+                page.evaluate(
+                    "() => _tabStops(document.getElementById('page-content'), null)[0].focus()"
+                )
+                for _ in range(400):
+                    page.keyboard.press("Tab")
+                    at = page.evaluate(SAVEBAR_STOP)
+                    if at is None:
+                        break
+                    stops += 1
+                    if at["own"]:
+                        saved = saved or at["at"] == "settings-save-btn"
+                        continue
+                    if at["size"] and (at["over"] > 0.5 or not at["found"]):
+                        bad.append((group, at["at"], round(at["over"], 1), at["found"]))
             assert stops > 100 and saved, (width, stops, saved)
             assert not bad, (width, len(bad), bad)
         # a mouse's press on a button the bar half covers: no scroll, so
         # the release lands on the button pressed
+        page.evaluate("() => SettingsPage.openGroup('sales')")  # a long group
         half = page.evaluate(
             """() => { const bar = document.getElementById('settings-savebar'),
                     content = document.getElementById('content');
@@ -2806,10 +2820,16 @@ def test_tab_through_settings_never_lands_under_its_save_bar(browser, company, b
         # a click into a text box the bar half covers: a text box takes
         # :focus-visible on a click too, and the page moved under it
         # (review); now nothing moves, and Tab to it still brings it clear
-        page.set_viewport_size({"width": 1440, "height": 900})
+        # (in its group, Sales documents, the notes box is the group's
+        # first section's, high on the page: a short window puts it where
+        # the bar half covers it, as the long page did at 1440 x 900)
+        page.set_viewport_size({"width": 1440, "height": 480})
         _visit(page, handled, "#/settings")
         page.wait_for_selector("#settings-savebar")
         settle(page, handled)
+        page.evaluate(
+            "() => SettingsPage.openGroup('sales')"
+        )  # the notes' group (#720)
         box = page.evaluate(
             """() => { const bar = document.getElementById('settings-savebar'),
                     content = document.getElementById('content'),
@@ -3753,6 +3773,11 @@ def test_every_field_keeps_a_fields_focus_style_on_every_page_and_dialog(
         assert wrong == [], (len(wrong), wrong)
         for route, sel in FIELD_KINDS:
             _visit(page, handled, route)
+            if route == "#/settings":  # the field's group, shown (#720)
+                page.evaluate(
+                    "(s) => SettingsPage.showSetting(document.querySelector(s), { focus: false })",
+                    sel,
+                )
             page.wait_for_selector(sel)
             settle(page, handled)
             _keyed(page, f"document.querySelector({sel!r})")

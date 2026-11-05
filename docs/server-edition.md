@@ -137,7 +137,7 @@ bookkeeping software has always worked. Names only, never roles, and only
 before sign-in. Anyone who can reach the port can read that list, which is
 one more reason Server Edition is for trusted networks.
 
-1. Sign in as the administrator → **Settings → Users**.
+1. Sign in as the administrator → **Settings → Users and security → Users**.
 2. Add each person with a username, password, and role. The sidebar reads
    **Server Edition** whenever the host serves the network (`--serve-lan`);
    the moment a second user exists, the sign-in screen also lists the
@@ -151,7 +151,7 @@ one more reason Server Edition is for trusted networks.
    bookkeeper does run the day-to-day syncs on a feed the administrator has
    connected. The last active administrator can never be locked out — the
    app refuses to demote or deactivate them.
-4. **Invite your accountant** (Settings → Users) makes a sign-in with a
+4. **Invite your accountant** (Settings → Users and security → Users) makes a sign-in with a
    one-time password and shows what to send, once: the address, the username
    and the password, each with a Copy button of its own. They choose their own
    password at the first sign-in and nothing else opens until they do. Give
@@ -164,7 +164,7 @@ one more reason Server Edition is for trusted networks.
 
 A program (an AI agent, the receipt service, an import tool, a script) signs
 in with an API token instead of a password. An administrator makes one under
-**Settings → API Tokens**: a label, a role and, if the program needs it,
+**Settings → Users and security → API Tokens**: a label, a role and, if the program needs it,
 **Can make backups**. The secret (`sbp_…`) is shown once and kept only as a
 SHA-256 hash, with its first ten characters as a hint in the list. The
 program sends it on every request as `Authorization: Bearer sbp_…`; no
@@ -191,7 +191,7 @@ What a token cannot do, whatever its role or permission:
   settings, users, tokens, companies, migration imports and HR stay with a
   signed-in administrator.
 - Restore a backup. Restoring replaces the whole company, so it is done by an
-  administrator signed in to SlowBooks Pro (Settings → Backup / Restore, or
+  administrator signed in to SlowBooks Pro (Settings → Backups → Backup / Restore, or
   `POST /api/backups/restore` from that session). A tool that resets the books
   between runs takes its backups with a token and leaves the restore to a
   person.
@@ -209,7 +209,7 @@ until it is revoked. No new administrator token can be made.
 
 ## Backups
 
-**Settings → Backup / Restore → Create Backup** writes the open company's
+**Settings → Backups → Backup / Restore → Create Backup** writes the open company's
 file to `C:\ProgramData\SlowBooksPro\data\backups` (or `%LOCALAPPDATA%\SlowBooksPro\data\backups`
 for the quick trial); Download saves a copy where you choose. A program with
 a **Can make backups** token takes them over the API. Backups are made on
@@ -228,7 +228,7 @@ and two people can work in two companies at the same time.
   people in the chosen company.
 - **Each company keeps its own people and roles.** A user lives in the company
   file, the way they always have. To give the bookkeeper both companies, add
-  them under Settings → Users in each one, with whatever role each company
+  them under Settings → Users and security → Users in each one, with whatever role each company
   gives them: administrator in one and bookkeeper in the other is fine.
 - **One sign-in, one click to switch.** Signing in also checks the same
   username and password against the other companies. The topbar then offers a

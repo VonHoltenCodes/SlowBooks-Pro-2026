@@ -385,6 +385,14 @@ def _signed_in(browser, client, role):
     return page, handled
 
 
+def _settings_groups(page):
+    """The groups Settings lists for this sign-in, in order (#720)."""
+    return page.evaluate(
+        "() => [...document.querySelectorAll('#settings-groups [role=\"tab\"]')]"
+        ".filter(t => !t.hidden).map(t => t.dataset.groupTab)"
+    )
+
+
 def _sweep_pages(browser, client, role, books):
     page, handled = _signed_in(browser, client, role)
     swept, headings, texts, admin_notes = {}, {}, {}, {}
@@ -410,17 +418,39 @@ def _sweep_pages(browser, client, role, books):
                 # which can outlast the quiet settle waits for
                 page.wait_for_function("() => AnalyticsPage.state.aiActions !== null")
                 settle(page, handled)
-            swept[route] = page.evaluate(SWEEP, "#page-content")
             headings[route] = page.evaluate(
                 "() => (document.querySelector('#page-content h2, #page-content h3')"
                 " || {}).textContent || ''"
             ).strip()
             texts[route] = page.inner_text("#page-content")
-            # the sentences that say a control is the administrator's
-            admin_notes[route] = page.evaluate(
-                "() => [...document.querySelectorAll('#page-content [data-admin-note]')]"
-                ".filter(n => n.getClientRects().length).map(n => n.textContent.trim())"
+            swept[route], admin_notes[route] = [], []
+            labels = page.evaluate(
+                "() => typeof SettingsPage === 'undefined' ? []"
+                " : SettingsPage.GROUPS.map(g => g.label)"
             )
+            # Settings shows one group of its sections at a time (#720):
+            # the page is each group in turn
+            for group in _settings_groups(page) if route == "#/settings" else [None]:
+                if group:
+                    page.evaluate("(g) => SettingsPage.openGroup(g)", group)
+                seen = {c["key"] for c in swept[route]}
+                swept[route] += [
+                    c
+                    for c in page.evaluate(SWEEP, "#page-content")
+                    if c["key"] not in seen
+                    # the list's own tabs: which groups a sign-in is shown
+                    # is tests/test_browser_settings_groups.py's
+                    and not (c["key"].startswith('button "') and c["text"] in labels)
+                ]
+                # the sentences that say a control is the administrator's
+                admin_notes[route] += [
+                    n
+                    for n in page.evaluate(
+                        "() => [...document.querySelectorAll('#page-content [data-admin-note]')]"
+                        ".filter(n => n.getClientRects().length).map(n => n.textContent.trim())"
+                    )
+                    if n not in admin_notes[route]
+                ]
         # a job's other tabs re-render in place
         for tab in JOB_TABS:
             page.evaluate("async (t) => { await JobsPage.setTab(t); }", tab)
@@ -724,20 +754,31 @@ def test_a_bookkeeper_on_a_first_page_of_settings(browser, company, books, db_se
         assert page.evaluate("() => !!document.getElementById('logo-upload')")
         page.evaluate("() => App.setRole('bookkeeper')")
         settle(page, handled)
+        # Settings shows one group at a time (#720): what each group shows
         got = page.evaluate("""() => {
             const shown = el => !!el && el.getClientRects().length > 0;
             const form = document.getElementById('settings-form');
             const named = [...form.querySelectorAll('[name]')];
             const add = document.getElementById('new-class-name');
-            return {
+            const got = {
                 fields: named.length,
                 open: named.filter(f => !f.disabled).map(f => f.name),
-                save: shown(document.getElementById('settings-save-btn')),
-                picker: shown(document.getElementById('logo-upload')),
-                notes: [...form.querySelectorAll('[data-admin-note]')].filter(shown)
-                    .map(n => n.textContent.trim()),
-                add_class: shown(add) && !add.disabled,
+                save: false, picker: false, notes: [], add_class: false,
             };
+            const groups = [...document.querySelectorAll('#settings-groups [role="tab"]')]
+                .filter(t => !t.hidden).map(t => t.dataset.groupTab);
+            for (const g of groups) {
+                SettingsPage.openGroup(g);
+                got.save = got.save || shown(document.getElementById('settings-save-btn'));
+                got.picker = got.picker || shown(document.getElementById('logo-upload'));
+                for (const n of [...form.querySelectorAll('[data-admin-note]')].filter(shown)) {
+                    const t = n.textContent.trim();
+                    if (!got.notes.includes(t)) got.notes.push(t);
+                }
+                got.add_class = got.add_class || (shown(add) && !add.disabled);
+            }
+            SettingsPage.openGroup('company');
+            return got;
         }""")
         # 49 named fields since the QuickBooks Online section left (2.23.2)
         assert got["fields"] >= 45 and got["open"] == []

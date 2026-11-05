@@ -23,7 +23,7 @@ See [setup-stripe.md](setup-stripe.md) for the Stripe equivalent — both can be
 
 ## Step 2: Configure Slowbooks
 
-1. Open **Settings → Online Payments → PayPal** (an administrator's setting)
+1. Open **Settings → Connections → Online Payments → PayPal** (an administrator's setting)
 2. Set **PayPal Payments** to Enabled
 3. Set **Environment** to `Sandbox` (switch to `Live` after testing)
 4. Paste the **Client ID** and **Client Secret**

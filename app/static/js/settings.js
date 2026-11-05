@@ -254,7 +254,7 @@ const SettingsPage = {
             + ' style="width:auto; vertical-align:middle; margin-right:6px;" onchange="' + onchange + '">'
             + label + '</label>'
             + '<div id="' + id + '-hint" style="font-size:11px; color:var(--text-muted); margin:2px 0 0 22px;">' + hint + '</div></div>';
-        return '<div class="settings-section" id="settings-my-preferences" data-own-preference role="group" aria-labelledby="settings-h-my-preferences">'
+        return '<div class="settings-section" data-group="preferences" id="settings-my-preferences" data-own-preference role="group" aria-labelledby="settings-h-my-preferences">'
             + '<h3 id="settings-h-my-preferences">My Preferences</h3>'
             + '<p style="font-size:11px; color:var(--text-muted); margin:0 0 8px;">Yours alone: kept with your sign-in, saved as soon as you change one.</p>'
             + box('pref-enter-moves', 'enter_moves', 'Enter key moves between fields',
@@ -391,16 +391,18 @@ const SettingsPage = {
             SettingsPage.loadMyPreferences();
             SettingsPage.loadUnreadableSecrets();
             SettingsPage.loadEmailLog(true);
+            // the groups down the left, from the sections now on the page
+            // (before scrollToFocus: a jump opens its section's group)
+            SettingsPage._initGroups();
             SettingsPage.scrollToFocus();
             SettingsPage._installLeaveGuard();
             SettingsPage._markClean();
         }, 0);
-        return `
-            <div class="page-header">
-                <h2>Company Settings</h2>
-            </div>
-            <div id="settings-unreadable" class="hint hint--locked" role="status" style="margin-bottom:12px;" data-admin hidden></div>
-            ${SettingsPage._myPreferencesHtml()}
+        // The form, then the page around it: the list of groups on the left
+        // (filled in from the sections' data-group once they are drawn,
+        // SettingsPage._initGroups), and My Preferences and the form in the
+        // one panel the list shows a group of.
+        const form = `
             <!-- data-admin-fields: the fields this form saves (PUT /api/settings)
                  are the administrator's. Any other sign-in sees them locked, with
                  the sentence below (App.adminPass). AI Insights and the lists
@@ -409,7 +411,7 @@ const SettingsPage = {
             <form id="settings-form" data-admin-fields onsubmit="SettingsPage.save(event)"
                 oninput="SettingsPage._updateDirty()" onchange="SettingsPage._updateDirty()">
                 <div class="hint hint--locked hidden" data-admin-note style="margin-bottom:10px;">Company settings are changed by an administrator.</div>
-                <div class="settings-section" role="group" aria-labelledby="settings-h-company-information">
+                <div class="settings-section" data-group="company" role="group" aria-labelledby="settings-h-company-information">
                     <h3 id="settings-h-company-information">Company Information</h3>
                     <div class="form-grid">
                         <div class="form-group full-width"><label>Company Name *</label>
@@ -473,7 +475,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-company-logo">
+                <div class="settings-section" data-group="company" role="group" aria-labelledby="settings-h-company-logo">
                     <h3 id="settings-h-company-logo">Company Logo</h3>
                     <div class="form-grid">
                         <div class="form-group">
@@ -499,7 +501,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-invoice-defaults">
+                <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-invoice-defaults">
                     <h3 id="settings-h-invoice-defaults">${T('Invoice')} Defaults</h3>
                     <div class="form-grid">
                         <div class="form-group"><label>Default Terms</label>
@@ -556,7 +558,7 @@ const SettingsPage = {
                 <!-- Desktop app only (shown by loadSignInPref); the session used
                      to outlive the app, so a relaunch reopened the company
                      without its password (explore 2.17.3, macbase1 S-j). -->
-                <div class="settings-section" id="settings-sign-in" hidden role="group" aria-labelledby="settings-h-sign-in">
+                <div class="settings-section" data-group="security" id="settings-sign-in" hidden role="group" aria-labelledby="settings-h-sign-in">
                     <h3 id="settings-h-sign-in">Sign-in</h3>
                     <div class="form-grid">
                         <div class="form-group full-width">
@@ -572,7 +574,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" id="settings-closing-date" role="group" aria-labelledby="settings-h-closing-date">
+                <div class="settings-section" data-group="company" id="settings-closing-date" role="group" aria-labelledby="settings-h-closing-date">
                     <h3 id="settings-h-closing-date">Closing Date</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Prevent modifications to transactions before this date.
@@ -601,7 +603,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" id="settings-warnings" role="group" aria-labelledby="settings-h-warnings">
+                <div class="settings-section" data-group="preferences" id="settings-warnings" role="group" aria-labelledby="settings-h-warnings">
                     <h3 id="settings-h-warnings">Transaction Warnings</h3>
                     <div style="font-size:11px; color:var(--text-muted); margin-bottom:8px;">
                         Questions every form asks before it saves, for everyone using these books. Each one can be answered
@@ -622,7 +624,7 @@ const SettingsPage = {
                         Saving changes to a transaction that was already saved asks first.</div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-email-smtp">
+                <div class="settings-section" data-group="email" role="group" aria-labelledby="settings-h-email-smtp">
                     <h3 id="settings-h-email-smtp">Email (SMTP)</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Configure SMTP for sending invoices by email.
@@ -654,7 +656,7 @@ const SettingsPage = {
                         Send Test Email</button>
                 </div>
 
-                <div class="settings-section" id="settings-email-recent-sends" data-admin role="group" aria-labelledby="settings-h-email-recent-sends" hidden>
+                <div class="settings-section" data-group="email" id="settings-email-recent-sends" data-admin role="group" aria-labelledby="settings-h-email-recent-sends" hidden>
                     <h3 id="settings-h-email-recent-sends">Recent sends</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Every invoice, statement, collection letter, portal invite and test email, newest first,
@@ -669,7 +671,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-direct-deposit">
+                <div class="settings-section" data-group="payroll" role="group" aria-labelledby="settings-h-direct-deposit">
                     <h3 id="settings-h-direct-deposit">Direct Deposit (ACH)</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         What the bank prints on its ACH origination agreement. With these saved, a processed
@@ -692,7 +694,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" id="settings-payroll-accounts" role="group" aria-labelledby="settings-h-payroll-accounts">
+                <div class="settings-section" data-group="payroll" id="settings-payroll-accounts" role="group" aria-labelledby="settings-h-payroll-accounts">
                     <h3 id="settings-h-payroll-accounts">Payroll Accounts</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Where a pay run posts. Each piece goes to its usual account unless another is chosen here.
@@ -704,7 +706,7 @@ const SettingsPage = {
                     ${SettingsPage._payrollAccountsHtml(payrollAccounts)}
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-online-payments">
+                <div class="settings-section" data-group="connections" role="group" aria-labelledby="settings-h-online-payments">
                     <h3 id="settings-h-online-payments">Online Payments</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Accept online payments on emailed invoice links. Enable any combination of
@@ -771,7 +773,7 @@ const SettingsPage = {
                     ${SettingsPage._clearingHtml('square', 'Square', s, accounts)}
                 </div>
 
-                <div class="settings-section" id="settings-ai" role="group" aria-labelledby="settings-h-ai-insights">
+                <div class="settings-section" data-group="connections" id="settings-ai" role="group" aria-labelledby="settings-h-ai-insights">
                     <h3 id="settings-h-ai-insights">AI Insights</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Bring-your-own-key access to Anthropic Claude, xAI Grok, Groq, Cloudflare Workers AI, OpenAI, or Google Gemini.
@@ -783,7 +785,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
+                <div class="settings-section" data-group="connections" id="settings-ocr" role="group" aria-labelledby="settings-h-receipt-scanning">
                     <h3 id="settings-h-receipt-scanning">Receipt Scanning</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         ${Terms.text('Local OCR for the Scan Receipt button on the Enter Sales Receipt, Enter Bill and Enter Expense forms.')}
@@ -809,7 +811,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" id="settings-sounds" role="group" aria-labelledby="settings-h-sounds">
+                <div class="settings-section" data-group="preferences" id="settings-sounds" role="group" aria-labelledby="settings-h-sounds">
                     <h3 id="settings-h-sounds">Sounds</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         A personal preference, kept per sign-in: it follows you to another computer, and everyone sets their own.
@@ -824,7 +826,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-late-fees">
+                <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-late-fees">
                     <h3 id="settings-h-late-fees">Late Fees</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Automatically apply late fees to overdue invoices. Use "Apply Late Fees" on the AR Aging report.
@@ -842,7 +844,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-email-templates">
+                <div class="settings-section" data-group="email" role="group" aria-labelledby="settings-h-email-templates">
                     <h3 id="settings-h-email-templates">Email Templates</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Customize email templates for invoices, payment receipts, and collection notices.
@@ -854,7 +856,7 @@ const SettingsPage = {
                     <div id="email-template-list"></div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-payment-terms">
+                <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-payment-terms">
                     <h3 id="settings-h-payment-terms">Payment Terms</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         The terms every ${T('invoice')}, bill, ${T('customer')} and vendor form offers, each with its rule. A standard term is due a number of days after
@@ -868,7 +870,7 @@ const SettingsPage = {
                     <div id="payment-term-list"></div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-invoice-messages">
+                <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-invoice-messages">
                     <h3 id="settings-h-invoice-messages">${T('Invoice')} Messages</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Saved notes to choose from on the ${T('invoice')} form: how to pay, a thank-you, a season's greeting. The form offers them beside Notes and copies the chosen text in,
@@ -881,7 +883,7 @@ const SettingsPage = {
                 </div>
 
                 ${Terms.isNonprofit() ? `
-                <div class="settings-section" role="group" aria-labelledby="settings-h-giving-statement">
+                <div class="settings-section" data-group="sales" role="group" aria-labelledby="settings-h-giving-statement">
                     <h3 id="settings-h-giving-statement">Giving Statement</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         The ministry's own words on the year-end giving statement. The Opening messages are saved
@@ -906,7 +908,7 @@ const SettingsPage = {
                     </div>
                 </div>` : ''}
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-menu">
+                <div class="settings-section" data-group="preferences" role="group" aria-labelledby="settings-h-menu">
                     <h3 id="settings-h-menu">Sidebar</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         A ticked item shows in the menu; untick the ones this company doesn't use (payroll done
@@ -918,7 +920,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-classes">
+                <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-classes">
                     <h3 id="settings-h-classes">${T('Classes')}</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Track income and expenses by department, location, or line of
@@ -940,7 +942,7 @@ const SettingsPage = {
                     <div id="classes-list"></div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-cost-types">
+                <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-cost-types">
                     <h3 id="settings-h-cost-types">Cost Types</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         How job costs roll up: labor, material, subcontract, equipment, other — add your own
@@ -959,7 +961,7 @@ const SettingsPage = {
                     <div id="cost-types-list"></div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-cost-codes">
+                <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-cost-codes">
                     <h3 id="settings-h-cost-codes">Cost Codes</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         ${Terms.text('The job-costing chart: which part of a job a cost belongs to')}
@@ -985,7 +987,7 @@ const SettingsPage = {
 
                 ${SettingsPage.tradePackagesSectionHtml()}
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-equipment">
+                <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-equipment">
                     <h3 id="settings-h-equipment">Equipment</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         ${Terms.text('Owned machines charged to jobs by the hour from a Job Cost Entry.')} The recovery account is
@@ -1000,7 +1002,7 @@ const SettingsPage = {
                     <div id="equipment-list"></div>
                 </div>
 
-                <div class="settings-section" role="group" aria-labelledby="settings-h-check-printing">
+                <div class="settings-section" data-group="payroll" role="group" aria-labelledby="settings-h-check-printing">
                     <h3 id="settings-h-check-printing">Check Printing</h3>
                     <div class="form-grid">
                         <div class="form-group full-width"><label>Check Stock</label>
@@ -1025,7 +1027,7 @@ const SettingsPage = {
                     </div>
                 </div>
 
-                <div class="settings-section" id="settings-backups" role="group" aria-labelledby="settings-h-backup-restore">
+                <div class="settings-section" data-group="backups" id="settings-backups" role="group" aria-labelledby="settings-h-backup-restore">
                     <h3 id="settings-h-backup-restore">Backup / Restore</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Backups of this company only, named for it. Restore replaces everything in this
@@ -1039,15 +1041,15 @@ const SettingsPage = {
                     <div id="backup-list"></div>
                 </div>
 
-                <div class="settings-section" id="settings-company-file" data-admin hidden role="group" aria-labelledby="settings-h-company-file">
+                <div class="settings-section" data-group="security" id="settings-company-file" data-admin hidden role="group" aria-labelledby="settings-h-company-file">
                     <h3 id="settings-h-company-file">Company File Encryption</h3>
                     <div id="company-file-status" style="font-size:11px; color:var(--text-muted); margin-bottom:8px;"></div>
                     <div id="company-file-actions" style="display:flex; gap:8px;" data-admin data-write></div>
                 </div>
 
-                ${SettingsPage._isAdmin() ? '<div class="settings-section" id="settings-legacy-files" data-admin hidden></div>' : ''}
+                ${SettingsPage._isAdmin() ? '<div class="settings-section" data-group="backups" id="settings-legacy-files" data-admin hidden></div>' : ''}
 
-                <div class="settings-section" id="settings-users" data-admin style="display:none;" role="group" aria-labelledby="settings-h-users-server-edition">
+                <div class="settings-section" data-group="security" id="settings-users" data-admin style="display:none;" role="group" aria-labelledby="settings-h-users-server-edition">
                     <h3 id="settings-h-users-server-edition">Users &mdash; Server Edition</h3>
                     <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
                         Add a second user and this deployment becomes
@@ -1075,7 +1077,7 @@ const SettingsPage = {
                     <button type="button" class="btn btn-secondary" onclick="SettingsPage.showInvite()">Invite your accountant…</button>
                 </div>
 
-                <div class="settings-section" id="settings-api-tokens" data-admin style="display:none;" role="group" aria-labelledby="settings-h-api-tokens-agents-integrations">
+                <div class="settings-section" data-group="security" id="settings-api-tokens" data-admin style="display:none;" role="group" aria-labelledby="settings-h-api-tokens-agents-integrations">
                     <h3 id="settings-h-api-tokens-agents-integrations">API Tokens &mdash; agents &amp; integrations</h3>
                     <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
                         Scoped credentials for non-humans: AI agents, the receipt
@@ -1122,9 +1124,22 @@ const SettingsPage = {
                            padding-bottom:10px; box-shadow:0 -4px 8px -6px rgba(0,0,0,0.25);">
                     <span id="settings-dirty-note" role="status" aria-live="polite"
                         style="margin-right:auto; font-size:11px; color:var(--text-muted);"></span>
+                    <span id="settings-dirty-groups" class="settings-dirty-groups" role="status" aria-live="polite"></span>
                     <button type="submit" class="btn btn-primary" id="settings-save-btn">Save Settings</button>
                 </div>
             </form>`;
+        return `
+            <div class="page-header">
+                <h2>Company Settings</h2>
+            </div>
+            <div id="settings-unreadable" class="hint hint--locked" role="status" style="margin-bottom:12px;" data-admin hidden></div>
+            <div class="settings-layout" id="settings-layout">
+                ${SettingsPage._groupNavHtml()}
+                <div class="settings-panel" id="settings-panel" role="tabpanel">
+                    ${SettingsPage._myPreferencesHtml()}
+                    ${form}
+                </div>
+            </div>`;
     },
 
     // ------------------------------------------------------------------
@@ -1287,6 +1302,8 @@ const SettingsPage = {
     _updateDirty() {
         const note = document.getElementById('settings-dirty-note');
         if (note) note.textContent = SettingsPage.isDirty() ? 'Unsaved changes' : '';
+        // the dot on each group holding a change, and their count by Save
+        SettingsPage._showDirtyGroups();
     },
 
     // App.navigate is the one door every in-app move goes through: sidebar
@@ -2070,7 +2087,7 @@ const SettingsPage = {
             // below, so point there and refresh it (#447).
             toast(err.message, 'error');
             const section = document.getElementById('settings-email-recent-sends');
-            if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            if (section) SettingsPage.showSetting(section, { focus: false });
         } finally {
             SettingsPage.loadEmailLog(true);
         }
@@ -3270,7 +3287,9 @@ const SettingsPage = {
         if (!target) return;
         try { window.sessionStorage.removeItem('settings_focus'); } catch (e) { /* nothing kept */ }
         const el = document.getElementById(target);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        // its group opens, and the page lands on its heading (once it is
+        // shown, for a section a loader reveals: Recent sends)
+        if (el) SettingsPage.showSetting(el);
     },
 };
 
@@ -3293,6 +3312,395 @@ SettingsPage._clearSaveBar = function (e) {
     if (!b.height || !content) return;
     const over = a.getBoundingClientRect().bottom + 8 - b.top;
     if (over > 0) content.scrollTop += Math.ceil(over);
+};
+
+// --- The groups (#720) ----------------------------------------------------
+// One group of sections at a time, chosen from the list down the left, as
+// QuickBooks Desktop's Preferences window does. The list is built from the
+// sections on the page: each .settings-section carries data-group="<key>",
+// and GROUPS below holds the keys in the list's order with their names. A
+// new setting is its section plus that one word; nothing else is
+// registered. Every section stays in the DOM, inside the one form (My
+// Preferences beside it, in the same panel), so Save Settings, the
+// unsaved-changes guard and the role rules see them all as before; a group
+// that is not showing is only hidden (the settings-off class). A group none
+// of whose sections is shown for this sign-in or company type is left out
+// of the list, and comes into it when a loader shows one (Users, Recent
+// sends). A section without a known group is shown in every group (and
+// fails tests/test_settings_groups.py), never hidden.
+SettingsPage.GROUPS = [
+    { key: 'company', label: 'Company' },
+    { key: 'sales', label: 'Sales documents' },
+    { key: 'email', label: 'Email' },
+    { key: 'payroll', label: 'Payroll and checks' },
+    { key: 'lists', label: 'Lists' },
+    { key: 'connections', label: 'Connections' },
+    { key: 'preferences', label: 'Preferences' },
+    { key: 'security', label: 'Users and security' },
+    { key: 'backups', label: 'Backups' },
+];
+
+// the group last opened on this computer
+SettingsPage._GROUP_STORE = 'slowbooks-settings-group';
+SettingsPage._group = 'company';  // the group asked for
+SettingsPage._shown = null;       // the group showing (the one asked for, if it is listed)
+SettingsPage._pendingFocus = null;
+
+SettingsPage._groupNavHtml = function () {
+    return '<div class="settings-nav" id="settings-nav">'
+        + '<label for="settings-find" id="settings-find-label" class="settings-find-label">Find a setting</label>'
+        + '<input type="search" id="settings-find" class="settings-find" autocomplete="off" spellcheck="false"'
+        + ' aria-describedby="settings-find-status">'
+        + '<div id="settings-find-status" class="settings-find-status" role="status" aria-live="polite"></div>'
+        + '<div class="settings-groups" id="settings-groups" role="tablist" aria-label="Settings groups" aria-orientation="vertical"></div>'
+        + '</div>';
+};
+
+SettingsPage._groupLabel = function (key) {
+    const g = SettingsPage.GROUPS.find(x => x.key === key);
+    return g ? g.label : '';
+};
+
+// The section's group, or null for one without a known group.
+SettingsPage._groupOf = function (section) {
+    const key = section && section.getAttribute ? section.getAttribute('data-group') : null;
+    return SettingsPage.GROUPS.some(g => g.key === key) ? key : null;
+};
+
+SettingsPage._sections = function () {
+    const root = document.getElementById('settings-layout');
+    return root && typeof root.querySelectorAll === 'function'
+        ? [...root.querySelectorAll('.settings-section')] : [];
+};
+
+// Shown for this sign-in and company type: not hidden by its loader
+// (hidden, display:none) or by the role rules (the hidden class).
+SettingsPage._available = function (section) {
+    return !section.hidden && section.style.display !== 'none' && !section.classList.contains('hidden');
+};
+
+SettingsPage._findWords = function () {
+    const box = document.getElementById('settings-find');
+    return box ? box.value.trim().toLowerCase().split(/\s+/).filter(Boolean) : [];
+};
+
+// A section matches when every word typed is in its headings or in the
+// names of its fields.
+SettingsPage._matches = function (section, words) {
+    const text = [...section.querySelectorAll('h3, h4, label, legend')].map(el => el.textContent)
+        .concat([...section.querySelectorAll('[aria-label]')].map(el => el.getAttribute('aria-label')))
+        .join(' ').toLowerCase().replace(/\s+/g, ' ');
+    return words.every(w => text.includes(w));
+};
+
+SettingsPage._initGroups = function () {
+    const tabs = document.getElementById('settings-groups');
+    const sections = SettingsPage._sections();
+    if (!tabs || !sections.length) return;
+    let stored = null;
+    try { stored = window.localStorage ? window.localStorage.getItem(SettingsPage._GROUP_STORE) : null; } catch (e) { stored = null; }
+    SettingsPage._group = SettingsPage.GROUPS.some(g => g.key === stored) ? stored : 'company';
+    SettingsPage._pendingFocus = null;
+    for (const s of sections) {
+        if (!SettingsPage._groupOf(s)) {
+            console.warn('Settings: a section has no known data-group, so it shows in every group', s.id || s.textContent.trim().slice(0, 40));
+        }
+    }
+    const present = new Set(sections.map(SettingsPage._groupOf));
+    tabs.innerHTML = SettingsPage.GROUPS.filter(g => present.has(g.key)).map(g =>
+        '<button type="button" role="tab" class="settings-tab" id="settings-tab-' + g.key + '"'
+        + ' data-group-tab="' + g.key + '" aria-controls="settings-panel" aria-selected="false" tabindex="-1">'
+        + '<span class="settings-tab-label">' + escapeHtml(g.label) + '</span>'
+        + '<span class="settings-tab-dot" aria-hidden="true" hidden></span>'
+        + '</button>').join('');
+    tabs.addEventListener('click', SettingsPage._onTabClick);
+    tabs.addEventListener('keydown', SettingsPage._onTabKey);
+    const find = document.getElementById('settings-find');
+    if (find) {
+        find.addEventListener('input', () => SettingsPage._refreshGroups());
+        find.addEventListener('keydown', SettingsPage._onFindKey);
+    }
+    // Save refused by a field in a group that is not showing (a half-typed
+    // closing date): that group opens, so the browser can focus the field
+    // and say what is wrong; "An invalid form control is not focusable"
+    // is never the answer. invalid does not bubble: caught on the way down.
+    const form = document.getElementById('settings-form');
+    if (form) form.addEventListener('invalid', SettingsPage._onInvalid, true);
+    // the list follows the sections: a loader showing or hiding one, the
+    // role rules hiding the administrator's
+    if (SettingsPage._groupObserver) SettingsPage._groupObserver.disconnect();
+    SettingsPage._groupObserver = null;
+    if (typeof MutationObserver === 'function') {
+        const layout = document.getElementById('settings-layout');
+        SettingsPage._groupObserver = new MutationObserver(muts => {
+            if (muts.some(m => m.target.classList && m.target.classList.contains('settings-section'))) {
+                SettingsPage._refreshGroups();
+            }
+        });
+        SettingsPage._groupObserver.observe(layout, {
+            attributes: true, subtree: true, attributeFilter: ['hidden', 'style', 'class'],
+        });
+    }
+    // the list is never taller than the window it scrolls in, at any text
+    // size (a root zoom scales 100vh with it, so it is measured)
+    if (SettingsPage._navResize) SettingsPage._navResize.disconnect();
+    SettingsPage._navResize = null;
+    const content = document.getElementById('content');
+    if (content && typeof ResizeObserver === 'function') {
+        SettingsPage._navResize = new ResizeObserver(() => SettingsPage._fitNav());
+        SettingsPage._navResize.observe(content);
+    }
+    SettingsPage._fitNav();
+    SettingsPage._orientGroups();
+    SettingsPage._refreshGroups();
+};
+
+SettingsPage._fitNav = function () {
+    const nav = document.getElementById('settings-nav');
+    const panel = document.getElementById('settings-panel');
+    const content = document.getElementById('content');
+    if (!nav || !panel || !content) return;
+    const cs = getComputedStyle(content);
+    const room = Math.max(120, Math.floor(content.clientHeight
+        - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0)));
+    // the panel is at least the window's height, so Save sits at its bottom
+    panel.style.minHeight = room + 'px';
+    nav.style.maxHeight = getComputedStyle(nav).position === 'sticky' ? room + 'px' : '';
+};
+
+// At a narrow window the list is a row above the panel (style.css).
+SettingsPage._orientGroups = function () {
+    const tabs = document.getElementById('settings-groups');
+    if (!tabs || typeof window.matchMedia !== 'function') return;
+    const narrow = window.matchMedia('(max-width: 900px)');
+    tabs.setAttribute('aria-orientation', narrow.matches ? 'horizontal' : 'vertical');
+    if (!SettingsPage._orientWatched && narrow.addEventListener) {
+        SettingsPage._orientWatched = true;
+        narrow.addEventListener('change', () => SettingsPage._orientGroups());
+    }
+};
+
+// Show the group asked for (or the first listed, while it has nothing to
+// show), or, with words in Find a setting, the sections of every group
+// that match them.
+SettingsPage._refreshGroups = function () {
+    const tabs = document.getElementById('settings-groups');
+    const sections = SettingsPage._sections();
+    if (!tabs || !sections.length) return;
+    const listed = new Set();
+    for (const s of sections) {
+        const g = SettingsPage._groupOf(s);
+        if (g && SettingsPage._available(s)) listed.add(g);
+    }
+    let shown = listed.has(SettingsPage._group) ? SettingsPage._group : null;
+    if (!shown) shown = (SettingsPage.GROUPS.find(g => listed.has(g.key)) || {}).key || null;
+    SettingsPage._shown = shown;
+    const words = SettingsPage._findWords();
+    const found = [];
+    for (const s of sections) {
+        const g = SettingsPage._groupOf(s);
+        let on;
+        if (words.length) {
+            on = SettingsPage._matches(s, words);
+            if (on && SettingsPage._available(s)) found.push(s);
+        } else {
+            on = !g || g === shown;
+        }
+        if (s.classList.contains('settings-off') === on) s.classList.toggle('settings-off', !on);
+    }
+    tabs.querySelectorAll('[role="tab"]').forEach(t => {
+        const key = t.getAttribute('data-group-tab');
+        t.hidden = !listed.has(key);
+        const selected = key === shown;
+        t.setAttribute('aria-selected', selected ? 'true' : 'false');
+        t.tabIndex = selected ? 0 : -1;
+    });
+    const nav = document.getElementById('settings-nav');
+    if (nav) nav.classList.toggle('settings-nav--finding', words.length > 0);
+    const panel = document.getElementById('settings-panel');
+    if (panel) {
+        panel.setAttribute('aria-labelledby', words.length || !shown ? 'settings-find-label' : 'settings-tab-' + shown);
+    }
+    const status = document.getElementById('settings-find-status');
+    if (status) {
+        let text = '';
+        if (words.length && !found.length) {
+            text = 'No setting matches what you typed.';
+        } else if (words.length) {
+            const groups = SettingsPage.GROUPS.filter(g => found.some(s => SettingsPage._groupOf(s) === g.key))
+                .map(g => g.label);
+            const what = found.length === 1 ? 'One section matches' : found.length + ' sections match';
+            text = what + (groups.length ? ', in ' + SettingsPage._andList(groups) : '') + '.';
+        }
+        if (status.textContent !== text) status.textContent = text;
+    }
+    // a jump to a section a loader had not shown yet (Recent sends)
+    const pending = SettingsPage._pendingFocus;
+    if (pending && SettingsPage._available(pending.section)) {
+        SettingsPage._pendingFocus = null;
+        SettingsPage._land(pending.section, pending.target, pending.opts);
+    }
+};
+
+// Open a group. `focus`: the switch was made from the keyboard, so focus
+// goes to the group's first heading.
+SettingsPage.openGroup = function (key, opts = {}) {
+    if (!SettingsPage.GROUPS.some(g => g.key === key)) return;
+    SettingsPage._group = key;
+    SettingsPage._pendingFocus = null;
+    try { if (window.localStorage) window.localStorage.setItem(SettingsPage._GROUP_STORE, key); } catch (e) { /* not remembered */ }
+    const find = document.getElementById('settings-find');
+    if (find && find.value) find.value = '';
+    SettingsPage._refreshGroups();
+    const first = SettingsPage._sections().find(s =>
+        SettingsPage._groupOf(s) === SettingsPage._shown && SettingsPage._available(s));
+    // the group starts at its top, wherever the last one was scrolled to
+    const layout = document.getElementById('settings-layout');
+    const content = document.getElementById('content');
+    if (layout && content && layout.getBoundingClientRect().top < content.getBoundingClientRect().top) {
+        SettingsPage._scrollTo(layout);
+    }
+    if (opts.focus && first) SettingsPage._focusHeading(first);
+};
+
+// Bring an element to the top of the page's scrolling content. Only that
+// scrolls: scrollIntoView would move the window's shell too (its body
+// hides its overflow but still scrolls), and leave the toolbars off the top.
+SettingsPage._scrollTo = function (el) {
+    const content = document.getElementById('content');
+    if (!content || !content.contains(el)) { el.scrollIntoView({ block: 'start' }); return; }
+    const pad = parseFloat(getComputedStyle(content).paddingTop) || 0;
+    content.scrollTop += el.getBoundingClientRect().top - content.getBoundingClientRect().top - pad;
+};
+
+SettingsPage._focusHeading = function (section, heading) {
+    const h = heading || section.querySelector('h3');
+    if (!h) return;
+    // a heading takes focus without becoming a Tab stop
+    if (!h.hasAttribute('tabindex')) h.setAttribute('tabindex', '-1');
+    h.focus({ preventScroll: true });
+};
+
+// Open the group of a section (or of anything in one) and land on it: its
+// heading in view and focused. Other pages ask for this with the
+// settings_focus hand-off (scrollToFocus).
+SettingsPage.showSetting = function (target, opts = {}) {
+    const el = typeof target === 'string' ? document.getElementById(target) : target;
+    if (!el) return;
+    const section = el.closest ? el.closest('.settings-section') : null;
+    if (!section) { el.scrollIntoView({ block: 'start' }); return; }
+    const key = SettingsPage._groupOf(section);
+    if (key) SettingsPage.openGroup(key);
+    if (SettingsPage._available(section)) SettingsPage._land(section, el, opts);
+    else SettingsPage._pendingFocus = { section, target: el, opts };
+};
+
+SettingsPage._land = function (section, el, opts = {}) {
+    SettingsPage._scrollTo(section);
+    if (opts.focus === false) return;
+    SettingsPage._focusHeading(section, /^H[1-6]$/.test(el.tagName) ? el : null);
+};
+
+SettingsPage._onTabClick = function (e) {
+    const tab = e.target.closest('[role="tab"]');
+    if (!tab) return;
+    // Enter or Space on the tab (a click with no pointer behind it)
+    SettingsPage.openGroup(tab.getAttribute('data-group-tab'), { focus: e.detail === 0 });
+};
+
+// Arrow keys move along the list (Home and End to its ends); Enter or
+// Space opens the group the focus is on.
+SettingsPage._onTabKey = function (e) {
+    const tabs = [...document.querySelectorAll('#settings-groups [role="tab"]')].filter(t => !t.hidden);
+    const at = tabs.indexOf(e.target.closest ? e.target.closest('[role="tab"]') : null);
+    if (at < 0 || e.altKey || e.ctrlKey || e.metaKey) return;
+    let to = null;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') to = (at + 1) % tabs.length;
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') to = (at - 1 + tabs.length) % tabs.length;
+    else if (e.key === 'Home') to = 0;
+    else if (e.key === 'End') to = tabs.length - 1;
+    if (to === null) return;
+    e.preventDefault();
+    tabs[to].focus();
+};
+
+// Escape empties Find a setting; Enter opens the first match's group.
+SettingsPage._onFindKey = function (e) {
+    const box = e.target;
+    if (e.key === 'Escape' && box.value) {
+        e.preventDefault();
+        e.stopPropagation();
+        box.value = '';
+        SettingsPage._refreshGroups();
+    } else if (e.key === 'Enter') {
+        e.preventDefault();
+        const words = SettingsPage._findWords();
+        const first = words.length && SettingsPage._sections().find(s =>
+            SettingsPage._available(s) && SettingsPage._matches(s, words));
+        if (first) SettingsPage.showSetting(first);
+    }
+};
+
+SettingsPage._onInvalid = function (e) {
+    // the browser checks every field and reports the first: only the first
+    // of one check opens its group
+    if (SettingsPage._invalidSeen) return;
+    SettingsPage._invalidSeen = true;
+    setTimeout(() => { SettingsPage._invalidSeen = false; }, 0);
+    const field = e.target;
+    const section = field.closest ? field.closest('.settings-section') : null;
+    if (!section || !section.classList.contains('settings-off')) return;
+    const key = SettingsPage._groupOf(section);
+    if (key) SettingsPage.openGroup(key);
+    // the browser focuses it and shows its message now that it is shown;
+    // where it did not, do it here
+    setTimeout(() => {
+        if (document.activeElement === field) return;
+        field.focus();
+        if (typeof field.reportValidity === 'function') field.reportValidity();
+    }, 0);
+};
+
+// The groups holding a change Save Settings would send.
+SettingsPage._dirtyGroups = function () {
+    if (!SettingsPage.isDirty()) return [];
+    const form = document.getElementById('settings-form');
+    if (!form || !form.elements || typeof form.elements.namedItem !== 'function') return [];
+    const before = SettingsPage._snapshot || {};
+    const now = SettingsPage._formData() || {};
+    const groups = new Set();
+    for (const name of new Set([...Object.keys(before), ...Object.keys(now)])) {
+        if (before[name] === now[name]) continue;
+        let el = form.elements.namedItem(name);
+        if (el && !el.closest && el.length) el = el[0];
+        const section = el && el.closest ? el.closest('.settings-section') : null;
+        const key = SettingsPage._groupOf(section);
+        if (key) groups.add(key);
+    }
+    return SettingsPage.GROUPS.map(g => g.key).filter(k => groups.has(k));
+};
+
+SettingsPage._showDirtyGroups = function () {
+    const tabs = document.getElementById('settings-groups');
+    if (!tabs || typeof tabs.querySelectorAll !== 'function') return;
+    const dirty = SettingsPage._dirtyGroups();
+    tabs.querySelectorAll('[role="tab"]').forEach(t => {
+        const key = t.getAttribute('data-group-tab');
+        const on = dirty.includes(key);
+        t.classList.toggle('settings-tab--dirty', on);
+        const dot = t.querySelector('.settings-tab-dot');
+        if (dot) dot.hidden = !on;
+        // the dot, in words, for a screen reader
+        if (on) t.setAttribute('aria-label', SettingsPage._groupLabel(key) + ', unsaved changes');
+        else t.removeAttribute('aria-label');
+    });
+    const count = document.getElementById('settings-dirty-groups');
+    if (count) {
+        const names = SettingsPage._andList(dirty.map(SettingsPage._groupLabel));
+        count.textContent = !dirty.length ? ''
+            : dirty.length === 1 ? '1 group has unsaved changes: ' + names + '.'
+                : dirty.length + ' groups have unsaved changes: ' + names + '.';
+    }
 };
 
 
@@ -3513,7 +3921,7 @@ SettingsPage.importCostCodes = async function () {
 SettingsPage.tradePackagesSectionHtml = function () {
     if (!Terms.isConstruction()) return '';
     return `
-                <div class="settings-section" role="group" aria-labelledby="settings-h-trade-packages">
+                <div class="settings-section" data-group="lists" role="group" aria-labelledby="settings-h-trade-packages">
                     <h3 id="settings-h-trade-packages">Trade Packages</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
                         Bid packages a general contractor awards — what a sub bids and
