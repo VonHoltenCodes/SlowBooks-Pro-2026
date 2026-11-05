@@ -76,3 +76,34 @@ def test_in_the_shell_with_no_ready_event_it_prints_a_moment_after_load(browser)
         page.wait_for_function("window.__prints === 1", timeout=4000)
     finally:
         page.close()
+
+
+def test_the_sheets_last_figures_clear_its_print_button(browser):
+    """W-124 (2.31.7 gate): the button is fixed at the bottom right, and
+    with no room under the sheet it sat on the last row's figures even
+    when the window was scrolled to the end. On screen the sheet has room
+    below it; in print the padding and the button are both gone."""
+    rows = "".join(f"<tr><td>Account {i}</td><td>{i}.00</td></tr>" for i in range(60))
+    sheet = (
+        "<html><head><title>t</title></head><body>"
+        f"<table style='width:100%'>{rows}</table></body></html>"
+    )
+    page = _page(browser)
+    try:
+        page.set_viewport_size({"width": 784, "height": 561})
+        page.route(
+            "http://print.test/long",
+            lambda r: r.fulfill(content_type="text/html", body=print_html(sheet)),
+        )
+        page.goto("http://print.test/long")
+        page.evaluate("window.scrollTo(0, document.documentElement.scrollHeight)")
+        got = page.evaluate("""() => {
+                const last = document.querySelector('tr:last-child').getBoundingClientRect();
+                const btn = document.getElementById('sb-print-again').getBoundingClientRect();
+                return { lastBottom: last.bottom, btnTop: btn.top };
+            }""")
+        assert got["lastBottom"] <= got["btnTop"], got
+        page.emulate_media(media="print")
+        assert page.evaluate("getComputedStyle(document.body).paddingBottom") == "0px"
+    finally:
+        page.close()

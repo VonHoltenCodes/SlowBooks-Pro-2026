@@ -26,6 +26,9 @@ from fastapi.responses import HTMLResponse
 PRINT_SCRIPT = (
     "<style>.sb-print-again{position:fixed;bottom:10px;right:10px;z-index:9;"
     "font:13px sans-serif;padding:4px 14px;cursor:pointer}"
+    # room under the sheet on screen, so the button never sits on the last
+    # figures once the window is scrolled to the end (W-124)
+    "@media screen{body{padding-bottom:64px}}"
     "@media print{.sb-print-again{display:none}}</style>"
     '<button type="button" class="sb-print-again" id="sb-print-again">Print</button>'
     "<script>(function(){var done=false;"

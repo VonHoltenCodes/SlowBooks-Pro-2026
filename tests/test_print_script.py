@@ -42,6 +42,8 @@ def test_the_script_waits_for_the_shell_and_carries_a_button():
     assert PRINT_SCRIPT.count("window.print()") == 2  # the page's, and the button's
     assert 'id="sb-print-again"' in PRINT_SCRIPT and ">Print</button>" in PRINT_SCRIPT
     assert "@media print{.sb-print-again{display:none}}" in PRINT_SCRIPT
+    # on screen the sheet ends above the button (W-124); nothing changes in print
+    assert "@media screen{body{padding-bottom:64px}}" in PRINT_SCRIPT
     page = print_html("<html><body><p>x</p></body></html>")
     assert page.count(PRINT_SCRIPT) == 1 and page.endswith("</body></html>")
     assert print_html("<p>x</p>").endswith(PRINT_SCRIPT)
