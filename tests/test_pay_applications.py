@@ -167,6 +167,47 @@ def test_one_open_application_per_job(client, seed_accounts, seed_customer):
     assert r.json()["detail"]["code"] == "application_open"
 
 
+NO_SOV = (
+    "This job has no schedule of values yet: set the contract on the job's "
+    "Contract tab (Build from accepted estimate, or add the lines by hand), "
+    "then bill against it here."
+)
+
+
+def test_a_job_with_no_schedule_of_values_makes_no_application(
+    client, db_session, seed_accounts, seed_customer
+):
+    """#714: New pay application on a job with no SOV made an application
+    with no lines, and the form opened on an empty grid. It is refused with
+    the step that is missing, and nothing is made."""
+    job = _job(client, seed_customer.id, name="Bare Job")
+    _contract(client, job["id"], contract_type="lump_sum", contract_amount=50000)
+    r = client.post(
+        "/api/pay-applications", json={"job_id": job["id"], "date": "2026-06-01"}
+    )
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"] == NO_SOV
+    assert db_session.query(PayApplication).count() == 0
+
+
+def test_a_job_with_a_schedule_of_values_still_makes_one_line_each(
+    client, seed_accounts, seed_customer
+):
+    job, sov = _two_line_job(client, seed_customer.id)
+    app = _new_app(client, job["id"])
+    assert app["status"] == "draft" and app["number"] == f"PA-{job['id']}-01"
+    assert [ln["sov_line_id"] for ln in app["lines"]] == [s["id"] for s in sov]
+    assert [ln["description"] for ln in app["lines"]] == ["Sitework", "Structure"]
+
+
+def test_the_pay_apps_tab_says_the_same_in_place_of_new():
+    js = (ROOT / "app/static/js/jobs.js").read_text(encoding="utf-8")
+    hint = js.split("paNoSovHtml() {")[1].split("\n    },")[0]
+    assert " ".join(hint.split()).count("then bill against it here.") == 1
+    assert "JobsPage.setTab('contract')\">Contract tab</a>" in hint
+    assert 'hasSov ? `<div class="form-actions" data-write' in js
+
+
 def test_line_over_scheduled_422(client, seed_accounts, seed_customer):
     job, sov = _two_line_job(client, seed_customer.id)
     app = _new_app(client, job["id"])
