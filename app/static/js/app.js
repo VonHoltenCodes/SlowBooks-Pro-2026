@@ -307,6 +307,17 @@ const App = {
     // keyboard's stop is brought in whole, its ring and halo with it (its
     // scroll-margin); a pointer's focus stays where the pointer put it.
     // The P&L grid has its own (ReportsPage._gridReveal).
+    // Printing a month grid (Budgets, Budget vs Actual: W-115): the print
+    // rules in style.css need to know a frozen grid is on the page, and
+    // whether it is in the open dialog. <body> carries that as classes for
+    // as long as the page is being printed.
+    printClasses(printing) {
+        if (typeof document === 'undefined' || !document.body) return;
+        const grid = printing && document.querySelector('.table-container--frozen');
+        const inDialog = printing && document.querySelector('#modal-overlay:not(.hidden) .table-container--frozen');
+        document.body.classList.toggle('prints-month-grid', !!grid);
+        document.body.classList.toggle('prints-month-grid-dialog', !!inDialog);
+    },
     revealInTable(e) {
         const a = e.target, c = a && a.closest && a.closest('.table-container');
         if (!c || a === c || c.id === 'grid-scroll' || !App.keyboardFocus()) return;
@@ -3062,3 +3073,16 @@ const App = {
 window.App = App;
 
 document.addEventListener('DOMContentLoaded', () => App.init());
+
+// see App.printClasses: both signals, since a print preview and a PDF
+// export do not always fire the same one
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('beforeprint', () => App.printClasses(true));
+    window.addEventListener('afterprint', () => App.printClasses(false));
+    if (typeof window.matchMedia === 'function') {
+        const printing = window.matchMedia('print');
+        if (printing && typeof printing.addEventListener === 'function') {
+            printing.addEventListener('change', (e) => App.printClasses(e.matches));
+        }
+    }
+}

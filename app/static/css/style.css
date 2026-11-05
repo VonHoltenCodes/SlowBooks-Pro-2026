@@ -1611,18 +1611,19 @@ a:hover { text-decoration: underline; }
    page, no row splits, and the twelve months (and Budget vs Actual's
    Total) share the page's width in a smaller type. Budget vs Actual opens
    in a dialog: while it is open the dialog is what prints, not the page
-   behind it. Other pages print as they did: every rule here is under a
-   grid's :has(). */
+   behind it. Other pages print as they did: every shell rule here is under a
+   class the page puts on <body> as printing starts (App.printClasses;
+   :has() would do it in CSS but is newer than the WebView2 floor). */
 @page sb-month-grid { size: letter landscape; margin: 0.4in; }
 @media print {
-    body:has(.table-container--frozen) {
+    body.prints-month-grid {
         overflow: visible;
         height: auto;
         background: white;
     }
-    body:has(.table-container--frozen) #app,
-    body:has(.table-container--frozen) #main-area,
-    body:has(.table-container--frozen) #content {
+    body.prints-month-grid #app,
+    body.prints-month-grid #main-area,
+    body.prints-month-grid #content {
         display: block;
         height: auto;
         max-height: none;
@@ -1630,11 +1631,11 @@ a:hover { text-decoration: underline; }
         padding: 0;
         margin: 0;
     }
-    body:has(.table-container--frozen) #page-content { max-width: none; }
-    body:has(.table-container--frozen) #app,
-    body:has(.table-container--frozen) #modal-overlay { page: sb-month-grid; }
-    body:has(.table-container--frozen) .budget-hint { display: none; }
-    body:has(.table-container--frozen) .page-header { margin-bottom: 6px; }
+    body.prints-month-grid #page-content { max-width: none; }
+    body.prints-month-grid #app,
+    body.prints-month-grid #modal-overlay { page: sb-month-grid; }
+    body.prints-month-grid .budget-hint { display: none; }
+    body.prints-month-grid .page-header { margin-bottom: 6px; }
     .table-container.table-container--frozen { border: 0; }
     .table--frozen,
     .budget-variance__sheet {
@@ -1674,14 +1675,14 @@ a:hover { text-decoration: underline; }
     .budget-variance__table th:first-child,
     .budget-variance__table td:first-child { width: 7%; }
     /* Budget vs Actual's dialog, printed in place of the page */
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #app { display: none !important; }
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-overlay {
+    body.prints-month-grid-dialog #app { display: none !important; }
+    body.prints-month-grid-dialog #modal-overlay {
         display: block !important;
         position: static;
         padding: 0;
         background: none;
     }
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal {
+    body.prints-month-grid-dialog #modal {
         width: auto;
         max-width: none;
         max-height: none;
@@ -1689,17 +1690,17 @@ a:hover { text-decoration: underline; }
         border: 0;
         box-shadow: none;
     }
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .modal-header {
+    body.prints-month-grid-dialog .modal-header {
         background: none;
         color: black;
         padding: 0 0 4px;
     }
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .modal-header h2 { text-shadow: none; font-size: 14px; }
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .modal-close,
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-body .report-toolbar,
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-body .form-actions { display: none; }
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-body { padding: 0; }
-    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .budget-variance { max-height: none; }
+    body.prints-month-grid-dialog .modal-header h2 { text-shadow: none; font-size: 14px; }
+    body.prints-month-grid-dialog .modal-close,
+    body.prints-month-grid-dialog #modal-body .report-toolbar,
+    body.prints-month-grid-dialog #modal-body .form-actions { display: none; }
+    body.prints-month-grid-dialog #modal-body { padding: 0; }
+    body.prints-month-grid-dialog .budget-variance { max-height: none; }
 }
 
 .modal-header {

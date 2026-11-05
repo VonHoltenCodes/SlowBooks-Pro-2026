@@ -347,6 +347,8 @@ def test_the_budgets_grid_prints_every_month_and_every_account(browser):
     page = _print_budgets(browser)
     try:
         page.emulate_media(media="print")
+        # the page marks <body> itself as printing starts (App.printClasses)
+        page.wait_for_function("document.body.classList.contains('prints-month-grid')")
         view = page.evaluate(PRINT_SHELL)
         for part in ("body", "app", "content"):
             overflow, height = view[part]
@@ -407,6 +409,8 @@ def test_budget_vs_actual_prints_its_dialog_not_the_page_behind(browser):
         page.evaluate("() => BudgetsPage.showVariance()")
         page.wait_for_selector("#modal-body .budget-variance__table")
         page.emulate_media(media="print")
+        # the page marks <body> itself as printing starts (App.printClasses)
+        page.wait_for_function("document.body.classList.contains('prints-month-grid')")
         view = page.evaluate("""() => {
             const cs = (sel) => getComputedStyle(document.querySelector(sel));
             return { app: cs('#app').display, overlay: cs('#modal-overlay').display,
