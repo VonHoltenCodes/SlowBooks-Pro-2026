@@ -333,6 +333,37 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
                 ),
             )
 
+    # An open invoice carried over from QuickBooks Online onto 1100 has no
+    # posting of its own: its balance is the history's. An edit of its lines
+    # would post a debit and a credit both on 1100 and move the aging without
+    # moving the control (#704), so the lines stay as they came; the dates,
+    # terms and notes edit as on any invoice.
+    if data.lines is not None:
+        from app.services.qbo_export_import import is_carried_invoice
+
+        if is_carried_invoice(db, invoice):
+            # the form sends every line as stored: the same lines are no
+            # change, and are left out so nothing is posted for them
+            sent = [
+                (ln.item_id, _q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))))
+                for ln in data.lines
+            ]
+            stored = [
+                (ln.item_id, _q(Decimal(str(ln.quantity)) * Decimal(str(ln.rate))))
+                for ln in invoice.lines
+            ]
+            if sent != stored:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "This invoice was carried over from QuickBooks Online as an "
+                        "open balance, so its lines and amount stay as they came. "
+                        "Void it and enter the invoice again, or post a credit memo "
+                        "for the difference."
+                    ),
+                )
+            data = data.model_copy(update={"lines": None})
+
     update_data = reject_null_updates(
         Invoice,
         data.model_dump(exclude_unset=True, exclude={"lines", "allow_zero_total"}),

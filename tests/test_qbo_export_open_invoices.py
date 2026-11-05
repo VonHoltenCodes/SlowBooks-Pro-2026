@@ -308,6 +308,43 @@ def test_voiding_a_carried_invoice_on_1100_moves_it_to_the_export_receivable(
     assert Decimal(str(aging.json()["totals"]["total"])) == Decimal("250.00")
 
 
+def test_a_carried_invoices_lines_are_not_edited(client, db_session, seed_accounts):
+    # no posting of its own (#704): an edit of the lines would post both
+    # sides on 1100 and move the aging without the control, so it is
+    # refused with what to do instead; the notes still edit
+    _imported(client)
+    invoice = db_session.query(Invoice).filter(Invoice.invoice_number == "1004").one()
+    before = _balance(client, number="1100")
+    resp = client.put(
+        f"/api/invoices/{invoice.id}",
+        json={"lines": [{"description": "changed", "quantity": 1, "rate": "100.00"}]},
+    )
+    assert resp.status_code == 409, resp.text
+    assert "carried over from QuickBooks Online" in resp.json()["detail"]
+    assert "credit memo" in resp.json()["detail"]
+    resp = client.put(f"/api/invoices/{invoice.id}", json={"notes": "called 11/4"})
+    assert resp.status_code == 200, resp.text
+    # the form sends the stored lines back with every save: no change, no posting
+    same = [
+        {
+            "item_id": ln.item_id,
+            "description": ln.description,
+            "quantity": str(ln.quantity),
+            "rate": str(ln.rate),
+        }
+        for ln in invoice.lines
+    ]
+    resp = client.put(
+        f"/api/invoices/{invoice.id}", json={"notes": "second call", "lines": same}
+    )
+    assert resp.status_code == 200, resp.text
+    db_session.expire_all()
+    assert db_session.get(Invoice, invoice.id).transaction_id is None
+    assert _balance(client, number="1100") == before
+    aging = client.get("/api/reports/ar-aging", params={"as_of_date": "2099-12-31"})
+    assert Decimal(str(aging.json()["totals"]["total"])) == before
+
+
 def test_new_invoices_continue_past_the_carried_numbers(
     client, db_session, seed_accounts
 ):
