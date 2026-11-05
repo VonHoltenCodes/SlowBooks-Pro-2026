@@ -1534,3 +1534,44 @@ def test_close_from_a_viewed_reconciliation_returns_to_the_card_list(
         assert page.evaluate(MODAL_SHOWN)
     finally:
         page.close()
+
+
+def test_all_dates_runs_from_the_first_transaction_and_stays_in_the_address(
+    browser, company, books
+):
+    """All dates (#707): the Trial Balance opened on it from its address
+    runs from the books' first transaction to today, keeps period=all_dates
+    on the address, and the Balance Sheet (as of one date) has no such
+    choice."""
+    first = company.get("/api/reports/first-date").json()["first_date"]
+    assert first
+    today = dt.date.today().isoformat()
+    page, handled = _open_at(
+        browser, company, "#/reports/trial-balance?period=all_dates"
+    )
+    try:
+        page.wait_for_selector("#report-content table")
+        assert page.evaluate(PERIOD)["period"] == "all_dates"
+        q = _query(_hash(page))
+        assert q["period"] == "all_dates"
+        assert (q["start_date"], q["end_date"]) == (first, today)
+        # the period is picked from the list like any other
+        page.select_option("#report-period-select", "this_year_to_date")
+        settle(page, handled)
+        page.wait_for_function("() => /period=this_year_to_date/.test(location.hash)")
+        page.select_option("#report-period-select", "all_dates")
+        settle(page, handled)
+        page.wait_for_function("() => /period=all_dates/.test(location.hash)")
+        assert _query(_hash(page))["start_date"] == first
+    finally:
+        page.close()
+    page = _open_at(browser, company, "#/reports/balance-sheet")[0]
+    try:
+        page.wait_for_selector("#report-content table")
+        values = page.evaluate(
+            "() => Array.from(document.querySelectorAll('#report-period-select option'))"
+            ".map(o => o.value)"
+        )
+        assert "all_dates" not in values
+    finally:
+        page.close()

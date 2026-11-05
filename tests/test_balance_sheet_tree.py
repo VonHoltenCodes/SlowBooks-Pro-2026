@@ -171,7 +171,7 @@ def test_the_equity_family_prints_with_net_income_last(client, books):
         ("account", 1, "3320 - Partner B", 2000.0),
         ("direct", 1, "Direct postings to Partners", 500.0),
         ("total", 0, "Total 3300 - Partners", 3500.0),
-        ("account", 0, "Net Income (current period)", 900.0),
+        ("account", 0, "Net Income", 900.0),
     ]
     assert d["tree"]["equity"][-1]["account_id"] is None
     _flat_total_holds(d["tree"]["equity"], d["total_equity"])
@@ -197,7 +197,7 @@ def test_the_prior_year_gives_each_family_total_every_column(client, books):
     equity = d["tree"]["equity"]
     assert _shape(equity, "prior_amount")[-2:] == [
         ("total", 0, "Total 3300 - Partners", 1000.0),
-        ("account", 0, "Net Income (current period)", 0.0),
+        ("account", 0, "Net Income", 0.0),
     ]
     _flat_total_holds(equity, d["prior"]["total_equity"], "prior_amount")
 
@@ -237,7 +237,7 @@ def test_the_pdf_indents_the_families_inside_their_groups(client, books, monkeyp
     words = [r["cells"][0].strip() for r in rows]
     assert (
         words.index("Total 3300 - Partners")
-        < words.index("Net Income (current period)")
+        < words.index("Net Income")
         < words.index("Total Equity")
     )
     assert "1250 - Deposits: Deposit A" not in by  # the path is the indent now
@@ -296,7 +296,7 @@ def test_the_csv_carries_the_families_as_the_screen_does(client, books):
         ("3320", "  Partners: Partner B", "2000.00", "Equity"),
         ("3300", "  Direct postings to Partners", "500.00", "Equity"),
         ("", "Total 3300 - Partners", "3500.00", "Equity"),
-        ("", "Net Income (current period)", "900.00", "Equity"),
+        ("", "Net Income", "900.00", "Equity"),
         ("", "Total Equity", "4400.00", "Equity"),
     ]
 
@@ -386,7 +386,7 @@ def test_a_flat_chart_prints_exactly_as_before(client, flat_books, monkeypatch):
     # no family row, no indent: the lines, each group's subtotal, the totals
     assert all(not r[2].startswith(" ") for r in rows)
     assert [r for r in rows[1:] if r[2].startswith("Total ")] == [
-        r for r in rows[1:] if r[1] == "" and r[2] != "Net Income (current period)"
+        r for r in rows[1:] if r[1] == "" and r[2] != "Net Income"
     ][:-1]
     names = [r[2] for r in rows[1:]]
     assert names == [
@@ -398,7 +398,7 @@ def test_a_flat_chart_prints_exactly_as_before(client, flat_books, monkeypatch):
         "Loan Payable",
         "Total Long Term Liabilities",
         "Total Liabilities",
-        "Net Income (current period)",
+        "Net Income",
         "Total Equity",
         "Liabilities + Equity",
     ]
@@ -429,7 +429,7 @@ def test_a_flat_chart_prints_exactly_as_before(client, flat_books, monkeypatch):
         ("Total Long Term Liabilities", "subtotal", 1),
         ("Total Liabilities", "subtotal", None),
         ("Equity", "subtotal", None),
-        ("Net Income (current period)", None, 1),
+        ("Net Income", None, 1),
         ("Total Equity", "subtotal", None),
         ("Liabilities + Equity", "grand-total", None),
     ]

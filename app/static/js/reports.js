@@ -1030,8 +1030,11 @@ const ReportsPage = {
         ReportsPage.setParam('account_id', sel.value);
     },
 
-    periodOptions(selected) {
+    // opts.allDates false leaves All dates out: an as-of report (the
+    // Balance Sheet) reads one date, and All dates has no end of its own.
+    periodOptions(selected, opts = {}) {
         const options = [
+            ...(opts.allDates === false ? [] : [["all_dates", "All dates"]]),
             ["this_month", "This Month"],
             ["this_quarter", "This Quarter"],
             ["this_year", "This Year"],
@@ -1064,6 +1067,18 @@ const ReportsPage = {
     _fiscalYearStartMonth() {
         const m = parseInt((App.settings && App.settings.fiscal_year_start_month) || "1", 10);
         return (m >= 1 && m <= 12) ? m : 1;
+    },
+
+    // The date of the first transaction in the books, for All dates (#707):
+    // a QuickBooks Online export's reports are "All Dates", and a missing
+    // start date means the fiscal year to the report routes. Read again on
+    // every All dates render (an import moves it); null with no books yet.
+    _firstDate: null,
+
+    async loadFirstDate() {
+        const data = await API.get('/reports/first-date');
+        ReportsPage._firstDate = (data && data.first_date) || null;
+        return ReportsPage._firstDate;
     },
 
     // Most recent first-of-start-month on or before `today` (a Date).
@@ -1208,6 +1223,13 @@ const ReportsPage = {
                 end = new Date(year - 1, month, Math.min(day, new Date(year - 1, month + 1, 0).getDate()));
                 break;
             }
+            case "all_dates":
+                // from the first transaction to today; with no books yet,
+                // the fiscal year to date (there is nothing before it)
+                return {
+                    start: ReportsPage._firstDate || ReportsPage._isoDate(ReportsPage._fiscalYearStart(today)),
+                    end: ReportsPage._isoDate(today),
+                };
             case "custom":
                 return {
                     start: customStart || ReportsPage._isoDate(ReportsPage._fiscalYearStart(today)),
@@ -1297,7 +1319,8 @@ const ReportsPage = {
 
         const defaultCustomStart = prefill.start_date || ReportsPage._isoDate(ReportsPage._fiscalYearStart(new Date()));
         const defaultCustomEnd = prefill.end_date || prefill.as_of_date || todayISO();
-        const known = ReportsPage.periodOptions('').includes(`value="${prefill.period}"`);
+        const periodChoices = { allDates: !useAsOfOnly };
+        const known = ReportsPage.periodOptions('', periodChoices).includes(`value="${prefill.period}"`);
         const dated = !!(prefill.start_date || prefill.end_date || prefill.as_of_date);
         const startingPeriod = (prefill.period && known) ? prefill.period : (dated ? 'custom' : initialPeriod);
 
@@ -1310,7 +1333,7 @@ const ReportsPage = {
                 <div class="form-group">
                     <label for="report-period-select">${label}</label>
                     <span style="display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap;">
-                        <select id="report-period-select">${ReportsPage.periodOptions(startingPeriod)}</select>
+                        <select id="report-period-select">${ReportsPage.periodOptions(startingPeriod, periodChoices)}</select>
                         ${opts.step === false ? '' : `<button type="button" class="btn btn-sm btn-secondary" id="report-period-prev" aria-label="Previous period" onclick="ReportsPage.stepPeriod(-1)">&lsaquo; Prev</button>
                         <button type="button" class="btn btn-sm btn-secondary" id="report-period-next" aria-label="Next period" onclick="ReportsPage.stepPeriod(1)">Next &rsaquo;</button>`}
                     </span>
@@ -1390,6 +1413,7 @@ const ReportsPage = {
                     content.innerHTML = await loadContent(select.value, { as_of_date: asOfDate }, params());
                     stickyScrollbars(content);
                 } else {
+                    if (select.value === 'all_dates') await ReportsPage.loadFirstDate();
                     const range = ReportsPage.getDateRange(select.value, startInput.value, endInput.value);
                     // the boxes show the dates the report runs on: a date the
                     // address had that the box refused is replaced by the
@@ -1425,6 +1449,8 @@ const ReportsPage = {
         // stepping by the preset's length until its dates are typed.
         let stepUnit = null;
         const step = (dir) => {
+            // All dates is every date there is: no earlier or later one
+            if (select.value === 'all_dates') return;
             const months = ReportsPage._PERIOD_MONTHS[select.value];
             if (months) stepUnit = { months };
             if (useAsOfOnly) {
@@ -1438,7 +1464,7 @@ const ReportsPage = {
                 startInput.value = next.start;
                 endInput.value = next.end;
                 const preset = Array.from(select.options).map(o => o.value).find(v => {
-                    if (v === 'custom') return false;
+                    if (v === 'custom' || v === 'all_dates') return false;
                     const r = ReportsPage.getDateRange(v);
                     return r.start === next.start && r.end === next.end;
                 });

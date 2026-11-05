@@ -482,7 +482,7 @@ const App = {
     // the dates of a custom range, or an as-of date.
     _periodWords(query) {
         const names = {
-            this_month: 'this month', this_quarter: 'this quarter', this_year: 'this year',
+            all_dates: 'all dates', this_month: 'this month', this_quarter: 'this quarter', this_year: 'this year',
             this_year_to_date: 'this year to date', last_month: 'last month',
             last_quarter: 'last quarter', last_year: 'last year', last_year_to_date: 'last year to date',
         };

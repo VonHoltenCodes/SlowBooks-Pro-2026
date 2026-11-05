@@ -720,6 +720,10 @@ _PL_SECTIONS = ("income", "cogs", "expenses", "other_income", "other_expense")
 _BS_TOTALS = ("total_assets", "total_liabilities", "total_equity") + BS_GROUP_TOTALS
 
 
+# the Balance Sheet's computed equity lines, in print order (#708)
+_COMPUTED_ORDER = {"retained_earnings": 1, "net_income": 2}
+
+
 def _line_key(item: dict):
     """What lines up an account's two years: its id, or for a computed line
     with no account (the Balance Sheet's net income line) its name."""
@@ -752,7 +756,14 @@ def _with_prior(
         lines += [
             dict(p, amount=0.0, prior_amount=p["amount"]) for p in prior_by.values()
         ]
-        lines.sort(key=lambda i: (i.get("account_id") is None, order(i)))
+        # the computed lines last, Retained Earnings before Net Income (#708)
+        lines.sort(
+            key=lambda i: (
+                i.get("account_id") is None,
+                _COMPUTED_ORDER.get(i.get("line"), 0),
+                order(i),
+            )
+        )
         out[key] = lines
     out["compare"] = "prior_year"
     out["prior"] = {
@@ -897,36 +908,66 @@ def _bs_period(
     total_liabilities = round(sum(liab["amount"] for liab in liabilities), 2)
     total_equity = round(sum(e["amount"] for e in equity), 2)
 
-    # Net income for all periods up to as_of_date flows into equity as retained
-    # earnings. Without this, the balance sheet fails to balance whenever there
-    # is income or expense activity that hasn't been formally closed into an
+    # Net income for all periods up to as_of_date flows into equity.
+    # Without this, the balance sheet fails to balance whenever there is
+    # income or expense activity that hasn't been formally closed into an
     # equity account (which is the normal state in this app — income/expense
-    # accounts are never explicitly closed).
-    income_rows = totals(AccountType.INCOME)
-    cogs_rows = totals(AccountType.COGS)
-    expense_rows = totals(AccountType.EXPENSE)
-    # Rounded to the cent the same way profit_loss rounds its net income
-    # (each total to the cent, then subtract and round), so the two reports
-    # agree and no float noise leaks into equity (#413).
-    net_income = round(
-        round(sum(r["amount"] for r in income_rows), 2)
-        - round(sum(r["amount"] for r in cogs_rows), 2)
-        - round(sum(r["amount"] for r in expense_rows), 2),
-        2,
-    )
+    # accounts are never explicitly closed). It prints as two lines (#708),
+    # as QuickBooks prints them: Retained Earnings, the net income of every
+    # fiscal year before the one the as-of date falls in, and Net Income,
+    # that fiscal year's to the date. A posted retained-earnings account
+    # keeps its own line, as it always has.
+    def net_income_between(date_start=None, date_end=as_of_date):
+        def total(acct_type):
+            rows = _totals_by_account(
+                db,
+                acct_type,
+                date_start=date_start,
+                date_end=date_end,
+                chart=chart,
+                basis=basis,
+            )
+            return round(sum(r["amount"] for r in rows), 2)
 
-    if net_income != 0:
+        # Rounded to the cent the same way profit_loss rounds its net income
+        # (each total to the cent, then subtract and round), so the two
+        # reports agree and no float noise leaks into equity (#413).
+        return round(
+            total(AccountType.INCOME)
+            - total(AccountType.COGS)
+            - total(AccountType.EXPENSE),
+            2,
+        )
+
+    net_income = net_income_between()
+    year_net = net_income_between(fiscal_year_start(db, as_of_date))
+    # the years before: what is left of the whole, so the two lines add up
+    # to the one they replace to the cent and total equity is unchanged
+    prior_net = round(net_income - year_net, 2)
+    nonprofit = t("Equity") != "Equity"
+    computed = (
+        (
+            "retained_earnings",
+            "Net Assets from Prior Years" if nonprofit else "Retained Earnings",
+            prior_net,
+        ),
+        ("net_income", t("Net Income"), year_net),
+    )
+    for line, words, amount in computed:
+        if amount == 0:
+            continue
         equity = list(equity) + [
             {
                 "account_id": None,
-                "account_name": f"{t('Net Income')} (current period)",
+                "line": line,
+                "account_name": words,
                 "account_number": None,
-                "account_path": f"{t('Net Income')} (current period)",
-                "account_label": f"{t('Net Income')} (current period)",
-                "amount": float(net_income),
+                "account_path": words,
+                "account_label": words,
+                "amount": float(amount),
             }
         ]
-        total_equity = round(total_equity + net_income, 2)
+    total_equity = round(total_equity + net_income, 2)
 
     group_totals = {
         **bs_group_totals(assets, "assets"),
@@ -1361,6 +1402,16 @@ def _account_set(
 
 # read as of the end date on the Trial Balance; the other types, for the period
 _BALANCE_SHEET_TYPES = (AccountType.ASSET, AccountType.LIABILITY, AccountType.EQUITY)
+
+
+@router.get("/first-date")
+def first_date(db: Session = Depends(get_db)):
+    """The date of the first transaction in the books, or null with none:
+    where the reports' All dates period starts (#707). A report route reads
+    a missing start date as the fiscal year's first day, so All dates sends
+    this date as its start."""
+    first = db.query(sqlfunc.min(Transaction.date)).scalar()
+    return {"first_date": first.isoformat() if first else None}
 
 
 @router.get("/trial-balance")

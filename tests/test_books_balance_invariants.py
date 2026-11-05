@@ -17,7 +17,7 @@ run), the following MUST hold:
   7. BS A/R account balance == open AR    (the GL account and the
      and BS A/P account balance ==        sub-ledger must tie)
      open AP
-  8. P&L net income == the synthetic      ("Net Income (current period)"
+  8. P&L net income == the synthetic      ("Net Income"
      Net Income line in BS equity         line we add to BS equity)
 
 These are the invariants the production-readiness sweep was trying to
@@ -403,7 +403,7 @@ def test_analytics_ar_equals_report_ar(
 def test_pnl_net_income_matches_balance_sheet_synthetic_equity(
     client, db_session, seed_accounts, seed_customer
 ):
-    """P&L net income should equal the synthetic 'Net Income (current period)'
+    """P&L net income should equal the synthetic 'Net Income'
     line we add to balance sheet equity.
 
     Without this tie-out, the books appear to balance on paper but the
