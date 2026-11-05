@@ -277,7 +277,7 @@ def test_the_register_filters_by_dates_and_class(browser, company, books, classe
         assert (
             page.evaluate("() => document.getElementById('reg-start').value") == SEPT[0]
         )
-        page.get_by_role("button", name="Clear").click()
+        page.get_by_role("button", name="Clear", exact=True).click()
         settle(page, handled)
         page.wait_for_function(f"(n) => ({REG_ROWS})().length === n", arg=all_rows)
         assert _hash(page) == f"#/banking/{bank}"

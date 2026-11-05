@@ -265,6 +265,10 @@ def test_collector_finds_something():
 _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     ("POST", "/api/mercury/webhook"),  # signed balance events from Mercury
     ("POST", "/api/stripe/webhook"),  # legacy alias for provider webhook
+    # Forgot your password (#719): the desktop launcher posts this for its
+    # own window with a secret the page never sees; the page only calls
+    # window.pywebview.api.reset_admin_password.
+    ("POST", "/api/auth/reset-at-computer"),
     # A garnishment order is ended, never deleted; DELETE stays so an API
     # client is told why (405) and where to go (POST .../end).
     ("DELETE", "/api/deductions/garnishments/{order_id}"),

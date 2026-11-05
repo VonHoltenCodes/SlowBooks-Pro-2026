@@ -943,7 +943,7 @@ def test_a_register_refuses_from_after_to_typed_before_touching_its_address(
         assert page.locator("#page-content tbody tr").count() == rows
 
         # only a To in use: From typed past it is refused, and "to" is kept
-        page.get_by_role("button", name="Clear").click()
+        page.get_by_role("button", name="Clear", exact=True).click()
         page.wait_for_function(
             "() => document.getElementById('reg-start').value === ''"
         )

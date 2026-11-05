@@ -767,7 +767,7 @@ def test_the_register_opens_on_the_from_date_it_last_used(browser):
         _open_register(page, 1, "2026-10-01")
 
         # Clear forgets it
-        page.get_by_role("button", name="Clear").click()
+        page.get_by_role("button", name="Clear", exact=True).click()
         page.wait_for_function("() => location.hash === '#/banking/1'")
         _open_register(page, 4, "")
         _open_register(page, 1, "")
