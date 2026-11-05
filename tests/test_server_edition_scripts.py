@@ -112,7 +112,8 @@ def test_the_installer_restarts_the_server_task_and_skips_the_window_on_a_server
     assert len(start) == 1, start
     assert (
         "/Run /TN SlowBooksProServer" in start[0]
-        and "Check: ServerTaskExists" in start[0]
+        # only an all-users install starts the SYSTEM task again (#699)
+        and "Check: IsAdminInstallMode and ServerTaskExists" in start[0]
     ), start[0]
     text = ISS.read_text(encoding="utf-8")
     assert "function ServerTaskExists(): Boolean;" in text

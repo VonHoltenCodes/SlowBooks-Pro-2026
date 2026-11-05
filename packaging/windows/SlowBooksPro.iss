@@ -32,6 +32,27 @@ DisableProgramGroupPage=yes
 ; Ask running instances to close before upgrading. The uvicorn server child
 ; (--_serve) has no window, so [Code] below also stops it by name.
 CloseApplications=yes
+; Per user unless an administrator chooses all users (#699). Before, the
+; default (admin) stopped a standard user at "You must be logged in as an
+; administrator". The first page asks; /ALLUSERS and /CURRENTUSER answer it
+; from the command line. An upgrade skips the question and keeps the mode
+; the copy already installed was installed in (UsePreviousPrivileges): an
+; all-users copy asks for an administrator's password (UAC), and
+; InitializeSetup below stops a run that would otherwise end up beside it.
+PrivilegesRequired=lowest
+PrivilegesRequiredOverridesAllowed=commandline dialog
+UsePreviousPrivileges=yes
+
+; The install-mode page, in plain words.
+[Messages]
+PrivilegesRequiredOverrideTitle=Who is SlowBooks Pro for?
+PrivilegesRequiredOverrideInstruction=Install for you, or for everyone on this computer
+PrivilegesRequiredOverrideText1=%1 can be installed for everyone who signs in to this computer, which needs an administrator's password, or for you only, which does not. Your books are kept in your own folder either way.
+PrivilegesRequiredOverrideText2=%1 can be installed for you only, which needs no administrator, or for everyone who signs in to this computer, which needs an administrator's password. Your books are kept in your own folder either way.
+PrivilegesRequiredOverrideAllUsers=Install for &all users (administrator)
+PrivilegesRequiredOverrideAllUsersRecommended=Install for &all users (administrator, recommended)
+PrivilegesRequiredOverrideCurrentUser=Install for &me only
+PrivilegesRequiredOverrideCurrentUserRecommended=Install for &me only (no administrator needed, recommended)
 
 ; An upgrade must not layer today's bundle over last month's. Inno Setup
 ; only overwrites files it ships; everything else under {app} survives, so
@@ -67,14 +88,16 @@ Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription
 [Run]
 Filename: "{tmp}\MicrosoftEdgeWebView2Setup.exe"; Parameters: "/silent /install"; \
   StatusMsg: "Installing or updating the Microsoft WebView2 runtime (app window component)..."; \
-  Check: not IsWebView2Current; Flags: waituntilterminated
+  Check: not IsWebView2Current; AfterInstall: ReportWebView2; Flags: waituntilterminated
 ; A Server Edition host (the SlowBooksProServer task exists) gets its server
 ; started again instead of a desktop window: PrepareToInstall killed the
 ; server, nothing restarted the task before the next boot, and the window
-; the launch box opened then held port 3001 against it (2.31.3).
+; the launch box opened then held port 3001 against it (2.31.3). Only an
+; all-users install: the task is an administrator's (it runs as SYSTEM), a
+; standard user may not start it, and a per-user install did not stop it.
 Filename: "{sys}\schtasks.exe"; Parameters: "/Run /TN SlowBooksProServer"; \
   StatusMsg: "Starting the Server Edition task..."; \
-  Check: ServerTaskExists; Flags: runhidden waituntilterminated
+  Check: IsAdminInstallMode and ServerTaskExists; Flags: runhidden waituntilterminated
 Filename: "{app}\SlowBooksPro.exe"; Description: "Launch SlowBooks Pro 2026"; Flags: nowait postinstall skipifsilent; \
   Check: not ServerTaskExists
 
@@ -88,6 +111,10 @@ const
   MinWebView2 = '101.0.1210.39';
   WebView2Client = 'Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
   ServerTask = 'SlowBooksProServer';
+  // Where an all-users install registers its uninstaller: Inno Setup's
+  // key for the AppId in [Setup], in the 64-bit view (x64 install mode).
+  AllUsersUninstallKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{f67ccf1c-2072-4f4a-9102-4e3897758a97}_is1';
+  WebView2Page = 'https://developer.microsoft.com/microsoft-edge/webview2/';
 
 var
   ServerTaskChecked: Boolean;
@@ -199,6 +226,59 @@ end;
 // (--_serve). CloseApplications can't reach it (no window, no message
 // loop), so stop every SlowBooksPro.exe by name before install/uninstall
 // — otherwise file-in-use errors block the upgrade.
+// After the bootstrapper ran: when the runtime is still missing or old, say
+// so now rather than leave a window that cannot open. The bootstrapper run
+// for one user (a per-user install is not elevated) installs a missing
+// runtime for that user, but it cannot replace an old runtime installed for
+// everyone; offline, neither mode can. SlowBooks itself is installed either
+// way, and the launcher says the same at start and offers the browser.
+procedure ReportWebView2();
+var
+  Found, Why: String;
+begin
+  if IsWebView2Current() then
+    Exit;
+  Found := WebView2Version();
+  if Found = '' then
+    Found := 'none';
+  if IsAdminInstallMode then
+    Why := 'The installer could not install or update it. It downloads it from Microsoft, ' +
+      'so it needs the internet for that step.'
+  else
+    Why := 'Installing or updating it for everyone on this computer needs an administrator, ' +
+      'and this install is for you only.';
+  SuppressibleMsgBox('SlowBooks Pro 2026 is installed, but its window needs the Microsoft Edge ' +
+    'WebView2 runtime version ' + MinWebView2 + ' or later, and this computer has ' + Found + '.' +
+    #13#10#13#10 + Why + #13#10#13#10 +
+    'Install or update it from Microsoft: ' + WebView2Page + ' (the Evergreen Bootstrapper), ' +
+    'or ask an administrator to. Until then, SlowBooks offers to open in your web browser.',
+    mbInformation, MB_OK, IDOK);
+end;
+
+// A copy installed for all users (Program Files) that this run, for one
+// user, cannot replace: a standard user who declined or could not answer
+// the administrator prompt, or /CURRENTUSER. Installing beside it would
+// leave two copies, two Start-menu entries and the old one still current
+// for everyone else, so Setup says so and stops before changing anything.
+function AllUsersInstallExists(): Boolean;
+begin
+  Result := RegKeyExists(HKLM64, AllUsersUninstallKey) or RegKeyExists(HKLM32, AllUsersUninstallKey);
+end;
+
+function InitializeSetup(): Boolean;
+begin
+  Result := True;
+  if (not IsAdminInstallMode) and AllUsersInstallExists() then
+  begin
+    SuppressibleMsgBox('SlowBooks Pro 2026 is already installed for all users on this computer ' +
+      '(in Program Files), and only an administrator can update that copy.' + #13#10#13#10 +
+      'Ask an administrator to run this installer, or to uninstall SlowBooks Pro 2026 so you can ' +
+      'install it for you only. Nothing has been changed, and your books are not touched either way.',
+      mbError, MB_OK, IDOK);
+    Result := False;
+  end;
+end;
+
 procedure KillAppProcesses();
 var
   ResultCode: Integer;
