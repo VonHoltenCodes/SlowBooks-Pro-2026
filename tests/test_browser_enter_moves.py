@@ -330,8 +330,8 @@ def test_my_preferences_save_themselves(browser, theme):
             (t, fg, bg, contrast(fg, bg)) for t, fg, bg in low if contrast(fg, bg) < 4.5
         ]
         # heading, note, and a label + hint for each of the section's three
-        # boxes (#480's two, #482's report refresh)
-        assert len(low) == 8 and not bad, bad
+        # boxes (#480's two, #482's report refresh) and for Text size (#717)
+        assert len(low) == 10 and not bad, bad
         assert not page.is_checked("#pref-enter-moves")
         assert not page.is_checked("#pref-auto-decimal")
         # outside the administrator's form: no Save Settings needed

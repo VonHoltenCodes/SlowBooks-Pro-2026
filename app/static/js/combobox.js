@@ -396,14 +396,19 @@ class ComboBox {
     _place() {
         const box = this.box, pop = Combobox.popup();
         if (!box.isConnected || box.offsetParent === null) { this._revert(); return; }
-        const r = box.getBoundingClientRect();
-        const below = window.innerHeight - r.bottom - 8, above = r.top - 8;
+        // measured in the window's pixels, set in the page's: at a text
+        // size above 100% (text_size.js) one of the page's covers more
+        const z = typeof SlowbooksTextSize !== 'undefined' ? SlowbooksTextSize.ratio() : 1;
+        const raw = box.getBoundingClientRect();
+        const r = { left: raw.left / z, top: raw.top / z, bottom: raw.bottom / z, width: raw.width / z };
+        const winW = window.innerWidth / z, winH = window.innerHeight / z;
+        const below = winH - r.bottom - 8, above = r.top - 8;
         const up = below < 160 && above > below;
-        pop.style.left = `${Math.max(4, Math.min(r.left, window.innerWidth - Math.max(r.width, 200) - 4))}px`;
+        pop.style.left = `${Math.max(4, Math.min(r.left, winW - Math.max(r.width, 200) - 4))}px`;
         pop.style.minWidth = `${r.width}px`;
-        pop.style.maxWidth = `${Math.max(r.width, Math.min(480, window.innerWidth - 8))}px`;
+        pop.style.maxWidth = `${Math.max(r.width, Math.min(480, winW - 8))}px`;
         pop.style.maxHeight = `${Math.max(120, Math.min(280, up ? above : below))}px`;
-        if (up) { pop.style.top = ''; pop.style.bottom = `${window.innerHeight - r.top + 1}px`; }
+        if (up) { pop.style.top = ''; pop.style.bottom = `${winH - r.top + 1}px`; }
         else { pop.style.bottom = ''; pop.style.top = `${r.bottom + 1}px`; }
     }
 

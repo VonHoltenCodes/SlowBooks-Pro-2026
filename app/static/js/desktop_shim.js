@@ -52,8 +52,8 @@
  *     (file:// needs no auth at all) in a window of its own, under a
  *     toolbar with Open in <the PDF app> and Show in folder.
  *
- * Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac) zoom the window from here too:
- * pywebview's zoomable=True only gives the wheel (see zoomKey below).
+ * Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac) and Ctrl + wheel step the Text
+ * size setting from here too (text_size.js; see zoomKey below).
  *
  * In a normal browser this file is a no-op, but for
  * window.SlowbooksDesktop.saveFile(), which answers false there.
@@ -146,38 +146,35 @@
         }
         return true;
     }
-    // Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac) zoom the window. pywebview's
-    // zoomable=True (desktop_launcher.py) only turns on Ctrl + wheel: the
-    // Windows release build switches WebView2's browser accelerator keys off,
-    // which takes the zoom keys with it, and WKWebView on a Mac has no zoom
-    // keys at all. The level is the document's CSS zoom, 0.5 to 2.0 by
-    // tenths, kept in localStorage so it holds across pages and launches.
+    // Ctrl + / Ctrl - / Ctrl 0 (Cmd on a Mac) change the text size.
+    // pywebview's zoomable=True (desktop_launcher.py) only turns on Ctrl +
+    // wheel: the Windows release build switches WebView2's browser
+    // accelerator keys off, which takes the zoom keys with it, and WKWebView
+    // on a Mac has no zoom keys at all. They step through the Text size
+    // setting's four sizes (text_size.js, #717), the one setting Settings →
+    // My Preferences sets too, so there are not two zooms that multiply.
+    // The size is kept per computer and applied from <head> on every page,
+    // in a browser too; only the keys and the wheel are the desktop's.
     // A document window (print preview, PDF) is its own page with no origin
-    // and no shim, so only the wheel reaches it.
-    const ZOOM_KEY = 'slowbooks.desktop.zoom';
-    const ZOOM_MIN = 0.5;
-    const ZOOM_MAX = 2;
-    const ZOOM_STEP = 0.1;
-
-    function readZoom() {
-        try {
-            const level = parseFloat(localStorage.getItem(ZOOM_KEY));
-            return level >= ZOOM_MIN && level <= ZOOM_MAX ? level : 1;
-        } catch (e) {
-            return 1;
-        }
+    // and no shim, so only pywebview's own wheel zoom reaches it.
+    function textSize() {
+        return window.SlowbooksTextSize || null;
     }
 
-    function applyZoom(level) {
-        level = Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, level)) * 10) / 10;
-        document.documentElement.style.zoom = level === 1 ? '' : String(level);
-        try {
-            if (level === 1) localStorage.removeItem(ZOOM_KEY);
-            else localStorage.setItem(ZOOM_KEY, String(level));
-        } catch (e) {
-            // storage refused (private mode): the level lasts this page only
-        }
-        return level;
+    function readZoom() {
+        const sizes = textSize();
+        return sizes ? sizes.read() : 100;
+    }
+
+    function applyZoom(size) {
+        const sizes = textSize();
+        return sizes ? sizes.apply(size) : 100;
+    }
+
+    function stepZoom(direction) {
+        const sizes = textSize();
+        if (!sizes) return 100;
+        return direction === 0 ? sizes.apply(100) : sizes.step(direction);
     }
 
     // The keydown handler: true when the key was a zoom key and taken. Only
@@ -191,17 +188,17 @@
         else if (e.key === '0') direction = 0;
         else return false;
         e.preventDefault();
-        applyZoom(direction === 0 ? 1 : readZoom() + direction * ZOOM_STEP);
+        stepZoom(direction);
         return true;
     }
     document.addEventListener('keydown', zoomKey, true);
 
-    // Ctrl + wheel (Cmd on a Mac) steps the same zoom. pywebview's
+    // Ctrl + wheel (Cmd on a Mac) steps the same size. pywebview's
     // zoomable=True gives WebView2 its own Ctrl + wheel, which zooms the
-    // view without touching the stored level, and the Cocoa backend never
+    // view without touching the setting, and the Cocoa backend never
     // reads the flag at all (2.30.0 gate NEW-186), so the shim takes the
     // wheel on both: one notch (a wheel's 100, or a trackpad's run of
-    // small deltas adding up to it) is one tenth, and the level is kept
+    // small deltas adding up to it) is one size, and the size is kept
     // like the keys'. preventDefault keeps WebView2's own zoom out of it.
     let wheelRun = 0;
     function zoomWheel(e) {
@@ -211,21 +208,10 @@
         if (Math.abs(wheelRun) < 50) return true;
         const direction = wheelRun < 0 ? 1 : -1;
         wheelRun = 0;
-        applyZoom(readZoom() + direction * ZOOM_STEP);
+        stepZoom(direction);
         return true;
     }
     document.addEventListener('wheel', zoomWheel, { capture: true, passive: false });
-
-    // The stored level comes back on load. On Windows the shell can't be
-    // told at load time (no "WebView2" in the user agent, and pywebview
-    // arrives after DOMContentLoaded), so a relaunch came back at 100%
-    // with 1.1 still stored (2.30.0 gate W-46): the level is applied
-    // again when pywebview announces itself.
-    function restoreZoom() {
-        if (inDesktopShell() && readZoom() !== 1) applyZoom(readZoom());
-    }
-    restoreZoom();
-    window.addEventListener('pywebviewready', restoreZoom);
 
     window.SlowbooksDesktop = {
         saveFile: saveFile,
@@ -233,7 +219,7 @@
         // finds with the app's search, there being no browser find bar
         // to fall through to (#695)
         inShell: inDesktopShell,
-        zoom: { handle: zoomKey, wheel: zoomWheel, apply: applyZoom, read: readZoom, restore: restoreZoom },
+        zoom: { handle: zoomKey, wheel: zoomWheel, apply: applyZoom, read: readZoom },
     };
 
     // Backups download URLs are handled by save_backup_file() instead of a

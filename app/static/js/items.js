@@ -356,7 +356,7 @@ const ItemsPage = {
                 &nbsp;·&nbsp; Weighted avg cost: <strong>${formatCurrency(item.avg_cost || 0)}</strong>
                 ${ItemsPage.belowZeroHtml(item)}
             </div>
-            <div class="table-container" style="max-height:60vh;overflow:auto;"><table>
+            <div class="table-container" style="max-height:calc(60vh / var(--ui-scale, 1));overflow:auto;"><table>
                 <thead><tr>
                     <th scope="col">Date</th><th scope="col">Type</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Unit Cost</th>
                     <th scope="col" class="amount">Bal Qty</th><th scope="col" class="amount">Bal Avg</th><th scope="col">Source</th>

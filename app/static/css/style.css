@@ -237,6 +237,120 @@
     --font-mono: 'Consolas', 'Courier New', monospace;
 }
 
+/* ========================================================================
+ * TEXT SIZE (#717) — Settings → My Preferences, and the desktop app's
+ * Ctrl + / Ctrl − / Ctrl 0 and Ctrl + wheel: 100, 115, 125 or 150 percent,
+ * kept per computer. text_size.js puts the size on <html> from <head>,
+ * before the first paint; the size is the page's CSS zoom, on screen only,
+ * so printing is never enlarged. --ui-scale is the same number for the
+ * frame: under zoom a viewport unit grows with everything else (100vh at
+ * 150% is one and a half windows tall), so a height taken from the window
+ * is a percentage of it, or the viewport divided by --ui-scale, and the
+ * sidebar, the bottom bar and a dialog's buttons stay in the window.
+ * ======================================================================== */
+:root { --ui-scale: 1; }
+@media screen {
+    html[data-text-size="115"] { zoom: 1.15; --ui-scale: 1.15; }
+    html[data-text-size="125"] { zoom: 1.25; --ui-scale: 1.25; }
+    html[data-text-size="150"] { zoom: 1.5; --ui-scale: 1.5; }
+}
+/* The shell is the window's height at every size (#app, below, is 100% of
+   it): the sidebar and the page scroll inside it, the bars stay put. */
+html, body { height: 100%; }
+/* A dialog keeps its title bar and its buttons in view while a tall form
+   scrolls between them (the dialog is what scrolls). The buttons take the
+   dialog's ground so the fields scroll under them, not through them; the
+   margin and the padding below them keep the keyboard's ring and halo
+   inside. A row of buttons with more of the dialog after it holds to the
+   bottom only while that row is below the fold. */
+.modal > .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+#modal-body .form-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    background: var(--form-bg);
+    padding-bottom: 8px;
+    margin-bottom: -8px;
+}
+/* A field the keyboard moves to comes into view clear of the two */
+.modal { scroll-padding-top: 40px; scroll-padding-bottom: 56px; }
+/* A width rule (@media max-width) reads the window, not the page: at
+   150% a 1366 window is a 911px page. The toolbar's rules (below, after
+   .topbar-clock) are given again here at each size, at the window width
+   where the page is that narrow, so the bar gives up its buttons and
+   nothing is past its right edge; and so are the 900px rules that stack
+   the dashboard's cards and a bill's vendor summary. */
+@media screen and (max-width: 1620px) {
+    html[data-text-size="115"] #topbar-clock, html[data-text-size="115"] .topbar-brand span { display: none; }
+    html[data-text-size="115"] .topbar-brand { margin-right: 6px; }
+    html[data-text-size="115"] #topbar .tb-sep { margin: 0 2px; }
+    html[data-text-size="115"] #topbar .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
+}
+@media screen and (max-width: 1436px) {
+    html[data-text-size="115"] #topbar .tb-btn[data-nav="#/quick-entry"], html[data-text-size="115"] #topbar .tb-btn[data-nav="#/bill-entry"] { display: none; }
+}
+@media screen and (max-width: 1275px) {
+    html[data-text-size="115"] #topbar .tb-btn[data-action] { display: none; }
+}
+@media screen and (max-width: 1035px) {
+    html[data-text-size="115"] .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    html[data-text-size="115"] .dash-card--full { grid-column: span 2; }
+    html[data-text-size="115"] .bill-with-summary { flex-direction: column; align-items: stretch; }
+    html[data-text-size="115"] .bill-vendor-summary { flex-basis: auto; width: 100%; border-left: 0; border-top: 1px solid var(--border, #ccc); padding: 8px 0 0; }
+}
+@media screen and (max-width: 644px) {
+    html[data-text-size="115"] .dash-grid { grid-template-columns: 1fr; }
+    html[data-text-size="115"] .dash-card--full { grid-column: span 1; }
+}
+@media screen and (max-width: 1761px) {
+    html[data-text-size="125"] #topbar-clock, html[data-text-size="125"] .topbar-brand span { display: none; }
+    html[data-text-size="125"] .topbar-brand { margin-right: 6px; }
+    html[data-text-size="125"] #topbar .tb-sep { margin: 0 2px; }
+    html[data-text-size="125"] #topbar .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
+}
+@media screen and (max-width: 1561px) {
+    html[data-text-size="125"] #topbar .tb-btn[data-nav="#/quick-entry"], html[data-text-size="125"] #topbar .tb-btn[data-nav="#/bill-entry"] { display: none; }
+}
+@media screen and (max-width: 1386px) {
+    html[data-text-size="125"] #topbar .tb-btn[data-action] { display: none; }
+}
+@media screen and (max-width: 1125px) {
+    html[data-text-size="125"] .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    html[data-text-size="125"] .dash-card--full { grid-column: span 2; }
+    html[data-text-size="125"] .bill-with-summary { flex-direction: column; align-items: stretch; }
+    html[data-text-size="125"] .bill-vendor-summary { flex-basis: auto; width: 100%; border-left: 0; border-top: 1px solid var(--border, #ccc); padding: 8px 0 0; }
+}
+@media screen and (max-width: 700px) {
+    html[data-text-size="125"] .dash-grid { grid-template-columns: 1fr; }
+    html[data-text-size="125"] .dash-card--full { grid-column: span 1; }
+}
+@media screen and (max-width: 2113px) {
+    html[data-text-size="150"] #topbar-clock, html[data-text-size="150"] .topbar-brand span { display: none; }
+    html[data-text-size="150"] .topbar-brand { margin-right: 6px; }
+    html[data-text-size="150"] #topbar .tb-sep { margin: 0 2px; }
+    html[data-text-size="150"] #topbar .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
+}
+@media screen and (max-width: 1873px) {
+    html[data-text-size="150"] #topbar .tb-btn[data-nav="#/quick-entry"], html[data-text-size="150"] #topbar .tb-btn[data-nav="#/bill-entry"] { display: none; }
+}
+@media screen and (max-width: 1663px) {
+    html[data-text-size="150"] #topbar .tb-btn[data-action] { display: none; }
+}
+@media screen and (max-width: 1350px) {
+    html[data-text-size="150"] .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    html[data-text-size="150"] .dash-card--full { grid-column: span 2; }
+    html[data-text-size="150"] .bill-with-summary { flex-direction: column; align-items: stretch; }
+    html[data-text-size="150"] .bill-vendor-summary { flex-basis: auto; width: 100%; border-left: 0; border-top: 1px solid var(--border, #ccc); padding: 8px 0 0; }
+}
+@media screen and (max-width: 840px) {
+    html[data-text-size="150"] .dash-grid { grid-template-columns: 1fr; }
+    html[data-text-size="150"] .dash-card--full { grid-column: span 1; }
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
@@ -251,7 +365,9 @@ body {
 #app {
     display: flex;
     flex-direction: column;
-    height: 100vh;
+    /* of the window, at any text size (TEXT SIZE, above): 100vh grew with
+       the zoom and put the bottom bar out of the window */
+    height: 100%;
 }
 
 /* ========================================================================
@@ -1325,7 +1441,9 @@ a:hover { text-decoration: underline; }
     border-radius: 0;
     width: 90%;
     max-width: 700px;
-    max-height: calc(100vh - 80px);
+    /* the overlay's height less its 40px at the top and 40px at the
+       bottom; a percentage, so it holds at any text size (100vh did not) */
+    max-height: calc(100% - 40px);
     overflow-y: auto;
     box-shadow: 4px 4px 12px rgba(0,0,0,0.3);
 }
@@ -1412,7 +1530,7 @@ a:hover { text-decoration: underline; }
    columns need. The corner cell sits above both. */
 .grid-scroll {
     overflow: auto;
-    max-height: min(68vh, 720px);
+    max-height: min(calc(68vh / var(--ui-scale)), 720px);
     overscroll-behavior: contain;
     /* a cell Tab moves to is scrolled out from under the frozen header row
        and Account column (their height and width, ReportsPage._gridFit),
@@ -1519,7 +1637,7 @@ a:hover { text-decoration: underline; }
 /* On a phone the wide dialog is the screen's width, the grid swipes
    sideways with the Account column frozen, and Prev / Next lead. */
 @media (max-width: 700px) {
-    .modal.modal--wide { width: 96vw; }
+    .modal.modal--wide { width: calc(96vw / var(--ui-scale)); }
     .pivot-grid th:first-child, .pivot-grid td:first-child { min-width: 120px; max-width: 150px; }
     .grid-toolbar label { flex-basis: 100%; }
     .grid-toolbar select, .grid-toolbar .cbx { flex: 1 1 100%; }
@@ -1538,7 +1656,7 @@ a:hover { text-decoration: underline; }
    height, measured by App.revealInTable) with its own 8px of room. */
 .table-container.table-container--frozen {
     overflow: auto;
-    max-height: max(240px, calc(100vh - 230px));
+    max-height: max(240px, calc(100vh / var(--ui-scale) - 230px));
     overscroll-behavior: contain;
     scroll-padding: var(--frozen-head, 28px) 0 0 var(--frozen-col, 200px);
 }
@@ -1583,7 +1701,7 @@ a:hover { text-decoration: underline; }
 /* Budget vs Actual: one table per account in one scrolling box; the sheet
    is as wide as the widest table, so each account's heading can hold to
    the box's left edge as the months scroll */
-.budget-variance { max-height: min(62vh, 640px); }
+.budget-variance { max-height: min(calc(62vh / var(--ui-scale)), 640px); }
 .budget-variance__sheet { width: max-content; min-width: 100%; }
 .budget-variance__acct {
     position: sticky;
@@ -3438,7 +3556,7 @@ tbody tr.row--dim > td.amount { color: var(--text-muted); }
     position: fixed;
     z-index: 450;
     box-sizing: border-box;
-    max-width: calc(100vw - 8px);
+    max-width: calc(100vw / var(--ui-scale) - 8px);
     padding: 4px;
     background: var(--panel-bg);
     color: var(--text-primary);
