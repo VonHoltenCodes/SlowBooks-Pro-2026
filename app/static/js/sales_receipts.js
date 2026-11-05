@@ -138,6 +138,10 @@ const SalesReceiptsPage = {
         const custOpts = customers.filter(c => String(c.id) !== walkInId)
             .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
         const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
+        // A blank Deposit To posts to Undeposited Funds (1200), named as
+        // Receive Payment names it (#709).
+        const undeposited = accounts.some(a => a.is_control && a.account_number === '1200');
+        const blankDeposit = undeposited ? 'Undeposited Funds (deposit later)' : '--';
 
         openModal(Terms.text('Enter Sales Receipt'), `
             <form id="sales-receipt-form" onsubmit="SalesReceiptsPage.save(event)">
@@ -169,7 +173,7 @@ const SalesReceiptsPage = {
                         <input name="reference"></div>
                     <div class="form-group"><label>Deposit To</label>
                         <select name="deposit_to_account_id">
-                            <option value="">Undeposited Funds (default)</option>${bankOpts}</select></div>
+                            <option value="">${blankDeposit}</option>${bankOpts}</select></div>
                     ${classGroup}${jobGroup}
                     ${currencyFormGroupsHtml(null, null)}
                     <div class="form-group"><label>Tax Rate (%)</label>

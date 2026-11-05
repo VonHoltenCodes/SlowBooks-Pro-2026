@@ -2111,12 +2111,13 @@ const App = {
                     <p style="font-size:11px; color:var(--text-muted); margin-bottom:12px;">Upload CSV files to import data.</p>
                     <form id="csv-import-form" onsubmit="App.importCSV(event)">
                         <div class="form-group"><label>Entity Type</label>
-                            <select name="entity_type" id="csv-entity">
+                            <select name="entity_type" id="csv-entity" onchange="App.csvImportHelp(this.value)">
                                 <option value="customers">${T('Customers')}</option>
                                 <option value="vendors">Vendors</option>
                                 <option value="items">Items</option>
                                 <option value="accounts">Chart of Accounts</option>
                             </select></div>
+                        <p class="hint" id="csv-import-help" aria-live="polite" style="font-size:11px; margin-bottom:10px;">${App._csvImportHelpHtml('customers')}</p>
                         <div class="form-group"><label>CSV File</label>
                             <input type="file" name="file" accept=".csv" required></div>
                         <button type="submit" class="btn btn-primary">Import</button>
@@ -2124,6 +2125,46 @@ const App = {
                     <div id="csv-import-results" style="margin-top:12px;"></div>
                 </div>
             </div>`;
+    },
+
+    // The columns each list import reads, as the server matches them
+    // (app/services/csv_import.py: case, spaces and underscores aside, with
+    // the aliases in brackets), and the template to start from (#710). The
+    // headings are a file's, not the screen's words: a nonprofit's donor
+    // list may say Donor (the importer reads it), and Income Account stays.
+    _CSV_IMPORT_COLUMNS: {
+        customers: {
+            template: 'customers-template.csv',
+            columns: () => `Name (or ${T('Customer')}, ${T('Customer')} Name), Company, Email, Phone, Address (or Street), City, State, ZIP, Terms`,
+        },
+        vendors: {
+            template: 'vendors-template.csv',
+            columns: 'Name (or Vendor, Vendor Name, Payee), Company, Email, Phone, Address (or Street), City, State, ZIP, Terms',
+        },
+        items: {
+            template: 'items-template.csv',
+            columns: 'Name (or Item, Item Name), Code, Type (service, product, material or labor), Description, '
+                + 'Rate (or Price, Sales Price), Cost (or Unit Cost), Income Account (number or name; blank is 4000), ' // literal face: the file's column heading
+                + 'Negative Price (yes for a discount item)',
+        },
+        accounts: {
+            template: 'chart-of-accounts-template.csv',
+            columns: 'Number, Name, Type, Parent, Description, Active',
+        },
+    },
+
+    _csvImportHelpHtml(entity) {
+        const spec = App._CSV_IMPORT_COLUMNS[entity];
+        if (!spec) return '';
+        const required = entity === 'accounts' ? '' : ' Only Name is required; headings match in any case, and other columns are ignored.';
+        const columns = typeof spec.columns === 'function' ? spec.columns() : spec.columns;
+        return `Columns read: ${escapeHtml(columns)}.${required} `
+            + `<a href="/static/downloads/${spec.template}" download>Download a template</a>.`;
+    },
+
+    csvImportHelp(entity) {
+        const help = $('#csv-import-help');
+        if (help) help.innerHTML = App._csvImportHelpHtml(entity);
     },
 
     async importCSV(e) {

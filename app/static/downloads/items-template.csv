@@ -1,0 +1,6 @@
+Name,Code,Type,Description,Rate,Cost,Income Account,Negative Price
+Design Hour,DES-HR,service,Design work by the hour,85.00,0.00,4000,
+Installation Labor,INST-LAB,labor,Installation labor per hour,65.00,30.00,Labor Income,
+Neon Tube 4ft,TUBE-4,product,Four-foot neon tube,45.00,18.50,4100,
+Mounting Hardware,HW-KIT,material,Brackets and anchors per kit,12.50,4.25,Material Income,
+Loyalty Discount,DISC-LOY,service,Returning-customer discount,0.00,0.00,4000,yes
