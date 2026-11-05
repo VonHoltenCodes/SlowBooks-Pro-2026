@@ -2,7 +2,7 @@ from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from app.schemas.common import StrictModel
 
 from app.models.banking import ReconciliationStatus
@@ -248,6 +248,12 @@ class FeedAddAll(StrictModel):
     listed posts with its category alone, as before."""
 
     lines: list[FeedLinePicks] = []
+
+
+class FeedExcludeAll(StrictModel):
+    """Exclude all shown (#705): the review list's statement line ids."""
+
+    line_ids: list[int] = Field(default_factory=list, max_length=10000)
 
 
 class StatementPayout(StrictModel):
