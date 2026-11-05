@@ -47,7 +47,10 @@ Windows. (Opening the SlowBooks Pro window while it serves is refused with
 
 ## Permanent install (starts with Windows, no login needed)
 
-From an **elevated** PowerShell (right-click → Run as Administrator):
+This needs SlowBooks installed **for all users** (the installer's first
+page, **Install for all users**, or `/ALLUSERS`), in Program Files: the
+startup task runs as SYSTEM and is an administrator's. From an **elevated**
+PowerShell (right-click → Run as Administrator):
 
 ```powershell
 cd "C:\Program Files\SlowBooks Pro 2026"

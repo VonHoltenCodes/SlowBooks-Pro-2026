@@ -1823,7 +1823,8 @@ def _old_webview2_message(version: str) -> str:
             "\n"
             f"Update it from Microsoft: {WEBVIEW2_URL}\n"
             f"or run the SlowBooks Pro installer, {WINDOWS_INSTALLER}, again, "
-            "which updates it.\n"
+            "which updates it. (A runtime installed for everyone on this "
+            "computer can only be updated by an administrator.)\n"
         )
     return why + (
         f"Update it from Microsoft: {WEBVIEW2_URL}\n"
