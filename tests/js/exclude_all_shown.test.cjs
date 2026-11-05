@@ -8,11 +8,11 @@ const path = require('node:path');
 const { test } = require('node:test');
 const vm = require('node:vm');
 
-function load({ confirmAnswer = true } = {}) {
+function load({ confirmAnswer = true, elements = {} } = {}) {
     const calls = { confirm: [], post: [], toast: [], back: [] };
     const context = {
         window: {},
-        document: { getElementById: () => null, querySelectorAll: () => [] },
+        document: { getElementById: (id) => elements[id] || null, querySelectorAll: () => [] },
         console,
         setTimeout: () => 0,
         escapeHtml: (s) => String(s),
@@ -25,7 +25,7 @@ function load({ confirmAnswer = true } = {}) {
         API: {
             post: async (url, body) => {
                 calls.post.push([url, body]);
-                return { excluded: body.line_ids.length };
+                return body ? { excluded: body.line_ids.length } : {};
             },
         },
     };
@@ -58,7 +58,10 @@ test('the review list has a named Exclude all shown button', () => {
     // a real <button> is in the tab order and answers Enter and Space
     assert.match(attrs, /type="button"/);
     assert.doesNotMatch(attrs, /tabindex="-1"/);
-    assert.match(attrs, /aria-label="Exclude all 3 statement lines shown"/);
+    // the accessible name starts with the visible label (WCAG 2.5.3, W-120)
+    assert.match(attrs, /aria-label="Exclude all shown: 3 statement lines"/);
+    // and the hint says where the lines go
+    assert.match(attrs, /title="[^"]*Show excluded[^"]*Restore[^"]*"/);
     assert.match(attrs, /BankingPage\.excludeAll\(4, 9\)/);
 });
 
@@ -88,7 +91,73 @@ test('cancelling the confirm excludes nothing', async () => {
 test('one line says line, not lines', async () => {
     const { BP, calls } = load();
     const html = BP._reviewPanel(LINES.slice(0, 1), 4, 9, 'bank');
-    assert.match(html, /aria-label="Exclude all 1 statement line shown"/);
+    assert.match(html, /aria-label="Exclude all shown: 1 statement line"/);
     await BP.excludeAll(4, 9);
     assert.match(calls.confirm[0], /Exclude all 1 statement line shown\?/);
+});
+
+
+// Show excluded (W-116): the excluded lines, each with why and Restore.
+const EXCLUDED = {
+    count: 2,
+    lines: [
+        { id: 21, date: '2026-10-02', payee: 'CHK #2201 CLEARED', description: '', amount: '-310.00', reason: 'in_books' },
+        { id: 22, date: '2026-09-30', payee: 'OLD FEE', description: 'before the books', amount: '-4.00', reason: 'excluded' },
+    ],
+};
+
+test('Show excluded is a real button that says how many and opens the list', () => {
+    const { BP } = load();
+    const html = BP._excludedPanel(EXCLUDED, 9);
+    const m = html.match(/<button([^>]*)>Show excluded \(2\)<\/button>/);
+    assert.ok(m, 'no Show excluded (2) button');
+    assert.match(m[1], /type="button"/);
+    assert.match(m[1], /aria-expanded="false"/);
+    assert.match(m[1], /aria-controls="excluded-list"/);
+    assert.doesNotMatch(m[1], /data-write/);
+    // the list starts closed
+    assert.match(html, /<div id="excluded-list"[^>]*\bhidden\b/);
+});
+
+test('each excluded line says why and has Restore', () => {
+    const { BP } = load();
+    const html = BP._excludedPanel(EXCLUDED, 9);
+    assert.match(html, /CHK #2201 CLEARED[\s\S]*Already in the books: same date and amount as a matched line/);
+    assert.match(html, /OLD FEE[\s\S]*Excluded by you/);
+    const restores = [...html.matchAll(/<button([^>]*)>Restore<\/button>/g)].map(x => x[1]);
+    assert.equal(restores.length, 2);
+    for (const attrs of restores) {
+        // hidden from a read-only or accountant's sign-in (App.hideWriteControls)
+        assert.match(attrs, /data-write/);
+        assert.match(attrs, /type="button"/);
+    }
+    assert.match(restores[0], /BankingPage\.restoreLine\(21, 9\)/);
+    assert.match(restores[1], /BankingPage\.restoreLine\(22, 9\)/);
+});
+
+test('the toggle opens and closes the list, aria-expanded with it', () => {
+    const list = { hidden: true };
+    const { BP } = load({ elements: { 'excluded-list': list } });
+    const attrs = { 'aria-expanded': 'false' };
+    const btn = {
+        textContent: 'Show excluded (2)',
+        getAttribute: (k) => attrs[k],
+        setAttribute: (k, v) => { attrs[k] = v; },
+    };
+    BP.toggleExcluded(btn);
+    assert.equal(attrs['aria-expanded'], 'true');
+    assert.equal(list.hidden, false);
+    assert.equal(btn.textContent, 'Hide excluded (2)');
+    BP.toggleExcluded(btn);
+    assert.equal(attrs['aria-expanded'], 'false');
+    assert.equal(list.hidden, true);
+    assert.equal(btn.textContent, 'Show excluded (2)');
+});
+
+test('Restore posts to the restore route and comes back to the register', async () => {
+    const { BP, calls } = load();
+    await BP.restoreLine(21, 9);
+    assert.equal(calls.post.length, 1);
+    assert.equal(calls.post[0][0], '/banking/transactions/21/restore');
+    assert.deepEqual(calls.back, [9]);
 });

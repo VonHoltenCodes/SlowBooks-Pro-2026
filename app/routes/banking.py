@@ -359,12 +359,18 @@ def list_bank_transactions(
     db: Session = Depends(get_db),
 ):
     """Statement lines (feeds and imports) — the review queue. `status`
-    filters on match_status: unmatched | auto | manual | added | excluded."""
+    filters on match_status: unmatched | auto | manual | added | excluded
+    (excluded takes in the lines an import set aside as in the books too;
+    in_books asks for those alone)."""
+    from app.services.bank_dedupe import EXCLUDED
+
     skip, limit = clamp_pagination(skip, limit)
     q = db.query(BankTransaction)
     if bank_account_id:
         q = q.filter(BankTransaction.bank_account_id == bank_account_id)
-    if status:
+    if status == "excluded":
+        q = q.filter(BankTransaction.match_status.in_(EXCLUDED))
+    elif status:
         q = q.filter(BankTransaction.match_status == status)
     rows = (
         q.order_by(BankTransaction.date.desc(), BankTransaction.id.desc())
@@ -669,6 +675,48 @@ def feed_exclude_all(
         bt.match_status = "excluded"
     db.commit()
     return {"excluded": len(rows)}
+
+
+EXCLUDED_WHY = {
+    "excluded": "excluded by you",
+    "in_books": "already in the books: same date and amount as a matched line",
+}
+
+
+@router.get("/accounts/{account_id}/feed/excluded")
+def feed_excluded(account_id: int, db: Session = Depends(get_db)):
+    """The feed's excluded statement lines, for the review list's Show
+    excluded (W-116): each with why it is out of To review, the user's
+    Exclude (one, or Exclude all shown) or an import's "already in the
+    books". Restore (POST /transactions/{id}/restore) brings one back.
+    Newest first; `count` is how many."""
+    from app.services.bank_dedupe import EXCLUDED
+
+    ba = db.query(BankAccount).filter(BankAccount.id == account_id).first()
+    if not ba:
+        raise HTTPException(status_code=404, detail="Bank account not found")
+    rows = (
+        db.query(BankTransaction)
+        .filter(
+            BankTransaction.bank_account_id == ba.id,
+            BankTransaction.match_status.in_(EXCLUDED),
+        )
+        .order_by(BankTransaction.date.desc(), BankTransaction.id.desc())
+        .all()
+    )
+    lines = [
+        {
+            "id": r.id,
+            "date": r.date.isoformat(),
+            "payee": r.payee,
+            "description": r.description,
+            "amount": str(r.amount),
+            "reason": r.match_status,
+            "reason_text": EXCLUDED_WHY[r.match_status],
+        }
+        for r in rows
+    ]
+    return {"count": len(lines), "lines": lines}
 
 
 def _entry_vendor(db: Session, vendor_id, payee):

@@ -1602,6 +1602,105 @@ a:hover { text-decoration: underline; }
     .table--frozen td:first-child,
     .budget-variance__acct { position: static; }
 }
+/* Printing the Budgets grid or Budget vs Actual (W-115, #702): the app's
+   shell is a screen's height that scrolls inside #content, and printed so
+   it gave one page, January to May and the first 36 accounts. While a
+   month grid is on the page the shell lets the page flow (no fixed
+   heights, nothing clipped, no 1100px cap), the sidebar, bars and buttons
+   are not printed, the sheet is landscape, the month row repeats on each
+   page, no row splits, and the twelve months (and Budget vs Actual's
+   Total) share the page's width in a smaller type. Budget vs Actual opens
+   in a dialog: while it is open the dialog is what prints, not the page
+   behind it. Other pages print as they did: every rule here is under a
+   grid's :has(). */
+@page sb-month-grid { size: letter landscape; margin: 0.4in; }
+@media print {
+    body:has(.table-container--frozen) {
+        overflow: visible;
+        height: auto;
+        background: white;
+    }
+    body:has(.table-container--frozen) #app,
+    body:has(.table-container--frozen) #main-area,
+    body:has(.table-container--frozen) #content {
+        display: block;
+        height: auto;
+        max-height: none;
+        overflow: visible;
+        padding: 0;
+        margin: 0;
+    }
+    body:has(.table-container--frozen) #page-content { max-width: none; }
+    body:has(.table-container--frozen) #app,
+    body:has(.table-container--frozen) #modal-overlay { page: sb-month-grid; }
+    body:has(.table-container--frozen) .budget-hint { display: none; }
+    body:has(.table-container--frozen) .page-header { margin-bottom: 6px; }
+    .table-container.table-container--frozen { border: 0; }
+    .table--frozen,
+    .budget-variance__sheet {
+        width: 100%;
+        min-width: 0;
+    }
+    .table--frozen { table-layout: fixed; font-size: 9px; }
+    .table--frozen thead { display: table-header-group; }
+    .table--frozen tr { break-inside: avoid; page-break-inside: avoid; }
+    .table--frozen th,
+    .table--frozen td {
+        padding: 2px 3px;
+        min-width: 0 !important;
+        overflow-wrap: anywhere;
+    }
+    .table--frozen th:first-child,
+    .table--frozen td:first-child {
+        width: 17%;
+        white-space: normal;
+        box-shadow: none;
+    }
+    .budget-grid td.budget-acct { max-width: none; overflow: visible; }
+    /* the entry boxes print as their figures */
+    .budget-grid .budget-cell {
+        width: 100% !important;
+        padding: 0 !important;
+        font-size: 9px !important;
+        border: 0;
+        background: none;
+        box-shadow: none;
+        appearance: textfield;
+        -moz-appearance: textfield;
+    }
+    .budget-variance__acct { margin: 8px 0 2px; padding-left: 0; break-after: avoid; page-break-after: avoid; }
+    .budget-variance__table { break-inside: avoid; page-break-inside: avoid; margin-bottom: 6px; font-size: 8px; }
+    /* Budget / Actual / Variance need little room; thirteen figures need it all */
+    .budget-variance__table th:first-child,
+    .budget-variance__table td:first-child { width: 7%; }
+    /* Budget vs Actual's dialog, printed in place of the page */
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #app { display: none !important; }
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-overlay {
+        display: block !important;
+        position: static;
+        padding: 0;
+        background: none;
+    }
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal {
+        width: auto;
+        max-width: none;
+        max-height: none;
+        overflow: visible;
+        border: 0;
+        box-shadow: none;
+    }
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .modal-header {
+        background: none;
+        color: black;
+        padding: 0 0 4px;
+    }
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .modal-header h2 { text-shadow: none; font-size: 14px; }
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .modal-close,
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-body .report-toolbar,
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-body .form-actions { display: none; }
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) #modal-body { padding: 0; }
+    body:has(#modal-overlay:not(.hidden) .table-container--frozen) .budget-variance { max-height: none; }
+}
 
 .modal-header {
     display: flex;

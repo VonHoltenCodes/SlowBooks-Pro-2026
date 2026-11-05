@@ -144,3 +144,103 @@ def test_a_nonprofit_keeps_its_words(client, books):
         ("retained_earnings", "Net Assets from Prior Years", 1300.0),
         ("net_income", "Change in Net Assets", 800.0),
     ]
+
+
+# Two lines called Retained Earnings (#708, macbase1): with the posted 3200
+# Retained Earnings holding a balance, the computed line of earlier years'
+# net income is named "Net Income, prior years"; with none it stays
+# Retained Earnings (the tests above). Its key does not change.
+
+
+@pytest.fixture
+def posted_re(db_session, books):
+    """An opening balance posted to 3200 Retained Earnings in 2025."""
+    _je(db_session, date(2025, 1, 1), books["1000"], books["3200"], "250.00")
+    db_session.commit()
+    return books
+
+
+def _equity_names(d):
+    return [
+        (
+            e["line"] if e["account_id"] is None else e["account_number"],
+            e["account_name"],
+            e["amount"],
+        )
+        for e in d["equity"]
+    ]
+
+
+def test_beside_a_posted_retained_earnings_the_line_is_prior_years(client, posted_re):
+    d = _bs(client, "2026-06-30")
+    names = _equity_names(d)
+    assert ("3200", "Retained Earnings", 250.0) in names
+    assert _computed(d) == [
+        ("retained_earnings", "Net Income, prior years", 1300.0),
+        ("net_income", "Net Income", 800.0),
+    ]
+    # one line, and one only, says Retained Earnings
+    assert [n for _k, n, _a in names].count("Retained Earnings") == 1
+    assert d["total_equity"] == 2350.0
+    assert d["total_assets"] == d["total_liabilities"] + d["total_equity"]
+    tree = [r["label"] for r in d["tree"]["equity"]]
+    assert "Net Income, prior years" in tree
+    assert sum("Retained Earnings" in label for label in tree) == 1
+
+
+def test_the_prior_year_column_keeps_one_name(client, posted_re):
+    """3200 holds a balance at 2025-12-31 and none a year earlier: the
+    computed line is still one row, named for the sheet."""
+    d = _bs(client, "2025-12-31", "&compare=prior_year")
+    rows = [
+        (e["line"], e["account_name"], e["amount"], e["prior_amount"])
+        for e in d["equity"]
+        if e["account_id"] is None
+    ]
+    # 2025-12-31: 800 from 2024 retained, 500 of 2025; 2024-12-31: all of
+    # 2024's 800 is that year's net income
+    assert rows == [
+        ("retained_earnings", "Net Income, prior years", 800.0, 0.0),
+        ("net_income", "Net Income", 500.0, 800.0),
+    ]
+
+
+def test_the_csv_and_pdf_print_the_new_name(client, posted_re, monkeypatch):
+    rows = rows_of(
+        client.get("/api/reports/balance-sheet/csv?as_of_date=2026-06-30").text
+    )
+    flat = [[c.strip() for c in r] for r in rows]
+    assert any("Net Income, prior years" in r and "1300.00" in r for r in flat)
+    assert any(any("Retained Earnings" in c for c in r) and "250.00" in r for r in flat)
+    assert sum(any(c.endswith("Retained Earnings") for c in r) for r in flat) == 1
+
+    from app.routes.reports import financial
+
+    captured = {}
+    monkeypatch.setattr(
+        financial,
+        "_pdf_response",
+        lambda sections, db, filename, landscape=False: captured.update(s=sections)
+        or {},
+    )
+    client.get("/api/reports/balance-sheet/pdf?as_of_date=2026-06-30")
+    by = {r["cells"][0].strip(): r for r in captured["s"][0]["rows"]}
+    assert by["Net Income, prior years"]["cells"][1] == "$1,300.00"
+    assert by["Net Income"]["cells"][1] == "$800.00"
+    assert "Retained Earnings" not in by
+    assert sum(label.endswith("Retained Earnings") for label in by) == 1
+
+
+def test_with_no_posted_balance_it_stays_retained_earnings(client, books):
+    d = _bs(client, "2026-06-30")
+    assert _computed(d)[0] == ("retained_earnings", "Retained Earnings", 1300.0)
+    assert not any(e["account_number"] == "3200" for e in d["equity"] if e["amount"])
+
+
+def test_a_nonprofit_keeps_its_words_beside_a_posted_balance(client, posted_re):
+    client.put("/api/settings", json={"company_type": "nonprofit"})
+    d = _bs(client, "2026-06-30")
+    assert _computed(d) == [
+        ("retained_earnings", "Net Assets from Prior Years", 1300.0),
+        ("net_income", "Change in Net Assets", 800.0),
+    ]

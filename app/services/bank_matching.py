@@ -412,7 +412,11 @@ def exclude(bt: BankTransaction) -> BankTransaction:
 
 
 def restore(bt: BankTransaction) -> BankTransaction:
-    if bt.match_status != "excluded":
+    """Back to To review: a line the user excluded, or one an import set
+    aside as already in the books (bank_dedupe.IN_BOOKS)."""
+    from app.services.bank_dedupe import EXCLUDED
+
+    if bt.match_status not in EXCLUDED:
         raise HTTPException(status_code=400, detail="Statement line is not excluded")
     bt.match_status = "unmatched"
     return bt

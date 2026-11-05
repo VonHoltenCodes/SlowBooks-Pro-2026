@@ -867,18 +867,59 @@ def balance_sheet(
         return _bs_period(db, as_of, sort, t, chart, basis, hide_zero)
 
     if compare == "prior_year":
-        return _bs_layout(
+        data = _bs_with_prior(
             db,
-            _bs_with_prior(
-                db,
-                period(as_of_date),
-                period(_year_earlier(as_of_date)),
-                sort,
-                chart,
-            ),
+            period(as_of_date),
+            period(_year_earlier(as_of_date)),
+            sort,
             chart,
         )
-    return _bs_layout(db, period(as_of_date), chart)
+    else:
+        data = period(as_of_date)
+    return _bs_layout(db, _name_prior_years(data, t), chart)
+
+
+# The computed line of earlier years' net income beside a posted Retained
+# Earnings account (#708, macbase1): with 3200 Retained Earnings holding a
+# balance on the sheet, a second line also called Retained Earnings could
+# not be told from it. It is then named for what it is, the earnings of
+# earlier fiscal years not yet closed to Retained Earnings; with no posted
+# balance it stays Retained Earnings, as QuickBooks prints it. A nonprofit's
+# words (Net Assets from Prior Years) are distinct either way. The line's
+# key, "retained_earnings", never changes.
+RETAINED_EARNINGS_NUMBER = "3200"
+PRIOR_YEARS_WORDS = "Net Income, prior years"
+
+
+def _name_prior_years(data: dict, t) -> dict:
+    if t("Equity") != "Equity":  # a nonprofit: its own words
+        return data
+    equity = data["equity"]
+    posted = any(
+        e.get("account_id") is not None
+        and e.get("account_number") == RETAINED_EARNINGS_NUMBER
+        and (
+            round(float(e.get("amount") or 0), 2)
+            or round(float(e.get("prior_amount") or 0), 2)
+        )
+        for e in equity
+    )
+    if not posted:
+        return data
+    data["equity"] = [
+        (
+            dict(
+                e,
+                account_name=PRIOR_YEARS_WORDS,
+                account_path=PRIOR_YEARS_WORDS,
+                account_label=PRIOR_YEARS_WORDS,
+            )
+            if e.get("account_id") is None and e.get("line") == "retained_earnings"
+            else e
+        )
+        for e in equity
+    ]
+    return data
 
 
 def _bs_period(

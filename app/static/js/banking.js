@@ -1049,6 +1049,9 @@ const BankingPage = {
         let review = [];
         // the whole queue: a year fetched from a feed can be more than a page
         if (feed) review = await fetchAllPages(`/banking/transactions?bank_account_id=${feed.bank_account_id}&status=unmatched`);
+        // the lines set aside, by the user or by an import as already in
+        // the books, for Show excluded (W-116)
+        const excluded = feed ? await API.get(`/banking/accounts/${feed.bank_account_id}/feed/excluded`).catch(() => null) : null;
         // the class chosen, for + Entry to take (#663): one archived is not
         // in the form's list, so a new entry is not given it
         const chosen = f.class_id ? classes.find(c => String(c.id) === f.class_id) || null : null;
@@ -1077,6 +1080,7 @@ const BankingPage = {
             </div>`;
 
         if (review.length) html += BankingPage._reviewPanel(review, feed.bank_account_id, id, kind);
+        if (excluded && excluded.count > 0) html += BankingPage._excludedPanel(excluded, id);
 
         const classOpts = classes.map(c => `<option value="${c.id}"${String(c.id) === f.class_id ? ' selected' : ''}>${escapeHtml(c.name)}${c.is_archived ? ' (archived)' : ''}</option>`).join('');
         const filtered = !!(f.start_date || f.end_date || f.class_id);
@@ -1237,7 +1241,7 @@ const BankingPage = {
             <div class="card-header">To review — ${review.length} statement line${review.length === 1 ? '' : 's'} not in the books
                 <span style="float:right;">
                     <button class="btn btn-sm btn-secondary" onclick="BankingPage.addAll(${feedId}, ${accountId})">Add all categorised</button>
-                    <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.excludeAll(${feedId}, ${accountId})" aria-label="Exclude all ${review.length} statement line${review.length === 1 ? '' : 's'} shown" title="Set aside every line in this list; each can be restored">Exclude all shown</button>
+                    <button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.excludeAll(${feedId}, ${accountId})" aria-label="Exclude all shown: ${review.length} statement line${review.length === 1 ? '' : 's'}" title="Set aside every line in this list; Show excluded, under the list, has each one with Restore">Exclude all shown</button>
                 </span>
             </div>
             <div class="table-container"><table>
@@ -1249,6 +1253,47 @@ const BankingPage = {
                 A ${kind === 'credit_card' ? 'card payment' : 'transfer'} is a line whose category is another bank or card account.
             </div>
         </div>`;
+    },
+
+    // Show excluded (W-116): the feed's excluded statement lines, under the
+    // review list, each with why it is out of To review and Restore, which
+    // brings it back. A real button, aria-expanded, opens the list; shown
+    // only when there is one (N from the server). Restore is data-write: a
+    // read-only or accountant's sign-in sees the list but not the button.
+    _excludedPanel(excluded, accountId) {
+        const n = excluded.count;
+        const why = (l) => l.reason === 'in_books'
+            ? 'Already in the books: same date and amount as a matched line'
+            : 'Excluded by you';
+        const rows = (excluded.lines || []).map(l => `
+            <tr data-excluded="${l.id}">
+                <td>${formatDate(l.date)}</td>
+                <td>${escapeHtml(l.payee || '')}<div style="font-size:10px; color:var(--gray-400);">${escapeHtml(l.description || '')}</div></td>
+                <td class="amount">${formatCurrency(l.amount)}</td>
+                <td>${escapeHtml(why(l))}</td>
+                <td><button type="button" class="btn btn-sm btn-secondary" data-write onclick="BankingPage.restoreLine(${l.id}, ${accountId})" aria-label="Restore ${escapeHtml(l.payee || 'the line')}, ${formatDate(l.date)}, ${formatCurrency(l.amount)}, to To review">Restore</button></td>
+            </tr>`).join('');
+        return `<div class="excluded-lines" style="margin-bottom:16px;">
+            <button type="button" class="btn btn-sm btn-secondary" id="excluded-toggle" data-readonly-ok aria-expanded="false" aria-controls="excluded-list" onclick="BankingPage.toggleExcluded(this)">Show excluded (${n})</button>
+            <div id="excluded-list" class="card" hidden style="margin-top:6px;">
+                <div class="card-header">Excluded — ${n} statement line${n === 1 ? '' : 's'} set aside, not in To review</div>
+                <div class="table-container"><table>
+                    <thead><tr><th scope="col">Date</th><th scope="col">Bank says</th><th scope="col" class="amount">Amount</th><th scope="col">Why</th><th scope="col"></th></tr></thead>
+                    <tbody>${rows}</tbody></table></div>
+                <div style="font-size:10px; color:var(--gray-500); margin-top:6px;">
+                    <strong>Restore</strong> returns a line to To review, where it can be added or matched. Nothing here is posted.
+                </div>
+            </div>
+        </div>`;
+    },
+
+    toggleExcluded(btn) {
+        const list = document.getElementById('excluded-list');
+        if (!list) return;
+        const open = btn.getAttribute('aria-expanded') !== 'true';
+        btn.setAttribute('aria-expanded', String(open));
+        list.hidden = !open;
+        btn.textContent = btn.textContent.replace(/^(Show|Hide)/, open ? 'Hide' : 'Show');
     },
 
     async _fillCategorySelects(kind) {
@@ -1453,7 +1498,7 @@ const BankingPage = {
         const ids = Object.keys(BankingPage._reviewLines || {}).map(Number).filter(Number.isFinite);
         if (!ids.length) return;
         const n = ids.length;
-        if (!confirm(`Exclude all ${n} statement line${n === 1 ? '' : 's'} shown? They leave To review and nothing is posted.`)) return;
+        if (!confirm(`Exclude all ${n} statement line${n === 1 ? '' : 's'} shown? They leave To review and nothing is posted; Show excluded brings any back.`)) return;
         try {
             const r = await API.post(`/banking/accounts/${feedId}/feed/exclude-all`, { line_ids: ids });
             toast(`Excluded ${r.excluded} statement line${r.excluded === 1 ? '' : 's'}`);
@@ -1464,6 +1509,7 @@ const BankingPage = {
     async restoreLine(lineId, accountId) {
         try {
             await API.post(`/banking/transactions/${lineId}/restore`);
+            toast('Restored to To review');
             BankingPage._backToRegister(accountId);
         } catch (err) { toast(err.message, 'error'); }
     },
