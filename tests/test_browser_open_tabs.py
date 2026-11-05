@@ -340,6 +340,7 @@ def test_hidden_menu_and_recent_leave_each_other_alone(browser, company, books):
     page, handled = _open_at(browser, company, "#/vendors")
     try:
         _visit(page, handled, "#/settings")
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#hidden-menu-choices input[data-show-menu]")
         assert page.evaluate(
             "() => document.querySelector('#sidebar .nav-link[data-page=\"vendors\"]').closest('li').hidden"

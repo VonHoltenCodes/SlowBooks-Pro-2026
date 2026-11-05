@@ -230,7 +230,7 @@ prints.
 
 ### Pre-printed check stock
 
-Settings → Check Printing chooses how every check prints, for the whole
+Settings → Payroll and checks → Check Printing chooses how every check prints, for the whole
 company. **Plain / voucher stock** (the default) prints the full face —
 "Pay to the order of", the memo and signature lines, the amount box and
 borders — and the two stubs, onto blank paper or voucher stock. **Pre-printed

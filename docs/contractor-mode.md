@@ -1,6 +1,6 @@
 # Contractor mode
 
-Settings → Company Information → Company Type → **Construction** sets a
+Settings → Company → Company Information → Company Type → **Construction** sets a
 company up the way a contractor keeps its books, the same way **Nonprofit**
 does for a ministry: one switch, no change to any data, reversible at any
 time. It is the counterpart to QuickBooks Desktop's Contractor Edition.
@@ -98,7 +98,7 @@ what a subcontractor bids and gets awarded; a cost-code **section** is what
 costs post to. The two are mapped many-to-many — a package can span
 divisions, and a division can be split across packages. Construction setup
 seeds a default set of packages mapped to the sections it has; edit them, and
-the section mapping, under **Settings → Trade Packages** (shown only for
+the section mapping, under **Settings → Lists → Trade Packages** (shown only for
 construction companies). Estimate lines, commitments, the schedule of values
 and the Buyout tab all use them.
 

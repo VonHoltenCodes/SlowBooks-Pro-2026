@@ -329,6 +329,28 @@
     color: #b0c4dc;
 }
 
+/* the groups' list (#720) */
+[data-theme="dark"] .settings-nav {
+    background: var(--panel-bg);
+    border-color: var(--panel-border);
+}
+
+[data-theme="dark"] .settings-tab { color: var(--text-primary); }
+
+[data-theme="dark"] .settings-tab:hover { background: #2a3040; }
+
+[data-theme="dark"] .settings-tab[aria-selected="true"] {
+    background: #2e4a6e;
+    color: #ffffff;
+}
+
+[data-theme="dark"] .settings-nav--finding .settings-tab[aria-selected="true"] {
+    background: transparent;
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .settings-tab-dot:not([hidden]) { background: #f0a050; }
+
 /* Search */
 [data-theme="dark"] .tb-search {
     background: #14161c;

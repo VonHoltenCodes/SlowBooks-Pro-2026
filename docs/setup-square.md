@@ -21,7 +21,7 @@ See [setup-stripe.md](setup-stripe.md) and [setup-paypal.md](setup-paypal.md) fo
 
 ## Step 2: Configure Slowbooks
 
-1. Open **Settings → Online Payments → Square** (an administrator's setting)
+1. Open **Settings → Connections → Online Payments → Square** (an administrator's setting)
 2. Set **Square Payments** to Enabled and **Environment** to `Sandbox`
 3. Paste the **Access Token** and **Location ID**
 4. Save

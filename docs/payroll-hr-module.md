@@ -237,7 +237,7 @@ URL only on that first claim.
 
 SlowBooks makes the ACH file (NACHA format); the bank moves the money.
 The business account needs ACH origination from the bank, which then
-gives the numbers Settings → Direct Deposit (ACH) asks for: the bank's
+gives the numbers Settings → Payroll and checks → Direct Deposit (ACH) asks for: the bank's
 routing number and name, the company account the net pay is paid from
 (`ach_company_account`, encrypted at rest like the SMTP password) and the
 two 10-character identifiers (`ach_immediate_origin`, `ach_company_id`),
@@ -284,7 +284,7 @@ generated since that counted it. The response's `warnings` repeat them.
 A pay run posts one journal entry: a debit for gross wages, one for the
 employer's payroll taxes, a credit to each payable for what was withheld or
 accrued, and a credit for the net pay. Each piece has a setting that names
-its account (Settings → Payroll Accounts, administrator only, saved with the
+its account (Settings → Payroll and checks → Payroll Accounts, administrator only, saved with the
 rest of the company settings by `PUT /api/settings`). Left blank, the piece
 posts to the seeded account it always has, so a company that chooses
 nothing posts exactly as before. The table is

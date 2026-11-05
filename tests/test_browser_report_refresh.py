@@ -186,6 +186,7 @@ def test_the_refresh_control_meets_aa_in_both_themes(browser, company, books):
 def test_my_preferences_has_the_checkbox_on_by_default(browser, company, books):
     page, handled = _open_at(browser, company, "#/settings")
     try:
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#pref-report-refresh")
         settle(page, handled)
         assert page.is_checked("#pref-report-refresh")

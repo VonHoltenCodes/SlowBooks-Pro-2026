@@ -116,7 +116,7 @@ configured to support them but doesn't enforce them on its own.
 | § 164.308 Information Access Management | Four roles with central enforcement, sign-in end dates, one-time passwords for new sign-ins, sessions ended on deactivation, role change or password reset; the access policy itself is the customer's |
 | § 164.308 Security Awareness and Training | Customer responsibility |
 | § 164.308 Security Incident Procedures | Customer responsibility; SlowBooks logs help with detection |
-| § 164.308 Contingency Plan | ✅ Backups and restore from Settings → Backup / Restore: a `pg_dump` on PostgreSQL, a copy of the company file on the desktop and Server Edition (encrypted when the file is) |
+| § 164.308 Contingency Plan | ✅ Backups and restore from Settings → Backups → Backup / Restore: a `pg_dump` on PostgreSQL, a copy of the company file on the desktop and Server Edition (encrypted when the file is) |
 | § 164.308 Evaluation | Periodic re-assessment — customer responsibility |
 | § 164.308 Business Associate Contracts | Customer responsibility — if SlowBooks operator becomes a BA |
 | § 164.310 Facility Access Controls | Physical deploy environment (datacenter / office) — customer responsibility |

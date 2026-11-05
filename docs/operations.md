@@ -26,7 +26,7 @@ PGHOST=localhost ./scripts/backup.sh
   the `bookkeeper` role. `DB_NAME`, `DB_USER` and `BACKUP_DIR` override the
   defaults.
 - The desktop app and Server Edition keep each company in one SQLite file and
-  back it up from Settings → Backup / Restore; this script is for the
+  back it up from Settings → Backups → Backup / Restore; this script is for the
   PostgreSQL installs.
 
 ### Scheduled production backup
@@ -216,7 +216,7 @@ Files. Nothing serves it until a server points at it. Two ways:
 Backups are per database: `scripts/backup.sh` dumps the database `DB_NAME`
 names (default `bookkeeper`), so for the second company pass its name:
 `docker compose exec -e DB_NAME=YOUR_DATABASE_NAME -e BACKUP_DIR=/app/backups slowbooks-second ./scripts/backup.sh`.
-Settings → Backup / Restore in each company does the same from the browser.
+Settings → Backups → Backup / Restore in each company does the same from the browser.
 
 ## Stopping, restarting, log rotation
 

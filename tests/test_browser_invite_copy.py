@@ -38,6 +38,7 @@ def test_each_line_of_the_invitation_copies_on_its_own(browser, company, books):
         page.context.grant_permissions(
             ["clipboard-read", "clipboard-write"], origin=ORIGIN
         )
+        page.click("#settings-tab-security")  # its group (#720)
         page.click("button:has-text('Invite your accountant…')")
         page.fill("#modal-body input[name=username]", "cpa-browser")
         page.click("#modal-body button[type=submit]")

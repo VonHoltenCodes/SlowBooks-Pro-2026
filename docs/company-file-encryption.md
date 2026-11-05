@@ -11,7 +11,7 @@ clinic or a law office, turn it on the first day.
 
 ## Turning it on
 
-**Settings → Company File Encryption → Turn on…**, or the *Encrypt this
+**Settings → Users and security → Company File Encryption → Turn on…**, or the *Encrypt this
 company file* box on first-run setup. An administrator types the company's
 name to confirm, and their own password. SlowBooks Pro then:
 
@@ -50,7 +50,7 @@ once they have set a password of their own and signed in.
 
 ## A new recovery key
 
-**Settings → Company File Encryption → New recovery key…** re-keys the
+**Settings → Users and security → Company File Encryption → New recovery key…** re-keys the
 file in place under a new recovery key, shown once, and retires the old
 one. The administrator who asked unlocks the file at once; every other
 administrator after their next sign-in (until then the picker tells them

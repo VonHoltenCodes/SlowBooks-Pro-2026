@@ -75,6 +75,18 @@ SETTINGS_KEPT = {
         )
     ],
     "Edit Email Template › Cancel": [],
+    # the groups' list and Find a setting (#720): they only show a group,
+    # and send nothing (Users and security holds only the administrator's
+    # sections, so a bookkeeper's list leaves it out)
+    "#settings-find": [],
+    "Company": [],
+    "Sales documents": [],
+    "Email": [],
+    "Payroll and checks": [],
+    "Lists": [],
+    "Connections": [],
+    "Preferences": [],
+    "Backups": [],
     "Classes › Add Class": [("POST", "/api/classes", {"name": "Wholesale"}, 201)],
     "Classes › Rename": [("PUT", "/api/classes/{klass}", {"name": "Counter"}, 200)],
     "Classes › Archive": [("PUT", "/api/classes/{klass}", {"is_archived": True}, 200)],

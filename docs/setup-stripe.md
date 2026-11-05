@@ -47,7 +47,7 @@ SlowBooks at the time.
 
 ## Step 3: Configure SlowBooks
 
-1. Open **Settings → Online Payments** and find the **Stripe** block.
+1. Open **Settings → Connections → Online Payments** and find the **Stripe** block.
 2. Set **Stripe Payments** to Enabled and paste the Publishable Key and the
    Secret Key.
 3. **Post to a clearing account**, optional: see "How it posts" below.
@@ -123,7 +123,7 @@ paste the `whsec_` it prints as the Webhook Secret while it runs.
 By default: **DR Undeposited Funds / CR Accounts Receivable** for the gross,
 the way any received payment posts.
 
-With **Post to a clearing account** on (Settings → Online Payments, since
+With **Post to a clearing account** on (Settings → Connections → Online Payments, since
 2.30.0): the payment posts **DR Stripe Clearing** (1210, or an account you
 choose) **/ CR Accounts Receivable**, and Stripe's fee posts **DR Merchant
 Account Fees** (6210) **/ CR Stripe Clearing**, so the clearing account holds

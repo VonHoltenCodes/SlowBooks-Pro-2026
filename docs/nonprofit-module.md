@@ -8,7 +8,7 @@ the screens, the printed documents and the reports do.
 
 ## Turning it on
 
-**Settings → Company Information → Company Type → Nonprofit.** The page
+**Settings → Company → Company Information → Company Type → Nonprofit.** The page
 reloads in nonprofit words and the four accounts the mode needs are created
 if they are missing (3300 Net Assets Without Donor Restrictions, 3400 Net
 Assets With Donor Restrictions, 4400 In-Kind Contributions, 6960 Bad Debt
@@ -17,7 +17,7 @@ nothing is lost either way. The statements never add these accounts on a
 read (2.31.2): a company switched to nonprofit over the API with
 `PUT /api/settings` alone, or an older file that never ran setup, shows a
 net-asset line by name with no account until a release, in-kind gift or
-write-off posts; run Settings → Company Type again, or
+write-off posts; run Settings → Company → Company Type again, or
 `POST /api/nonprofit/setup-accounts`, if a statement shows one.
 
 ## What changes on screen
@@ -47,7 +47,7 @@ invoice form decides which.
 
 ## Funds
 
-A class is a fund. **Settings → Funds → Edit** sets:
+A class is a fund. **Settings → Lists → Funds → Edit** sets:
 
 - **Restriction** — without donor restrictions, with donor restrictions
   (purpose or time), or with donor restrictions (permanent). The last two
@@ -143,7 +143,7 @@ Donation so it is revenue the day it arrives.
 
 Every gift gets a written acknowledgment: **Acknowledgment (PDF)** and
 **Email Acknowledgment** on the donation, payment and in-kind views. The
-wording is yours — **Settings → Email Templates → donation_acknowledgment**
+wording is yours — **Settings → Email → Email Templates → donation_acknowledgment**
 (press **Seed Default Templates** first if the list is empty; until then the
 built-in wording is used) — with `{{ irs.text }}` supplying the sentence the
 IRS requires (no goods
@@ -181,7 +181,7 @@ receipt is what gets acknowledged.
   (whether a donor can deduct it depends on their own return: from tax year
   2026 non-itemizers may deduct some cash gifts and itemizers face a floor);
   non-cash gifts described without amounts; the IRS sentence at the foot.
-- **The ministry's own words** — Settings → Giving Statement (nonprofit mode)
+- **The ministry's own words** — Settings → Sales documents → Giving Statement (nonprofit mode)
   keeps the ministry's own message and footer on the statement. The **Opening
   messages** are saved the same way as Invoice Messages (a short list, one the
   default); the default one prints above the gift table (a thank-you from the

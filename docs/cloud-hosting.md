@@ -194,7 +194,7 @@ above, put Caddy on the compose network, and proxy to `slowbooks:3001`.
 ## 7. First run, and the users
 
 Open the site, set the administrator's password, and enter the company.
-Then, under **Settings → Users**, add a named account for each person and
+Then, under **Settings → Users and security → Users**, add a named account for each person and
 stop sharing the first sign-in for daily work. Roles are administrator,
 bookkeeper, accountant and read-only; [server-edition.md](server-edition.md)
 describes what each can reach.

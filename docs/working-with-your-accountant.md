@@ -15,7 +15,7 @@ its own way. There are four routes, from the most direct down.
 
 Server Edition is the same download, running as a server so everyone uses a
 browser ([server-edition.md](server-edition.md)). **Invite your accountant**
-under **Settings → Users**: the sign-in gets the **Accountant** role, a
+under **Settings → Users and security → Users**: the sign-in gets the **Accountant** role, a
 one-time password you send once with the address, and an end date if the
 engagement has one; they choose their own password at the first sign-in.
 What the role can do:
@@ -38,7 +38,7 @@ with the name of whoever posted each one. Reports → **Adjusting Journal
 Entries** lists them for a period, as PDF or CSV, and the Profit & Loss and
 Trial Balance can be run *without* them, for a before-and-after view.
 
-Set a **Closing Date** (Settings → Closing Date, with its own password) once
+Set a **Closing Date** (Settings → Company → Closing Date, with its own password) once
 they have signed off a period, the way QuickBooks' closing date works: a
 change dated into the closed period then takes the password, and each use
 is written to the audit log. Reports → **Closing Date Exceptions** lists who
@@ -46,7 +46,7 @@ used the password, when, and every row changed, before and after, as PDF or
 CSV.
 
 **An accountant's own software or agent** gets an **API token** rather than
-a sign-in: an administrator makes one under **Settings → API Tokens** with
+a sign-in: an administrator makes one under **Settings → Users and security → API Tokens** with
 the Accountant or Read-only role. A token is never an administrator (one
 made as an administrator before 2.29.0 is refused since 2.31.2 and flagged in
 the list; revoke it and make a new one). It wears the same limits as the

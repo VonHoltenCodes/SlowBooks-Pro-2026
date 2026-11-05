@@ -314,6 +314,7 @@ def test_my_preferences_save_themselves(browser, theme):
     page = _page(browser, None)
     try:
         page.goto(f"{ORIGIN}/#/settings")
+        page.click("#settings-tab-preferences")  # its group (#720)
         page.wait_for_selector("#pref-enter-moves")
         _theme(page, theme)
         # every line of the section reads at WCAG AA (4.5:1) on its ground
