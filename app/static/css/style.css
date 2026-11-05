@@ -2460,6 +2460,20 @@ tr.clickable { cursor: pointer; }
 
 .settings-panel #settings-savebar { margin-top: auto; }
 
+/* The bar is pinned to the bottom of the content area's box, and that area
+   has 16px of padding under it where the page went on showing: a strip of
+   whatever was scrolling by, under the Save button. The bar now covers its
+   own strip. */
+.settings-panel #settings-savebar::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 100%;
+    height: 16px;
+    background: var(--content-bg);
+}
+
 /* The form draws no box of its own, so the Save Settings bar (sticky to the
    bottom of the window) is held within the whole panel, not the form: in
    Preferences, My Preferences (outside the form) can fill a short window at
