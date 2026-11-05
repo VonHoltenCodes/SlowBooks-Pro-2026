@@ -27,8 +27,9 @@ takes a few seconds for most books.
 
 **Keep the recovery key where the backups are not**: a safe, a password
 manager, a sealed envelope. It opens the file, and every backup of it, on
-any machine, if every administrator's password is lost; and anyone holding
-it can read the books. SlowBooks Pro keeps no copy.
+any machine, if every administrator's password is lost, and then lets you
+set a new administrator password (see *A forgotten password* below); and
+anyone holding it can read the books. SlowBooks Pro keeps no copy.
 
 **Backups made before you turned it on are still plain**, readable by anyone
 with the file. Settings counts them and says so; delete them once a newer,
@@ -47,6 +48,37 @@ accountant signs in once an administrator has opened the books.
 An administrator who is removed, demoted, or whose password an
 administrator reset, no longer unlocks the file; a reset one does again
 once they have set a password of their own and signed in.
+
+## A forgotten password
+
+The sign-in page's **Forgot your password?** says what to do for the
+company in front of you:
+
+- **Another administrator can still sign in**: ask them to reset it under
+  Settings, Users. They give you a one-time password, and you choose a new
+  one at your next sign-in.
+- **The file is encrypted**: close the company (*Choose a different
+  company*), open it again, and choose *Use the recovery key instead*. Once
+  the recovery key has opened it, the sign-in page offers **Set a new
+  administrator password**: pick the administrator if there are several,
+  and type the new password twice. The company key is wrapped for the new
+  password, so the company list opens the file with it from then on.
+- **The file is not encrypted** (the default): the desktop app offers
+  **Set a new administrator password** right there. Being at the computer
+  is the proof: anyone who can sign in to that computer can already read a
+  plain company file without the app, so the password keeps a coworker out
+  of the app, not out of the data.
+
+Either reset ends that administrator's other sessions, and the audit log
+records it as a password reset by the recovery key or at the computer.
+The reset is made only in the SlowBooks Pro window on the computer that
+holds the company file: a browser on the network, an API token, Server
+Edition and a windowless start never get it. On Server Edition, ask
+another administrator.
+
+The recovery key is **not used up** by a reset: it still opens the file,
+and every backup of it. If anyone else may have seen it, make a new one
+under Settings (below).
 
 ## A new recovery key
 

@@ -21,7 +21,9 @@ here:
 - An administrator who has no wrapping yet (added after encryption was
   turned on, or whose password changed) gets one at their next sign-in,
   from the running process, which has the key. Removing an
-  administrator, or resetting their password, drops their wrapping.
+  administrator, or resetting their password, drops their wrapping. A
+  forgotten password set again after the recovery key opened the file
+  (#719, auth's reset-at-computer) is wrapped at once, for the new one.
 - A **new recovery key** retires the old one: the file is re-keyed in
   place under the key the new one derives, the administrator who asked
   is wrapped for it at once, and every other administrator at their next
@@ -129,8 +131,9 @@ def recovery_file_text(company_name: str, recovery_key: str) -> str:
         f"    {recovery_key}\n"
         f"\n"
         f"This key opens the encrypted company file, and every backup of it, if\n"
-        f"every administrator's password is lost. Keep it where the books'\n"
-        f"backups are not: a safe, a password manager, a sealed envelope.\n"
+        f"every administrator's password is lost, and then lets you set a new\n"
+        f"administrator password. Keep it where the books' backups are not: a\n"
+        f"safe, a password manager, a sealed envelope.\n"
         f"Anyone holding it can read the books. SlowBooks Pro does not keep a\n"
         f"copy; an administrator can make a new one under Settings, which\n"
         f"retires this one.\n"

@@ -310,6 +310,12 @@ def prepare_env() -> None:
 # ---------------------------------------------------------------------------
 
 
+# What the window's picker hands its server child (#719): this run's window
+# secret, and whether the company was opened with its recovery key. Set by
+# PickerApi alone, so a headless run (--serve-lan, --no-window) never has it.
+_WINDOW_ENV: dict = {}
+
+
 def _server_env(
     db_url: str, port: int, bind_host: str = "127.0.0.1", key: bytes | None = None
 ) -> dict:
@@ -320,6 +326,17 @@ def _server_env(
     env.pop("SLOWBOOKS_COMPANY_FILE_KEY", None)
     if key is not None:
         env["SLOWBOOKS_COMPANY_FILE_KEY"] = key.hex()
+    # The window's own secret (#719, app/services/desktop_window.py): only a
+    # loopback server the window's picker starts gets it, never Server
+    # Edition or a windowless run, and never a value from the shell.
+    from app.services import desktop_window
+
+    env.pop(desktop_window.SECRET_ENV, None)
+    env.pop(desktop_window.RECOVERY_OPENED_ENV, None)
+    if bind_host == "127.0.0.1" and _WINDOW_ENV.get("secret"):
+        env[desktop_window.SECRET_ENV] = _WINDOW_ENV["secret"]
+        if _WINDOW_ENV.get("recovery"):
+            env[desktop_window.RECOVERY_OPENED_ENV] = "1"
     env.update(
         {
             "DATABASE_URL": db_url,
@@ -1254,6 +1271,19 @@ class PickerApi:
         self._auto_open = True
         self._log_fh = log_fh
         self._startup_status = ""  # the server's start-up note (#693)
+        # This run's window secret (#719): the server child has it, the
+        # page never does; reset_admin_password sends it for the page.
+        self._window_secret = secrets.token_urlsafe(32)
+        # the recovery key the open company was unlocked with, if it was
+        self._recovery_key = ""
+
+    def _prepare_server(self, recovery_key: str = "") -> None:
+        """What the next server child is told about the window (#719)."""
+        self._recovery_key = recovery_key
+        _WINDOW_ENV.clear()
+        _WINDOW_ENV.update(
+            {"secret": self._window_secret, "recovery": bool(recovery_key)}
+        )
 
     def open_document_html(self, title: str, html: str) -> dict:
         """Show already-fetched, already-authenticated HTML (an invoice/
@@ -1531,6 +1561,7 @@ class PickerApi:
 
         stop_server(self._server)
         self._server = None
+        self._recovery_key = ""
         self._auto_open = False  # the person asked for the picker; show it
         window = self._window
 
@@ -1559,6 +1590,7 @@ class PickerApi:
         background thread. Returning the url and letting the caller
         navigate AFTER the call resolves avoids the race entirely.
         """
+        self._prepare_server()
         try:
             self._server = launch_company(
                 filename,
@@ -1607,6 +1639,9 @@ class PickerApi:
             )
         except company_keyring.Locked as exc:
             return {"success": False, "locked": True, "error": str(exc)}
+        # opened with the recovery key: the sign-in page offers a new
+        # administrator password, and the reset is proven by this key (#719)
+        self._prepare_server((recovery_key or "").strip())
         try:
             self._server = launch_company(
                 filename,
@@ -1618,6 +1653,56 @@ class PickerApi:
         except Exception as exc:
             return {"success": False, "error": str(exc)}
         return {"success": True, "url": f"http://127.0.0.1:{self._port}"}
+
+    def reset_admin_password(self, username: str = "", new_password: str = "") -> dict:
+        """The sign-in page's "Set a new administrator password" (#719).
+        Sent from here, not from the page, with this run's window secret,
+        and with the recovery key when the company was opened with one: a
+        browser has neither, so it cannot make the same request. Returns
+        {"success": True, "username", "multi_user"} or {"success": False,
+        "error"}; the page then signs in with the new password itself."""
+        from app.services import desktop_window
+
+        body = json.dumps(
+            {
+                "username": str(username or "") or None,
+                "new_password": str(new_password or ""),
+                "recovery_key": self._recovery_key or None,
+            }
+        ).encode("utf-8")
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self._port}/api/auth/reset-at-computer",
+            data=body,
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                desktop_window.SECRET_HEADER: self._window_secret,
+            },
+        )
+        # straight to this computer's server, never through a proxy the
+        # environment names: the secret does not leave the machine
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=60) as resp:
+                out = json.loads(resp.read().decode("utf-8") or "{}")
+        except urllib.error.HTTPError as exc:
+            try:
+                detail = json.loads(exc.read().decode("utf-8")).get("detail")
+            except Exception:
+                detail = None
+            if not isinstance(detail, str):
+                detail = "The new password could not be set."
+            return {"success": False, "error": detail}
+        except OSError:
+            return {
+                "success": False,
+                "error": "The company is not open. Open it from the company list, then try again.",
+            }
+        return {
+            "success": True,
+            "username": out.get("username") or "",
+            "multi_user": bool(out.get("multi_user")),
+        }
 
 
 # The lowest Microsoft Edge WebView2 runtime the app's window works on. Two

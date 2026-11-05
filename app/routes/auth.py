@@ -275,6 +275,9 @@ def _auth_status(request: Request, db: Session) -> dict:
         from app.models.transactions import Transaction
 
         out["has_data"] = db.query(Transaction.id).first() is not None
+    elif not authenticated:
+        # "Forgot your password?" (#719): what to do for this company
+        out["forgot"] = _forgot_password(request, db)
     if authenticated and request.session.get("username"):
         out["user"] = {
             "username": request.session.get("username"),
@@ -283,6 +286,272 @@ def _auth_status(request: Request, db: Session) -> dict:
             "must_change_password": bool(request.session.get("must_change_password")),
         }
     return out
+
+
+# ---------------------------------------------------------------------------
+# Forgot your password? (#719)
+#
+# Server Edition, a browser, and any company with another administrator:
+# ask an administrator (Settings, Users, Reset password). A desktop file
+# encrypted under a recovery key: open it with the key, then set a new
+# administrator password. A desktop file that is not encrypted: set one at
+# the computer, where anyone who can sign in can already read the file
+# without the app. Only the desktop app's own window can make either reset:
+# the launcher sends it with this run's window secret (desktop_window.py).
+# ---------------------------------------------------------------------------
+
+FORGOT_ASK_ADMIN = (
+    "Ask an administrator to reset it under Settings, Users. They give you a "
+    "one-time password to sign in with, and you choose a new one then."
+)
+FORGOT_ASK_ANOTHER = "Ask another administrator to reset it under Settings, Users."
+FORGOT_RECOVERY = (
+    "This company file is encrypted. Close the company and open it with its "
+    "recovery key: choose a different company, open this one, and choose "
+    "Use the recovery key instead. You can then set a new administrator "
+    "password."
+)
+FORGOT_RECOVERY_OPENED = (
+    "You opened this company with its recovery key, so you can set a new "
+    "password for one of its administrators now."
+)
+FORGOT_HERE = (
+    "This company file is on this computer and is not encrypted, so you can "
+    "set a new administrator password here."
+)
+FORGOT_HERE_OR_ASK = (
+    "You can also set a new administrator password here, because this "
+    "company file is on this computer and is not encrypted."
+)
+WINDOW_ONLY_MESSAGE = (
+    "A new administrator password can be set only in the SlowBooks Pro "
+    "window, on the computer that holds the company file."
+)
+ENCRYPTED_NEEDS_KEY_MESSAGE = (
+    "This company file is encrypted. Close the company and open it with its "
+    "recovery key to set a new administrator password."
+)
+CHOOSE_ADMIN_MESSAGE = "Choose which administrator gets the new password."
+NOT_AN_ADMIN_MESSAGE = "That is not an administrator of this company."
+
+RESET_BY_RECOVERY_KEY = "recovery key"
+RESET_AT_COMPUTER = "at the computer"
+
+
+def _active_admins(db: Session) -> list:
+    from app.models.users import ROLE_ADMIN, User
+
+    return (
+        db.query(User)
+        .filter(User.role == ROLE_ADMIN, User.is_active.is_(True))
+        .order_by(User.username)
+        .all()
+    )
+
+
+def _window_may_reset(request: Request) -> bool:
+    """The page is the desktop app's own window, started by the launcher
+    for it: the only place the reset is offered. The reset route itself
+    asks for more (the launcher's secret, _from_the_window)."""
+    from app.services import company_file, desktop_window
+
+    return (
+        _desktop_window(request)
+        and desktop_window.has_secret()
+        and not served_companies.enabled()
+        and not company_file.serving_another_company()
+    )
+
+
+def _from_the_window(request: Request) -> bool:
+    """A request the launcher made for its window: the desktop's loopback
+    window as the sign-in screen tells it, this run's window secret, and no
+    API token. Everything else is refused."""
+    from app.services import desktop_window
+
+    if request.headers.get("authorization"):
+        return False
+    return _window_may_reset(request) and desktop_window.secret_matches(request.headers)
+
+
+def _forgot_password(request: Request, db: Session) -> dict:
+    """The sign-in page's "Forgot your password?": the sentence for this
+    company, and whether the window can set a new password here."""
+    from app.services import company_file, company_keyring, desktop_window
+
+    admins = [u.username for u in _active_admins(db)]
+    ask = {"kind": "ask_admin", "message": FORGOT_ASK_ADMIN, "admins": []}
+    if not _window_may_reset(request):
+        return ask
+    path = company_file.active_path()
+    if path is None:
+        return ask
+    several = len(admins) > 1
+    if company_keyring.exists(path):
+        if desktop_window.opened_with_recovery_key():
+            return {
+                "kind": "recovery_reset",
+                "message": FORGOT_RECOVERY_OPENED,
+                "admins": admins,
+            }
+        return {
+            "kind": "recovery",
+            "message": (FORGOT_ASK_ANOTHER + " " if several else "") + FORGOT_RECOVERY,
+            "admins": [],
+        }
+    if company_file.is_encrypted_file(path):
+        # keyed by an operator secret, with no recovery key: an administrator
+        return ask
+    return {
+        "kind": "reset_here",
+        "message": (
+            FORGOT_ASK_ANOTHER + " " + FORGOT_HERE_OR_ASK if several else FORGOT_HERE
+        ),
+        "admins": admins,
+    }
+
+
+class ResetAtComputerPayload(StrictModel):
+    # which administrator; may be left out when there is one
+    username: Optional[str] = Field(None, max_length=100)
+    new_password: str = Field(..., min_length=1, max_length=512)
+    # the recovery key the picker opened the company with, sent on by the
+    # launcher; required when the file is encrypted under one
+    recovery_key: Optional[str] = Field(None, max_length=200)
+
+
+@router.post("/reset-at-computer")
+@limiter.limit("5/minute")
+def reset_at_computer(
+    request: Request, payload: ResetAtComputerPayload, db: Session = Depends(get_db)
+):
+    """Set a new administrator password when it is forgotten (#719): from
+    the desktop app's own window alone (the launcher sends this with its
+    window secret; a browser, an API token, Server Edition and a windowless
+    run are refused), with the recovery key when the file is encrypted
+    under one, else proven by being at the computer that holds the file.
+    The administrator's other sessions end, the reset is in the audit log
+    by how it was made, and the page signs in with the new password."""
+    import hmac
+
+    from app.models.users import User
+    from app.services import company_file, company_keyring
+    from app.services.audit import log_event
+    from app.services.auth import AUTH_PASSWORD_KEY, MIN_PASSWORD_LEN, hash_password
+
+    if not _from_the_window(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=WINDOW_ONLY_MESSAGE
+        )
+    if not password_is_set(db):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Setup required — set a password first",
+        )
+    path = company_file.active_path()
+    if path is None:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=WINDOW_ONLY_MESSAGE
+        )
+    if len(payload.new_password) < MIN_PASSWORD_LEN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Password must be at least {MIN_PASSWORD_LEN} characters",
+        )
+
+    # How it is proven: the recovery key for a file encrypted under one (it
+    # must derive the key this server has the file open with), being at the
+    # computer for a file that is not encrypted at all.
+    key = None
+    if company_keyring.exists(path):
+        running = company_file.resolve_key()
+        typed = payload.recovery_key or ""
+        if not typed.strip():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=ENCRYPTED_NEEDS_KEY_MESSAGE,
+            )
+        if not company_keyring.is_recovery_key(typed) or running is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=company_keyring.WRONG_RECOVERY_MESSAGE,
+            )
+        key = company_keyring.key_from_recovery(typed)
+        if not hmac.compare_digest(key, running):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=company_keyring.WRONG_RECOVERY_MESSAGE,
+            )
+        how = RESET_BY_RECOVERY_KEY
+    elif company_file.is_encrypted_file(path):
+        # an operator secret keys it, and no recovery key exists: an
+        # administrator resets it under Settings, Users
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=FORGOT_ASK_ADMIN
+        )
+    else:
+        how = RESET_AT_COMPUTER
+
+    ensure_admin_user(db)  # a legacy book: its operator as the admin row
+    admins = _active_admins(db)
+    wanted = (payload.username or "").strip().lower()
+    if wanted:
+        user = next((u for u in admins if u.username == wanted), None)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=NOT_AN_ADMIN_MESSAGE
+            )
+    elif len(admins) == 1:
+        user = admins[0]
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=CHOOSE_ADMIN_MESSAGE
+        )
+
+    db.info["acting_username"] = user.username
+    new_hash = hash_password(payload.new_password)
+    user.password_hash = new_hash
+    user.must_change_password = False
+    if db.query(User).count() == 1:
+        # single-operator: the settings hash is the same password
+        set_setting(db, AUTH_PASSWORD_KEY, new_hash)
+    # every session this administrator has ends, as at a reset under Users
+    bump_session_version(user)
+    log_event(
+        db,
+        table_name="users",
+        record_id=user.id,
+        action="RESET",
+        new_values={
+            "username": user.username,
+            "password_reset": (
+                "by the recovery key"
+                if how == RESET_BY_RECOVERY_KEY
+                else "at the computer that holds the company file"
+            ),
+        },
+        changed_fields=["password_hash"],
+        source=(
+            "password reset by recovery key"
+            if how == RESET_BY_RECOVERY_KEY
+            else "password reset at the computer"
+        ),
+    )
+    db.commit()
+    if key is not None:
+        # the key wrapped for the new password, so the picker opens the file
+        # with it; the recovery key is untouched and still opens it too
+        ring = company_keyring.load(path)
+        if ring is not None:
+            company_keyring.set_admin(ring, user.username, payload.new_password, key)
+            company_keyring.save(path, ring)
+    logger.info("administrator password for %s reset (%s)", user.username, how)
+    return {
+        "status": "ok",
+        "username": user.username,
+        "multi_user": is_multi_user(db),
+        "how": how,
+    }
 
 
 class NewPasswordPayload(StrictModel):
