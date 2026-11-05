@@ -1,4 +1,16 @@
 {
+  "2.31.7": {
+    "title": "Install without an administrator, statement lines that import once, and Retained Earnings on the Balance Sheet",
+    "items": [
+      "The Windows installer no longer needs an administrator: \"Install for me only\" installs into your own account, \"Install for all users\" into Program Files as before, and your books stay in the same place either way.",
+      "A bank statement line imports once: the same month brought in as a CSV and again as the bank's OFX skips every line it already has, and the review list has Exclude all shown.",
+      "A QuickBooks Online import puts payables on Accounts Payable, brings an open invoice across at its full total with what was already paid, and imports the Employee list.",
+      "Reports have an All dates period, and the Balance Sheet shows Retained Earnings and Net Income as two lines.",
+      "Receive Payment's first Deposit To choice reads Undeposited Funds (deposit later); Migrate Data shows that an import is running.",
+      "The customer, vendor and item CSV imports list the columns they read, link a template each, and an item can name its income account.",
+      "On the Budgets page the account column and the month headers stay put while you scroll."
+    ]
+  },
   "2.31.6": {
     "title": "Ctrl+F, arithmetic in the amount box, and the big file that would not open",
     "items": [
