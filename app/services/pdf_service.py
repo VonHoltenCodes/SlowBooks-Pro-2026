@@ -345,24 +345,20 @@ def render_pay_application_html(app, pa, job, company_settings: dict) -> str:
     deposit applied, balance to finish) and the line detail (the line
     table). `pa` is the PayApplicationOut; `job` carries the owner."""
 
-    def f(v):
-        return float(v) if v is not None else 0.0
+    from sqlalchemy.orm import object_session
 
-    # Contract sums as of the application: the figures snapshotted when it was
-    # approved, so a reprint doesn't pick up change orders approved later. A
-    # draft (no snapshot yet) reads the job as it stands.
-    if app.contract_sum_to_date is not None:
-        original = f(app.contract_sum_original)
-        current = f(app.contract_sum_to_date)
-    else:
-        original = f(job.original_contract_amount if job else 0)
-        current = f(job.contract_amount if job else 0)
+    from app.services.contracts import application_contract_sums
+
+    # Contract sums as of the application (#723): the snapshot taken at
+    # approval, or the job as it stands for a draft; the net change is the
+    # approved change orders, never a difference against a missing original.
+    sums = application_contract_sums(object_session(app), app, job)
     header = {
         "owner": (job.customer.name if job and job.customer else ""),
         "job_name": (job.full_name if job else ""),
-        "net_change": current - original,
-        "contract_sum_original": original,
-        "contract_sum_to_date": current,
+        "net_change": float(sums["net_change"]),
+        "contract_sum_original": float(sums["original"]),
+        "contract_sum_to_date": float(sums["to_date"]),
     }
     return _render(
         "pay_application_pdf.html",

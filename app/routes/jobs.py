@@ -45,6 +45,7 @@ from app.services.contracts import (
     build_sov,
     contract_is_locked,
     contract_summary,
+    settle_contract_type,
     sync_contingency_line,
 )
 from app.services.estimating import estimate_totals
@@ -643,6 +644,11 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
         _save_sov_with_billings(db, job, data.lines, kept, billed)
     else:
         _save_sov_replace(db, job, data.lines, kept)
+    # A schedule of values makes the sum billable: with no contract type saved
+    # it is taken as a lump sum and its original stamped, as building from an
+    # estimate does (#723).
+    if data.lines:
+        settle_contract_type(db, job)
     db.commit()
     db.refresh(job)
     return ContractSummary(**contract_summary(db, job))

@@ -240,7 +240,7 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
     books as of `as_of`: actuals and posted revenue to that date, billing and
     retainage from the approved applications dated that day or earlier, and the
     revised contract with the change orders approved by then."""
-    from app.services.contracts import contract_summary
+    from app.services.contracts import contract_summary, original_contract_sum
     from app.services.job_costing import job_cost_tree
     from app.services.pay_applications import has_approved_application
 
@@ -265,18 +265,13 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
         db, job, cost=cost_to_date, billed=posted_revenue, as_of=as_of
     )
     current_revised = _q(summary["contract_amount"])
-    original = (
-        _q(summary["original_contract_amount"])
-        if summary["original_contract_amount"] is not None
-        else current_revised
-    )
+    # The original as the pay application prints it (#723): the stamped one,
+    # else the sum less the approved change orders (a sum from the job form
+    # with no contract type saved was never stamped).
+    original = original_contract_sum(db, job)
     # The contract as of the date: back out the contract-funded COs approved
     # after it, so original + approved-as-of = revised-as-of.
-    changes_after = (
-        _contract_changes_after(db, job, as_of)
-        if summary["original_contract_amount"] is not None
-        else _ZERO
-    )
+    changes_after = _contract_changes_after(db, job, as_of)
     revised = _q(current_revised - changes_after)
     approved_cos = _q(revised - original)
     billed = _q(summary["billed_to_date"])
@@ -1022,11 +1017,11 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
     # The contract read straight off the job's own columns (no cost tree): the
     # revised sum as of the date is the original plus the changes approved by
     # then, so it agrees with the running total above.
-    original = (
-        _q(job.original_contract_amount)
-        if job.original_contract_amount is not None
-        else (_q(job.contract_amount) if job.contract_amount is not None else None)
-    )
+    # (#723) With no original stamped the original is the sum less the
+    # approved change orders, not the sum itself — that counted them twice.
+    from app.services.contracts import original_contract_sum
+
+    original = original_contract_sum(db, job)
     revised = _q(original + approved_changes) if original is not None else None
     return {
         "job_id": job.id,

@@ -38,6 +38,7 @@ from app.services.accounting import (
     get_sales_tax_account_id,
 )
 from app.services.closing_date import check_closing_date
+from app.services.contracts import original_contract_sum, settle_contract_type
 from app.services.numbering import next_invoice_number
 from app.services.payment_terms import term_id_for
 from app.services.pay_applications import (
@@ -348,6 +349,8 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
     # with nothing to type an amount into (#714).
     if not job.sov_lines:
         raise HTTPException(status_code=409, detail=NO_SOV_MESSAGE)
+    # A sum billed with no contract type saved is a lump sum (#723).
+    settle_contract_type(db, job)
     # Only one draft/submitted application per job at a time.
     open_one = (
         db.query(PayApplication)
@@ -530,7 +533,11 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
             detail="This payment application has nothing to bill, hold, release or apply.",
         )
 
-    app.contract_sum_original = job.original_contract_amount
+    # The contract sums as of approval (#723): a job billed with no contract
+    # type saved is settled as a lump sum first, so the original is stamped
+    # (the sum less any change orders already approved), never left empty.
+    settle_contract_type(db, job)
+    app.contract_sum_original = original_contract_sum(db, job)
     app.contract_sum_to_date = job.contract_amount
     invoice = None
     if invoice_lines or retainage_held != 0 or retainage_released != 0 or deposit:
