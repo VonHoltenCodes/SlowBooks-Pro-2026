@@ -327,6 +327,14 @@ WINDOW_ONLY_MESSAGE = (
     "A new administrator password can be set only in the SlowBooks Pro "
     "window, on the computer that holds the company file."
 )
+# What a browser on the same computer is told where the window would be
+# offered the reset (W-125): the status cannot tell the app's own window from
+# a browser at its address, so the page offers the reset only when it has the
+# launcher's bridge, and says this when it has not.
+FORGOT_ELSEWHERE = (
+    WINDOW_ONLY_MESSAGE
+    + " Open the company in the app there and choose Forgot your password?"
+)
 ENCRYPTED_NEEDS_KEY_MESSAGE = (
     "This company file is encrypted. Close the company and open it with its "
     "recovery key to set a new administrator password."
@@ -376,28 +384,32 @@ def _from_the_window(request: Request) -> bool:
 
 def _forgot_password(request: Request, db: Session) -> dict:
     """The sign-in page's "Forgot your password?": the sentence for this
-    company, and whether the window can set a new password here."""
+    company, and whether the app's own window can set a new password here.
+
+    Anyone at the app's address on this computer reads this, a browser
+    included, so it names no administrator (W-125): the window asks for the
+    names through the launcher, with its secret (GET reset-at-computer).
+    Where a reset is possible the answer carries two sentences: `message`
+    for the window, and `elsewhere` for a page that has no bridge."""
     from app.services import company_file, company_keyring, desktop_window
 
-    admins = [u.username for u in _active_admins(db)]
-    ask = {"kind": "ask_admin", "message": FORGOT_ASK_ADMIN, "admins": []}
+    ask = {"kind": "ask_admin", "message": FORGOT_ASK_ADMIN}
     if not _window_may_reset(request):
         return ask
     path = company_file.active_path()
     if path is None:
         return ask
-    several = len(admins) > 1
+    several = len(_active_admins(db)) > 1
     if company_keyring.exists(path):
         if desktop_window.opened_with_recovery_key():
             return {
                 "kind": "recovery_reset",
                 "message": FORGOT_RECOVERY_OPENED,
-                "admins": admins,
+                "elsewhere": FORGOT_ELSEWHERE,
             }
         return {
             "kind": "recovery",
             "message": (FORGOT_ASK_ANOTHER + " " if several else "") + FORGOT_RECOVERY,
-            "admins": [],
         }
     if company_file.is_encrypted_file(path):
         # keyed by an operator secret, with no recovery key: an administrator
@@ -407,7 +419,24 @@ def _forgot_password(request: Request, db: Session) -> dict:
         "message": (
             FORGOT_ASK_ANOTHER + " " + FORGOT_HERE_OR_ASK if several else FORGOT_HERE
         ),
-        "admins": admins,
+        "elsewhere": (FORGOT_ASK_ANOTHER + " " if several else "") + FORGOT_ELSEWHERE,
+    }
+
+
+@router.get("/reset-at-computer")
+@limiter.limit("30/minute")
+def reset_at_computer_options(request: Request, db: Session = Depends(get_db)):
+    """Whose password the window may set (W-125): the administrators' names,
+    for the reset form's choice. The launcher asks with its window secret, as
+    it sends the reset itself; a browser, a token and a server install are
+    refused, so the names are not read from the sign-in page's address."""
+    if not _from_the_window(request):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail=WINDOW_ONLY_MESSAGE
+        )
+    return {
+        "admins": [u.username for u in _active_admins(db)],
+        "multi_user": is_multi_user(db),
     }
 
 

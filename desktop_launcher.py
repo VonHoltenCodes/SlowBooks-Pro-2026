@@ -1654,6 +1654,32 @@ class PickerApi:
             return {"success": False, "error": str(exc)}
         return {"success": True, "url": f"http://127.0.0.1:{self._port}"}
 
+    def reset_admins(self) -> dict:
+        """The administrators whose password the window may set (W-125),
+        asked for here with this run's window secret: the sign-in page's own
+        address tells a browser on this computer no names. Returns
+        {"success": True, "admins": [...], "multi_user": bool} or
+        {"success": False}."""
+        from app.services import desktop_window
+
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{self._port}/api/auth/reset-at-computer",
+            method="GET",
+            headers={desktop_window.SECRET_HEADER: self._window_secret},
+        )
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        try:
+            with opener.open(request, timeout=30) as resp:
+                out = json.loads(resp.read().decode("utf-8") or "{}")
+        except (OSError, ValueError):
+            return {"success": False}
+        admins = out.get("admins")
+        return {
+            "success": True,
+            "admins": [str(a) for a in admins] if isinstance(admins, list) else [],
+            "multi_user": bool(out.get("multi_user")),
+        }
+
     def reset_admin_password(self, username: str = "", new_password: str = "") -> dict:
         """The sign-in page's "Set a new administrator password" (#719).
         Sent from here, not from the page, with this run's window secret,

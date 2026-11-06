@@ -27,9 +27,17 @@ OPENED = (
     "password for one of its administrators now."
 )
 
-BRIDGE = """() => {
+ELSEWHERE = (
+    "A new administrator password can be set only in the SlowBooks Pro window, "
+    "on the computer that holds the company file. Open the company in the app "
+    "there and choose Forgot your password?"
+)
+
+BRIDGE = """(admins) => {
     window.__resets = [];
     window.pywebview = { api: {
+        reset_admins: () => Promise.resolve({ success: true, admins: admins,
+                                              multi_user: admins.length > 1 }),
         reset_admin_password: (user, password) => {
             window.__resets.push([user, password]);
             return Promise.resolve({ success: true, username: user || 'admin',
@@ -39,7 +47,14 @@ BRIDGE = """() => {
 }"""
 
 
-def _sign_in_page(browser, forgot, *, bridge, multi_user=False):  # noqa: F811
+def _sign_in_page(
+    browser,  # noqa: F811
+    forgot,
+    *,
+    bridge,
+    multi_user=False,
+    admins=("admin",),
+):
     page = _open_raw(browser, 1280, 800)
     logins = []
     status = {
@@ -62,14 +77,14 @@ def _sign_in_page(browser, forgot, *, bridge, multi_user=False):  # noqa: F811
 
     page.route("**/api/auth/login", login)
     if bridge:
-        page.add_init_script(f"({BRIDGE})()")
+        page.add_init_script(f"({BRIDGE})({json.dumps(list(admins))})")
     page.goto(f"{ORIGIN}/")
     page.wait_for_selector("#auth-overlay #auth-forgot")
     return page, logins
 
 
 def test_a_plain_desktop_file_sets_a_new_password_at_the_window(browser):  # noqa: F811
-    forgot = {"kind": "reset_here", "message": HERE, "admins": ["admin"]}
+    forgot = {"kind": "reset_here", "message": HERE, "elsewhere": ELSEWHERE}
     page, logins = _sign_in_page(browser, forgot, bridge=True)
     try:
         assert page.is_hidden("#auth-forgot-panel")
@@ -101,7 +116,7 @@ def test_a_plain_desktop_file_sets_a_new_password_at_the_window(browser):  # noq
 
 
 def test_back_to_sign_in_returns_to_the_password(browser):  # noqa: F811
-    forgot = {"kind": "reset_here", "message": HERE, "admins": ["admin"]}
+    forgot = {"kind": "reset_here", "message": HERE, "elsewhere": ELSEWHERE}
     page, _ = _sign_in_page(browser, forgot, bridge=True)
     try:
         page.click("#auth-forgot")
@@ -114,7 +129,7 @@ def test_back_to_sign_in_returns_to_the_password(browser):  # noqa: F811
 
 
 def test_a_browser_is_told_to_ask_an_administrator(browser):  # noqa: F811
-    forgot = {"kind": "ask_admin", "message": ASK, "admins": []}
+    forgot = {"kind": "ask_admin", "message": ASK}
     page, _ = _sign_in_page(browser, forgot, bridge=False, multi_user=True)
     try:
         page.click("#auth-forgot")
@@ -129,9 +144,12 @@ def test_a_browser_is_told_to_ask_an_administrator(browser):  # noqa: F811
 
 
 def test_opened_with_the_recovery_key_offers_it_at_once(browser):  # noqa: F811
-    forgot = {"kind": "recovery_reset", "message": OPENED, "admins": ["admin", "bob"]}
-    page, logins = _sign_in_page(browser, forgot, bridge=True, multi_user=True)
+    forgot = {"kind": "recovery_reset", "message": OPENED, "elsewhere": ELSEWHERE}
+    page, logins = _sign_in_page(
+        browser, forgot, bridge=True, multi_user=True, admins=("admin", "bob")
+    )
     try:
+        page.wait_for_selector("#auth-reset-open")
         notice = page.inner_text("#auth-recovery-notice")
         assert OPENED in notice and "Set a new administrator password" in notice
         page.click("#auth-reset-open")
@@ -158,24 +176,39 @@ def test_opened_with_the_recovery_key_offers_it_at_once(browser):  # noqa: F811
         page.close()
 
 
-def test_no_bridge_says_where_it_can_be_done(browser):  # noqa: F811
-    # the server said reset_here (a browser on the desktop's own loopback),
-    # but there is no launcher bridge behind this page
-    forgot = {"kind": "reset_here", "message": HERE, "admins": ["admin"]}
+def test_a_browser_at_the_apps_address_is_not_offered_the_reset(browser):  # noqa: F811
+    """W-125: the status says reset_here to anything on the desktop's own
+    loopback, a browser included. Without the launcher's bridge the page
+    offers no reset and no form, and says where it can be done."""
+    forgot = {"kind": "reset_here", "message": HERE, "elsewhere": ELSEWHERE}
     page, logins = _sign_in_page(browser, forgot, bridge=False)
     try:
         page.click("#auth-forgot")
-        page.click("#auth-reset-here")
-        page.fill("#auth-reset-password", "a-brand-new-password")
-        page.fill("#auth-reset-confirm", "a-brand-new-password")
-        page.click("#auth-submit")
-        page.wait_for_function(
-            "() => document.getElementById('auth-error').textContent.length > 0",
-            timeout=10000,
+        # the page waits once for a bridge that can arrive late on a Mac
+        page.wait_for_selector("#auth-forgot-text", timeout=10000)
+        assert page.inner_text("#auth-forgot-text") == ELSEWHERE
+        assert page.query_selector("#auth-reset-here") is None
+        assert page.query_selector("#auth-reset-password") is None
+        assert "set a new administrator password here" not in page.inner_text(
+            "#auth-overlay"
         )
-        assert page.inner_text("#auth-error").startswith(
-            "A new administrator password can be set only in the SlowBooks Pro window"
-        )
+        # folded away and opened again: the answer is there at once
+        page.click("#auth-forgot")
+        page.click("#auth-forgot")
+        assert page.inner_text("#auth-forgot-text") == ELSEWHERE
         assert logins == []
+    finally:
+        page.close()
+
+
+def test_a_browser_sees_no_recovery_notice(browser):  # noqa: F811
+    forgot = {"kind": "recovery_reset", "message": OPENED, "elsewhere": ELSEWHERE}
+    page, _ = _sign_in_page(browser, forgot, bridge=False, multi_user=True)
+    try:
+        page.click("#auth-forgot")
+        page.wait_for_selector("#auth-forgot-text", timeout=10000)
+        assert page.inner_text("#auth-forgot-text") == ELSEWHERE
+        assert page.is_hidden("#auth-recovery-notice")
+        assert page.query_selector("#auth-reset-open") is None
     finally:
         page.close()

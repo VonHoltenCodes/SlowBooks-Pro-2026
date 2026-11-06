@@ -19,6 +19,7 @@ reset is in the audit log by how it was made, and ends that administrator's
 other sessions.
 """
 
+import json
 import types
 
 import pytest
@@ -125,6 +126,12 @@ def _from_window(body, host="127.0.0.1", headers=None):
     return _at(host).post(RESET, json=body, headers=sent)
 
 
+def _window_admins(host="127.0.0.1", headers=None):
+    """The launcher's question for its window: whose password may be set."""
+    sent = {desktop_window.SECRET_HEADER: SECRET} if headers is None else headers
+    return _at(host).get(RESET, headers=sent)
+
+
 def _forgot(host="127.0.0.1"):
     r = _at(host).get("/api/auth/status")
     assert r.status_code == 200, r.text
@@ -159,7 +166,10 @@ def test_the_recovery_key_sets_a_new_administrator_password(
     forgot = _forgot()
     assert forgot["kind"] == "recovery_reset"
     assert forgot["message"] == routes.FORGOT_RECOVERY_OPENED
-    assert forgot["admins"] == ["admin", "bob"]
+    # the status names no administrator (W-125); the window asks for them
+    assert "admins" not in forgot
+    assert forgot["elsewhere"] == routes.FORGOT_ELSEWHERE
+    assert _window_admins().json() == {"admins": ["admin", "bob"], "multi_user": True}
     # the administrator's session from before, elsewhere
     assert client.get("/api/settings").status_code == 200
 
@@ -237,7 +247,7 @@ def test_an_encrypted_file_not_opened_with_its_key_says_how(encrypted, monkeypat
     assert forgot["kind"] == "recovery"
     # another administrator can reset it, and so can the recovery key
     assert forgot["message"] == routes.FORGOT_ASK_ANOTHER + " " + routes.FORGOT_RECOVERY
-    assert forgot["admins"] == []
+    assert "admins" not in forgot
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +260,9 @@ def test_a_plain_desktop_file_resets_from_the_window(plain, client, db_session):
     assert forgot == {
         "kind": "reset_here",
         "message": routes.FORGOT_HERE,
-        "admins": ["admin"],
+        "elsewhere": routes.FORGOT_ELSEWHERE,
     }
+    assert _window_admins().json() == {"admins": ["admin"], "multi_user": False}
     assert client.get("/api/settings").status_code == 200
     # one administrator: the page need not name them
     r = _from_window({"new_password": NEW_PW})
@@ -280,7 +291,11 @@ def test_with_several_administrators_one_is_chosen_and_the_other_untouched(
     assert forgot["message"] == (
         routes.FORGOT_ASK_ANOTHER + " " + routes.FORGOT_HERE_OR_ASK
     )
-    assert forgot["admins"] == ["admin", "bob"]
+    assert forgot["elsewhere"] == (
+        routes.FORGOT_ASK_ANOTHER + " " + routes.FORGOT_ELSEWHERE
+    )
+    assert "admins" not in forgot
+    assert _window_admins().json()["admins"] == ["admin", "bob"]
     r = _from_window({"new_password": NEW_PW})
     assert r.status_code == 400 and r.json()["detail"] == routes.CHOOSE_ADMIN_MESSAGE
     r = _from_window({"username": "BOB", "new_password": NEW_PW})
@@ -356,11 +371,7 @@ def test_the_same_request_from_anywhere_else_is_refused(
 def test_forgot_says_ask_an_administrator_off_the_window(plain, client):
     client.post("/api/auth/logout")
     forgot = _forgot(host="192.168.68.60")
-    assert forgot == {
-        "kind": "ask_admin",
-        "message": routes.FORGOT_ASK_ADMIN,
-        "admins": [],
-    }
+    assert forgot == {"kind": "ask_admin", "message": routes.FORGOT_ASK_ADMIN}
 
 
 def test_forgot_is_not_in_the_status_once_signed_in(plain, client):
@@ -542,3 +553,64 @@ def test_the_docs_and_the_pages_say_what_the_key_can_do():
     assert words in " ".join(settings.split())
     text = company_keyring.recovery_file_text("Harbor Light Bakery", "ABCD")
     assert "set a new\nadministrator password" in text
+
+
+# ---------------------------------------------------------------------------
+# W-125: the status is read by anyone at the app's address on this computer
+# ---------------------------------------------------------------------------
+
+
+def test_the_status_names_no_administrator_and_the_names_need_the_secret(
+    plain, client, db_session
+):
+    _add_bob(db_session)
+    client.post("/api/auth/logout")
+    # a browser at 127.0.0.1 reads the same status as the window: no names
+    forgot = _forgot()
+    assert forgot["kind"] == "reset_here"
+    assert "admins" not in forgot and "bob" not in json.dumps(forgot)
+    # and it cannot ask for them: no secret, a wrong one, a token, the LAN
+    assert _window_admins(headers={}).status_code == 403
+    wrong = {desktop_window.SECRET_HEADER: "x" * 43}
+    assert _window_admins(headers=wrong).status_code == 403
+    both = {desktop_window.SECRET_HEADER: SECRET, "Authorization": "Bearer tok-abc"}
+    assert _window_admins(headers=both).status_code == 403
+    assert _window_admins(host="192.168.68.60").status_code == 403
+    r = _window_admins(headers={})
+    assert r.json()["detail"] == routes.WINDOW_ONLY_MESSAGE
+    # the window's launcher, with this run's secret, is told
+    assert _window_admins().json()["admins"] == ["admin", "bob"]
+
+
+def test_the_launcher_asks_for_the_names_with_its_secret(monkeypatch):
+    api = dl.PickerApi(3999)
+    seen = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return json.dumps({"admins": ["admin", "bob"], "multi_user": True}).encode()
+
+    class _Opener:
+        def open(self, request, timeout=None):
+            seen["url"] = request.full_url
+            seen["method"] = request.get_method()
+            seen["secret"] = request.get_header(
+                desktop_window.SECRET_HEADER.capitalize()
+            )
+            return _Resp()
+
+    monkeypatch.setattr(dl.urllib.request, "build_opener", lambda *a: _Opener())
+    assert api.reset_admins() == {
+        "success": True,
+        "admins": ["admin", "bob"],
+        "multi_user": True,
+    }
+    assert seen["url"] == "http://127.0.0.1:3999/api/auth/reset-at-computer"
+    assert seen["method"] == "GET"
+    assert seen["secret"] == api._window_secret

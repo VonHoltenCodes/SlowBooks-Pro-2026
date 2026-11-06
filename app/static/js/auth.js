@@ -357,12 +357,32 @@
 
     // ----- forgot your password? (#719) -----------------------------------
 
-    // From /api/auth/status: {kind, message, admins}. kind is "ask_admin"
-    // (Server Edition, a browser, another administrator), "recovery" (an
-    // encrypted desktop file: open it with its recovery key), "reset_here"
-    // (a desktop file that is not encrypted) or "recovery_reset" (opened
-    // with its recovery key just now). The last two offer a new password.
+    // From /api/auth/status: {kind, message, elsewhere?}. kind is "ask_admin"
+    // (Server Edition, another administrator), "recovery" (an encrypted
+    // desktop file: open it with its recovery key), "reset_here" (a desktop
+    // file that is not encrypted) or "recovery_reset" (opened with its
+    // recovery key just now). The last two are what the app's own window can
+    // do: the status cannot tell that window from a browser at its address
+    // (W-125), so the reset is offered only where the launcher's bridge is,
+    // and a page without it says `elsewhere` instead. The administrators'
+    // names come through the bridge too, never in the status.
     let forgot = null;
+    let windowBridge = null;   // a promise of the bridge's api, or of null
+    let bridgeWaited = false;  // the one wait for a late bridge is over
+
+    // The launcher's api when this page is the app's own window, else null.
+    // The first call waits for a bridge that arrives after the page (macOS);
+    // later calls answer at once, and still find one that came later yet.
+    function windowCanReset() {
+        if (bridgeWaited) return Promise.resolve(bridgeNow("reset_admin_password"));
+        if (!windowBridge) {
+            windowBridge = bridgeFor("reset_admin_password").then(function (api) {
+                bridgeWaited = true;
+                return api;
+            });
+        }
+        return windowBridge;
+    }
 
     function noticeStyle() {
         return (
@@ -382,29 +402,47 @@
         );
     }
 
+    // The notice a company opened with its recovery key shows at once: an
+    // empty place in the page, filled when the window's bridge has answered
+    // (a browser never sees it).
     function recoveryNoticeHTML() {
         if (!forgot || forgot.kind !== "recovery_reset") return "";
-        return (
-            '<div id="auth-recovery-notice" style="' + noticeStyle() + 'margin:0 0 14px;">' +
-            escapeText(forgot.message) + "<br>" + resetButtonHTML("auth-reset-open") + "</div>"
-        );
+        return '<div id="auth-recovery-notice" hidden style="' + noticeStyle() + 'margin:0 0 14px;"></div>';
     }
 
     function wireForgot(overlay, onSuccess) {
         const link = overlay.querySelector("#auth-forgot");
         const panel = overlay.querySelector("#auth-forgot-panel");
-        const open = overlay.querySelector("#auth-reset-open");
-        if (open) open.addEventListener("click", function () { renderReset(onSuccess); });
+        const notice = overlay.querySelector("#auth-recovery-notice");
+        if (notice) {
+            windowCanReset().then(function (api) {
+                if (!api || !notice.isConnected) return;
+                notice.innerHTML = escapeText(forgot.message) + "<br>" + resetButtonHTML("auth-reset-open");
+                notice.hidden = false;
+                notice.querySelector("#auth-reset-open").addEventListener("click", function () {
+                    renderReset(onSuccess);
+                });
+            });
+        }
         if (!link || !panel) return;
-        link.addEventListener("click", function () {
+        const ask = "Ask an administrator to reset it under Settings, Users.";
+        link.addEventListener("click", async function () {
             const showing = panel.hidden;
             panel.hidden = !showing;
             link.setAttribute("aria-expanded", showing ? "true" : "false");
             if (!showing) return;
-            const message = (forgot && forgot.message) ||
-                "Ask an administrator to reset it under Settings, Users.";
+            let message = (forgot && forgot.message) || ask;
+            let offer = false;
+            if (forgotOffersReset()) {
+                // only the app's own window has the bridge; a browser at
+                // the same address is told where to go instead
+                panel.innerHTML = "";
+                offer = !!(await windowCanReset());
+                if (panel.hidden) return;
+                if (!offer) message = forgot.elsewhere || ask;
+            }
             panel.innerHTML = '<span id="auth-forgot-text">' + escapeText(message) + "</span>" +
-                (forgotOffersReset() ? "<br>" + resetButtonHTML("auth-reset-here") : "");
+                (offer ? "<br>" + resetButtonHTML("auth-reset-here") : "");
             const here = panel.querySelector("#auth-reset-here");
             if (here) {
                 here.addEventListener("click", function () { renderReset(onSuccess); });
@@ -416,23 +454,24 @@
     // The launcher's bridge, waited for: on macOS it arrives after the page
     // has loaded. Resolves to the api, or null when there is none (a
     // browser, which can never set a password this way).
+    function bridgeNow(method) {
+        const there = typeof window.pywebview !== "undefined" && window.pywebview.api &&
+            typeof window.pywebview.api[method] === "function";
+        return there ? window.pywebview.api : null;
+    }
+
     function bridgeFor(method) {
-        function ready() {
-            return typeof window.pywebview !== "undefined" && window.pywebview.api &&
-                typeof window.pywebview.api[method] === "function";
-        }
-        if (ready()) return Promise.resolve(window.pywebview.api);
+        if (bridgeNow(method)) return Promise.resolve(window.pywebview.api);
         return new Promise(function (resolve) {
             const timer = setTimeout(function () { resolve(null); }, 5000);
             window.addEventListener("pywebviewready", function () {
                 clearTimeout(timer);
-                resolve(ready() ? window.pywebview.api : null);
+                resolve(bridgeNow(method));
             }, { once: true });
         });
     }
 
-    function resetViewHTML() {
-        const admins = (forgot && Array.isArray(forgot.admins)) ? forgot.admins : [];
+    function resetViewHTML(admins) {
         const name = existingCompany.name;
         let who = "";
         if (admins.length > 1) {
@@ -483,9 +522,19 @@
         );
     }
 
-    function renderReset(onSuccess) {
+    async function renderReset(onSuccess) {
+        // whose password: the names come from the launcher, which asks the
+        // server with the window's secret (the status names nobody, W-125)
+        let admins = [];
+        const bridge = await windowCanReset();
+        if (bridge && typeof bridge.reset_admins === "function") {
+            try {
+                const out = await bridge.reset_admins();
+                if (out && out.success && Array.isArray(out.admins)) admins = out.admins;
+            } catch (err) { /* the form still works for a lone administrator */ }
+        }
         removeOverlay();
-        const overlay = buildShell(resetViewHTML());
+        const overlay = buildShell(resetViewHTML(admins));
         document.body.appendChild(overlay);
         const form = overlay.querySelector("#auth-form");
         const pw = overlay.querySelector("#auth-reset-password");
@@ -515,7 +564,7 @@
                 btn.disabled = false;
                 btn.textContent = "Set the password and sign in";
             };
-            const api = await bridgeFor("reset_admin_password");
+            const api = await windowCanReset();
             if (!api) {
                 done("A new administrator password can be set only in the SlowBooks Pro window, on the computer that holds the company file.");
                 return;
@@ -985,6 +1034,9 @@
                 usernames = Array.isArray(status.usernames) ? status.usernames : [];
                 companies = Array.isArray(status.companies) ? status.companies : [];
                 forgot = status.forgot && typeof status.forgot === "object" ? status.forgot : null;
+                // start looking for the window's bridge now, so "Forgot your
+                // password?" has its answer by the time it is pressed
+                if (forgotOffersReset()) windowCanReset();
                 existingCompany = {
                     name: status.company_name || "",
                     hasData: status.has_data === true,

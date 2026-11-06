@@ -269,6 +269,7 @@ _INTENTIONAL_BACKEND_ONLY: set[tuple[str, str]] = {
     # own window with a secret the page never sees; the page only calls
     # window.pywebview.api.reset_admin_password.
     ("POST", "/api/auth/reset-at-computer"),
+    ("GET", "/api/auth/reset-at-computer"),  # the names, asked the same way
     # A garnishment order is ended, never deleted; DELETE stays so an API
     # client is told why (405) and where to go (POST .../end).
     ("DELETE", "/api/deductions/garnishments/{order_id}"),
