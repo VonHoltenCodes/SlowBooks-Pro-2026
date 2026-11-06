@@ -20,7 +20,8 @@
  *
  * Before 2.31.8 the desktop app's zoom keys kept a free zoom level of
  * their own (slowbooks.desktop.zoom, 0.5 to 2.0 by tenths). That level is
- * carried over once to the nearest size, and the old key removed.
+ * carried over once to the nearest size (the larger, between two), and
+ * the old key removed.
  */
 (function () {
     'use strict';
@@ -54,11 +55,15 @@
         return false;
     }
 
-    // The size nearest a zoom level (1.3 → 125); below 100 it is 100.
+    // The size nearest a zoom level (1.3 → 125); below 100 it is 100. A
+    // level exactly between two sizes (1.2, between 115 and 125) takes the
+    // larger: whoever chose bigger text never gets smaller text from the
+    // update (W-127). The level is read to a tenth of a percent, so a
+    // level's binary fraction (1.15 is 114.999...) does not tip it.
     function nearest(level) {
-        var pct = level * 100, best = SIZES[0];
+        var pct = Math.round(level * 1000) / 10, best = SIZES[0];
         for (var i = 1; i < SIZES.length; i++) {
-            if (Math.abs(SIZES[i] - pct) < Math.abs(best - pct)) best = SIZES[i];
+            if (Math.abs(SIZES[i] - pct) <= Math.abs(best - pct)) best = SIZES[i];
         }
         return best;
     }

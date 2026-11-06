@@ -103,7 +103,9 @@ or Alt+D.*
   sideways in their own box; printing and PDFs are never enlarged. In the
   desktop app Ctrl and + or −, Ctrl+0 to go back to 100%, and Ctrl and the
   mouse wheel (⌘ on a Mac) step through the same four sizes. A window zoom
-  set in an earlier version was carried over to the nearest size.
+  set in an earlier version was carried over to the nearest size, and to
+  the larger of two when it sat exactly between them, so nobody's text got
+  smaller with the update.
 - **A sound when a transaction posts**, optional and per sign-in (v2.29.1):
   Settings → Preferences → Sounds. Off by default.
 - **Enter moves between fields** on request (v2.29.1): Settings → Preferences → My
