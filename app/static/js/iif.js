@@ -263,6 +263,8 @@ const IIFPage = {
             html += `<div class="result-row"><span>Already here, marked paid or partly paid from Open Balance</span><span class="result-count">${result.invoices_updated}</span></div>`;
         }
         html += IIFPage._answeredRows(result);
+        // the lines that posted with the report's Class (#722)
+        if (result.classes_text) html += `<div class="result-row result-row--line">${escapeHtml(result.classes_text)}</div>`;
         if (result.duplicates_skipped > 0) {
             html += `<div class="result-row"><span>Duplicates skipped</span><span class="result-count">${result.duplicates_skipped}</span></div>`;
         }
@@ -334,6 +336,7 @@ const IIFPage = {
         let html = `<div class="iif-results qbr" id="qbr" role="region" aria-labelledby="qbr-title">
             <h4 id="qbr-title">Choose what to import</h4>
             <p class="qbr-lead">Nothing is imported yet. ${IIFPage._count(ready, 'transaction')} ${ready === 1 ? 'is' : 'are'} ready${here ? `, and ${IIFPage._count(here, 'transaction')} already here ${here === 1 ? 'is' : 'are'} skipped` : ''}. The file also has the problems below: tick one to accept it, or leave it unticked to leave it out. Then press Import.</p>
+            ${result.classes_text ? `<p class="qbr-lead">${escapeHtml(result.classes_text)}</p>` : ''}
             <div class="qbr-save"><button type="button" class="btn btn-sm btn-secondary" onclick="IIFPage.saveErrors('qbr')" title="Every problem in this list, as a text file">Save the list</button></div>`;
         if (cut) {
             html += `<section class="qbr-group" data-kind="cut_off" aria-labelledby="qbr-h-cut_off">

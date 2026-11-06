@@ -696,37 +696,14 @@ _SETTLED = {InvoiceStatus.PAID, InvoiceStatus.PARTIAL} | {
 
 
 def _report_class(db: Session, name: str, warnings=None):
-    """The class a report row names (its Class column): exact, then
-    case-insensitive; a class the books do not have is created, as a
-    customer or a job named in a report is, and the result says so once
-    (2.23.1, #308: the column was read into the index and never used, so
-    a file whose entities are its classes arrived with every posting
-    under Uncategorized)."""
-    from app.models.classes import TxnClass
-    from app.services.classes_service import resolve_class_id
+    """The class a report row names (its Class column): the one resolver
+    every QuickBooks report import shares, classes_service.report_class_id
+    (2.23.1, #308: the column was read into the index and never used, so a
+    file whose entities are its classes arrived with every posting under
+    Uncategorized; #722 moved it there for the ledger import too)."""
+    from app.services.classes_service import report_class_id
 
-    name = (name or "").strip()
-    if not name:
-        return None
-    class_id = resolve_class_id(db, name)
-    if class_id is not None:
-        return class_id
-    limit = TxnClass.__table__.c.name.type.length
-    if len(name) > limit:
-        raise DataProblem(
-            f"class '{name}' is over the {limit}-character limit; shorten it in "
-            "the report or create it under Settings → Classes first"
-        )
-    row = TxnClass(name=name)
-    db.add(row)
-    db.flush()
-    if warnings is not None:
-        note = (
-            f"Class '{name}' is named in the report and was not in your books: created"
-        )
-        if note not in warnings:
-            warnings.append(note)
-    return row.id
+    return report_class_id(db, name, warnings)
 
 
 def _line_classes(db: Session, block: dict, warnings) -> int | None:
@@ -1583,6 +1560,9 @@ def import_qb_report(
             "left_out",
             "differences_account",
             "file_sha256",
+            "class_lines",
+            "classes_new",
+            "classes_text",
         ):
             if key in sub:
                 base[key] = sub.pop(key)

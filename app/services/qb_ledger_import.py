@@ -218,7 +218,7 @@ def _unreadable_words(n: int, day_first: str | None, look: bool) -> str:
 
 def parse_ledger(rows: list[list[str]], header_at: int, cols: dict):
     """(lines, errors, notes, cut): each transaction row as {path, type,
-    date, num, name, memo, debit, credit, row}, its account the path of the
+    date, num, name, memo, class, debit, credit, row}, its account the path of the
     headings above it ("Parent:Child"). `errors` refuse the file: rows with
     no account above them, and rows whose date is not month/day/year or
     whose amount cannot be read, every one listed. `cut` says where it
@@ -360,6 +360,8 @@ def parse_ledger(rows: list[list[str]], header_at: int, cols: dict):
                 "num": cell(row, "Num"),
                 "name": cell(row, "Name"),
                 "memo": cell(row, "Memo"),
+                # the row's own Class cell (#722): "" with no Class column
+                "class": cell(row, "Class"),
                 "debit": debit,
                 "credit": credit,
                 "row": n,
@@ -1423,6 +1425,75 @@ def _problem_notes(db: Session, problems: list[dict]) -> dict:
     return notes
 
 
+def _file_classes(db: Session, lines: list[dict]) -> dict:
+    """What the file's Class column holds (#722): how many lines carry a
+    class, the classes the books do not have yet (made when a line of
+    theirs posts), and the sentences refusing any name too long to be one.
+    Nothing is written."""
+    from app.services.classes_service import class_name_too_long, resolve_class_id
+
+    names = OrderedDict.fromkeys(ln["class"] for ln in lines if ln["class"])
+    new, errors = [], []
+    for name in names:
+        if resolve_class_id(db, name) is not None:
+            continue
+        too_long = class_name_too_long(db, name)
+        if too_long:
+            errors.append(too_long)
+        elif name.casefold() not in {n.casefold() for n in new}:
+            new.append(name)
+    return {
+        "lines": sum(1 for ln in lines if ln["class"]),
+        "new": new,
+        "errors": errors,
+    }
+
+
+def _classes_words(db: Session, count: int, total: int, new: list, done: bool) -> str:
+    """The result's sentence about the Class column (#722): on the list a
+    file with problems answers with (nothing posted yet), what the file
+    carries and which classes importing would create; after posting, how
+    many lines posted with a class (the classes made are in the notes)."""
+    from app.services.terminology import terms_from_db
+
+    words = terms_from_db(db)
+    one, many = words("class"), words("classes")
+    if done:
+        return f"{count:,} line{'s' if count != 1 else ''} posted with a {one}."
+    text = (
+        f"{count:,} of the file's {total:,} lines carry a {one}."
+        if total != 1
+        else f"The file's one line carries a {one}."
+    )
+    if new:
+        names = ", ".join(new)
+        text += (
+            f" {len(new)} {many if len(new) != 1 else one} the file names "
+            f"{'are' if len(new) != 1 else 'is'} not in your books and "
+            f"{'are' if len(new) != 1 else 'is'} created when a line that "
+            f"names {'them' if len(new) != 1 else 'it'} posts: {names}."
+        )
+    else:
+        text += f" Every {one} the file names is in your books already."
+    return text
+
+
+def _skipped_keep_words(db: Session, n: int) -> str:
+    """An entry already in the books is skipped whole and keeps what it was
+    imported with, a class or none (#722): what to do to bring the file's
+    classes in for it."""
+    from app.services.terminology import terms_from_db
+
+    words = terms_from_db(db)
+    return (
+        f"{n:,} transaction{'s' if n != 1 else ''} already in your books "
+        f"{'are' if n != 1 else 'is'} skipped and do{'' if n != 1 else 'es'} "
+        f"not gain a {words('class')} from this file. To bring the file's "
+        f"{words('classes')} in for them, import it into a fresh company, or "
+        "restore the backup taken before the first import and import it again."
+    )
+
+
 def import_ledger_report(
     db: Session,
     rows: list[list[str]],
@@ -1477,6 +1548,13 @@ def import_ledger_report(
                 "report as ordinary journal entries."
             )
             return result
+    # the Class column (#722): a name too long to be a class refuses the
+    # file before anything is written; a file with no Class column, or a
+    # row with an empty cell, posts as before, unclassified
+    classes = _file_classes(db, lines)
+    if classes["errors"]:
+        result["errors"] = ["Nothing was imported."] + classes["errors"]
+        return result
     accounts = {}
     missing = {}  # a section's path: the path of the account it needs
     for path in OrderedDict.fromkeys(ln["path"] for ln in lines):
@@ -1560,6 +1638,15 @@ def import_ledger_report(
         )
         result["problems"] = problems
         result["problem_notes"] = _problem_notes(db, problems)
+        if classes["lines"]:
+            # what the Class column brings, before anything posts (#722)
+            result["class_lines"] = classes["lines"]
+            result["classes_new"] = classes["new"]
+            result["classes_text"] = _classes_words(
+                db, classes["lines"], len(lines), classes["new"], done=False
+            )
+            if here:
+                result["warnings"].append(_skipped_keep_words(db, here))
         if file_sha:
             result["file_sha256"] = file_sha
         if any(p["kind"] == "missing_account" for p in problems):
@@ -1597,7 +1684,20 @@ def import_ledger_report(
     }
     accepted = 0
     replaced = 0
-    posting = {"differences": None, "control": 0}
+    posting = {"differences": None, "control": 0, "classed": 0}
+    from app.services.classes_service import report_class_id
+
+    class_ids: dict[str, int | None] = {}
+
+    def class_of(name: str) -> int | None:
+        """The line's class (#722), resolved or made on first sight, the
+        result noting each one made; None for an empty cell."""
+        if not name:
+            return None
+        if name not in class_ids:
+            class_ids[name] = report_class_id(db, name, result["warnings"])
+        return class_ids[name]
+
     from app.services.accounting import get_ap_account_id, get_ar_account_id
 
     try:
@@ -1619,9 +1719,13 @@ def import_ledger_report(
                 "debit": ln["debit"],
                 "credit": ln["credit"],
                 "description": (ln["memo"] or ln["name"] or first["type"])[:300],
+                # the row's own Class cell (#722); the entry's header keeps
+                # none, as each line says its own
+                "class_id": class_of(ln["class"]),
             }
             for ln in journal
         ]
+        posting["classed"] += sum(1 for ln in lines_out if ln["class_id"])
         off = t["off"]
         if off:
             if posting["differences"] is None:
@@ -1713,6 +1817,14 @@ def import_ledger_report(
             "Accounts Payable. The A/R and A/P aging read invoices and bills, so "
             "enter the ones still open as documents after the import."
         )
+    if posting["classed"]:
+        result["class_lines"] = posting["classed"]
+        result["classes_new"] = [n for n in classes["new"] if n in class_ids]
+        result["classes_text"] = _classes_words(
+            db, posting["classed"], len(lines), [], done=True
+        )
+    if classes["lines"] and result["duplicates_skipped"]:
+        result["warnings"].append(_skipped_keep_words(db, result["duplicates_skipped"]))
     if problems:
         result["accepted"] = {
             "unbalanced": accepted,

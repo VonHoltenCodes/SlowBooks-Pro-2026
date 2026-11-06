@@ -500,14 +500,43 @@ Details worth knowing:
 ## Classes: entities kept apart in one file
 
 If your QuickBooks file keeps several entities apart by class (a nonprofit
-and two LLCs in one file, say), the class travels with every posting on
-both paths (v2.23.1): the IIF import takes the TRNS row's class as the
-document's and each split row's as its line's, and the report CSV import
-reads the Class column on every report it takes, header and lines. A class
-the file names that your books do not have is created on first sight, and
-the import's result says so. Check P&L by Class afterwards: every column
-should tie to the entity's own Profit & Loss in QuickBooks, and anything
-under Uncategorized is a posting QuickBooks had no class on either.
+and two LLCs in one file, say), each import carries the class this way:
+
+- **IIF files** (since 2.23.1): the TRNS row's class is the document's, and
+  each split row's is its line's.
+- **Sales Receipt, Invoice, Deposit Detail and Check Detail reports**
+  (since 2.23.1): the Class column on the header row is the document's, and
+  each line's own Class cell is that line's.
+- **Transaction Detail by Account** (since 2.31.8; before that this report's
+  Class column was not read, and every line came in without a class): each
+  row's Class cell is the class of the line it posts. Add Class to the
+  report's columns in QuickBooks (Customize Report → Display) before you
+  export. A row whose Class cell is empty posts with no class, and a report
+  without the Class column imports as it always did. When the file has
+  problems to decide on, the list shown before anything is imported says
+  how many lines carry a class and which classes it would create.
+- **Time by Name by Job detail** and the **categorized bank sheet** carry no
+  class: a time entry has none here, and the sheet has no Class column.
+
+On every report a class is matched to yours by its exact name, then the same
+name in other capitals. QuickBooks' subclass path (`Parent:Child`) is kept
+whole as the class's name, as the IIF class list keeps it. A class the file
+names that your books do not have is created on first sight, and the
+import's result says so. A name longer than 100 characters cannot be a
+class here: Transaction Detail by Account then imports nothing, and the
+other reports leave out the document that names it, each saying which
+name. Shorten it in QuickBooks, export the report again and import that.
+
+A transaction already in the books is skipped as a duplicate when the same
+file comes again, and keeps what it was imported with: importing a report
+again with its Class column does not add the class to entries that came in
+without one. To bring the classes in for books imported without them,
+import into a fresh company, or restore the backup taken before the
+import and import the files again.
+
+Check P&L by Class afterwards: every column should tie to the entity's own
+Profit & Loss in QuickBooks, and anything under Uncategorized is a posting
+QuickBooks had no class on either.
 
 ## After the import
 
