@@ -2,9 +2,10 @@
  * SlowBooks Pro 2026 — UI Stylesheet
  * ============================================================================ */
 
-/* Skip-to-content link — first tab stop on every page, hidden until focused.
-   Lets keyboard / screen-reader users jump past the topbar + sidebar straight
-   into the main content area. */
+/* Skip links. The page's own, "Skip to main content", is a small icon
+   button at the start of the top bar (#topbar .skip-link--bar, below);
+   these first rules are the forms' and pages' own (.skip-link--inline),
+   which show where they sit when the keyboard reaches them. */
 .skip-link {
     position: absolute;
     top: -40px;
@@ -31,6 +32,45 @@
     outline-offset: 2px;
     box-shadow: 0 0 0 8px var(--focus-halo);
 }
+/* Skip to main content (2.31.8): the first Tab stop on every page, at the
+   start of the top bar, where it covers nothing. It showed, on focus, as a
+   large blue box at the window's corner, over the menu button, the
+   wordmark and Back. Always there and quiet, like the bar's other
+   controls: a glyph in the bar's text colour, named and titled "Skip to
+   main content". On the keyboard's focus it draws the ring the bar's
+   other controls draw, in the bar's own gold; a click moves focus on to
+   the content at once, so a mouse leaves no ring on it. */
+#topbar .skip-link--bar {
+    position: static;
+    z-index: auto;
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 4px 5px;
+    margin-right: 2px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    font-weight: 400;
+    line-height: 1;
+    text-decoration: none;
+}
+#topbar .skip-link--bar svg { display: block; width: 14px; height: 14px; }
+#topbar .skip-link--bar:hover {
+    background: rgba(255,255,255,0.6);
+    border-color: #b0b8c8;
+}
+#topbar .skip-link--bar:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 8px var(--focus-halo);
+    position: relative;
+    top: auto;   /* not the inline links' place (.skip-link:focus, above) */
+    left: auto;
+}
+
 /* A form's or page's own skip link (#266): out of the way until the
    keyboard reaches it, then shown where it sits, above what it skips. */
 .skip-link--inline {

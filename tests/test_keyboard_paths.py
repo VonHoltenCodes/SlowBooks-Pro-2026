@@ -632,13 +632,28 @@ def test_the_skip_link_draws_the_ring_and_goes_to_the_content_in_place():
         dark, '[data-theme="dark"] .skip-link:focus {'
     )
     html = (ROOT / "index.html").read_text(encoding="utf-8")
-    assert '<a href="#page-content" class="skip-link">Skip to main content</a>' in html
+    # the page's own skip link is an icon button at the start of the top
+    # bar, named and titled, so its ring covers nothing (2.31.8)
+    bar = html[html.index('<div id="topbar">') :]
+    first = bar[bar.index("<a ") : bar.index("</a>")]
+    assert bar.index("<a ") < bar.index("<button"), "the bar's first control"
+    for part in (
+        'href="#page-content"',
+        'class="skip-link skip-link--bar"',
+        'id="skip-link"',
+        'aria-label="Skip to main content"',
+        'title="Skip to main content"',
+    ):
+        assert part in first, part
+    ring = _rule(css, "#topbar .skip-link--bar:focus-visible {")
+    assert "outline: 2px solid var(--focus-ring);" in ring
+    assert "position: static;" in _rule(css, "#topbar .skip-link--bar {")
     # the content takes focus only while the skip link puts it there: a
     # standing tabindex made any click on blank content focus it
     assert '<div id="page-content"></div>' in html
     assert 'id="page-content" tabindex' not in html
     boot = _src("bootstrap.js")
-    wire = boot[boot.index("const skip = document.querySelector('.skip-link');") :]
+    wire = boot[boot.index("const skip = document.getElementById('skip-link');") :]
     wire = wire[: wire.index("main.focus();") + len("main.focus();")]
     assert "e.preventDefault();" in wire
     assert "const main = document.getElementById('page-content');" in wire

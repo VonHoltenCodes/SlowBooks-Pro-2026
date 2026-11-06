@@ -77,7 +77,10 @@ or Alt+D.*
   A field keeps its own focus style (the blue border and pale ground), and
   a dialog that takes focus itself is not outlined. The skip link, Tab's
   first stop, moves focus to the page's content and leaves the page where
-  it is.
+  it is. Since v2.31.8 it is a small arrow button at the start of the top
+  bar, named "Skip to main content" with a tooltip saying so, and it draws
+  the same ring as the bar's other buttons; it no longer shows as a large
+  box over the menu button, the wordmark and Back.
 - **Back, within the app** (v2.22.0): the toolbar's bordered gold
   **← Back** button goes back through the app's history, and is lit only
   while an app page is behind (muted and borderless otherwise, so the two

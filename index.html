@@ -64,13 +64,15 @@
     </div>
 
     <div id="app">
-        <!-- Skip link for keyboard users — first tab stop, lets them jump
-             past the topbar + sidebar straight into page content. It moves
-             focus there without changing the address (bootstrap.js): the
-             router took "#page-content" for a page, "Page not found". -->
-        <a href="#page-content" class="skip-link">Skip to main content</a>
         <!-- Toolbar -->
         <div id="topbar">
+            <!-- Skip to main content: the first Tab stop on every page, a
+                 small icon button at the start of the bar, so it covers
+                 nothing when it shows its ring (it was a large box over the
+                 menu button, the wordmark and Back). It moves focus to the
+                 page's content without changing the address (bootstrap.js):
+                 the router took "#page-content" for a page, "Page not found". -->
+            <a href="#page-content" class="skip-link skip-link--bar" id="skip-link" aria-label="Skip to main content" title="Skip to main content"><svg aria-hidden="true" focusable="false" viewBox="0 0 16 16" width="14" height="14"><path d="M8 2v8.5M4.5 7.5 8 11l3.5-3.5M3 14h10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
             <!-- Hide sidebar (#688): the menu put away, the page takes the
                  width; pressed while hidden, pressed again shows it. Kept
                  per computer (app.js App.setSidebarHidden). Not shown on a
