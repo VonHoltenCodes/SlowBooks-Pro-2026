@@ -67,6 +67,61 @@ def resolve_class_id(db: Session, name: str) -> Optional[int]:
     return row.id if row else None
 
 
+def class_name_too_long(db: Session, name: str) -> Optional[str]:
+    """The sentence that refuses a class name a QuickBooks report names
+    when it is longer than a class name can be here, or None when it fits.
+    QuickBooks' "Parent:Child" subclass path is the name, whole (as the IIF
+    class list keeps it), so the limit counts all of it."""
+    from app.services.terminology import terms_from_db
+
+    limit = TxnClass.__table__.c.name.type.length
+    name = (name or "").strip()
+    if len(name) <= limit:
+        return None
+    word = terms_from_db(db)("Class")
+    return (
+        f"{word} '{name}' is over the {limit}-character limit. Shorten it in "
+        "QuickBooks, export the report again and import that."
+    )
+
+
+def class_created_note(db: Session, name: str) -> str:
+    """The result's note for a class a report named and the books lacked."""
+    from app.services.terminology import terms_from_db
+
+    word = terms_from_db(db)("Class")
+    return f"{word} '{name}' is named in the report and was not in your books: created"
+
+
+def report_class_id(db: Session, name: str, warnings=None) -> Optional[int]:
+    """The class a QuickBooks Desktop report row names (its Class column),
+    for every report import (qb_report_import's and the Transaction Detail
+    by Account import's, #722): exact, then case-insensitive
+    (resolve_class_id); a class the books do not have is created, as a
+    customer or a job named in a report is, and ``warnings`` says so once.
+    "Parent:Child" is kept whole as the name, as the IIF class list keeps
+    it. A name over the length limit raises DataProblem (2.23.1, #308)."""
+    from app.services.safe_errors import DataProblem
+
+    name = (name or "").strip()
+    if not name:
+        return None
+    class_id = resolve_class_id(db, name)
+    if class_id is not None:
+        return class_id
+    too_long = class_name_too_long(db, name)
+    if too_long:
+        raise DataProblem(too_long)
+    row = TxnClass(name=name)
+    db.add(row)
+    db.flush()
+    if warnings is not None:
+        note = class_created_note(db, name)
+        if note not in warnings:
+            warnings.append(note)
+    return row.id
+
+
 def class_attribution(uncat_id: Optional[int]):
     """SQL expression for the class a posted line belongs to: the line's
     own class, else the transaction header's, else the system default.
