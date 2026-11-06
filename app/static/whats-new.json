@@ -3,12 +3,13 @@
     "title": "Settings in groups, a Text size setting, and a way back in when the password is forgotten",
     "items": [
       "Company Settings is nine groups chosen from a list down the left, one shown at a time, with Find a setting to search them all; Save Settings stays in view.",
-      "A Text size setting (Settings, Preferences): 100%, 115%, 125% or 150%, with the sidebar, the bottom bar and dialog buttons staying on screen at every size.",
+      "A Text size setting (Settings, Preferences): 100%, 115%, 125% or 150%, with the sidebar, the bottom bar and dialog buttons staying on screen at every size; in a small window the top bar folds its less-used entries into a More button.",
       "Forgot your password? on the sign-in page: in the desktop app an administrator's password can be set again at the computer, or with the recovery key for an encrypted company file.",
       "Click a line's ✓ cell in a bank or card register to mark it cleared as it posts at the bank; the next reconciliation opens with it ticked.",
       "The reconcile list sorts by Date, Payee, Ref # or Amount, with check numbers in number order.",
       "A bank feed with no bank account to import into says so and lets you pick an account you already have.",
-      "A pay application on a job with no schedule of values says to set the contract first."
+      "A pay application on a job with no schedule of values says to set the contract first.",
+      "Skip to main content is a small arrow button at the start of the top bar, still the first Tab stop, and no longer covers the menu button."
     ]
   },
   "2.31.7": {
