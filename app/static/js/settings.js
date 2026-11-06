@@ -3310,10 +3310,12 @@ const SettingsPage = {
 // pointer's focus, which must stay under the pointer that pressed it: a
 // text box matches :focus-visible on a click too, and the page moved
 // under a click into the invoice notes (App.keyboardFocus). (App.init
-// hands every focusin here.)
+// hands every focusin here.) Anywhere in the panel, My Preferences too,
+// which is beside the form, not in it: at 150% in a 900 x 600 window its
+// first box landed half under the bar (W-126).
 SettingsPage._clearSaveBar = function (e) {
     const a = e.target, bar = document.getElementById('settings-savebar');
-    if (!bar || !a || !a.closest || bar.contains(a) || !a.closest('#settings-form')) return;
+    if (!bar || !a || !a.closest || bar.contains(a) || !a.closest('#settings-panel')) return;
     if (!App.keyboardFocus()) return;
     const b = bar.getBoundingClientRect(), content = document.getElementById('content');
     if (!b.height || !content) return;
@@ -3462,11 +3464,27 @@ SettingsPage._initGroups = function () {
     SettingsPage._refreshGroups();
 };
 
+// A page 900px wide or less puts the list above the panel (style.css,
+// .settings-layout--narrow). Measured, not a width rule: a width rule reads
+// the window, and at 150% a 900px window is a 600px page (W-126). The
+// body's own width is the page's, in the page's pixels, at any text size.
+SettingsPage.NARROW = 900;
+SettingsPage._narrow = function () {
+    const page = document.body ? document.body.clientWidth : 0;
+    return page > 0 && page <= SettingsPage.NARROW;
+};
+
 SettingsPage._fitNav = function () {
     const nav = document.getElementById('settings-nav');
     const panel = document.getElementById('settings-panel');
     const content = document.getElementById('content');
     if (!nav || !panel || !content) return;
+    const layout = document.getElementById('settings-layout');
+    const narrow = SettingsPage._narrow();
+    if (layout && layout.classList.contains('settings-layout--narrow') !== narrow) {
+        layout.classList.toggle('settings-layout--narrow', narrow);
+        SettingsPage._orientGroups();
+    }
     const cs = getComputedStyle(content);
     const room = Math.max(120, Math.floor(content.clientHeight
         - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0)));
@@ -3475,16 +3493,14 @@ SettingsPage._fitNav = function () {
     nav.style.maxHeight = getComputedStyle(nav).position === 'sticky' ? room + 'px' : '';
 };
 
-// At a narrow window the list is a row above the panel (style.css).
+// On a narrow page the list is a row above the panel (_fitNav, which
+// runs again as the page's size changes).
 SettingsPage._orientGroups = function () {
     const tabs = document.getElementById('settings-groups');
-    if (!tabs || typeof window.matchMedia !== 'function') return;
-    const narrow = window.matchMedia('(max-width: 900px)');
-    tabs.setAttribute('aria-orientation', narrow.matches ? 'horizontal' : 'vertical');
-    if (!SettingsPage._orientWatched && narrow.addEventListener) {
-        SettingsPage._orientWatched = true;
-        narrow.addEventListener('change', () => SettingsPage._orientGroups());
-    }
+    const layout = document.getElementById('settings-layout');
+    if (!tabs || !layout) return;
+    const narrow = layout.classList.contains('settings-layout--narrow');
+    tabs.setAttribute('aria-orientation', narrow ? 'horizontal' : 'vertical');
 };
 
 // Show the group asked for (or the first listed, while it has nothing to

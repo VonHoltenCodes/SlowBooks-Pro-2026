@@ -158,8 +158,10 @@ test('Ctrl + wheel steps the same setting, a notch at a time, in the shell only 
 });
 
 test('a zoom level from before 2.31.8 is carried over once to the nearest size', () => {
+    // exactly between two sizes, the larger (W-127): 1.2 is between 115
+    // and 125, and whoever chose bigger text never gets smaller text
     const cases = [
-        ['1.1', '115'], ['1.2', '115'], ['1.3', '125'], ['1.4', '150'], ['1.5', '150'],
+        ['1.1', '115'], ['1.2', '125'], ['1.15', '115'], ['1.25', '125'], ['1.3', '125'], ['1.4', '150'], ['1.5', '150'],
         ['2', '150'], ['1', undefined], ['0.7', undefined],
     ];
     for (const [level, size] of cases) {
@@ -183,4 +185,9 @@ test('ratio() is 1 where nothing can be measured', () => {
     assert.equal(sizes.ratio(), 1);
     assert.deepEqual(Array.from(sizes.SIZES), [100, 115, 125, 150]);
     assert.equal(sizes.nearest(1.3), 125);
+    // a tie goes up, wherever it falls
+    assert.equal(sizes.nearest(1.075), 115);
+    assert.equal(sizes.nearest(1.2), 125);
+    assert.equal(sizes.nearest(1.375), 150);
+    assert.equal(sizes.nearest(1.37), 125);
 });

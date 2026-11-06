@@ -134,7 +134,7 @@
     // skip link puts it there: standing, it made a mouse click on any blank
     // part of a page focus the content, so the next Tab went to the page's
     // first control and scrolled back to the top (2.22.0 review).
-    const skip = document.querySelector('.skip-link');
+    const skip = document.getElementById('skip-link');
     const main = document.getElementById('page-content');
     if (skip && main) skip.addEventListener('click', (e) => {
         e.preventDefault();

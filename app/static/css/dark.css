@@ -98,6 +98,7 @@
 [data-theme="dark"] .topbar-brand { color: #e0e4ec; }
 [data-theme="dark"] .topbar-brand span { color: var(--qb-gold); }
 [data-theme="dark"] .tb-btn { color: var(--text-secondary); }
+[data-theme="dark"] #topbar .skip-link--bar:hover { background: rgba(255,255,255,0.08); border-color: #4a4e58; color: #e0e4ec; }
 [data-theme="dark"] .tb-btn:hover { background: rgba(255,255,255,0.08); border-color: #4a4e58; color: #e0e4ec; }
 /* Back (NEW-42): gold words on a dark gold-tinted ground (6.7:1) and a gold
    border (6.4:1 against the bar's darker stop) while there is somewhere to
