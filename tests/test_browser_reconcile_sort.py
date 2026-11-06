@@ -97,6 +97,12 @@ def _page(browser):
 
 
 def _show(page):
+    # the app draws its first page when it starts; on a slow machine that
+    # finished after the view below was shown, and drew over it
+    page.wait_for_function(
+        "() => { const t = (document.getElementById('status-text') || {}).textContent || '';"
+        " return t !== '' && !/^Loading /.test(t); }"
+    )
     page.evaluate("() => BankingPage.showReconcileView(7)")
     page.wait_for_selector("#recon-view tbody tr[data-line]")
 

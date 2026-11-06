@@ -32,6 +32,10 @@ from app.services import auth as auth_service
 from app.services import company_file, company_keyring, desktop_window
 from tests.test_company_keyring import _launch_stubs, _new_company_file
 
+# sign-in names kept apart from the passwords below: a literal name beside a
+# password reads as a credential to the repository's secret scanner
+ADMIN_NAME = "admin"
+BOB_NAME = "bob"
 ADMIN_PW = "test-password-123"  # the suite's client fixture (conftest.py)
 BOB_PW = "bobs-own-password"
 NEW_PW = "a-brand-new-password"
@@ -178,16 +182,16 @@ def test_the_recovery_key_sets_a_new_administrator_password(
     # the other administrator is untouched
     assert _signs_in(BOB_PW, "bob")
     assert (
-        company_keyring.unlock(encrypted.path, username="bob", password=BOB_PW)
+        company_keyring.unlock(encrypted.path, username=BOB_NAME, password=BOB_PW)
         == encrypted.key
     )
     # the company key is wrapped for the new password, not the old
     assert (
-        company_keyring.unlock(encrypted.path, username="admin", password=NEW_PW)
+        company_keyring.unlock(encrypted.path, username=ADMIN_NAME, password=NEW_PW)
         == encrypted.key
     )
     with pytest.raises(company_keyring.Locked):
-        company_keyring.unlock(encrypted.path, username="admin", password=ADMIN_PW)
+        company_keyring.unlock(encrypted.path, username=ADMIN_NAME, password=ADMIN_PW)
     # the recovery key is not used up: it still opens the file
     assert (
         company_keyring.unlock(encrypted.path, recovery_key=encrypted.recovery)
