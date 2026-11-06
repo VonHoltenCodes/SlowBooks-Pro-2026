@@ -520,6 +520,17 @@ here." in place of **+ New pay application**, with a link to the Contract
 tab, and `POST /api/pay-applications` refuses with 409 and the same sentence
 (#714).
 
+**An application with no lines can be deleted.** One made before 2.31.8 on a
+job with no schedule of values has no lines, so it could not be given amounts
+or approved, and as the job's open application it kept New from making
+another. Its row on the Pay apps tab offers **Delete** in place of Submit and
+Approve, and Edit says why there is nothing on it to bill
+(`DELETE /api/pay-applications/{id}`; only a draft or submitted application
+with no lines is deleted: 409 `application_has_lines` or
+`application_not_open` otherwise). While it is open, New is refused with a
+sentence that names it and says to delete it. An approved application with
+no lines and a zero total is voided like any other (#723).
+
 **The application and its math.** Every SOV line (work, allowance, contingency
 and change-order lines all bill the same way) carries, per period:
 
