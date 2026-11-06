@@ -38,6 +38,7 @@ from app.services.accounting import (
     get_sales_tax_account_id,
 )
 from app.services.closing_date import check_closing_date
+from app.services.contracts import original_contract_sum, settle_contract_type
 from app.services.numbering import next_invoice_number
 from app.services.payment_terms import term_id_for
 from app.services.pay_applications import (
@@ -348,6 +349,8 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
     # with nothing to type an amount into (#714).
     if not job.sov_lines:
         raise HTTPException(status_code=409, detail=NO_SOV_MESSAGE)
+    # A sum billed with no contract type saved is a lump sum (#723).
+    settle_contract_type(db, job)
     # Only one draft/submitted application per job at a time.
     open_one = (
         db.query(PayApplication)
@@ -355,12 +358,19 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
         .first()
     )
     if open_one is not None:
+        # An open one with no lines (made before the job had a schedule of
+        # values, #714) can't be billed or approved, so "submit or approve it"
+        # was no way out: it is deleted instead (#723).
+        message = (
+            f"{open_one.number} has no lines because it was made before this "
+            "job had a schedule of values. Delete it, then make a new pay "
+            "application."
+            if not open_one.lines
+            else f"{open_one.number} is still open; submit or approve it first."
+        )
         raise HTTPException(
             status_code=409,
-            detail={
-                "code": "application_open",
-                "message": f"{open_one.number} is still open; submit or approve it first.",
-            },
+            detail={"code": "application_open", "message": message},
         )
     last = (
         db.query(PayApplication)
@@ -457,6 +467,35 @@ def update_pay_application(
     return _out(db, app)
 
 
+@router.delete("/{app_id}")
+def delete_pay_application(app_id: int, db: Session = Depends(get_db)):
+    """Delete an open (draft or submitted) pay application that has no lines
+    (#723). One made before the job had a schedule of values (#714) could not
+    be given amounts, approved or voided, and as the job's open application it
+    refused every new one. An application with lines is never deleted: it is
+    edited, or approved and then voided. It has no invoice or journal to undo."""
+    app = _get(db, app_id)
+    if app.status not in _OPEN:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "application_not_open",
+                "message": "Only a draft or submitted pay application can be deleted; void an approved one instead.",
+            },
+        )
+    if app.lines:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "application_has_lines",
+                "message": "This pay application has lines, so it can't be deleted. Change its amounts, or approve it and void it.",
+            },
+        )
+    db.delete(app)
+    db.commit()
+    return {"message": f"{app.number} deleted"}
+
+
 @router.post("/{app_id}/submit", response_model=PayApplicationOut)
 def submit_pay_application(app_id: int, db: Session = Depends(get_db)):
     app = _get(db, app_id)
@@ -530,7 +569,11 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
             detail="This payment application has nothing to bill, hold, release or apply.",
         )
 
-    app.contract_sum_original = job.original_contract_amount
+    # The contract sums as of approval (#723): a job billed with no contract
+    # type saved is settled as a lump sum first, so the original is stamped
+    # (the sum less any change orders already approved), never left empty.
+    settle_contract_type(db, job)
+    app.contract_sum_original = original_contract_sum(db, job)
     app.contract_sum_to_date = job.contract_amount
     invoice = None
     if invoice_lines or retainage_held != 0 or retainage_released != 0 or deposit:

@@ -25,6 +25,10 @@ const JobsPage = {
     // detail state
     _job: null,
     _tab: 'overview',
+    // The tab each job was left on, by job id, for this session (#723): one
+    // tab shared by every job opened a newly created job on the last job's
+    // Pay apps. A job not opened yet opens on Overview.
+    _tabByJob: {},
     _period: { start: '', end: '' },
     _tree: null,
     _open: new Set(),        // expanded node keys
@@ -175,6 +179,8 @@ const JobsPage = {
     // (replaced, as a change inside a view is).
     async renderDetail(id, query) {
         JobsPage._job = null;
+        const remembered = JobsPage._tabByJob[String(id)];
+        JobsPage._tab = remembered && JobsPage.tabLabels()[remembered] ? remembered : 'overview';
         JobsPage._tree = null;
         JobsPage._open = new Set();
         JobsPage._showLines = new Set();
@@ -229,6 +235,7 @@ const JobsPage = {
 
     async setTab(tab) {
         JobsPage._tab = tab;
+        if (JobsPage._job) JobsPage._tabByJob[String(JobsPage._job.id)] = tab;
         $$('[data-jobtab]').forEach(b => { b.className = `btn btn-sm ${b.dataset.jobtab === tab ? 'btn-primary' : 'btn-secondary'}`; });
         const body = $('#job-tab-body');
         if (body) { body.innerHTML = '<p style="color:var(--gray-500);">Loading…</p>'; body.innerHTML = await JobsPage.tabHtml(); }
@@ -1306,8 +1313,13 @@ const JobsPage = {
         const id = a.id;
         const open = a.status === 'draft' || a.status === 'submitted';
         const parts = [`<button class="btn btn-sm btn-secondary" onclick="JobsPage.paEdit(${id})">${open ? 'Edit' : 'View'}</button>`];
-        if (a.status === 'draft') parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paSubmit(${id})">Submit</button>`);
-        if (open) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paApprove(${id})">Approve</button>`);
+        // An open application with no lines (made before the job had a
+        // schedule of values) has nothing to submit or approve: it is
+        // deleted, so the job can be billed again (#723).
+        const empty = open && !(a.lines || []).length;
+        if (empty) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paDelete(${id})">Delete</button>`);
+        if (a.status === 'draft' && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paSubmit(${id})">Submit</button>`);
+        if (open && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paApprove(${id})">Approve</button>`);
         if (a.status === 'approved') parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paVoid(${id})">Void</button>`);
         parts.push(`<button class="btn btn-sm btn-secondary" onclick="window.open('/api/pay-applications/${id}/pdf','_blank')">PDF</button>`);
         if (a.status === 'approved' && a.invoice_id) parts.push(`<button class="btn btn-sm btn-secondary" onclick="JobsPage.paWaivers(${id})">Waivers</button>`);
@@ -1344,8 +1356,31 @@ const JobsPage = {
         };
     },
 
+    // The sentence an open application with no lines shows in place of its
+    // grid (#723), with the one thing that can be done with it.
+    paEmptyHtml(a) {
+        return `<div id="pa-empty" style="margin:4px 0 8px">
+            <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">Pay application ${escapeHtml(a.number)}</h4>
+            <p role="note" style="margin:0 0 8px">This pay application has no lines because it was made before the job had a schedule of values, so there is nothing on it to bill. Delete it, then make a new pay application from the schedule of values.</p>
+            <div class="form-actions" data-write style="justify-content:flex-start;gap:8px">
+                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id})">Delete this pay application</button>
+                <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
+            </div>
+        </div>`;
+    },
+
+    async paDelete(id) {
+        if (!confirm('Delete this pay application? It has no lines, so nothing has been billed on it.')) return;
+        try {
+            await API.del(`/pay-applications/${id}`);
+            toast('Pay application deleted');
+            await JobsPage.setTab('payapps');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
     paFormHtml(a) {
         const ro = !(a.status === 'draft' || a.status === 'submitted');
+        if (!ro && !(a.lines || []).length) return JobsPage.paEmptyHtml(a);
         const d = ro ? 'disabled' : '';
         return `<form id="pa-form" data-write onsubmit="JobsPage.paSave(event, ${a.id})">
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">Pay application ${escapeHtml(a.number)}</h4>

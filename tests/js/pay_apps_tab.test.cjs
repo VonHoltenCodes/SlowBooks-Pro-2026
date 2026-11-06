@@ -136,7 +136,8 @@ test('the invoice view shows the retainage lines', () => {
 test('the application form carries the tax toggle and the waivers screen lists each type', () => {
     const page = jobsContext(true).JobsPage;
     const form = page.paFormHtml({
-        id: 4, number: 'PA-1-02', status: 'draft', lines: [], totals: {}, tax_rate: 0.08,
+        id: 4, number: 'PA-1-02', status: 'draft', totals: {}, tax_rate: 0.08,
+        lines: [{ sov_line_id: 1, description: 'Framing', scheduled_value: 1000, previous: 0, this_period: 0, stored: 0 }],
         charge_tax: true, retainage_pct: 10, unapplied_deposits: 0,
     });
     assert.match(form, /id="pa-tax-on"[^>]*checked/);
@@ -152,4 +153,16 @@ test('an approved application offers its waivers', () => {
     const page = jobsContext(true).JobsPage;
     assert.match(page.paRowActions({ id: 3, status: 'approved', invoice_id: 9 }), /paWaivers\(3\)/);
     assert.doesNotMatch(page.paRowActions({ id: 3, status: 'draft' }), /paWaivers/);
+});
+
+test('an open application with no lines offers Delete in place of Submit and Approve (#723)', () => {
+    const page = jobsContext(true).JobsPage;
+    const empty = page.paRowActions({ id: 3, status: 'draft', lines: [] });
+    assert.match(empty, /paDelete\(3\)/);
+    assert.doesNotMatch(empty, /paSubmit|paApprove/);
+    const full = page.paRowActions({ id: 3, status: 'draft', lines: [{ sov_line_id: 1 }] });
+    assert.doesNotMatch(full, /paDelete/);
+    assert.match(full, /paSubmit\(3\)/);
+    assert.doesNotMatch(page.paRowActions({ id: 3, status: 'approved', lines: [] }), /paDelete/);
+    assert.match(page.paFormHtml({ id: 3, number: 'PA-1-01', status: 'draft', lines: [], totals: {} }), /id="pa-empty"/);
 });

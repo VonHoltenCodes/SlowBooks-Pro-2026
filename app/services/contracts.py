@@ -59,6 +59,105 @@ def contract_is_locked(db: Session, job: Job) -> bool:
     )
 
 
+def _utc(ts):
+    """A stored timestamp as an aware UTC one (a naive one is UTC here)."""
+    from datetime import timezone
+
+    return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
+
+
+def approved_contract_changes(db: Session, job: Job, through=None) -> Decimal:
+    """Σ sell of the job's approved, contract-funded owner change orders — the
+    "net change by change orders" (#723). With `through` (a timestamp, such as
+    a pay application's approval) only those approved on or before it count,
+    so an application reads the change orders as they stood when it was
+    approved."""
+    from app.models.change_orders import ChangeOrder
+    from app.services.change_orders import co_totals
+
+    cos = (
+        db.query(ChangeOrder)
+        .filter(
+            ChangeOrder.job_id == job.id,
+            ChangeOrder.kind == "owner",
+            ChangeOrder.status == "approved",
+            ChangeOrder.funding == "contract",
+        )
+        .all()
+    )
+    total = Decimal("0")
+    for co in cos:
+        if through is not None and (
+            co.approved_at is None or _utc(co.approved_at) > _utc(through)
+        ):
+            continue
+        total += co_totals(co, job)["sell_total"]
+    return _q(total)
+
+
+def original_contract_sum(db: Session, job: Job) -> Optional[Decimal]:
+    """The original contract sum: the stamped original when there is one, else
+    the contract sum less the approved change orders (#723). A sum typed on
+    the job form with no contract type saved was never stamped, and reading
+    the missing original as zero printed the whole contract as a change. None
+    only when the job has no contract sum at all."""
+    if job.original_contract_amount is not None:
+        return _q(job.original_contract_amount)
+    if job.contract_amount is None:
+        return None
+    return _q(_q(job.contract_amount) - approved_contract_changes(db, job))
+
+
+def application_contract_sums(db: Session, app, job: Optional[Job]) -> dict:
+    """The contract rows of a pay application's header (#723): the original
+    contract sum, the net change by change orders and the contract sum to
+    date, which always foot (original + net change = to date).
+
+    An approved application reads the sums it snapshotted at approval, so a
+    reprint does not pick up change orders approved later. A snapshot with no
+    original (approved while the job had no original stamped) reads the net
+    change as the change orders approved on or before the application's
+    approval, and the original as the sum less them. A draft reads the job as
+    it stands."""
+    zero = Decimal("0")
+    if app.contract_sum_to_date is not None:
+        to_date = _q(app.contract_sum_to_date)
+        if app.contract_sum_original is not None:
+            original = _q(app.contract_sum_original)
+            net = _q(to_date - original)
+        else:
+            net = (
+                approved_contract_changes(db, job, through=app.approved_at)
+                if job is not None
+                else zero
+            )
+            original = _q(to_date - net)
+        return {"original": original, "net_change": net, "to_date": to_date}
+    if job is None or job.contract_amount is None:
+        return {"original": zero, "net_change": zero, "to_date": zero}
+    to_date = _q(job.contract_amount)
+    original = original_contract_sum(db, job)
+    return {
+        "original": original,
+        "net_change": _q(to_date - original),
+        "to_date": to_date,
+    }
+
+
+def settle_contract_type(db: Session, job: Job) -> None:
+    """A contract sum becomes billable once the job has a schedule of values:
+    with no type saved it is taken as a lump sum, and its original is stamped,
+    as building the schedule from an estimate already does (#723). Called when
+    the schedule is saved and when a pay application is made or approved; a
+    job with no sum, or with a type, is left alone."""
+    if job.contract_amount is None:
+        return
+    if job.contract_type is None:
+        job.contract_type = "lump_sum"
+    if job.original_contract_amount is None:
+        job.original_contract_amount = original_contract_sum(db, job)
+
+
 def sov_from_estimate(estimate: Estimate) -> list[dict]:
     """The SOV lines an accepted estimate produces, in print order:
 
@@ -299,9 +398,13 @@ def contract_summary(
     ctype = job.contract_type
     amount = job.contract_amount
     original = job.original_contract_amount
+    # Changes is the sum less the original; with no original stamped (a sum
+    # from the job form, no type saved) the original is the sum less the
+    # approved change orders, so Changes is those change orders (#723).
+    figured_original = original_contract_sum(db, job)
     changes = (
-        _q(amount - original)
-        if amount is not None and original is not None
+        _q(amount - figured_original)
+        if amount is not None and figured_original is not None
         else Decimal("0")
     )
 
