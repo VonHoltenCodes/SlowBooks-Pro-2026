@@ -279,23 +279,12 @@ html, body { height: 100%; }
 /* A field the keyboard moves to comes into view clear of the two */
 .modal { scroll-padding-top: 40px; scroll-padding-bottom: 56px; }
 /* A width rule (@media max-width) reads the window, not the page: at
-   150% a 1366 window is a 911px page. The toolbar's rules (below, after
-   .topbar-clock) are given again here at each size, at the window width
-   where the page is that narrow, so the bar gives up its buttons and
-   nothing is past its right edge; and so are the 900px rules that stack
-   the dashboard's cards and a bill's vendor summary. */
-@media screen and (max-width: 1620px) {
-    html[data-text-size="115"] #topbar-clock, html[data-text-size="115"] .topbar-brand span { display: none; }
-    html[data-text-size="115"] .topbar-brand { margin-right: 6px; }
-    html[data-text-size="115"] #topbar .tb-sep { margin: 0 2px; }
-    html[data-text-size="115"] #topbar .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
-}
-@media screen and (max-width: 1436px) {
-    html[data-text-size="115"] #topbar .tb-btn[data-nav="#/quick-entry"], html[data-text-size="115"] #topbar .tb-btn[data-nav="#/bill-entry"] { display: none; }
-}
-@media screen and (max-width: 1275px) {
-    html[data-text-size="115"] #topbar .tb-btn[data-action] { display: none; }
-}
+   150% a 1366 window is a 911px page. The 900px rules that stack the
+   dashboard's cards and a bill's vendor summary are given again here at
+   each size, at the window width where the page is that narrow. The top
+   bar is not: it is measured and folds to fit at any size (topbar_fit.js,
+   style.css "TOP BAR — folding"), and so is Settings' list of groups
+   (settings.js SettingsPage._fitNav). */
 @media screen and (max-width: 1035px) {
     html[data-text-size="115"] .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     html[data-text-size="115"] .dash-card--full { grid-column: span 2; }
@@ -306,18 +295,6 @@ html, body { height: 100%; }
     html[data-text-size="115"] .dash-grid { grid-template-columns: 1fr; }
     html[data-text-size="115"] .dash-card--full { grid-column: span 1; }
 }
-@media screen and (max-width: 1761px) {
-    html[data-text-size="125"] #topbar-clock, html[data-text-size="125"] .topbar-brand span { display: none; }
-    html[data-text-size="125"] .topbar-brand { margin-right: 6px; }
-    html[data-text-size="125"] #topbar .tb-sep { margin: 0 2px; }
-    html[data-text-size="125"] #topbar .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
-}
-@media screen and (max-width: 1561px) {
-    html[data-text-size="125"] #topbar .tb-btn[data-nav="#/quick-entry"], html[data-text-size="125"] #topbar .tb-btn[data-nav="#/bill-entry"] { display: none; }
-}
-@media screen and (max-width: 1386px) {
-    html[data-text-size="125"] #topbar .tb-btn[data-action] { display: none; }
-}
 @media screen and (max-width: 1125px) {
     html[data-text-size="125"] .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     html[data-text-size="125"] .dash-card--full { grid-column: span 2; }
@@ -327,18 +304,6 @@ html, body { height: 100%; }
 @media screen and (max-width: 700px) {
     html[data-text-size="125"] .dash-grid { grid-template-columns: 1fr; }
     html[data-text-size="125"] .dash-card--full { grid-column: span 1; }
-}
-@media screen and (max-width: 2113px) {
-    html[data-text-size="150"] #topbar-clock, html[data-text-size="150"] .topbar-brand span { display: none; }
-    html[data-text-size="150"] .topbar-brand { margin-right: 6px; }
-    html[data-text-size="150"] #topbar .tb-sep { margin: 0 2px; }
-    html[data-text-size="150"] #topbar .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
-}
-@media screen and (max-width: 1873px) {
-    html[data-text-size="150"] #topbar .tb-btn[data-nav="#/quick-entry"], html[data-text-size="150"] #topbar .tb-btn[data-nav="#/bill-entry"] { display: none; }
-}
-@media screen and (max-width: 1663px) {
-    html[data-text-size="150"] #topbar .tb-btn[data-action] { display: none; }
 }
 @media screen and (max-width: 1350px) {
     html[data-text-size="150"] .dash-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -581,6 +546,86 @@ body {
     #topbar .tb-sep { margin: 0 2px; }
     #topbar .tb-btn { padding-left: 6px; padding-right: 6px; }
 }
+
+/* ========================================================================
+ * TOP BAR — folding (W-126, 2.31.8). The rules above read the window; at a
+ * larger text size the page is narrower than the window, and a long
+ * sign-in name takes room no window width knows of. topbar_fit.js measures
+ * the bar and, while it is wider than the window, adds tb-fold-1, then
+ * tb-fold-2 and so on: each step below puts something away, and More (in
+ * the bar from step 4) lists all of it. Sign Out, Back and the search box
+ * never fold, so nothing is past the window's edge and the page never
+ * scrolls sideways, at any size.
+ * ======================================================================== */
+/* The name signed in: one line, ending in "…" when it is long, its whole
+   self in its title (app.js). It wrapped to three lines and pushed Sign
+   Out out of the window. */
+#topbar .topbar-user {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 16em;
+    min-width: 0;
+}
+#topbar.tb-fold-1 #topbar-clock,
+#topbar.tb-fold-1 .topbar-brand span { display: none; }
+#topbar.tb-fold-1 .topbar-brand { margin-right: 6px; }
+#topbar.tb-fold-1 .tb-sep { margin: 0 2px; }
+#topbar.tb-fold-1 .tb-btn:not(.tb-sidebar-toggle) { padding-left: 6px; padding-right: 6px; }
+#topbar.tb-fold-1 .topbar-right { gap: 4px; }
+#topbar.tb-fold-2 .tb-btn[data-nav="#/quick-entry"],
+#topbar.tb-fold-2 .tb-btn[data-nav="#/bill-entry"] { display: none; }
+#topbar.tb-fold-3 .tb-btn[data-action] { display: none; }
+#topbar.tb-fold-4 #user-chip,
+#topbar.tb-fold-4 #about-btn,
+#topbar.tb-fold-4 #support-btn { display: none; }
+#topbar.tb-fold-5 .tb-btn[data-nav="#/"],
+#topbar.tb-fold-5 .tb-btn[data-nav="#/reports"],
+#topbar.tb-fold-5 .tb-btn[data-nav="#/bill-entry"] + .tb-sep,
+#topbar.tb-fold-5 .tb-btn[data-nav="#/reports"] + .tb-sep { display: none; }
+#topbar.tb-fold-6 .topbar-brand { display: none; }
+#topbar.tb-fold-7 #theme-toggle { display: none; }
+#topbar .tb-more[hidden],
+#topbar .tb-more-menu[hidden] { display: none; }
+/* More's list opens under it, at the bar's right edge, above the page */
+.topbar-right { position: relative; }
+.tb-more-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 250;
+    min-width: 200px;
+    max-width: calc(100vw / var(--ui-scale) - 16px);
+    display: flex;
+    flex-direction: column;
+    padding: 4px 0;
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+}
+.tb-more-who {
+    padding: 6px 12px 8px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--panel-border);
+    font-size: 11px;
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+.tb-more-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 12px;
+    font: inherit;
+    font-size: 12px;
+    color: var(--text-primary);
+    background: transparent;
+    border: 0;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.tb-more-item:hover { background: var(--primary-light); }
+.tb-more-item:focus-visible { outline-offset: -4px; box-shadow: none; }
 
 /* ========================================================================
  * SIDEBAR / NAVIGATOR — left-docked panel with 32x32 icons
@@ -2565,22 +2610,36 @@ tr.clickable { cursor: pointer; }
 
 .settings-dirty-groups:empty { display: none; }
 
-/* A narrow window: the list becomes a row of choices above the panel,
-   rather than squeezing the form beside it. */
-@media (max-width: 900px) {
-    .settings-layout { display: block; }
-    .settings-nav {
-        position: static;
-        width: auto;
-        max-height: none;
-        margin-bottom: 12px;
-    }
-    .settings-groups {
-        flex-direction: row;
-        flex-wrap: wrap;
-    }
-    .settings-tab { width: auto; }
+/* A narrow page: the list becomes a row of choices above the panel,
+   rather than squeezing the form beside it. "Narrow" is a page 900px wide
+   or less, measured (SettingsPage._fitNav): a width rule reads the window,
+   and at 150% a 900px window is a 600px page, where the list stayed beside
+   the form (W-126). Compact, so a group's fields and Save Settings share
+   the window with it at 900 x 600 and 150%: the search box beside its
+   label, the choices closer together, and the list scrolls away with the
+   page. */
+.settings-layout--narrow { display: block; }
+.settings-layout--narrow .settings-nav {
+    position: static;
+    width: auto;
+    max-height: none;
+    margin-bottom: 8px;
+    padding: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    column-gap: 8px;
 }
+.settings-layout--narrow .settings-find-label { margin-bottom: 0; }
+.settings-layout--narrow .settings-find { flex: 1 1 140px; width: auto; }
+.settings-layout--narrow .settings-find-status { flex: 1 0 100%; }
+.settings-layout--narrow .settings-groups {
+    flex: 1 0 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    margin-top: 6px;
+}
+.settings-layout--narrow .settings-tab { width: auto; padding: 3px 7px; }
 
 /* ========================================================================
  * QUICK ENTRY — batch invoice entry

@@ -103,6 +103,11 @@
                 <div class="topbar-clock" id="topbar-clock"></div>
                 <button class="tb-btn" id="about-btn">About</button>
                 <button class="tb-btn" id="support-btn" title="Contact support">Contact support</button>
+                <!-- More (W-126): in the bar only when the bar has folded
+                     things away to fit the window (topbar_fit.js); it lists
+                     them, and the name signed in. -->
+                <button class="tb-btn tb-more" id="topbar-more" type="button" aria-expanded="false" aria-controls="topbar-more-menu" hidden>More <span aria-hidden="true">&#9662;</span></button>
+                <div class="tb-more-menu" id="topbar-more-menu" role="group" aria-label="More" hidden></div>
                 <button class="tb-btn" id="logout-btn" title="Sign out">Sign Out</button>
             </div>
         </div>
@@ -282,6 +287,7 @@
     <div id="toast-container" role="status" aria-live="polite" aria-atomic="false"></div>
 
     <script src="/static/js/desktop_shim.js"></script>
+    <script src="/static/js/topbar_fit.js"></script>
     <script src="/static/js/api.js"></script>
     <script src="/static/js/utils.js"></script>
     <script src="/static/js/combobox.js"></script>

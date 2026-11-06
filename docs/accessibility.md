@@ -100,7 +100,16 @@ or Alt+D.*
   screen included. At every size the sidebar scrolls inside itself, the
   bottom bar stays in the window, a dialog keeps its title and its buttons
   in view while the form scrolls between them, and wide tables scroll
-  sideways in their own box; printing and PDFs are never enlarged. In the
+  sideways in their own box; printing and PDFs are never enlarged. The top
+  bar fits the window at every size, down to the desktop app's smallest
+  window (900 x 600) and a 700-pixel browser window: as room runs out it
+  puts away the clock, then the quick-entry buttons, then moves the
+  signed-in name, About, Contact support, Home and Reports into a More
+  button that lists them, so Sign Out is always in view and the page never
+  scrolls sideways. A long signed-in name ends in "…", and its whole self
+  is in its tooltip. Settings puts its list of groups above the form on a
+  narrow page, measured at the text size, so the list, the fields and Save
+  Settings share the window. In the
   desktop app Ctrl and + or −, Ctrl+0 to go back to 100%, and Ctrl and the
   mouse wheel (⌘ on a Mac) step through the same four sizes. A window zoom
   set in an earlier version was carried over to the nearest size, and to

@@ -993,7 +993,7 @@ def test_a_control_the_keyboard_puts_under_settings_save_bar_is_scrolled_clear()
     assert "document.addEventListener('focusin'" not in src
     for line in (
         "const a = e.target, bar = document.getElementById('settings-savebar');",
-        "if (!bar || !a || !a.closest || bar.contains(a) || !a.closest('#settings-form')) return;",
+        "if (!bar || !a || !a.closest || bar.contains(a) || !a.closest('#settings-panel')) return;",
         "if (!App.keyboardFocus()) return;",
         "if (!b.height || !content) return;",
         "const over = a.getBoundingClientRect().bottom + 8 - b.top;",

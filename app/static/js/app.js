@@ -3030,9 +3030,13 @@ const App = {
                     if (right && !document.getElementById('user-chip')) {
                         const chip = document.createElement('span');
                         chip.id = 'user-chip';
-                        chip.className = 'topbar-clock';
+                        // a long name ends in "…" with the whole of it as
+                        // its title, and folds into More when the bar is
+                        // short of room (topbar_fit.js, W-126)
+                        chip.className = 'topbar-clock topbar-user';
                         chip.textContent =
                             `${a.user.display_name || a.user.username} · ${a.user.role}`;
+                        chip.title = `Signed in as ${chip.textContent}`;
                         right.prepend(chip);
                     }
                 }
