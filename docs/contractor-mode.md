@@ -225,7 +225,9 @@ owner. A construction job grows a **Contract** tab (construction mode only;
 every other company sees the job pages exactly as before) that holds the
 terms, a few summary tiles and the owner's schedule of values. A job with no
 contract type set behaves the way it always has — the plain Contract amount on
-the job form still works for everyone.
+the job form still works for everyone. A newly created job opens on its
+**Overview**; each job you open keeps the tab you left it on for the rest of
+the session, so one job's Pay apps no longer carries over to the next (#723).
 
 **The three types.** A job's contract is a **lump sum** (one fixed price), a
 **GMP** — guaranteed maximum price (cost-plus up to a ceiling the owner is

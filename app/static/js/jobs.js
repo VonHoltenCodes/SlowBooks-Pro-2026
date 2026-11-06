@@ -25,6 +25,10 @@ const JobsPage = {
     // detail state
     _job: null,
     _tab: 'overview',
+    // The tab each job was left on, by job id, for this session (#723): one
+    // tab shared by every job opened a newly created job on the last job's
+    // Pay apps. A job not opened yet opens on Overview.
+    _tabByJob: {},
     _period: { start: '', end: '' },
     _tree: null,
     _open: new Set(),        // expanded node keys
@@ -175,6 +179,8 @@ const JobsPage = {
     // (replaced, as a change inside a view is).
     async renderDetail(id, query) {
         JobsPage._job = null;
+        const remembered = JobsPage._tabByJob[String(id)];
+        JobsPage._tab = remembered && JobsPage.tabLabels()[remembered] ? remembered : 'overview';
         JobsPage._tree = null;
         JobsPage._open = new Set();
         JobsPage._showLines = new Set();
@@ -229,6 +235,7 @@ const JobsPage = {
 
     async setTab(tab) {
         JobsPage._tab = tab;
+        if (JobsPage._job) JobsPage._tabByJob[String(JobsPage._job.id)] = tab;
         $$('[data-jobtab]').forEach(b => { b.className = `btn btn-sm ${b.dataset.jobtab === tab ? 'btn-primary' : 'btn-secondary'}`; });
         const body = $('#job-tab-body');
         if (body) { body.innerHTML = '<p style="color:var(--gray-500);">Loading…</p>'; body.innerHTML = await JobsPage.tabHtml(); }
