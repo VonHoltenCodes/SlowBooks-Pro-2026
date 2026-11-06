@@ -414,7 +414,7 @@
         const link = overlay.querySelector("#auth-forgot");
         const panel = overlay.querySelector("#auth-forgot-panel");
         const notice = overlay.querySelector("#auth-recovery-notice");
-        if (notice) {
+        if (notice && forgot && forgot.kind === "recovery_reset") {
             windowCanReset().then(function (api) {
                 if (!api || !notice.isConnected) return;
                 notice.innerHTML = escapeText(forgot.message) + "<br>" + resetButtonHTML("auth-reset-open");
