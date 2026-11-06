@@ -19,6 +19,14 @@ on what the software does, not on what sprint shipped what.
 
 **A bank feed with no account to import into says so** (#718, from discussion #588). On Banking → Bank Feeds, when no account in the chart is marked as a bank account the row says so in place of a list with nothing in it, and offers **+ New bank account** and **Use an account I already have…**, which turns an account already in the chart into a bank or credit-card account and maps the feed to it. A sign-in that may not change the mapping sees where each feed imports as text.
 
+**QuickBooks Desktop: Transaction Detail by Account keeps each line's Class** (#722). The report's Class column was never read, so a file that keeps entities or properties apart by class imported with every line unclassified and P&L by Class was empty, although the guide said the class travelled. Each row's class now lands on its line; a class the books lack is created and named in the result; a file with no Class column imports as before. Lines imported before this release do not gain a class from a second import: import into a fresh company, or restore the backup taken before the import.
+
+**The pay application's original contract sum** (#723). A job whose contract sum was typed on the job form, with no contract type saved, billed with no original recorded, and its pay application PDF printed Original contract sum $0.00 with the whole contract as Net change by change orders. The original is now the contract sum less the approved change orders, on the PDF, the Contract tab, the WIP schedule and the change-order log alike, applications already approved included; and saving a schedule of values or making an application settles the contract type as lump sum where none was saved.
+
+**A pay application with no lines has a way out** (#723). One made before the job had a schedule of values could not be given amounts, approved, voided or removed, and stopped any new one. It can be deleted from the Pay apps tab, and New pay application says why it is refused. `DELETE /api/pay-applications/{id}`.
+
+**A new job opens on Overview** (#723). The job page remembered one tab for every job, so a newly created job opened on whatever tab the last job was left on. Each job keeps its own tab now, and one opened for the first time starts on Overview.
+
 **A pay application needs a schedule of values, and says so** (#714). New pay application on a job with no schedule of values opened an empty grid with nothing to type into. It now says to set the contract on the job's Contract tab first, with a link, and creates nothing.
 
 **Skip to main content is a button in the top bar.** The link keyboard and screen-reader users take past the menus showed, on focus, as a large box over the menu button, the wordmark and Back. It is now a small arrow button at the start of the top bar, named and titled "Skip to main content", still the first Tab stop on every page with the bar's own focus ring, covering nothing.

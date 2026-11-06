@@ -8,7 +8,8 @@
       "Click a line's ✓ cell in a bank or card register to mark it cleared as it posts at the bank; the next reconciliation opens with it ticked.",
       "The reconcile list sorts by Date, Payee, Ref # or Amount, with check numbers in number order.",
       "A bank feed with no bank account to import into says so and lets you pick an account you already have.",
-      "A pay application on a job with no schedule of values says to set the contract first.",
+      "Importing QuickBooks Desktop's Transaction Detail by Account report keeps each line's Class, so P&L by Class shows the imported history.",
+      "Pay applications: a job with no schedule of values says to set the contract first; the PDF's original contract sum is right when the sum was typed on the job form; an application with no lines can be deleted.",
       "Skip to main content is a small arrow button at the start of the top bar, still the first Tab stop, and no longer covers the menu button."
     ]
   },

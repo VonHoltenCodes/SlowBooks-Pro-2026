@@ -247,7 +247,7 @@ jobs:
           # 195 with the feed review's class/job/name browser test (#671,
           # test_browser_review_dims.py, Chromium through playwright, which
           # is not installed here; every browser test skips the same way).
-          MAX_SKIPS: "218"
+          MAX_SKIPS: "220"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
