@@ -2474,12 +2474,9 @@ tr.clickable { cursor: pointer; }
     background: var(--content-bg);
 }
 
-/* The form draws no box of its own, so the Save Settings bar (sticky to the
-   bottom of the window) is held within the whole panel, not the form: in
-   Preferences, My Preferences (outside the form) can fill a short window at
-   a large text size, and the bar, held within the form below it, sat out of
-   view. Nothing else changes: the fields are the form's as before. */
-.settings-panel > #settings-form { display: contents; }
+/* The Save Settings bar (sticky to the bottom of the window) is the panel's
+   last child, after the form, so it stays in view whatever fills the window
+   above it; the form is an ordinary box (NEW-210). */
 
 .settings-section.settings-off { display: none !important; }
 

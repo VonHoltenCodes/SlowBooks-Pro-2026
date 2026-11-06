@@ -492,3 +492,45 @@ def test_save_stays_in_view_and_the_list_scrolls_inside_itself(
             assert last <= got["height"], last
     finally:
         page.close()
+
+
+def test_the_form_is_a_box_and_save_is_still_its_own_button(browser, company, books):
+    """NEW-210: the form drew no box of its own (display: contents), and an
+    accessibility client on the Mac found the panel empty after a switch of
+    group. The form is an ordinary box now, with the Save bar after it in
+    the panel; the button is the form's submit by its form attribute, so
+    Enter in a field saves as before."""
+    page, handled = _open_at(browser, company, "#/settings")
+    try:
+        page.click("#settings-tab-email")
+        got = page.evaluate("""() => {
+            const form = document.getElementById('settings-form'),
+                  bar = document.getElementById('settings-savebar'),
+                  btn = document.getElementById('settings-save-btn'),
+                  panel = document.getElementById('settings-panel');
+            return {
+                display: getComputedStyle(form).display,
+                height: form.getBoundingClientRect().height,
+                barInForm: form.contains(bar),
+                barLast: panel.lastElementChild === bar,
+                owner: btn.form && btn.form.id,
+                fields: [...panel.querySelectorAll('.settings-section')]
+                    .filter(s => s.getClientRects().length).length,
+            };
+        }""")
+        assert got["display"] not in ("contents", "none"), got
+        assert got["height"] > 0 and got["fields"] > 0, got
+        assert got["barInForm"] is False and got["barLast"] is True, got
+        assert got["owner"] == "settings-form", got
+        # Enter in a field of the form still saves through the one button
+        page.click("#settings-tab-company")
+        box = page.locator("#settings-form [name=company_phone]")
+        box.fill("555-0199")
+        assert page.inner_text("#settings-dirty-note") == "Unsaved changes"
+        box.press("Enter")
+        page.wait_for_function(
+            "() => !document.getElementById('settings-dirty-note').textContent"
+        )
+        assert _ok(company.get("/api/settings"))["company_phone"] == "555-0199"
+    finally:
+        page.close()

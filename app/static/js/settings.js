@@ -1116,6 +1116,13 @@ const SettingsPage = {
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
                 </div>
 
+            </form>`;
+        // The Save bar is the panel's, not the form's (NEW-210): held inside
+        // the form it could not stay in view when My Preferences, above the
+        // form, filled a short window, and the way round that (the form
+        // drawing no box of its own) left the panel empty to an accessibility
+        // client on the Mac. Its button is still the form's own submit.
+        const savebar = `
                 <!-- Always in reach: the one Save for the settings above sat at
                      the very bottom, after 25 other buttons, and the first
                      "Save" on the page was AI Insights' (explore 2.17.3, L16). -->
@@ -1125,9 +1132,8 @@ const SettingsPage = {
                     <span id="settings-dirty-note" role="status" aria-live="polite"
                         style="margin-right:auto; font-size:11px; color:var(--text-muted);"></span>
                     <span id="settings-dirty-groups" class="settings-dirty-groups" role="status" aria-live="polite"></span>
-                    <button type="submit" class="btn btn-primary" id="settings-save-btn">Save Settings</button>
-                </div>
-            </form>`;
+                    <button type="submit" form="settings-form" class="btn btn-primary" id="settings-save-btn">Save Settings</button>
+                </div>`;
         return `
             <div class="page-header">
                 <h2>Company Settings</h2>
@@ -1138,6 +1144,7 @@ const SettingsPage = {
                 <div class="settings-panel" id="settings-panel" role="tabpanel">
                     ${SettingsPage._myPreferencesHtml()}
                     ${form}
+                    ${savebar}
                 </div>
             </div>`;
     },

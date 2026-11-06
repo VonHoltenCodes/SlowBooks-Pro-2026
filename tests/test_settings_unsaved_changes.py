@@ -70,12 +70,17 @@ def test_unsaved_changes_are_tracked_and_leaving_asks_first():
 
 
 def test_the_save_bar_stays_in_reach_and_is_the_forms_own_submit():
-    bar = JS[JS.index('id="settings-savebar"') - 40 : JS.index("</form>`;")]
+    # the bar sits after the form, the panel's last child (NEW-210), and its
+    # button is the form's own submit by the form attribute
+    at = JS.index('id="settings-savebar"')
+    assert at > JS.index("</form>`;")
+    bar = JS[at - 40 : JS.index("</div>`;", at)]
     assert "position:sticky; bottom:0" in bar
     assert (
-        '<button type="submit" class="btn btn-primary" id="settings-save-btn">Save Settings</button>'
+        '<button type="submit" form="settings-form" class="btn btn-primary" id="settings-save-btn">Save Settings</button>'
         in bar
     )
+    assert "${form}\n                    ${savebar}" in JS
     assert 'id="settings-dirty-note"' in bar
     # and AI Insights' own button no longer reads as the page's "Save"
     assert 'id="ai-settings-save">Save AI settings</button>' in JS
