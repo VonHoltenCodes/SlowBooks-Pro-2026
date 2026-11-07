@@ -206,3 +206,39 @@ def test_the_construction_estimate_pdf_has_no_status(client, db_session, seed_cu
     est = _est(client, seed_customer.id, line)
     assert "Status:" not in _html(db_session, est["id"], "construction")
     assert "Status:" in _html(db_session, est["id"], "business")
+
+
+def test_a_late_fee_stays_in_the_aging_and_ties_to_1100(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A fee posts its own A/R debit; an edit of the invoice used to drop it
+    from the balance, and an aging dated before the fee still counted it."""
+    from datetime import date, timedelta
+
+    from tests.test_aging_everywhere_ties import _tb
+    from tests.test_late_fee_job_and_void import (
+        _apply_late_fees,
+        _overdue_job_invoice,
+    )
+
+    _job_id, inv_id = _overdue_job_invoice(client, seed_customer)
+    _apply_late_fees(client)  # 5% of 100
+
+    def aging(**params):
+        r = client.get("/api/reports/ar-aging", params=params)
+        return D(str(r.json()["totals"]["total"]))
+
+    assert aging() == D("105.00") == _tb(client)["1100"]
+    # before the fee posted the invoice owed 100, as 1100 did
+    yesterday = (date.today() - timedelta(days=1)).isoformat()
+    assert aging(as_of_date=yesterday) == D("100.00")
+
+    # re-lining the invoice keeps the fee on it
+    r = client.put(
+        f"/api/invoices/{inv_id}",
+        json={"lines": [{"description": "Service", "quantity": 1, "rate": 100}]},
+    )
+    assert r.status_code == 200, r.text
+    assert D(str(r.json()["balance_due"])) == D("105.00")
+    assert aging() == D("105.00") == _tb(client)["1100"]
+    assert aging(as_of_date=yesterday) == D("100.00")

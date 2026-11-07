@@ -861,7 +861,10 @@ Receivable (its total less the retainage held, plus any released; the line says
 how much was held or released), so its **Balance Due** is the amount due and
 equals A/R Aging for that customer. The retainage still held across the
 customer's invoices (held − released, to the statement date) prints on its own
-line, *Retainage held, not yet due*, beside the balance. The statement takes
+line, *Retainage held, not yet due*, beside the balance. A late fee (Apply Late Fees)
+posts its own A/R debit and is part of the invoice's balance from the day it posts: an
+edit of the invoice keeps it, and an aging dated before that day reads the invoice
+without it, so A/R Aging ties to 1100 on every date. The statement takes
 `as_of_date` only; it has no start date. A dropped retainage percent makes the retainage this period negative and
 the 1150 leg a credit; the entry still balances. **Void** reverses the
 invoice (and the 1150 entries), and later applications stay correct because

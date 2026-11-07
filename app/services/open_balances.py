@@ -32,7 +32,7 @@ from app.models.bills import (
 from app.models.credit_memos import CreditApplication, CreditMemo, CreditMemoStatus
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
-from app.models.transactions import Transaction
+from app.models.transactions import Transaction, TransactionLine
 from app.models.vendor_credits import (
     VendorCredit,
     VendorCreditApplication,
@@ -74,6 +74,42 @@ def _void_after(db: Session, source_type: str, model, as_of: date) -> set[int]:
     }
 
 
+def late_fees(db: Session, invoice_ids=None) -> dict[int, list[tuple[date, Decimal]]]:
+    """Invoice id -> [(date, amount)] of the late fees standing on it. A fee
+    posts its own A/R debit (source_type "late_fee") and is also added to the
+    invoice's total and balance; a fee voided in the journal is not standing."""
+    from app.services.qbo_documents import REVERSALS
+
+    q = db.query(Transaction).filter(Transaction.source_type == "late_fee")
+    if invoice_ids is not None:
+        q = q.filter(Transaction.source_id.in_(invoice_ids))
+    out: dict[int, list[tuple[date, Decimal]]] = {}
+    for txn in q.order_by(Transaction.date, Transaction.id):
+        reversed_ = (
+            db.query(Transaction.id)
+            .filter(
+                Transaction.source_type.in_(REVERSALS),
+                Transaction.source_id == txn.id,
+            )
+            .first()
+        )
+        if reversed_ is not None:
+            continue
+        amount = _dec(
+            db.query(func.sum(TransactionLine.debit))
+            .filter(TransactionLine.transaction_id == txn.id)
+            .scalar()
+        )
+        if amount > 0:
+            out.setdefault(txn.source_id, []).append((txn.date, amount))
+    return out
+
+
+def standing_late_fee(db: Session, invoice_id: int) -> Decimal:
+    """The late fees standing on one invoice, whatever their date."""
+    return sum((a for _, a in late_fees(db, [invoice_id]).get(invoice_id, [])), ZERO)
+
+
 def open_invoices_as_of(db: Session, as_of: date) -> list[tuple[Invoice, Decimal]]:
     """Every invoice dated on or before `as_of` with what was still owed on
     it then (its own currency), the open ones only."""
@@ -107,8 +143,12 @@ def open_invoices_as_of(db: Session, as_of: date) -> list[tuple[Invoice, Decimal
     )
     q = q.filter(or_(live, Invoice.id.in_(voided_later)))
 
+    invoices = q.order_by(Invoice.date, Invoice.id).all()
+    # A fee is in the invoice's total from the day it posts: before that day
+    # the invoice owed without it, as 1100 did.
+    fees = late_fees(db, [inv.id for inv in invoices])
     out = []
-    for inv in q.order_by(Invoice.date, Invoice.id):
+    for inv in invoices:
         if inv.status == InvoiceStatus.VOID:
             # open until its void entry, as booked: net of retainage held
             bal = (
@@ -122,6 +162,7 @@ def open_invoices_as_of(db: Session, as_of: date) -> list[tuple[Invoice, Decimal
                 + later_paid.get(inv.id, ZERO)
                 + later_credited.get(inv.id, ZERO)
             )
+        bal -= sum((a for d, a in fees.get(inv.id, []) if d > as_of), ZERO)
         if bal > 0:
             out.append((inv, bal))
     return out
