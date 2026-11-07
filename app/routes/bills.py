@@ -682,6 +682,14 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         key in update_data and update_data[key] != getattr(bill, key)
         for key in repost_fields
     )
+    # A retainage release bill (#555) debits 2050, not an expense account; a
+    # re-post would put its line on the vendor's default expense instead.
+    if needs_repost and (bill.retainage_released or 0) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="A retainage release bill can't be re-lined; void it and "
+            "release again.",
+        )
 
     # The lines to post: the ones sent, else the bill's own. A header-only
     # edit that re-posts (a class, a job, a new vendor or number, the tax

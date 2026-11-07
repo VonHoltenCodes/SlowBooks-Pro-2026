@@ -946,7 +946,10 @@ previous / this period / remaining). Its held retainage is released with
 which writes a bill for the vendor carrying no expense account: DR **Retainage
 Payable** (2050) / CR Accounts Payable for the amount, payable through Pay Bills
 like any bill. A release over what is held is refused (422), and voiding the
-release bill gives the retainage back to the commitment. Retainage is held and
+release bill gives the retainage back to the commitment. A release bill's lines,
+tax, job, class or number can't be edited (409, "A retainage release bill can't
+be re-lined; void it and release again."), since a re-post would put its line on an
+expense account instead of 2050; its memo, due date and terms still save. Retainage is held and
 released this way on **both** sides — 1150 receivable on the owner side, 2050
 payable on the sub side.
 
