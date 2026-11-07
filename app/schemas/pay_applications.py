@@ -112,6 +112,9 @@ class PayApplicationOut(BaseModel):
     sub_waivers: dict = {}
     unapplied_deposits: float = 0.0
     retainage_outstanding: float = 0.0
+    # Void would be accepted now: the latest approved application, its
+    # invoice unpaid. The Pay apps tab offers Void only then.
+    can_void: bool = False
 
     model_config = {"from_attributes": True}
 

@@ -44,7 +44,7 @@ from app.services.contracts import (
     settle_contract_type,
 )
 from app.services.numbering import next_invoice_number
-from app.services.payment_terms import term_id_for
+from app.services.payment_terms import due_date_for, term_id_for
 from app.services.pay_applications import (
     application_figures,
     deposits_figures,
@@ -54,6 +54,7 @@ from app.services.pay_applications import (
     retainage_outstanding,
 )
 from app.services.request_utils import content_disposition
+from app.services.settings_service import get_setting_raw
 from app.services.sub_customers import invoice_addresses
 
 router = APIRouter(prefix="/api/pay-applications", tags=["pay-applications"])
@@ -169,6 +170,7 @@ def _out(db: Session, app: PayApplication) -> PayApplicationOut:
     out.sub_waivers = _sub_waivers(db, app.job_id, app.period_to)
     out.unapplied_deposits = float(deposits_figures(db, app.job_id)["unapplied"])
     out.retainage_outstanding = float(retainage_outstanding(db, app.job_id))
+    out.can_void = _can_void(db, app)
     return out
 
 
@@ -299,6 +301,58 @@ def _q6(value) -> Decimal:
     return quantize_to(value, Decimal("0.000001"))
 
 
+def _refresh_lines(db: Session, app: PayApplication) -> bool:
+    """Bring a draft's lines up to the job's schedule of values: a line for
+    every SOV line added since the draft was made (a change order approved,
+    an allowance added), and each existing line's item, description and
+    scheduled value as the SOV has them now. The amounts typed on a line are
+    kept. Only a draft is refreshed; a submitted application is as it was sent,
+    and one with no lines at all (made before the job had a schedule of
+    values, #714) is deleted, not filled. True when anything changed."""
+    if app.status != "draft" or not app.lines:
+        return False
+    job = db.get(Job, app.job_id)
+    by_sov = {ln.sov_line_id: ln for ln in app.lines if ln.sov_line_id}
+    changed = False
+    for n, sov in enumerate(job.sov_lines, start=1):
+        ln = by_sov.get(sov.id)
+        if ln is None:
+            db.add(
+                PayApplicationLine(
+                    pay_application_id=app.id,
+                    sov_line_id=sov.id,
+                    line_no=n,
+                    item_no=sov.item_no,
+                    description=sov.description,
+                    scheduled_value=sov.scheduled_value,
+                    this_period=_ZERO,
+                    stored=_ZERO,
+                )
+            )
+            changed = True
+            continue
+        for field in ("item_no", "description", "scheduled_value"):
+            if getattr(ln, field) != getattr(sov, field):
+                setattr(ln, field, getattr(sov, field))
+                changed = True
+    if changed:
+        db.flush()
+        db.refresh(app)
+    return changed
+
+
+@router.post("/{app_id}/refresh-lines", response_model=PayApplicationOut)
+def refresh_pay_application_lines(app_id: int, db: Session = Depends(get_db)):
+    """Pick up the schedule of values' changes on a draft (the Pay apps tab
+    calls this when it opens one). A submitted or approved application is not
+    changed."""
+    app = _get(db, app_id)
+    if _refresh_lines(db, app):
+        db.commit()
+        db.refresh(app)
+    return _out(db, app)
+
+
 @router.get("", response_model=list[PayApplicationOut])
 def list_pay_applications(job_id: int = Query(...), db: Session = Depends(get_db)):
     apps = (
@@ -384,7 +438,7 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
             "job had a schedule of values. Delete it, then make a new pay "
             "application."
             if not open_one.lines
-            else f"{open_one.number} is still open; submit or approve it first."
+            else f"{open_one.number} is still open; submit or approve it first, or delete it."
         )
         raise HTTPException(
             status_code=409,
@@ -404,7 +458,7 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
         job_id=job.id,
         application_no=no,
         number=number,
-        date=data.date or dt_date.today(),
+        date=data.date or data.period_to or dt_date.today(),
         period_to=data.period_to,
         status="draft",
         retainage_pct=(
@@ -453,6 +507,8 @@ def update_pay_application(
             status_code=409,
             detail="Only a draft or submitted pay application can be edited.",
         )
+    if data.date is not None and data.date != app.date:
+        check_closing_date(db, data.date)
     for key in (
         "date",
         "period_to",
@@ -467,6 +523,7 @@ def update_pay_application(
         val = getattr(data, key)
         if val is not None:
             setattr(app, key, val)
+    _refresh_lines(db, app)
     if data.lines is not None:
         by_sov = {ln.sov_line_id: ln for ln in app.lines}
         for row in data.lines:
@@ -487,11 +544,10 @@ def update_pay_application(
 
 @router.delete("/{app_id}")
 def delete_pay_application(app_id: int, db: Session = Depends(get_db)):
-    """Delete an open (draft or submitted) pay application that has no lines
-    (#723). One made before the job had a schedule of values (#714) could not
-    be given amounts, approved or voided, and as the job's open application it
-    refused every new one. An application with lines is never deleted: it is
-    edited, or approved and then voided. It has no invoice or journal to undo."""
+    """Delete an open (draft or submitted) pay application, whatever its
+    lines. It has no invoice or journal to undo, and as the job's open
+    application it keeps New from making another. An approved application is
+    voided, not deleted."""
     app = _get(db, app_id)
     if app.status not in _OPEN:
         raise HTTPException(
@@ -499,14 +555,6 @@ def delete_pay_application(app_id: int, db: Session = Depends(get_db)):
             detail={
                 "code": "application_not_open",
                 "message": "Only a draft or submitted pay application can be deleted; void an approved one instead.",
-            },
-        )
-    if app.lines:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "application_has_lines",
-                "message": "This pay application has lines, so it can't be deleted. Change its amounts, or approve it and void it.",
             },
         )
     db.delete(app)
@@ -521,6 +569,7 @@ def submit_pay_application(app_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=409, detail="Only a draft pay application can be submitted."
         )
+    _refresh_lines(db, app)
     _validate(db, app)
     app.status = "submitted"
     db.commit()
@@ -544,6 +593,7 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     customer = db.get(Customer, job.customer_id)
     when = app.date or dt_date.today()
     check_closing_date(db, when)
+    _refresh_lines(db, app)
     _validate(db, app)
 
     figures = application_figures(db, app)
@@ -675,6 +725,10 @@ def _create_invoice(
     # through the helper every other new invoice uses (a pay application's
     # invoice used to carry no street, so it printed a name alone).
     addresses = invoice_addresses(db, customer)
+    # Terms as a new invoice for this customer gets them: the customer's, else
+    # the company's default, and the due date follows from them.
+    terms = (customer.terms or get_setting_raw(db, "default_terms") or "Net 30").strip()
+    due_date = due_date_for(db, when, terms)
 
     invoice = None
     last_err = None
@@ -686,9 +740,9 @@ def _create_invoice(
             **addresses,
             status=(InvoiceStatus.PAID if balance_due == 0 else InvoiceStatus.SENT),
             date=when,
-            due_date=when,
-            terms="Net 30",
-            payment_term_id=term_id_for(db, "Net 30"),
+            due_date=due_date,
+            terms=terms,
+            payment_term_id=term_id_for(db, terms),
             subtotal=subtotal,
             tax_rate=tax_rate,
             tax_amount=tax_amount,
@@ -824,16 +878,7 @@ def void_pay_application(app_id: int, db: Session = Depends(get_db)):
     # Later applications are figured from this one (previous work, retainage,
     # payment applications), and their invoices are already posted; so only the latest
     # approved application can be voided (#576).
-    later = (
-        db.query(PayApplication)
-        .filter(
-            PayApplication.job_id == app.job_id,
-            PayApplication.status == "approved",
-            PayApplication.application_no > app.application_no,
-        )
-        .order_by(PayApplication.application_no)
-        .first()
-    )
+    later = _later_approved(db, app)
     if later is not None:
         raise HTTPException(
             status_code=409,
@@ -898,15 +943,15 @@ def _deposit_payment(db, app, invoice):
     )
 
 
-def _refuse_if_truly_paid(db, app, invoice):
-    """409 invoice_paid when the invoice carries a payment that is not this
-    application's own deposit payment — a real receipt has to be voided first.
-    An unrelated deposit-method payment counts, so matching is by id."""
+def _other_payment(db, app, invoice):
+    """A live payment on the invoice that is not this application's own
+    deposit payment, or None. An unrelated deposit-method payment counts, so
+    matching is by id."""
     from app.models.payments import Payment, PaymentAllocation
 
     own = _deposit_payment(db, app, invoice)
     own_id = own.id if own is not None else None
-    others = (
+    return (
         db.query(Payment)
         .join(PaymentAllocation, PaymentAllocation.payment_id == Payment.id)
         .filter(
@@ -916,7 +961,12 @@ def _refuse_if_truly_paid(db, app, invoice):
         )
         .first()
     )
-    if others is not None:
+
+
+def _refuse_if_truly_paid(db, app, invoice):
+    """409 invoice_paid when the invoice carries a payment that is not this
+    application's own deposit payment — a real receipt has to be voided first."""
+    if _other_payment(db, app, invoice) is not None:
         raise HTTPException(
             status_code=409,
             detail={
@@ -924,6 +974,30 @@ def _refuse_if_truly_paid(db, app, invoice):
                 "message": "The invoice has a payment on it; void the payment first.",
             },
         )
+
+
+def _later_approved(db, app):
+    """The next approved application on the job after this one, or None."""
+    return (
+        db.query(PayApplication)
+        .filter(
+            PayApplication.job_id == app.job_id,
+            PayApplication.status == "approved",
+            PayApplication.application_no > app.application_no,
+        )
+        .order_by(PayApplication.application_no)
+        .first()
+    )
+
+
+def _can_void(db, app) -> bool:
+    """Whether Void would be accepted now: approved, the latest approved
+    application, and its invoice carries no real payment. The Pay apps tab
+    offers Void only on that one."""
+    if app.status != "approved" or _later_approved(db, app) is not None:
+        return False
+    invoice = db.get(Invoice, app.invoice_id) if app.invoice_id else None
+    return invoice is None or _other_payment(db, app, invoice) is None
 
 
 # ── PDF ──────────────────────────────────────────────────────────────────

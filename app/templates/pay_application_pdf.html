@@ -27,7 +27,9 @@
     table.cont th.r { text-align: right; }
     table.cont td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
     table.cont td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    table.cont tfoot td { font-weight: 700; border-top: 2px solid #003366; }
+    table.cont tr.totals td { font-weight: 700; border-top: 2px solid #003366; }
+    table.cont tr { page-break-inside: avoid; }
+    .note { font-size: 8pt; color: #4a4a6a; margin: 6px 0 0 0; }
     .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
 </head>
@@ -67,10 +69,15 @@
         <tr><td class="label">Net change by change orders</td><td class="r">{{ header.net_change | currency }}</td></tr>
         <tr><td class="label">Contract sum to date</td><td class="r">{{ header.contract_sum_to_date | currency }}</td></tr>
         <tr><td class="label">Completed and stored to date</td><td class="r">{{ totals.completed_to_date | currency }}</td></tr>
+        {# Retainage foots on its own: previous + this period - released = to date. #}
+        <tr><td class="label">Retainage held, previous applications</td><td class="r">{{ totals.previous_retainage | currency }}</td></tr>
+        <tr><td class="label">Retainage this period</td><td class="r">{{ totals.retainage_this_period | currency }}</td></tr>
+        {% if totals.release_retainage %}<tr><td class="label">Less retainage released</td><td class="r">{{ totals.release_retainage | currency }}</td></tr>{% endif %}
         <tr><td class="label">Retainage to date</td><td class="r">{{ totals.retainage_to_date | currency }}</td></tr>
+        {# Earned less retainage - previous + tax = current payment due. A release is inside the retainage figure above, never an extra row. #}
         <tr><td class="label">Total earned less retainage</td><td class="r">{{ totals.total_earned_less_retainage | currency }}</td></tr>
         <tr><td class="label">Less previous payment applications</td><td class="r">{{ totals.previous_applications | currency }}</td></tr>
-        {% if totals.release_retainage %}<tr><td class="label">Retainage released</td><td class="r">{{ totals.release_retainage | currency }}</td></tr>{% endif %}
+        {% if totals.tax_amount %}<tr><td class="label">Sales tax</td><td class="r">{{ totals.tax_amount | currency }}</td></tr>{% endif %}
         <tr><td class="label grand">Current payment due</td><td class="r grand">{{ totals.current_due | currency }}</td></tr>
         {% if totals.deposit_applied %}<tr><td class="label">Less deposit applied</td><td class="r">{{ totals.deposit_applied | currency }}</td></tr>
         <tr><td class="label grand">Net due</td><td class="r grand">{{ totals.net_due | currency }}</td></tr>{% endif %}
@@ -106,8 +113,8 @@
                 <td class="r">{{ line.retainage | currency }}</td>
             </tr>
         {% endfor %}
-        </tbody>
-        <tfoot><tr>
+            {# A body row, not a tfoot: a footer repeats on every printed page. #}
+            <tr class="totals">
             <td></td><td>Totals</td>
             <td class="r">{{ totals.scheduled_total | currency }}</td>
             <td class="r">{{ totals.previous_total | currency }}</td>
@@ -116,9 +123,12 @@
             <td class="r">{{ totals.completed_to_date | currency }}</td>
             <td class="r"></td>
             <td class="r">{{ totals.balance_to_finish_total | currency }}</td>
-            <td class="r">{{ totals.retainage_to_date | currency }}</td>
-        </tr></tfoot>
+            <td class="r">{{ pa.lines | sum(attribute='retainage') | currency }}</td>
+        </tr>
+        </tbody>
     </table>
+    {% set released_to_date = totals.previous_released + totals.release_retainage %}
+    {% if released_to_date %}<p class="note">The retainage column is before releases. Less retainage released to date {{ released_to_date | currency }} = retainage to date {{ totals.retainage_to_date | currency }}.</p>{% endif %}
 
     <div class="footer">{{ app.number }} · {{ header.job_name }}</div>
 </body>

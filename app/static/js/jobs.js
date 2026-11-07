@@ -1329,8 +1329,10 @@ const JobsPage = {
                 <td>${escapeHtml(a.number)}${a.job_number ? `<br><span style="font-size:11px;color:var(--text-muted)">${escapeHtml(a.job_number)}</span>` : ''}</td>
                 <td>${escapeHtml(a.period_to || '')}</td>
                 <td><span class="badge">${escapeHtml(JobsPage.PA_STATUS_LABELS[a.status] || a.status)}</span></td>
-                <td class="amount">${m(t.this_period_total)}</td>
+                <td class="amount">${m(t.billed_this_period)}</td>
                 <td class="amount">${m(t.retainage_this_period)}</td>
+                <td class="amount">${m(t.release_retainage)}</td>
+                <td class="amount">${m(t.tax_amount)}</td>
                 <td class="amount">${m(t.current_due)}</td>
                 <td class="amount">${m(t.net_due)}</td>
                 <td>${inv}</td>
@@ -1343,11 +1345,14 @@ const JobsPage = {
             <div class="table-container"><table class="data-table" id="pa-log" style="font-size:12px">
                 <thead><tr>
                     <th scope="col">No</th><th scope="col">Period</th><th scope="col">Status</th>
-                    <th scope="col" class="amount">This period</th><th scope="col" class="amount">Retainage</th>
-                    <th scope="col" class="amount">Current due</th><th scope="col" class="amount">Net due</th>
+                    <th scope="col" class="amount" title="Work this period plus the change in stored materials">Billed</th>
+                    <th scope="col" class="amount" title="Retainage withheld this period">Retainage</th>
+                    <th scope="col" class="amount" title="Retainage released this period">Released</th>
+                    <th scope="col" class="amount">Tax</th>
+                    <th scope="col" class="amount" title="Billed less retainage, plus released, plus tax">Current due</th><th scope="col" class="amount">Net due</th>
                     <th scope="col">${T('Invoice')}</th><th scope="col"></th>
                 </tr></thead>
-                <tbody>${body || '<tr><td colspan="9" style="color:var(--text-muted)">No pay applications yet.</td></tr>'}</tbody>
+                <tbody>${body || '<tr><td colspan="12" style="color:var(--text-muted)">No pay applications yet.</td></tr>'}</tbody>
             </table></div>`;
     },
 
@@ -1359,10 +1364,13 @@ const JobsPage = {
         // schedule of values) has nothing to submit or approve: it is
         // deleted, so the job can be billed again (#723).
         const empty = open && !(a.lines || []).length;
-        if (empty) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paDelete(${id})">Delete</button>`);
+        // A draft or submitted application is deleted whatever its lines;
+        // an approved one is voided.
+        if (open) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paDelete(${id}, ${empty})">Delete</button>`);
         if (a.status === 'draft' && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paSubmit(${id})">Submit</button>`);
         if (open && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paApprove(${id})">Approve</button>`);
-        if (a.status === 'approved') parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paVoid(${id})">Void</button>`);
+        // Void is for the latest approved application, its invoice unpaid.
+        if (a.status === 'approved' && a.can_void) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paVoid(${id})">Void</button>`);
         parts.push(`<button class="btn btn-sm btn-secondary" onclick="window.open('/api/pay-applications/${id}/pdf','_blank')">PDF</button>`);
         if (a.status === 'approved' && a.invoice_id) parts.push(`<button class="btn btn-sm btn-secondary" onclick="JobsPage.paWaivers(${id})">Waivers</button>`);
         return parts.join(' ');
@@ -1370,14 +1378,17 @@ const JobsPage = {
 
     async paNew() {
         try {
-            const a = await API.post('/pay-applications', { job_id: JobsPage._job.id, date: todayISO() });
+            const a = await API.post('/pay-applications', { job_id: JobsPage._job.id });
             await JobsPage.setTab('payapps');
             JobsPage.paEdit(a.id);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async paEdit(id) {
-        const a = await API.get(`/pay-applications/${id}`);
+        // A draft picks up the schedule of values' changes (a change order
+        // approved since it was made) as it opens.
+        let a = await API.get(`/pay-applications/${id}`);
+        if (a.status === 'draft') a = await API.post(`/pay-applications/${id}/refresh-lines`, {});
         JobsPage._paEditing = a;
         const area = $('#pa-form-area');
         if (area) { area.innerHTML = JobsPage.paFormHtml(a); JobsPage.paRecalc(); }
@@ -1405,14 +1416,16 @@ const JobsPage = {
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">Pay application ${escapeHtml(a.number)}</h4>
             <p role="note" style="margin:0 0 8px">This pay application has no lines because it was made before the job had a schedule of values, so there is nothing on it to bill. Delete it, then make a new pay application from the schedule of values.</p>
             <div class="form-actions" data-write style="justify-content:flex-start;gap:8px">
-                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id})">Delete this pay application</button>
+                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id}, true)">Delete this pay application</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
             </div>
         </div>`;
     },
 
-    async paDelete(id) {
-        if (!confirm('Delete this pay application? It has no lines, so nothing has been billed on it.')) return;
+    async paDelete(id, empty) {
+        if (!confirm(empty
+            ? 'Delete this pay application? It has no lines, so nothing has been billed on it.'
+            : 'Delete this pay application? Nothing has been billed on it yet; the amounts entered on it are lost.')) return;
         try {
             await API.del(`/pay-applications/${id}`);
             toast('Pay application deleted');
@@ -1428,7 +1441,8 @@ const JobsPage = {
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">Pay application ${escapeHtml(a.number)}</h4>
             ${JobsPage.paGridHtml(a.lines, a.totals, { pct: a.retainage_pct, disabled: ro })}
             <div class="form-grid" style="margin-top:10px">
-                <div class="form-group"><label>Period to</label><input id="pa-period" ${d} type="date" value="${a.period_to || ''}"></div>
+                <div class="form-group"><label>Period to</label><input id="pa-period" ${d} type="date" value="${a.period_to || ''}" onchange="JobsPage.paPeriodChanged()"></div>
+                <div class="form-group"><label>Application date</label><input id="pa-date" ${d} type="date" value="${a.date || ''}" title="The invoice date and the date it posts" oninput="this.dataset.touched = '1'"></div>
                 <div class="form-group"><label>Retainage %</label><input id="pa-pct" ${d} type="number" step="0.01" min="0" max="100" value="${a.retainage_pct ?? ''}" oninput="JobsPage.paRecalc()"></div>
                 <div class="form-group"><label>Sales tax</label>
                     <label style="font-weight:normal"><input id="pa-tax-on" ${d} type="checkbox" ${a.charge_tax !== false ? 'checked' : ''} ${a.tax_exempt ? 'disabled' : ''} onchange="JobsPage.paRecalc()"> Charge tax${a.tax_exempt ? ' (owner is tax-exempt)' : ''}</label></div>
@@ -1446,6 +1460,7 @@ const JobsPage = {
                 <button type="submit" class="btn btn-primary">Save</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.paSubmit(${a.id})">Submit</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.paApprove(${a.id})">Approve</button>
+                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id}, false)">Delete</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
             </div>`}
         </form>`;
@@ -1551,10 +1566,17 @@ const JobsPage = {
         if (el) el.innerHTML = JobsPage.paTotalsHtml(totals);
     },
 
+    // The application date follows Period to until the date is set by hand.
+    paPeriodChanged() {
+        const period = $('#pa-period'), date = $('#pa-date');
+        if (period && date && period.value && !date.dataset.touched) date.value = period.value;
+    },
+
     paReadForm() {
         const num = sel => { const el = $(sel); const v = el && el.value !== '' ? parseFloat(el.value) : null; return (v === null || isNaN(v)) ? null : v; };
         return {
             period_to: ($('#pa-period') && $('#pa-period').value) || null,
+            date: ($('#pa-date') && $('#pa-date').value) || null,
             retainage_pct: num('#pa-pct'),
             release_retainage: num('#pa-release') || 0,
             deposit_applied: num('#pa-deposit') || 0,
