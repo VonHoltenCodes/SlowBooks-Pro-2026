@@ -201,3 +201,32 @@ test('the form has an application date that follows Period to until it is set by
     vm.runInContext('JobsPage.paPeriodChanged()', ctx);
     assert.equal(els['#pa-date'].value, '2026-07-31');
 });
+
+test('the form previews tax only on taxable lines, as the server bills it', () => {
+    const ctx = jobsContext(true);
+    const page = ctx.JobsPage;
+    const cell = () => ({ textContent: '' });
+    const line = (taxable, tp, st, priorStored) => {
+        const parts = {
+            '.pa-tp': { value: String(tp) }, '.pa-st': { value: String(st) },
+            '.pa-completed': cell(), '.pa-pct': cell(), '.pa-balance': cell(), '.pa-retainage': cell(),
+        };
+        return {
+            dataset: { scheduled: '100000', previous: '0', taxable: taxable ? '1' : '0', priorStored: String(priorStored) },
+            querySelector: (sel) => parts[sel],
+        };
+    };
+    const totalsEl = { innerHTML: '' };
+    const fields = {
+        '#pa-pct': { value: '0' }, '#pa-release': { value: '0' }, '#pa-deposit': { value: '0' },
+        '#pa-tax-on': { checked: true }, '#pa-tax-rate': { value: '10' }, '#pa-totals': totalsEl,
+    };
+    ctx.$ = (sel) => fields[sel] || null;
+    ctx.$$ = () => [line(true, 1000, 0, 0), line(false, 2000, 500, 0)];
+    let seen = null;
+    page.paTotalsHtml = (t) => { seen = t; return ''; };
+    page._paEditing = { totals: {} };
+    vm.runInContext('JobsPage.paRecalc()', ctx);
+    // 10% of the taxable line's 1,000 only; the 2,500 on the exempt line is untaxed
+    assert.equal(seen.tax_amount, 100);
+});

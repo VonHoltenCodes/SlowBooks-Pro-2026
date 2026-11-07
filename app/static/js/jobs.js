@@ -1528,7 +1528,7 @@ const JobsPage = {
         const pct = opts.pct || 0;
         const rows = lines.map(l => {
             const r = JobsPage.paLineMath(l.scheduled_value, l.previous, l.this_period, l.stored, pct);
-            return `<tr class="pa-line" data-sov="${l.sov_line_id}" data-scheduled="${l.scheduled_value}" data-previous="${l.previous}">
+            return `<tr class="pa-line" data-sov="${l.sov_line_id}" data-scheduled="${l.scheduled_value}" data-previous="${l.previous}" data-taxable="${l.is_taxable === false ? '0' : '1'}" data-prior-stored="${l.prior_stored ?? 0}">
                 <td>${escapeHtml(l.item_no || '')}</td>
                 <td>${escapeHtml(l.description || '')}</td>
                 <td class="amount">${formatCurrency(l.scheduled_value)}</td>
@@ -1577,7 +1577,7 @@ const JobsPage = {
 
     paRecalc() {
         const pct = Number(($('#pa-pct') ? $('#pa-pct').value : 0) || 0);
-        let completed = 0, retainage = 0;
+        let completed = 0, retainage = 0, exemptBilled = 0;
         $$('#pa-body .pa-line').forEach(tr => {
             const scheduled = tr.dataset.scheduled, previous = tr.dataset.previous;
             const tp = tr.querySelector('.pa-tp').value, st = tr.querySelector('.pa-st').value;
@@ -1587,6 +1587,11 @@ const JobsPage = {
             tr.querySelector('.pa-balance').textContent = formatCurrency(r.balance);
             tr.querySelector('.pa-retainage').textContent = formatCurrency(r.retainage);
             completed += r.completed; retainage += r.retainage;
+            // A line that is not taxed bills this period plus the change in
+            // its stored materials, none of it taxed (as the server figures).
+            if (tr.dataset.taxable === '0') {
+                exemptBilled += (Number(tp) || 0) + (Number(st) || 0) - (Number(tr.dataset.priorStored) || 0);
+            }
         });
         const prevRet = (JobsPage._paEditing && JobsPage._paEditing.totals && JobsPage._paEditing.totals.previous_retainage) || 0;
         const prevCert = (JobsPage._paEditing && JobsPage._paEditing.totals && JobsPage._paEditing.totals.previous_applications) || 0;
@@ -1603,7 +1608,7 @@ const JobsPage = {
         const taxOn = $('#pa-tax-on') ? $('#pa-tax-on').checked : false;
         const taxRate = Number(($('#pa-tax-rate') ? $('#pa-tax-rate').value : 0) || 0) / 100;
         const exempt = !!(JobsPage._paEditing && (JobsPage._paEditing.tax_exempt || JobsPage._paEditing.contractor_pays_tax));
-        const tax = (taxOn && !exempt) ? Math.round((completed - priorBilled) * taxRate * 100) / 100 : 0;
+        const tax = (taxOn && !exempt) ? Math.round((completed - priorBilled - exemptBilled) * taxRate * 100) / 100 : 0;
         const currentDue = Math.round((earnedLess - prevCert + tax) * 100) / 100;
         const totals = {
             tax_amount: tax,

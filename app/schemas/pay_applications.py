@@ -81,6 +81,10 @@ class PayApplicationLineOut(BaseModel):
     pct_complete: float = 0.0
     balance_to_finish: Decimal = Decimal("0")
     retainage: Decimal = Decimal("0")
+    # For the form's live tax: whether the SOV line is taxed, and the stored
+    # materials the earlier applications left on it.
+    is_taxable: bool = True
+    prior_stored: Decimal = Decimal("0")
 
     model_config = {"from_attributes": True}
 

@@ -222,6 +222,11 @@ def test_a_partly_taxable_package_is_two_lines_and_the_tax_matches_the_bid(
 
     approved = _bill_all(client, job["id"], sov)
     assert float(approved["totals"]["tax_amount"]) == 3022.55
+    # each application line tells the form whether it is taxed, so the form's
+    # live tax preview skips the same lines the server does
+    flags = {ln["description"]: ln["is_taxable"] for ln in approved["lines"]}
+    assert flags["Unassigned"] is True
+    assert flags["Unassigned (not taxable)"] is False
     inv = db_session.get(Invoice, approved["invoice_id"])
     assert inv.tax_amount == Decimal("3022.55")
     # the invoice lines say which were taxed

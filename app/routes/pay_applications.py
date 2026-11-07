@@ -55,6 +55,8 @@ from app.services.pay_applications import (
     previous_by_sov_line,
     retainage_outstanding,
     sov_line_in_effect,
+    sov_line_taxable,
+    stored_by_sov_line,
 )
 from app.services.request_utils import content_disposition
 from app.services.settings_service import get_setting_raw
@@ -169,6 +171,7 @@ def _line_obj(prev, ln):
 
 def _out(db: Session, app: PayApplication) -> PayApplicationOut:
     prev = previous_by_sov_line(db, app.job_id, app.application_no)
+    prior_stored = stored_by_sov_line(db, app.job_id, app.application_no)
     lines = []
     for ln in lines_in_effect(db, app):
         row = line_computed(_line_obj(prev, ln), app.retainage_pct)
@@ -179,6 +182,8 @@ def _out(db: Session, app: PayApplication) -> PayApplicationOut:
                 line_no=ln.line_no,
                 item_no=ln.item_no,
                 description=ln.description,
+                is_taxable=sov_line_taxable(db, ln.sov_line_id),
+                prior_stored=prior_stored.get(ln.sov_line_id, _ZERO),
                 **row,
             )
         )
