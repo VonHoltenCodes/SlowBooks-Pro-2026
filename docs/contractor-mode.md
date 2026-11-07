@@ -782,7 +782,9 @@ is set by hand; the closing-date guard applies when it is saved and when the
 application is approved. The invoice is due by the customer's payment terms
 (their terms, else the company's Default Terms, through the same parser as
 every other invoice), counted from the application date: an owner on Net 45
-billed July 31 owes on September 14, and one on Due on Receipt owes that day.
+billed July 31 owes on September 14, and one on Due on Receipt owes that day. The
+invoice is tied to that entry of the Payment Terms list, which is seeded first on
+a company whose list is still empty.
 
 **The application and its math.** Every SOV line (work, allowance, contingency
 and change-order lines all bill the same way) carries, per period:

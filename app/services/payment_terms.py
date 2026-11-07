@@ -611,7 +611,10 @@ def term_id_for(db: Session, text: Optional[str]) -> Optional[int]:
     """The list entry the terms of a document made now name, picked by the
     person (a form, the API) or given by its customer or vendor: what a new
     invoice or bill is tied to. A copy (duplicate, a template's next
-    document) takes its source's tie instead; an import takes none."""
+    document) takes its source's tie instead; an import takes none. A company
+    whose list is still empty gets the standard terms first, so a new document
+    links to its term instead of none."""
+    ensure_seeded(db)
     with db.no_autoflush:
         term = find_term(db, text)
     return term.id if term is not None else None

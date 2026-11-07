@@ -22,6 +22,7 @@ from tests.test_co_effective_date_allowance import (
     _setup,
 )
 from tests.test_cash_basis_construction import (
+    _approved_app,
     _commitment,
     _job,
     _release,
@@ -242,3 +243,19 @@ def test_a_late_fee_stays_in_the_aging_and_ties_to_1100(
     assert D(str(r.json()["balance_due"])) == D("105.00")
     assert aging() == D("105.00") == _tb(client)["1100"]
     assert aging(as_of_date=yesterday) == D("100.00")
+
+
+def test_a_pay_app_invoice_links_to_its_term_on_an_unseeded_list(
+    client, db_session, seed_accounts, seed_customer
+):
+    from app.models.invoices import Invoice
+    from app.models.payment_terms import PaymentTerm
+
+    job, sov = _job(client, seed_customer.id)
+    db_session.query(PaymentTerm).delete()
+    db_session.commit()
+    inv_id = _approved_app(client, job["id"], "2026-07-31", sov, (1000, 0))
+    db_session.expire_all()
+    inv = db_session.get(Invoice, inv_id)
+    term = db_session.get(PaymentTerm, inv.payment_term_id)
+    assert term is not None and term.name == inv.terms
