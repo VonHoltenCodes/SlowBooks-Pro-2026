@@ -522,16 +522,37 @@ here." in place of **+ New pay application**, with a link to the Contract
 tab, and `POST /api/pay-applications` refuses with 409 and the same sentence
 (#714).
 
-**An application with no lines can be deleted.** One made before 2.31.8 on a
-job with no schedule of values has no lines, so it could not be given amounts
-or approved, and as the job's open application it kept New from making
-another. Its row on the Pay apps tab offers **Delete** in place of Submit and
-Approve, and Edit says why there is nothing on it to bill
-(`DELETE /api/pay-applications/{id}`; only a draft or submitted application
-with no lines is deleted: 409 `application_has_lines` or
-`application_not_open` otherwise). While it is open, New is refused with a
-sentence that names it and says to delete it. An approved application with
+**An open application can be deleted.** A draft or submitted application is
+deleted whatever its lines, so a draft that has gone stale or was started by
+mistake is never a trap: its row on the Pay apps tab (and its form) offers
+**Delete** beside Submit and Approve, and the job can then start a new one
+(`DELETE /api/pay-applications/{id}`; it has no invoice or journal to undo). An
+approved application is never deleted: it is voided (409
+`application_not_open`). One made before 2.31.8 on a job with no schedule of
+values has no lines at all, so it could not be given amounts or approved; Edit
+says why there is nothing on it to bill and offers Delete in place of Submit
+and Approve. While an application is open, New is refused with a sentence that
+names it and says to submit, approve or delete it. An approved application with
 no lines and a zero total is voided like any other (#723).
+
+**A draft follows the schedule of values.** A change order approved, or a line
+added to the SOV, after a draft was made would leave the draft without it.
+Opening a draft on the Pay apps tab refreshes it (`POST
+/api/pay-applications/{id}/refresh-lines`): every SOV line the draft lacks is
+added, and each line's item, description and scheduled value are read from the
+SOV as it stands now. The amounts already typed are kept. Saving, submitting or
+approving a draft refreshes it first, so an API client never meets "SOV line N
+is not on this pay application". A submitted application is as it was sent and
+is not refreshed.
+
+**The application date and its terms.** The form carries an **Application
+date** beside Period to. It is the invoice date and the date the invoice posts,
+and it starts as the period-to date (else today) and follows Period to until it
+is set by hand; the closing-date guard applies when it is saved and when the
+application is approved. The invoice is due by the customer's payment terms
+(their terms, else the company's Default Terms, through the same parser as
+every other invoice), counted from the application date: an owner on Net 45
+billed July 31 owes on September 14, and one on Due on Receipt owes that day.
 
 **The application and its math.** Every SOV line (work, allowance, contingency
 and change-order lines all bill the same way) carries, per period:
@@ -602,11 +623,30 @@ due*. A dropped retainage percent makes the retainage this period negative and
 the 1150 leg a credit; the entry still balances. **Void** reverses the
 invoice (and the 1150 entries), and later applications stay correct because
 each reads its *previous* and *retainage to date* from the approved history
-live. An application's invoice is voided with the application: voiding it from
+live. The Pay apps tab offers Void only on the application that can be voided:
+the latest approved one, whose invoice has no payment on it other than its own
+deposit (`can_void` on the application). An application's invoice is voided
+with the application: voiding it from
 the Invoices screen is refused (409 `invoice_belongs_to_pay_application`). Only
 the **latest approved** application can be voided (409 `later_application`
 otherwise); void the later ones first. Only one application
 may be open (draft or submitted) per job at a time.
+
+**The Pay apps list and the printed application foot.** The list shows, per
+application, **Billed** (the work this period plus the change in stored
+materials), **Retainage** (withheld this period), **Released**, **Tax** and
+**Current due**, so Billed − Retainage + Released + Tax = Current due on every
+row. The PDF's summary adds the same way: *Retainage held, previous
+applications* + *Retainage this period* − *Less retainage released* =
+*Retainage to date*; *Completed and stored to date* − retainage to date =
+*Total earned less retainage*; and total earned less retainage − *Less previous
+payment applications* + *Sales tax* = *Current payment due* (a negative
+application prints a negative tax line), then *Less deposit applied* and *Net
+due*. A release is inside the retainage figure, never a row of its own to add.
+The line table's **Totals** row prints once, at the end of the table, not as a
+footer repeated on every page, and its retainage column is before releases; a
+note under the table says what was released to date and that it ties to the
+retainage to date.
 
 **Rules the application keeps.** Completed to date and stored never go below
 zero (or above zero on a deduct line): a negative this-period or stored that

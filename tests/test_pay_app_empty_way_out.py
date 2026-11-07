@@ -98,24 +98,25 @@ def test_an_empty_submitted_application_can_be_deleted_too(
     assert _new(client, job["id"]).status_code == 201
 
 
-def test_an_application_with_lines_is_not_deleted(
+def test_an_open_application_with_lines_is_deleted_too(
     client, db_session, seed_accounts, seed_customer
 ):
+    """Whatever its lines; New names the open application, and says delete is
+    a way out, until it is."""
     job = _job(client, seed_customer.id)
     r = _new(client, job["id"])
     assert r.status_code == 201
     app_id = r.json()["id"]
-    r = client.delete(f"/api/pay-applications/{app_id}")
-    assert r.status_code == 409
-    assert r.json()["detail"]["code"] == "application_has_lines"
-    db_session.expire_all()
-    assert db_session.get(PayApplication, app_id) is not None
-    # and New still names the open application the ordinary way
     r = _new(client, job["id"])
     assert r.status_code == 409
     assert r.json()["detail"]["message"] == (
-        f"PA-{job['id']}-01 is still open; submit or approve it first."
+        f"PA-{job['id']}-01 is still open; submit or approve it first, or delete it."
     )
+    r = client.delete(f"/api/pay-applications/{app_id}")
+    assert r.status_code == 200, r.text
+    db_session.expire_all()
+    assert db_session.get(PayApplication, app_id) is None
+    assert _new(client, job["id"]).status_code == 201
 
 
 def test_an_approved_or_void_application_is_not_deleted(
