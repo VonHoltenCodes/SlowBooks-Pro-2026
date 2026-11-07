@@ -77,6 +77,11 @@ DEFAULT_SETTINGS = {
     "company_email": "",
     "company_website": "",
     "company_tax_id": "",
+    # Construction mode: the contractor's license number, printed in the
+    # estimate PDF's header, and the default terms / inclusions / exclusions
+    # text a new construction estimate starts with (editable on each one).
+    "company_license": "",
+    "estimate_terms": "",
     "operator_name": "",
     "operator_email": "",
     # Desktop: "true" signs the company out whenever the app is quit, so the

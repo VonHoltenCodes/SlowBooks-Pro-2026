@@ -437,6 +437,12 @@ const SettingsPage = {
                             <input name="company_website" value="${escapeHtml(s.company_website || '')}"></div>
                         <div class="form-group"><label>Tax ID / EIN</label>
                             <input name="company_tax_id" value="${escapeHtml(s.company_tax_id || '')}"></div>
+                        ${s.company_type === 'construction' ? `<div class="form-group"><label for="company-license">Contractor license #</label>
+                            <input id="company-license" name="company_license" value="${escapeHtml(s.company_license || '')}">
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Printed in the header of the estimate PDF.</div></div>
+                        <div class="form-group full-width"><label for="estimate-terms">Default estimate terms, inclusions and exclusions</label>
+                            <textarea id="estimate-terms" name="estimate_terms" rows="5">${escapeHtml(s.estimate_terms || '')}</textarea>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate starts with this text; edit it on any estimate. It prints above the acceptance block on the owner's PDF.</div></div>` : ''}
                         <div class="form-group full-width"><label for="company-type">Company Type</label>
                             <select id="company-type" name="company_type" data-prev="${s.company_type === 'nonprofit' ? 'nonprofit' : (s.company_type === 'construction' ? 'construction' : 'business')}" onchange="SettingsPage.changeCompanyType(this)">
                                 <option value="business" ${(s.company_type !== 'nonprofit' && s.company_type !== 'construction') ? 'selected' : ''}>Business</option>

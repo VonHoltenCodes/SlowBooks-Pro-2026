@@ -82,15 +82,18 @@ const EstimatesPage = {
         openModal(`Estimate #${est.estimate_number}`, `
             <div style="margin-bottom:12px;">
                 <strong>${T('Customer')}:</strong> ${escapeHtml(est.customer_name || '')}<br>
+                ${construction && est.job_name ? `<strong>Project:</strong> ${escapeHtml(est.job_name)}${est.job_site_address ? ', ' + escapeHtml(est.job_site_address) : ''}<br>` : ''}
                 <strong>Date:</strong> ${formatDate(est.date)}<br>
                 ${est.expiration_date ? `<strong>Expires:</strong> ${formatDate(est.expiration_date)}<br>` : ''}
                 <strong>Status:</strong> ${statusBadge(est.status)}
             </div>
             ${bodyHtml}
+            ${construction && est.terms ? `<p style="margin-top:12px;white-space:pre-wrap;"><strong>Terms, inclusions and exclusions</strong>\n${escapeHtml(est.terms)}</p>` : ''}
             ${est.notes ? `<p style="margin-top:12px;color:var(--gray-500);">${escapeHtml(est.notes)}</p>` : ''}
             <div class="form-actions">
                 ${EstimatesPage.acceptButtonHtml(est)}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Save PDF</button>
+                <button class="btn btn-secondary" onclick="EstimatesPage.emailEstimate(${est.id})">Email</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/print-preview','_blank')">Print</button>
                 ${construction && est.status === 'pending' ? `<button class="btn btn-secondary" onclick="EstimatesPage.markLost(${est.id})">Mark lost</button>` : ''}
                 ${est.status !== 'converted' && !(construction && (est.bills_by_pay_app || est.status === 'rejected')) ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
@@ -115,7 +118,11 @@ const EstimatesPage = {
             name: p.package_name,
             lines: est.lines.filter(l => scopeLine(l) && (l.trade_package_id ?? null) === (p.package_id ?? null)),
         })).filter(g => g.lines.length);
-        const lineRow = l => `<tr><td>${escapeHtml(l.description || '')}</td>
+        // an accepted alternate sits in its package at cost, tagged so it reads
+        // as the add or deduct it was (the owner's PDF tags it the same way)
+        const altTag = l => ((l.line_kind || 'base') === 'alternate'
+            ? ` <em style="color:var(--gray-500);">(${Number(l.amount) < 0 ? 'deduct' : 'add'} alternate, accepted)</em>` : '');
+        const lineRow = l => `<tr><td>${escapeHtml(l.description || '')}${altTag(l)}</td>
             <td class="amount">${l.quantity}${l.unit ? ' ' + escapeHtml(l.unit) : ''}</td>
             <td class="amount">${SalesLines.rate(l.rate)}</td><td class="amount">${formatCurrency(l.amount)}</td></tr>`;
         const groupsHtml = groups.map(g =>
@@ -139,11 +146,15 @@ const EstimatesPage = {
         const pctLabel = v => String(+Number(v || 0));
         const mRow = (label, pct, amt) => (Number(amt) ? `<div class="total-row"><span class="label">${label} (${pctLabel(pct)}%)</span><span class="value">${formatCurrency(amt)}</span></div>` : '');
         const taxRow = Number(est.tax_amount) ? `<div class="total-row"><span class="label">Tax</span><span class="value">${formatCurrency(est.tax_amount)}</span></div>` : '';
+        // the markup rows below are the GC's view; the owner's PDF can spread
+        // them into the package prices instead (the form's "Show markup rows")
+        const hiddenNote = est.show_markup_rows === false
+            ? '<div style="margin-top:8px;color:var(--gray-500);font-size:12px;">On the owner\'s PDF the markup rows are hidden: each package\'s price carries its share and one subtotal is printed.</div>' : '';
         return `<div class="table-container"><table>
                 <thead><tr><th scope="col">Description</th><th scope="col" class="amount">Qty</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Amount</th></tr></thead>
                 <tbody>${groupsHtml}</tbody>
             </table></div>
-            ${allowBlock}${altBlock}${upBlock}
+            ${allowBlock}${altBlock}${upBlock}${hiddenNote}
             <div class="invoice-totals">
                 <div class="total-row"><span class="label">Subtotal</span><span class="value">${formatCurrency(t.subtotal)}</span></div>
                 ${mRow('General conditions', t.gc_pct, t.gc)}
@@ -176,6 +187,50 @@ const EstimatesPage = {
             if (inv.jobs_left_off && inv.jobs_left_off.length) toast(JobPicker.leftOffNote(inv.jobs_left_off), 'info');
             closeModal();
             App.navigate('#/invoices');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Email the estimate PDF by the invoice's path (same address checks and
+    // Recent sends log); the recipient starts as the customer's email.
+    async emailEstimate(id) {
+        const est = await API.get(`/estimates/${id}`);
+        let email = '';
+        try { email = (await API.get(`/customers/${est.customer_id}`)).email || ''; }
+        catch (e) { /* the user types it */ }
+        openModal('Email Estimate', `
+            <form onsubmit="EstimatesPage.sendEmail(event, ${id})">
+                <div class="form-grid">
+                    <div class="form-group full-width"><label>Recipient Email *</label>
+                        <input name="recipient" type="email" required value="${escapeHtml(email)}"></div>
+                    <div class="form-group"><label>CC <span class="form-hint">Optional. Separate addresses with commas.</span></label>
+                        <input name="cc" placeholder="office@example.com"></div>
+                    <div class="form-group"><label>BCC <span class="form-hint">Optional. Hidden from the recipient.</span></label>
+                        <input name="bcc" placeholder="books@example.com"></div>
+                    <div class="form-group full-width"><label>Subject</label>
+                        <input name="subject" placeholder="Estimate #${escapeHtml(est.estimate_number)}"></div>
+                    <div class="form-group full-width"><label>Message <span class="form-hint">Appears at the top of the email, above the attached PDF.</span></label>
+                        <textarea name="message"></textarea></div>
+                </div>
+                <div class="form-actions">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Send Email</button>
+                </div>
+            </form>`);
+    },
+
+    async sendEmail(e, id) {
+        e.preventDefault();
+        const form = e.target;
+        try {
+            await API.post(`/estimates/${id}/email`, {
+                recipient: form.recipient.value,
+                cc: form.cc.value.trim() || null,
+                bcc: form.bcc.value.trim() || null,
+                subject: form.subject.value.trim() || null,
+                message: form.message.value,
+            });
+            toast('Estimate emailed');
+            closeModal();
         } catch (err) { toast(err.message, 'error'); }
     },
 
@@ -233,6 +288,8 @@ const EstimatesPage = {
             lines: [],
         };
         if (id) est = await API.get(`/estimates/${id}`);
+        // a new construction estimate starts with the company's default terms
+        else est.terms = settings.estimate_terms || '';
         const classGroup = await classFormGroupHtml(est.class_id);
         const jobGroup = await jobFormGroupHtml(est.job_id, 'est-customer-select');
         await CostCodes.load();
@@ -288,6 +345,7 @@ const EstimatesPage = {
                     <div class="total-row grand-total"><span class="label">Total</span><span class="value" id="est-total">$0.00</span></div>
                 </div>`}
                 ${EstimatesPage.bidTotalsPanelHtml()}
+                ${EstimatesPage.termsBlockHtml(est)}
                 <div class="form-group" style="margin-top:12px;"><label>Notes</label>
                     <textarea name="notes">${escapeHtml(est.notes || '')}</textarea></div>
                 <div class="form-actions">
@@ -351,7 +409,17 @@ const EstimatesPage = {
                 ${f('fee_pct', est.fee_pct, 'Fee')}
                 ${f('bond_pct', est.bond_pct, 'Bond')}
             </div>
-            <label style="display:block; margin-top:6px;"><input type="checkbox" name="markup_allowances" ${est.markup_allowances ? 'checked' : ''} onchange="EstimatesPage.recalc()"> Apply the markups to allowances too (off by default)</label>`;
+            <label style="display:block; margin-top:6px;"><input type="checkbox" name="markup_allowances" ${est.markup_allowances ? 'checked' : ''} onchange="EstimatesPage.recalc()"> Apply the markups to allowances too (off by default)</label>
+            <label style="display:block; margin-top:6px;"><input type="checkbox" name="show_markup_rows" ${est.show_markup_rows === false ? '' : 'checked'}> Show the markup rows on the owner's bid</label>
+            <div style="font-size:10px; color:var(--text-muted); margin-top:2px;">Off, the owner's PDF spreads the markups into each package's price and prints one subtotal. The totals here do not change.</div>`;
+    },
+
+    // The terms / inclusions / exclusions the owner's PDF prints above the
+    // acceptance block; construction only. New estimates start from Settings.
+    termsBlockHtml(est) {
+        if (!Terms.isConstruction()) return '';
+        return `<div class="form-group" style="margin-top:12px;"><label>Terms, inclusions and exclusions</label>
+            <textarea name="terms" rows="5">${escapeHtml(est.terms || '')}</textarea></div>`;
     },
 
     bidTotalsPanelHtml() {
@@ -407,9 +475,11 @@ const EstimatesPage = {
             const unit = row.querySelector('.line-unit')?.value || '';
             if (kind === 'unit_price') { unitPrices.push({ idx: eline, desc, unit, rate }); return; }
             if (kind === 'alternate') {
-                // an alternate with a cost shows its marked-up price; one with
-                // no cost shows its rate price
-                const shown = hasCost ? EstimatesPage._r(cost * factor) : amount;
+                // an alternate not yet taken shows its marked-up price (what
+                // taking it adds); one with no cost shows its rate price. A
+                // TAKEN one shows its cost, the figure that sits in the scope
+                // and on the owner's PDF, its markups in the rows below.
+                const shown = hasCost && !accepted ? EstimatesPage._r(cost * factor) : amount;
                 alternates.push({ idx: eline, desc, amount: shown, accepted });
                 if (!accepted) return;
             }
@@ -447,7 +517,7 @@ const EstimatesPage = {
         const alt = $('#est-bid-alternates');
         if (alt) alt.innerHTML = t.alternates.length
             ? '<strong>Alternates</strong> <span style="color:var(--gray-500)">(add / deduct)</span>' + t.alternates.map(a =>
-                `<div><label><input type="checkbox" ${a.accepted ? 'checked' : ''} onchange="EstimatesPage.toggleAlternate(${a.idx}, this.checked)"> ${escapeHtml(a.desc || '(alternate)')} — ${formatCurrency(a.amount)}</label></div>`).join('')
+                `<div><label><input type="checkbox" ${a.accepted ? 'checked' : ''} onchange="EstimatesPage.toggleAlternate(${a.idx}, this.checked)"> ${escapeHtml(a.desc || '(alternate)')} — ${formatCurrency(a.amount)}${a.accepted ? ' <span style="color:var(--gray-500)">(taken, at cost; markups in the rows above)</span>' : ''}</label></div>`).join('')
             : '';
         const up = $('#est-bid-unitprices');
         if (up) up.innerHTML = t.unitPrices.length
@@ -626,6 +696,8 @@ const EstimatesPage = {
             data.fee_pct = parseFloat(form.fee_pct?.value) || 0;
             data.bond_pct = parseFloat(form.bond_pct?.value) || 0;
             data.markup_allowances = !!form.markup_allowances?.checked;
+            data.show_markup_rows = !!form.show_markup_rows?.checked;
+            data.terms = form.terms ? form.terms.value : null;
         }
 
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
