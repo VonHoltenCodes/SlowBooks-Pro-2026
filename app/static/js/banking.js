@@ -1294,12 +1294,16 @@ const BankingPage = {
         // with none and leave the list).
         const quickRow = f.class_id ? BankingPage._entryRowOff(!!(chosen && chosen.is_system_default))
             : BankingPage._quickEntryRow(id, kind, chart, outLabel, inLabel);
+        // one set of columns, empty or not (#729): the empty register's
+        // header said Category where the populated one said Type
+        const head = `<thead><tr>
+                    <th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref #</th><th scope="col">Type</th><th scope="col">Category</th>
+                    <th scope="col" class="amount">${outLabel}</th><th scope="col" class="amount">${inLabel}</th><th scope="col" class="amount">Balance</th>
+                    <th scope="col" title="✓ cleared · R reconciled">✓</th><th scope="col"></th>
+                </tr></thead>`;
         if (!reg.entries.length) {
             html += `<div class="empty-state"><p>${filtered ? 'Nothing posted to this account for these filters' : 'Nothing posted to this account yet'}</p></div>`;
-            html += `<div class="table-container"><table><thead><tr>
-                    <th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref</th><th scope="col">Category</th>
-                    <th scope="col" class="amount">${outLabel}</th><th scope="col" class="amount">${inLabel}</th><th scope="col" class="amount">Balance</th><th scope="col"></th><th scope="col"></th>
-                </tr></thead><tbody></tbody>${quickRow}</table></div>`;
+            html += `<div class="table-container"><table>${head}<tbody></tbody>${quickRow}</table></div>`;
         } else {
             const rows = shown.map(e => `
                 <tr data-txn="${e.transaction_id}" style="${e.voided ? 'color:var(--gray-400); text-decoration:line-through;' : ''}">
@@ -1308,6 +1312,7 @@ const BankingPage = {
                     <td>${BankingPage._memoCell(e)}</td>
                     <td>${escapeHtml(e.reference || '')}</td>
                     <td style="font-size:10px; color:var(--gray-500);">${escapeHtml(sourceWord(e.source_type, e.source_kind))}</td>
+                    ${BankingPage._categoryCell(e)}
                     <td class="amount">${e.payment > 0 ? formatCurrency(e.payment) : ''}</td>
                     <td class="amount">${e.deposit > 0 ? formatCurrency(e.deposit) : ''}</td>
                     <td class="amount" style="font-weight:700;">${formatCurrency(e.balance)}</td>
@@ -1318,13 +1323,8 @@ const BankingPage = {
             // doing) opens the table (2.23.5 round 2, NEW-142); the entry
             // row follows the entries on a populated register as on an
             // empty one (W-14, NEW-140)
-            const opening = f.start_date ? `<tr style="color:var(--gray-500);" id="reg-opening"><td>${formatDate(f.start_date)}</td><td colspan="6">Balance brought forward${reg.class_name ? ` (${escapeHtml(reg.class_name)})` : ''}</td><td class="amount">${formatCurrency(reg.opening_balance)}</td><td></td><td></td></tr>` : '';
-            html += `<div class="table-container"><table>
-                <thead><tr>
-                    <th scope="col">Date</th><th scope="col">Payee</th><th scope="col">Memo</th><th scope="col">Ref #</th><th scope="col">Type</th>
-                    <th scope="col" class="amount">${outLabel}</th><th scope="col" class="amount">${inLabel}</th><th scope="col" class="amount">Balance</th>
-                    <th scope="col" title="✓ cleared · R reconciled">✓</th><th scope="col"></th>
-                </tr></thead><tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}`;
+            const opening = f.start_date ? `<tr style="color:var(--gray-500);" id="reg-opening"><td>${formatDate(f.start_date)}</td><td colspan="7">Balance brought forward${reg.class_name ? ` (${escapeHtml(reg.class_name)})` : ''}</td><td class="amount">${formatCurrency(reg.opening_balance)}</td><td></td><td></td></tr>` : '';
+            html += `<div class="table-container"><table>${head}<tbody>${opening}${rows}</tbody>${quickRow}</table></div>${hiddenNote}`;
         }
         return html;
     },
@@ -1395,6 +1395,20 @@ const BankingPage = {
     // linked to #/journal/… read as "this is a journal entry", the kind
     // that cannot be edited, and testers went looking for a way to change
     // it. A void bank entry keeps the plain link: there is nothing to edit.
+    // The register's Category (#729): the account the posting's other line
+    // went to; for several, "3 accounts", each account and amount in the
+    // cell's tooltip and, for a screen reader, in hidden text after it.
+    _categoryCell(e) {
+        const lines = Array.isArray(e.category_lines) ? e.category_lines : [];
+        const words = l => accountWords({ account_number: l.account_number }, l.account_name || '');
+        if (lines.length === 1) {
+            return `<td style="font-size:11px;">${escapeHtml(words(lines[0]))}</td>`;
+        }
+        if (!lines.length) return `<td style="font-size:11px;">${escapeHtml(e.category || '')}</td>`;
+        const each = lines.map(l => `${words(l)} ${formatCurrency(l.amount)}`);
+        return `<td style="font-size:11px;" title="${escapeHtml(each.join('\n'))}">${lines.length} accounts<span class="visually-hidden">: ${escapeHtml(each.join('; '))}</span></td>`;
+    },
+
     _memoCell(e) {
         const href = escapeHtml(BankingPage._entryHref(e));
         if (e.source_type !== 'bank_entry' || !e.editable) {
@@ -1863,13 +1877,14 @@ const BankingPage = {
                     <td><input type="text" id="qe-payee" list="qe-payee-vendors" autocomplete="off" aria-label="New entry payee" placeholder="Payee" style="width:100%; font-size:11px; padding:2px 4px;" onblur="BankingPage.payeeTyped(this.value, BankingPage._rowMoneyIn(), 'qe-payee')" ${key}>${BankingPage._vendorDatalist('qe-payee-vendors')}</td>
                     <td><input type="text" id="qe-memo" aria-label="New entry memo" placeholder="Memo" style="width:100%; font-size:11px; padding:2px 4px;" ${key}></td>
                     <td><input type="text" id="qe-ref" aria-label="New entry check or reference number" placeholder="Ref" style="width:60px; font-size:11px; padding:2px 4px;" ${key}></td>
+                    <td></td>
                     <td>${AccountQuickAdd.picker('<select id="qe-category" aria-label="New entry category" data-no-search ' + key + ' style="font-size:11px; padding:2px 4px; max-width:150px;"><option value="">Category…</option>' + cats + '</select>', 'register', { ctx: accountId, id: 'qe-category-add', style: 'font-size:11px; padding:2px 6px;' })}${BankingPage._quickClassHtml(key)}</td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-out" class="money" aria-label="New entry ${escapeHtml(outLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td class="amount"><input type="number" step="0.01" min="0" id="qe-in" class="money" aria-label="New entry ${escapeHtml(inLabel)}" placeholder="0.00" style="width:90px; font-size:11px; padding:2px 4px; text-align:right;" ${key}></td>
                     <td></td><td></td>
                     <td><button type="button" class="btn btn-sm btn-primary" onclick="BankingPage.postQuickEntry(${accountId})">Post</button></td>
                 </tr>
-                <tr data-write><td colspan="10" id="qe-category-host" style="padding:0; border:0;"></td></tr></tfoot>`;
+                <tr data-write><td colspan="11" id="qe-category-host" style="padding:0; border:0;"></td></tr></tfoot>`;
     },
 
     // The entry row's Class (#671), as + Entry has it: shown once the
@@ -1894,7 +1909,7 @@ const BankingPage = {
         // (#671); the balance is the reason then too
         const why = isDefault || BankingPage._lineClassShown() ? `the running balance counts this ${cls} only`
             : `it has no ${cls} box, and the running balance counts this ${cls} only`;
-        return `<tfoot><tr id="reg-quick-entry-off" data-write><td colspan="10" style="padding:6px 10px; font-size:11px; color:var(--gray-500);">The entry row is hidden while a ${cls} is chosen: ${why}. Choose All ${T('classes').toLowerCase()} to use it, or post with + Entry.</td></tr></tfoot>`;
+        return `<tfoot><tr id="reg-quick-entry-off" data-write><td colspan="11" style="padding:6px 10px; font-size:11px; color:var(--gray-500);">The entry row is hidden while a ${cls} is chosen: ${why}. Choose All ${T('classes').toLowerCase()} to use it, or post with + Entry.</td></tr></tfoot>`;
     },
 
     // Enter in the quick row. As before, it posts the entry, unless the

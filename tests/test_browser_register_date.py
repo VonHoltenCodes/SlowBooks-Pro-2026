@@ -1520,3 +1520,112 @@ def test_a_filter_changed_by_hand_leaves_the_page_where_it_was(browser):
         assert abs(page.evaluate(SCROLLED) - top) <= 1
     finally:
         page.close()
+
+
+# ── #729: the Category column ──
+
+
+def test_the_category_column_names_the_account_or_counts_a_split(browser):
+    ledger = _Ledger(days=3)
+    one, split, none = ledger.entries
+    one["category_lines"] = [
+        {
+            "account_id": 2,
+            "account_number": "6100",
+            "account_name": "Automobile",
+            "amount": 25.0,
+        }
+    ]
+    one["category"] = "Automobile"
+    split["category_lines"] = [
+        {
+            "account_id": 2,
+            "account_number": "6100",
+            "account_name": "Automobile",
+            "amount": 10.0,
+        },
+        {
+            "account_id": 4,
+            "account_number": "1400",
+            "account_name": "Prepaid Expenses",
+            "amount": 12.5,
+        },
+        {
+            "account_id": 5,
+            "account_number": "6400",
+            "account_name": "Office Supplies",
+            "amount": 2.5,
+        },
+    ]
+    split["category"] = "3 accounts"
+    page = _ledger_page(browser, ledger, "#/banking/1")
+    try:
+        heads = page.eval_on_selector_all(
+            "#page-content thead th", "ths => ths.map(t => t.textContent.trim())"
+        )
+        assert heads[4:6] == ["Type", "Category"]
+        col = heads.index("Category")
+        cell = (
+            '(txn, col) => document.querySelector(`tr[data-txn="${txn}"]`).cells[col]'
+        )
+        text = page.evaluate(
+            f"([t, c]) => ({cell})(t, c).textContent", [one["transaction_id"], col]
+        )
+        assert text.strip() == "6100 - Automobile"  # numbers on
+        got = page.evaluate(
+            f"([t, c]) => {{ const td = ({cell})(t, c);"
+            " return { text: td.firstChild.textContent, title: td.title,"
+            " hidden: td.querySelector('.visually-hidden').textContent }; }",
+            [split["transaction_id"], col],
+        )
+        assert got["text"] == "3 accounts"
+        assert "-split-" not in got["text"].lower()
+        assert got["title"].split("\n") == [
+            "6100 - Automobile $10.00",
+            "1400 - Prepaid Expenses $12.50",
+            "6400 - Office Supplies $2.50",
+        ]
+        assert (
+            "6100 - Automobile $10.00; 1400 - Prepaid Expenses $12.50" in got["hidden"]
+        )
+        assert (
+            page.evaluate(
+                f"([t, c]) => ({cell})(t, c).textContent", [none["transaction_id"], col]
+            ).strip()
+            == ""
+        )
+        # the entry row's Category box sits under the column
+        assert page.evaluate(
+            "(col) => document.getElementById('qe-category').closest('td').cellIndex === col",
+            col,
+        )
+        # the Posting link of a register entry stays: the Memo cell is as it was
+        assert (
+            page.locator(
+                f'tr[data-txn="{one["transaction_id"]}"] td:nth-child(3) a'
+            ).count()
+            == 1
+        )
+    finally:
+        page.close()
+
+
+def test_the_empty_register_has_the_populated_ones_columns(browser):
+    posted = []
+    page = _register_page(browser, posted)
+    try:
+        empty = page.eval_on_selector_all(
+            "#page-content thead th", "ths => ths.map(t => t.textContent.trim())"
+        )
+    finally:
+        page.close()
+    ledger = _Ledger(days=2)
+    page = _ledger_page(browser, ledger, "#/banking/1")
+    try:
+        full = page.eval_on_selector_all(
+            "#page-content thead th", "ths => ths.map(t => t.textContent.trim())"
+        )
+    finally:
+        page.close()
+    assert empty == full
+    assert full[:6] == ["Date", "Payee", "Memo", "Ref #", "Type", "Category"]

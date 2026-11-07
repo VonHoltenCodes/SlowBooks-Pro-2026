@@ -102,7 +102,7 @@ def test_hide_voided_is_named_reached_by_tab_and_remembered(browser):
         # the rows shown add up: the row between the void and its reversal
         balances = page.evaluate(
             "() => [...document.querySelectorAll('#page-content tr[data-txn]')]"
-            ".map(r => r.cells[7].textContent.trim())"
+            ".map(r => r.cells[8].textContent.trim())"  # Balance, after Category (#729)
         )
         assert balances == ["$1,000.00", "$900.00", "$860.00"]
         # the entry row is still at the foot, the next stop after the box's
