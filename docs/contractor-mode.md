@@ -448,23 +448,30 @@ account is the income account it credits (blank means 4050 Contract
 Revenue), so revenue lands by section beside cost; the Tax box says whether
 sales tax is charged on the line's billing (see *Progress billing* below). The sum (and the schedule) is **pre-tax**: sales
 tax is added on each invoice, not carried in the contract. **Build from
-accepted estimate** lays it out automatically: one **work** line per trade
+accepted estimate** lays it out automatically: **work** lines per trade
 package, in bid-book order (its base lines plus any accepted alternates, **at cost** — the lines
-carry no markup), an **allowance** line for each allowance, then one line per
+carry no markup), a work line for each line with no package, an **allowance** line for each allowance, then one line per
 **non-zero markup** in order (general conditions, insurance, fee, bond), each
 labelled with its percent, and a **contingency** line when the job carries one.
-The work, allowance and markup lines foot exactly to the pre-tax bid. Lines
-with no package roll into one "Unassigned" work line. Each built line credits
-**4050 Contract Revenue** and carries:
+The work, allowance and markup lines foot exactly to the pre-tax bid. A
+package is one work line per section its estimate lines carry: a package
+whose lines share one section is one line under the package's name, and one
+whose lines sit on several is a line per section, in code order, named
+"Concrete — 03 30 00 Cast-in-Place Concrete". A line with **no package** is
+its own work line under its own description (an accepted deduct alternate
+reads as its own text), so the owner's schedule, pay applications and PDF
+never print "Unassigned"; the internal reports (Buyout, the cost tree) keep
+that row. Each built line credits **4050 Contract Revenue** and carries:
 
-- **its section** — a work line takes its package's section when the package
-  maps to one, else the package's lowest section; a package mapped to none
-  (and the Unassigned line) takes the cost code its estimate lines share, or
-  none when they differ. An allowance takes its own line's cost code, else
-  its package's section. A markup or contingency line carries none.
+- **its section** — a work line carries the cost code its estimate lines
+  carry, the code Accept budgets them on, so its billing lands on the section
+  its budget and cost are on; a line with no code takes its package's lowest
+  section (none when the package maps none). An allowance takes its own
+  line's cost code, else its package's section. A markup or contingency line
+  carries none.
 - **its Tax box** — a work or allowance line is taxable when its estimate
-  lines are. A package whose lines are partly taxable becomes **two** work
-  lines, the taxable part under the package's name and the rest as
+  lines are. A package section whose lines are partly taxable becomes **two** work
+  lines, the taxable part under its name and the rest as
   "*Package* (not taxable)", so a pay application at 100% charges the tax the
   bid quoted. A **markup** line follows the taxable share of the markup base:
   wholly taxable when every marked-up line is, not taxable when none is, and
@@ -713,11 +720,19 @@ approve click.
 - *Owner CO, contract-funded* — adds the sell total to the **contract amount**
   (the original sum is never touched, so the Contract tab reads original +
   changes = revised), appends a read-only **change_order** line to the
-  schedule of values for the sell total (with the cost code its lines share,
-  else the lowest of them; 4050 Contract Revenue; taxable when the rest of the
-  schedule has a taxable line), and writes locked budget rows
+  schedule of values for the sell total, and writes locked budget rows
   (`source = change`) with the cost on the cost side and the sell on the
   revenue side. The job-cost tree shows these in its **Changes** column.
+  The change order's SOV line takes the cost code its lines share, else the
+  lowest of them, and extends the schedule's line for that section: it takes
+  that line's **revenue account** (4050 Contract Revenue when there is none)
+  and the next **item number**, so the pay-application PDF's Item column is
+  filled. Its **Tax box** is the section's lines' when they agree; else that
+  of the lines of the change order's package; else the schedule's — taxed
+  when every line on it is taxed (or it is empty), and **not taxed when the
+  schedule is mixed** or taxes nothing. So a change order on exempt work
+  (electrical on a bid that taxes only materials) bills no tax; tick its Tax
+  box on the Contract tab's grid if it should.
 - *Owner CO, contingency-funded* — the contract is unchanged; the budget rows
   carry the **cost with no revenue** (the contract already holds the
   contingency money); the draw counts against the contract's contingency
@@ -786,7 +801,10 @@ void reverses the exact figures it applied.
 
 **Void** reverses each of these — the contract and SOV line, the budget rows,
 and the appended commitment lines (exactly the ones it added) — except that a
-commitment line already billed against cannot be pulled (409 `co_billed`). The
+commitment line already billed against cannot be pulled (409 `co_billed`).
+The SOV line comes off any open (draft or submitted) pay application that
+carries it with no amounts, so the draft no longer lists a voided change or
+a balance to finish on it; an approved application keeps the line as history. The
 lifecycle is draft → submitted (*pending*) → approved, with reject and void
 beside it; a PCO runs
 draft → pending → promoted (asking to *promote* rather than approve).
@@ -794,7 +812,12 @@ draft → pending → promoted (asking to *promote* rather than approve).
 **Billed change orders are locked.** Once a pay application has billed a
 change order's schedule-of-values line (#555, below), that change order can no
 longer be voided — the void answers 409 `co_billed`, the same guard a sub
-change order's billed commitment line already carried. The change-order **log
+change order's billed commitment line already carried. Any amount counts,
+either sign (a deduct's credit too), on any application not void: an
+approved one reads "PA-1-03 has billed this change order; it cannot be
+voided."; a draft or submitted one names itself ("PA-1-04, a draft pay
+application, bills this change order. Take its amounts off that application
+(or delete it), then void the change order."). The change-order **log
 report** (#556, see *Job reports* below) lists every change order and its effect.
 
 ## Progress billing and retainage
@@ -830,10 +853,18 @@ added to the SOV, after a draft was made would leave the draft without it.
 Opening a draft on the Pay apps tab refreshes it (`POST
 /api/pay-applications/{id}/refresh-lines`): every SOV line the draft lacks is
 added, and each line's item, description and scheduled value are read from the
-SOV as it stands now. The amounts already typed are kept. Saving, submitting or
+SOV as it stands now. The amounts already typed are kept. A line whose SOV
+line is gone (its change order voided, or the line taken off the schedule) is
+dropped when it carries no amounts. Saving, submitting or
 approving a draft refreshes it first, so an API client never meets "SOV line N
 is not on this pay application". A submitted application is as it was sent and
-is not refreshed.
+is not refreshed; `refresh-lines` on an approved or void one is refused (409,
+"PA-1-03 is approved; only a draft picks up changes to the schedule of
+values."). **No approve saves a line whose SOV line no longer exists:** a
+submitted application drops such a line when it carries nothing, and one
+that carries amounts is refused (409, "02 Extra is no longer on the job's
+schedule of values. Take its amounts off PA-1-04 (or delete the
+application), then approve.").
 
 **The application date and its terms.** The form carries an **Application
 date** beside Period to. It is the invoice date and the date the invoice posts,
@@ -962,8 +993,9 @@ application prints a negative tax line), then *Less deposit applied* and *Net
 due*. A release is inside the retainage figure, never a row of its own to add.
 The line table's **Totals** row prints once, at the end of the table, not as a
 footer repeated on every page, and its retainage column is before releases; a
-note under the table says what was released to date and that it ties to the
-retainage to date.
+note under the table gives the whole sentence: "The retainage column is before
+releases: its total of $38,795.58, less retainage released to date of
+$38,795.58, equals retainage to date of $0.00."
 
 **Rules the application keeps.** Completed to date and stored never go below
 zero (or above zero on a deduct line): a negative this-period or stored that
@@ -1082,7 +1114,7 @@ carries the cost code.
 | **Estimate accepted** | — | — | No entry. Seeds and locks the job budget (cost per section and cost type, revenue spread pro rata so it foots to the bid). |
 | **Contract built / schedule of values saved** | — | — | No entry. Each SOV line carries its section, its revenue account (4050 Contract Revenue unless changed) and its Tax box. |
 | **Owner deposit received** | the bank account chosen | 2210 Customer Deposits (job) | Held until a pay application applies it. |
-| **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, 4050, taxed as the schedule is); every kind writes budget rows. |
+| **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, that section's revenue account else 4050, taxed as that section is; see *Change orders*); every kind writes budget rows. |
 | **Commitment issued; sub change order approved** | — | — | No entry. Committed cost on the job, by section and cost type. |
 | **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released (job); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines (none on a *contractor pays* job) | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. **Stored materials** are revenue the period they are billed (no stored-material asset; the WIP entry adjusts any over-billing) and taxed with their line on a *charge the owner* job. |
 | … with a deposit applied | 2210 Customer Deposits | 1100 Accounts Receivable | A payment from the deposit, applied to the application's invoice. |

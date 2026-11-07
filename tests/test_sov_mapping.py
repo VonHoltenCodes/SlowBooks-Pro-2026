@@ -134,7 +134,7 @@ def test_build_carries_section_revenue_account_and_tax(
         [
             _line("Demo", 18000, trade_package_id=pkg_demo["id"], is_taxable=False),
             _line("Board", 96000, trade_package_id=pkg_dry["id"], is_taxable=False),
-            # no package: the one code its lines share
+            # no package: its own line, on its own code
             _line("Panels", 8000, cost_code_id=elec["id"]),
             {
                 "description": "Finishes allowance",
@@ -151,13 +151,13 @@ def test_build_carries_section_revenue_account_and_tax(
     by = {line["description"]: line for line in sov}
     assert by["Demo (bid)"]["cost_code_id"] == demo["id"]
     assert by["Drywall (bid)"]["cost_code_id"] == gyp["id"]
-    assert by["Unassigned"]["cost_code_id"] == elec["id"]
+    assert by["Panels"]["cost_code_id"] == elec["id"]
     assert by["Finishes allowance"]["cost_code_id"] == gyp["id"]
     # taxable per the estimate's lines; the markup splits by the taxable
     # share of its base: 8,000 of 122,000, so 640 of the 9,760 is taxed
     assert by["Demo (bid)"]["is_taxable"] is False
     assert by["Drywall (bid)"]["is_taxable"] is False
-    assert by["Unassigned"]["is_taxable"] is True
+    assert by["Panels"]["is_taxable"] is True
     assert by["Finishes allowance"]["is_taxable"] is False
     gc_taxed = by["General conditions (8%)"]
     gc_exempt = by["General conditions (8%) (not taxable)"]
@@ -197,11 +197,12 @@ def test_a_partly_taxable_package_is_two_lines_and_the_tax_matches_the_bid(
     est = client.get(f"/api/estimates/{est_id}").json()
     assert float(est["tax_amount"]) == 3022.55
     work = [line for line in sov if line["kind"] == "work"]
+    # no package: each line is its own SOV line under its own description
     assert [(w["description"], w["is_taxable"]) for w in work] == [
-        ("Unassigned", True),
-        ("Unassigned (not taxable)", False),
+        ("Labor", False),
+        ("Materials", True),
     ]
-    assert [float(w["scheduled_value"]) for w in work] == [40000.0, 60000.0]
+    assert [float(w["scheduled_value"]) for w in work] == [60000.0, 40000.0]
 
     # each markup is a taxable part (40% of it) and a part that is not; the
     # taxable parts sum to the estimate's taxable share, 6,500.80
@@ -225,14 +226,14 @@ def test_a_partly_taxable_package_is_two_lines_and_the_tax_matches_the_bid(
     # each application line tells the form whether it is taxed, so the form's
     # live tax preview skips the same lines the server does
     flags = {ln["description"]: ln["is_taxable"] for ln in approved["lines"]}
-    assert flags["Unassigned"] is True
-    assert flags["Unassigned (not taxable)"] is False
+    assert flags["Materials"] is True
+    assert flags["Labor"] is False
     inv = db_session.get(Invoice, approved["invoice_id"])
     assert inv.tax_amount == Decimal("3022.55")
     # the invoice lines say which were taxed
     taxed = {ln.description: ln.is_taxable for ln in inv.lines}
-    assert taxed["01 Unassigned"] is True
-    assert taxed["02 Unassigned (not taxable)"] is False
+    assert taxed["01 Labor"] is False
+    assert taxed["02 Materials"] is True
     assert taxed["09 Bond (1%)"] is True
     assert taxed["10 Bond (1%) (not taxable)"] is False
 

@@ -24,7 +24,7 @@ from app.models.job_costing import JobBudget
 from app.models.jobs import Job, SovLine
 from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
 from app.services.accounting import _q
-from app.services.contracts import change_order_sov_fields
+from app.services.contracts import change_order_sov_fields, next_item_no
 
 _ZERO = Decimal("0")
 _HUNDRED = Decimal("100")
@@ -564,7 +564,7 @@ def _apply_allowance_return(db: Session, co: ChangeOrder, job: Job, sell_total):
             SovLine(
                 job_id=job.id,
                 line_no=_next_sov_line_no(job),
-                item_no=None,
+                item_no=next_item_no(job, _next_sov_line_no(job)),
                 description=f"{co.number} {co.title or ''}".strip(),
                 kind="change_order",
                 scheduled_value=-credit,
@@ -681,12 +681,11 @@ def apply_change_order(
                     SovLine(
                         job_id=job.id,
                         line_no=_next_sov_line_no(job),
-                        item_no=None,
                         description=f"{co.number} {co.title or ''}".strip(),
                         kind="change_order",
                         scheduled_value=sell_total,
                         change_order_id=co.id,
-                        **change_order_sov_fields(job, co),
+                        **change_order_sov_fields(db, job, co),
                     )
                 )
             _write_change_budgets(db, job.id, co, with_revenue=True)
@@ -790,48 +789,80 @@ def apply_change_order(
 
 
 def _refuse_if_co_line_billed(db: Session, co: ChangeOrder) -> None:
-    """A change_order SOV line that a pay application has billed (previous +
-    this period + stored > 0 on any non-void application) cannot be voided
-    out from under the billing (#555, 409 co_billed)."""
+    """A change_order SOV line that a pay application carries amounts on
+    (this period or stored, either sign, on any application not void) cannot
+    be voided out from under it (#555, 409 co_billed). The sentence names the
+    application: an approved one has billed it for good; a draft or submitted
+    one can take the amounts off (or be deleted) and the void then goes
+    through."""
     from app.models.pay_applications import PayApplication, PayApplicationLine
-    from app.services.pay_applications import billed_completed_by_sov_line
 
-    sov_line_ids = [
-        r.id
-        for r in db.query(SovLine).filter(
-            SovLine.job_id == co.job_id, SovLine.change_order_id == co.id
-        )
-    ]
+    sov_line_ids = _co_sov_line_ids(db, co)
     if not sov_line_ids:
         return
-    billed = billed_completed_by_sov_line(db, co.job_id)
-    if any(_q(billed.get(sid, 0)) > 0 for sid in sov_line_ids):
-        _raise_co_billed()
-    open_line = (
-        db.query(PayApplicationLine)
+    app = (
+        db.query(PayApplication)
         .join(
-            PayApplication, PayApplication.id == PayApplicationLine.pay_application_id
+            PayApplicationLine,
+            PayApplication.id == PayApplicationLine.pay_application_id,
         )
         .filter(
             PayApplication.job_id == co.job_id,
             PayApplication.status != "void",
             PayApplicationLine.sov_line_id.in_(sov_line_ids),
-            (PayApplicationLine.this_period + PayApplicationLine.stored) > 0,
+            (PayApplicationLine.this_period != 0) | (PayApplicationLine.stored != 0),
         )
+        .order_by(PayApplication.application_no)
         .first()
     )
-    if open_line is not None:
-        _raise_co_billed()
-
-
-def _raise_co_billed() -> None:
+    if app is None:
+        return
+    if app.status == "approved":
+        message = f"{app.number} has billed this change order; it cannot be voided."
+    else:
+        message = (
+            f"{app.number}, a {app.status} pay application, bills this change "
+            "order. Take its amounts off that application (or delete it), then "
+            "void the change order."
+        )
     raise HTTPException(
-        status_code=409,
-        detail={
-            "code": "co_billed",
-            "message": "A pay application has billed this change order; it cannot be voided.",
-        },
+        status_code=409, detail={"code": "co_billed", "message": message}
     )
+
+
+def _co_sov_line_ids(db: Session, co: ChangeOrder) -> list[int]:
+    return [
+        r.id
+        for r in db.query(SovLine).filter(
+            SovLine.job_id == co.job_id, SovLine.change_order_id == co.id
+        )
+    ]
+
+
+def _release_co_application_lines(db: Session, co: ChangeOrder) -> None:
+    """Before a voided change order's SOV lines are removed: an open (draft or
+    submitted) application drops its line for them (it carries no amounts, or
+    the void was refused), and an approved one keeps its line as history with
+    the link cleared, as the foreign key's SET NULL does on Postgres."""
+    from app.models.pay_applications import PayApplication, PayApplicationLine
+
+    sov_line_ids = _co_sov_line_ids(db, co)
+    if not sov_line_ids:
+        return
+    rows = (
+        db.query(PayApplicationLine, PayApplication.status)
+        .join(
+            PayApplication, PayApplication.id == PayApplicationLine.pay_application_id
+        )
+        .filter(PayApplicationLine.sov_line_id.in_(sov_line_ids))
+        .all()
+    )
+    for line, status in rows:
+        if status in ("draft", "submitted"):
+            db.delete(line)
+        else:
+            line.sov_line_id = None
+    db.flush()
 
 
 def _reverse_allowance_return(db: Session, co: ChangeOrder, sell_total) -> None:
@@ -864,6 +895,7 @@ def reverse_change_order(db: Session, co: ChangeOrder) -> None:
             job.contract_amount = _q(base - sell_total)
             if co.allowance_return:
                 _reverse_allowance_return(db, co, sell_total)
+            _release_co_application_lines(db, co)
             db.query(SovLine).filter(
                 SovLine.job_id == job.id, SovLine.change_order_id == co.id
             ).delete()

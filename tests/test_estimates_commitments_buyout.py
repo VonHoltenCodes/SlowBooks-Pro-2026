@@ -477,7 +477,9 @@ def test_packages_sort_by_their_lowest_section_code(client, seed_customer):
         for ln in client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
         if ln["kind"] == "work"
     ]
-    assert sov == ["Demolition", "Concrete", "Electrical", "Unassigned"]
+    # a line with no package is its own SOV line, under its own description
+    # (the owner's schedule never prints "Unassigned"; the Buyout keeps it)
+    assert sov == ["Demolition", "Concrete", "Electrical", "Loose"]
     rows = [r["package_name"] for r in _buyout(client, job["id"])["rows"]]
     assert rows[:4] == ["Demolition", "Concrete", "Electrical", "Unassigned"]
 
