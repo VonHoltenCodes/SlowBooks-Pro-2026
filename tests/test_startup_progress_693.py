@@ -50,7 +50,7 @@ def test_a_file_built_by_migrations_has_both_indexes(tmp_path):
     db = tmp_path / "fresh.db"
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == [REVISION]
+    assert script.get_heads() == ["e1b7c4a92d68"]
     assert script.get_revision(REVISION).down_revision == BEFORE
     command.upgrade(cfg, "head")
     indexes = _indexes(db)
