@@ -1168,12 +1168,17 @@ def _bill_job_share(bill, job_id: int) -> Decimal:
     return job_amt / total
 
 
-def _vendor_bill_figures(db: Session, job_id: int, vendor_id: int) -> dict:
-    """For one vendor on one job: the bills carrying the job and the payments,
+def _vendor_bill_figures(
+    db: Session, job_id: int, as_of: Optional[date]
+) -> dict[int, dict]:
+    """Per vendor on one job: the bills carrying the job and the payments,
     retainage held-less-released and open A/P on them — each prorated by the
     job's share of the bill's line amounts (a header-only bill is a whole 1),
     so a bill split across two jobs lands half on each. A bill carries the job
-    on its header or on any of its lines."""
+    on its header or on any of its lines. Read as of `as_of` (bills dated by
+    then, payments dated by then, open as A/P Aging would age it) and in home
+    currency at each bill's booked rate, so the figures tie to A/P Aging and
+    Commitment Status for the same job and date; with no date, everything."""
     from sqlalchemy import or_
 
     from app.models.bills import (
@@ -1181,61 +1186,156 @@ def _vendor_bill_figures(db: Session, job_id: int, vendor_id: int) -> dict:
         BillLine,
         BillPayment,
         BillPaymentAllocation,
+        BillStatus,
     )
+    from app.services.contact_balances import home_amount
+    from app.services.open_balances import open_bills_as_of
 
     on_line = db.query(BillLine.bill_id).filter(BillLine.job_id == job_id)
-    bills = (
+    q = (
         db.query(Bill)
-        .filter(
-            Bill.vendor_id == vendor_id,
-            or_(Bill.job_id == job_id, Bill.id.in_(on_line)),
-        )
-        .all()
+        .filter(or_(Bill.job_id == job_id, Bill.id.in_(on_line)))
+        .filter(Bill.status.notin_([BillStatus.VOID, BillStatus.DRAFT]))
     )
-    # payments allocated to each bill (non-void), by bill id
-    paid_by_bill: dict[int, Decimal] = {}
-    bill_ids = [b.id for b in bills]
-    if bill_ids:
-        rows = (
-            db.query(
-                BillPaymentAllocation.bill_id,
-                sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
-            )
-            .select_from(BillPaymentAllocation)
-            .join(
-                BillPayment,
-                BillPaymentAllocation.bill_payment_id == BillPayment.id,
-            )
-            .filter(
-                BillPaymentAllocation.bill_id.in_(bill_ids),
-                BillPayment.is_voided.is_(False),
-            )
-            .group_by(BillPaymentAllocation.bill_id)
-            .all()
+    if as_of is not None:
+        q = q.filter(Bill.date <= as_of)
+    bills = q.all()
+    bill_ids = {b.id for b in bills}
+    if not bill_ids:
+        return {}
+    open_by_bill = {
+        b.id: amt for b, amt in open_bills_as_of(db, as_of or date.max, bill_ids)
+    }
+    # payments allocated to each bill (non-void, dated by as_of), by bill id
+    paid_q = (
+        db.query(
+            BillPaymentAllocation.bill_id,
+            sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
         )
-        paid_by_bill = {bid: Decimal(str(amt)) for bid, amt in rows}
+        .select_from(BillPaymentAllocation)
+        .join(BillPayment, BillPaymentAllocation.bill_payment_id == BillPayment.id)
+        .filter(
+            BillPaymentAllocation.bill_id.in_(bill_ids),
+            BillPayment.is_voided.is_(False),
+        )
+    )
+    if as_of is not None:
+        paid_q = paid_q.filter(BillPayment.date <= as_of)
+    paid_by_bill = {
+        bid: Decimal(str(amt))
+        for bid, amt in paid_q.group_by(BillPaymentAllocation.bill_id)
+    }
 
-    count = _ZERO
-    retainage = _ZERO
-    open_ap = _ZERO
-    paid = _ZERO
+    out: dict[int, dict] = {}
     for b in bills:
         share = _bill_job_share(b, job_id)
         if share == _ZERO:
             continue
-        count += share
-        retainage += share * (
+        f = out.setdefault(
+            b.vendor_id,
+            {
+                "bills_count": _ZERO,
+                "paid_to_date": _ZERO,
+                "retainage_outstanding": _ZERO,
+                "open_ap": _ZERO,
+            },
+        )
+        rate = b.exchange_rate
+
+        def home(amount):
+            return share * home_amount(amount, rate)
+
+        f["bills_count"] += share
+        f["retainage_outstanding"] += home(
             Decimal(str(b.retainage_held or 0))
             - Decimal(str(b.retainage_released or 0))
         )
-        open_ap += share * Decimal(str(b.balance_due or 0))
-        paid += share * paid_by_bill.get(b.id, _ZERO)
+        f["open_ap"] += home(open_by_bill.get(b.id, _ZERO))
+        f["paid_to_date"] += home(paid_by_bill.get(b.id, _ZERO))
     return {
-        "bills_count": float(_q(count)),
-        "paid_to_date": _q(paid),
-        "retainage_outstanding": _q(retainage),
-        "open_ap": _q(open_ap),
+        vid: {
+            "bills_count": float(_q(f["bills_count"])),
+            "paid_to_date": _q(f["paid_to_date"]),
+            "retainage_outstanding": _q(f["retainage_outstanding"]),
+            "open_ap": _q(f["open_ap"]),
+        }
+        for vid, f in out.items()
     }
+
+
+# The documents whose postings name their vendor: a bill (and its edit and
+# void), a bill payment, a vendor credit.
+_BILL_SOURCES = ("bill", "bill_edit", "bill_void")
+_PAYMENT_SOURCES = ("bill_payment", "bill_payment_void")
+_CREDIT_SOURCES = ("vendor_credit", "vendor_credit_void")
+
+
+def _transaction_vendors(db: Session, txns: list) -> dict[int, Optional[int]]:
+    """The vendor of each posted transaction, read from the document behind
+    it, so books posted before any vendor was stamped read right. `txns` are
+    (id, vendor_id, source_type, source_id) rows. The header's own vendor wins
+    (bank matching sets it); else the bill's, the bill payment's or the vendor
+    credit's; an expense keeps its payee vendor as its source id. A journal or
+    a job cost entry has none."""
+    from app.models.bills import Bill, BillPayment
+    from app.models.vendor_credits import VendorCredit
+
+    def ids_of(kinds):
+        return {sid for _t, _v, st, sid in txns if st in kinds and sid is not None}
+
+    bill_vendor = {}
+    if ids_of(_BILL_SOURCES):
+        bill_vendor = dict(
+            db.query(Bill.id, Bill.vendor_id).filter(Bill.id.in_(ids_of(_BILL_SOURCES)))
+        )
+    payment_vendor = {}
+    if ids_of(_PAYMENT_SOURCES):
+        payment_vendor = dict(
+            db.query(BillPayment.id, BillPayment.vendor_id).filter(
+                BillPayment.id.in_(ids_of(_PAYMENT_SOURCES))
+            )
+        )
+    credit_vendor = {}
+    if ids_of(_CREDIT_SOURCES):
+        credit_vendor = dict(
+            db.query(VendorCredit.id, VendorCredit.vendor_id).filter(
+                VendorCredit.id.in_(ids_of(_CREDIT_SOURCES))
+            )
+        )
+    # a voided expense names the expense it reverses, which names the payee
+    expense_ids = ids_of(("expense",))
+    voided_expense = ids_of(("expense_void",))
+    original_payee = {}
+    if voided_expense:
+        original_payee = dict(
+            db.query(Transaction.id, Transaction.source_id).filter(
+                Transaction.id.in_(voided_expense)
+            )
+        )
+    payees = expense_ids | {v for v in original_payee.values() if v is not None}
+    from app.models.contacts import Vendor
+
+    real_payees = (
+        {r[0] for r in db.query(Vendor.id).filter(Vendor.id.in_(payees))}
+        if payees
+        else set()
+    )
+
+    out: dict[int, Optional[int]] = {}
+    for tid, vendor_id, st, sid in txns:
+        if vendor_id is None:
+            if st in _BILL_SOURCES:
+                vendor_id = bill_vendor.get(sid)
+            elif st in _PAYMENT_SOURCES:
+                vendor_id = payment_vendor.get(sid)
+            elif st in _CREDIT_SOURCES:
+                vendor_id = credit_vendor.get(sid)
+            elif st == "expense" and sid in real_payees:
+                vendor_id = sid
+            elif st == "expense_void" and original_payee.get(sid) in real_payees:
+                vendor_id = original_payee[sid]
+        out[tid] = vendor_id
+    return out
 
 
 def _vendor_job(
@@ -1249,7 +1349,10 @@ def _vendor_job(
     cost_types = (AccountType.COGS, AccountType.EXPENSE)
     q = (
         db.query(
+            Transaction.id,
             Transaction.vendor_id,
+            Transaction.source_type,
+            Transaction.source_id,
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
         )
@@ -1262,35 +1365,53 @@ def _vendor_job(
         q = q.filter(Transaction.date >= start_date)
     if end_date:
         q = q.filter(Transaction.date <= end_date)
-    by_vendor = q.group_by(Transaction.vendor_id).all()
+    posted = q.group_by(
+        Transaction.id,
+        Transaction.vendor_id,
+        Transaction.source_type,
+        Transaction.source_id,
+    ).all()
 
-    vendor_ids = [v for v, _dr, _cr in by_vendor if v is not None]
+    # the vendor of each entry comes from its document, then totals per vendor
+    vendor_of = _transaction_vendors(db, [p[:4] for p in posted])
+    cost_by_vendor: dict[Optional[int], Decimal] = {}
+    for tid, _v, _st, _sid, dr, cr in posted:
+        vid = vendor_of[tid]
+        cost_by_vendor[vid] = cost_by_vendor.get(vid, _ZERO) + (
+            Decimal(str(dr)) - Decimal(str(cr))
+        )
+
+    bill_figures = _vendor_bill_figures(db, job.id, end_date)
+    vendor_ids = {v for v in cost_by_vendor if v is not None} | set(bill_figures)
     names = {
         v.id: v.name for v in db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).all()
     }
 
     rows = []
-    for vendor_id, dr, cr in by_vendor:
-        cost = Decimal(str(dr)) - Decimal(str(cr))
-        if vendor_id is None:
-            rows.append(
-                {
-                    "vendor_id": None,
-                    "vendor_name": _NO_VENDOR,
-                    "cost": float(_q(cost)),
-                    "bills_count": 0,
-                    "paid_to_date": 0.0,
-                    "retainage_outstanding": 0.0,
-                    "open_ap": 0.0,
-                }
-            )
-            continue
-        bf = _vendor_bill_figures(db, job.id, vendor_id)
+    if None in cost_by_vendor:
+        rows.append(
+            {
+                "vendor_id": None,
+                "vendor_name": _NO_VENDOR,
+                "cost": float(_q(cost_by_vendor[None])),
+                "bills_count": 0,
+                "paid_to_date": 0.0,
+                "retainage_outstanding": 0.0,
+                "open_ap": 0.0,
+            }
+        )
+    for vendor_id in vendor_ids:
+        bf = bill_figures.get(vendor_id) or {
+            "bills_count": 0,
+            "paid_to_date": _ZERO,
+            "retainage_outstanding": _ZERO,
+            "open_ap": _ZERO,
+        }
         rows.append(
             {
                 "vendor_id": vendor_id,
                 "vendor_name": names.get(vendor_id, ""),
-                "cost": float(_q(cost)),
+                "cost": float(_q(cost_by_vendor.get(vendor_id, _ZERO))),
                 "bills_count": bf["bills_count"],
                 "paid_to_date": float(bf["paid_to_date"]),
                 "retainage_outstanding": float(bf["retainage_outstanding"]),
@@ -1323,12 +1444,14 @@ def job_cost_by_vendor(
     status: Optional[str] = None,
     include_closed: bool = False,
 ) -> dict:
-    """Posted job cost grouped job → vendor (the transaction header's vendor; a
-    No vendor bucket holds the rest), with the vendor's bills, paid to date,
-    retainage held outstanding and open A/P on the job. Cost is period-filtered
-    by transaction date; the bill figures are job-to-date and **prorated by the
-    job's share of each bill's line amounts** (a header-only bill counts whole,
-    a bill split across jobs splits), so bills can read fractional."""
+    """Posted job cost grouped job → vendor (each entry's vendor read from the
+    bill, bill payment, vendor credit or expense behind it; a No vendor bucket
+    holds journals and job cost entries), with the vendor's bills, paid to
+    date, retainage held outstanding and open A/P on the job. Cost is
+    period-filtered by transaction date; the bill figures are job-to-date as of
+    `end_date` and **prorated by the job's share of each bill's line amounts**
+    (a header-only bill counts whole, a bill split across jobs splits), so
+    bills can read fractional."""
     from fastapi import HTTPException
 
     if start_date and end_date and start_date > end_date:
