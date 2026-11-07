@@ -362,6 +362,44 @@ def test_an_owner_co_that_funds_a_sub_co_is_not_a_loss(
     assert row["variance"] == 2000.0
 
 
+def test_buyout_changes_count_only_change_orders_in_effect_by_the_date(
+    client, db_session, seed_accounts, seed_customer
+):
+    from datetime import date
+
+    from app.models.jobs import Job
+    from app.services.buyout import job_buyout
+
+    _set_construction(client)
+    job = _job(client, seed_customer.id)
+    _est, pc, _pf, c, _f = _bid(client, seed_customer.id, job["id"])
+    owner = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "kind": "owner",
+            "funding": "contract",
+            "date": "2026-08-10",
+            "lines": [_co_line("Extra slab", 5000, code_id=c["id"])],
+        },
+    ).json()
+    assert client.post(f"/api/change-orders/{owner['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{owner['id']}/approve",
+        json={"approved_on": "2026-08-10"},
+    )
+    assert r.status_code == 200, r.text
+
+    j = db_session.get(Job, job["id"])
+
+    def concrete(as_of):
+        rows = job_buyout(db_session, j, as_of=as_of)["rows"]
+        return next(r for r in rows if r["package_name"] == "Concrete")
+
+    assert concrete(date(2026, 7, 31))["changes"] == 0.0
+    assert concrete(date(2026, 8, 31))["changes"] == 5000.0
+
+
 def test_plain_bills_count_as_spent_not_zero_bought(
     client, seed_accounts, seed_customer
 ):

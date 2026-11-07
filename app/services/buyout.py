@@ -89,14 +89,15 @@ def _package_by_code(db: Session, preferred: set) -> dict:
     return out
 
 
-def _changes_by_package(db: Session, job: Job, pkg_of: dict) -> dict:
+def _changes_by_package(db: Session, job: Job, pkg_of: dict, as_of=None) -> dict:
     """Approved change-order cost per package (None = no package): the lines of
     the job's approved owner change orders and standalone sub change orders (a
     sub CO that carries an owner CO writes no budget of its own, so its money
     is counted once, on the owner CO). A line's own package wins, else the
-    package its cost code maps to."""
+    package its cost code maps to. With `as_of`, only change orders in effect
+    by then count."""
     from app.models.change_orders import ChangeOrder
-    from app.services.change_orders import _writes_budget
+    from app.services.change_orders import _writes_budget, co_effective_date
 
     out: dict = {}
     cos = db.query(ChangeOrder).filter(
@@ -107,6 +108,10 @@ def _changes_by_package(db: Session, job: Job, pkg_of: dict) -> dict:
     for co in cos:
         if not _writes_budget(co):
             continue
+        if as_of is not None:
+            day = co_effective_date(co)
+            if day is None or day > as_of:
+                continue
         for line in co.lines:
             key = line.trade_package_id
             if key is None:
@@ -207,7 +212,7 @@ def job_buyout(db: Session, job: Job, as_of=None) -> dict:
     # the package that maps it (the bid's own packages win a tie).
     pkg_of = _package_by_code(db, {k for k in bid_by_pkg if k is not None})
     pkg_names = {p.id: p.name for p in db.query(TradePackage)}
-    for pkg_id, amount in _changes_by_package(db, job, pkg_of).items():
+    for pkg_id, amount in _changes_by_package(db, job, pkg_of, as_of).items():
         row_for(pkg_id, pkg_names.get(pkg_id, _UNASSIGNED))["changes"] += amount
     for pkg_id, amount in _spent_no_commitment(db, job, as_of, pkg_of).items():
         row = row_for(pkg_id, pkg_names.get(pkg_id, _UNASSIGNED))
