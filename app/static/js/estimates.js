@@ -539,12 +539,19 @@ const EstimatesPage = {
     },
 
     // What the Accept confirm says: the budget it locks (cost against the
-    // bid), and a warning when the estimate has expired. Pure, for a probe.
+    // bid), the lines with no cost code, and a warning when the estimate has
+    // expired. Pure, for a probe.
     acceptConfirmText(est) {
         const t = est.totals || {};
         let text = 'Accepting locks the job budget to this estimate.';
         if (t.budget_cost !== undefined) {
             text = `Accepting locks the job budget to this estimate: ${formatCurrency(t.budget_cost)} of cost against a ${formatCurrency(t.bid_total)} bid.`;
+        }
+        const uncoded = est.uncoded_lines || 0;
+        if (uncoded) {
+            text += uncoded === 1
+                ? '\n\n1 line has no cost code, so its budget lands on no code.'
+                : `\n\n${uncoded} lines have no cost code, so their budget lands on no code.`;
         }
         if (est.expiration_date && est.expiration_date < todayISO()) {
             text += `\n\nThis estimate expired on ${formatDate(est.expiration_date)}. Accept it anyway?`;

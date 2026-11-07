@@ -242,38 +242,17 @@ def _unmeasured_wip_row(
     return row
 
 
-def _contract_changes_after(db: Session, job: Job, as_of: date) -> Decimal:
-    """Σ sell of this job's approved, contract-funded owner change orders whose
-    approve landed after `as_of` — what to back out of the current contract to
-    read the sum as it stood on that day."""
-    from app.models.change_orders import ChangeOrder
-    from app.services.change_orders import co_effective_date, co_totals
-
-    total = _ZERO
-    cos = (
-        db.query(ChangeOrder)
-        .filter(
-            ChangeOrder.job_id == job.id,
-            ChangeOrder.kind == "owner",
-            ChangeOrder.status == "approved",
-            ChangeOrder.funding == "contract",
-        )
-        .all()
-    )
-    for co in cos:
-        approved = co_effective_date(co)
-        if approved is not None and approved > as_of:
-            total += co_totals(co, job)["sell_total"]
-    return _q(total)
-
-
 def wip_row(db: Session, job: Job, as_of: date) -> dict:
     """One WIP line for a job. A job with no contract amount is listed with
     blank figures (the schedule still shows it). Every money figure reads the
     books as of `as_of`: actuals and posted revenue to that date, billing and
     retainage from the approved applications dated that day or earlier, and the
     revised contract with the change orders approved by then."""
-    from app.services.contracts import contract_summary, original_contract_sum
+    from app.services.contracts import (
+        contract_changes_after,
+        contract_summary,
+        original_contract_sum,
+    )
     from app.services.job_costing import job_cost_tree
     from app.services.pay_applications import has_approved_application
 
@@ -306,7 +285,7 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
     original = original_contract_sum(db, job)
     # The contract as of the date: back out the contract-funded COs approved
     # after it, so original + approved-as-of = revised-as-of.
-    changes_after = _contract_changes_after(db, job, as_of)
+    changes_after = contract_changes_after(db, job, as_of)
     revised = _q(current_revised - changes_after)
     approved_cos = _q(revised - original)
     billed = _q(summary["billed_to_date"])

@@ -261,7 +261,10 @@ fee. **Accept also awards the job:** a job still `pending` becomes `awarded`
 (a job already awarded, in progress or closed is left alone), and the first
 approved pay application moves a pending or awarded job to `in progress`. The
 Accept confirm names the budget it locks (the cost budget against the bid
-total) and warns when the estimate's expiration date has passed. Converting an accepted estimate to an invoice drops
+total), says how many lines have no cost code (their budget lands on no code),
+and warns when the estimate's expiration date has passed. Accept still goes
+ahead; `POST /api/estimates/{id}/accept` returns the same count as a sentence in
+its `warnings` list (`uncoded_lines` on the estimate carries the number). Converting an accepted estimate to an invoice drops
 the unit-price lines and any un-accepted alternate, carries each line's cost
 type and unit cost onto the invoice, and adds one invoice line per non-zero
 markup (on the job) so the invoice foots to the bid.
@@ -286,7 +289,8 @@ the same way.
 ### The bid the owner receives
 
 The customer PDF (and Print) of a construction estimate is built to go out
-under the contractor's name; a Business or Nonprofit estimate PDF is unchanged.
+under the contractor's name, so it carries no Status line (the owner is not told
+it is "Pending"); a Business or Nonprofit estimate PDF is unchanged.
 
 - **Header and cover.** The company's **contractor license #** (Settings →
   Company → Company Information, shown once the company is Construction) prints
@@ -635,11 +639,16 @@ click (the audit trail). A pay application dated before a change order takes
 effect does not carry it: its **contract sum to date** and **net change by
 change orders** read the change orders that took effect on or before the
 application's date, whether it is a draft or approved (a change order entered
-before the application but taking effect after it shows on the next one).
+before the application but taking effect after it shows on the next one). That
+change order's line on the schedule of values stays off the application too (on
+screen, in the totals and on the PDF), so the schedule total equals the contract
+sum to date; a draft picks the line up when its date moves past the change
+order's effective date.
 Approving in a closed period is refused like a bill or a pay application there:
 403 with "Transaction date … is on or before the closing date (…). Modifications
 to closed periods are not allowed." (the closing-date password override works
-the same way). Change orders approved before this keep the local day of their
+the same way). Voiding an approved change order is refused the same way when the
+date it took effect falls in a closed period. Change orders approved before this keep the local day of their
 approve click.
 
 - *Owner CO, contract-funded* — adds the sell total to the **contract amount**
@@ -774,7 +783,9 @@ is set by hand; the closing-date guard applies when it is saved and when the
 application is approved. The invoice is due by the customer's payment terms
 (their terms, else the company's Default Terms, through the same parser as
 every other invoice), counted from the application date: an owner on Net 45
-billed July 31 owes on September 14, and one on Due on Receipt owes that day.
+billed July 31 owes on September 14, and one on Due on Receipt owes that day. The
+invoice is tied to that entry of the Payment Terms list, which is seeded first on
+a company whose list is still empty.
 
 **The application and its math.** Every SOV line (work, allowance, contingency
 and change-order lines all bill the same way) carries, per period:
@@ -853,7 +864,10 @@ Receivable (its total less the retainage held, plus any released; the line says
 how much was held or released), so its **Balance Due** is the amount due and
 equals A/R Aging for that customer. The retainage still held across the
 customer's invoices (held − released, to the statement date) prints on its own
-line, *Retainage held, not yet due*, beside the balance. The statement takes
+line, *Retainage held, not yet due*, beside the balance. A late fee (Apply Late Fees)
+posts its own A/R debit and is part of the invoice's balance from the day it posts: an
+edit of the invoice keeps it, and an aging dated before that day reads the invoice
+without it, so A/R Aging ties to 1100 on every date. The statement takes
 `as_of_date` only; it has no start date. A dropped retainage percent makes the retainage this period negative and
 the 1150 leg a credit; the entry still balances. **Void** reverses the
 invoice (and the 1150 entries), and later applications stay correct because
@@ -947,7 +961,10 @@ previous / this period / remaining). Its held retainage is released with
 which writes a bill for the vendor carrying no expense account: DR **Retainage
 Payable** (2050) / CR Accounts Payable for the amount, payable through Pay Bills
 like any bill. A release over what is held is refused (422), and voiding the
-release bill gives the retainage back to the commitment. Retainage is held and
+release bill gives the retainage back to the commitment. A release bill's lines,
+tax, job, class or number can't be edited (409, "A retainage release bill can't
+be re-lined; void it and release again."), since a re-post would put its line on an
+expense account instead of 2050; its memo, due date and terms still save. Retainage is held and
 released this way on **both** sides — 1150 receivable on the owner side, 2050
 payable on the sub side.
 

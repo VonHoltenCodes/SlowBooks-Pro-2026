@@ -694,6 +694,16 @@ def update_invoice(invoice_id: int, data: InvoiceUpdate, db: Session = Depends(g
 
             cash_basis.recompute_invoice_cash_lines(db, invoice)
 
+        # A late fee has its own A/R posting that the repost above leaves
+        # standing; the invoice owes it still, so the A/R Aging ties to 1100.
+        from app.services.open_balances import standing_late_fee
+
+        fee = standing_late_fee(db, invoice.id)
+        if fee:
+            invoice.subtotal += fee
+            invoice.total += fee
+            invoice.balance_due = invoice.total - invoice.amount_paid
+
     if adopting:
         txn = _post_invoice_journal(
             db,

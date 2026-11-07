@@ -50,8 +50,10 @@ from app.services.pay_applications import (
     deposits_figures,
     effective_tax_rate,
     line_computed,
+    lines_in_effect,
     previous_by_sov_line,
     retainage_outstanding,
+    sov_line_in_effect,
 )
 from app.services.request_utils import content_disposition
 from app.services.settings_service import get_setting_raw
@@ -167,7 +169,7 @@ def _line_obj(prev, ln):
 def _out(db: Session, app: PayApplication) -> PayApplicationOut:
     prev = previous_by_sov_line(db, app.job_id, app.application_no)
     lines = []
-    for ln in app.lines:
+    for ln in lines_in_effect(db, app):
         row = line_computed(_line_obj(prev, ln), app.retainage_pct)
         lines.append(
             PayApplicationLineOut(
@@ -341,6 +343,8 @@ def _refresh_lines(db: Session, app: PayApplication) -> bool:
     for n, sov in enumerate(job.sov_lines, start=1):
         ln = by_sov.get(sov.id)
         if ln is None:
+            if not sov_line_in_effect(db, sov, app.date):
+                continue
             db.add(
                 PayApplicationLine(
                     pay_application_id=app.id,
@@ -502,6 +506,8 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
     # Pre-fill a line from every SOV line, in order — change_order, allowance
     # and contingency lines bill like work.
     for n, sov in enumerate(job.sov_lines, start=1):
+        if not sov_line_in_effect(db, sov, app.date):
+            continue
         db.add(
             PayApplicationLine(
                 pay_application_id=app.id,

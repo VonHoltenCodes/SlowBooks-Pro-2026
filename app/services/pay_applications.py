@@ -247,6 +247,34 @@ def effective_tax_rate(app) -> Decimal:
     return Decimal(str(app.tax_rate or 0))
 
 
+def sov_line_in_effect(db: Session, sov, on) -> bool:
+    """False for a change order's schedule line on an application dated before
+    the change order takes effect: the application's contract sum does not
+    carry that change yet, so its schedule must not either."""
+    if sov is None or sov.change_order_id is None or on is None:
+        return True
+    from app.models.change_orders import ChangeOrder
+    from app.services.change_orders import co_effective_date
+
+    co = db.get(ChangeOrder, sov.change_order_id)
+    effective = co_effective_date(co) if co is not None else None
+    return effective is None or effective <= on
+
+
+def lines_in_effect(db: Session, app) -> list:
+    """The application's lines less a change order's line that takes effect
+    after the application's date (one already billed on stays: it is money)."""
+    from app.models.jobs import SovLine
+
+    kept = []
+    for ln in app.lines:
+        billed = _q(ln.this_period) != _ZERO or _q(ln.stored) != _ZERO
+        sov = db.get(SovLine, ln.sov_line_id) if ln.sov_line_id else None
+        if billed or sov_line_in_effect(db, sov, app.date):
+            kept.append(ln)
+    return kept
+
+
 def application_figures(db: Session, app) -> dict:
     """Full totals for one application, with its lines' `previous` filled from
     one history pass. Reads live, so it is correct whether draft or approved."""
@@ -260,7 +288,7 @@ def application_figures(db: Session, app) -> dict:
             is_taxable=sov_line_taxable(db, ln.sov_line_id),
             prior_stored=h["stored"].get(ln.sov_line_id, _ZERO),
         )
-        for ln in app.lines
+        for ln in lines_in_effect(db, app)
     ]
     return application_totals(
         rows,

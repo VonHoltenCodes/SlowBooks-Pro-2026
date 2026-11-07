@@ -8,6 +8,7 @@ WIP / cost-to-complete / the change-order log / buyout report / job cost by
 vendor are #556; this one leaves those figures reachable.
 """
 
+from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
@@ -705,7 +706,11 @@ def test_co_void_blocked_once_its_sov_line_is_billed(
     # the approved CO appended a change_order SOV line — bill it
     sov = client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
     co_line = next(l for l in sov if l["kind"] == "change_order")
-    app = _new_app(client, job["id"])
+    # dated today: an application before the CO takes effect has no line for it
+    app = client.post(
+        "/api/pay-applications",
+        json={"job_id": job["id"], "date": date.today().isoformat()},
+    ).json()
     _edit(
         client,
         app["id"],

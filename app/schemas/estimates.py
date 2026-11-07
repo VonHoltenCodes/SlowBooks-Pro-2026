@@ -234,6 +234,10 @@ class EstimateResponse(BaseModel):
     # True when the estimate's job bills by pay application (a contract type, a
     # schedule of values or a pay application), so Convert is refused.
     bills_by_pay_app: bool = False
+    # Bought-scope lines with a price but no cost code (the Accept confirm
+    # says how many), and the sentences Accept answers with.
+    uncoded_lines: int = 0
+    warnings: list[str] = []
     created_at: datetime
     updated_at: datetime
 
