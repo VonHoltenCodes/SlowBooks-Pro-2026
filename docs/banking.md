@@ -262,10 +262,33 @@ check** opens a sample check (Sample Payee, $1,234.56, today, "Alignment
 test") in a new tab; print it on plain paper and hold it against your stock
 to see how far to nudge. The test check uses the stock and nudges as they
 stand in the form, saved or not, so a change can be tried before saving it
-(`GET /api/checks/test-print?check_stock=&check_nudge_x_in=&check_nudge_y_in=`,
+(`GET /api/checks/test-print?check_stock=&check_position=&check_nudge_x_in=&check_nudge_y_in=`,
 each optional). This applies to every check print path — a bill
-payment, Pay Bills, a register check and an expense paid from a bank
-account.
+payment, Pay Bills, the batch print of waiting checks, a register check
+and an expense paid from a bank account.
+
+**Check position** (v2.31.9) says where the check sits on the sheet.
+**Check at the bottom** (the default) prints two stubs and then the check,
+as above. **Check on top** prints the check in the top third and two
+vouchers below it, the way QuickBooks Desktop's standard voucher checks are
+laid out, so that stock can be used with at most a nudge. On a check on top
+the date is at the top right, the payee is on the next line with the amount
+in numbers at the right edge, the amount in words is on the line below, and
+the payee's address is under that at the left. Each voucher shows the payee
+and the date on one line, then what the check paid (the bill, or the
+account and description) with each amount, and at its foot the bank
+account's name and the check's total. The stock (plain or values only) and
+the nudges apply to the check either way; the nudges never move the stubs
+or vouchers. The test check follows the position chosen in the form.
+
+**The payee's address** (v2.31.9) prints on the check under the amount in
+words, at the left, so the check can go out in a window envelope: the
+payee's name and the vendor's street, city, state and ZIP code. It prints
+for a bill payment, Pay Bills, the batch print, and a register check or
+expense paid to a vendor; when the vendor has no address on file (or the
+check has no vendor), no address prints and nothing else on the check
+moves. The test check prints a made-up address so the block can be lined
+up too.
 
 ## Transfers
 

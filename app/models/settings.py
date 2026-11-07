@@ -139,6 +139,11 @@ DEFAULT_SETTINGS = {
     # line the values up with the pre-printed boxes, in inches from -0.5 to
     # +0.5. Stored as a decimal string.
     "check_stock": "plain",
+    # Check position (#727): "bottom" prints stub / stub / check as it
+    # always has; "top" prints the check face in the top third and two
+    # vouchers below it, for QuickBooks Desktop's standard voucher stock.
+    # The stock and the nudges apply to the face in either position.
+    "check_position": "bottom",
     "check_nudge_x_in": "0",
     "check_nudge_y_in": "0",
     # Opening-balance wizard readiness metadata
