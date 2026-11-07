@@ -33,6 +33,8 @@ from app.services.estimating import (
     estimate_document_totals,
     fmt_pct,
     is_included_line,
+    uncoded_lines,
+    uncoded_warning,
 )
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
@@ -218,6 +220,7 @@ def _estimate_response(est: Estimate) -> EstimateResponse:
         if line is not None and line.trade_package is not None:
             line_resp.trade_package_name = line.trade_package.name
     resp.totals = totals_from_dict(estimate_totals(est))
+    resp.uncoded_lines = uncoded_lines(est)
     db = object_session(est)
     resp.bills_by_pay_app = bool(
         db is not None
@@ -638,7 +641,10 @@ def accept_estimate(
     _accept_estimate(db, estimate, data.job_id if data else None)
     db.commit()
     db.refresh(estimate)
-    return _estimate_response(estimate)
+    resp = _estimate_response(estimate)
+    # Accept goes ahead; lines with no code budget on none, and it says so.
+    resp.warnings = [w for w in (uncoded_warning(resp.uncoded_lines),) if w]
+    return resp
 
 
 @router.post("/{estimate_id}/lost", response_model=EstimateResponse)

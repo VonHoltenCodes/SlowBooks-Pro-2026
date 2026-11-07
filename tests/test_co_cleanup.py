@@ -1,7 +1,19 @@
 """Construction-overhaul leftovers (workstream L): each small fix, pinned."""
 
+import json
+import shutil
+import subprocess
 from decimal import Decimal
+from pathlib import Path
 
+import pytest
+
+from tests.test_estimates_commitments_buyout import (
+    _estimate,
+    _job as _plain_job,
+    _section,
+    _set_construction,
+)
 from tests.test_co_effective_date_allowance import (
     _app,
     _approve,
@@ -122,3 +134,64 @@ def test_a_pay_application_before_a_change_order_leaves_its_line_off(
     august = _app(client, job["id"], "2026-08-31")
     got = client.get(f"/api/pay-applications/{august['id']}").json()
     assert got["totals"]["scheduled_total"] == 113640.0
+
+
+def test_accept_says_how_many_lines_have_no_cost_code(client, seed_customer):
+    """Accept still goes ahead; the API names the lines whose budget lands on
+    no code, and the estimate carries the count for the confirm."""
+    _set_construction(client)
+    code = _section(client, "26 05 00", "Electrical")
+    job = _plain_job(client, seed_customer.id)
+    lines = [
+        {
+            "description": "Wire",
+            "quantity": 1,
+            "unit_cost": 100,
+            "cost_code_id": code["id"],
+        },
+        {"description": "Misc", "quantity": 1, "unit_cost": 50},
+        {"description": "Cleanup", "quantity": 1, "unit_cost": 25},
+    ]
+    est = _estimate(client, seed_customer.id, lines, job_id=job["id"])
+    assert client.get(f"/api/estimates/{est['id']}").json()["uncoded_lines"] == 2
+    r = client.post(f"/api/estimates/{est['id']}/accept", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "accepted"
+    assert r.json()["warnings"] == [
+        "2 lines have no cost code, so their budget lands on no code."
+    ]
+
+    # every line coded: no warning
+    clean = _estimate(
+        client,
+        seed_customer.id,
+        [{**lines[0]}],
+        job_id=_plain_job(client, seed_customer.id, name="Clean")["id"],
+    )
+    r = client.post(f"/api/estimates/{clean['id']}/accept", json={})
+    assert r.status_code == 200, r.text
+    assert r.json()["warnings"] == []
+
+
+def test_accept_confirm_names_the_lines_with_no_cost_code():
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node not installed")
+    js = (
+        Path(__file__).resolve().parents[1] / "app/static/js/estimates.js"
+    ).read_text()
+    body = js[js.index("acceptConfirmText(est) {") : js.index("async accept(id)")]
+    script = (
+        "const formatCurrency = v => '$' + Number(v).toFixed(2);"
+        "const formatDate = d => d; const todayISO = () => '2026-11-07';"
+        f"const P = {{ {body.rstrip().rstrip(',')} }};"
+        "console.log(JSON.stringify([P.acceptConfirmText({uncoded_lines:1}),"
+        "P.acceptConfirmText({uncoded_lines:3}), P.acceptConfirmText({})]));"
+    )
+    out = subprocess.run(
+        [node, "-e", script], capture_output=True, text=True, check=True
+    )
+    one, three, none = json.loads(out.stdout)
+    assert "1 line has no cost code, so its budget lands on no code." in one
+    assert "3 lines have no cost code, so their budget lands on no code." in three
+    assert "no cost code" not in none

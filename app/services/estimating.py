@@ -41,6 +41,26 @@ def included_lines(estimate):
     return [ln for ln in estimate.lines if is_included_line(ln)]
 
 
+def uncoded_lines(estimate) -> int:
+    """How many bought-scope lines carry a price or cost but no cost code:
+    Accept budgets them on no code (a whole-job row)."""
+    return sum(
+        1
+        for ln in included_lines(estimate)
+        if ln.cost_code_id is None
+        and (Decimal(str(ln.amount or 0)) != 0 or ln.unit_cost is not None)
+    )
+
+
+def uncoded_warning(count: int) -> str:
+    """The sentence Accept gives for lines with no cost code (empty for none)."""
+    if not count:
+        return ""
+    if count == 1:
+        return "1 line has no cost code, so its budget lands on no code."
+    return f"{count} lines have no cost code, so their budget lands on no code."
+
+
 # A line's cost is quantity × unit cost (the budget side); a line with no unit
 # cost carries no cost. Rounded to the cent, as the budget seeder does.
 def line_cost(line) -> Decimal:

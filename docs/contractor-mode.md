@@ -260,7 +260,10 @@ fee. **Accept also awards the job:** a job still `pending` becomes `awarded`
 (a job already awarded, in progress or closed is left alone), and the first
 approved pay application moves a pending or awarded job to `in progress`. The
 Accept confirm names the budget it locks (the cost budget against the bid
-total) and warns when the estimate's expiration date has passed. Converting an accepted estimate to an invoice drops
+total), says how many lines have no cost code (their budget lands on no code),
+and warns when the estimate's expiration date has passed. Accept still goes
+ahead; `POST /api/estimates/{id}/accept` returns the same count as a sentence in
+its `warnings` list (`uncoded_lines` on the estimate carries the number). Converting an accepted estimate to an invoice drops
 the unit-price lines and any un-accepted alternate, carries each line's cost
 type and unit cost onto the invoice, and adds one invoice line per non-zero
 markup (on the job) so the invoice foots to the bid.
