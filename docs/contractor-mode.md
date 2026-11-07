@@ -638,7 +638,8 @@ before the application but taking effect after it shows on the next one).
 Approving in a closed period is refused like a bill or a pay application there:
 403 with "Transaction date … is on or before the closing date (…). Modifications
 to closed periods are not allowed." (the closing-date password override works
-the same way). Change orders approved before this keep the local day of their
+the same way). Voiding an approved change order is refused the same way when the
+date it took effect falls in a closed period. Change orders approved before this keep the local day of their
 approve click.
 
 - *Owner CO, contract-funded* — adds the sell total to the **contract amount**

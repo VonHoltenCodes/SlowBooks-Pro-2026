@@ -34,6 +34,7 @@ from app.services.change_orders import (
     apply_change_order,
     check_allowance_line,
     check_owner_link,
+    co_effective_date,
     co_totals,
     create_allowance_return,
     recompute,
@@ -422,6 +423,11 @@ def void_change_order(co_id: int, db: Session = Depends(get_db)):
                 "message": "Only an approved change order can be voided.",
             },
         )
+    # Voiding takes the change order out as of the day it took effect, so a
+    # closed period refuses it as approving it there would.
+    effective = co_effective_date(co)
+    if effective is not None:
+        check_closing_date(db, effective)
     reverse_change_order(db, co)  # may 409 co_billed
     db.commit()
     db.refresh(co)

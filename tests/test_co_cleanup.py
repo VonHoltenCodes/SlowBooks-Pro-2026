@@ -2,6 +2,12 @@
 
 from decimal import Decimal
 
+from tests.test_co_effective_date_allowance import (
+    _approve,
+    _contract,
+    _owner_co,
+    _setup,
+)
 from tests.test_cash_basis_construction import (
     _commitment,
     _job,
@@ -45,3 +51,21 @@ def test_a_retainage_release_bill_cannot_be_re_lined(
     r = client.put(f"/api/bills/{bill_id}", json={"notes": "per the sub"})
     assert r.status_code == 200, r.text
     assert client.get(f"/api/bills/{bill_id}").json()["total"] == bill["total"]
+
+
+def test_voiding_a_change_order_in_a_closed_period_is_refused(client, seed_customer):
+    job, _sov = _setup(client, seed_customer.id, [], 100000)
+    co = _owner_co(client, job["id"], 1000, date="2026-08-10")
+    assert _approve(client, co["id"]).status_code == 200
+    assert (
+        client.put("/api/settings", json={"closing_date": "2026-09-30"}).status_code
+        == 200
+    )
+    r = client.post(f"/api/change-orders/{co['id']}/void")
+    assert r.status_code == 403, r.text
+    assert "on or before the closing date" in r.json()["detail"]
+    assert client.get(f"/api/change-orders/{co['id']}").json()["status"] == "approved"
+    assert _contract(client, job["id"])["contract"]["contract_amount"] == 101000.0
+    # an open period still voids
+    client.put("/api/settings", json={"closing_date": ""})
+    assert client.post(f"/api/change-orders/{co['id']}/void").status_code == 200
