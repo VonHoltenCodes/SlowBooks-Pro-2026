@@ -291,7 +291,9 @@ converts as before.
 **Accept, Lost and the list.** On the Estimates list a pending estimate with a
 job shows **Accept** as its main action (Convert is secondary, or absent on a
 contract job); one with no job says "Needs a job to accept" instead. **Mark
-lost** (`POST /api/estimates/{id}/lost`, with an optional `reason`) sets the
+lost** (`POST /api/estimates/{id}/lost`, with an optional `reason` of up to
+500 characters; any other field, a non-text reason or a longer one is a 422)
+sets the
 status to `rejected` and keeps the reason, dated, in the notes; an accepted or
 converted estimate can't be marked lost. The list carries a **Status** filter
 (Pending / Accepted / Lost / Converted); `GET /api/estimates?status=` filters
@@ -566,7 +568,8 @@ cost tree they are all-time (the response flags this with
 **Issuing a commitment.** A new commitment is a **draft**, and a draft is in no
 Buyout, committed or commitment-status figure. **Issue** (on the Purchase
 Orders list and the view) moves it to `sent` (issued); Edit has a **Status**
-select too. `PUT /api/purchase-orders/{id}` with a status that isn't one of
+select too. In construction mode the list and the view label `sent` as
+**Issued**, as the form and the button do. `PUT /api/purchase-orders/{id}` with a status that isn't one of
 `draft`, `sent`, `partial`, `received`, `closed` answers 422 naming them.
 
 **Bid vs buyout.** A **Buyout** tab on the job (after Contract, construction
@@ -1122,7 +1125,9 @@ comes in three kinds:
 Numbers count per job and kind, like change orders; a job with no job number
 uses `J<id>`. Each ticket has a date, a default cost code for its lines, a
 description, who submitted it, and lines of labor, equipment, material or
-other with a quantity, unit and cost rate (a T&M ticket also has a bill rate).
+other with a quantity, unit and cost rate (a T&M ticket also has a bill rate;
+its quantities are not negative, since a return slip is the only negative
+kind).
 A blank cost rate takes the employee's loaded rate (the same rate time
 entries post at), the equipment's hourly rate, or the item's average cost
 (its cost when it has no average yet); a blank bill rate is the cost rate
@@ -1138,7 +1143,11 @@ ticket is what was signed, so a change means voiding it and writing another.
 the ticket (attachments take `field_ticket` as their record type). An
 on-screen signature pad is a later issue. A ticket is voided while nothing it
 led to is approved: a T&M ticket on a change order that still stands, or on an
-invoice that is not void, is refused until that is rejected or voided.
+invoice that is not void, is refused until that is rejected or voided. The
+ticket's `can_void` says whether a void would be accepted now (it is false on
+a closed T&M ticket that is still priced or billed, on a void ticket, and on a
+posted slip or a delivery dated in a closed period of a company with no
+closing-date password); the tab shows **Void** only then.
 
 ### T&M tickets
 
@@ -1179,14 +1188,23 @@ extra work to bill goes on a T&M ticket.
 
 Material taken from the company's own stock onto a job. Each line is an
 inventory item and a quantity; a **negative quantity is a return** to stock.
-**Post** (`POST /api/field-tickets/{id}/post`, optional `date`, else the
-slip's) writes one Job Cost Entry, source `material_slip`: DR job cost (cost
+**Post** (`POST /api/field-tickets/{id}/post`) writes one Job Cost Entry, source `material_slip`: DR job cost (cost
 type material, the line's cost code; the account is the code's, else the
 material cost type's default account) / CR the item's inventory asset account
 (the item's own, else 1300), at the item's **average cost**, and the item's
 on-hand quantity goes down through the inventory service (a return: the same
 entry the other way, the stock back at the average). An item with no average
-cost yet is refused (the slip would post nothing). The slip closes. **Voiding**
+cost yet is refused (the slip would post nothing). The slip posts **on its own
+date**, with the closing date checked on that date, and its stock movements
+carry that date too (so does the void's); a `date` in the request that is not
+the slip's date is a 422, since a slip dated 9/20 posted on 10/02 would put the
+cost in a different month than the paper says. To post on another day, change
+the slip's date first. A slip that takes an item **past the stock on hand**
+follows the company's *Refuse a sale of more than is on hand* setting as an
+invoice does: when it is on, the post is refused (422, naming each item, how
+many are on hand and how many short, and nothing is written); when it is off,
+the slip posts and the response's `warnings` say it ("Rebar #4: 100 on hand;
+this slip takes it to -50."). A return never counts as short. The slip closes. **Voiding**
 it reverses the entry and puts each stock movement back **at the cost it was
 booked at**, not today's average. The entry shows on Job Cost Entries; its
 void there is refused (void the slip, which puts the stock back too).
@@ -1206,6 +1224,31 @@ ordered and received per line beside what is billed, and **warns** (never
 refuses) when a line would bill more than the value received (received
 quantity × the line's rate); the convert's response carries the same
 `warnings`. **Commitment Status** gains a **Received** column.
+
+**Over-receipt.** A delivery that would take a PO line past its ordered
+quantity (received so far plus this ticket's) is refused (409, code
+`over_receipt`) with a sentence naming both: "Conduit: 100 ordered and 60
+already received, so 50 more would make 110 received." The ticket form asks
+"Record the over-delivery anyway?" and sends the ticket again with
+`over_receipt: true` (create and edit both take it). The ticket then saves,
+the line is marked (`over_receipt` on the ticket line, an **over** tag beside
+its received quantity), and the ticket carries a `warnings` sentence on this
+and every later read until it is voided. A quantity of 100,000,000,000 or more
+is refused even then (the column's limit). An edit that keeps an
+over-delivered line unchanged does not ask again.
+
+**Deliveries and the purchase order's lines.** A PO line that a delivery
+ticket (not void) received on cannot be removed by `PUT /api/purchase-orders/
+{id}`, and cannot be cut below the quantity received: 409, code
+`commitment_received`, naming the ticket ("Conduit has 100 received on delivery
+ticket 2601-DT-001, so it cannot be cut to 20. Void the ticket, or keep at
+least 100."). Void the delivery ticket first. A line can still grow.
+
+**Closed periods.** A delivery ticket changes received quantity as of its
+date, so editing it, deleting it or voiding it with that date on or
+before the closing date is refused like any entry there (403; the closing-date
+password override applies, and an edit that moves the date is checked on both
+dates).
 
 ### Field ticket log
 

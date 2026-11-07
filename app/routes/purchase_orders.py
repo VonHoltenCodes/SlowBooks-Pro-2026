@@ -24,6 +24,7 @@ from app.schemas.purchase_orders import (
 )
 from app.schemas.pay_applications import ReleaseRetainageRequest
 from app.services.accounting import _q, compute_line_totals
+from app.services.field_tickets import received_line_refusal
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_po_number
 from app.services.payment_terms import term_id_for
@@ -240,6 +241,27 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
                     status_code=409,
                     detail={"code": "commitment_billed", "message": _billed},
                 )
+        # A line a delivery ticket received on stays, and does not shrink below
+        # what arrived: void the ticket first (the way out for a billed line
+        # is a sub change order, for a delivered one the ticket).
+        for ln in po.lines:
+            if ln.id not in incoming_ids:
+                refusal = received_line_refusal(db, ln)
+                if refusal:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "commitment_received", "message": refusal},
+                    )
+        for ld in data.lines:
+            if ld.id and ld.id in existing:
+                refusal = received_line_refusal(
+                    db, existing[ld.id], Decimal(str(ld.quantity))
+                )
+                if refusal:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "commitment_received", "message": refusal},
+                    )
         # Lines a sub change order added belong to it: a plain edit can
         # neither drop them nor change their amount, job, cost code or type (void the sub CO).
         _co_owned = "A sub change order added a line on this commitment; void that change order to change it."

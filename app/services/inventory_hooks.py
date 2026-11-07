@@ -561,6 +561,10 @@ _OVERSELL_WAY_OUT = {
         "Keep at least what has sold on the bill, void the sale that took it, "
         "or turn off Refuse a sale of more than is on hand under Settings."
     ),
+    "slip": (
+        "Receive the stock on a bill first, or turn off Refuse a sale of more "
+        "than is on hand under Settings."
+    ),
     "credit": (
         "Return no more than is on hand, enter the bill that received the "
         "stock first, or turn off Refuse a sale of more than is on hand under "

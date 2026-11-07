@@ -188,12 +188,12 @@ def create_field_ticket(data: FieldTicketCreate, db: Session = Depends(get_db)):
     job = db.get(Job, data.job_id)
     if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
-    header = data.model_dump(exclude={"lines", "job_id", "kind"})
+    header = data.model_dump(exclude={"lines", "job_id", "kind", "over_receipt"})
     _check_header(db, job, data.kind, header)
     header["date"] = header.get("date") or date.today()
     t = _create_numbered(db, job, data.kind, status="draft", **header)
     svc.set_lines(db, t, data.lines)
-    svc.check_kind_lines(db, t)
+    svc.check_kind_lines(db, t, data.over_receipt)
     svc.apply_received(db, t)
     db.commit()
     db.refresh(t)
@@ -209,7 +209,7 @@ def update_field_ticket(
     svc.require_construction(db)
     t = _get(db, ticket_id)
     _refuse_unless_draft(t, "edited")
-    fields = data.model_dump(exclude_unset=True, exclude={"lines"})
+    fields = data.model_dump(exclude_unset=True, exclude={"lines", "over_receipt"})
     merged = {
         "cost_code_id": t.cost_code_id,
         "commitment_id": t.commitment_id,
@@ -217,6 +217,9 @@ def update_field_ticket(
         **fields,
     }
     _check_header(db, t.job, t.kind, merged)
+    # A delivery ticket moves received quantity as of its date: both the date
+    # it has and the one it is moved to must be open.
+    svc.check_delivery_period(db, t, t.date, fields.get("date") or t.date)
     # A delivery ticket's quantities come off the PO lines before the edit and
     # go back on after it, so an edit moves received quantity by the change.
     svc.unapply_received(db, t)
@@ -226,7 +229,7 @@ def update_field_ticket(
         setattr(t, key, val)
     if data.lines is not None:
         svc.set_lines(db, t, data.lines)
-    svc.check_kind_lines(db, t)
+    svc.check_kind_lines(db, t, data.over_receipt)
     svc.apply_received(db, t)
     db.commit()
     db.refresh(t)
@@ -239,6 +242,7 @@ def delete_field_ticket(ticket_id: int, db: Session = Depends(get_db)):
     svc.require_construction(db)
     t = _get(db, ticket_id)
     _refuse_unless_draft(t, "deleted")
+    svc.check_delivery_period(db, t)
     svc.unapply_received(db, t)
     db.delete(t)
     db.commit()
@@ -281,14 +285,18 @@ def post_material_slip(
     """Post a material slip: a Job Cost Entry (source material_slip) puts the
     stock on the job at each item's average cost, DR job cost / CR the item's
     inventory asset account, and on-hand quantity goes down (a negative
-    quantity returns stock). `date` defaults to the slip's date. The slip
-    closes; voiding it reverses at the booked cost."""
+    quantity returns stock). It posts on the slip's own date (a `date` sent
+    must be that date). Stock gone short is refused or warned of as an
+    invoice's is, by the company's refuse-oversell setting. The slip closes;
+    voiding it reverses at the booked cost."""
     svc.require_construction(db)
     t = _get(db, ticket_id)
-    svc.post_material_slip(db, t, data.date if data else None)
+    warnings = svc.post_material_slip(db, t, data.date if data else None)
     db.commit()
     db.refresh(t)
-    return _out(db, t)
+    out = _out(db, t)
+    out.warnings = out.warnings + warnings
+    return out
 
 
 @router.post("/{ticket_id}/void", response_model=FieldTicketOut)

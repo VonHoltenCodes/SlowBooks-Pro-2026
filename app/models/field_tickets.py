@@ -18,6 +18,7 @@
 # ============================================================================
 
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -26,6 +27,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    false,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -146,6 +148,11 @@ class FieldTicketLine(Base):
         Integer, ForeignKey("cost_codes.id", ondelete="SET NULL"), nullable=True
     )
     cost_type = Column(String(20), nullable=True)
+    # A delivery line that took its PO line past the ordered quantity (saved
+    # with over_receipt: true)
+    over_receipt = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     ticket = relationship("FieldTicket", back_populates="lines")
     employee = relationship("Employee")

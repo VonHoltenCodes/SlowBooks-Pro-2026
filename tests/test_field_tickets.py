@@ -577,7 +577,7 @@ def test_posting_a_material_slip_charges_the_job_and_moves_stock(
     con, seed_customer, stock, seed_accounts, db_session
 ):
     job = _job(con, seed_customer.id)
-    slip = _slip(con, job["id"], stock.id, 25)
+    slip = _slip_on(con, job["id"], stock.id, 25, date="2026-06-05")
     # the slip's line is at the item's average cost
     assert slip["lines"][0]["cost_rate"] == 4.0 and slip["cost_total"] == 100.0
     r = con.post(f"/api/field-tickets/{slip['id']}/post", json={"date": "2026-06-05"})
@@ -827,3 +827,299 @@ def test_commitment_status_has_a_received_column(con, po):
     assert late["totals"]["received"] == 250.0
     csv = con.get("/api/reports/commitment-status/csv?as_of=2026-07-31").text
     assert "Received" in csv and "250.00" in csv
+
+
+# ── Round 1: receiving, slips and voids that used to pass silently ──────
+
+
+def _over(con, job_id, po_id, qtys, status=201, **extra):
+    return _deliver(con, job_id, po_id, qtys, status=status, **extra)
+
+
+def test_a_delivery_past_the_ordered_quantity_is_refused_with_a_sentence(con, po):
+    job, order = po
+    conduit = order["lines"][0]["id"]
+    _deliver(con, job["id"], order["id"], {conduit: 60})
+    for qty in (50, 10**12):
+        lines = [{"po_line_id": conduit, "quantity": qty}]
+        r = con.post(
+            "/api/field-tickets",
+            json={
+                "job_id": job["id"],
+                "kind": "delivery",
+                "purchase_order_id": order["id"],
+                "lines": lines,
+            },
+        )
+        assert r.status_code == 409, r.text
+        message = r.json()["detail"]["message"]
+        assert r.json()["detail"]["code"] == "over_receipt"
+        assert "100 ordered" in message and "60 already received" in message
+    # nothing was received by the refused requests, and the order is as it was
+    got = _po_get(con, order["id"])
+    assert float(got["lines"][0]["received_qty"]) == 60.0
+    assert got["status"] == "partial"
+
+
+def test_an_over_delivery_is_recorded_only_when_the_request_says_so(con, po):
+    job, order = po
+    conduit = order["lines"][0]["id"]
+    _deliver(con, job["id"], order["id"], {conduit: 60})
+    r = con.post(
+        "/api/field-tickets",
+        json={
+            "job_id": job["id"],
+            "kind": "delivery",
+            "purchase_order_id": order["id"],
+            "over_receipt": True,
+            "lines": [{"po_line_id": conduit, "quantity": 50}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    ticket = r.json()
+    assert ticket["lines"][0]["over_receipt"] is True
+    [warning] = ticket["warnings"]
+    assert "110 received against 100 ordered" in warning
+    assert float(_po_get(con, order["id"])["lines"][0]["received_qty"]) == 110.0
+    # the mark and the warning stay on a later read, and a plain edit of the
+    # ticket (no new lines) keeps the over-delivery it already recorded
+    again = con.get(f"/api/field-tickets/{ticket['id']}").json()
+    assert again["lines"][0]["over_receipt"] and again["warnings"] == [warning]
+    r = con.put(f"/api/field-tickets/{ticket['id']}", json={"description": "Extra"})
+    assert r.status_code == 200, r.text
+    # an in-range delivery carries no mark
+    clean = _deliver(con, job["id"], order["id"], {order["lines"][1]["id"]: 5})
+    assert clean["lines"][0]["over_receipt"] is False and clean["warnings"] == []
+    # a quantity beyond what the column holds is a typo, over_receipt or not
+    r = con.post(
+        "/api/field-tickets",
+        json={
+            "job_id": job["id"],
+            "kind": "delivery",
+            "purchase_order_id": order["id"],
+            "over_receipt": True,
+            "lines": [{"po_line_id": conduit, "quantity": 10**15}],
+        },
+    )
+    assert r.status_code == 422 and "100,000,000,000" in r.text
+
+
+def test_an_edit_that_takes_a_delivery_past_the_order_is_refused_too(con, po):
+    job, order = po
+    conduit = order["lines"][0]["id"]
+    t = _deliver(con, job["id"], order["id"], {conduit: 60})
+    r = con.put(
+        f"/api/field-tickets/{t['id']}",
+        json={"lines": [{"po_line_id": conduit, "quantity": 150}]},
+    )
+    assert r.status_code == 409 and "100 ordered" in r.json()["detail"]["message"]
+    # the refused edit left the ticket's 60 where it was
+    assert float(_po_get(con, order["id"])["lines"][0]["received_qty"]) == 60.0
+    assert con.get(f"/api/field-tickets/{t['id']}").json()["lines"][0]["quantity"] == 60
+
+
+def _put_po_lines(con, order, lines):
+    return con.put(f"/api/purchase-orders/{order['id']}", json={"lines": lines})
+
+
+def test_a_po_line_with_a_delivery_cannot_be_removed_or_cut_below_it(con, po):
+    job, order = po
+    conduit, boxes = order["lines"]
+    t = _deliver(con, job["id"], order["id"], {conduit["id"]: 100})
+    keep = {"id": boxes["id"], "description": "Boxes", "quantity": 10, "rate": 20}
+    full = {"id": conduit["id"], "description": "Conduit", "quantity": 100, "rate": 3}
+    # dropping the received line
+    r = _put_po_lines(con, order, [keep])
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["code"] == "commitment_received"
+    assert t["number"] in r.json()["detail"]["message"]
+    # shrinking it below what arrived
+    r = _put_po_lines(con, order, [keep, {**full, "quantity": 20}])
+    assert r.status_code == 409, r.text
+    assert t["number"] in r.json()["detail"]["message"]
+    assert "100 received" in r.json()["detail"]["message"]
+    got = _po_get(con, order["id"])
+    assert [float(ln["quantity"]) for ln in got["lines"]] == [100.0, 10.0]
+    # the line can grow, and an unreceived line is edited freely
+    r = _put_po_lines(con, order, [{**keep, "quantity": 4}, {**full, "quantity": 120}])
+    assert r.status_code == 200, r.text
+    # with the ticket void, the line goes
+    _sign(con, t["id"], name="Gate")
+    assert con.post(f"/api/field-tickets/{t['id']}/void").status_code == 200
+    assert _put_po_lines(con, order, [keep]).status_code == 200
+
+
+def _slip_on(con, job_id, item_id, qty, **extra):
+    return _ticket(
+        con,
+        job_id,
+        [{"line_type": "material", "item_id": item_id, "quantity": qty}],
+        kind="material",
+        **extra,
+    )
+
+
+def test_a_slip_past_the_stock_on_hand_warns_when_oversell_is_allowed(
+    con, seed_customer, stock, db_session
+):
+    job = _job(con, seed_customer.id)
+    slip = _slip(con, job["id"], stock.id, 150)  # 100 on hand
+    r = con.post(f"/api/field-tickets/{slip['id']}/post")
+    assert r.status_code == 200, r.text
+    [warning] = r.json()["warnings"]
+    assert "Rebar #4" in warning and "100 on hand" in warning and "-50" in warning
+    db_session.expire_all()
+    assert float(stock.quantity_on_hand) == -50.0
+
+
+def test_a_slip_past_the_stock_is_refused_when_the_company_refuses_oversell(
+    con, seed_customer, stock, db_session
+):
+    r = con.put("/api/settings", json={"inventory_refuse_oversell": "true"})
+    assert r.status_code == 200, r.text
+    job = _job(con, seed_customer.id)
+    slip = _slip(con, job["id"], stock.id, 150)
+    r = con.post(f"/api/field-tickets/{slip['id']}/post")
+    assert r.status_code == 422, r.text
+    assert "100 on hand" in r.json()["detail"] and "50 short" in r.json()["detail"]
+    # nothing posted: the slip is still a draft and the shelf is as it was
+    assert con.get(f"/api/field-tickets/{slip['id']}").json()["status"] == "draft"
+    db_session.expire_all()
+    assert float(stock.quantity_on_hand) == 100.0
+    # a slip within the stock, and a return, post as ever
+    ok = _slip(con, job["id"], stock.id, 90)
+    assert con.post(f"/api/field-tickets/{ok['id']}/post").json()["warnings"] == []
+    back = _slip(con, job["id"], stock.id, -10)
+    assert con.post(f"/api/field-tickets/{back['id']}/post").status_code == 200
+
+
+def test_a_slip_posts_on_its_own_date_with_movements_on_that_date(
+    con, seed_customer, stock, db_session
+):
+    from app.models.items import InventoryMovement
+
+    job = _job(con, seed_customer.id)
+    slip = _slip_on(con, job["id"], stock.id, 20, date="2026-09-20")
+    # a posting date that is not the slip's is refused, not followed
+    r = con.post(f"/api/field-tickets/{slip['id']}/post", json={"date": "2026-10-02"})
+    assert r.status_code == 422 and "2026-09-20" in r.json()["detail"]
+    r = con.post(f"/api/field-tickets/{slip['id']}/post", json={})
+    assert r.status_code == 200, r.text
+    jc = con.get(f"/api/job-costs/{r.json()['job_cost_id']}").json()
+    assert jc["date"] == "2026-09-20"
+    db_session.expire_all()
+    [move] = (
+        db_session.query(InventoryMovement)
+        .filter(
+            InventoryMovement.source_type == "job_cost",
+            InventoryMovement.source_id == jc["id"],
+        )
+        .all()
+    )
+    assert move.date.date().isoformat() == "2026-09-20"
+    # the void's movement carries the slip's date as well
+    assert con.post(f"/api/field-tickets/{slip['id']}/void").status_code == 200
+    db_session.expire_all()
+    back = (
+        db_session.query(InventoryMovement)
+        .filter(InventoryMovement.source_type == "job_cost_void")
+        .one()
+    )
+    assert back.date.date().isoformat() == "2026-09-20"
+
+
+def test_a_slip_dated_in_a_closed_period_is_not_posted(con, seed_customer, stock):
+    job = _job(con, seed_customer.id)
+    slip = _slip_on(con, job["id"], stock.id, 5, date="2026-09-20")
+    assert (
+        con.put("/api/settings", json={"closing_date": "2026-09-30"}).status_code == 200
+    )
+    try:
+        r = con.post(f"/api/field-tickets/{slip['id']}/post", json={})
+        assert r.status_code == 403 and "closing date" in r.json()["detail"]
+    finally:
+        con.put("/api/settings", json={"closing_date": ""})
+    assert con.get(f"/api/field-tickets/{slip['id']}").json()["status"] == "draft"
+
+
+def test_a_delivery_in_a_closed_period_is_not_edited_deleted_or_voided(con, po):
+    job, order = po
+    conduit = order["lines"][0]["id"]
+    signed = _deliver(con, job["id"], order["id"], {conduit: 10}, date="2026-09-05")
+    _sign(con, signed["id"], name="Gate")
+    draft = _deliver(con, job["id"], order["id"], {conduit: 5}, date="2026-09-06")
+    assert (
+        con.put("/api/settings", json={"closing_date": "2026-09-30"}).status_code == 200
+    )
+    try:
+        r = con.post(f"/api/field-tickets/{signed['id']}/void")
+        assert r.status_code == 403 and "closing date" in r.json()["detail"]
+        r = con.put(f"/api/field-tickets/{draft['id']}", json={"description": "x"})
+        assert r.status_code == 403
+        # moving a draft out of the closed period into it is no way round it
+        open_draft = _deliver(
+            con, job["id"], order["id"], {conduit: 1}, date="2026-10-05"
+        )
+        r = con.put(
+            f"/api/field-tickets/{open_draft['id']}", json={"date": "2026-09-01"}
+        )
+        assert r.status_code == 403
+        assert con.delete(f"/api/field-tickets/{draft['id']}").status_code == 403
+        # the quantity stood: 10 + 5 + 1
+        assert float(_po_get(con, order["id"])["lines"][0]["received_qty"]) == 16.0
+        # and the tab does not offer the void
+        assert con.get(f"/api/field-tickets/{signed['id']}").json()["can_void"] is False
+    finally:
+        con.put("/api/settings", json={"closing_date": ""})
+    assert con.post(f"/api/field-tickets/{signed['id']}/void").status_code == 200
+
+
+def test_a_tm_ticket_line_cannot_have_a_negative_quantity(con, seed_customer):
+    job = _job(con, seed_customer.id)
+    r = con.post(
+        "/api/field-tickets",
+        json={"job_id": job["id"], "kind": "tm", "lines": [{**LABOR, "quantity": -8}]},
+    )
+    assert r.status_code == 422, r.text
+    assert "negative quantity" in r.json()["detail"]
+    t = _ticket(con, job["id"], [LABOR])
+    r = con.put(
+        f"/api/field-tickets/{t['id']}", json={"lines": [{**LABOR, "quantity": -1}]}
+    )
+    assert r.status_code == 422
+
+
+def test_the_ticket_says_whether_void_would_be_accepted(
+    con, seed_customer, seed_accounts
+):
+    job = _job(con, seed_customer.id)
+    a = _signed(con, job["id"], [LABOR])
+    assert a["can_void"] is True
+    billed = con.post("/api/field-tickets/bill", json={"ticket_ids": [a["id"]]})
+    assert billed.status_code == 200, billed.text
+    closed = con.get(f"/api/field-tickets/{a['id']}").json()
+    assert closed["status"] == "closed" and closed["can_void"] is False
+    assert con.post(f"/api/field-tickets/{a['id']}/void").status_code == 409
+    # the invoice voided, the ticket is signed again and can be voided
+    assert (
+        con.post(f"/api/invoices/{billed.json()['invoice_id']}/void").status_code == 200
+    )
+    assert con.get(f"/api/field-tickets/{a['id']}").json()["can_void"] is True
+    voided = con.post(f"/api/field-tickets/{a['id']}/void").json()
+    assert voided["status"] == "void" and voided["can_void"] is False
+
+
+def test_the_tab_offers_void_only_where_the_server_allows_it():
+    src = (ROOT / "app/static/js/field_tickets.js").read_text(encoding="utf-8")
+    assert "&& t.can_void)" in src
+    # the over-receipt question is asked and the same ticket sent again
+    assert "'over_receipt'" in src and "over_receipt: true" in src
+
+
+def test_a_sent_order_reads_issued_in_construction_mode():
+    src = (ROOT / "app/static/js/purchase_orders.js").read_text(encoding="utf-8")
+    assert "status === 'sent' ? 'Issued'" in src
+    assert "statusBadge(po.status)" in src.replace(
+        "PurchaseOrdersPage.statusBadge(po.status)", "statusBadge(po.status)"
+    )
+    assert src.count("PurchaseOrdersPage.statusBadge(po.status)") == 2

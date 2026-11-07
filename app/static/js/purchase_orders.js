@@ -3,6 +3,13 @@
  * Feature 6: CRUD + convert to bill
  */
 const PurchaseOrdersPage = {
+    // The status badge. A commitment that is sent reads "Issued" in
+    // construction mode, as the form and the Issue button say.
+    statusBadge(status) {
+        const label = Terms.isConstruction() && status === 'sent' ? 'Issued' : status;
+        return `<span class="badge badge-${status}">${label}</span>`;
+    },
+
     showAll() { PurchaseOrdersPage._showAll = true; App.navigate(location.hash); },
 
     async render() {
@@ -26,7 +33,7 @@ const PurchaseOrdersPage = {
                     ${con ? `<td>${po.commitment_type === 'subcontract' ? 'Subcontract' : 'Purchase order'}</td>` : ''}
                     ${con ? `<td>${escapeHtml(po.trade_package_name || '—')}</td>` : ''}
                     <td>${formatDate(po.date)}</td>
-                    <td>${statusBadge(po.status)}</td>
+                    <td>${PurchaseOrdersPage.statusBadge(po.status)}</td>
                     <td class="amount">${formatCurrency(po.total)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.view(${po.id})">View</button>
@@ -67,7 +74,7 @@ const PurchaseOrdersPage = {
                 <strong>Vendor:</strong> ${escapeHtml(po.vendor_name || '')}<br>
                 <strong>Date:</strong> ${formatDate(po.date)}<br>
                 ${po.expected_date ? `<strong>Expected:</strong> ${formatDate(po.expected_date)}<br>` : ''}
-                <strong>Status:</strong> ${statusBadge(po.status)}${conMeta}
+                <strong>Status:</strong> ${PurchaseOrdersPage.statusBadge(po.status)}${conMeta}
             </div>
             <div class="table-container"><table>
                 <thead>${head}</thead>

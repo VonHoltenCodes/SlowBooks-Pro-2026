@@ -51,6 +51,9 @@ class FieldTicketCreate(StrictModel):
     commitment_id: Optional[int] = None
     purchase_order_id: Optional[int] = None
     vendor_ticket_ref: Optional[str] = None
+    # A delivery that takes a PO line past its ordered quantity is refused
+    # unless the request says it is meant.
+    over_receipt: bool = False
     lines: List[FieldTicketLineIn] = []
 
     @field_validator("kind")
@@ -72,6 +75,7 @@ class FieldTicketUpdate(StrictModel):
     commitment_id: Optional[int] = None
     purchase_order_id: Optional[int] = None
     vendor_ticket_ref: Optional[str] = None
+    over_receipt: bool = False
     lines: Optional[List[FieldTicketLineIn]] = None
 
 
@@ -125,6 +129,8 @@ class FieldTicketLineOut(BaseModel):
     # Delivery: the PO line's ordered and received-to-date quantity
     ordered_qty: Optional[float] = None
     received_qty: Optional[float] = None
+    # Delivery: this line took the PO line past what was ordered
+    over_receipt: bool = False
 
 
 class FieldTicketOut(BaseModel):
@@ -157,4 +163,8 @@ class FieldTicketOut(BaseModel):
     cost_total: float = 0
     bill_total: Optional[float] = None
     attachment_count: int = 0
+    # Whether Void would be accepted now (the tab offers it only then)
+    can_void: bool = False
+    # Over-receipts on this ticket and, on a posted slip, stock gone short
+    warnings: List[str] = []
     lines: List[FieldTicketLineOut] = []

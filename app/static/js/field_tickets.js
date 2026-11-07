@@ -83,7 +83,8 @@ const FieldTickets = {
         if (t.status === 'draft' && t.kind !== 'material') parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="FieldTickets.sign(${t.id})">Sign</button>`);
         if (t.status === 'draft' && t.kind === 'material') parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="FieldTickets.post(${t.id})" title="Put the stock on the job at its average cost">Post</button>`);
         if (t.status === 'draft') parts.push(`<button data-destructive class="btn btn-sm btn-danger" onclick="FieldTickets.del(${t.id})">Delete</button>`);
-        if (t.status !== 'void' && t.status !== 'draft') parts.push(`<button data-destructive class="btn btn-sm btn-danger" onclick="FieldTickets.voidTicket(${t.id})">Void</button>`);
+        // can_void: the server says whether it would accept the void now
+        if (t.status !== 'void' && t.status !== 'draft' && t.can_void) parts.push(`<button data-destructive class="btn btn-sm btn-danger" onclick="FieldTickets.voidTicket(${t.id})">Void</button>`);
         return parts.join(' ');
     },
 
@@ -197,7 +198,7 @@ const FieldTickets = {
         return `<tr class="ft-line" data-po-line="${line.po_line_id}">
             <td>${escapeHtml(line.description || '')}</td>
             <td class="amount">${line.ordered_qty ?? ''}</td>
-            <td class="amount">${received}</td>
+            <td class="amount">${received}${line.over_receipt ? ' <span class="badge" title="This delivery took the line past what was ordered">over</span>' : ''}</td>
             <td class="amount"><input class="ft-qty" ${d} type="number" step="0.0001" min="0" value="${line.quantity ?? ''}" style="width:90px"></td>
             <td><input class="ft-unit" ${d} maxlength="20" value="${escapeHtml(line.unit || '')}" style="width:50px"></td>
         </tr>`;
@@ -281,14 +282,27 @@ const FieldTickets = {
         return body;
     },
 
+    // A delivery past what was ordered comes back refused (409, code
+    // "over_receipt") with a question; on yes the same ticket is sent again
+    // with over_receipt, and the response's warnings are shown.
     async save(e) {
         e.preventDefault();
         const t = FieldTickets._editing;
         const body = FieldTickets.collect();
+        const send = (extra) => t.id
+            ? API.put(`/field-tickets/${t.id}`, { ...body, ...extra })
+            : API.post('/field-tickets', { job_id: FieldTickets._job.id, kind: t.kind, ...body, ...extra });
         try {
-            if (t.id) await API.put(`/field-tickets/${t.id}`, body);
-            else await API.post('/field-tickets', { job_id: FieldTickets._job.id, kind: t.kind, ...body });
+            let saved;
+            try {
+                saved = await send({});
+            } catch (err) {
+                if (!(err.status === 409 && err.detail && err.detail.code === 'over_receipt')) throw err;
+                if (!confirm(err.detail.question || err.message)) return;
+                saved = await send({ over_receipt: true });
+            }
             toast('Field ticket saved', 'success');
+            (saved.warnings || []).forEach(w => toast(w, 'warning'));
             await FieldTickets.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -335,6 +349,7 @@ const FieldTickets = {
         try {
             const t = await API.post(`/field-tickets/${id}/post`, {});
             toast(`Posted as job cost ${t.job_cost_number}`, 'success');
+            (t.warnings || []).forEach(w => toast(w, 'warning'));
             await FieldTickets.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },
