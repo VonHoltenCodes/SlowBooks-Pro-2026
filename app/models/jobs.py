@@ -39,6 +39,13 @@ JOB_STATUSES = ("pending", "awarded", "in_progress", "closed", "not_awarded")
 # with a plain contract amount and no construction terms.
 CONTRACT_TYPES = ("lump_sum", "gmp", "cost_plus")
 
+# Who pays the sales tax on a construction job. "charge_owner" (and NULL) is
+# sales tax on the owner's pay applications; "contractor_pays" is the
+# lump-sum real-property rule (Florida and many states): the contractor is
+# the consumer of the materials, so the pay applications bill no sales tax
+# and material bills on the job accrue use tax (purchase_posting.use_tax_for).
+SALES_TAX_TREATMENTS = ("charge_owner", "contractor_pays")
+
 # A schedule-of-values line kind. "work" is the ordinary scope line (one per
 # trade package); allowance / contingency and the four estimate markups —
 # general_conditions / insurance / fee / bond — are the carried items an owner
@@ -92,6 +99,7 @@ class Job(Base):
     # means no default; a CO or a CO line can still carry its own.
     co_markup_pct = Column(Numeric(7, 4), nullable=True)
     contract_date = Column(Date, nullable=True)
+    sales_tax_treatment = Column(String(20), nullable=True)  # SALES_TAX_TREATMENTS
     contract_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )

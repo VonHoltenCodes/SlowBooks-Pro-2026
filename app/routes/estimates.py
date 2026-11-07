@@ -31,8 +31,8 @@ from app.services.job_costing import line_cost_type, budgets_from_estimate
 from app.services.estimating import (
     estimate_totals,
     estimate_document_totals,
-    fmt_pct,
     is_included_line,
+    markup_parts,
 )
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
@@ -843,23 +843,17 @@ def convert_to_invoice(
     copied = taxed_copy_lines(kept, estimate.customer)
     # The four markups ride the invoice as their own lines under the copied
     # scope, so the invoice foots to the bid (#551): one line per non-zero
-    # markup, taxed with the lines (taxable when any copied line is taxable).
-    mt = estimate_totals(estimate)
-    markups_taxable = any(cline.is_taxable for cline in copied)
-    markup_specs = (
-        ("General conditions", mt["gc_pct"], mt["gc"]),
-        ("Insurance", mt["insurance_pct"], mt["insurance"]),
-        ("Fee", mt["fee_pct"], mt["fee"]),
-        ("Bond", mt["bond_pct"], mt["bond"]),
-    )
+    # markup, split into the part on taxable lines and the rest as the
+    # estimate taxes them (estimating.markup_parts); none is taxed when no
+    # copied line is (an exempt customer).
+    any_taxed = any(cline.is_taxable for cline in copied)
     markup_lines = [
         SimpleNamespace(
-            description=f"{label} ({fmt_pct(pct)}%)",
-            amount=amt,
-            is_taxable=markups_taxable,
+            description=part["description"],
+            amount=part["amount"],
+            is_taxable=part["is_taxable"] and any_taxed,
         )
-        for label, pct, amt in markup_specs
-        if amt and amt != 0
+        for part in markup_parts(estimate)
     ]
     for ml in markup_lines:
         ml.quantity = Decimal("1")

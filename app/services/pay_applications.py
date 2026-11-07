@@ -240,9 +240,15 @@ def stored_by_sov_line(db: Session, job_id: int, before_no=None) -> dict:
 
 def effective_tax_rate(app) -> Decimal:
     """The rate this application taxes with: its own rate when tax is on and
-    the owner is taxable, else 0 (the invoice routes tax the same way)."""
+    the owner is taxable, else 0 (the invoice routes tax the same way). A job
+    whose contractor pays the tax on materials bills no sales tax at all,
+    stored materials included, whatever the SOV's Tax boxes say."""
+    from app.services.contracts import contractor_pays_tax
+
     customer = app.job.customer if app.job is not None else None
     if not app.charge_tax or (customer is not None and customer.is_taxable is False):
+        return _ZERO
+    if contractor_pays_tax(app.job):
         return _ZERO
     return Decimal(str(app.tax_rate or 0))
 

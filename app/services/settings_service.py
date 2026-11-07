@@ -196,10 +196,13 @@ def upgrade_plaintext_secrets(db: Session) -> int:
 _PERCENT_SETTINGS = {
     "default_tax_rate": "Default tax rate",
     "late_fee_rate": "Late fee rate",
+    "use_tax_rate": "Use tax rate",
 }
 # A document keeps its tax rate to four places of a percent (New York
 # City's 8.875%, 7.0625%), so the default that fills it in can have no more.
-_FOUR_PLACE_PERCENTS = {"default_tax_rate"}
+_FOUR_PLACE_PERCENTS = {"default_tax_rate", "use_tax_rate"}
+# Percents whose empty value means "follow another setting", kept empty.
+_BLANK_IS_DEFAULT = {"use_tax_rate"}
 # key -> (label, smallest allowed, largest allowed or None)
 _WHOLE_NUMBER_SETTINGS = {
     "invoice_next_number": ("Next invoice number", 1, None),
@@ -297,7 +300,7 @@ def clean_setting_value(key: str, value) -> str:
     if key in _PERCENT_SETTINGS:
         label = _PERCENT_SETTINGS[key]
         if text == "":
-            return "0"
+            return "" if key in _BLANK_IS_DEFAULT else "0"
         try:
             number = Decimal(text)
         except InvalidOperation:

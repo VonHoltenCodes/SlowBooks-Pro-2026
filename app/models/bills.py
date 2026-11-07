@@ -147,6 +147,10 @@ class BillLine(Base):
         Integer, ForeignKey("invoice_lines.id"), nullable=True
     )
     line_order = Column(Integer, default=0)
+    # Use tax on the line (construction): None follows the job's sales tax
+    # rule (a material line on a "contractor pays" job, on a bill that
+    # carries no sales tax), True accrues it anyway, False never.
+    use_tax = Column(Boolean, nullable=True)
 
     bill = relationship("Bill", back_populates="lines")
     item = relationship("Item")

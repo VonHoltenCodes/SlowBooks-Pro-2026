@@ -447,8 +447,8 @@ const EstimatesPage = {
 
     // The bid math the server computes (app/services/estimating.py), mirrored
     // for the live form panel. Lines stay at cost; the four markups are their
-    // own figures under the subtotal, and tax covers the lines and the markups
-    // together. Reads the current rows and markup inputs (#551).
+    // own figures under the subtotal, and tax covers the taxable lines and
+    // their share of the markups. Reads the current rows and markup inputs (#551).
     bidTotals() {
         const pct = v => (Number(v) || 0) / 100;
         const form = $('#est-form');
@@ -456,7 +456,7 @@ const EstimatesPage = {
         // the marked-up factor an alternate's shown price uses
         const factor = (1 + m('gc_pct')) * (1 + m('insurance_pct')) * (1 + m('fee_pct')) * (1 + m('bond_pct'));
         const markupAllowances = !!(form && form.markup_allowances && form.markup_allowances.checked);
-        let markupBase = 0, allowanceTotal = 0, pricedDirect = 0, subtotal = 0, taxableSubtotal = 0, anyTaxable = false;
+        let markupBase = 0, taxedMarkupBase = 0, allowanceTotal = 0, pricedDirect = 0, subtotal = 0, taxableSubtotal = 0, anyTaxable = false;
         const alternates = [], unitPrices = [];
         $$('#est-lines tr').forEach(row => {
             // the stable line index is the data attribute, not the row's
@@ -485,11 +485,14 @@ const EstimatesPage = {
             }
             subtotal += amount;
             if (taxable) { taxableSubtotal += amount; anyTaxable = true; }
+            let base = 0;
             if (kind === 'allowance') {
                 allowanceTotal += amount;
-                if (markupAllowances) markupBase += amount;
-            } else if (hasCost) markupBase += cost;
+                if (markupAllowances) base = amount;
+            } else if (hasCost) base = cost;
             else pricedDirect += amount;
+            markupBase += base;
+            if (taxable) taxedMarkupBase += base;
         });
         const gc = EstimatesPage._r(markupBase * m('gc_pct'));
         const insurance = EstimatesPage._r((markupBase + gc) * m('insurance_pct'));
@@ -497,9 +500,10 @@ const EstimatesPage = {
         const bond = EstimatesPage._r((markupBase + gc + insurance + fee) * m('bond_pct'));
         const markupTotal = gc + insurance + fee + bond;
         const bid = EstimatesPage._r(subtotal + markupTotal);
-        // tax covers the lines and the markups when any included line is
-        // taxable (the server's rule); an exempt estimate taxes nothing
-        const tax = anyTaxable ? EstimatesPage._r((taxableSubtotal + markupTotal) * m('tax_rate')) : 0;
+        // tax covers the taxable lines and their pro-rata share of the
+        // markups (the server's rule); an exempt estimate taxes nothing
+        const markupShare = markupBase ? EstimatesPage._r(markupTotal * taxedMarkupBase / markupBase) : 0;
+        const tax = anyTaxable ? EstimatesPage._r((taxableSubtotal + markupShare) * m('tax_rate')) : 0;
         const total = EstimatesPage._r(bid + tax);
         return { markupAllowances, markupBase, gc, insurance, fee, bond, markupTotal, pricedDirect, allowanceTotal, subtotal, bid, tax, total, alternates, unitPrices };
     },

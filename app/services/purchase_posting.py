@@ -20,6 +20,14 @@
 # touches 2200 Sales Tax Payable, which holds the tax the business collected
 # from its own customers and owes the state: debiting it with tax paid to a
 # supplier made Pay Sales Tax offer $0.33 where $59.57 was owed (macbase1 F9).
+#
+# Use tax (construction). On a job whose contractor pays the tax on its
+# materials (the job's Sales tax setting), a material line on a bill the
+# vendor charged no sales tax on owes use tax: the bill's own journal adds DR
+# the line's job-cost account (job, section, cost type) / CR 2220 Use Tax
+# Payable, at the company's use-tax rate. A line's Use tax box accrues it on
+# anything else; voiding or editing the bill reverses or re-posts it with
+# the rest of the journal.
 # ============================================================================
 
 from decimal import Decimal
@@ -138,3 +146,78 @@ def expense_account_for(
             "Vendor Center. Nothing was saved."
         ),
     )
+
+
+def use_tax_rate(db: Session) -> Decimal:
+    """The company's use-tax rate as a fraction: the Use tax rate setting, else
+    the default tax rate (both percents, 6.5 = 6.5%)."""
+    from app.services.settings_service import get_all_settings
+
+    settings = get_all_settings(db)
+    pct = (settings.get("use_tax_rate") or "").strip() or (
+        settings.get("default_tax_rate") or "0"
+    )
+    try:
+        return Decimal(pct) / Decimal("100")
+    except ArithmeticError:
+        return Decimal("0")
+
+
+def use_tax_for(
+    db: Session,
+    *,
+    amount,
+    job_id: Optional[int],
+    cost_type: Optional[str],
+    bill_taxed: bool,
+    use_tax: Optional[bool] = None,
+) -> Decimal:
+    """The use tax one purchase line accrues, 0 for none. Construction only.
+    A line's own `use_tax` wins (True accrues, False never); left unset, a
+    material line on a "contractor pays" job accrues when the vendor charged
+    no sales tax on the bill (`bill_taxed` false)."""
+    from app.models.jobs import Job
+    from app.services.contracts import contractor_pays_tax
+    from app.services.terminology import terms_from_db
+
+    amount = _q(Decimal(str(amount or 0)))
+    if amount <= 0 or use_tax is False or not terms_from_db(db).is_construction:
+        return Decimal("0")
+    if use_tax is not True:
+        if bill_taxed or cost_type != "material" or not job_id:
+            return Decimal("0")
+        if not contractor_pays_tax(db.get(Job, job_id)):
+            return Decimal("0")
+    return _q(amount * use_tax_rate(db))
+
+
+def use_tax_lines(
+    db: Session, debit_line: dict, accrual: Decimal, job_id: Optional[int]
+) -> list[dict]:
+    """The two journal lines that accrue `accrual` of use tax on a purchase
+    line: DR the line's own account and dimensions (`debit_line`, the line's
+    cost debit), CR 2220 Use Tax Payable, both with the job. Nothing when
+    there is no accrual."""
+    if not accrual:
+        return []
+    from app.services.accounting import ensure_construction_accounts
+
+    payable = ensure_construction_accounts(db)["2220"]
+    memo = f"Use tax - {debit_line.get('description') or 'materials'}"[:200]
+    return [
+        {
+            **debit_line,
+            "debit": accrual,
+            "credit": Decimal("0"),
+            "description": memo,
+            "job_id": job_id,
+            "is_billable": False,
+        },
+        {
+            "account_id": payable.id,
+            "debit": Decimal("0"),
+            "credit": accrual,
+            "description": memo,
+            "job_id": job_id,
+        },
+    ]

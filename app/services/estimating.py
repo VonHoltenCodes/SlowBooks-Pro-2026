@@ -11,7 +11,7 @@
 # The lines stay AT COST. The four markups are their own figures under the
 # subtotal — on the PDF, in the app, and (later, #552) as their own
 # schedule-of-values lines. The bid total is subtotal + the markups, pre-tax;
-# tax covers the lines and the markups together.
+# tax covers the taxable lines and their share of the markups.
 # ============================================================================
 
 from decimal import Decimal
@@ -137,6 +137,29 @@ def _markups(markup_base, gc_pct, insurance_pct, fee_pct, bond_pct):
     return gc, insurance, fee, bond
 
 
+def taxable_markup_share(lines, markup_total, markup_allowances=False) -> Decimal:
+    """The part of the markups that rides on the taxable lines: markup_total ×
+    (the taxable lines' markup base ÷ the whole markup base), to the cent. The
+    same pro-rata split the budget seeder and the owner's bid use, so a markup
+    on an exempt line is never taxed. Shared by the estimate's tax and the
+    schedule of values' markup lines (contracts.sov_from_estimate)."""
+    included = [ln for ln in lines if is_included_line(ln)]
+    base = sum(
+        (markup_base_amount(ln, markup_allowances) for ln in included), Decimal("0")
+    )
+    if not base or not markup_total:
+        return Decimal("0")
+    taxed = sum(
+        (
+            markup_base_amount(ln, markup_allowances)
+            for ln in included
+            if getattr(ln, "is_taxable", None) is not False
+        ),
+        Decimal("0"),
+    )
+    return _q(Decimal(str(markup_total)) * taxed / base)
+
+
 def estimate_document_totals(
     lines,
     tax_rate,
@@ -154,9 +177,10 @@ def estimate_document_totals(
     - the four markups compound in order on the markup base (Σ price of base /
       accepted-alternate lines that carry a unit cost, plus the allowance
       lines only when markup_allowances is on); markup_total is their sum.
-    - tax covers the lines AND the markups: tax_rate × (taxable line subtotal +
-      markup_total) when at least one included line is taxable, else 0 (an
-      exempt customer pays no tax on anything).
+    - tax covers the taxable lines and their share of the markups: tax_rate ×
+      (taxable line subtotal + taxable_markup_share), so a markup on an exempt
+      line is not taxed; 0 when no included line is taxable (an exempt
+      customer pays no tax on anything).
     - total = subtotal + markup_total + tax.
 
     Works on both ORM lines and the request-schema lines (both carry quantity,
@@ -181,12 +205,65 @@ def estimate_document_totals(
     ]
     if taxable_lines:
         taxable_base = _q(sum((line_price(ln) for ln in taxable_lines), Decimal("0")))
-        tax_amount = _q((taxable_base + markup_total) * Decimal(str(tax_rate or 0)))
+        markup_share = taxable_markup_share(included, markup_total, markup_allowances)
+        tax_amount = _q((taxable_base + markup_share) * Decimal(str(tax_rate or 0)))
     else:
         tax_amount = Decimal("0")
 
     total = _q(subtotal + markup_total + tax_amount)
     return subtotal, tax_amount, total
+
+
+def markup_parts(estimate) -> list[dict]:
+    """The estimate's non-zero markups in compounding order, each split into
+    the part that rides on taxable lines and the rest: [{"kind",
+    "description", "amount", "is_taxable"}]. The taxable parts are
+    taxable_markup_share spread over the markups pro rata (the last one takes
+    the rounding), so they sum to the estimate's own taxed figure to the cent.
+    A markup wholly taxable or wholly not is one part, "General conditions
+    (8%)"; a split one adds "General conditions (8%) (not taxable)". The
+    schedule of values and the converted invoice both build from this."""
+    totals = estimate_totals(estimate)
+    specs = [
+        (kind, label, totals[pct_key], totals[key])
+        for kind, label, key, pct_key in (
+            ("general_conditions", "General conditions", "gc", "gc_pct"),
+            ("insurance", "Insurance", "insurance", "insurance_pct"),
+            ("fee", "Fee", "fee", "fee_pct"),
+            ("bond", "Bond", "bond", "bond_pct"),
+        )
+        if totals[key]
+    ]
+    markup_total = totals["markup_total"]
+    taxed_total = taxable_markup_share(
+        included_lines(estimate), markup_total, totals["markup_allowances"]
+    )
+    parts = []
+    assigned = Decimal("0")
+    for n, (kind, label, pct, amount) in enumerate(specs):
+        if n == len(specs) - 1:
+            taxed = taxed_total - assigned
+        else:
+            taxed = _q(amount * taxed_total / markup_total)
+        assigned += taxed
+        name = f"{label} ({fmt_pct(pct)}%)"
+        pieces = [
+            (flag, v) for flag, v in ((True, taxed), (False, amount - taxed)) if v
+        ]
+        for flag, value in pieces:
+            parts.append(
+                {
+                    "kind": kind,
+                    "description": (
+                        f"{name} (not taxable)"
+                        if len(pieces) > 1 and not flag
+                        else name
+                    ),
+                    "amount": value,
+                    "is_taxable": flag,
+                }
+            )
+    return parts
 
 
 def estimate_totals(estimate) -> dict:

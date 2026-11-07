@@ -26,11 +26,10 @@ from app.models.estimates import Estimate, EstimateStatus
 from app.models.jobs import Job, SovLine
 from app.services.accounting import _q, get_contract_revenue_account_id
 from app.services.estimating import (
-    estimate_totals,
     package_order_key,
-    fmt_pct,
     included_lines,
     line_price,
+    markup_parts,
 )
 
 
@@ -185,6 +184,13 @@ def settle_contract_type(db: Session, job: Job) -> None:
         job.original_contract_amount = original_contract_sum(db, job)
 
 
+def contractor_pays_tax(job) -> bool:
+    """True when the job's contract says the contractor pays the tax on its
+    materials (the lump-sum real-property rule): its pay applications bill
+    the owner no sales tax, and its material bills accrue use tax."""
+    return job is not None and job.sales_tax_treatment == "contractor_pays"
+
+
 def _taxable(line) -> bool:
     """An estimate line is taxable unless it says it is not (the estimate's
     own tax rule reads it the same way)."""
@@ -219,12 +225,16 @@ def sov_from_estimate(estimate: Estimate) -> list[dict]:
     - one `allowance` line per allowance line (its own price);
     - one line per NON-ZERO markup, in order — general_conditions, insurance,
       fee, bond — each its own kind, named "General conditions (8%)" style.
+      On a bid whose markup base is partly taxable each markup is two lines,
+      the taxable part and "General conditions (8%) (not taxable)"
+      (estimating.markup_parts), so a pay application at 100% bills exactly
+      the bid's tax.
 
     Each line carries its cost code (a work line its package's section, see
     package_section_id; an allowance its own line's code, else its
     package's) and whether it is taxable (a work or allowance line from its
-    estimate lines; a markup line when any included line is, as the
-    estimate taxes its markups).
+    estimate lines; a markup line by the taxable share of the markup base,
+    as the estimate taxes its markups).
 
     The work lines plus the allowance lines sum to the estimate's subtotal, and
     the markup lines add markup_total, so the whole set foots exactly to the
@@ -232,10 +242,8 @@ def sov_from_estimate(estimate: Estimate) -> list[dict]:
     which knows the job. Returns plain dicts (no line_no / item_no yet)."""
     work: dict = {}  # package_id -> {"name", "value", "parts", "codes", "package"}
     allowances: list[dict] = []
-    any_taxable = False
     for line in included_lines(estimate):
         kind = line.line_kind or "base"
-        any_taxable = any_taxable or _taxable(line)
         if kind == "allowance":
             allowances.append(
                 {
@@ -301,28 +309,20 @@ def sov_from_estimate(estimate: Estimate) -> list[dict]:
             )
     lines.extend(allowances)
 
-    # One line per non-zero markup, in compounding order, each its own kind.
-    # Work + allowance lines foot to the subtotal; these add markup_total, so
-    # the full set foots to the estimate's pre-tax bid_total.
-    totals = estimate_totals(estimate)
-    markup_specs = (
-        ("general_conditions", "General conditions", totals["gc_pct"], totals["gc"]),
-        ("insurance", "Insurance", totals["insurance_pct"], totals["insurance"]),
-        ("fee", "Fee", totals["fee_pct"], totals["fee"]),
-        ("bond", "Bond", totals["bond_pct"], totals["bond"]),
-    )
-    for kind, label, pct, amount in markup_specs:
-        if not amount:
-            continue
+    # One line per non-zero markup, in compounding order, each its own kind,
+    # split into its taxable part and the rest. Work + allowance lines foot to
+    # the subtotal; these add markup_total, so the full set foots to the
+    # estimate's pre-tax bid_total.
+    for part in markup_parts(estimate):
         lines.append(
             {
                 "item_no": None,
-                "description": f"{label} ({fmt_pct(pct)}%)",
+                "description": part["description"],
                 "trade_package_id": None,
                 "cost_code_id": None,
-                "is_taxable": any_taxable,
-                "kind": kind,
-                "scheduled_value": amount,
+                "is_taxable": part["is_taxable"],
+                "kind": part["kind"],
+                "scheduled_value": part["amount"],
                 "source_estimate_id": estimate.id,
             }
         )
@@ -582,6 +582,7 @@ def contract_summary(
         "contingency_remaining": f(contingency_remaining),
         "retainage_pct": f(job.retainage_pct),
         "contract_date": job.contract_date,
+        "sales_tax_treatment": job.sales_tax_treatment or "charge_owner",
         "contract_estimate_id": job.contract_estimate_id,
         "co_markup_pct": f(job.co_markup_pct),
         "sov_total": float(sov_total),

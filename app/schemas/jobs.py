@@ -5,7 +5,12 @@ from typing import Annotated, List, Optional
 from pydantic import BaseModel, Field, field_validator
 from app.schemas.common import StrictModel
 
-from app.models.jobs import CONTRACT_TYPES, JOB_STATUSES, SOV_KINDS
+from app.models.jobs import (
+    CONTRACT_TYPES,
+    JOB_STATUSES,
+    SALES_TAX_TREATMENTS,
+    SOV_KINDS,
+)
 
 # Money columns are Numeric(15, 2): anything larger overflows Postgres (a 500).
 _MAX_MONEY = Decimal("9999999999999.99")
@@ -145,9 +150,22 @@ class ContractTerms(StrictModel):
     retainage_pct: Optional[Decimal] = None
     co_markup_pct: Optional[Decimal] = None
     contract_date: Optional[dt_date] = None
+    # "charge_owner" (null) or "contractor_pays" (models.jobs)
+    sales_tax_treatment: Optional[str] = None
 
     _type = field_validator("contract_type")(_check_contract_type)
     _comarkup = field_validator("co_markup_pct")(_bounded_markup)
+
+    @field_validator("sales_tax_treatment")
+    @classmethod
+    def _tax_treatment(cls, v):
+        if v is not None and v not in SALES_TAX_TREATMENTS:
+            raise ValueError(
+                "sales_tax_treatment must be charge_owner (sales tax on the "
+                "owner's pay applications) or contractor_pays (the contractor "
+                "pays tax on materials)"
+            )
+        return v
 
     @field_validator("fee_pct")
     @classmethod
@@ -235,6 +253,7 @@ class ContractSummary(BaseModel):
     retainage_pct: Optional[float] = None
     co_markup_pct: Optional[float] = None
     contract_date: Optional[dt_date] = None
+    sales_tax_treatment: str = "charge_owner"
     contract_estimate_id: Optional[int] = None
     sov_total: float = 0.0
     sov_balance: float = 0.0

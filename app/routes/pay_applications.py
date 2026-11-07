@@ -40,6 +40,7 @@ from app.services.accounting import (
 from app.services.closing_date import check_closing_date
 from app.services.contracts import (
     contract_changes_after,
+    contractor_pays_tax,
     original_contract_sum,
     settle_contract_type,
 )
@@ -190,6 +191,7 @@ def _out(db: Session, app: PayApplication) -> PayApplicationOut:
     out.tax_exempt = bool(
         app.job and app.job.customer and app.job.customer.is_taxable is False
     )
+    out.contractor_pays_tax = contractor_pays_tax(app.job)
     out.invoice_number = app.invoice.invoice_number if app.invoice else None
     out.sub_waivers = _sub_waivers(db, app.job_id, app.period_to)
     out.unapplied_deposits = float(deposits_figures(db, app.job_id)["unapplied"])

@@ -2044,8 +2044,34 @@ const ReportsPage = {
                     <div style="font-size:12px;">Tax on sales ${formatCurrency(data.tax_on_sales)} less tax on credit memos ${formatCurrency(data.tax_credited)}</div>
                     <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">Tax Collected: ${formatCurrency(data.total_tax)}</div>
                     ${reconcile}
-                </div>`;
+                </div>${ReportsPage.useTaxHtml(data.use_tax, data.end_date)}`;
         }, "Dates", false, { reportType: 'sales_tax', view: 'sales-tax', prefill, ...basisOpts });
+    },
+
+    // The Use tax section of the Sales Tax report (construction): the use tax
+    // material bills accrued on Use Tax Payable, what was paid, what is owed.
+    // Paying it is a check or bill to the tax agency on that account.
+    useTaxHtml(u, endDate) {
+        if (!u) return '';
+        const rows = (u.items || []).map(i => `<tr>
+                <td>${formatDate(i.date)}</td>
+                <td>${escapeHtml(i.bill_number || '')}${i.type === 'bill_void' ? ' <span class="badge" style="font-size:9px">Void</span>' : ''}</td>
+                <td>${escapeHtml(i.vendor_name || '')}</td>
+                <td>${escapeHtml(i.job_name || '')}</td>
+                <td>${escapeHtml(i.description || '')}</td>
+                <td class="amount">${formatCurrency(i.amount)}</td>
+            </tr>`).join('');
+        const name = u.account_number ? `${escapeHtml(u.account_number)} ${escapeHtml(u.account_name)}` : escapeHtml(u.account_name);
+        return `
+            <h3 style="margin:18px 0 6px; font-size:14px;">Use tax</h3>
+            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, at ${SalesLines.taxPercent(u.rate)}%. Pay it as a check or bill to the tax agency on ${name}.</p>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Vendor</th><th scope="col">${T('Job')}</th><th scope="col">Line</th><th scope="col" class="amount">Use tax</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No use tax accrued</td></tr>'}</tbody>
+            </table></div>
+            <div style="margin-top:8px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200); font-size:12px;">
+                Accrued ${formatCurrency(u.accrued)} · Paid ${formatCurrency(u.paid)} · Owed at ${formatDate(endDate)}: <strong>${formatCurrency(u.balance)}</strong>
+            </div>`;
     },
 
     // The General Ledger's filters (#236): one account, one class, or both,

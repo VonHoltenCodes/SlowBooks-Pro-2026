@@ -49,6 +49,8 @@ from app.services.purchase_posting import (
     expense_account_for,
     spread,
     unit_cost_with_tax,
+    use_tax_for,
+    use_tax_lines,
 )
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
@@ -293,6 +295,7 @@ def _post_bill_lines(
                 ),
                 function=line_data.function,
                 is_billable=line_data.is_billable,
+                use_tax=getattr(line_data, "use_tax", None),
                 line_order=i,
             )
         )
@@ -317,6 +320,20 @@ def _post_bill_lines(
                     ),
                 }
             )
+            # Use tax a "contractor pays" job owes on the line (construction).
+            if not (item and item.track_inventory):
+                job_id = line_data.job_id or bill.job_id
+                accrual = use_tax_for(
+                    db,
+                    amount=amt,
+                    job_id=job_id,
+                    cost_type=eff_cost_type,
+                    bill_taxed=tax_amount > 0,
+                    use_tax=getattr(line_data, "use_tax", None),
+                )
+                journal_lines.extend(
+                    use_tax_lines(db, journal_lines[-1], accrual, job_id)
+                )
 
     # Credit AP for the net; any retainage held rides on Retainage Payable
     # (2050) instead, so Pay Bills pays only the net (#553). #555 releases it
@@ -705,6 +722,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
                 # later void still restores the PO line's billed_amount.
                 purchase_order_line_id=ln.purchase_order_line_id,
                 is_billable=bool(ln.is_billable),
+                use_tax=ln.use_tax,
                 description=ln.description,
                 # the stored Decimals, not a float round trip (everything
                 # below reads them through Decimal(str(...)))

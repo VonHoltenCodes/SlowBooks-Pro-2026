@@ -488,7 +488,7 @@ const BillsPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <div class="table-container table-container--scroll"><table class="line-items-table bill-lines-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col" title="Where the line is recorded">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${Nonprofit.headHtml()}<th scope="col" title="Billable to the job's customer">Bill?</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col" title="Where the line is recorded">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${BillsPage.useTaxHeadHtml()}${Nonprofit.headHtml()}<th scope="col" title="Billable to the job's customer">Bill?</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="bill-lines">${bill ? '' : BillsPage.lineHtml(0)}</tbody>
                 </table></div>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="BillsPage.addLine()">+ Add Line</button>
@@ -550,12 +550,30 @@ const BillsPage = {
                 <td><select class="line-item" onchange="BillsPage.itemSelected(this)">${ItemQuickAdd.options(BillsPage._items, l.item_id)}</select></td>
                 <td>${AccountQuickAdd.picker(`<select class="line-account"${stock ? ' disabled title="Stock items are recorded in Inventory"' : ''}><option value="">Choose...</option>${acctOpts}</select>`, 'bill', { disabled: stock })}</td>
                 <td><input class="line-desc" value="${escapeHtml(l.description || '')}"></td>
-                ${CostCodes.cellHtml('line-cost-code', l.cost_code_id)}${CostTypes.cellHtml('line-cost-type', l.cost_type)}${Nonprofit.cellHtml('line-function', l.function, l.class_id)}
+                ${CostCodes.cellHtml('line-cost-code', l.cost_code_id)}${CostTypes.cellHtml('line-cost-type', l.cost_type)}${BillsPage.useTaxCellHtml(l)}${Nonprofit.cellHtml('line-function', l.function, l.class_id)}
                 <td style="text-align:center;"><input type="checkbox" class="line-billable" title="Billable"${l.is_billable ? ' checked' : ''}></td>
                 <td><input class="line-qty" type="number" step="0.0001" value="${qty}" oninput="BillsPage.qtyChanged(this)"></td>
                 <td><input class="line-rate money" type="number" step="0.0001" value="${rate}" oninput="BillsPage.recalc()"></td>
                 <td class="col-amount line-amount"><input class="line-amt money" type="number" step="0.01" value="${amount}" title="The line's amount; type a quantity and rate instead to price it" oninput="BillsPage.recalc()" onchange="BillsPage.amtChanged(this)"></td>
             </tr>`;
+    },
+
+    // The Use tax box (construction, beside Cost Type). Unticked, the line
+    // follows its job's rule: a material line on a "contractor pays" job, on
+    // a bill with no sales tax, accrues use tax by itself. Ticked, it accrues
+    // on this line anyway. A line the API set to never accrue keeps that.
+    useTaxHeadHtml() {
+        return CostTypes.any() ? `<th scope="col" title="Accrue use tax on this line even when its job's rule would not">Use tax</th>` : '';
+    },
+    useTaxCellHtml(l) {
+        if (!CostTypes.any()) return '';
+        return `<td style="text-align:center;"><input type="checkbox" class="line-usetax" data-stored="${l.use_tax === false ? 'false' : ''}" title="Accrue use tax on this line"${l.use_tax === true ? ' checked' : ''}></td>`;
+    },
+    useTaxFromRow(row) {
+        const box = row.querySelector('.line-usetax');
+        if (!box) return null;
+        if (box.checked) return true;
+        return box.dataset.stored === 'false' ? false : null;
     },
 
     // Picking an item fills what it costs and where it is recorded; a stock
@@ -841,6 +859,7 @@ const BillsPage = {
                 class_id: Nonprofit.fundFromRow(row, 'line-function'),
                 ...Nonprofit.linePayload(row, 'line-function'),
                 is_billable: !!row.querySelector('.line-billable')?.checked,
+                use_tax: BillsPage.useTaxFromRow(row),
                 line_order: i,
             });
         });

@@ -99,6 +99,8 @@ class PayApplicationOut(BaseModel):
     charge_tax: bool = True
     # The owner is tax-exempt, so no tax however the toggle stands.
     tax_exempt: bool = False
+    # The job's contractor pays tax on materials: no sales tax is billed.
+    contractor_pays_tax: bool = False
     release_retainage: Decimal = Decimal("0")
     deposit_applied: Decimal = Decimal("0")
     lien_waiver_status: Optional[str] = None
