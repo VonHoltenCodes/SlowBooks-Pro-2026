@@ -17,10 +17,12 @@ from app.models.field_tickets import FT_KINDS, FT_STATUSES, FieldTicket
 from app.models.jobs import Job
 from app.models.purchase_orders import PurchaseOrder
 from app.schemas.field_tickets import (
+    BillIn,
     FieldTicketCreate,
     FieldTicketOut,
     FieldTicketUpdate,
     SignIn,
+    TicketIdsIn,
 )
 from app.services import field_tickets as svc
 
@@ -289,3 +291,45 @@ def void_field_ticket(ticket_id: int, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(t)
     return _out(db, t)
+
+
+# ── T&M ticket → change order or invoice ──────────────────────────────────
+
+
+@router.post("/make-change-order")
+def make_change_order(data: TicketIdsIn, db: Session = Depends(get_db)):
+    """Price one or several signed T&M tickets on one job as a potential
+    change order to the owner: a line per ticket line at cost, with the
+    job's change-order markup. A sub's ticket (one naming a commitment) also
+    goes on a draft sub change order on that commitment, at cost. Each ticket
+    links to them and closes when the owner change order is approved
+    (promote the PCO, then approve)."""
+    from app.routes.change_orders import _co_out
+
+    svc.require_construction(db)
+    made = svc.make_change_order(db, data.ticket_ids)
+    db.commit()
+    return {
+        "change_order": _co_out(db, made["change_order"]),
+        "sub_change_orders": [_co_out(db, s) for s in made["sub_change_orders"]],
+        "tickets": [_out(db, t) for t in made["tickets"]],
+    }
+
+
+@router.post("/bill")
+def bill_field_tickets(data: BillIn, db: Session = Depends(get_db)):
+    """Bill one or several signed T&M tickets on one job: an invoice to the
+    job's customer with a line per ticket line at its bill rate. Only for a
+    job with no schedule of values (one that bills on pay applications makes
+    a change order instead). The tickets close; voiding the invoice opens
+    them again."""
+    svc.require_construction(db)
+    invoice = svc.bill_tickets(db, data.ticket_ids, data.date)
+    db.commit()
+    tickets = db.query(FieldTicket).filter(FieldTicket.invoice_id == invoice.id).all()
+    return {
+        "invoice_id": invoice.id,
+        "invoice_number": invoice.invoice_number,
+        "total": float(invoice.total),
+        "tickets": [_out(db, t) for t in tickets],
+    }

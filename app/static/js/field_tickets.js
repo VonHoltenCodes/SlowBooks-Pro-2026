@@ -51,7 +51,7 @@ const FieldTickets = {
     listHtml(list) {
         const m = FieldTickets.money;
         const body = (list || []).map(t => `<tr>
-            <td>${t.kind === 'tm' && t.status === 'signed' && !t.change_order_number ? `<input type="checkbox" class="ft-pick" value="${t.id}" aria-label="Select ${escapeHtml(t.number)}"> ` : ''}${escapeHtml(t.number)}</td>
+            <td>${t.kind === 'tm' && t.status === 'signed' && !t.change_order_number && !t.invoice_number ? `<input type="checkbox" class="ft-pick" value="${t.id}" aria-label="Select ${escapeHtml(t.number)}"> ` : ''}${escapeHtml(t.number)}</td>
             <td>${escapeHtml(FieldTickets.KINDS[t.kind] || t.kind)}</td>
             <td>${escapeHtml(t.date || '')}</td>
             <td><span class="badge">${escapeHtml(FieldTickets.STATUS[t.status] || t.status)}</span></td>
@@ -65,6 +65,8 @@ const FieldTickets = {
                 <button class="btn btn-primary" onclick="FieldTickets.newTicket('tm')">+ T&amp;M ticket</button>
                 <button class="btn btn-secondary" onclick="FieldTickets.newTicket('material')">+ Material slip</button>
                 <button class="btn btn-secondary" onclick="FieldTickets.newTicket('delivery')">+ Delivery ticket</button>
+                <button class="btn btn-secondary" onclick="FieldTickets.makeChangeOrder()" title="Tick signed T&amp;M tickets to price them as one potential change order, at cost with the job's markup">Make change order</button>
+                <button class="btn btn-secondary" onclick="FieldTickets.billSelected()" title="Tick signed T&amp;M tickets to bill them on an invoice at their bill rates (a job with no schedule of values)">Bill it</button>
             </div>
             <div class="table-container"><table class="data-table" id="ft-list" style="font-size:12px">
                 <thead><tr>
@@ -296,6 +298,33 @@ const FieldTickets = {
         try {
             await API.post(`/field-tickets/${id}/sign`, { signed_by_name: name });
             toast('Ticket signed', 'success');
+            await FieldTickets.refresh();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    _picked() { return $$('.ft-pick:checked').map(el => parseInt(el.value, 10)); },
+
+    // Price the ticked T&M tickets as one PCO (a sub's ticket also makes a
+    // draft sub change order on its commitment); they close when the owner
+    // change order is approved.
+    async makeChangeOrder() {
+        const ids = FieldTickets._picked();
+        if (!ids.length) { toast('Tick one or more signed T&M tickets first', 'error'); return; }
+        try {
+            const made = await API.post('/field-tickets/make-change-order', { ticket_ids: ids });
+            const subs = made.sub_change_orders.map(s => s.number).join(', ');
+            toast(`Made ${made.change_order.number}${subs ? ` and sub change order ${subs}` : ''}. Find it on the Change orders tab.`, 'success');
+            await FieldTickets.refresh();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async billSelected() {
+        const ids = FieldTickets._picked();
+        if (!ids.length) { toast('Tick one or more signed T&M tickets first', 'error'); return; }
+        if (!confirm('Bill the ticked tickets on an invoice to the customer, at their bill rates?')) return;
+        try {
+            const billed = await API.post('/field-tickets/bill', { ticket_ids: ids });
+            toast(`Invoice ${billed.invoice_number} made for ${formatCurrency(billed.total)}`, 'success');
             await FieldTickets.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },

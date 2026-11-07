@@ -92,6 +92,11 @@ class TicketIdsIn(StrictModel):
     ticket_ids: List[int]
 
 
+class BillIn(TicketIdsIn):
+    # The invoice date; blank is today
+    date: Optional[dt_date] = None
+
+
 class PostIn(StrictModel):
     date: Optional[dt_date] = None
 

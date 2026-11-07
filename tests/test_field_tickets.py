@@ -319,3 +319,194 @@ def test_field_tickets_script_is_loaded():
     assert '<script src="/static/js/field_tickets.js"></script>' in index
     src = (ROOT / "app/static/js/jobs.js").read_text(encoding="utf-8")
     assert "case 'fieldtickets': return await FieldTickets.html(JobsPage._job);" in src
+
+
+# ── M2: T&M ticket → change order or invoice ────────────────────────────
+
+
+def _vendor(client, name="Sparky Electric", **extra):
+    r = client.post("/api/vendors", json={"name": name, **extra})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _sent_po(client, vendor_id, job_id, lines, **extra):
+    body = {
+        "vendor_id": vendor_id,
+        "date": "2026-06-01",
+        "job_id": job_id,
+        "lines": lines,
+        **extra,
+    }
+    r = client.post("/api/purchase-orders", json=body)
+    assert r.status_code == 201, r.text
+    up = client.put(f"/api/purchase-orders/{r.json()['id']}", json={"status": "sent"})
+    assert up.status_code == 200, up.text
+    return up.json()
+
+
+def _signed(client, job_id, lines, **extra):
+    t = _ticket(client, job_id, lines, **extra)
+    return _sign(client, t["id"])
+
+
+def _make_co(client, ids, status=200):
+    r = client.post("/api/field-tickets/make-change-order", json={"ticket_ids": ids})
+    assert r.status_code == status, r.text
+    return r.json()
+
+
+def _approve(client, co_id):
+    assert client.post(f"/api/change-orders/{co_id}/submit").status_code == 200
+    r = client.post(f"/api/change-orders/{co_id}/approve")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_make_change_order_from_several_tickets_at_cost_with_job_markup(
+    con, seed_customer
+):
+    job = _job(con, seed_customer.id, job_number="2601")
+    con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 15})
+    a = _signed(con, job["id"], [LABOR])  # 8 h × 50 cost
+    b = _signed(
+        con,
+        job["id"],
+        [
+            {
+                "line_type": "material",
+                "description": "Conduit",
+                "quantity": 10,
+                "cost_rate": 12,
+            }
+        ],
+    )
+    made = _make_co(con, [a["id"], b["id"]])
+    pco = made["change_order"]
+    assert pco["kind"] == "pco" and pco["status"] == "draft"
+    assert pco["number"] == "2601-PCO-001"
+    # a line per ticket line, at cost; the job's markup prices it
+    assert [float(ln["unit_cost"]) for ln in pco["lines"]] == [50.0, 12.0]
+    assert [ln["cost_type"] for ln in pco["lines"]] == ["labor", "material"]
+    assert pco["lines"][0]["description"].startswith("2601-TM-001")
+    assert pco["cost_total"] == 520.0
+    assert pco["sell_total"] == 598.0
+    # each ticket links to it and stays signed until the owner approves
+    for t in made["tickets"]:
+        assert (t["change_order_number"], t["status"]) == ("2601-PCO-001", "signed")
+    # already priced: not twice
+    _make_co(con, [a["id"]], status=409)
+
+
+def test_tickets_close_when_the_owner_co_is_approved_and_reopen_on_void(
+    con, seed_customer
+):
+    job = _job(con, seed_customer.id)
+    a = _signed(con, job["id"], [LABOR])
+    pco = _make_co(con, [a["id"]])["change_order"]
+    owner = con.post(f"/api/change-orders/{pco['id']}/promote").json()
+    t = con.get(f"/api/field-tickets/{a['id']}").json()
+    # the ticket follows its PCO into the owner CO
+    assert t["change_order_number"] == owner["number"] and t["status"] == "signed"
+    _approve(con, owner["id"])
+    assert con.get(f"/api/field-tickets/{a['id']}").json()["status"] == "closed"
+    # a closed ticket on an approved CO is not voided
+    assert con.post(f"/api/field-tickets/{a['id']}/void").status_code == 409
+    r = con.post(f"/api/change-orders/{owner['id']}/void")
+    assert r.status_code == 200, r.text
+    t = con.get(f"/api/field-tickets/{a['id']}").json()
+    assert (t["status"], t["change_order_number"]) == ("signed", None)
+    # free to price again
+    _make_co(con, [a["id"]])
+
+
+def test_a_rejected_pco_frees_its_tickets(con, seed_customer):
+    job = _job(con, seed_customer.id)
+    a = _signed(con, job["id"], [LABOR])
+    pco = _make_co(con, [a["id"]])["change_order"]
+    # while it stands, the ticket is not voided
+    assert con.post(f"/api/field-tickets/{a['id']}/void").status_code == 409
+    assert con.post(f"/api/change-orders/{pco['id']}/reject").status_code == 200
+    assert con.get(f"/api/field-tickets/{a['id']}").json()["change_order_id"] is None
+    _make_co(con, [a["id"]])
+
+
+def test_only_signed_tm_tickets_on_one_job_are_priced(con, seed_customer):
+    job = _job(con, seed_customer.id)
+    other = _job(con, seed_customer.id, name="Annex")
+    draft = _ticket(con, job["id"], [LABOR])
+    r = _make_co(con, [draft["id"]], status=409)
+    assert "only a signed" in r["detail"]
+    a = _signed(con, job["id"], [LABOR])
+    b = _signed(con, other["id"], [LABOR])
+    assert "different jobs" in _make_co(con, [a["id"], b["id"]], status=409)["detail"]
+
+
+def test_a_subs_ticket_adds_a_sub_change_order_on_its_commitment(
+    con, seed_customer, seed_accounts
+):
+    job = _job(con, seed_customer.id)
+    v = _vendor(con, default_expense_account_id=seed_accounts["5100"].id)
+    po = _sent_po(
+        con,
+        v["id"],
+        job["id"],
+        [{"description": "Electrical", "quantity": 1, "rate": 10000}],
+        commitment_type="subcontract",
+    )
+    sub_ticket = _signed(
+        con,
+        job["id"],
+        [{**LABOR, "description": "Electrician", "cost_rate": 90}],
+        commitment_id=po["id"],
+    )
+    own = _signed(con, job["id"], [LABOR])
+    made = _make_co(con, [sub_ticket["id"], own["id"]])
+    pco = made["change_order"]
+    # the owner side carries both; the sub's work is subcontract cost
+    assert [ln["cost_type"] for ln in pco["lines"]] == ["subcontract", "labor"]
+    [sub] = made["sub_change_orders"]
+    assert sub["kind"] == "sub" and sub["commitment_id"] == po["id"]
+    # the sub CO carries the sub's ticket only, at cost, no markup
+    assert sub["cost_total"] == 720.0 and sub["sell_total"] == 720.0
+    tickets = {t["id"]: t for t in made["tickets"]}
+    assert tickets[sub_ticket["id"]]["sub_change_order_number"] == sub["number"]
+    assert tickets[own["id"]]["sub_change_order_id"] is None
+
+
+def test_bill_it_on_a_job_with_no_schedule_of_values(con, seed_customer, seed_accounts):
+    job = _job(con, seed_customer.id)
+    a = _signed(con, job["id"], [LABOR])  # 8 h × 75 bill
+    b = _signed(con, job["id"], [{**LABOR, "quantity": 2}])
+    r = con.post(
+        "/api/field-tickets/bill",
+        json={"ticket_ids": [a["id"], b["id"]], "date": "2026-06-30"},
+    )
+    assert r.status_code == 200, r.text
+    billed = r.json()
+    assert billed["total"] == 750.0  # bill rates, not cost
+    inv = con.get(f"/api/invoices/{billed['invoice_id']}").json()
+    assert inv["job_id"] == job["id"] and len(inv["lines"]) == 2
+    assert [float(ln["rate"]) for ln in inv["lines"]] == [75.0, 75.0]
+    for t in billed["tickets"]:
+        assert t["status"] == "closed" and t["invoice_number"] == inv["invoice_number"]
+    # billed tickets leave the log
+    log = con.get("/api/reports/field-ticket-log").json()
+    assert log["totals"]["signed_unbilled"] == 0.0
+    # voiding the invoice opens them again
+    assert con.post(f"/api/invoices/{inv['id']}/void").status_code == 200
+    t = con.get(f"/api/field-tickets/{a['id']}").json()
+    assert (t["status"], t["invoice_id"]) == ("signed", None)
+
+
+def test_bill_it_refused_on_a_job_with_a_schedule_of_values(con, seed_customer):
+    job = _job(con, seed_customer.id)
+    r = con.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={"lines": [{"description": "Base", "scheduled_value": 100000}]},
+    )
+    assert r.status_code in (200, 201), r.text
+    a = _signed(con, job["id"], [LABOR])
+    r = con.post("/api/field-tickets/bill", json={"ticket_ids": [a["id"]]})
+    assert r.status_code == 409
+    assert "change order" in r.json()["detail"]

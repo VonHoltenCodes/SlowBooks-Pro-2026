@@ -200,23 +200,275 @@ def live_change_order(db: Session, co: Optional[ChangeOrder]) -> Optional[Change
     followed to its latest revision and one that was promoted to the owner CO
     it rolled into. None when that chain ends rejected or void (or the CO is
     gone): the ticket is free to price again."""
+    end = chain_end(db, co)
+    if end is None or end.status in ("rejected", "void", "superseded", "promoted"):
+        return None
+    return end
+
+
+def chain_end(db: Session, co: Optional[ChangeOrder]) -> Optional[ChangeOrder]:
+    """Follow a change order through its revisions and its promotion to the
+    last one in the chain, whatever its status."""
     seen = set()
     while co is not None and co.id not in seen:
         seen.add(co.id)
         if co.status == "superseded":
-            co = (
+            nxt = (
                 db.query(ChangeOrder)
                 .filter(ChangeOrder.supersedes_id == co.id)
                 .order_by(ChangeOrder.id.desc())
                 .first()
             )
         elif co.status == "promoted" and co.promoted_to_id:
-            co = db.get(ChangeOrder, co.promoted_to_id)
-        elif co.status in ("rejected", "void"):
-            return None
+            nxt = db.get(ChangeOrder, co.promoted_to_id)
         else:
             return co
-    return None
+        if nxt is None:
+            return co
+        co = nxt
+    return co
+
+
+def _tickets_on(db: Session, co: ChangeOrder, status: str) -> list[FieldTicket]:
+    """The job's T&M tickets in `status` whose change order chain ends at
+    `co` (a ticket priced on a PCO that was promoted into it, too)."""
+    rows = (
+        db.query(FieldTicket)
+        .filter(
+            FieldTicket.job_id == co.job_id,
+            FieldTicket.kind == "tm",
+            FieldTicket.status == status,
+            FieldTicket.change_order_id.isnot(None),
+        )
+        .all()
+    )
+    return [
+        t for t in rows if (end := chain_end(db, t.change_order)) and end.id == co.id
+    ]
+
+
+def close_for_change_order(db: Session, co: ChangeOrder) -> None:
+    """An owner change order was approved: the signed tickets it prices are
+    closed (their work is now in the contract)."""
+    if co.kind != "owner":
+        return
+    for t in _tickets_on(db, co, "signed"):
+        t.status = "closed"
+
+
+def reopen_for_change_order(db: Session, co: ChangeOrder) -> None:
+    """An approved owner change order was voided: its tickets go back to
+    signed and are free to price or bill again."""
+    if co.kind != "owner":
+        return
+    for t in _tickets_on(db, co, "closed"):
+        t.status = "signed"
+
+
+def release_invoice(db: Session, invoice) -> None:
+    """An invoice was voided: the tickets it billed go back to signed, free to
+    bill again."""
+    for t in db.query(FieldTicket).filter(FieldTicket.invoice_id == invoice.id):
+        if t.status == "closed":
+            t.status = "signed"
+        t.invoice_id = None
+
+
+# ── T&M ticket → change order or invoice ───────────────────────────────────
+
+
+def billable_tickets(db: Session, ticket_ids: list[int]) -> tuple[Job, list]:
+    """The tickets to make a change order or an invoice from: T&M, signed,
+    one job, not already on a live change order or invoice."""
+    if not ticket_ids:
+        raise HTTPException(status_code=422, detail="Pick at least one ticket.")
+    tickets = []
+    for tid in dict.fromkeys(ticket_ids):
+        t = db.get(FieldTicket, tid)
+        if t is None:
+            raise HTTPException(status_code=404, detail="Field ticket not found")
+        if t.kind != "tm":
+            raise HTTPException(
+                status_code=409,
+                detail=f"{t.number} is not a T&M ticket; only T&M work is priced or billed.",
+            )
+        if t.status != "signed":
+            raise HTTPException(
+                status_code=409,
+                detail=f"{t.number} is {t.status}; only a signed T&M ticket is "
+                "priced or billed.",
+            )
+        live = live_change_order(db, t.change_order) if t.change_order_id else None
+        if live is not None:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{t.number} is already priced on change order {live.number}.",
+            )
+        if t.invoice is not None and _invoice_live(t.invoice):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{t.number} is already billed on invoice {t.invoice.invoice_number}.",
+            )
+        tickets.append(t)
+    if len({t.job_id for t in tickets}) > 1:
+        raise HTTPException(
+            status_code=409, detail="The tickets are on different jobs; pick one job's."
+        )
+    return tickets[0].job, tickets
+
+
+def _co_cost_type(t: FieldTicket, ln: FieldTicketLine) -> str:
+    """A sub's ticket is subcontract cost to the contractor, whatever the sub's
+    own line was; the contractor's own crew keeps the line's type."""
+    return "subcontract" if t.commitment_id else (ln.cost_type or "other")
+
+
+def _co_lines(tickets) -> list:
+    from app.models.change_orders import ChangeOrderLine
+
+    out = []
+    for t in tickets:
+        for ln in t.lines:
+            if _d(ln.quantity) == 0:
+                continue
+            out.append(
+                ChangeOrderLine(
+                    line_order=len(out),
+                    description=f"{t.number}: {ln.description or ln.line_type}",
+                    cost_type=_co_cost_type(t, ln),
+                    cost_code_id=ln.cost_code_id,
+                    quantity=ln.quantity,
+                    unit=ln.unit,
+                    unit_cost=ln.cost_rate,
+                )
+            )
+    return out
+
+
+def make_change_order(db: Session, ticket_ids: list[int]) -> dict:
+    """Price signed T&M tickets as one potential change order to the owner:
+    a line per ticket line at cost, marked up by the job's change-order
+    markup, each ticket linked to it. A sub's ticket (one with a commitment)
+    also goes on a draft sub change order on that commitment, at cost, so
+    the sub's contract rises with the owner's. The tickets close when the
+    owner change order is approved."""
+    from app.routes.change_orders import _create_numbered
+    from app.services.change_orders import _check_commitment, recompute
+
+    job, tickets = billable_tickets(db, ticket_ids)
+    numbers = ", ".join(t.number for t in tickets)
+    lines = _co_lines(tickets)
+    if not lines:
+        raise HTTPException(
+            status_code=422, detail="The tickets have no lines with a quantity."
+        )
+    pco = _create_numbered(
+        db,
+        job,
+        kind="pco",
+        status="draft",
+        title=f"T&M {numbers}"[:200],
+        description="\n".join(t.description for t in tickets if t.description) or None,
+        date=max(t.date for t in tickets),
+        funding="contract",
+        apply_markup=True,
+    )
+    for ln in lines:
+        ln.change_order_id = pco.id
+        db.add(ln)
+    db.flush()
+    db.refresh(pco)
+    recompute(pco, job)
+
+    subs = []
+    by_commitment: dict[int, list] = {}
+    for t in tickets:
+        if t.commitment_id:
+            by_commitment.setdefault(t.commitment_id, []).append(t)
+    for commitment_id, group in by_commitment.items():
+        po = group[0].commitment
+        _check_commitment(po, pco)  # same job, still open
+        sub = _create_numbered(
+            db,
+            job,
+            kind="sub",
+            status="draft",
+            title=f"T&M {', '.join(t.number for t in group)} (under {pco.number})"[
+                :200
+            ],
+            date=max(t.date for t in group),
+            funding="contract",
+            commitment_id=commitment_id,
+        )
+        for ln in _co_lines(group):
+            ln.change_order_id = sub.id
+            db.add(ln)
+        db.flush()
+        db.refresh(sub)
+        recompute(sub, job)
+        for t in group:
+            t.sub_change_order_id = sub.id
+        subs.append(sub)
+    # Linked after the numbering retry loops: a collision's rollback would
+    # undo it.
+    for t in tickets:
+        t.change_order_id = pco.id
+    db.flush()
+    return {"change_order": pco, "sub_change_orders": subs, "tickets": tickets}
+
+
+def bill_tickets(db: Session, ticket_ids: list[int], invoice_date: Optional[date]):
+    """Bill signed T&M tickets on an invoice to the job's customer: a line per
+    ticket line at its bill rate, tagged to the job and the line's cost code.
+    Only for a job with no schedule of values: a job that bills on pay
+    applications prices extra work as a change order instead. The tickets
+    close; voiding the invoice opens them again."""
+    from app.routes.invoices.crud import create_invoice
+    from app.schemas.invoices import InvoiceCreate, InvoiceLineCreate
+
+    job, tickets = billable_tickets(db, ticket_ids)
+    if job.sov_lines:
+        raise HTTPException(
+            status_code=409,
+            detail="This job bills by its schedule of values on pay applications. "
+            "Make a change order from the tickets instead.",
+        )
+    lines = []
+    for t in tickets:
+        for ln in t.lines:
+            if _d(ln.quantity) == 0:
+                continue
+            lines.append(
+                InvoiceLineCreate(
+                    description=f"{t.number}: {ln.description or ln.line_type}",
+                    quantity=ln.quantity,
+                    rate=ln.bill_rate or 0,
+                    job_id=job.id,
+                    cost_code_id=ln.cost_code_id,
+                    line_order=len(lines),
+                )
+            )
+    if not lines:
+        raise HTTPException(
+            status_code=422, detail="The tickets have no lines with a quantity."
+        )
+    numbers = ", ".join(t.number for t in tickets)
+    resp = create_invoice(
+        InvoiceCreate(
+            customer_id=job.customer_id,
+            date=invoice_date or date.today(),
+            job_id=job.id,
+            notes=f"T&M tickets {numbers}",
+            lines=lines,
+        ),
+        db,
+    )
+    for t in tickets:
+        t = db.get(FieldTicket, t.id)  # the invoice route committed
+        t.invoice_id = resp.id
+        t.status = "closed"
+    db.flush()
+    return resp
 
 
 def ticket_out(db: Session, t: FieldTicket) -> dict:
@@ -283,11 +535,10 @@ def ticket_out(db: Session, t: FieldTicket) -> dict:
             t.purchase_order.po_number if t.purchase_order else None
         ),
         "vendor_ticket_ref": t.vendor_ticket_ref,
-        # the CO its work sits on now (a promoted PCO's owner CO)
-        "change_order_id": live.id if live else t.change_order_id,
-        "change_order_number": (
-            live.number if live else (t.change_order.number if t.change_order else None)
-        ),
+        # the CO its work sits on now (a promoted PCO's owner CO); none once
+        # that change order is rejected or void
+        "change_order_id": live.id if live else None,
+        "change_order_number": live.number if live else None,
         "sub_change_order_id": t.sub_change_order_id,
         "sub_change_order_number": (
             t.sub_change_order.number if t.sub_change_order else None
