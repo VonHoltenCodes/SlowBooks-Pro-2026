@@ -33,7 +33,8 @@ from sqlalchemy.orm import relationship
 
 from app.database import Base
 
-JOB_COST_SOURCES = ("manual", "time_entry", "allocation")
+# material_slip: posted by a field ticket's material slip (construction)
+JOB_COST_SOURCES = ("manual", "time_entry", "allocation", "material_slip")
 JOB_COST_STATUSES = ("posted", "void")
 ALLOCATION_METHODS = ("percent", "hours", "revenue", "costs", "equal")
 

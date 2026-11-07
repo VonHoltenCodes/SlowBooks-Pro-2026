@@ -7,7 +7,8 @@ time. It is the counterpart to QuickBooks Desktop's Contractor Edition.
 Construction mode adds the contractor accounts, division/section cost codes,
 trade packages, a Sub vendor type, construction estimating, the contract and
 schedule of values, commitments, change orders, progress billing with
-retainage, and seven job reports. Every role reaches these screens; only
+retainage, field tickets (T&M tickets, material slips, delivery tickets), and
+eight job reports. Every role reaches these screens; only
 payroll and HR are the administrator's alone.
 
 The five starting cost types (labor, material, subcontract, equipment,
@@ -1008,6 +1009,7 @@ carries the cost code.
 | **Customer payment** | the deposit-to account (Undeposited Funds unless a bank is chosen) | 1100 Accounts Receivable | Retainage still held stays on 1150 until a release bills it. |
 | **Job Cost Entry** | the line's cost account (the line's, else the code's, else the cost type's default) (job, section, cost type) | the line's offset account, else the equipment's recovery account, else the cost type's offset account | |
 | **Sales tax paid** | 2200 Sales Tax Payable | the bank | |
+| **Material slip posted** (field ticket) | the line's cost account (material type; job, section) at the item's average cost | the item's inventory asset account | A Job Cost Entry; a return slip is the reverse, and a void reverses at the booked cost. T&M and delivery tickets post nothing. |
 
 Because each pay-application line credits its own revenue account with its
 section, revenue by section appears beside cost by section in the job cost
@@ -1015,6 +1017,116 @@ tree (actual revenue), Job Budget vs Actual and P&L by Job; a line with no
 section (a markup line, unless one is set) reads under "Other". Because each
 cost type has a default account, the P&L's cost lines (5100–5500) and the job
 reports' cost types agree for a costed line that names no account of its own.
+
+## Field tickets
+
+A **field ticket** is the paper that comes back from the job site: what was
+done or what arrived, on what day, signed by somebody. It lives on the job, on
+the job's **Field tickets** tab (construction mode only, after Pay apps), and
+comes in three kinds:
+
+| Kind | Number | Signed by | What it leads to |
+|---|---|---|---|
+| **T&M ticket** | `<job>-TM-001` | the owner's rep (or the GC) | a change order, or an invoice |
+| **Material slip** | `<job>-MS-001` | not signed | a Job Cost Entry: stock onto the job |
+| **Delivery ticket** | `<job>-DT-001` | the receiver | received quantity on a PO's lines |
+
+Numbers count per job and kind, like change orders; a job with no job number
+uses `J<id>`. Each ticket has a date, a default cost code for its lines, a
+description, who submitted it, and lines of labor, equipment, material or
+other with a quantity, unit and cost rate (a T&M ticket also has a bill rate).
+A blank cost rate takes the employee's loaded rate (the same rate time
+entries post at), the equipment's hourly rate, or the item's average cost
+(its cost when it has no average yet); a blank bill rate is the cost rate
+plus the job's **Markup on change orders**. A line's cost type follows its
+kind (labor, equipment, material), else its cost code's.
+
+**Status.** A ticket is `draft` while it is written, `signed` once someone
+signs it, `closed` once it has had its effect (billed, its change order
+approved, posted), and `void`. Only a draft is edited or deleted; a signed
+ticket is what was signed, so a change means voiding it and writing another.
+**Signing** in this version is the signer's typed name and the date (`POST
+/api/field-tickets/{id}/sign`), with a photo of the signed paper attached to
+the ticket (attachments take `field_ticket` as their record type). An
+on-screen signature pad is a later issue. A ticket is voided while nothing it
+led to is approved: a T&M ticket on a change order that still stands, or on an
+invoice that is not void, is refused until that is rejected or voided.
+
+### T&M tickets
+
+Extra work, foreman's hours by person, equipment hours, material and other,
+at cost and bill rates, signed by the owner's rep. **A T&M ticket posts no
+cost.** Labor reaches the job through time entries and payroll, equipment
+through Job Cost Entries, material through bills; if the ticket posted cost
+as well, the job would count the work twice. It is the quantity and billing
+record. A sub's ticket names the sub's **commitment**.
+
+Two ways out, from the tab (tick the signed tickets first):
+
+- **Make change order** (`POST /api/field-tickets/make-change-order`): one or
+  several signed tickets on one job become one **potential change order** to
+  the owner, a line per ticket line **at cost** (quantity × cost rate, the
+  line's cost type and code), marked up by the job's change-order markup. The
+  ticket's bill rates are not used on this path. A sub's ticket is
+  subcontract cost on the PCO, and also goes, at cost with no markup, on a
+  draft **sub change order** on its commitment (one per commitment), so the
+  sub's contract rises with the owner's; link it to the owner CO once the PCO
+  is promoted. Each ticket links to the PCO and follows it through revision
+  and promotion; it **closes when the owner change order is approved**, and
+  goes back to signed if that CO is voided. A rejected PCO frees its tickets
+  to price again.
+- **Bill it** (`POST /api/field-tickets/bill`): for a job with **no schedule
+  of values** (a T&M or cost-plus job billed by invoice), an invoice to the
+  job's customer with a line per ticket line at its **bill rate**, tagged to
+  the job and the line's code. The tickets close; voiding the invoice opens
+  them again. A job with a schedule of values bills on pay applications, so
+  it is refused there: make a change order instead.
+
+Job Cost Entry's **Bill?** box (`is_billable`) is left as it is: nothing
+reads it, and Bill it does not either. Its lines are at cost and carry no bill
+rate, and work billed from both would be billed twice. In construction mode,
+extra work to bill goes on a T&M ticket.
+
+### Material slips
+
+Material taken from the company's own stock onto a job. Each line is an
+inventory item and a quantity; a **negative quantity is a return** to stock.
+**Post** (`POST /api/field-tickets/{id}/post`, optional `date`, else the
+slip's) writes one Job Cost Entry, source `material_slip`: DR job cost (cost
+type material, the line's cost code; the account is the code's, else the
+material cost type's default account) / CR the item's inventory asset account
+(the item's own, else 1300), at the item's **average cost**, and the item's
+on-hand quantity goes down through the inventory service (a return: the same
+entry the other way, the stock back at the average). An item with no average
+cost yet is refused (the slip would post nothing). The slip closes. **Voiding**
+it reverses the entry and puts each stock movement back **at the cost it was
+booked at**, not today's average. The entry shows on Job Cost Entries; its
+void there is refused (void the slip, which puts the stock back too).
+
+### Delivery tickets
+
+Received against an **open purchase order** on the job (sent, partly received
+or received; not a draft or a fully billed one): a line per PO line with the
+quantity received, and the supplier's own ticket number. **Saving** a delivery
+ticket adds its quantities to each PO line's received quantity and moves the
+order to `partial` (something received) or `received` (every line in full);
+an edit moves it by the change, and deleting or voiding the ticket takes the
+quantity back. Nothing posts: received-not-billed accruals are the
+accountant's. When the supplier's bill is entered from the PO, the
+construction **To Bill** dialog of an order being received this way shows
+ordered and received per line beside what is billed, and **warns** (never
+refuses) when a line would bill more than the value received (received
+quantity × the line's rate); the convert's response carries the same
+`warnings`. **Commitment Status** gains a **Received** column.
+
+### Field ticket log
+
+The **Field Ticket Log** report (`field-ticket-log`, JSON, PDF and CSV, on
+the Report Center in construction mode): per job, the T&M tickets dated by
+`as_of` that are still money on the table, **unsigned** ones and **signed
+ones not yet billed**, each at its bill rates, with the change order a signed
+ticket is priced on while that is not yet approved. Totals per job and grand;
+a job with no open ticket is left out. The ticket's status is today's.
 
 ## Job reports
 
@@ -1150,7 +1262,9 @@ forecast, so the two can show different figures for the same job. PDF and CSV
 like the other reports.
 
 **Commitment status** (`commitment-status`). Each commitment (PO or subcontract,
-not a draft, dated by `as_of`) per job: committed (pre-tax value), billed to date
+not a draft, dated by `as_of`) per job: committed (pre-tax value), received (the
+quantities on its delivery tickets dated by then, not void, at the PO line
+rates; see *Field tickets*), billed to date
 (bills dated by then; a retainage-release bill pays money already billed and is
 not counted), retainage held (held less released) and remaining (committed less
 billed, open commitments only), with totals per job and grand. Committed leaves
@@ -1229,15 +1343,20 @@ W-9 on file is a fact you record, not a default, so it stays No.
 
 ## The reports
 
-In construction mode the Report Center's first ten cards are the three job
+In construction mode the Report Center's first eleven cards are the three job
 reports that always existed — **Job Profitability**, **Job Budget vs Actual**
-and **P&L by Job** — then the seven construction reports: **WIP Schedule**,
+and **P&L by Job** — then the eight construction reports: **WIP Schedule**,
 **Cost to Complete**, **Change Order Log**, **Buyout Report**, **Job Cost by
-Vendor**, **Cost-to-Complete Forecast** and **Commitment Status** (see *Job
-reports* above). The seven show in construction mode only. Every other report
+Vendor**, **Cost-to-Complete Forecast**, **Commitment Status** (see *Job
+reports* above) and **Field Ticket Log** (see *Field tickets*). The eight show
+in construction mode only. Every other report
 stays where it is.
 
 ## What this mode does not do yet
+
+- **Field tickets, version 1:** no mobile or foreman app, no on-screen
+  signature pad (a typed name and a photo), no daily reports or timesheets
+  on the ticket, and no received-not-billed accrual from delivery tickets.
 
 - **No first-run prompt.** `company_type` still defaults to Business for a
   new company file; Construction is chosen in Settings afterward, as

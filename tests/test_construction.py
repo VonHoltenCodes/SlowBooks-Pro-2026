@@ -140,7 +140,8 @@ def _probe(name, *args):
 def test_report_center_leads_with_contractor_cards_and_keeps_the_set():
     got = _probe("reports_cards_probe.js")
     # the Construction group leads: the three contractor reports that always
-    # existed, then the seven job reports added in #556 (construction only)
+    # existed, then the seven job reports added in #556 and the Field Ticket Log
+    # (construction only)
     construction_only = [
         "wip-schedule",
         "cost-to-complete",
@@ -149,9 +150,10 @@ def test_report_center_leads_with_contractor_cards_and_keeps_the_set():
         "job-cost-by-vendor",
         "cost-to-complete-forecast",
         "commitment-status",
+        "field-ticket-log",
     ]
     assert (
-        got["construction"][:10]
+        got["construction"][:11]
         == [
             "job-profitability",
             "job-budget-vs-actual",

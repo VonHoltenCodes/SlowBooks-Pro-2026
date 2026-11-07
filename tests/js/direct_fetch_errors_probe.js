@@ -122,6 +122,12 @@ const scenarios = {
     await p.get('JournalPage').uploadAttachment(1);
     return last(p.toasts);
   },
+  // a field ticket's photo of the signed paper (construction)
+  async 'field_tickets.js attachment'() {
+    const p = page(['app/static/js/field_tickets.js']);
+    await p.get('FieldTickets').upload(1);
+    return last(p.toasts);
+  },
   // the Accountant's Copy (#346): the copy opened, the changes file previewed
   async 'companies.js open accountant\'s copy'() {
     const p = page(['app/static/js/companies.js']);

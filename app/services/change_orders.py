@@ -782,6 +782,10 @@ def apply_change_order(
     co.status = "approved"
     co.approved_at = datetime.now(timezone.utc)
     co.approved_on = resolve_approved_on(co, approved_on)
+    # The signed T&M tickets this owner CO prices close with it.
+    from app.services.field_tickets import close_for_change_order
+
+    close_for_change_order(db, co)
     db.flush()
 
 
@@ -875,4 +879,8 @@ def reverse_change_order(db: Session, co: ChangeOrder) -> None:
 
     co.status = "void"
     co.voided_at = datetime.now(timezone.utc)
+    # ...and open again when it is voided.
+    from app.services.field_tickets import reopen_for_change_order
+
+    reopen_for_change_order(db, co)
     db.flush()

@@ -1669,12 +1669,14 @@ COMMITMENT_COLUMNS = [
     {"key": "type", "label": "Type", "kind": "text"},
     {"key": "status", "label": "Status", "kind": "text"},
     {"key": "committed", "label": "Committed", "kind": "money"},
+    # What has arrived on the field's delivery tickets, at the PO line rates
+    {"key": "received", "label": "Received", "kind": "money"},
     {"key": "billed", "label": "Billed to date", "kind": "money"},
     {"key": "retainage_held", "label": "Retainage held", "kind": "money"},
     {"key": "remaining", "label": "Remaining", "kind": "money"},
 ]
 
-_COMMITMENT_SUMMED = ("committed", "billed", "retainage_held", "remaining")
+_COMMITMENT_SUMMED = ("committed", "received", "billed", "retainage_held", "remaining")
 
 
 def _commitment_row(
@@ -1737,8 +1739,9 @@ def commitment_status(
     include_closed: bool = False,
 ) -> dict:
     """Every non-draft commitment (PO or subcontract) on each job dated by
-    `as_of`: committed, billed to date, retainage held and remaining, with
-    totals per job and grand. Only bills dated by `as_of` count."""
+    `as_of`: committed, received (delivery tickets dated by then, at the line
+    rates), billed to date, retainage held and remaining, with totals per job
+    and grand. Only bills dated by `as_of` count."""
     from app.models.bills import Bill, BillStatus
     from app.models.change_orders import ChangeOrder
     from app.models.purchase_orders import POStatus, PurchaseOrder
@@ -1788,6 +1791,9 @@ def commitment_status(
                 is not None
             )
             row = _commitment_row(po, bills, as_of, co_by_id, billed_later)
+            from app.services.field_tickets import received_by
+
+            row["received"] = float(received_by(db, po.id, as_of))
             rows.append(row)
             for k in _COMMITMENT_SUMMED:
                 totals[k] += Decimal(str(row[k]))

@@ -50,6 +50,7 @@ TITLES = {
     "/api/reports/cost-to-complete/print": "Cost to Complete",
     "/api/reports/cost-to-complete-forecast/print": "Cost-to-Complete Forecast",
     "/api/reports/commitment-status/print": "Commitment Status",
+    "/api/reports/field-ticket-log/print": "Field Ticket Log",
     "/api/reports/change-order-log/print": "Change Order Log",
     "/api/reports/buyout/print": "Buyout Report",
     "/api/reports/job-cost-by-vendor/print": "Job Cost by Vendor",

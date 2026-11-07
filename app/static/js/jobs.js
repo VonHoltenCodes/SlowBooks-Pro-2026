@@ -47,7 +47,8 @@ const JobsPage = {
         const { overview, costs, budget, ...rest } = JobsPage.TAB_LABELS;
         // Contract (the owner's side), Buyout (the sub/supplier side, #553),
         // then Change orders (#554).
-        return { overview, costs, budget, contract: 'Contract', buyout: 'Buyout', changeorders: 'Change orders', payapps: 'Pay apps', ...rest };
+        // Field tickets (T&M, material slips, deliveries) follow Pay apps.
+        return { overview, costs, budget, contract: 'Contract', buyout: 'Buyout', changeorders: 'Change orders', payapps: 'Pay apps', fieldtickets: 'Field tickets', ...rest };
     },
 
     // =====================================================================
@@ -295,6 +296,7 @@ const JobsPage = {
                 case 'buyout': return await JobsPage.buyoutHtml();
                 case 'changeorders': return await JobsPage.changeOrdersHtml();
                 case 'payapps': return await JobsPage.payAppsHtml();
+                case 'fieldtickets': return await FieldTickets.html(JobsPage._job);
                 case 'transactions': return await JobsPage.transactionsHtml();
                 case 'time': return await JobsPage.timeHtml();
                 default: return await JobsPage.overviewHtml();
