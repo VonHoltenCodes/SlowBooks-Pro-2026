@@ -1012,6 +1012,13 @@ const SettingsPage = {
                             </select>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Pre-printed stock already carries the "Pay to the order of", memo and signature lines. Choose it to print only the values — payee, amount, amount in words, date and memo — in their places, with no labels, lines or borders. The two stubs are unchanged either way.</div>
                         </div>
+                        <div class="form-group full-width"><label for="settings-check-position">Check Position</label>
+                            <select name="check_position" id="settings-check-position" aria-describedby="settings-check-position-help">
+                                <option value="bottom" ${s.check_position !== 'top' ? 'selected' : ''}>Check at the bottom (stub, stub, check)</option>
+                                <option value="top" ${s.check_position === 'top' ? 'selected' : ''}>Check on top (check, voucher, voucher)</option>
+                            </select>
+                            <div id="settings-check-position-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Where the check sits on the sheet. Check at the bottom prints two stubs and then the check. Check on top prints the check first and two vouchers below it, the way QuickBooks Desktop's standard voucher checks are laid out, so that stock can be used. The stock and the nudges apply to the check either way.</div>
+                        </div>
                         <div class="form-group"><label>Horizontal nudge (in)</label>
                             <input name="check_nudge_x_in" type="number" min="-0.5" max="0.5" step="0.01"
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
@@ -1022,7 +1029,7 @@ const SettingsPage = {
                                 value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
                         <div class="form-group full-width">
                             <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock and nudges as set here, saved or not.</div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position and nudges as set here, saved or not.</div>
                         </div>
                     </div>
                 </div>
@@ -2871,13 +2878,13 @@ const SettingsPage = {
         window.open(`/api/donors/giving-statement/preview?year=${year}`, '_blank');
     },
 
-    // Opens a sample check PDF in a new tab (#440) with the stock and nudge
-    // as they stand in the form — saved or not — so a nudge can be tried
+    // Opens a sample check PDF in a new tab (#440) with the stock, check
+    // position (#727) and nudge as they stand in the form — saved or not — so a nudge can be tried
     // before it is saved.
     testPrintCheck() {
         const form = document.getElementById('settings-form');
         const params = new URLSearchParams();
-        for (const name of ['check_stock', 'check_nudge_x_in', 'check_nudge_y_in']) {
+        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in']) {
             const el = form && form.querySelector(`[name="${name}"]`);
             if (el) params.set(name, el.value);
         }
