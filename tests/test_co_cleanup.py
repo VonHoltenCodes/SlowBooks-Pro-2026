@@ -3,6 +3,7 @@
 from decimal import Decimal
 
 from tests.test_co_effective_date_allowance import (
+    _app,
     _approve,
     _contract,
     _owner_co,
@@ -69,3 +70,55 @@ def test_voiding_a_change_order_in_a_closed_period_is_refused(client, seed_custo
     # an open period still voids
     client.put("/api/settings", json={"closing_date": ""})
     assert client.post(f"/api/change-orders/{co['id']}/void").status_code == 200
+
+
+def test_a_pay_application_before_a_change_order_leaves_its_line_off(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The schedule on an application dated before the change order takes
+    effect equals the contract sum to date on that application, on screen and
+    on the PDF; one dated after lists the change order's line."""
+    from app.models.pay_applications import PayApplication
+    from app.routes.pay_applications import _out
+    from app.services.pdf_service import render_pay_application_html
+    from app.services.settings_service import get_all_settings
+
+    job, sov = _setup(
+        client,
+        seed_customer.id,
+        [{"description": "Base", "scheduled_value": 100000}],
+        100000,
+    )
+    co = _owner_co(client, job["id"], 13640, date="2026-08-10")
+    assert _approve(client, co["id"]).status_code == 200
+
+    july = _app(client, job["id"], "2026-07-31")
+    got = client.get(f"/api/pay-applications/{july['id']}").json()
+    assert [ln["description"] for ln in got["lines"]] == ["Base"]
+    assert got["totals"]["scheduled_total"] == 100000.0
+    # a refresh (the tab calls it on opening a draft) does not add it back
+    assert (
+        client.post(f"/api/pay-applications/{july['id']}/refresh-lines").status_code
+        == 200
+    )
+    got = client.get(f"/api/pay-applications/{july['id']}").json()
+    assert got["totals"]["scheduled_total"] == 100000.0
+
+    db_session.expire_all()
+    pa = db_session.get(PayApplication, july["id"])
+    html = render_pay_application_html(
+        pa, _out(db_session, pa), pa.job, get_all_settings(db_session)
+    )
+    assert "Deck" not in html and "113,640.00" not in html
+
+    # moving the date past the change order's brings its line in
+    r = client.put(f"/api/pay-applications/{july['id']}", json={"date": "2026-08-31"})
+    assert r.status_code == 200, r.text
+    got = r.json()
+    assert len(got["lines"]) == 2
+    assert got["totals"]["scheduled_total"] == 113640.0
+
+    assert client.delete(f"/api/pay-applications/{july['id']}").status_code == 200
+    august = _app(client, job["id"], "2026-08-31")
+    got = client.get(f"/api/pay-applications/{august['id']}").json()
+    assert got["totals"]["scheduled_total"] == 113640.0

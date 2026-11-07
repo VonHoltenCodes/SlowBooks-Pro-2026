@@ -634,7 +634,11 @@ click (the audit trail). A pay application dated before a change order takes
 effect does not carry it: its **contract sum to date** and **net change by
 change orders** read the change orders that took effect on or before the
 application's date, whether it is a draft or approved (a change order entered
-before the application but taking effect after it shows on the next one).
+before the application but taking effect after it shows on the next one). That
+change order's line on the schedule of values stays off the application too (on
+screen, in the totals and on the PDF), so the schedule total equals the contract
+sum to date; a draft picks the line up when its date moves past the change
+order's effective date.
 Approving in a closed period is refused like a bill or a pay application there:
 403 with "Transaction date … is on or before the closing date (…). Modifications
 to closed periods are not allowed." (the closing-date password override works
