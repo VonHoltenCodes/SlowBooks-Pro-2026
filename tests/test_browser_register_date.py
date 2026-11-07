@@ -1522,6 +1522,24 @@ def test_a_filter_changed_by_hand_leaves_the_page_where_it_was(browser):
         page.close()
 
 
+def test_another_page_opens_at_its_top_after_the_register(browser):
+    """The foot is the register's (#728): a page opened after it starts at
+    its top, not where the register left the window."""
+    ledger = _Ledger()
+    page = _ledger_page(browser, ledger, "#/banking/1")
+    try:
+        page.wait_for_function(ELEMENT_IN_VIEW, arg="#reg-quick-entry")
+        assert page.evaluate(SCROLLED) > 0
+        page.goto(page.url.split("#")[0] + "#/banking")
+        page.wait_for_function(
+            "() => !document.getElementById('reg-filters')"
+            " && document.getElementById('page-content').children.length > 0"
+        )
+        assert page.evaluate(SCROLLED) == 0
+    finally:
+        page.close()
+
+
 # ── #729: the Category column ──
 
 

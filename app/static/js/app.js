@@ -846,6 +846,18 @@ const App = {
             const html = await route.render(param, query);
             if (adminOnly()) return showAdminOnly();
             $('#page-content').innerHTML = html;
+            // Another page opens at its top. A register opens at its foot
+            // (#728), and a page drawn again in place (a filter, a save)
+            // keeps its place; a different page must not inherit either. A
+            // document over its list (route.document) leaves the list where
+            // it is, under it and when it closes.
+            if (!route.document) {
+                if (App._lastRoute && App._lastRoute !== route) {
+                    const box = document.getElementById('content');
+                    if (box) box.scrollTop = 0;
+                }
+                App._lastRoute = route;
+            }
             App.setStatus(`${route.label} — Ready`);
             App.screenShown(route);  // listed under Open (#336)
             if (route.mount) App._pageCleanup = route.mount();
