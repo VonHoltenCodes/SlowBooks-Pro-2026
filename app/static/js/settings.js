@@ -1049,7 +1049,7 @@ const SettingsPage = {
 
                 ${SettingsPage._isAdmin() ? '<div class="settings-section" data-group="backups" id="settings-legacy-files" data-admin hidden></div>' : ''}
 
-                <div class="settings-section" data-group="security" id="settings-users" data-admin style="display:none;" role="group" aria-labelledby="settings-h-users-server-edition">
+                <div class="settings-section" data-group="security" id="settings-users" data-admin hidden role="group" aria-labelledby="settings-h-users-server-edition">
                     <h3 id="settings-h-users-server-edition">Users &mdash; Server Edition</h3>
                     <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
                         Add a second user and this deployment becomes
@@ -1077,7 +1077,7 @@ const SettingsPage = {
                     <button type="button" class="btn btn-secondary" onclick="SettingsPage.showInvite()">Invite your accountant…</button>
                 </div>
 
-                <div class="settings-section" data-group="security" id="settings-api-tokens" data-admin style="display:none;" role="group" aria-labelledby="settings-h-api-tokens-agents-integrations">
+                <div class="settings-section" data-group="security" id="settings-api-tokens" data-admin hidden role="group" aria-labelledby="settings-h-api-tokens-agents-integrations">
                     <h3 id="settings-h-api-tokens-agents-integrations">API Tokens &mdash; agents &amp; integrations</h3>
                     <p style="font-size:12px; color:var(--text-muted); margin-bottom:10px;">
                         Scoped credentials for non-humans: AI agents, the receipt
@@ -1253,10 +1253,9 @@ const SettingsPage = {
         try {
             data = await API.get('/email-log' + params);
         } catch (e) {
-            section.hidden = true;
+            SettingsPage._showSection(section, false);
             return;
         }
-        section.hidden = false;
         const rows = data.rows || [];
         const html = SettingsPage._emailLogRowsHtml(rows);
         if (reset) host.innerHTML = html;
@@ -1264,6 +1263,7 @@ const SettingsPage = {
         SettingsPage._emailLogOffset += rows.length;
         const more = document.getElementById('email-log-more');
         if (more) more.hidden = SettingsPage._emailLogOffset >= (data.total || 0);
+        SettingsPage._showSection(section, true);
     },
 
     _formData() {
@@ -1399,7 +1399,7 @@ const SettingsPage = {
                     : 'To turn it on, set COMPANY_FILE_ENCRYPTION_SECRET where SlowBooks Pro starts, then start it again.');
             actions.innerHTML = `<button type="button" class="btn btn-primary" ${st.can_turn_on ? '' : 'disabled'} onclick="SettingsPage.confirmEncryption(true)">Turn on…</button>`;
         }
-        section.hidden = false;
+        SettingsPage._showSection(section, true);
         // the list marks the plain backups once the state is known
         SettingsPage.loadBackups();
     },
@@ -1597,7 +1597,6 @@ const SettingsPage = {
             const status = await API.get('/auth/status');
             if (!status.user || status.user.role !== 'admin') return;
             const users = await API.get('/users');
-            section.style.display = '';
             const rows = users.map(u => `<tr>
                 <td>${escapeHtml(u.username)}</td>
                 <td>${escapeHtml(u.display_name)}</td>
@@ -1622,6 +1621,7 @@ const SettingsPage = {
             $('#users-list').innerHTML = `<div class="table-container"><table>
                 <thead><tr><th scope="col">Username</th><th scope="col">Name</th><th scope="col">Role</th><th scope="col">Last login</th><th scope="col">Ends</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
+            SettingsPage._showSection(section, true);
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
     },
 
@@ -1632,7 +1632,7 @@ const SettingsPage = {
         if (!section) return;
         try {
             const sys = await API.get('/system');
-            if (sys && sys.desktop) section.hidden = false;
+            if (sys && sys.desktop) SettingsPage._showSection(section, true);
         } catch (e) { /* stays hidden */ }
     },
 
@@ -1646,10 +1646,10 @@ const SettingsPage = {
             const status = await API.get('/auth/status');
             if (!status.user || status.user.role !== 'admin') return;
             const tokens = await API.get('/tokens');
-            section.style.display = '';
             if (!tokens.length) {
                 $('#api-token-list').innerHTML =
                     '<div style="font-size:11px; color:var(--text-muted);">No tokens yet.</div>';
+                SettingsPage._showSection(section, true);
                 return;
             }
             const rows = tokens.map(t => `<tr>
@@ -1668,6 +1668,7 @@ const SettingsPage = {
             $('#api-token-list').innerHTML = `<div class="table-container"><table>
                 <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Backups</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
+            SettingsPage._showSection(section, true);
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
     },
 
@@ -2305,6 +2306,7 @@ const SettingsPage = {
             if (!el) return;
             if (backups.length === 0) {
                 el.innerHTML = '<div style="font-size:11px; color:var(--text-muted);">No backups yet.</div>';
+                SettingsPage._showSection(el.closest ? el.closest('.settings-section') : null, true);
                 return;
             }
             el.innerHTML = `<div class="table-container"><table>
@@ -2322,6 +2324,7 @@ const SettingsPage = {
                     </td>
                 </tr>`).join('')}</tbody>
             </table></div>`;
+            SettingsPage._showSection(el.closest ? el.closest('.settings-section') : null, true);
         } catch (e) { /* ignore */ }
     },
 
@@ -2347,8 +2350,8 @@ const SettingsPage = {
         } catch (e) { return; }  // an older server, or one that refuses this role: stays hidden
         SettingsPage._legacyFiles = state;
         if (!state || !(state.files > 0)) {
-            section.hidden = true;
             section.innerHTML = '';
+            SettingsPage._showSection(section, false);
             return;
         }
         const pending = state.pending_companies || [];
@@ -2372,7 +2375,7 @@ const SettingsPage = {
             ${wait ? `<div id="legacy-files-pending" style="font-size:11px; margin-bottom:8px;">${escapeHtml(wait)}</div>` : ''}
             <button type="button" class="btn btn-sm btn-secondary" id="legacy-files-remove" data-write
                 ${pending.length ? 'disabled' : ''} onclick="SettingsPage.removeLegacyFiles()">Remove them</button>`;
-        section.hidden = false;
+        SettingsPage._showSection(section, true);
     },
 
     async removeLegacyFiles() {
@@ -3388,6 +3391,79 @@ SettingsPage._available = function (section) {
     return !section.hidden && section.style.display !== 'none' && !section.classList.contains('hidden');
 };
 
+// A loader shows or hides its section here, never by its own hand (#725):
+// with the group switch, this is the one path that changes which sections
+// show. `on` with content just drawn into the section counts as a change
+// when the section is showing (the backups list, the users list).
+SettingsPage._showSection = function (section, on) {
+    if (!section) return;
+    section.hidden = !on;
+    if (section.style && section.style.display === 'none') section.style.display = '';
+    if (typeof document === 'undefined') return;  // the node tests' stand-in page
+    SettingsPage._refreshGroups({ filled: on ? section : null });
+};
+
+// The accessibility tree under the panel (#725, NEW-210). On the Mac
+// (WKWebView), after some switches of group a client walking AXChildren
+// found settings-panel empty while its fields were on screen: WebKit's
+// accessibility cache missed a children-changed notice for a section shown
+// or hidden inside the form, and nothing dirtied the panel again. When the
+// set of sections showing changes, the panel's renderer is dropped and
+// restored in one synchronous turn (hidden, a layout read, shown), so
+// WebKit builds that part of the tree again. Nothing paints in between, the
+// inputs are the same elements (their values and the form's state are
+// untouched), every scroll position is put back, and while focus is inside
+// the panel it is left alone until focus leaves it (hiding a focused
+// field's box would drop its focus). Only Apple's WebKit: WebView2 and
+// Chromium-based browsers never lost the tree, and see no change.
+SettingsPage._AX_REBUILD = null;   // null: by the engine; true/false: forced (tests)
+SettingsPage._showing = null;      // which sections showed at the last refresh
+SettingsPage._treeStale = false;   // a rebuild waits for focus to leave the panel
+SettingsPage._treeRebuilds = 0;    // how many were made (tests)
+
+SettingsPage._needsTreeRebuild = function () {
+    if (SettingsPage._AX_REBUILD !== null) return !!SettingsPage._AX_REBUILD;
+    const ua = (typeof navigator !== 'undefined' && navigator.userAgent) || '';
+    return /AppleWebKit/.test(ua) && !/Chrome|Chromium|CriOS|Edg|Android/.test(ua);
+};
+
+SettingsPage._rebuildPanelTree = function () {
+    const panel = document.getElementById('settings-panel');
+    if (!panel || !SettingsPage._needsTreeRebuild()) return;
+    if (SettingsPage._focusInPanel(panel)) { SettingsPage._treeStale = true; return; }
+    SettingsPage._treeStale = false;
+    const content = document.getElementById('content');
+    const scrolled = [content, document.scrollingElement, ...panel.querySelectorAll('*')]
+        .filter(el => el && (el.scrollTop || el.scrollLeft))
+        .map(el => [el, el.scrollTop, el.scrollLeft]);
+    const display = panel.style.display;
+    panel.style.display = 'none';
+    void panel.offsetHeight;  // the layout read: the renderer goes now
+    panel.style.display = display;
+    for (const [el, top, left] of scrolled) {
+        if (el.scrollTop !== top) el.scrollTop = top;
+        if (el.scrollLeft !== left) el.scrollLeft = left;
+    }
+    SettingsPage._treeRebuilds += 1;
+};
+
+// Focus on something drawn in the panel. A field of a group just switched
+// away from can keep focus with no box (a click on a tab in WebKit does not
+// move focus to the tab); dropping the panel's box changes nothing for it.
+SettingsPage._focusInPanel = function (panel) {
+    const a = document.activeElement;
+    return !!a && panel.contains(a) && a.getClientRects().length > 0;
+};
+
+// The rebuild put off while focus was in the panel, made once it leaves.
+SettingsPage._onPanelFocusOut = function (e) {
+    const panel = e.currentTarget;
+    if (!SettingsPage._treeStale || (e.relatedTarget && panel.contains(e.relatedTarget))) return;
+    setTimeout(() => {
+        if (SettingsPage._treeStale && !SettingsPage._focusInPanel(panel)) SettingsPage._rebuildPanelTree();
+    }, 0);
+};
+
 SettingsPage._findWords = function () {
     const box = document.getElementById('settings-find');
     return box ? box.value.trim().toLowerCase().split(/\s+/).filter(Boolean) : [];
@@ -3410,6 +3486,10 @@ SettingsPage._initGroups = function () {
     try { stored = window.localStorage ? window.localStorage.getItem(SettingsPage._GROUP_STORE) : null; } catch (e) { stored = null; }
     SettingsPage._group = SettingsPage.GROUPS.some(g => g.key === stored) ? stored : 'company';
     SettingsPage._pendingFocus = null;
+    SettingsPage._showing = null;
+    SettingsPage._treeStale = false;
+    const panel = document.getElementById('settings-panel');
+    if (panel) panel.addEventListener('focusout', SettingsPage._onPanelFocusOut);
     for (const s of sections) {
         if (!SettingsPage._groupOf(s)) {
             console.warn('Settings: a section has no known data-group, so it shows in every group', s.id || s.textContent.trim().slice(0, 40));
@@ -3505,8 +3585,8 @@ SettingsPage._orientGroups = function () {
 
 // Show the group asked for (or the first listed, while it has nothing to
 // show), or, with words in Find a setting, the sections of every group
-// that match them.
-SettingsPage._refreshGroups = function () {
+// that match them. `filled`: a section a loader has just drawn into.
+SettingsPage._refreshGroups = function (opts = {}) {
     const tabs = document.getElementById('settings-groups');
     const sections = SettingsPage._sections();
     if (!tabs || !sections.length) return;
@@ -3557,6 +3637,15 @@ SettingsPage._refreshGroups = function () {
         }
         if (status.textContent !== text) status.textContent = text;
     }
+    // the set showing changed (not at the first draw, whose tree is new):
+    // WebKit's accessibility tree under the panel is built again
+    const showing = sections.map((s, i) =>
+        !s.classList.contains('settings-off') && SettingsPage._available(s) ? i : '').join(',');
+    const filled = opts.filled && sections.includes(opts.filled)
+        && !opts.filled.classList.contains('settings-off') && SettingsPage._available(opts.filled);
+    const before = SettingsPage._showing;
+    SettingsPage._showing = showing;
+    if (before !== null && (before !== showing || filled)) SettingsPage._rebuildPanelTree();
     // a jump to a section a loader had not shown yet (Recent sends)
     const pending = SettingsPage._pendingFocus;
     if (pending && SettingsPage._available(pending.section)) {
