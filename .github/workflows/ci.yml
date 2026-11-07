@@ -249,8 +249,10 @@ jobs:
           # is not installed here; every browser test skips the same way).
           # 221 with the estimate PDF page-break sweep (construction overhaul,
           # test_estimate_bid_presentation.py::test_total_is_never_alone_on_a_page,
+          # WeasyPrint). 222 with the multi-page pay application PDF
+          # (test_pay_app_billing_flow.py::test_a_long_application_prints_totals_once_at_the_end,
           # WeasyPrint).
-          MAX_SKIPS: "221"
+          MAX_SKIPS: "222"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
