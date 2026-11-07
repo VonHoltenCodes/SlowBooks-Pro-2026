@@ -135,17 +135,17 @@ def test_top_places_the_fields_as_quickbooks_voucher_stock_does():
     # the date at the top right; the payee and the amount on one line with
     # the amount at the right edge; words below; the address under, at left
     assert (
-        ".check-top .check-date { top: 0.4in; right: 0.15in; text-align: right; }"
+        ".check-top .check-date { top: 0.65in; right: 0.4in; text-align: right; }"
         in html
     )
-    assert ".check-top .pay-to { position: absolute; top: 0.8in;" in html
-    assert ".check-top .amount-box { top: 0.74in; right: 0.1in;" in html
+    assert ".check-top .pay-to { position: absolute; top: 1.15in;" in html
+    assert ".check-top .amount-box { top: 1.09in; right: 0.1in;" in html
     assert (
-        ".check-top .amount-words { position: absolute; top: 1.2in; left: 0.1in;"
+        ".check-top .amount-words { position: absolute; top: 1.48in; left: 0.1in;"
         in html
     )
     assert (
-        ".check-top .payee-address { position: absolute; top: 1.75in; left: 0.75in;"
+        ".check-top .payee-address { position: absolute; top: 1.8in; left: 0.75in;"
         in html
     )
     assert "Oct 24, 2026" in face
