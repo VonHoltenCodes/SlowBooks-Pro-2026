@@ -5,6 +5,18 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### v2.31.9 — Checks on top, the payee's address on a check, and a register that opens at today
+
+**Check on top** (#727). Settings → Payroll and checks → Check Printing has a **Check position**: *Check at the bottom*, the stub / stub / check sheet as before, or *Check on top*, the check face in the top third of the page with two vouchers below it, which is the layout of QuickBooks Desktop's voucher check stock. On the top face the date, payee, amount, amount in words and address sit where that stock prints them, so pre-printed checks brought over from QuickBooks work with at most the alignment nudge; the pre-printed (values only) choice and the nudges apply to the face in either position; and bill payments, Pay Bills, checks from the register or an expense, the batch print and the test print all follow it. Each voucher lists the payee and date, the lines, and the bank account with the check total.
+
+**The payee's address on the check** (#726). A check prints the vendor's postal address under the amount in words (the name, the street lines, then city, state and ZIP), so it can go out in a window envelope and fills the address area of pre-printed stock. A vendor with no address prints as before, with nothing moved; the test print carries a sample address.
+
+**The register opens at its newest entries** (#728). A bank or card register opens scrolled to its last lines and the entry row, with the order and the running balance as they were. Changing a filter or saving an entry leaves the page where it is, and a saved entry's row still comes into view.
+
+**A Category column in the register** (#729). Beside Type, each line shows the account it was posted against; an entry spread over several accounts says "3 accounts", with each account and its amount in the cell's tooltip and read out to a screen reader. The entry row's Category box sits under the column. The register's rows carry `category`, `category_account_id` and `category_lines`.
+
+**macOS: the Settings panel in the accessibility tree** (#725). After switching between Company Settings' groups, a client that reads the Mac app's accessibility tree could find the panel empty while its fields were on screen (VoiceOver was not affected). One path now shows and hides the page's sections, and on the Mac the app asks WebKit to rebuild the panel's tree whenever that set changes, without moving focus, losing a typed value or the scroll position. Other platforms are unchanged.
+
 ### v2.31.8 — Settings in groups, a Text size setting, and a way back in when the password is forgotten
 
 **Company Settings in nine groups** (#720). The page was thirty-two sections in one scroll. It is now nine groups chosen from a list down the left (Company, Sales documents, Email, Payroll and checks, Lists, Connections, Preferences, Users and security, Backups), one shown at a time, with **Find a setting** above the list to search every group by heading or field name. Save Settings stays at the bottom of the window and says which groups hold unsaved changes; a group with a change shows a dot; a field that stops the save in a group that is not showing is opened and focused; the links other pages make into Settings open the right group; and the group you last opened is remembered on this computer. Nothing was renamed or moved between screens, and a sign-in sees only the groups it has something in.

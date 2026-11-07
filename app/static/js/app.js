@@ -40,7 +40,7 @@ const App = {
         '/payments':      { page: 'payments',        label: 'Receive Payments',   render: () => PaymentsPage.render() },
         '/payments/:id':      { page: 'payments',   label: 'Payment',       document: true, render: (id) => App.withDocument(() => PaymentsPage.render(), () => PaymentsPage.view(id)) },
         '/banking':       { page: 'banking',         label: 'Banking',            render: () => BankingPage.render() },
-        '/banking/:id':   { page: 'banking',         label: 'Register',           render: (id, query) => BankingPage.renderRegister(id, query) },
+        '/banking/:id':   { page: 'banking',         label: 'Register',           render: (id, query) => BankingPage.renderRegister(id, query), mount: () => BankingPage.mountRegister() },
         '/banking/transfers/:id': { page: 'banking', label: 'Transfer',     document: true, render: (id) => App.withDocument(() => BankingPage.render(), () => JournalPage.view(id)) },
         '/accounts':      { page: 'accounts',        label: 'Chart of Accounts',  render: () => App.renderAccounts() },
         // A class's own page and the Classes list (#234): the period, the
@@ -846,6 +846,18 @@ const App = {
             const html = await route.render(param, query);
             if (adminOnly()) return showAdminOnly();
             $('#page-content').innerHTML = html;
+            // Another page opens at its top. A register opens at its foot
+            // (#728), and a page drawn again in place (a filter, a save)
+            // keeps its place; a different page must not inherit either. A
+            // document over its list (route.document) leaves the list where
+            // it is, under it and when it closes.
+            if (!route.document) {
+                if (App._lastRoute && App._lastRoute !== route) {
+                    const box = document.getElementById('content');
+                    if (box) box.scrollTop = 0;
+                }
+                App._lastRoute = route;
+            }
             App.setStatus(`${route.label} — Ready`);
             App.screenShown(route);  // listed under Open (#336)
             if (route.mount) App._pageCleanup = route.mount();

@@ -592,6 +592,15 @@ def check_print_options(company_settings: dict) -> dict:
     }
 
 
+def check_position(company_settings: dict) -> str:
+    """Where the check face sits on the page (#727): "bottom" (stub / stub /
+    check, the default) or "top" (check / voucher / voucher, QuickBooks
+    Desktop's standard voucher stock). Read apart from check_print_options()
+    so the stock and nudge options keep their shape; every check print path
+    renders through render_checks_html(), which reads both."""
+    return "top" if company_settings.get("check_position") == "top" else "bottom"
+
+
 def render_check_html(check_data: dict, company_settings: dict, options=None) -> str:
     """The check face as HTML. Checks print on stock that already carries the
     bank's and the company's marks, so this is the one document that
@@ -604,12 +613,18 @@ def render_check_html(check_data: dict, company_settings: dict, options=None) ->
 
 def render_checks_html(checks: list, company_settings: dict, options=None) -> str:
     """One or more checks, each on its own page of the 3-per-page stock
-    (two stubs and the check), in the order given (#603)."""
+    (two stubs and the check, or the check and two vouchers when the check
+    position is "top", #727), in the order given (#603)."""
     template = _jinja_env.get_template("check_pdf.html")
     for check_data in checks:
         check_data["amount_words"] = _amount_to_words(check_data.get("amount", 0))
     opts = check_print_options(company_settings) if options is None else options
-    return template.render(checks=checks, company=company_settings, **opts)
+    return template.render(
+        checks=checks,
+        company=company_settings,
+        position=check_position(company_settings),
+        **opts,
+    )
 
 
 def generate_check_pdf(check_data: dict, company_settings: dict) -> bytes:
