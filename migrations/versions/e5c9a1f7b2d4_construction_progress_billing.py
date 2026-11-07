@@ -46,7 +46,9 @@ def upgrade() -> None:
             "status", sa.String(length=10), nullable=False, server_default="draft"
         ),
         sa.Column("retainage_pct", sa.Numeric(5, 2), nullable=True),
-        sa.Column("tax_rate", sa.Numeric(7, 4), nullable=False, server_default="0"),
+        sa.Column(
+            "tax_rate", sa.Numeric(7, 4), nullable=False, server_default="0"
+        ),
         sa.Column(
             "release_retainage", sa.Numeric(15, 2), nullable=False, server_default="0"
         ),
@@ -66,7 +68,9 @@ def upgrade() -> None:
             "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
         ),
         sa.ForeignKeyConstraint(["job_id"], ["jobs.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["invoice_id"], ["invoices.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["invoice_id"], ["invoices.id"], ondelete="SET NULL"
+        ),
         sa.ForeignKeyConstraint(
             ["deposit_payment_id"], ["payments.id"], ondelete="SET NULL"
         ),
@@ -94,7 +98,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["pay_application_id"], ["pay_applications.id"], ondelete="CASCADE"
         ),
-        sa.ForeignKeyConstraint(["sov_line_id"], ["sov_lines.id"], ondelete="SET NULL"),
+        sa.ForeignKeyConstraint(
+            ["sov_line_id"], ["sov_lines.id"], ondelete="SET NULL"
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -122,7 +128,9 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["transaction_id"], ["transactions.id"]),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_job_deposits_job_id", "job_deposits", ["job_id"], unique=False)
+    op.create_index(
+        "ix_job_deposits_job_id", "job_deposits", ["job_id"], unique=False
+    )
 
     with op.batch_alter_table("invoices") as batch:
         batch.add_column(

@@ -66,9 +66,7 @@ def upgrade() -> None:
 
     for table in _LINE_TABLES:
         with op.batch_alter_table(table) as batch:
-            batch.add_column(
-                sa.Column("cost_type", sa.String(length=20), nullable=True)
-            )
+            batch.add_column(sa.Column("cost_type", sa.String(length=20), nullable=True))
 
     op.create_table(
         "trade_packages",
@@ -77,12 +75,8 @@ def upgrade() -> None:
         sa.Column("notes", sa.Text(), nullable=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("sort_order", sa.Integer(), nullable=False, server_default="0"),
-        sa.Column(
-            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
-        ),
-        sa.Column(
-            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
-        ),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.UniqueConstraint("name", name="uq_trade_package_name"),
     )
     op.create_table(
