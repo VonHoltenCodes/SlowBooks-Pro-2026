@@ -1330,7 +1330,9 @@ def test_wip_pdf_sections_include_the_adjusting_entry(db_session, seed_accounts)
     entry = sections[1]
     assert entry["columns"] == ["Job", "Account", "Debit", "Credit"]
     texts = [c for r in entry["rows"] for c in r["cells"]]
-    assert job_reports.WIP_OVERBILLING_ACCOUNT in texts and "Net entry" in texts
+    # the account by number and name, as the chart has it (2060 is free)
+    assert f"2060 {job_reports.WIP_OVERBILLING_ACCOUNT}" in texts
+    assert "Net entry" in texts
 
 
 def _commitment(db, job, vendor, number, subtotal, status=POStatus.SENT, when=None):

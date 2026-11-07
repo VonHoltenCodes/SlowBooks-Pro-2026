@@ -649,16 +649,42 @@ def get_bad_debt_account_id(db: Session) -> int:
 # a 1xxx asset or 2xxx liability Other Current anyway, but pinning it keeps
 # these on the right balance-sheet line whatever the rule does later, and a
 # yielded number (the chart already owns 1150) leaves the rule nothing to
-# read.
+# read. The 1360 / 2060 / 2070 / 4060 / 5600 accounts take the WIP schedule's
+# posted adjusting entry (over and under billing, the loss provision).
 CONSTRUCTION_ACCOUNTS = (
     ("1150", "Retainage Receivable", AccountType.ASSET, "other_current_asset"),
     ("1350", "Construction in Progress", AccountType.ASSET, "other_current_asset"),
+    (
+        "1360",
+        "Costs and Estimated Earnings in Excess of Billings",
+        AccountType.ASSET,
+        "other_current_asset",
+    ),
     ("2050", "Retainage Payable", AccountType.LIABILITY, "other_current_liability"),
+    (
+        "2060",
+        "Billings in Excess of Costs and Estimated Earnings",
+        AccountType.LIABILITY,
+        "other_current_liability",
+    ),
+    (
+        "2070",
+        "Provision for Loss on Uncompleted Contracts",
+        AccountType.LIABILITY,
+        "other_current_liability",
+    ),
     ("2210", "Customer Deposits", AccountType.LIABILITY, "other_current_liability"),
     ("2220", "Use Tax Payable", AccountType.LIABILITY, "other_current_liability"),
     ("4050", "Contract Revenue", AccountType.INCOME, "income"),
+    ("4060", "Contract Revenue – WIP Adjustment", AccountType.INCOME, "income"),
     ("5400", "Equipment Cost", AccountType.COGS, "cost_of_goods_sold"),
     ("5500", "Other Job Costs", AccountType.COGS, "cost_of_goods_sold"),
+    (
+        "5600",
+        "Loss on Uncompleted Contracts",
+        AccountType.COGS,
+        "cost_of_goods_sold",
+    ),
 )
 
 
