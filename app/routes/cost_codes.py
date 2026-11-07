@@ -34,6 +34,7 @@ from app.services.cost_code_catalog import (
     division_of,
     ensure_division,
     load_standard_catalog,
+    map_new_section,
     normalize_code,
 )
 from app.schemas.common import StrictModel
@@ -159,6 +160,8 @@ def create_cost_code(data: CostCodeCreate, db: Session = Depends(get_db)):
             values["parent_id"] = ensure_division(db, div).id
     row = CostCode(**values)
     db.add(row)
+    db.flush()
+    map_new_section(db, row)
     db.commit()
     return _to_response(_get(db, row.id), db)
 
