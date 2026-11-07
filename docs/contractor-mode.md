@@ -467,9 +467,16 @@ Release it with **Release retainage** on the commitment
 **Retainage on the cash basis.** A bill's held retainage is not an expense on
 a cash-basis report until it is paid: paying the net spreads that amount over
 the bill's expense lines, the held part waits on 2050 (which reads zero on the
-cash Balance Sheet while it waits), and a release of that retainage recognizes
-the rest of the expense on the day it is paid. Accrual reports are unchanged:
-the whole bill on its date, the held part on Retainage Payable.
+cash Balance Sheet while it waits), and paying the release bill recognizes the
+rest of the expense on the day it is paid, on the held bills' own expense
+lines (account, job, cost code and cost type), never on 6990 Unapplied Cash
+Bill Payment Expense. A release draws on the commitment's bills held before
+it in proportion to what each still holds, so partial releases that add up
+to all that was held recognize each bill's held part once. Once every bill
+and release is paid, cash-basis cost, P&L by Job and Job Profitability equal
+the accrual figures. Editing a held bill's lines rewrites the cash lines of
+its release's payments too. Accrual reports are unchanged: the whole bill on
+its date, the held part on Retainage Payable.
 
 **What committed and billed mean now.** *Committed* cost is the **remaining**
 open commitment — the scheduled value of every issued, not-yet-closed
@@ -892,6 +899,17 @@ original kept reads it as the sum less the change orders approved by its
 approval, so it prints right with no repair (#723). An invoice made from a payment application can't be edited on the
 Invoices screen except for its notes (409); change the application instead.
 
+**Owner retainage on the cash basis.** The mirror of the sub side. A payment
+on an application's invoice recognizes income only on the cash received: its
+sales tax whole (retainage is held on the work, before tax) and its income
+lines less the retainage held, so held retainage is not income and 1150 reads
+zero on the cash Balance Sheet while it waits. Paying a release application
+recognizes the held income on the earlier applications' own income lines
+(account, job and cost code), never on 4950 Unapplied Cash Payment Income; an
+application that releases and bills new work does both. Once everything is
+paid, cash income and tax equal the accrual figures. A dropped retainage
+percent (retainage this period below zero) is a release of what was held.
+
 **Owner deposits.** Money an owner pays ahead of the work is a **deposit**
 (Pay apps tab → Owner deposits, or `POST /api/jobs/{id}/deposits`): it posts DR
 the bank / CR **Customer Deposits** (2210) and shows as received, applied and
@@ -904,6 +922,13 @@ payment, the invoice and the application are voided together, so a refusal
 A deposit that has been applied cannot be voided until the application is, and
 the deposit payment cannot be voided from Payments while the application
 stands (409).
+On the **cash basis** a deposit is income when it is applied, not when it is
+received: until then it is money held for the owner, a liability on 2210 on
+the cash Balance Sheet as on the accrual one (QuickBooks' cash basis reads a
+customer deposit the same way). Applying it is a payment on the
+application's invoice, so it recognizes that invoice's income and tax like
+any payment. An accountant who reports a deposit as income on receipt
+adjusts it by journal entry.
 
 **The sub side.** A commitment bills a period at a time exactly as buyout
 described (the **Sub pay app** button opens the partial-convert dialog with

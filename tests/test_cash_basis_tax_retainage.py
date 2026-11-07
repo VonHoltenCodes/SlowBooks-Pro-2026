@@ -2,12 +2,9 @@
 Sales Tax Liability report on a basis, retainage held on a bill, and payroll
 staying on both bases."""
 
-from datetime import date
 from decimal import Decimal
 
-from app.models.bills import Bill
 from app.services import cash_basis
-from app.services.accounting import all_lines, create_journal_entry
 from tests.test_cash_basis import (
     _account_id,
     _amount,
@@ -204,53 +201,42 @@ def _retainage_bill(client, db_session, seed_accounts, vendor_id, held=100):
     return r.json()
 
 
-def _release(db_session, bill_id, day, amount, bank_number="1000"):
-    """What a release of held retainage posts: Dr 2050 / Cr bank (both) with
-    the bill's expense recognized beside it (cash). The app has no release
-    route yet (progress billing), so the entry is written the way it will."""
-    from app.models.accounts import Account
-
-    bill = db_session.get(Bill, bill_id)
-    held = db_session.query(Account).filter_by(account_number="2050").one()
-    bank = db_session.query(Account).filter_by(account_number=bank_number).one()
-    lines = [
-        {"account_id": held.id, "debit": D(amount), "credit": D("0")},
-        {"account_id": bank.id, "debit": D("0"), "credit": D(amount)},
-    ] + cash_basis.retainage_release_cash_lines(db_session, bill, D(amount), "Release")
-    txn = create_journal_entry(
-        db_session, day, "Retainage release", lines, source_type="retainage_release"
+def _released_commitment(client, seed_accounts, vendor_id):
+    """A commitment holding 10% on Framing 700 (5100) and Trim 300 (6000),
+    billed whole on 2026-06-01: 1,000, of which 100 held on 2050."""
+    po = client.post(
+        "/api/purchase-orders",
+        json={
+            "vendor_id": vendor_id,
+            "date": "2026-06-01",
+            "retainage_pct": 10,
+            "lines": [
+                {"description": "Framing", "quantity": 1, "rate": 700},
+                {"description": "Trim", "quantity": 1, "rate": 300},
+            ],
+        },
+    ).json()
+    po = client.put(f"/api/purchase-orders/{po['id']}", json={"status": "sent"})
+    po = po.json()
+    framing, trim = po["lines"]
+    r = client.post(
+        f"/api/purchase-orders/{po['id']}/convert-to-bill",
+        json={
+            "lines": [
+                {"line_id": framing["id"], "account_id": seed_accounts["5100"].id},
+                {"line_id": trim["id"], "account_id": seed_accounts["6000"].id},
+            ]
+        },
     )
-    db_session.commit()
-    return txn
-
-
-def _void_entry(db_session, txn, day):
-    lines = [
-        {
-            "account_id": ln.account_id,
-            "debit": ln.credit,
-            "credit": ln.debit,
-            "description": "VOID",
-            "class_id": ln.class_id,
-            "job_id": ln.job_id,
-            "cost_code_id": ln.cost_code_id,
-            "cost_type": ln.cost_type,
-            "function": ln.function,
-            "basis": ln.basis,
-        }
-        for ln in all_lines(db_session, txn.id)
-    ]
-    create_journal_entry(
-        db_session, day, "VOID Retainage release", lines, source_type="retainage_void"
-    )
-    db_session.commit()
+    assert r.status_code == 200, r.text
+    return po, client.get(f"/api/bills/{r.json()['bill_id']}").json()
 
 
 def test_retainage_is_not_expensed_until_it_is_released(
     client, db_session, seed_accounts, seed_customer
 ):
     vendor = _vendor(client)
-    bill = _retainage_bill(client, db_session, seed_accounts, vendor["id"])
+    po, bill = _released_commitment(client, seed_accounts, vendor["id"])
     assert D(str(bill["balance_due"])) == D("900.00")
     _bill_payment(client, vendor["id"], "2026-06-10", 900, [(bill["id"], 900)])
 
@@ -266,11 +252,18 @@ def test_retainage_is_not_expensed_until_it_is_released(
     assert D(str(acc["net_income"])) == D("-1000.00")
     assert _bs_amount(_bs(client, "2026-06-30"), "2050") == D("100.00")
 
-    # the release recognizes the held tenth
-    txn = _release(db_session, bill["id"], date(2026, 7, 15), "100.00")
+    # the release bill, paid, recognizes the held tenth on the bill's lines
+    r = client.post(
+        f"/api/purchase-orders/{po['id']}/release-retainage",
+        json={"date": "2026-07-15"},
+    )
+    assert r.status_code == 200, r.text
+    release = r.json()["bill_id"]
+    paid = _bill_payment(client, vendor["id"], "2026-07-15", 100, [(release, 100)])
     july, bs_july, _ = _assert_cash_invariant(client, "2026-07-01", "2026-07-31")
     assert _amount(july, "5100") == D("70.00")
     assert _amount(july, "6000") == D("30.00")
+    assert _amount(july, "6990") == 0
     assert D(str(july["net_income"])) == D("-100.00")
     assert _bs_amount(bs_july, "2000") == 0 and _bs_amount(bs_july, "2050") == 0
     assert _bs_amount(_bs(client, "2026-07-31"), "2050") == 0  # accrual: released
@@ -279,9 +272,10 @@ def test_retainage_is_not_expensed_until_it_is_released(
     assert _amount(whole, "5100") == D("700.00")
     assert _amount(whole, "6000") == D("300.00")
 
-    # voiding the release takes the cash expense back and the held part
-    # returns to 2050 on the accrual view
-    _void_entry(db_session, txn, date(2026, 7, 15))
+    # voiding the payment and the release takes the cash expense back and
+    # the held part returns to 2050 on the accrual view
+    assert client.post(f"/api/bill-payments/{paid['id']}/void").status_code == 200
+    assert client.post(f"/api/bills/{release}/void").status_code == 200
     july, bs_july, _ = _assert_cash_invariant(client, "2026-07-01", "2026-07-31")
     assert D(str(july["net_income"])) == 0
     assert _bs_amount(bs_july, "2050") == 0

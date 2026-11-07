@@ -19,8 +19,8 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.models.accounts import AccountType
-from app.models.bills import Bill, BillPayment, BillPaymentAllocation
-from app.models.invoices import Invoice
+from app.models.bills import Bill, BillPayment, BillPaymentAllocation, BillStatus
+from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment, PaymentAllocation
 from app.models.transactions import (
     BASIS_ACCRUAL,
@@ -193,7 +193,7 @@ def document_lines(
     every line of its entries except the control account's (A/R or A/P),
     each as {account_id, amount, class_id, job_id, cost_code_id, cost_type,
     function}, `amount` signed credit-positive. `skip_account_ids` leaves
-    out more accounts (a bill's Retainage Payable). Read on every basis: the
+    out more accounts (the retainage account). Read on every basis: the
     entries are accrual ones, and a repair may run before they are tagged."""
     rows = (
         db.query(TransactionLine)
@@ -286,29 +286,30 @@ def _ledger_posted(db: Session, document) -> bool:
 
 def _recognition(
     db: Session,
-    source_types,
-    document_id: int,
+    document,
+    *,
+    invoice: bool,
     control_id: int,
     applied_home: Decimal,
     memo: str,
-    fallback_account_id,
-    link_key: str,
-    skip_account_ids=(),
 ) -> list[dict]:
-    """The cash lines recognizing `applied_home` of one document: its
-    recognition lines prorated, each on the same side as on the document
-    and tied to it through `link_key`. `skip_account_ids` leaves accounts
-    out of the recognition (a bill's Retainage Payable). A document with no
-    recognition lines of its own (an import that posted none) is recognized
-    to the unapplied account instead."""
-    lines = document_lines(db, source_types, document_id, control_id, skip_account_ids)
-    total = sum((ln["amount"] for ln in lines), Decimal("0"))
+    """The cash lines recognizing `applied_home` of one invoice or bill: its
+    recognition pool (`recognition_pool`) prorated, each line on the same
+    side as on the document and tied to it. A document with nothing to
+    recognize (an import that posted no lines) is recognized to the
+    unapplied account instead. `applied_home` is signed credit-positive:
+    an invoice's is positive, a bill's negative."""
+    lines, total = recognition_pool(
+        db, document, invoice=invoice, control_id=control_id
+    )
     shares = prorate(lines, applied_home, total) if total else []
     if not shares:
         if applied_home == 0:
             return []
-        shares = [{"account_id": fallback_account_id(db), "amount": applied_home}]
-    return [_cash_line({**s, link_key: document_id}, memo) for s in shares]
+        fallback = unapplied_income_id if invoice else unapplied_expense_id
+        shares = [{"account_id": fallback(db), "amount": applied_home}]
+    link_key = INVOICE_LINK if invoice else BILL_LINK
+    return [_cash_line({**s, link_key: document.id}, memo) for s in shares]
 
 
 def customer_payment_cash_lines(
@@ -325,13 +326,11 @@ def customer_payment_cash_lines(
         out.extend(
             _recognition(
                 db,
-                INVOICE_SOURCE_TYPES,
-                invoice.id,
-                ar_id,
-                _q(applied_home),
-                memo,
-                unapplied_income_id,
-                INVOICE_LINK,
+                invoice,
+                invoice=True,
+                control_id=ar_id,
+                applied_home=_q(applied_home),
+                memo=memo,
             )
         )
     unapplied_home = _q(unapplied_home or 0)
@@ -349,24 +348,19 @@ def bill_payment_cash_lines(
 ) -> list[dict]:
     """The mirror for a bill payment: each bill's expense, cost and inventory
     lines prorated (debits), the remainder to Unapplied Cash Bill Payment
-    Expense, and one Cr A/P for the whole."""
+    Expense, and one Cr A/P for the whole. A retainage-release bill
+    recognizes the held expense of the bills it releases."""
     out: list[dict] = []
-    held = _retainage_ids(db)
     for bill, applied_home in applied:
-        # a bill's lines are debits: recognize -applied of credit. Retainage
-        # Payable is left out, so the net paid is spread over the expense
-        # lines and the held part is not yet an expense (released later).
+        # a bill's lines are debits: recognize -applied of credit
         out.extend(
             _recognition(
                 db,
-                BILL_SOURCE_TYPES,
-                bill.id,
-                ap_id,
-                -_q(applied_home),
-                memo,
-                unapplied_expense_id,
-                BILL_LINK,
-                held,
+                bill,
+                invoice=False,
+                control_id=ap_id,
+                applied_home=-_q(applied_home),
+                memo=memo,
             )
         )
     unapplied_home = _q(unapplied_home or 0)
@@ -380,43 +374,195 @@ def bill_payment_cash_lines(
     return _balanced_on(out, ap_id, memo)
 
 
-def _retainage_ids(db: Session) -> tuple:
-    """Retainage Payable (2050), when the chart has it: a bill holding
-    retainage credits it, and it is not an expense until released."""
+# ---------------------------------------------------------------------------
+# Retainage: held back on a payment, recognized when the release is paid
+# ---------------------------------------------------------------------------
+
+
+def _retainage_ids(db: Session, invoice: bool = False) -> tuple:
+    """The retainage account, when the chart has it: Retainage Receivable
+    (1150) for an invoice, Retainage Payable (2050) for a bill. A document
+    holding retainage posts part of itself there, and that part is not
+    income or expense on the cash basis until the release is paid."""
     from app.services import control_accounts
 
-    found = control_accounts.find(db, "2050")
+    found = control_accounts.find(db, "1150" if invoice else "2050")
     return (found,) if found is not None else ()
 
 
-def retainage_release_cash_lines(
-    db: Session, bill, released_home, memo: str
-) -> list[dict]:
-    """The cash lines of releasing `released_home` of a bill's held retainage
-    (#483): the bill's expense, cost and inventory lines prorated for the
-    released amount (debits) and one Cr Retainage Payable (cash), so the
-    expense lands when the held part is paid. They go in the release's own
-    entry, beside its Dr 2050 / Cr bank (both), which then net to zero on
-    2050 in the cash view. A release that is not tied to a bill (a plain
-    check or journal entry against 2050) has nothing to recognize."""
-    from app.services.accounting import ensure_construction_accounts, get_ap_account_id
+def _retainage_of(document) -> tuple[Decimal, Decimal]:
+    """(held, released) by one document, both >= 0, in its own currency.
+    A pay application whose retainage percent was dropped holds a negative
+    amount: that is a release of what earlier applications held."""
+    held = _q(document.retainage_held or 0)
+    released = _q(document.retainage_released or 0)
+    if held < 0:
+        held, released = Decimal("0"), released - held
+    return held, released
 
-    released_home = _q(released_home)
-    if released_home <= 0:
+
+def _carry_and_whole(db: Session, lines: list[dict], invoice: bool):
+    """Split a document's lines into those that carry its retainage and those
+    recognized whole. An owner's retainage is held on the work, before tax,
+    so an invoice's sales tax (its liability lines) is collected whole with
+    the net; on a bill every line carries it (its tax is part of the cost)."""
+    if not invoice or not lines:
+        return lines, []
+    from app.models.accounts import Account
+
+    ids = {ln["account_id"] for ln in lines}
+    liability = {
+        a.id
+        for a in db.query(Account.id).filter(
+            Account.id.in_(ids), Account.account_type == AccountType.LIABILITY
+        )
+    }
+    carry = [ln for ln in lines if ln["account_id"] not in liability]
+    whole = [ln for ln in lines if ln["account_id"] in liability]
+    return carry, whole
+
+
+def _merge(lines: list[dict]) -> list[dict]:
+    """Lines netted by account and dimensions, as document_lines nets them."""
+    netted: dict[tuple, dict] = {}
+    for ln in lines:
+        key = tuple(
+            ln.get(k)
+            for k in (
+                "account_id",
+                "class_id",
+                "job_id",
+                "cost_code_id",
+                "cost_type",
+                "function",
+            )
+        )
+        if key in netted:
+            netted[key]["amount"] += ln["amount"]
+        else:
+            netted[key] = dict(ln)
+    return [e for e in netted.values() if e["amount"] != 0]
+
+
+def _retainage_group(db: Session, document, invoice: bool) -> list:
+    """The documents a release draws on, with it, oldest first: on the owner
+    side the job's invoices, on the sub side the commitment's bills; void
+    ones left out."""
+    if invoice:
+        if document.job_id is None:
+            return []
+        return (
+            db.query(Invoice)
+            .filter(
+                Invoice.job_id == document.job_id,
+                Invoice.status != InvoiceStatus.VOID,
+            )
+            .order_by(Invoice.id)
+            .all()
+        )
+    if document.po_id is None:
         return []
-    held = _retainage_ids(db)
-    lines = _recognition(
-        db,
-        BILL_SOURCE_TYPES,
-        bill.id,
-        get_ap_account_id(db),
-        -released_home,
-        memo,
-        unapplied_expense_id,
-        BILL_LINK,
-        held,
+    return (
+        db.query(Bill)
+        .filter(Bill.po_id == document.po_id, Bill.status != BillStatus.VOID)
+        .order_by(Bill.id)
+        .all()
     )
-    return _balanced_on(lines, ensure_construction_accounts(db)["2050"].id, memo)
+
+
+def _release_shares(group: list, document) -> list[tuple]:
+    """[(holding document, share)] that `document`'s release draws on. Each
+    release in the group, oldest first, takes from the documents held before
+    it in proportion to what each still holds, so a set of releases that
+    gives back all that was held recognizes each document's held part once.
+    Worked from the documents alone, so a payment posted today and the
+    backfill of an older book write the same lines."""
+    left: dict[int, Decimal] = {}
+    by_id = {d.id: d for d in group}
+    for doc in group:
+        held, released = _retainage_of(doc)
+        if released > 0:
+            outstanding = sum(left.values(), Decimal("0"))
+            take = min(released, outstanding)
+            pots = [{"id": i, "amount": v} for i, v in left.items() if v > 0]
+            shares = prorate(pots, take, outstanding) if outstanding > 0 else []
+            for s in shares:
+                left[s["id"]] -= s["amount"]
+            if doc.id == document.id:
+                return [(by_id[s["id"]], s["amount"]) for s in shares]
+        if held > 0:
+            left[doc.id] = left.get(doc.id, Decimal("0")) + held
+        if doc.id == document.id:
+            return []
+    return []
+
+
+def _released_lines(db: Session, document, invoice: bool) -> list[dict]:
+    """The lines `document`'s release recognizes: for each document it
+    releases, that document's retainage-carrying lines prorated to the
+    share (signed as on that document)."""
+    from app.services.accounting import get_ap_account_id, get_ar_account_id
+    from app.services.currency import to_home
+
+    source_types = INVOICE_SOURCE_TYPES if invoice else BILL_SOURCE_TYPES
+    control_id = get_ar_account_id(db) if invoice else get_ap_account_id(db)
+    held_ids = _retainage_ids(db, invoice)
+    sign = 1 if invoice else -1
+    out: list[dict] = []
+    group = _retainage_group(db, document, invoice)
+    for holder, share in _release_shares(group, document):
+        lines = document_lines(db, source_types, holder.id, control_id, held_ids)
+        carry, _whole = _carry_and_whole(db, lines, invoice)
+        base = sum((ln["amount"] for ln in carry), Decimal("0"))
+        if base == 0:
+            continue
+        rate = holder.exchange_rate or Decimal("1")
+        out.extend(prorate(carry, sign * to_home(share, rate), base))
+    return out
+
+
+def recognition_pool(
+    db: Session, document, *, invoice: bool, control_id: int
+) -> tuple[list[dict], Decimal]:
+    """(lines, total): what the payments on one invoice or bill recognize,
+    each payment prorating the lines by applied / total. `amount` is signed
+    credit-positive. A document with no retainage gives its own lines, less
+    the control account. One holding retainage leaves the retainage account
+    out (it reads zero on the cash Balance Sheet): a bill's net paid is
+    spread over all its lines; an invoice's over its income lines less the
+    held part, with its sales tax whole, since retainage is held on the work
+    before tax. A release (a release bill, a release pay application) adds
+    the held part of the documents it releases, so that income or expense
+    is recognized on the day the release is paid, on their accounts, jobs
+    and cost codes, not as unapplied cash."""
+    from app.services.currency import to_home
+
+    source_types = INVOICE_SOURCE_TYPES if invoice else BILL_SOURCE_TYPES
+    held_ids = _retainage_ids(db, invoice)
+    lines = document_lines(db, source_types, document.id, control_id, held_ids)
+    total = sum((ln["amount"] for ln in lines), Decimal("0"))
+    held, released = _retainage_of(document)
+    if held == 0 and released == 0:
+        return lines, total
+    if not invoice and released == 0:
+        # a bill's payments spread the net over all its lines (net / total)
+        return lines, total
+
+    rate = document.exchange_rate or Decimal("1")
+    sign = 1 if invoice else -1
+    carry, whole = _carry_and_whole(db, lines, invoice)
+    base = sum((ln["amount"] for ln in carry), Decimal("0"))
+    pool = list(whole)
+    if base != 0:
+        # the part of this document's own lines not held back
+        hold = sign * to_home(held, rate)
+        if abs(hold) > abs(base):
+            hold = base
+        pool.extend(prorate(carry, base - hold, base) if base != hold else [])
+    if released > 0:
+        pool.extend(_released_lines(db, document, invoice))
+    pool = _merge(pool)
+    return pool, sum((ln["amount"] for ln in pool), Decimal("0"))
 
 
 def discount_cash_lines(
@@ -451,29 +597,14 @@ def discount_cash_lines(
                 "basis": BASIS_CASH,
             },
         ]
-    if invoice:
-        lines = _recognition(
-            db,
-            INVOICE_SOURCE_TYPES,
-            document.id,
-            control_id,
-            amount_home,
-            memo,
-            unapplied_income_id,
-            INVOICE_LINK,
-        )
-    else:
-        lines = _recognition(
-            db,
-            BILL_SOURCE_TYPES,
-            document.id,
-            control_id,
-            -amount_home,
-            memo,
-            unapplied_expense_id,
-            BILL_LINK,
-            _retainage_ids(db),
-        )
+    lines = _recognition(
+        db,
+        document,
+        invoice=invoice,
+        control_id=control_id,
+        applied_home=amount_home if invoice else -amount_home,
+        memo=memo,
+    )
     net = sum((ln["credit"] - ln["debit"] for ln in lines), Decimal("0"))
     if net == 0:
         return lines
@@ -528,13 +659,11 @@ def apply_reclass_lines(
         ]
     lines = _recognition(
         db,
-        INVOICE_SOURCE_TYPES,
-        invoice.id,
-        ar_id,
-        _q(applied_home),
-        memo,
-        unapplied_income_id,
-        INVOICE_LINK,
+        invoice,
+        invoice=True,
+        control_id=ar_id,
+        applied_home=_q(applied_home),
+        memo=memo,
     )
     if not lines:
         return []
@@ -591,10 +720,8 @@ def _recompute(
     db: Session,
     document,
     *,
-    link_key: str,
-    source_types,
+    invoice: bool,
     control_id: int,
-    fallback_account_id,
     allocations,
     fully_applied,
     adopted: bool,
@@ -612,6 +739,7 @@ def _recompute(
     db.flush()  # lines added a moment ago (an adoption) are looked for below
     closing = get_closing_date(db)
     rate = document.exchange_rate or Decimal("1")
+    link_key = INVOICE_LINK if invoice else BILL_LINK
     rewritten = 0
     for payment, alloc in allocations(document):
         if payment is None or payment.is_voided or payment.transaction_id is None:
@@ -648,15 +776,11 @@ def _recompute(
                 continue
         new = _recognition(
             db,
-            source_types,
-            document.id,
-            control_id,
-            (1 if link_key == INVOICE_LINK else -1) * _q(to_home(alloc.amount, rate)),
-            txn.description or "Payment",
-            fallback_account_id,
-            link_key,
-            # a bill's Retainage Payable stays out of the recognition (step 4)
-            _retainage_ids(db) if link_key == BILL_LINK else (),
+            document,
+            invoice=invoice,
+            control_id=control_id,
+            applied_home=(1 if invoice else -1) * _q(to_home(alloc.amount, rate)),
+            memo=txn.description or "Payment",
         )
         if old:
             audited_bulk_delete(
@@ -720,10 +844,8 @@ def recompute_invoice_cash_lines(
     rewritten = _recompute(
         db,
         invoice,
-        link_key=INVOICE_LINK,
-        source_types=INVOICE_SOURCE_TYPES,
+        invoice=True,
         control_id=get_ar_account_id(db),
-        fallback_account_id=unapplied_income_id,
         allocations=allocations,
         fully_applied=fully_applied,
         adopted=adopted,
@@ -749,15 +871,28 @@ def recompute_bill_cash_lines(db: Session, bill: Bill) -> int:
     rewritten = _recompute(
         db,
         bill,
-        link_key=BILL_LINK,
-        source_types=BILL_SOURCE_TYPES,
+        invoice=False,
         control_id=get_ap_account_id(db),
-        fallback_account_id=unapplied_expense_id,
         allocations=allocations,
         fully_applied=fully_applied,
         adopted=False,
     )
-    return rewritten + recompute_discount_cash_lines(db, bill, invoice=False)
+    rewritten += recompute_discount_cash_lines(db, bill, invoice=False)
+    # a release on the same commitment recognized this bill's held part as
+    # its lines stood; rewrite that too
+    if bill.po_id is not None and not (bill.retainage_released or 0):
+        for release in (
+            db.query(Bill)
+            .filter(
+                Bill.po_id == bill.po_id,
+                Bill.id > bill.id,
+                Bill.retainage_released > 0,
+                Bill.status != BillStatus.VOID,
+            )
+            .order_by(Bill.id)
+        ):
+            rewritten += recompute_bill_cash_lines(db, release)
+    return rewritten
 
 
 def recompute_discount_cash_lines(db: Session, document, invoice: bool = True) -> int:
@@ -1194,9 +1329,9 @@ __all__ = [
     "default_basis_for",
     "pending_backfill",
     "reading",
+    "recognition_pool",
     "recompute_bill_cash_lines",
     "recompute_invoice_cash_lines",
-    "retainage_release_cash_lines",
     "resolve_basis",
     "unapplied_expense_id",
     "unapplied_income_id",
