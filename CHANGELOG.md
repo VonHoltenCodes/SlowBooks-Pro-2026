@@ -5,6 +5,34 @@ Notable changes between releases. Format roughly follows
 used during development is captured here so the README can stay focused
 on what the software does, not on what sprint shipped what.
 
+### Unreleased — Construction, gone through
+
+Four role-played users (an estimator, a project manager, a project accountant and an owner) ran one tenant-improvement job through construction mode end to end. This is what they found, fixed, and the field tickets the maintainer asked for.
+
+**Construction maps to the books.** A schedule-of-values line carries its section, a revenue account (new **4050 Contract Revenue** unless changed) and a taxable flag, and each pay-application line credits that account with the job and section, so revenue by section now sits beside cost by section in the job cost tree, Job Budget vs Actual and P&L by Job (it all used to land in one income account with no code). Construction setup points the five starting cost types at Materials, Labor, Subcontractor Costs, 5400 and 5500, so a costed bill line with no account posts to the cost type's account. `docs/contractor-mode.md` has a new table of every construction document's entry, account by account.
+
+**The WIP schedule.** Cost to complete nets cost types within a section, so a trade bid as subcontract and bought as material no longer reads its whole bid as still to spend and a finished, profitable job no longer shows a projected loss. Budget nothing has burned (general conditions, an untouched allowance) on a nearly billed job is listed as a warning; a closed job reads 100% complete; a job whose only budget came from change orders earns nothing; gross profit to date and backlog are on the grid, which opens full width. **Post** books the adjusting entry on the as-of date with a reversal the next day, to five new accounts (1360, 2060, 2070, 4060, 5600); **Void posted entry** takes both back.
+
+**Pay applications.** The invoice is due by the customer's terms (it was due the day it was issued, "Net 30" hard-coded); the form has an application date; the PDF prints the sales tax and retainage this period and foots, with totals once at the end; an open draft can be deleted and picks up new schedule lines; the list's columns add up and Void shows only on the one application that can be voided; tax is charged only on taxable lines, so billing at 100% charges the bid's tax; a draft dated before a change order leaves its line off.
+
+**Change orders.** Approve takes the date the change takes effect (default the change order's own date), and every as-of report reads it; approving or voiding in a closed period is refused; an allowance-funded change order draws down the allowance's budget instead of adding to it; **Return unspent** on an allowance makes the deduct change order that closes it out.
+
+**Estimates and buyout.** Convert to invoice is refused on a job that bills by pay application (it posted the whole contract a second time); Accept leads the list and awards the job, Mark lost and a Status filter are added; insurance and bond are budgeted as cost, so budgeted margin is the fee; tax covers only taxable lines and their share of the markups; packages sort in division order; a commitment can be **Issued** from the screen (drafts counted as $0 bought everywhere); Buyout reads an allowance's amount as its bid, adds a Changes and a Spent, no commitment column, and reads change orders as of its date. Three common sections (02 41 19, 09 21 16, 23 00 00) join the standard list.
+
+**The bid the owner receives.** The totals stay together; the contractor license number, a Project block, default terms, inclusions and exclusions, and an acceptance block print; **Show markup rows** off spreads the markups into each package's price; "Markup on allowances" and the status stay off the owner's copy; an accepted alternate is marked; **Email** sends the PDF.
+
+**Cash basis and retainage.** Paying a sub's retainage release recognises the held cost on the job's own lines (it fell to 6990 with no job); held owner retainage is income only when the release is paid (it was counted when the invoice was paid, and 1150 showed as an asset).
+
+**Reports.** Job Cost by Vendor reads each bill's vendor (every dollar sat under "No vendor"); A/R and A/P Aging read as of their date, so a past date ties to 1100 / 2000 with the invoices and bills paid since; a customer statement shows retainage held as its own line, not as due; a late fee stays in the aging.
+
+**Sales tax and use tax on a job.** A contract can say the contractor pays tax on materials (the lump-sum rule in Florida and many states): its pay applications charge no tax and its material bills accrue use tax to 2220 at the company's use-tax rate, shown on the Sales Tax report.
+
+**The contractor's dashboard.** Tiles for retainage owed to and by the company, over and under billing, backlog and committed not yet billed; receivables and payables say they exclude retainage. A **Retainage** report ties to 1150 and 2050; **Sub Compliance** lists subs with an expired or expiring certificate, no W-9, or a paid bill with no lien waiver, and the vendor list flags subs and colours the certificate date. The job Overview shows retainage, and Projected counts the budget not yet bought.
+
+**Field tickets.** A job's Field tickets tab holds **T&M tickets** (signed by the owner's rep, then made into a change order at cost with the job's markup, or billed on a job with no schedule of values), **material slips** (stock onto the job as a Job Cost Entry at average cost, a return the reverse, a void at the booked cost) and **delivery tickets** (received quantity on a PO's lines, so a bill that runs past what was received warns). The **Field Ticket Log** lists T&M not yet billed.
+
+A retainage-release bill can't be re-lined (it re-posted to an expense account).
+
 ### v2.31.8 — Settings in groups, a Text size setting, and a way back in when the password is forgotten
 
 **Company Settings in nine groups** (#720). The page was thirty-two sections in one scroll. It is now nine groups chosen from a list down the left (Company, Sales documents, Email, Payroll and checks, Lists, Connections, Preferences, Users and security, Backups), one shown at a time, with **Find a setting** above the list to search every group by heading or field name. Save Settings stays at the bottom of the window and says which groups hold unsaved changes; a group with a change shows a dot; a field that stops the save in a group that is not showing is opened and focused; the links other pages make into Settings open the right group; and the group you last opened is remembered on this computer. Nothing was renamed or moved between screens, and a sign-in sees only the groups it has something in.
