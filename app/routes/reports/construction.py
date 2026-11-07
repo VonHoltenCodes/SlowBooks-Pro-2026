@@ -1295,3 +1295,68 @@ def cost_tree_csv(tree: dict, job_name: str, company: str) -> str:
     if tree.get("start_date") or tree.get("end_date"):
         w.writerow([_COST_TREE_NOTE])
     return out.getvalue()
+
+
+# ── Field ticket log ──────────────────────────────────────────────────────
+# Per job, the T&M tickets that are still money on the table: unsigned, and
+# signed but not yet billed, at their bill rates (app/services/field_tickets).
+
+
+@router.get("/field-ticket-log")
+def field_ticket_log_route(
+    as_of: date = Query(default=None),
+    db: Session = Depends(get_db),
+    job_id: _JOB_Q = None,
+    customer_id: _CUST_Q = None,
+    status: _STATUS_Q = None,
+    include_closed: _CLOSED_Q = False,
+):
+    """Per job, the T&M tickets dated by `as_of` not yet billed: unsigned ones
+    and signed ones, each at its bill rates, with the change order a signed
+    ticket is priced on when that is not yet approved. Totals per job and
+    grand. A job with no open ticket is left out."""
+    from app.services.field_tickets import field_ticket_log
+
+    return field_ticket_log(db, as_of, job_id, customer_id, status, include_closed)
+
+
+@router.get("/field-ticket-log/pdf")
+def field_ticket_log_pdf(
+    as_of: date = Query(default=None),
+    db: Session = Depends(get_db),
+    job_id: _JOB_Q = None,
+    customer_id: _CUST_Q = None,
+    status: _STATUS_Q = None,
+    include_closed: _CLOSED_Q = False,
+):
+    from app.services.field_tickets import field_ticket_log
+
+    data = field_ticket_log(db, as_of, job_id, customer_id, status, include_closed)
+    return _pdf_response(
+        _per_job_grid_sections(data, "Field Ticket Log", f"As of {data['as_of']}"),
+        db,
+        f"field-ticket-log_{data['as_of']}.pdf",
+        landscape=True,
+    )
+
+
+@router.get("/field-ticket-log/csv")
+def field_ticket_log_csv(
+    request: Request,
+    as_of: date = Query(default=None),
+    db: Session = Depends(get_db),
+    job_id: _JOB_Q = None,
+    customer_id: _CUST_Q = None,
+    status: _STATUS_Q = None,
+    include_closed: _CLOSED_Q = False,
+):
+    from app.services.field_tickets import field_ticket_log
+
+    data = field_ticket_log(db, as_of, job_id, customer_id, status, include_closed)
+    return _csv_download(
+        _per_job_grid_csv(
+            data, _company_name(db), "Field Ticket Log", f"As of {data['as_of']}"
+        ),
+        f"field-ticket-log_{data['as_of']}.csv",
+        request,
+    )

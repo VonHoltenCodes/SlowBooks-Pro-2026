@@ -149,9 +149,10 @@ def test_report_center_leads_with_contractor_cards_and_keeps_the_set():
         "job-cost-by-vendor",
         "cost-to-complete-forecast",
         "commitment-status",
+        "field-ticket-log",
     ]
     assert (
-        got["construction"][:10]
+        got["construction"][:11]
         == [
             "job-profitability",
             "job-budget-vs-actual",
