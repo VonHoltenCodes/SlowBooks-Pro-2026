@@ -502,6 +502,8 @@ def test_a_new_entry_keeps_the_dates_and_comes_into_view(browser):
     at = "#/banking/1?start_date=2026-09-01"
     page = _ledger_page(browser, ledger, at)
     try:
+        # the register opens at its foot (#728); scrolled back to the top
+        page.evaluate("() => { document.getElementById('content').scrollTop = 0; }")
         assert page.evaluate(SCROLLED) == 0
         page.click("text=+ Entry")
         page.wait_for_selector("#entry-payee")
@@ -1425,5 +1427,96 @@ def test_a_from_in_the_address_is_the_one_kept(browser):
         # an address with only a To keeps the From it had
         _visit(page, "#/banking/1?end_date=2026-09-20", "#reg-end[value='2026-09-20']")
         assert page.evaluate(KEPT, 1) == "2026-09-15"
+    finally:
+        page.close()
+
+
+# ── #728: the register opens at its newest entries ──
+
+ELEMENT_IN_VIEW = """(sel) => {
+    const el = document.querySelector(sel);
+    if (!el) return false;
+    const box = document.getElementById('content').getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return r.top >= box.top - 1 && r.bottom <= box.bottom + 1;
+}"""
+
+
+def _redrawn(page):
+    """Mark the drawn filter bar; the wait that follows sees a new one."""
+    page.evaluate(
+        "() => { document.getElementById('reg-filters').dataset.probe = 'before'; }"
+    )
+
+
+def _wait_redrawn(page):
+    page.wait_for_function(
+        "() => document.getElementById('reg-filters')"
+        " && document.getElementById('reg-filters').dataset.probe !== 'before'"
+    )
+
+
+def test_the_register_opens_with_the_newest_entries_and_the_entry_row_in_view(
+    browser,
+):
+    """Years of entries and the entry row at the foot were a long scroll
+    down, every time the register opened (#728). It opens with the newest
+    rows and the entry row in view, the list still oldest to newest, and
+    nothing on the page takes the focus."""
+    ledger = _Ledger()
+    page = _ledger_page(browser, ledger, "#/banking/1")
+    try:
+        page.wait_for_function(ELEMENT_IN_VIEW, arg="#reg-quick-entry")
+        assert page.evaluate(SCROLLED) > 0
+        assert page.evaluate(IN_VIEW, 159)  # the newest
+        assert not page.evaluate(IN_VIEW, 100)  # the oldest is above
+        dates = page.eval_on_selector_all(
+            "#page-content tr[data-txn]",
+            "rows => rows.map(r => r.cells[0].textContent)",
+        )
+        assert dates[0] == "Sep 1, 2026" and dates[-1] == "Oct 30, 2026"
+        assert not page.evaluate(
+            "() => document.getElementById('page-content')"
+            ".contains(document.activeElement)"
+        )
+
+        # opened again from another page, and with a From: at the foot again
+        _visit(page, "#/banking/4", "#reg-filters[data-account='4']")
+        _visit(
+            page,
+            "#/banking/1?start_date=2026-09-05",
+            "#reg-opening",
+        )
+        page.wait_for_function(ELEMENT_IN_VIEW, arg="#reg-quick-entry")
+        assert page.input_value("#reg-start") == "2026-09-05"
+    finally:
+        page.close()
+
+
+def test_a_filter_changed_by_hand_leaves_the_page_where_it_was(browser):
+    """Only an opened register goes to its foot (#728): a date changed on
+    the bar draws it again in place."""
+    ledger = _Ledger()
+    page = _ledger_page(browser, ledger, "#/banking/1")
+    try:
+        page.wait_for_function(ELEMENT_IN_VIEW, arg="#reg-quick-entry")
+        # scrolled up by hand to the filter bar, the page not at its top
+        top = page.evaluate(
+            "() => { document.getElementById('reg-filters')"
+            ".scrollIntoView({ block: 'start' });"
+            " return document.getElementById('content').scrollTop; }"
+        )
+        assert top > 50
+        _redrawn(page)
+        page.fill("#reg-end", "2026-10-25")
+        _wait_redrawn(page)
+        assert page.evaluate("() => location.hash") == "#/banking/1?end_date=2026-10-25"
+        assert abs(page.evaluate(SCROLLED) - top) <= 1
+        assert not page.evaluate(ELEMENT_IN_VIEW, "#reg-quick-entry")
+        # and a From, the list shorter at its top: the same
+        _redrawn(page)
+        page.fill("#reg-start", "2026-09-10")
+        _wait_redrawn(page)
+        assert abs(page.evaluate(SCROLLED) - top) <= 1
     finally:
         page.close()

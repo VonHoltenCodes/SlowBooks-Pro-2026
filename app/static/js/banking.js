@@ -1137,6 +1137,18 @@ const BankingPage = {
         }
     },
 
+    // The register drawn (#728): opened, it shows the newest entries and
+    // the entry row at the foot, the list still oldest to newest; drawn
+    // again in place (a filter changed by hand) the page stays where it
+    // was. A save's way back (_backToRegister) puts its own place after
+    // this. Only the scroll moves: nothing takes the focus.
+    mountRegister() {
+        if (!BankingPage._openAtEnd) return;
+        BankingPage._openAtEnd = false;
+        const box = document.getElementById('content');
+        if (box) box.scrollTop = box.scrollHeight;
+    },
+
     // Whether the page under any dialog open is this account's register.
     _onRegister(id) {
         return App.parseHash(location.hash).path === `/banking/${id}`;
@@ -1147,6 +1159,10 @@ const BankingPage = {
     async renderRegister(accountId, query) {
         const id = parseInt(accountId, 10);
         const drawing = ++BankingPage._drawing;
+        // opened, not drawn again in place (#728): the page under it is not
+        // this register (a filter changed, a save, a void redraw it in place)
+        const bar = document.querySelector('#reg-filters');
+        BankingPage._openAtEnd = !(bar && bar.dataset.account === String(id));
         const q = query || {};
         await BankingPage._openCompany();  // whose From is kept
         const f = BankingPage._regFilterFrom(q);
@@ -1253,7 +1269,7 @@ const BankingPage = {
         // calendar at once (#663: regFiltersKey)
         const dateBox = `onpointerdown="BankingPage.regDatePointer(this)" onchange="BankingPage.regDateChanged(this, ${id})"`;
         html += `
-            <div class="toolbar" id="reg-filters" data-drawn="${drawing}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
+            <div class="toolbar" id="reg-filters" data-drawn="${drawing}" data-account="${id}" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;"
                 onkeydown="BankingPage.regFiltersKey(event, ${id})" onfocusout="BankingPage.regFiltersLeft(event, ${id})">
                 <label for="reg-start" style="font-size:11px;">From</label>
                 <input type="date" id="reg-start" value="${escapeHtml(f.start_date)}" ${dateBox}>
