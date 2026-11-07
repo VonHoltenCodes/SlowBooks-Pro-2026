@@ -31,6 +31,7 @@ const PurchaseOrdersPage = {
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.view(${po.id})">View</button>
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.showForm(${po.id})">Edit</button>
+                        ${con && po.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.issue(${po.id})" title="Issue it to the vendor; it then counts as bought and committed">Issue</button>` : ''}
                         ${con && po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.subPayApp(${po.id})">Sub pay app</button>` : (po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : '')}
                         ${con && (po.retainage_pct || Number(po.retainage_released)) ? `<button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.releaseRetainage(${po.id})">Release retainage</button>` : ''}
                     </td>
@@ -81,10 +82,22 @@ const PurchaseOrdersPage = {
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/print-preview','_blank')">Print</button>
+                ${con && po.status === 'draft' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.issue(${po.id})">Issue</button>` : ''}
                 ${con && po.status !== 'closed' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.subPayApp(${po.id})">Sub pay app</button>` : (po.status !== 'closed' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : '')}
                 ${con && (po.retainage_pct || Number(po.retainage_released)) ? `<button class="btn btn-secondary" onclick="PurchaseOrdersPage.releaseRetainage(${po.id})">Release retainage</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+    },
+
+    // Issue a draft commitment (draft -> sent): until it is issued it is in no
+    // Buyout, committed or commitment-status figure.
+    async issue(id) {
+        try {
+            await API.put(`/purchase-orders/${id}`, { status: 'sent' });
+            toast('Commitment issued');
+            closeModal();
+            App.navigate('#/purchase-orders');
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     _items: [],
@@ -189,7 +202,14 @@ const PurchaseOrdersPage = {
             (TradePackages._list || []).map(p =>
                 `<option value="${p.id}" ${String(po.trade_package_id) === String(p.id) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)).join('');
         const ret = (po.retainage_pct === null || po.retainage_pct === undefined) ? '' : po.retainage_pct;
-        return `
+        // A saved commitment's status: Issued (sent) is what puts it in the Buyout.
+        const st = po.status || 'draft';
+        const statusGroup = po.id ? `<div class="form-group"><label>Status</label>
+                <select name="status" title="A draft counts nowhere; issue it to count it as bought and committed.">
+                    ${[['draft', 'Draft'], ['sent', 'Issued'], ['partial', 'Partially billed'], ['received', 'Received'], ['closed', 'Closed']]
+                        .map(([v, label]) => `<option value="${v}" ${sel(st, v)}>${label}</option>`).join('')}
+                </select></div>` : '';
+        return statusGroup + `
             <div class="form-group"><label>Type</label>
                 <select name="commitment_type" onchange="PurchaseOrdersPage.refreshVendorNote()">
                     <option value="po" ${sel(t, 'po')}>Purchase order</option>
@@ -296,6 +316,7 @@ const PurchaseOrdersPage = {
             data.trade_package_id = form.trade_package_id && form.trade_package_id.value ? parseInt(form.trade_package_id.value) : null;
             data.retainage_pct = form.retainage_pct && form.retainage_pct.value !== '' ? parseFloat(form.retainage_pct.value) : null;
             data.scope_notes = form.scope_notes ? (form.scope_notes.value || null) : null;
+            if (id && form.status) data.status = form.status.value;
         }
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         try {

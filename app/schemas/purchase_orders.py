@@ -57,6 +57,18 @@ class POLineResponse(BaseModel):
 
 COMMITMENT_TYPES = ("po", "subcontract")
 
+PO_STATUSES = ("draft", "sent", "partial", "received", "closed")
+
+
+def _check_status(v):
+    """A status the model knows, else a 422 that names the valid ones (an
+    unknown word used to reach the enum and fail as a 500)."""
+    if v is not None and v not in PO_STATUSES:
+        raise ValueError(
+            f"Unknown status '{v}'. Valid statuses are: {', '.join(PO_STATUSES)}."
+        )
+    return v
+
 
 def _check_commitment_type(v):
     if v is None:
@@ -119,6 +131,7 @@ class POUpdate(StrictModel):
 
     _ctype = field_validator("commitment_type")(_check_commitment_type)
     _ret = field_validator("retainage_pct")(_check_retainage_pct)
+    _status = field_validator("status")(_check_status)
 
 
 class POConvertLineAccount(StrictModel):
