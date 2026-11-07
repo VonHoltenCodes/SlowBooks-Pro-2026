@@ -15,6 +15,7 @@
 # schedule reads contract_summary for each job's contract and billing.
 # ============================================================================
 
+from datetime import date
 from decimal import Decimal
 from typing import Optional
 
@@ -66,16 +67,11 @@ def _utc(ts):
     return ts.replace(tzinfo=timezone.utc) if ts.tzinfo is None else ts
 
 
-def approved_contract_changes(db: Session, job: Job, through=None) -> Decimal:
-    """Σ sell of the job's approved, contract-funded owner change orders — the
-    "net change by change orders" (#723). With `through` (a timestamp, such as
-    a pay application's approval) only those approved on or before it count,
-    so an application reads the change orders as they stood when it was
-    approved."""
+def _contract_cos(db: Session, job: Job) -> list:
+    """The job's approved, contract-funded owner change orders."""
     from app.models.change_orders import ChangeOrder
-    from app.services.change_orders import co_totals
 
-    cos = (
+    return (
         db.query(ChangeOrder)
         .filter(
             ChangeOrder.job_id == job.id,
@@ -85,13 +81,38 @@ def approved_contract_changes(db: Session, job: Job, through=None) -> Decimal:
         )
         .all()
     )
+
+
+def approved_contract_changes(db: Session, job: Job, through=None) -> Decimal:
+    """Σ sell of the job's approved, contract-funded owner change orders — the
+    "net change by change orders" (#723). With `through` (a timestamp, such as
+    a pay application's approval) only those whose approve click came on or
+    before it count: the way to read an application approved before it kept
+    its original, whose sums were never snapshotted by date."""
+    from app.services.change_orders import co_totals
+
     total = Decimal("0")
-    for co in cos:
+    for co in _contract_cos(db, job):
         if through is not None and (
             co.approved_at is None or _utc(co.approved_at) > _utc(through)
         ):
             continue
         total += co_totals(co, job)["sell_total"]
+    return _q(total)
+
+
+def contract_changes_after(db: Session, job: Job, on) -> Decimal:
+    """Σ sell of the approved, contract-funded owner change orders that take
+    effect after `on` — what to back out of the job's contract sum to read it
+    as it stood that day. A pay application dated before a change order's
+    approval does not carry it in its contract sum to date."""
+    from app.services.change_orders import co_effective_date, co_totals
+
+    total = Decimal("0")
+    for co in _contract_cos(db, job):
+        effective = co_effective_date(co)
+        if effective is not None and effective > on:
+            total += co_totals(co, job)["sell_total"]
     return _q(total)
 
 
@@ -118,7 +139,7 @@ def application_contract_sums(db: Session, app, job: Optional[Job]) -> dict:
     original (approved while the job had no original stamped) reads the net
     change as the change orders approved on or before the application's
     approval, and the original as the sum less them. A draft reads the job as
-    it stands."""
+    it stands, less the change orders that take effect after its date."""
     zero = Decimal("0")
     if app.contract_sum_to_date is not None:
         to_date = _q(app.contract_sum_to_date)
@@ -135,7 +156,12 @@ def application_contract_sums(db: Session, app, job: Optional[Job]) -> dict:
         return {"original": original, "net_change": net, "to_date": to_date}
     if job is None or job.contract_amount is None:
         return {"original": zero, "net_change": zero, "to_date": zero}
-    to_date = _q(job.contract_amount)
+    # A draft reads the job as it stands, less the change orders that take
+    # effect after the application's own date.
+    to_date = _q(
+        _q(job.contract_amount)
+        - contract_changes_after(db, job, app.date or date.today())
+    )
     original = original_contract_sum(db, job)
     return {
         "original": original,

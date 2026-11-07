@@ -54,7 +54,10 @@ def _co(client, job_id, amount):
     assert co.status_code in (200, 201), co.text
     co = co.json()
     assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
-    r = client.post(f"/api/change-orders/{co['id']}/approve")
+    # takes effect before the applications' date (2026-06-01)
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-05-15"}
+    )
     assert r.status_code == 200, r.text
     return co
 

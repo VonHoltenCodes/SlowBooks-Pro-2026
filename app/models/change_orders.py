@@ -25,6 +25,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    false,
     func,
 )
 from sqlalchemy.orm import relationship
@@ -109,7 +110,17 @@ class ChangeOrder(Base):
         Integer, ForeignKey("change_orders.id", ondelete="SET NULL"), nullable=True
     )
 
+    # approved_at is the audit stamp of the Approve click. approved_on is the
+    # day the change order takes effect: every as-of reader (WIP, the log, a
+    # pay application's contract sum) reads it, not the click.
     approved_at = Column(DateTime(timezone=True), nullable=True)
+    approved_on = Column(Date, nullable=True)
+    # True for the owner CO that returns an allowance's unspent amount: it
+    # names the allowance in allowance_sov_line_id, is contract-funded and
+    # carries no markup (see apply_change_order).
+    allowance_return = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     voided_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

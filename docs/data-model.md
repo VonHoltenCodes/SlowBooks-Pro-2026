@@ -286,7 +286,10 @@ How a locked budget, its contract and its commitments move. Two new tables:
   the API defaults it off for allowance/contingency funding), `revision`
   Integer (default 1) and `supersedes_id` (FK self, SET NULL — the PCO revision
   this one replaced), `promoted_to_id` (FK self, SET NULL — the owner CO a PCO
-  was rolled into; several PCOs may share one), `approved_at`, `voided_at`.
+  was rolled into; several PCOs may share one), `approved_at` (the click),
+  `approved_on` (Date — the day it takes effect; every as-of reader uses it),
+  `allowance_return` (Boolean — the CO that returns an allowance's unspent
+  amount), `voided_at`.
 - `change_order_lines` — `change_order_id` (FK, CASCADE), `line_order`,
   `description`, `cost_type` String(20) NOT NULL (validated against
   `cost_types`), `cost_code_id`, `trade_package_id`, `quantity`, `unit`,

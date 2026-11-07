@@ -38,7 +38,11 @@ from app.services.accounting import (
     get_sales_tax_account_id,
 )
 from app.services.closing_date import check_closing_date
-from app.services.contracts import original_contract_sum, settle_contract_type
+from app.services.contracts import (
+    contract_changes_after,
+    original_contract_sum,
+    settle_contract_type,
+)
 from app.services.numbering import next_invoice_number
 from app.services.payment_terms import term_id_for
 from app.services.pay_applications import (
@@ -221,15 +225,29 @@ def _validate(db: Session, app: PayApplication) -> None:
     # releasing on the same application would otherwise over-bill the owner.
     held = application_figures(db, app)["retainage_to_date"]
     if held < _ZERO:
-        raise HTTPException(
-            status_code=422,
-            detail=(
+        if _q(app.release_retainage) == _ZERO:
+            # A credit billed after the retainage was released: its share of
+            # retainage would come back out of nothing.
+            message = (
+                f"Retainage to date would be {held:.2f}: this application bills "
+                "a credit after the retainage was released, and the credit's "
+                f"{app.retainage_pct}% retainage has none left to come out of. "
+                "Bill the credit before the final retainage release, or release "
+                "less retainage now and the rest after the credit."
+            )
+        else:
+            message = (
                 f"Retainage to date would be {held:.2f}: the release of "
                 f"{_q(app.release_retainage):.2f} is more than the retainage "
                 f"held at {app.retainage_pct}% on the work completed. Release "
                 "less, or keep the retainage percent until the release is billed."
-            ),
-        )
+            )
+            if any(_q(ln.this_period) < _ZERO for ln in app.lines):
+                message += (
+                    " This application also bills a credit: bill the credit "
+                    "before the final release, or release the credit's share less."
+                )
+        raise HTTPException(status_code=422, detail=message)
     unapplied = deposits_figures(db, app.job_id)["unapplied"]
     deposit = _q(app.deposit_applied)
     if deposit > unapplied:
@@ -574,7 +592,13 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     # (the sum less any change orders already approved), never left empty.
     settle_contract_type(db, job)
     app.contract_sum_original = original_contract_sum(db, job)
-    app.contract_sum_to_date = job.contract_amount
+    # A change order that takes effect after the application's date is not in
+    # its contract sum to date, however early it was entered.
+    app.contract_sum_to_date = (
+        _q(job.contract_amount) - contract_changes_after(db, job, when)
+        if job.contract_amount is not None
+        else None
+    )
     invoice = None
     if invoice_lines or retainage_held != 0 or retainage_released != 0 or deposit:
         # Tax over the billed work at the application's rate when tax is on and

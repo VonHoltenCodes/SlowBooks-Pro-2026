@@ -738,7 +738,7 @@ const JobsPage = {
             `<option value="${k}" ${(line.kind || 'work') === k ? 'selected' : ''}>${v}</option>`).join('');
         // An allowance line shows its change-order draw-down (used / remaining).
         const allowanceNote = (line.kind === 'allowance' && usage)
-            ? `<div style="font-size:11px;color:var(--text-muted)">Used ${formatCurrency(usage.used)} · ${formatCurrency(usage.remaining)} left</div>` : '';
+            ? `<div style="font-size:11px;color:var(--text-muted)">Used ${formatCurrency(usage.used)} · ${formatCurrency(usage.remaining)} left${(line.id && usage.remaining > 0) ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coReturnAllowance(${line.id}, ${usage.remaining})" title="Make a change order that gives the unspent amount back to the owner">Return unspent</button>` : ''}</div>` : '';
         return `<tr class="sov-row" data-id="${line.id || ''}">
             <td><input class="sov-item" data-write maxlength="10" value="${escapeHtml(line.item_no || '')}" style="width:46px"></td>
             <td><input class="sov-desc" data-write maxlength="200" value="${escapeHtml(line.description || '')}" style="width:100%">${allowanceNote}</td>
@@ -1024,6 +1024,7 @@ const JobsPage = {
         const lineRows = (co.lines || []).map((l, i) => JobsPage.coLineRowHtml(l, i)).join('');
         return `<form id="co-form" data-write onsubmit="JobsPage.coSave(event, ${co.id || 'null'})">
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">${co.id ? `Change order ${escapeHtml(co.number || '')}` : 'New change order'}</h4>
+            ${co.allowance_return ? '<p style="font-size:12px;color:var(--text-muted)">This change order returns an allowance\'s unspent amount to the owner: it takes the amount off the contract with no markup. Change its amount, title or date; funding and markup are fixed.</p>' : ''}
             <div class="form-grid">
                 <div class="form-group"><label>Title</label><input id="co-title" ${d} maxlength="200" value="${escapeHtml(co.title || '')}"></div>
                 <div class="form-group"><label>Kind</label><select id="co-kind" ${d || (co.id ? 'disabled' : '')}>${kindOpts}</select></div>
@@ -1199,7 +1200,42 @@ const JobsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
     coSubmit(id) { JobsPage._coAction(id, 'submit'); },
-    coApprove(id) { JobsPage._coAction(id, 'approve', 'Approve this change order? It updates the contract, budget and commitment.'); },
+    // Approve asks for the day the change order takes effect (its own date by
+    // default): the contract, WIP and pay-application sums read that day, not
+    // the click.
+    coApprove(id) {
+        const co = (JobsPage._coList || []).find(c => c.id === id) || {};
+        const today = new Date();
+        const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        openModal('Approve change order', `<form id="co-approve-form" onsubmit="JobsPage.coApproveSubmit(event, ${id})">
+            <p>Approving ${escapeHtml(co.number || 'this change order')} updates the contract, budget and commitment.</p>
+            <div class="form-group"><label for="co-approved-on">Takes effect on</label>
+                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}">
+                <div style="font-size:11px;color:var(--text-muted)">The date the owner signed. Reports, WIP and pay applications read the change order from this day.</div></div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Approve</button></div>
+        </form>`);
+    },
+    async coApproveSubmit(e, id) {
+        if (e) e.preventDefault();
+        const approved_on = $('#co-approved-on').value;
+        try {
+            await API.post(`/change-orders/${id}/approve`, { approved_on });
+            toast('Change order approved');
+            closeModal();
+            await JobsPage.setTab('changeorders');
+        } catch (err) { toast(err.message, 'error'); }
+    },
+    // Make a draft owner change order for the allowance's unspent amount
+    // (the Contract tab's allowance row offers it).
+    async coReturnAllowance(sovLineId, remaining) {
+        if (!confirm(`Return the ${formatCurrency(remaining)} left on this allowance to the owner? This makes a draft change order for minus that amount, with no markup.`)) return;
+        try {
+            await API.post('/change-orders/allowance-return', { allowance_sov_line_id: sovLineId });
+            toast('Draft change order made: submit and approve it to take effect');
+            await JobsPage.setTab('changeorders');
+        } catch (err) { toast(err.message, 'error'); }
+    },
     coReject(id) { JobsPage._coAction(id, 'reject', 'Reject this change order?'); },
     coVoid(id) { JobsPage._coAction(id, 'void', 'Void this change order? Every effect is reversed.'); },
     coPromote(id) { JobsPage._coAction(id, 'promote', 'Promote this potential change order to an owner change order?'); },

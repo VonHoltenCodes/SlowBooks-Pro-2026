@@ -214,7 +214,7 @@ def _contract_changes_after(db: Session, job: Job, as_of: date) -> Decimal:
     approve landed after `as_of` — what to back out of the current contract to
     read the sum as it stood on that day."""
     from app.models.change_orders import ChangeOrder
-    from app.services.change_orders import co_totals
+    from app.services.change_orders import co_effective_date, co_totals
 
     total = _ZERO
     cos = (
@@ -228,7 +228,7 @@ def _contract_changes_after(db: Session, job: Job, as_of: date) -> Decimal:
         .all()
     )
     for co in cos:
-        approved = _local_date(co.approved_at) if co.approved_at else None
+        approved = co_effective_date(co)
         if approved is not None and approved > as_of:
             total += co_totals(co, job)["sell_total"]
     return _q(total)
@@ -954,7 +954,7 @@ CO_COLUMNS = [
 
 def _co_job(db: Session, job: Job, as_of: date) -> dict:
     from app.models.change_orders import ChangeOrder
-    from app.services.change_orders import co_totals
+    from app.services.change_orders import co_effective_date, co_totals
 
     cos = (
         db.query(ChangeOrder)
@@ -973,7 +973,7 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
         cost = figs["cost_total"]
         sell = figs["sell_total"]
         markup = figs["markup_total"]
-        approved_on = _local_date(co.approved_at) if co.approved_at else None
+        approved_on = co_effective_date(co)
         approved_by_as_of = (
             co.status == "approved" and approved_on is not None and approved_on <= as_of
         )
@@ -1007,6 +1007,7 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
                 "markup": float(markup),
                 "sell": float(sell),
                 "approved_at": co.approved_at.isoformat() if co.approved_at else None,
+                "approved_on": approved_on.isoformat() if approved_on else None,
                 "voided_at": co.voided_at.isoformat() if co.voided_at else None,
                 "source_pco_id": co.source_pco_id,
                 "commitment": commitment,
@@ -1495,6 +1496,7 @@ def _commitment_row(
     billed, so it is not counted); retainage held is held less released on those
     bills; remaining is committed less billed while the commitment is open."""
     from app.models.purchase_orders import POStatus
+    from app.services.change_orders import co_effective_date
 
     billed = held = released = _ZERO
     for b in bills:
@@ -1509,7 +1511,7 @@ def _commitment_row(
     later = _ZERO
     for ln in po.lines:
         co = ln.change_order_id and co_by_id.get(ln.change_order_id)
-        if co is not None and co.approved_at and _local_date(co.approved_at) > as_of:
+        if co is not None and (co_effective_date(co) or as_of) > as_of:
             later += Decimal(str(ln.amount or 0))
     committed = _q(Decimal(str(po.subtotal or 0)) - later)
     # A closed commitment counts closed on every date, unless a bill against it

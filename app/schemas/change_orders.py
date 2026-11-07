@@ -90,6 +90,18 @@ class ChangeOrderUpdate(StrictModel):
         return v
 
 
+class ApproveIn(StrictModel):
+    # The day the change order takes effect. None = the change order's own
+    # date, else today.
+    approved_on: Optional[dt_date] = None
+
+
+class AllowanceReturnIn(StrictModel):
+    allowance_sov_line_id: int
+    # None = everything the allowance has unspent.
+    amount: Optional[Decimal] = None
+
+
 class PromoteIn(StrictModel):
     # Roll several PCOs (all on one job, same funding) into one owner CO. The
     # PCO in the URL is included automatically. Empty = just that PCO.
@@ -142,6 +154,8 @@ class ChangeOrderOut(BaseModel):
     # On an owner CO promoted from PCOs: every PCO rolled into it.
     source_pco_ids: List[int] = []
     approved_at: Optional[datetime] = None
+    approved_on: Optional[dt_date] = None
+    allowance_return: bool = False
     voided_at: Optional[datetime] = None
     lines: List[ChangeOrderLineOut] = []
     # Server-computed roll-ups (cost / markup / sell, and per cost type).
