@@ -7,7 +7,7 @@ time. It is the counterpart to QuickBooks Desktop's Contractor Edition.
 Construction mode adds the contractor accounts, division/section cost codes,
 trade packages, a Sub vendor type, construction estimating, the contract and
 schedule of values, commitments, change orders, progress billing with
-retainage, and seven job reports. Every role reaches these screens; only
+retainage, a contractor's dashboard, and nine job reports. Every role reaches these screens; only
 payroll and HR are the administrator's alone.
 
 The five starting cost types (labor, material, subcontract, equipment,
@@ -1018,7 +1018,7 @@ reports' cost types agree for a costed line that names no account of its own.
 
 ## Job reports
 
-Seven reports sit on the Report Center for a construction company (its first
+Nine reports sit on the Report Center for a construction company (its first
 cards, after the three job reports every company has; a Business or Nonprofit
 company never sees them), each a plain grid with a JSON route, a PDF and a CSV
 like P&L by Job. Each takes an `as_of` date (or
@@ -1196,8 +1196,87 @@ date. They are **prorated by the job's share of each bill's line amounts** — a
 header-only bill counts whole, a bill split across jobs splits its payment,
 retainage, A/P and count — so a job's bills can read fractional.
 
+**Retainage** (`retainage`). Retainage in one place, per job, as of a date.
+*Owed to me* (account 1150) is what the owner holds back: per job, **held**
+(the retainage on the job's pay-application invoices dated by then),
+**released** (billed back) and **outstanding**. *I owe* (account 2050) is what
+you hold from subs: one row per commitment and one per hand-entered bill with
+retainage, giving the vendor, the held and released retainage on its bills
+(a release bill is the commitment's release; a bill split across jobs splits
+its retainage by the money on each) and what is outstanding. Each side has
+job totals and a grand total, and **the grand totals are the Balance Sheet's
+Retainage Receivable (1150) and Retainage Payable (2050) for the same date**.
+That holds whatever the documents say: a ledger amount no pay application or
+bill explains (a journal entry posted straight to 1150 or 2050, a void
+reversed on a later day, a bill with no job) is shown as its own row,
+*Journal entries and other*, so the totals still tie and the difference is
+in view. Closed jobs are included, since retainage outlives the job; a job
+with no retainage held, released or on the books is left out. `job_id`,
+`customer_id` and `status` narrow it (then the jobless row is left out, and
+`filtered` is true). The report reads the accrual ledger. PDF and CSV carry
+the two grids, each ending in its total.
+
+**Sub Compliance** (`compliance`). The subs a GC should chase, one row per
+problem, as of a date: a certificate of insurance **expired**, **expiring
+within 30 days** (the thirtieth day counts) or with **no date on file**; **no
+W-9 on file**; and a **paid bill whose lien waiver is missing or still
+pending** (the bill, its job, the day it was first paid and its total; a bill
+not yet paid, or paid after the date, is not listed, and *not required*,
+*conditional* and *unconditional* are all fine). Only active vendors marked
+Sub are read. Nothing here blocks a payment. PDF and CSV like the others.
+
 The existing **Job Profitability** and **Job Budget vs Actual** reports gained
 PDF and CSV routes, so every contractor report exports the same way.
+
+## The dashboard
+
+A construction company's Dashboard opens on the money a GC watches. The
+default layout leads with Total Receivables, Total Payables and five tiles,
+then the usual cards; a layout you saved before keeps your cards, and the
+tiles are in **Customize → Add a card**. A Business or Nonprofit dashboard is
+exactly as it was, and is never offered these cards.
+
+| Tile | Figure | Opens |
+| --- | --- | --- |
+| **Retainage Owed to Me** | Retainage Receivable (1150) today | the Retainage report |
+| **Retainage I Owe** | Retainage Payable (2050) today | the Retainage report |
+| **Over / Under Billed** | billed ahead of the work, and work done not yet billed, from the WIP schedule as of today | the WIP schedule |
+| **Backlog** | revised contract less earned revenue on open jobs (the WIP schedule's backlog) | the WIP schedule |
+| **Committed, Not Yet Billed** | what open subcontracts and POs still have to bill, from Commitment Status today | Commitment Status |
+
+Hover a tile to see the jobs that make up its figure; click it for the
+report. The retainage tiles are the report's grand totals, so they equal the
+Balance Sheet lines. **Total Receivables and Total Payables leave retainage
+out** (it sits on 1150 and 2050), and in construction mode their titles say
+**(excl. retainage)**. Closed jobs are left out of the WIP and commitment
+tiles, as they are from those reports.
+
+## The job Overview
+
+The Overview tab of a construction job:
+
+- **Retainage owed to me** and **Retainage I owe** tiles, the job's own
+  figures from the Retainage report (click one to open it).
+- **Projected** is the projected final cost: **actual + committed remaining +
+  budget not yet committed**. The last is figured **per cost code, floored at
+  zero**: a code's revised budget (all its cost types together) less the cost
+  posted to it and the commitment still to bill on it, never below zero, then
+  summed. So a trade that has not been bought is cost still to come, not a
+  saving, and an overrun on one code does not eat another's unspent budget. A
+  trade bid as subcontract and bought as material nets within its code, as it
+  does in the cost-to-complete forecast. Budget with no cost code shares one
+  cell with the cost and commitments that have none. The figure is job to
+  date (a cost tree dated from a start date leaves it out) and a closed job
+  has none. **Budget not yet committed** is its own tile, a row under the
+  cost-type table and a row on Cost Detail (and in its PDF and CSV), so the
+  Projected column foots to the total; **Variance** is the budget less the
+  new Projected. The Jobs list, Job Budget vs Actual and the cost-tree totals
+  read the same figure; a Business or Nonprofit job's Projected stays actual
+  + committed.
+- **Revenue billed (gross of retainage)** is the revenue posted, including
+  what the owner holds back. **Billed margin** is revenue billed less cost
+  over revenue billed, not the job margin (the WIP schedule's estimated and
+  projected gross profit are those).
 
 ## The words
 
@@ -1227,14 +1306,21 @@ vendor is marked a Sub, 1099-NEC turns on** (a sub's labor is reportable);
 you can change it afterward, and a sub already set to 1099-MISC keeps it.
 W-9 on file is a fact you record, not a default, so it stays No.
 
+In a construction company the **vendor list** shows a **Sub** badge and the
+**COI expires** date beside each sub: red once expired (or when there is no
+date), amber within 30 days. The **Sub Compliance** report (see *Job reports*)
+lists the same subs, the missing W-9s and the paid bills without a lien
+waiver.
+
 ## The reports
 
-In construction mode the Report Center's first ten cards are the three job
+In construction mode the Report Center's first twelve cards are the three job
 reports that always existed — **Job Profitability**, **Job Budget vs Actual**
-and **P&L by Job** — then the seven construction reports: **WIP Schedule**,
+and **P&L by Job** — then the nine construction reports: **WIP Schedule**,
 **Cost to Complete**, **Change Order Log**, **Buyout Report**, **Job Cost by
-Vendor**, **Cost-to-Complete Forecast** and **Commitment Status** (see *Job
-reports* above). The seven show in construction mode only. Every other report
+Vendor**, **Cost-to-Complete Forecast**, **Commitment Status**, **Retainage**
+and **Sub Compliance** (see *Job reports* above). The nine show in
+construction mode only. Every other report
 stays where it is.
 
 ## What this mode does not do yet

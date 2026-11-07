@@ -29,8 +29,8 @@ def list_widgets(db: Session = Depends(get_db)):
 def widget_data(ids: str = Query(default=""), db: Session = Depends(get_db)):
     """Data for the requested widget ids (comma-separated). Unknown ids are
     ignored; no ids means the default layout."""
-    wanted = [w.strip() for w in ids.split(",") if w.strip()] or default_layout(
-        terms_from_db(db)
-    )
-    wanted = [w for w in wanted if w in WIDGETS]
+    t = terms_from_db(db)
+    wanted = [w.strip() for w in ids.split(",") if w.strip()] or default_layout(t)
+    offered = {w["id"] for w in catalog(t)}
+    wanted = [w for w in wanted if w in WIDGETS and w in offered]
     return build(db, wanted)
