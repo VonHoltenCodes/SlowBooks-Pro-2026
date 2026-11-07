@@ -80,11 +80,9 @@ def _accepted_build(client, customer_id, lines, **est):
     return job, r.json()["sov"], est_id
 
 
-def _bill_all(client, job_id, sov):
+def _bill_all(client, job_id, sov, day="2026-07-31"):
     """One pay application billing every SOV line in full, approved."""
-    r = client.post(
-        "/api/pay-applications", json={"job_id": job_id, "date": "2026-07-31"}
-    )
+    r = client.post("/api/pay-applications", json={"job_id": job_id, "date": day})
     assert r.status_code == 201, r.text
     app = r.json()
     lines = [
@@ -383,7 +381,9 @@ def test_change_order_line_takes_the_change_orders_code(
     # the bid taxed nothing, so the change is not taxed either
     assert co_line["is_taxable"] is False
 
-    approved = _bill_all(client, job["id"], sov)
+    # dated after the change order takes effect (2026-08-03): before it, the
+    # application carries no line for it
+    approved = _bill_all(client, job["id"], sov, day="2026-08-31")
     by_number = {}
     for n, tl in _income_lines(db_session, approved["invoice_id"]):
         by_number.setdefault(n, []).append(tl)
