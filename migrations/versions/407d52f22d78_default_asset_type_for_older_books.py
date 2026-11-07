@@ -52,7 +52,9 @@ def _expense_account(bind):
     accounting.ensure_account makes it (the detail type its insert hook
     gives an expense account)."""
     found = _first(
-        bind, "SELECT id FROM accounts WHERE name = :name ORDER BY id", name=EXPENSE_NAME
+        bind,
+        "SELECT id FROM accounts WHERE name = :name ORDER BY id",
+        name=EXPENSE_NAME,
     )
     if found is not None:
         return found
@@ -82,9 +84,7 @@ def _expense_account(bind):
 
 def upgrade() -> None:
     bind = op.get_bind()
-    if not {"accounts", "fixed_asset_types"} <= set(
-        sa.inspect(bind).get_table_names()
-    ):
+    if not {"accounts", "fixed_asset_types"} <= set(sa.inspect(bind).get_table_names()):
         return
     if _first(bind, "SELECT id FROM fixed_asset_types") is not None:
         return
