@@ -325,7 +325,7 @@ const FieldTickets = {
         if (!confirm('Bill the ticked tickets on an invoice to the customer, at their bill rates?')) return;
         try {
             const billed = await API.post('/field-tickets/bill', { ticket_ids: ids });
-            toast(`Invoice ${billed.invoice_number} made for ${formatCurrency(billed.total)}`, 'success');
+            toast(`${T('Invoice')} ${billed.invoice_number} made for ${formatCurrency(billed.total)}`, 'success');
             await FieldTickets.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },

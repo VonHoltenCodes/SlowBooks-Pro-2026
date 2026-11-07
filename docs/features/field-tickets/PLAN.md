@@ -149,9 +149,10 @@ The four decisions above are taken as written.
    no bill rate, and reading both would bill the work twice). In
    construction mode extra work to bill goes on a T&M ticket.
 8. **Material slips post at average cost, void at booked cost.** One Job Cost
-   Entry per slip, source `material_slip`; the movement is an inventory
-   adjustment with source `material_slip` (no new movement type, so no enum
-   migration). The Job Cost Entries void refuses a slip's entry. An item
+   Entry per slip, source `material_slip`; each stock movement is an
+   inventory adjustment keyed to that Job Cost Entry (source `job_cost`, its
+   void `job_cost_void`), so it links where the entry does (no new movement
+   type, so no enum migration). The Job Cost Entries void refuses a slip's entry. An item
    with no average cost is refused rather than posting $0.
 9. **The received warning** shows only on an order that is being received by
    delivery tickets (some line has a received quantity), comparing billed to

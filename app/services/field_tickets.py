@@ -965,8 +965,9 @@ def post_material_slip(db: Session, t: FieldTicket, post_date: Optional[date]):
             MovementType.ADJUSTMENT,
             quantity=-qty,
             unit_cost=unit_cost,
-            source_type="material_slip",
-            source_id=t.id,
+            # the movement belongs to the Job Cost Entry, which links to it
+            source_type="job_cost",
+            source_id=jc.id,
             txn_date=post_date,
             transaction_id=txn.id,
             memo=f"Material slip {t.number}",
@@ -1004,8 +1005,8 @@ def reverse_material_slip(db: Session, t: FieldTicket) -> None:
     moves = (
         db.query(InventoryMovement)
         .filter(
-            InventoryMovement.source_type == "material_slip",
-            InventoryMovement.source_id == t.id,
+            InventoryMovement.source_type == "job_cost",
+            InventoryMovement.source_id == jc.id,
             InventoryMovement.reverses_movement_id.is_(None),
         )
         .all()
@@ -1017,8 +1018,8 @@ def reverse_material_slip(db: Session, t: FieldTicket) -> None:
             MovementType.VOID,
             quantity=-_d(mv.quantity),
             unit_cost=_d(mv.unit_cost),
-            source_type="material_slip_void",
-            source_id=t.id,
+            source_type="job_cost_void",
+            source_id=jc.id,
             txn_date=jc.date,
             transaction_id=void_txn.id if void_txn else None,
             memo=f"VOID material slip {t.number}",

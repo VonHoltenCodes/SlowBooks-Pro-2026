@@ -14,7 +14,9 @@ writes a ticket sees none of it.
   quantity, cost rate and (T&M) bill rate, and the PO line a delivery line
   received against.
 
-downgrade drops both.
+Each table is created only when it is missing, so books built by
+create_all (or stamped back over the tables) upgrade as a no-op. downgrade
+drops both.
 
 Revision ID: e4b7c2a9f1d3
 Revises: d7f3a9c1b5e2
@@ -32,7 +34,19 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _tables() -> set:
+    return set(sa.inspect(op.get_bind()).get_table_names())
+
+
 def upgrade() -> None:
+    existing = _tables()
+    if "field_tickets" not in existing:
+        _create_field_tickets()
+    if "field_ticket_lines" not in existing:
+        _create_field_ticket_lines()
+
+
+def _create_field_tickets() -> None:
     op.create_table(
         "field_tickets",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -88,6 +102,8 @@ def upgrade() -> None:
         "ix_field_tickets_job_id", "field_tickets", ["job_id"], unique=False
     )
 
+
+def _create_field_ticket_lines() -> None:
     op.create_table(
         "field_ticket_lines",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -135,11 +151,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index(
-        "ix_field_ticket_lines_field_ticket_id", table_name="field_ticket_lines"
-    )
-    op.drop_index("ix_field_ticket_lines_id", table_name="field_ticket_lines")
-    op.drop_table("field_ticket_lines")
-    op.drop_index("ix_field_tickets_job_id", table_name="field_tickets")
-    op.drop_index("ix_field_tickets_id", table_name="field_tickets")
-    op.drop_table("field_tickets")
+    # Dropping a table drops its indexes with it.
+    existing = _tables()
+    for table in ("field_ticket_lines", "field_tickets"):
+        if table in existing:
+            op.drop_table(table)
