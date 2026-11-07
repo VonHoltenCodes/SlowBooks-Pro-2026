@@ -8,7 +8,8 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -47,6 +48,7 @@ from app.schemas.estimates import (
     EstimateAccept,
     totals_from_dict,
 )
+from app.schemas.common import StrictModel
 from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.numbering import next_estimate_number, next_invoice_number
@@ -184,6 +186,9 @@ def _estimate_response(est: Estimate) -> EstimateResponse:
     resp = EstimateResponse.model_validate(est)
     if est.customer:
         resp.customer_name = est.customer.name
+    if est.job is not None:
+        resp.job_name = est.job.name
+        resp.job_site_address = est.job.site_address
     by_line = {ln.id: ln for ln in est.lines}
     for line_resp in resp.lines:
         line = by_line.get(line_resp.id)
@@ -318,6 +323,11 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
         for name in _MARKUP_PCTS:
             setattr(data, name, Decimal("0"))
         data.markup_allowances = False
+        data.show_markup_rows = True
+        data.terms = None
+    elif data.terms is None:
+        # a new construction estimate starts with the company's default terms
+        data.terms = get_settings(db).get("estimate_terms") or None
     # Construction lines stay at cost before anything is totalled (#551).
     _enforce_at_cost(data.lines, is_construction)
     # The document totals cover the bought scope and the four markups: lines
@@ -359,6 +369,8 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             fee_pct=data.fee_pct,
             bond_pct=data.bond_pct,
             markup_allowances=data.markup_allowances,
+            show_markup_rows=data.show_markup_rows,
+            terms=data.terms,
             **bill_to,
         )
         db.add(estimate)
@@ -468,6 +480,8 @@ def update_estimate(
         for name in _MARKUP_PCTS:
             setattr(estimate, name, Decimal("0"))
         estimate.markup_allowances = False
+        estimate.show_markup_rows = True
+        estimate.terms = None
 
     if data.lines is not None:
         # Each line's tax is settled before it is stored, the way create does
@@ -621,6 +635,93 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
     html_str = _render("estimate_pdf.html", company, est=est)
     html_str = print_html(html_str)
     return HTMLResponse(content=html_str)
+
+
+class _EmailEstimateRequest(StrictModel):
+    recipient: Optional[str] = None
+    subject: Optional[str] = None
+    message: Optional[str] = None
+    cc: Optional[str] = Field(default=None, max_length=2000)
+    bcc: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.post("/{estimate_id}/email")
+def email_estimate(
+    estimate_id: int,
+    data: _EmailEstimateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Email the estimate PDF as an attachment, by the path an invoice uses:
+    the same address checks, the same send_email (EmailLog row, always-copy
+    settings) and the same 502 when SMTP is not set up."""
+    import html as _html
+
+    from app.routes._roles import is_admin
+    from app.services.email_errors import where_to_see_why
+    from app.services.email_service import (
+        _get_smtp_settings,
+        bad_addresses,
+        copy_lists,
+        send_email,
+    )
+
+    est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    recipient = (data.recipient or "").strip() or (
+        (est.customer.email or "").strip() if est.customer else ""
+    )
+    if not recipient:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This estimate has no email address to send to. Add one to the "
+                "customer or type one here."
+            ),
+        )
+    rejected = bad_addresses(data.cc) + bad_addresses(data.bcc)
+    if rejected:
+        raise HTTPException(
+            status_code=400,
+            detail="Not an email address: " + ", ".join(rejected[:5]) + ".",
+        )
+    try:
+        copy_lists(_get_smtp_settings(db), data.cc, data.bcc)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    company = get_settings(db)
+    name = (company.get("display_name") or company.get("company_name") or "").strip()
+    subject = (data.subject or "").strip() or (
+        f"Estimate #{est.estimate_number}" + (f" from {name}" if name else "")
+    )
+    note = (data.message or "").strip()
+    body = (f"<p>{_html.escape(note)}</p>\n" if note else "") + (
+        f"<p>Please find estimate #{_html.escape(est.estimate_number)} attached.</p>"
+        + (f"<p>{_html.escape(name)}</p>" if name else "")
+    )
+    sent = send_email(
+        db=db,
+        to_email=recipient,
+        subject=subject,
+        html_body=body,
+        attachment_bytes=generate_estimate_pdf(est, company),
+        attachment_name=f"Estimate_{est.estimate_number}.pdf",
+        entity_type="estimate",
+        entity_id=est.id,
+        cc=data.cc,
+        bcc=data.bcc,
+    )
+    # send_email() returns False (and logs why) when SMTP is not set up or the
+    # send fails; reporting "sent" regardless would be a lie.
+    if not sent:
+        admin = is_admin(request)
+        detail = "Email could not be sent. " + (
+            "Check the SMTP settings under Settings → Email (SMTP). " if admin else ""
+        )
+        raise HTTPException(status_code=502, detail=detail + where_to_see_why(admin))
+    return {"status": "sent"}
 
 
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)

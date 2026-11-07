@@ -141,7 +141,13 @@ the cost posts. A unit of measure (SF, LF, EA, CY…) sits beside the quantity.
   its **marked-up price** (cost × the markup factor); one with no cost shows
   its rate price. Accepting it moves it into the scope (at cost, with its
   markups in the markup rows) and adds its cost to the markup base; the
-  Alternates block then offers only the ones not yet taken.
+  Alternates block then offers only the ones not yet taken. **An accepted
+  alternate shows at cost everywhere** — in its package on the view and the
+  owner's PDF, tagged *Add alternate, accepted* or *Deduct alternate,
+  accepted*, and in the form's Alternates panel, which marks it *taken, at
+  cost* — because that is the figure the subtotal holds, with the markup in the
+  markup rows (or in the package price, see *The bid the owner receives*). Only
+  an alternate not yet taken shows marked up.
 - **Unit price** — a rate card (a price per unit for work whose quantity is
   unknown, like rock excavation). It is never in the bid and never seeds a
   budget.
@@ -176,9 +182,9 @@ caller sends, so its totals are the plain Subtotal / Tax / Total.
 estimate carries a `markup_allowances` flag (a checkbox under Markups on the
 form). Off, allowances sit in the subtotal at their amount and the markups skip
 them. On, the allowance amounts join the markup base, so the four markups are
-figured on them too (and the budget revenue split follows). The estimate, the
-form's totals panel, the view and the customer PDF all show "Markup on
-allowances" as On or Off. The flag freezes with the rest of the price once the
+figured on them too (and the budget revenue split follows). The form's totals
+panel and the view show "Markup on allowances" as On or Off; **the owner's PDF
+does not**, since the setting is the GC's own. The flag freezes with the rest of the price once the
 estimate is accepted. There is no separate contingency line kind; a contingency
 carried as an allowance line follows the same flag.
 
@@ -211,6 +217,45 @@ only. Converting an accepted estimate to an invoice drops
 the unit-price lines and any un-accepted alternate, carries each line's cost
 type and unit cost onto the invoice, and adds one invoice line per non-zero
 markup (on the job) so the invoice foots to the bid.
+
+### The bid the owner receives
+
+The customer PDF (and Print) of a construction estimate is built to go out
+under the contractor's name; a Business or Nonprofit estimate PDF is unchanged.
+
+- **Header and cover.** The company's **contractor license #** (Settings →
+  Company → Company Information, shown once the company is Construction) prints
+  in the header under the company name. A **Project** block beside *Prepared
+  for* carries the job's name and site address (left out when the estimate has
+  no job).
+- **Show markup rows** is a checkbox on each estimate (Markups, default on —
+  the rows under the subtotal described above). Off, the PDF drops the General
+  conditions, Insurance, Fee and Bond rows and spreads the markups into each
+  package's price: the budget's own split, pro rata to each row's share of the
+  markup base with the last row taking the rounding remainder, so the package
+  prices, the allowances (which carry a share only when *Markup on allowances*
+  is on) and any priced-direct package foot to the bid to the cent. A package
+  prints its price on its heading row with its lines listed by description and
+  quantity; one **Subtotal** (the bid total) stands in for the rows, then Tax
+  and Total. The stored subtotal, markups, tax and total do not change, the
+  view and the form still show the markup rows (a note on the view says the
+  owner's PDF hides them), and the flag edits after the estimate is accepted
+  since it moves no figure.
+- **Terms, inclusions and exclusions.** A default text in Settings (**Default
+  estimate terms, inclusions and exclusions**, key `estimate_terms`) is what a
+  new construction estimate starts with, through the form or the API when no
+  `terms` is sent; edit it on any estimate (it stays editable after accept). It
+  prints above the acceptance block. A blank `terms` is kept blank.
+- **Acceptance block.** An owner signature line, a printed-name line and a date
+  line, kept together on one page.
+- **The totals block stays together**, so a page break never leaves Total alone
+  on the next page.
+- **Email.** The estimate view has an **Email** button
+  (`POST /api/estimates/{id}/email`: `recipient`, `cc`, `bcc`, `subject`,
+  `message`). It sends the PDF as an attachment through the same SMTP settings,
+  address checks, always-copy settings and Recent sends log as an invoice; the
+  recipient defaults to the customer's email, and an estimate or customer with
+  no address and none typed is a 400.
 
 **Change orders move the locked budget.** A **change order** (#554, see
 *Change orders* below) is how a locked budget moves — a numbered document that

@@ -65,6 +65,14 @@ class Estimate(Base):
     # The GC decides whether the markups also build on allowance lines; off by
     # default (an allowance is a budgeted figure, not priced scope).
     markup_allowances = Column(Boolean, nullable=False, default=False)
+    # "Show markup rows" on the owner's PDF (default on, the look it always
+    # had). Off, the PDF spreads the markups into each package's price and
+    # prints one subtotal; the stored math is untouched.
+    show_markup_rows = Column(Boolean, nullable=False, default=True)
+    # The estimate's terms / inclusions / exclusions text, printed above the
+    # acceptance block. A new construction estimate starts with the company's
+    # default (Settings); NULL on an older or non-construction estimate.
+    terms = Column(Text, nullable=True)
     # When the estimate was accepted and its job budget locked (#551).
     accepted_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -91,6 +99,7 @@ class Estimate(Base):
         order_by="EstimateLine.line_order",
     )
     converted_invoice = relationship("Invoice", foreign_keys=[converted_invoice_id])
+    job = relationship("Job", foreign_keys=[job_id])
 
 
 class EstimateLine(Base):

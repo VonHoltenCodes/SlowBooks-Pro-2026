@@ -101,6 +101,11 @@ class EstimateCreate(StrictModel):
     fee_pct: Decimal = Decimal("0")
     bond_pct: Decimal = Decimal("0")
     markup_allowances: bool = False
+    # Owner-PDF presentation (construction only): show the markup rows, or
+    # spread them into each package's price. `terms` None starts from the
+    # company's default terms text.
+    show_markup_rows: bool = True
+    terms: Optional[str] = None
     lines: list[EstimateLineCreate] = []
 
     @field_validator("lines")
@@ -125,6 +130,8 @@ class EstimateUpdate(StrictModel):
     fee_pct: Optional[Decimal] = None
     bond_pct: Optional[Decimal] = None
     markup_allowances: Optional[bool] = None
+    show_markup_rows: Optional[bool] = None
+    terms: Optional[str] = None
     lines: Optional[list[EstimateLineCreate]] = None
 
 
@@ -205,10 +212,14 @@ class EstimateResponse(BaseModel):
     fee_pct: Decimal = Decimal("0")
     bond_pct: Decimal = Decimal("0")
     markup_allowances: bool = False
+    show_markup_rows: bool = True
+    terms: Optional[str] = None
     accepted_at: Optional[datetime] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    job_site_address: Optional[str] = None
     converted_invoice_id: Optional[int]
     lines: list[EstimateLineResponse] = []
     customer_name: Optional[str] = None
