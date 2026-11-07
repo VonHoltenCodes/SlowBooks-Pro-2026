@@ -33,8 +33,11 @@ def test_the_entry_row_follows_the_entries_on_a_populated_register():
     assert "const quickRow = f.class_id ? BankingPage._entryRowOff(" in js
     # the brought-forward balance opens the oldest-first table (NEW-142)
     assert "<tbody>${opening}${rows}</tbody>" in populated
-    # and the row's memo has a column of its own
-    assert '<th scope="col">Memo</th>' in populated
+    # and the row's memo has a column of its own, in the one header the
+    # empty and the populated register share (#729)
+    assert "<table>${head}<tbody>${opening}${rows}</tbody>" in populated
+    head = js[js.index("const head = `<thead>") :][:600]
+    assert '<th scope="col">Memo</th>' in head
 
 
 def test_the_register_shows_the_memo_typed_into_the_row(client, seed_accounts):

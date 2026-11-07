@@ -358,6 +358,56 @@ def references_for(db: Session, txns) -> dict[int, str]:
     return out
 
 
+def categories_for(db: Session, account_id: int, txn_ids) -> dict[int, dict]:
+    """The other side of each posting on the register (#729), in one query
+    for the page: per transaction id, the accounts its lines other than
+    the register account's post to, in line order, each with the amount
+    (one account's lines added together, shown positive). `category` is
+    the one account's name, "3 accounts" for several, "" for none (a
+    posting that touches this account only)."""
+    ids = list(txn_ids)
+    if not ids:
+        return {}
+    per = defaultdict(dict)
+    for txn_id, acct_id, number, name, dr, cr in (
+        db.query(
+            TransactionLine.transaction_id,
+            TransactionLine.account_id,
+            Account.account_number,
+            Account.name,
+            TransactionLine.debit,
+            TransactionLine.credit,
+        )
+        .join(Account, Account.id == TransactionLine.account_id)
+        .filter(TransactionLine.transaction_id.in_(ids))
+        .filter(TransactionLine.account_id != account_id)
+        .order_by(TransactionLine.transaction_id, TransactionLine.id)
+    ):
+        slot = per[txn_id].setdefault(
+            acct_id,
+            {
+                "account_id": acct_id,
+                "account_number": number or "",
+                "account_name": name or "",
+                "amount": ZERO,
+            },
+        )
+        slot["amount"] += (dr or ZERO) - (cr or ZERO)
+    out = {}
+    for txn_id, accounts in per.items():
+        lines = [{**a, "amount": float(abs(a["amount"]))} for a in accounts.values()]
+        out[txn_id] = {
+            "category": (
+                lines[0]["account_name"]
+                if len(lines) == 1
+                else f"{len(lines)} accounts"
+            ),
+            "category_account_id": lines[0]["account_id"] if len(lines) == 1 else None,
+            "category_lines": lines,
+        }
+    return out
+
+
 def line_scope(db: Session, class_id: int | None = None, job_id: int | None = None):
     """The SQL test for a posted line in the class and job asked for, or
     None for every line: the line's own class, else its transaction's, else
@@ -444,6 +494,8 @@ def account_register(
     voided = voided_transaction_ids(db, txns.keys())
     payees = payees_for(db, txns.values())
     refs = references_for(db, list(txns.values()))
+    categories = categories_for(db, account.id, txns.keys())
+    no_category = {"category": "", "category_account_id": None, "category_lines": []}
 
     running = opening
     period_debit = ZERO
@@ -488,6 +540,8 @@ def account_register(
                 or bool((txn.source_type or "").endswith("_void")),
                 # what the line's Edit opens (#689); None: Open only
                 "edit": edit_target(txn, txn.id in voided),
+                # the offset account, or "3 accounts" and each (#729)
+                **categories.get(txn.id, no_category),
             }
         )
     period_net = (

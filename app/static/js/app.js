@@ -40,7 +40,7 @@ const App = {
         '/payments':      { page: 'payments',        label: 'Receive Payments',   render: () => PaymentsPage.render() },
         '/payments/:id':      { page: 'payments',   label: 'Payment',       document: true, render: (id) => App.withDocument(() => PaymentsPage.render(), () => PaymentsPage.view(id)) },
         '/banking':       { page: 'banking',         label: 'Banking',            render: () => BankingPage.render() },
-        '/banking/:id':   { page: 'banking',         label: 'Register',           render: (id, query) => BankingPage.renderRegister(id, query) },
+        '/banking/:id':   { page: 'banking',         label: 'Register',           render: (id, query) => BankingPage.renderRegister(id, query), mount: () => BankingPage.mountRegister() },
         '/banking/transfers/:id': { page: 'banking', label: 'Transfer',     document: true, render: (id) => App.withDocument(() => BankingPage.render(), () => JournalPage.view(id)) },
         '/accounts':      { page: 'accounts',        label: 'Chart of Accounts',  render: () => App.renderAccounts() },
         // A class's own page and the Classes list (#234): the period, the

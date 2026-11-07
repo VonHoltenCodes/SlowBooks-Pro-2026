@@ -57,7 +57,7 @@ def _page(browser):
 
 
 CELLS = """() => [...document.querySelectorAll('#page-content tr[data-txn]')].map(r => {
-    const c = r.cells[8], b = c.querySelector('button');
+    const c = r.cells[9], b = c.querySelector('button');  // ✓, after Category (#729)
     const shown = !!b && b.offsetParent !== null;
     return { txn: +r.dataset.txn, text: c.textContent.trim(),
              button: shown ? b.getAttribute('aria-label') : null,
