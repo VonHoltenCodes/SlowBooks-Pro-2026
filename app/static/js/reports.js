@@ -4200,13 +4200,13 @@ ReportsPage.retainage = async function (prefill) {
                 A row named “Journal entries and other” is ledger balance no pay application or bill explains. Closed jobs are included.</div>
             <h4 style="margin:0 0 4px 0;">Owed to me (1150)</h4>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Customer</th><th scope="col">Job</th><th scope="col" class="amount">Held by owner</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
+                <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th><th scope="col" class="amount">Held by owner</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
                 <tbody>${recvRows || '<tr><td colspan="5" style="color:var(--gray-400);">No retainage held by owners</td></tr>'}</tbody>
                 <tfoot><tr style="${strong}"><td colspan="2">Total owed to me</td><td class="amount">${m(recv.totals.held)}</td><td class="amount">${m(recv.totals.released)}</td><td class="amount">${m(recv.totals.outstanding)}</td></tr></tfoot>
             </table></div>
             <h4 style="margin:14px 0 4px 0;">I owe (2050)</h4>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Job</th><th scope="col">Vendor</th><th scope="col">Commitment / bill</th><th scope="col" class="amount">Held from sub</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
+                <thead><tr><th scope="col">${T('Job')}</th><th scope="col">Vendor</th><th scope="col">Commitment / bill</th><th scope="col" class="amount">Held from sub</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
                 <tbody>${payRows || '<tr><td colspan="6" style="color:var(--gray-400);">No retainage held from subs</td></tr>'}</tbody>
                 <tfoot><tr style="${strong}"><td colspan="3">Total I owe</td><td class="amount">${m(pay.totals.held)}</td><td class="amount">${m(pay.totals.released)}</td><td class="amount">${m(pay.totals.outstanding)}</td></tr></tfoot>
             </table></div>`;

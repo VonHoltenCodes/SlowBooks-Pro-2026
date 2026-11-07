@@ -299,7 +299,7 @@ const DashboardPage = {
                 d.under_jobs.length ? 'Under-billed' + DashboardPage._byJob(d.under_jobs, true) : '',
             ].filter(Boolean).join('\n');
             const line = (label, v, color) => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${label}</span><strong style="color:${v ? color : 'inherit'}">${formatCurrency(v)}</strong></div>`;
-            return `<a class="dash-tile" href="${DashboardPage._reportLink('wip-schedule')}" onclick="ReportsPage._leaveFrom(this)" title="${escapeHtml(hover || 'Billing matches the work done')}"
+            return `<a class="dash-tile" href="${DashboardPage._tileLink('wip-schedule')}" onclick="ReportsPage._leaveFrom(this)" title="${escapeHtml(hover || 'Billing matches the work done')}"
                 style="display:block;color:inherit;text-decoration:none">
                 <div style="font-size:12px;line-height:1.7">
                     ${line('Over-billed', d.over, 'var(--text-danger)')}
@@ -338,9 +338,12 @@ const DashboardPage = {
         },
     },
 
+    // A contractor tile's report, as of today
+    _tileLink(view) { return ReportsPage.viewUrl(view, { as_of_date: todayISO() }); },
+
     // A stat tile that opens its report; `hover` is the by-job breakdown.
     _tile(view, value, note, hover) {
-        return `<a class="dash-tile" href="${DashboardPage._reportLink(view)}" onclick="ReportsPage._leaveFrom(this)" title="${escapeHtml(hover || 'Open the report')}"
+        return `<a class="dash-tile" href="${DashboardPage._tileLink(view)}" onclick="ReportsPage._leaveFrom(this)" title="${escapeHtml(hover || 'Open the report')}"
             style="display:block;color:inherit;text-decoration:none">
             <div class="card-value">${formatCurrency(value)}</div>
             <div style="font-size:11px;color:var(--gray-500)">${escapeHtml(note)}</div></a>`;
@@ -358,9 +361,6 @@ const DashboardPage = {
     // with the dates, so a bookmark of the link is "this month" next month
     // too.
     _reportLink(which, period) {
-        if (['retainage', 'wip-schedule', 'commitment-status'].includes(which)) {
-            return ReportsPage.viewUrl(which, { as_of_date: todayISO() });
-        }
         const np = Terms.isNonprofit();
         if (which === 'bs') {
             return ReportsPage.viewUrl(np ? 'statement-of-financial-position' : 'balance-sheet', { as_of_date: todayISO() });

@@ -320,7 +320,7 @@ const JobsPage = {
         let ret = null;
         if (construction) {
             const r = await API.get(`/reports/retainage?as_of=${todayISO()}&job_id=${job.id}`).catch(() => null);
-            ret = r && r.jobs.find(j => j.job_id === job.id) || { receivable: { outstanding: 0 }, payable: { outstanding: 0 } };
+            ret = ((r && r.jobs) || []).find(j => j.job_id === job.id) || { receivable: { outstanding: 0 }, payable: { outstanding: 0 } };
         }
         const stat = (label, value, color, title) => `<div style="min-width:130px;" title="${title || ''}">
             <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">${label}</div>
