@@ -743,6 +743,8 @@ def void_ticket(db: Session, t: FieldTicket) -> None:
                 detail=f"This ticket is billed on invoice {t.invoice.invoice_number}. "
                 "Void that invoice first.",
             )
+    elif t.kind == "material" and t.status == "closed":
+        reverse_material_slip(db, t)
     elif t.kind == "delivery":
         unapply_received(db, t)
 
@@ -750,3 +752,191 @@ def void_ticket(db: Session, t: FieldTicket) -> None:
 def _invoice_live(invoice) -> bool:
     status = getattr(invoice.status, "value", invoice.status)
     return status != "void"
+
+
+# ── Material slip → job cost ────────────────────────────────────────────────
+
+
+def post_material_slip(db: Session, t: FieldTicket, post_date: Optional[date]):
+    """Put a material slip's stock on the job: one Job Cost Entry
+    (source "material_slip"), DR job cost (material, the line's code; the
+    account is the code's, else the material cost type's default account) /
+    CR the item's inventory asset account, at the item's average cost, and
+    the item's on-hand quantity goes down by the slip's quantity. A negative
+    quantity is a return: the same entry the other way, the stock back on
+    the shelf at the average cost. The slip closes."""
+    from app.models.items import MovementType
+    from app.models.job_costing import JobCost, JobCostLine
+    from app.services.accounting import create_journal_entry
+    from app.services.closing_date import check_closing_date
+    from app.services.inventory_service import (
+        _append_at_cost,
+        get_inventory_asset_account_id,
+    )
+    from app.services.job_costing import (
+        cost_type_map,
+        next_job_cost_number,
+        resolve_line_accounts,
+    )
+    from app.services.safe_errors import DataProblem
+
+    if t.kind != "material":
+        raise HTTPException(
+            status_code=409, detail="Only a material slip is posted to job cost."
+        )
+    if t.status != "draft":
+        raise HTTPException(
+            status_code=409, detail=f"This material slip is already {t.status}."
+        )
+    if not t.lines:
+        raise HTTPException(
+            status_code=422, detail="Add the stock items before posting the slip."
+        )
+    post_date = post_date or t.date
+    check_closing_date(db, post_date)
+    types = cost_type_map(db)
+    jc = JobCost(
+        number=next_job_cost_number(db),
+        date=post_date,
+        job_id=t.job_id,
+        memo=f"Material slip {t.number}"
+        + (f": {t.description}" if t.description else ""),
+        source="material_slip",
+    )
+    db.add(jc)
+    db.flush()
+    entry, issues = [], []
+    for i, ln in enumerate(t.lines):
+        item = ln.item
+        qty = _d(ln.quantity)
+        unit_cost = _d(item.avg_cost).quantize(Decimal("0.0001"))
+        amount = _q(qty * unit_cost)
+        if amount == 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{item.name} has no average cost yet, so the slip would post "
+                "nothing. Receive it on a bill (or set its opening quantity) first.",
+            )
+        asset_id = get_inventory_asset_account_id(db, item)
+        if not asset_id:
+            raise HTTPException(
+                status_code=422,
+                detail=f"{item.name} has no inventory asset account; set one on the item.",
+            )
+        try:
+            debit, credit = resolve_line_accounts(
+                db, types, ln.cost_code, "material", None, asset_id
+            )
+        except DataProblem as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        desc = ln.description or item.name
+        jc.lines.append(
+            JobCostLine(
+                job_id=t.job_id,
+                cost_code_id=ln.cost_code_id,
+                cost_type="material",
+                description=desc,
+                quantity=qty,
+                rate=unit_cost,
+                amount=amount,
+                debit_account_id=debit,
+                credit_account_id=credit,
+                line_order=i,
+            )
+        )
+        tagged = {
+            "account_id": debit,
+            "description": desc,
+            "job_id": t.job_id,
+            "cost_code_id": ln.cost_code_id,
+            "cost_type": "material",
+        }
+        stock = {"account_id": credit, "description": f"Stock: {desc}", "job_id": None}
+        if amount > 0:
+            entry += [
+                {**tagged, "debit": amount, "credit": _ZERO},
+                {**stock, "debit": _ZERO, "credit": amount},
+            ]
+        else:  # a return: the job's cost comes off, the stock goes back
+            entry += [
+                {**stock, "debit": -amount, "credit": _ZERO},
+                {**tagged, "debit": _ZERO, "credit": -amount},
+            ]
+        issues.append((item, qty, unit_cost))
+    txn = create_journal_entry(
+        db,
+        post_date,
+        f"Job cost {jc.number} - material slip {t.number}",
+        entry,
+        source_type="job_cost",
+        source_id=jc.id,
+        reference=t.number,
+    )
+    jc.transaction_id = txn.id
+    jc.total = sum((_q(ln.amount) for ln in jc.lines), _ZERO)
+    for item, qty, unit_cost in issues:
+        _append_at_cost(
+            db,
+            item,
+            MovementType.ADJUSTMENT,
+            quantity=-qty,
+            unit_cost=unit_cost,
+            source_type="material_slip",
+            source_id=t.id,
+            txn_date=post_date,
+            transaction_id=txn.id,
+            memo=f"Material slip {t.number}",
+        )
+    t.job_cost_id = jc.id
+    t.status = "closed"
+    db.flush()
+    return jc
+
+
+def reverse_material_slip(db: Session, t: FieldTicket) -> None:
+    """Void a posted slip at the cost it was booked at, not today's average:
+    the Job Cost Entry's own entry reversed, and each stock movement put back
+    at its own unit cost."""
+    from app.models.items import InventoryMovement, MovementType
+    from app.models.transactions import Transaction
+    from app.services.closing_date import check_closing_date
+    from app.services.inventory_service import _append_at_cost
+    from app.services.job_costing import void_job_cost
+
+    jc = t.job_cost
+    if jc is None or jc.status == "void":
+        return
+    check_closing_date(db, jc.date)
+    void_job_cost(db, jc)
+    db.flush()
+    void_txn = (
+        db.query(Transaction)
+        .filter(
+            Transaction.source_type == "job_cost_void", Transaction.source_id == jc.id
+        )
+        .order_by(Transaction.id.desc())
+        .first()
+    )
+    moves = (
+        db.query(InventoryMovement)
+        .filter(
+            InventoryMovement.source_type == "material_slip",
+            InventoryMovement.source_id == t.id,
+            InventoryMovement.reverses_movement_id.is_(None),
+        )
+        .all()
+    )
+    for mv in moves:
+        _append_at_cost(
+            db,
+            mv.item,
+            MovementType.VOID,
+            quantity=-_d(mv.quantity),
+            unit_cost=_d(mv.unit_cost),
+            source_type="material_slip_void",
+            source_id=t.id,
+            txn_date=jc.date,
+            transaction_id=void_txn.id if void_txn else None,
+            memo=f"VOID material slip {t.number}",
+            reverses_movement_id=mv.id,
+        )

@@ -81,6 +81,7 @@ const FieldTickets = {
     rowActions(t) {
         const parts = [`<button class="btn btn-sm btn-secondary" onclick="FieldTickets.edit(${t.id})">${t.status === 'draft' ? 'Edit' : 'View'}</button>`];
         if (t.status === 'draft' && t.kind !== 'material') parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="FieldTickets.sign(${t.id})">Sign</button>`);
+        if (t.status === 'draft' && t.kind === 'material') parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="FieldTickets.post(${t.id})" title="Put the stock on the job at its average cost">Post</button>`);
         if (t.status === 'draft') parts.push(`<button data-destructive class="btn btn-sm btn-danger" onclick="FieldTickets.del(${t.id})">Delete</button>`);
         if (t.status !== 'void' && t.status !== 'draft') parts.push(`<button data-destructive class="btn btn-sm btn-danger" onclick="FieldTickets.voidTicket(${t.id})">Void</button>`);
         return parts.join(' ');
@@ -325,6 +326,15 @@ const FieldTickets = {
         try {
             const billed = await API.post('/field-tickets/bill', { ticket_ids: ids });
             toast(`Invoice ${billed.invoice_number} made for ${formatCurrency(billed.total)}`, 'success');
+            await FieldTickets.refresh();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async post(id) {
+        if (!confirm('Post this material slip? The stock comes off the shelf onto the job at its average cost.')) return;
+        try {
+            const t = await API.post(`/field-tickets/${id}/post`, {});
+            toast(`Posted as job cost ${t.job_cost_number}`, 'success');
             await FieldTickets.refresh();
         } catch (err) { toast(err.message, 'error'); }
     },

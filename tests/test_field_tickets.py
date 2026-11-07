@@ -510,3 +510,171 @@ def test_bill_it_refused_on_a_job_with_a_schedule_of_values(con, seed_customer):
     r = con.post("/api/field-tickets/bill", json={"ticket_ids": [a["id"]]})
     assert r.status_code == 409
     assert "change order" in r.json()["detail"]
+
+
+# ── M3: material slip posting ───────────────────────────────────────────
+
+
+@pytest.fixture
+def stock(con, db_session, seed_accounts):
+    """A tracked item with 100 on hand at $4.00 average, and the material cost
+    type pointed at Materials Cost (5100), as construction setup does."""
+    from decimal import Decimal
+
+    from app.models.items import Item, ItemType
+    from app.services import inventory_service
+    from app.services.job_costing import cost_type_map
+
+    material = cost_type_map(db_session)["material"]
+    material.default_account_id = seed_accounts["5100"].id
+    item = Item(
+        name="Rebar #4",
+        item_type=ItemType.PRODUCT,
+        rate=Decimal("9"),
+        cost=Decimal("4"),
+        track_inventory=True,
+        asset_account_id=seed_accounts["1300"].id,
+    )
+    db_session.add(item)
+    db_session.flush()
+    inventory_service.record_purchase(
+        db_session,
+        item,
+        quantity=Decimal("100"),
+        unit_cost=Decimal("4"),
+        source_type="adjustment",
+        source_id=item.id,
+        post_journal=False,
+    )
+    db_session.commit()
+    return item
+
+
+def _balance(db_session, account_id, job_id=None):
+    from sqlalchemy import func
+
+    from app.models.transactions import TransactionLine
+
+    q = db_session.query(
+        func.coalesce(func.sum(TransactionLine.debit - TransactionLine.credit), 0)
+    ).filter(TransactionLine.account_id == account_id)
+    if job_id is not None:
+        q = q.filter(TransactionLine.job_id == job_id)
+    return float(q.scalar())
+
+
+def _slip(con, job_id, item_id, qty, status=201):
+    return _ticket(
+        con,
+        job_id,
+        [{"line_type": "material", "item_id": item_id, "quantity": qty}],
+        kind="material",
+        status=status,
+    )
+
+
+def test_posting_a_material_slip_charges_the_job_and_moves_stock(
+    con, seed_customer, stock, seed_accounts, db_session
+):
+    job = _job(con, seed_customer.id)
+    slip = _slip(con, job["id"], stock.id, 25)
+    # the slip's line is at the item's average cost
+    assert slip["lines"][0]["cost_rate"] == 4.0 and slip["cost_total"] == 100.0
+    r = con.post(f"/api/field-tickets/{slip['id']}/post", json={"date": "2026-06-05"})
+    assert r.status_code == 200, r.text
+    posted = r.json()
+    assert posted["status"] == "closed" and posted["job_cost_number"]
+    jc = con.get(f"/api/job-costs/{posted['job_cost_id']}").json()
+    assert jc["source"] == "material_slip" and float(jc["total"]) == 100.0
+    # DR Materials Cost on the job / CR Inventory
+    assert _balance(db_session, seed_accounts["5100"].id, job["id"]) == 100.0
+    assert _balance(db_session, seed_accounts["1300"].id) == -100.0
+    db_session.expire_all()
+    assert float(stock.quantity_on_hand) == 75.0
+    # the job's cost detail shows it as material
+    tree = con.get(f"/api/jobs/{job['id']}/cost-tree").json()
+    assert tree["totals"]["actual"] == 100.0
+    # posted once
+    assert con.post(f"/api/field-tickets/{slip['id']}/post").status_code == 409
+
+
+def test_voiding_a_slip_reverses_at_the_booked_cost(
+    con, seed_customer, stock, seed_accounts, db_session
+):
+    from decimal import Decimal
+
+    from app.services import inventory_service
+
+    job = _job(con, seed_customer.id)
+    slip = _slip(con, job["id"], stock.id, 25)
+    con.post(f"/api/field-tickets/{slip['id']}/post")
+    # the average moves after the posting: 75 @ 4 + 75 @ 8 → 150 @ 6
+    db_session.expire_all()
+    inventory_service.record_purchase(
+        db_session,
+        stock,
+        quantity=Decimal("75"),
+        unit_cost=Decimal("8"),
+        source_type="adjustment",
+        source_id=stock.id,
+        post_journal=False,
+    )
+    db_session.commit()
+    r = con.post(f"/api/field-tickets/{slip['id']}/void")
+    assert r.status_code == 200, r.text
+    # the job's cost and the stock come back at the $4.00 booked, not $6.00
+    assert _balance(db_session, seed_accounts["5100"].id, job["id"]) == 0.0
+    assert _balance(db_session, seed_accounts["1300"].id) == 0.0
+    db_session.expire_all()
+    assert float(stock.quantity_on_hand) == 175.0
+    # 150 @ 6 + 25 back @ 4 = 1,000 over 175: the stock re-averages on what
+    # the slip took out, not on today's average
+    assert float(stock.avg_cost) == pytest.approx(5.7143, abs=1e-4)
+    jc = con.get(f"/api/job-costs/{slip['job_cost_id'] or r.json()['job_cost_id']}")
+    assert jc.json()["status"] == "void"
+
+
+def test_a_return_slip_takes_cost_off_the_job_and_restocks(
+    con, seed_customer, stock, seed_accounts, db_session
+):
+    job = _job(con, seed_customer.id)
+    out = _slip(con, job["id"], stock.id, 30)
+    con.post(f"/api/field-tickets/{out['id']}/post")
+    back = _slip(con, job["id"], stock.id, -10)
+    r = con.post(f"/api/field-tickets/{back['id']}/post")
+    assert r.status_code == 200, r.text
+    assert r.json()["cost_total"] == -40.0
+    assert _balance(db_session, seed_accounts["5100"].id, job["id"]) == 80.0
+    assert _balance(db_session, seed_accounts["1300"].id) == -80.0
+    db_session.expire_all()
+    assert float(stock.quantity_on_hand) == 80.0
+
+
+def test_the_job_cost_entry_of_a_slip_is_voided_through_the_slip(
+    con, seed_customer, stock
+):
+    job = _job(con, seed_customer.id)
+    slip = _slip(con, job["id"], stock.id, 5)
+    posted = con.post(f"/api/field-tickets/{slip['id']}/post").json()
+    r = con.post(f"/api/job-costs/{posted['job_cost_id']}/void")
+    assert r.status_code == 409
+    assert "Field tickets tab" in r.json()["detail"]
+
+
+def test_a_material_slip_line_is_a_stock_item(con, seed_customer, db_session):
+    from app.models.items import Item, ItemType
+
+    job = _job(con, seed_customer.id)
+    r = con.post(
+        "/api/field-tickets",
+        json={
+            "job_id": job["id"],
+            "kind": "material",
+            "lines": [{"line_type": "material", "description": "Sand", "quantity": 1}],
+        },
+    )
+    assert r.status_code == 422 and "stock item" in r.json()["detail"]
+    service = Item(name="Hauling", item_type=ItemType.SERVICE)
+    db_session.add(service)
+    db_session.commit()
+    _slip(con, job["id"], service.id, 1, status=422)

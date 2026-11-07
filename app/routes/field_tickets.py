@@ -21,6 +21,7 @@ from app.schemas.field_tickets import (
     FieldTicketCreate,
     FieldTicketOut,
     FieldTicketUpdate,
+    PostIn,
     SignIn,
     TicketIdsIn,
 )
@@ -268,6 +269,23 @@ def sign_field_ticket(ticket_id: int, data: SignIn, db: Session = Depends(get_db
     t.signed_by_name = data.signed_by_name
     t.signed_at = data.signed_at or date.today()
     t.status = "signed"
+    db.commit()
+    db.refresh(t)
+    return _out(db, t)
+
+
+@router.post("/{ticket_id}/post", response_model=FieldTicketOut)
+def post_material_slip(
+    ticket_id: int, data: PostIn | None = None, db: Session = Depends(get_db)
+):
+    """Post a material slip: a Job Cost Entry (source material_slip) puts the
+    stock on the job at each item's average cost, DR job cost / CR the item's
+    inventory asset account, and on-hand quantity goes down (a negative
+    quantity returns stock). `date` defaults to the slip's date. The slip
+    closes; voiding it reverses at the booked cost."""
+    svc.require_construction(db)
+    t = _get(db, ticket_id)
+    svc.post_material_slip(db, t, data.date if data else None)
     db.commit()
     db.refresh(t)
     return _out(db, t)
