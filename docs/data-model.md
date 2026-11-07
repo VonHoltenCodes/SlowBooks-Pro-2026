@@ -218,7 +218,9 @@ New table `sov_lines` — the owner's schedule of values:
 | id, job_id (FK jobs, CASCADE) | the job this schedule belongs to |
 | line_no (Integer), item_no (String(10)) | 1-based order; printed number ("01"…), editable |
 | description (String(200)) | |
-| trade_package_id (FK, SET NULL), cost_code_id (FK, SET NULL) | optional links |
+| trade_package_id (FK, SET NULL), cost_code_id (FK, SET NULL) | optional links; the cost code (section) is what the line's billing posts with |
+| revenue_account_id (FK accounts, SET NULL) | the income account the line's billing credits; null posts to 4050 Contract Revenue |
+| is_taxable (Boolean, NOT NULL default true) | sales tax is charged on the line's billing; every line made before it is taxable |
 | kind (String(16), NOT NULL default `work`) | `work` · `allowance` · `contingency` · `general_conditions` · `insurance` · `fee` · `bond` |
 | scheduled_value (Numeric(15,2), NOT NULL default 0) | |
 | source_estimate_id (FK estimates, SET NULL) | set when built from an estimate |

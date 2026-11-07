@@ -24,6 +24,7 @@ from app.models.job_costing import JobBudget
 from app.models.jobs import Job, SovLine
 from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
 from app.services.accounting import _q
+from app.services.contracts import change_order_sov_fields
 
 _ZERO = Decimal("0")
 _HUNDRED = Decimal("100")
@@ -568,6 +569,10 @@ def _apply_allowance_return(db: Session, co: ChangeOrder, job: Job, sell_total):
                 kind="change_order",
                 scheduled_value=-credit,
                 change_order_id=co.id,
+                # the credit reverses the allowance's own revenue and tax
+                cost_code_id=line.cost_code_id,
+                revenue_account_id=line.revenue_account_id,
+                is_taxable=line.is_taxable,
             )
         )
 
@@ -681,6 +686,7 @@ def apply_change_order(
                         kind="change_order",
                         scheduled_value=sell_total,
                         change_order_id=co.id,
+                        **change_order_sov_fields(job, co),
                     )
                 )
             _write_change_budgets(db, job.id, co, with_revenue=True)

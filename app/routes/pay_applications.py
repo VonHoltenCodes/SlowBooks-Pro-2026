@@ -34,7 +34,7 @@ from app.services.accounting import (
     create_journal_entry,
     ensure_construction_accounts,
     get_ar_account_id,
-    get_default_income_account_id,
+    get_contract_revenue_account_id,
     get_sales_tax_account_id,
 )
 from app.services.closing_date import check_closing_date
@@ -80,6 +80,30 @@ class _LineInput:
         self.previous = previous
         self.this_period = ln.this_period
         self.stored = ln.stored
+
+
+class _BilledLine:
+    """One SOV line's billing this period, with where it posts: the SOV
+    line's cost code and revenue account (4050 Contract Revenue when it names
+    none) and whether it is taxed. A line with no SOV line posts to 4050 and
+    is taxed, as before."""
+
+    __slots__ = (
+        "description",
+        "amount",
+        "cost_code_id",
+        "revenue_account_id",
+        "is_taxable",
+    )
+
+    def __init__(self, description, amount, sov, default_revenue_id):
+        self.description = description
+        self.amount = amount
+        self.cost_code_id = sov.cost_code_id if sov else None
+        self.revenue_account_id = (
+            sov.revenue_account_id if sov and sov.revenue_account_id else None
+        ) or default_revenue_id
+        self.is_taxable = bool(sov.is_taxable) if sov else True
 
 
 def _signed(account_id, amount, description, natural, **extra):
@@ -605,7 +629,8 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     # so stored materials are billed when stored and reversed when installed.
     # A deduct line may be negative.
     prior_stored = _prior_stored(db, app)
-    invoice_lines = []  # (description, amount, cost_code_id)
+    contract_revenue_id = get_contract_revenue_account_id(db)
+    invoice_lines = []  # _BilledLine per SOV line with something billed
     for ln in app.lines:
         delta = _q(ln.stored) - prior_stored.get(ln.sov_line_id, _ZERO)
         amount = _q(_q(ln.this_period) + delta)
@@ -615,7 +640,7 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
         desc = (
             f"{ln.item_no or ''} {ln.description or ''}".strip() or "Progress billing"
         )
-        invoice_lines.append((desc, amount, sov.cost_code_id if sov else None))
+        invoice_lines.append(_BilledLine(desc, amount, sov, contract_revenue_id))
 
     deposit = _q(app.deposit_applied)
     moved = any(
@@ -651,11 +676,15 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     )
     invoice = None
     if invoice_lines or retainage_held != 0 or retainage_released != 0 or deposit:
-        # Tax over the billed work at the application's rate when tax is on and
-        # the owner is taxable — the same figure the application shows.
+        # Tax over the billed work on the taxable SOV lines, at the
+        # application's rate when tax is on and the owner is taxable — the
+        # same figure the application shows.
         tax_rate = _q6(effective_tax_rate(app))
-        subtotal = _q(sum((a for _d, a, _c in invoice_lines), _ZERO))
-        tax_amount = _q(subtotal * tax_rate) if tax_rate else _ZERO
+        subtotal = _q(sum((bl.amount for bl in invoice_lines), _ZERO))
+        taxable_base = _q(
+            sum((bl.amount for bl in invoice_lines if bl.is_taxable), _ZERO)
+        )
+        tax_amount = _q(taxable_base * tax_rate) if tax_rate else _ZERO
         total = _q(subtotal + tax_amount)
         invoice = _create_invoice(
             db,
@@ -716,9 +745,10 @@ def _create_invoice(
 ):
     """Build the pay application's invoice and post its retainage journal:
     DR A/R (net of retainage), DR 1150 for retainage held, CR 1150 for
-    retainage released, CR income per line, CR sales tax."""
+    retainage released, CR each line's revenue account (its SOV line's, else
+    4050 Contract Revenue) with the job and the line's cost code, CR sales
+    tax."""
     ar_id = get_ar_account_id(db)
-    income_id = get_default_income_account_id(db)
     retainage_recv = ensure_construction_accounts(db)["1150"].id
     balance_due = _q(total - retainage_held + retainage_released)
     # The payer's whole Bill To as of now and the customer's own Ship To,
@@ -770,17 +800,17 @@ def _create_invoice(
             status_code=503, detail="Could not assign an invoice number; retry."
         ) from last_err
 
-    for i, (desc, amount, cost_code_id) in enumerate(lines):
+    for i, bl in enumerate(lines):
         db.add(
             InvoiceLine(
                 invoice_id=invoice.id,
-                description=desc,
+                description=bl.description,
                 quantity=Decimal("1"),
-                rate=amount,
-                amount=amount,
+                rate=bl.amount,
+                amount=bl.amount,
                 job_id=job.id,
-                cost_code_id=cost_code_id,
-                is_taxable=taxable,
+                cost_code_id=bl.cost_code_id,
+                is_taxable=taxable and bl.is_taxable,
                 line_order=i,
             )
         )
@@ -812,15 +842,15 @@ def _create_invoice(
             job_id=job.id,
         ),
     ]
-    for desc, amount, cost_code_id in lines:
+    for bl in lines:
         journal_lines.append(
             _signed(
-                income_id,
-                amount,
-                desc,
+                bl.revenue_account_id,
+                bl.amount,
+                bl.description,
                 "credit",
                 job_id=job.id,
-                cost_code_id=cost_code_id,
+                cost_code_id=bl.cost_code_id,
             )
         )
     if tax_amount != 0:

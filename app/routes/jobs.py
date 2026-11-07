@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.models.transactions import LEDGER_BASIS_OPTION, READ_ALL
 from app.database import get_db
 from app.routes._helpers import reject_null_updates
+from app.models.accounts import Account, AccountType
 from app.models.contacts import Customer
 from app.models.cost_codes import CostCode
 from app.models.trade_packages import TradePackage
@@ -424,6 +425,9 @@ def _sov_responses(job: Job) -> list[SovLineOut]:
         data = SovLineOut.model_validate(r)
         data.trade_package_name = r.trade_package.name if r.trade_package else None
         data.cost_code_label = r.cost_code.label if r.cost_code else None
+        data.revenue_account_name = (
+            r.revenue_account.name if r.revenue_account else None
+        )
         out.append(data)
     return out
 
@@ -620,6 +624,18 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
             raise HTTPException(status_code=404, detail="Trade package not found")
         if line.cost_code_id and not db.get(CostCode, line.cost_code_id):
             raise HTTPException(status_code=404, detail="Cost code not found")
+        if line.revenue_account_id:
+            acct = db.get(Account, line.revenue_account_id)
+            if acct is None:
+                raise HTTPException(status_code=404, detail="Account not found")
+            if acct.account_type != AccountType.INCOME:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"{acct.name} is not an income account. Choose an "
+                        "income account for the line's revenue."
+                    ),
+                )
     # A change_order-kind line is owned by its change order (#554), not the
     # grid: it is never sent by the client and is preserved across a save.
     if any(line.kind == "change_order" for line in data.lines):
@@ -654,14 +670,37 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
     return ContractSummary(**contract_summary(db, job))
 
 
+def _sov_mapping(line, row) -> dict:
+    """A saved line's revenue account and taxable flag: what the request
+    sent, else what the existing line `row` had, else no account (4050 at
+    posting) and taxed."""
+    sent = line.model_fields_set
+    if "revenue_account_id" in sent:
+        revenue = line.revenue_account_id
+    else:
+        revenue = row.revenue_account_id if row is not None else None
+    if "is_taxable" in sent and line.is_taxable is not None:
+        taxable = line.is_taxable
+    else:
+        taxable = bool(row.is_taxable) if row is not None else True
+    return {"revenue_account_id": revenue, "is_taxable": taxable}
+
+
 def _save_sov_replace(db: Session, job: Job, lines, kept) -> None:
     """Full replace of the non change-order lines (no billings to protect)."""
+    old = {
+        r.id: r
+        for r in db.query(SovLine).filter(
+            SovLine.job_id == job.id, SovLine.kind != "change_order"
+        )
+    }
+    mapping = [_sov_mapping(line, old.get(line.id)) for line in lines]
     db.query(SovLine).filter(
         SovLine.job_id == job.id, SovLine.kind != "change_order"
     ).delete()
     db.flush()
     n = 0
-    for line in lines:
+    for line, mapped in zip(lines, mapping):
         n += 1
         item_no = (line.item_no or "").strip() or f"{n:02d}"
         db.add(
@@ -674,6 +713,7 @@ def _save_sov_replace(db: Session, job: Job, lines, kept) -> None:
                 cost_code_id=line.cost_code_id,
                 kind=line.kind,
                 scheduled_value=_q(line.scheduled_value),
+                **mapped,
             )
         )
     for co_line in kept:  # keep their value and FK, renumbered after the rest
@@ -725,6 +765,8 @@ def _save_sov_with_billings(db: Session, job: Job, lines, kept, billed) -> None:
             row.cost_code_id = line.cost_code_id
             row.kind = line.kind
             row.scheduled_value = line.scheduled_value
+            for field, value in _sov_mapping(line, row).items():
+                setattr(row, field, value)
         else:
             db.add(
                 SovLine(
@@ -736,6 +778,7 @@ def _save_sov_with_billings(db: Session, job: Job, lines, kept, billed) -> None:
                     cost_code_id=line.cost_code_id,
                     kind=line.kind,
                     scheduled_value=line.scheduled_value,
+                    **_sov_mapping(line, None),
                 )
             )
     for line_id, row in existing.items():

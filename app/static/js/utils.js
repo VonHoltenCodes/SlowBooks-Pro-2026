@@ -2144,6 +2144,18 @@ const CostTypes = {
         const v = row.querySelector(`.${cls}`)?.value;
         return v || null;
     },
+    // The account a construction line with a cost code or type and no account
+    // posts to, as the server resolves it: the code's account, else the
+    // default account of the line's type (its own, else the code's). Needs
+    // CostCodes.load() and CostTypes.load(); null when nothing names one.
+    accountFor(costCodeId, costType) {
+        if (!Terms.isConstruction() || (!costCodeId && !costType)) return null;
+        const code = costCodeId ? (CostCodes._list || []).find(c => c.id === costCodeId) : null;
+        if (code && code.account_id) return code.account_id;
+        const type = costType || (code ? code.cost_type : null);
+        const t = type ? (CostTypes._list || []).find(x => x.code === type) : null;
+        return (t && t.default_account_id) || null;
+    },
 };
 
 // ---------------------------------------------------------------------------

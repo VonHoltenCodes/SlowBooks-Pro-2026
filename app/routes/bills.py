@@ -265,6 +265,8 @@ def _post_bill_lines(
                 account_id=line_data.account_id,
                 item=item,
                 vendor=vendor,
+                cost_code_id=line_data.cost_code_id,
+                cost_type=eff_cost_type,
             )
         else:
             # A description-only line (no amount) posts nothing; keep the

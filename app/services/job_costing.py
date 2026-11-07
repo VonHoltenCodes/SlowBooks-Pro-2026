@@ -76,6 +76,61 @@ def ensure_default_cost_types(db: Session) -> None:
         db.flush()
 
 
+# The job-cost account each starting cost type posts to when a line names
+# none; construction setup fills the cost type's default account with it.
+CONSTRUCTION_COST_TYPE_ACCOUNTS = (
+    ("material", "5100", "Materials Cost"),
+    ("labor", "5200", "Labor Cost"),
+    ("subcontract", "5300", "Subcontractor Costs"),
+    ("equipment", "5400", "Equipment Cost"),
+    ("other", "5500", "Other Job Costs"),
+)
+
+
+def map_construction_cost_types(db: Session) -> None:
+    """Point each starting cost type with no default account at its job-cost
+    account: the COGS account with that number, else the account of that
+    name. A type already mapped is left alone, and a chart with neither
+    leaves the type unset. Flushes; the caller commits."""
+    ensure_default_cost_types(db)
+    types = {t.code: t for t in db.query(CostType).all()}
+    for code, number, name in CONSTRUCTION_COST_TYPE_ACCOUNTS:
+        ctype = types.get(code)
+        if ctype is None or ctype.default_account_id:
+            continue
+        acct = (
+            db.query(Account)
+            .filter(
+                Account.account_number == number,
+                Account.account_type == AccountType.COGS,
+            )
+            .first()
+        ) or db.query(Account).filter(Account.name == name).first()
+        if acct is not None:
+            ctype.default_account_id = acct.id
+    db.flush()
+
+
+def job_cost_account_for(
+    db: Session, cost_code_id: Optional[int], cost_type: Optional[str]
+) -> Optional[int]:
+    """The account a purchase line with a cost code or cost type and no
+    account of its own posts to: the code's account, else the default
+    account of the line's cost type (its own, else the code's). None when
+    the line has neither, or neither names an account. A read: seeds
+    nothing."""
+    if not cost_code_id and not cost_type:
+        return None
+    code = db.get(CostCode, cost_code_id) if cost_code_id else None
+    if code is not None and code.account_id:
+        return code.account_id
+    ctype_code = cost_type or (code.cost_type if code is not None else None)
+    if not ctype_code:
+        return None
+    ctype = db.query(CostType).filter(CostType.code == ctype_code).first()
+    return ctype.default_account_id if ctype is not None else None
+
+
 def cost_type_map(db: Session) -> dict[str, CostType]:
     ensure_default_cost_types(db)
     return {r.code: r for r in db.query(CostType).all()}

@@ -23,18 +23,25 @@ Picking Construction in Settings saves `company_type = construction` and
 calls `POST /api/construction/setup`, which:
 
 1. creates the contractor accounts below if they are missing,
-2. loads the standard division titles and a set of common sections
+2. points each starting cost type that has no default account at its
+   job-cost account — material → 5100 Materials Cost, labor → 5200 Labor
+   Cost, subcontract → 5300 Subcontractor Costs, equipment → 5400 Equipment
+   Cost, other → 5500 Other Job Costs (the COGS account with that number,
+   else the account of that name; a type you already mapped keeps yours, and
+   one whose account the chart has under neither is left unset),
+3. loads the standard division titles and a set of common sections
    **only when the company has no cost codes of its own** (the same list the
    Cost Codes page's **Load standard divisions and common sections**
    button loads), ensuring the labor / material / subcontract / equipment /
    other cost types first, and
-3. seeds the default **trade packages**, mapped to the sections just loaded
+4. seeds the default **trade packages**, mapped to the sections just loaded
    (only when the company has no packages yet).
 
 Setup is idempotent — safe to run again. It never renumbers or renames an
 account you already have, never touches an existing cost code (a company
-that has built its own cost-code chart gets no standard codes added), and changes
-no posting. Switching back to Business leaves the accounts and codes in
+that has built its own cost-code chart gets no standard codes added), never
+re-points a cost type you mapped, and changes no posting already made.
+Switching back to Business leaves the accounts and codes in
 place (as switching away from Nonprofit leaves its net-asset accounts); they
 are ordinary accounts once created.
 
@@ -43,8 +50,8 @@ are ordinary accounts once created.
 Each is created only if an account of that name does not already exist, and
 each keeps its suggested number only if the chart has not already used it
 (an imported chart that owns 1150 keeps it; the new account takes no
-number). Each is pinned to a balance-sheet detail type so it lands on the
-right line whatever the number-and-name rule would otherwise guess.
+number). Each is pinned to a detail type so it lands on the right line
+whatever the number-and-name rule would otherwise guess.
 
 | Number | Name                     | Type      | Detail type            |
 | ------ | ------------------------ | --------- | ---------------------- |
@@ -53,6 +60,7 @@ right line whatever the number-and-name rule would otherwise guess.
 | 2050   | Retainage Payable        | Liability | Other Current Liability|
 | 2210   | Customer Deposits        | Liability | Other Current Liability|
 | 2220   | Use Tax Payable          | Liability | Other Current Liability|
+| 4050   | Contract Revenue         | Income    | Income                 |
 | 5400   | Equipment Cost           | COGS      | Cost of Goods Sold     |
 | 5500   | Other Job Costs          | COGS      | Cost of Goods Sold     |
 
@@ -60,9 +68,10 @@ Retainage is the portion of a billing held back until a job is accepted —
 receivable when a customer holds it from you, payable when you hold it from
 a sub. Construction in Progress carries costs on a job not yet billed.
 Customer Deposits holds money taken before work. Use Tax Payable is the use
-tax a contractor self-assesses on materials. Equipment Cost and Other Job
-Costs are job-cost buckets beside the seed chart's Materials, Labor and
-Subcontractor Costs.
+tax a contractor self-assesses on materials. Contract Revenue is where a pay
+application's billing posts unless its schedule-of-values line names another
+income account. Equipment Cost and Other Job Costs are job-cost buckets
+beside the seed chart's Materials, Labor and Subcontractor Costs.
 
 ## The cost codes
 
@@ -122,6 +131,18 @@ shows in construction mode only; a Business or Nonprofit company keeps its
 line forms as they were and posts the code's type (the API accepts a line
 type for any company). Job-cost reports read the line's type first and fall
 back to the code's, and roll a section's cost up under its division.
+
+**The cost type picks the account.** In construction mode a bill, purchase
+order or vendor credit line with a cost code or cost type and no account of
+its own posts to the code's account, else the default account of the line's
+cost type (its own, else the code's) — the accounts construction setup maps
+(subcontract → 5300, equipment → 5400 …) — before the vendor's default
+expense account is tried. The account chosen on the line, then the item's
+expense account, still come first. The **Sub pay app** / To Bill dialog
+pre-fills each line's account the same way, and the bill form saves a costed
+line with no account picked. A Job Cost Entry already resolves this way
+(line account, then code, then type). A Business or Nonprofit company's lines
+resolve as they always have.
 
 ## Estimating
 
@@ -353,9 +374,13 @@ none, so the fee tile and the SOV fee line agree on a GMP.
 
 **The schedule of values.** The SOV is the contract sum broken into the lines
 an owner pay application bills against — each with an item number, a
-description, an optional package and section, a kind (work, allowance,
-contingency, or one of the four markups: general conditions, insurance, fee,
-bond) and a scheduled value. The sum (and the schedule) is **pre-tax**: sales
+description, an optional package and section, a **revenue account**, a
+**Tax** box, a kind (work, allowance, contingency, or one of the four
+markups: general conditions, insurance, fee, bond) and a scheduled value. The
+section is the cost code the line's billing posts with and the revenue
+account is the income account it credits (blank means 4050 Contract
+Revenue), so revenue lands by section beside cost; the Tax box says whether
+sales tax is charged on the line's billing (see *Progress billing* below). The sum (and the schedule) is **pre-tax**: sales
 tax is added on each invoice, not carried in the contract. **Build from
 accepted estimate** lays it out automatically: one **work** line per trade
 package, in bid-book order (its base lines plus any accepted alternates, **at cost** — the lines
@@ -363,7 +388,26 @@ carry no markup), an **allowance** line for each allowance, then one line per
 **non-zero markup** in order (general conditions, insurance, fee, bond), each
 labelled with its percent, and a **contingency** line when the job carries one.
 The work, allowance and markup lines foot exactly to the pre-tax bid. Lines
-with no package roll into one "Unassigned" work line. You
+with no package roll into one "Unassigned" work line. Each built line credits
+**4050 Contract Revenue** and carries:
+
+- **its section** — a work line takes its package's section when the package
+  maps to one, else the package's lowest section; a package mapped to none
+  (and the Unassigned line) takes the cost code its estimate lines share, or
+  none when they differ. An allowance takes its own line's cost code, else
+  its package's section. A markup or contingency line carries none.
+- **its Tax box** — a work or allowance line is taxable when its estimate
+  lines are. A package whose lines are partly taxable becomes **two** work
+  lines, the taxable part under the package's name and the rest as
+  "*Package* (not taxable)", so a pay application at 100% charges the tax the
+  bid quoted. A markup or contingency line is taxable when any included
+  estimate line is, as the estimate taxes its markups.
+
+Each of the three is editable per line in the grid. A line saved through the
+API without `revenue_account_id` or `is_taxable` keeps what it had (a new
+line: 4050 and taxable); a revenue account that is not an income account is
+refused (422). A schedule built before this has no account on its lines (they
+post to 4050) and is taxable throughout, so it taxes as it always did. You
 can add, remove and reorder rows by hand and edit any value; a value may be
 **negative** — a deduct alternate carried onto the schedule nets the sum down.
 The SOV must **balance to the contract sum**: a running total and the balance
@@ -584,7 +628,9 @@ approve click.
 - *Owner CO, contract-funded* — adds the sell total to the **contract amount**
   (the original sum is never touched, so the Contract tab reads original +
   changes = revised), appends a read-only **change_order** line to the
-  schedule of values for the sell total, and writes locked budget rows
+  schedule of values for the sell total (with the cost code its lines share,
+  else the lowest of them; 4050 Contract Revenue; taxable when the rest of the
+  schedule has a taxable line), and writes locked budget rows
   (`source = change`) with the cost on the cost side and the sell on the
   revenue side. The job-cost tree shows these in its **Changes** column.
 - *Owner CO, contingency-funded* — the contract is unchanged; the budget rows
@@ -770,9 +816,14 @@ stored and reversed the period they go into the work, and the income billed to
 date always equals completed-to-date. The journal is DR Accounts Receivable for
 the net (total − retainage held this period + retainage released), DR
 **Retainage Receivable** (1150) for the retainage held, CR 1150 for any
-released, CR income per line, CR sales tax as any invoice. Sales tax is **on by
+released, CR each line's **revenue account** (its SOV line's, else 4050
+Contract Revenue) with the job and the line's **cost code**, CR sales tax as
+any invoice. Revenue by section then shows in the job cost tree's actual
+revenue, Job Budget vs Actual and P&L by Job. Sales tax is **on by
 default** and can be switched off per application (the *Charge tax* box); it is
-charged on the work billed this period at the application's **tax rate**,
+charged on the work billed this period **on the taxable SOV lines** (a line
+whose Tax box is off bills untaxed, and the invoice line says so) at the
+application's **tax rate**,
 defaulted from the job's accepted estimate (kept to six decimals, so 8.875%
 stays 8.875%) and editable while the application is open. A tax-exempt owner is never taxed. The application shows the tax and
 its current due includes it, so the application and the invoice match. The
@@ -897,6 +948,39 @@ can still be added.
 change-order log, the buyout report and job cost by vendor (#556, see *Job
 reports* below) are built on the contract, the cost tree, the commitments, the
 change orders and the pay applications above.
+
+## How construction maps to the books
+
+Every construction document either posts one journal entry or posts none and
+moves only the job's figures. The table is the accrual entry, account by
+account (cash-basis reports re-read the same entries; see *Retainage on the
+cash basis* above). "Job" means the line carries the job; "section" means it
+carries the cost code.
+
+| Document | Debit | Credit | Notes |
+| --- | --- | --- | --- |
+| **Estimate accepted** | — | — | No entry. Seeds and locks the job budget (cost per section and cost type, revenue spread pro rata so it foots to the bid). |
+| **Contract built / schedule of values saved** | — | — | No entry. Each SOV line carries its section, its revenue account (4050 Contract Revenue unless changed) and its Tax box. |
+| **Owner deposit received** | the bank account chosen | 2210 Customer Deposits (job) | Held until a pay application applies it. |
+| **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, 4050, taxed as the schedule is); every kind writes budget rows. |
+| **Commitment issued; sub change order approved** | — | — | No entry. Committed cost on the job, by section and cost type. |
+| **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released (job); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. |
+| … with a deposit applied | 2210 Customer Deposits | 1100 Accounts Receivable | A payment from the deposit, applied to the application's invoice. |
+| … with retainage released | 1100 Accounts Receivable (job) | 1150 Retainage Receivable (job) | Inside the application's own entry; a release-only application bills nothing else. |
+| **Pay application voided** | — | — | Reverses the invoice's entry and any deposit payment, on their original dates. |
+| **Sub or supplier bill** (Sub pay app / To Bill, or entered by hand) | each line's cost account (job, section, cost type), with its share of the bill's tax: the line's account, else the item's expense account, else (construction) the code's account, else the cost type's default — 5100 material, 5200 labor, 5300 subcontract, 5400 equipment, 5500 other — else the vendor's default expense account | 2000 Accounts Payable for the net; 2050 Retainage Payable for the retainage held (job) | A stock item posts to Inventory. A line nothing names is refused with a sentence. |
+| **Sub retainage released** (Release retainage on the commitment) | 2050 Retainage Payable (job) | 2000 Accounts Payable | A bill with no expense line, paid through Pay Bills. |
+| **Bill payment** | 2000 Accounts Payable | the bank (1000 Checking unless another is chosen) | |
+| **Customer payment** | the deposit-to account (Undeposited Funds unless a bank is chosen) | 1100 Accounts Receivable | Retainage still held stays on 1150 until a release bills it. |
+| **Job Cost Entry** | the line's cost account (the line's, else the code's, else the cost type's default) (job, section, cost type) | the line's offset account, else the equipment's recovery account, else the cost type's offset account | |
+| **Sales tax paid** | 2200 Sales Tax Payable | the bank | |
+
+Because each pay-application line credits its own revenue account with its
+section, revenue by section appears beside cost by section in the job cost
+tree (actual revenue), Job Budget vs Actual and P&L by Job; a line with no
+section (a markup line, unless one is set) reads under "Other". Because each
+cost type has a default account, the P&L's cost lines (5100–5500) and the job
+reports' cost types agree for a costed line that names no account of its own.
 
 ## Job reports
 
