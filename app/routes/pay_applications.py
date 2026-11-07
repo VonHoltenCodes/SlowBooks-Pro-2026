@@ -628,6 +628,10 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     app.status = "approved"
     app.approved_at = datetime.now(timezone.utc)
     app.invoice_id = invoice.id if invoice is not None else None
+    # The first approved application is the work under way: a pending or
+    # awarded job moves to in progress.
+    if job.status in ("pending", "awarded"):
+        job.status = "in_progress"
     db.flush()
 
     if deposit > 0:

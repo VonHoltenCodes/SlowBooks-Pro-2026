@@ -57,6 +57,7 @@ SECTIONS = (
     ("01 60 00", "Product Requirements"),
     ("01 70 00", "Execution and Closeout Requirements"),
     ("02 41 00", "Demolition"),
+    ("02 41 19", "Selective Demolition"),
     ("03 10 00", "Concrete Forming and Accessories"),
     ("03 20 00", "Concrete Reinforcing"),
     ("03 30 00", "Cast-in-Place Concrete"),
@@ -82,6 +83,7 @@ SECTIONS = (
     ("08 70 00", "Hardware"),
     ("08 80 00", "Glazing"),
     ("09 20 00", "Plaster and Gypsum Board"),
+    ("09 21 16", "Gypsum Board Assemblies"),
     ("09 30 00", "Tiling"),
     ("09 50 00", "Ceilings"),
     ("09 60 00", "Flooring"),
@@ -97,6 +99,7 @@ SECTIONS = (
     ("21 10 00", "Water-Based Fire-Suppression Systems"),
     ("22 10 00", "Plumbing Piping"),
     ("22 40 00", "Plumbing Fixtures"),
+    ("23 00 00", "Heating, Ventilating, and Air Conditioning (HVAC)"),
     ("23 05 00", "Common Work Results for HVAC"),
     ("23 30 00", "HVAC Air Distribution"),
     ("23 80 00", "Decentralized HVAC Equipment"),
@@ -133,7 +136,7 @@ TRADE_PACKAGES = (
             "01 70 00",
         ),
     ),
-    ("Demolition", ("02 41 00",)),
+    ("Demolition", ("02 41 00", "02 41 19")),
     ("Concrete", ("03 10 00", "03 20 00", "03 30 00", "03 40 00")),
     ("Masonry", ("04 20 00", "04 40 00")),
     ("Structural Steel and Misc. Metals", ("05 10 00", "05 30 00", "05 50 00")),
@@ -144,7 +147,7 @@ TRADE_PACKAGES = (
     ("Joint Sealants", ("07 90 00",)),
     ("Doors, Frames and Hardware", ("08 10 00", "08 30 00", "08 70 00")),
     ("Glass and Glazing", ("08 40 00", "08 50 00", "08 80 00")),
-    ("Drywall and Ceilings", ("09 20 00", "09 50 00")),
+    ("Drywall and Ceilings", ("09 20 00", "09 21 16", "09 50 00")),
     ("Tile", ("09 30 00",)),
     ("Flooring", ("09 60 00",)),
     ("Painting", ("09 90 00",)),
@@ -153,7 +156,7 @@ TRADE_PACKAGES = (
     ("Elevators", ("14 20 00",)),
     ("Fire Protection", ("21 10 00",)),
     ("Plumbing", ("22 10 00", "22 40 00")),
-    ("HVAC", ("23 05 00", "23 30 00", "23 80 00")),
+    ("HVAC", ("23 00 00", "23 05 00", "23 30 00", "23 80 00")),
     ("Electrical", ("26 05 00", "26 20 00", "26 50 00")),
     ("Low Voltage and Life Safety", ("27 10 00", "28 10 00", "28 46 00")),
     ("Earthwork", ("31 10 00", "31 20 00", "31 60 00")),
@@ -241,6 +244,55 @@ def ensure_division(db: Session, number: str, cache: dict | None = None):
     return row
 
 
+def default_package_id(db: Session, code) -> int | None:
+    """The trade package a new section should join, or None: the one the
+    standard catalog puts it in (by package name), else the single package its
+    division's other sections already belong to. None when the section is not
+    a section, is already mapped, or the choice is not exactly one package."""
+    from app.models.cost_codes import CostCode
+    from app.models.trade_packages import TradePackage, TradePackageSection
+
+    if code.level != "section" or not db.query(TradePackage.id).first():
+        return None
+    if (
+        db.query(TradePackageSection)
+        .filter(TradePackageSection.cost_code_id == code.id)
+        .first()
+    ):
+        return None
+    for name, section_codes in TRADE_PACKAGES:
+        if code.code in {normalize_code(c) for c in section_codes}:
+            pkg = db.query(TradePackage).filter(TradePackage.name == name).first()
+            if pkg is not None:
+                return pkg.id
+    div = division_of(code.code)
+    if div is None:
+        return None
+    siblings = db.query(CostCode.id).filter(
+        CostCode.level == "section",
+        CostCode.code.like(f"{div} %"),
+        CostCode.id != code.id,
+    )
+    ids = {
+        row[0]
+        for row in db.query(TradePackageSection.package_id).filter(
+            TradePackageSection.cost_code_id.in_(siblings)
+        )
+    }
+    return ids.pop() if len(ids) == 1 else None
+
+
+def map_new_section(db: Session, code) -> None:
+    """Put a newly created section on its default package, so a bid line on it
+    lands in the Buyout and the schedule of values without a trip to Settings."""
+    from app.models.trade_packages import TradePackageSection
+
+    pkg_id = default_package_id(db, code)
+    if pkg_id is not None:
+        db.add(TradePackageSection(package_id=pkg_id, cost_code_id=code.id))
+        db.flush()
+
+
 def load_standard_catalog(db: Session) -> dict:
     """Load the division titles and the common sections: divisions first,
     then each section parented to its division (created from the title table
@@ -277,6 +329,7 @@ def load_standard_catalog(db: Session) -> dict:
         db.add(row)
         db.flush()
         by_code[code.lower()] = row
+        map_new_section(db, row)
         created += 1
 
     db.flush()

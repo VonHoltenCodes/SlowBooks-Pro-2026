@@ -11,7 +11,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.exc import IntegrityError
 from fastapi.responses import Response
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
 from app.database import get_db
 from app.routes.invoices.helpers import (
@@ -39,12 +39,14 @@ from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
 from app.models.job_costing import JobBudget
-from app.models.jobs import Job
+from app.models.jobs import Job, SovLine
+from app.models.pay_applications import PayApplication
 from app.schemas.estimates import (
     EstimateCreate,
     EstimateUpdate,
     EstimateResponse,
     EstimateAccept,
+    EstimateLost,
     totals_from_dict,
 )
 from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
@@ -178,6 +180,27 @@ def _lines_changed(db: Session, estimate: Estimate, sent_lines) -> bool:
     return [_line_key(ln) for ln in sent] != [_line_key(ln) for ln in stored]
 
 
+def _pay_app_job_ids(db: Session, job_ids) -> set:
+    """Of these jobs, the ones that bill by pay application: a contract type, a
+    schedule of values, or any pay application (#552, #555). Converting an
+    estimate on one would post the whole contract a second time."""
+    ids = {j for j in job_ids if j is not None}
+    if not ids:
+        return set()
+    found = {
+        row[0]
+        for row in db.query(Job.id)
+        .filter(Job.id.in_(ids), Job.contract_type.isnot(None))
+        .all()
+    }
+    for model in (SovLine, PayApplication):
+        found |= {
+            row[0]
+            for row in db.query(model.job_id).filter(model.job_id.in_(ids)).distinct()
+        }
+    return found
+
+
 def _estimate_response(est: Estimate) -> EstimateResponse:
     """A single estimate's response: the customer name, each line's package
     name, and the bid math (#551). The list endpoint skips the totals."""
@@ -190,6 +213,13 @@ def _estimate_response(est: Estimate) -> EstimateResponse:
         if line is not None and line.trade_package is not None:
             line_resp.trade_package_name = line.trade_package.name
     resp.totals = totals_from_dict(estimate_totals(est))
+    db = object_session(est)
+    resp.bills_by_pay_app = bool(
+        db is not None
+        and est.job_id is not None
+        and terms_from_db(db).is_construction
+        and _pay_app_job_ids(db, [est.job_id])
+    )
     return resp
 
 
@@ -237,6 +267,10 @@ def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     estimate.job_id = job.id
     estimate.status = EstimateStatus.ACCEPTED
     estimate.accepted_at = datetime.now(timezone.utc)
+    # The job is won: a pending job is awarded (the first approved pay
+    # application moves it on to in progress).
+    if job.status == "pending":
+        job.status = "awarded"
     budgets_from_estimate(db, job, estimate)
     # Lock exactly the rows this acceptance seeded; manual rows stay editable.
     db.query(JobBudget).filter(
@@ -270,11 +304,17 @@ def list_estimates(
         .limit(limit)
         .all()
     )
+    pay_app_jobs = (
+        _pay_app_job_ids(db, [e.job_id for e in estimates])
+        if terms_from_db(db).is_construction
+        else set()
+    )
     results = []
     for est in estimates:
         resp = EstimateResponse.model_validate(est)
         if est.customer:
             resp.customer_name = est.customer.name
+        resp.bills_by_pay_app = est.job_id in pay_app_jobs
         results.append(resp)
     return results
 
@@ -587,6 +627,34 @@ def accept_estimate(
     return _estimate_response(estimate)
 
 
+@router.post("/{estimate_id}/lost", response_model=EstimateResponse)
+def mark_estimate_lost(
+    estimate_id: int,
+    data: Optional[EstimateLost] = None,
+    db: Session = Depends(get_db),
+):
+    """Mark a bid lost: status rejected, with an optional reason kept in the
+    notes. An accepted or converted estimate won the job and can't be lost."""
+    estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
+    if not estimate:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    if estimate.status in (EstimateStatus.ACCEPTED, EstimateStatus.CONVERTED):
+        raise HTTPException(
+            status_code=409,
+            detail="An accepted or converted estimate won the job; it can't be marked lost.",
+        )
+    if estimate.status == EstimateStatus.REJECTED:
+        raise HTTPException(status_code=409, detail="Estimate is already marked lost")
+    estimate.status = EstimateStatus.REJECTED
+    reason = (data.reason or "").strip() if data else ""
+    if reason:
+        line = f"Lost {date.today().isoformat()}: {reason}"
+        estimate.notes = f"{estimate.notes}\n{line}" if estimate.notes else line
+    db.commit()
+    db.refresh(estimate)
+    return _estimate_response(estimate)
+
+
 @router.get("/{estimate_id}/pdf")
 def estimate_pdf(estimate_id: int, db: Session = Depends(get_db)):
     """Generate the estimate PDF."""
@@ -637,6 +705,24 @@ def convert_to_invoice(
         raise HTTPException(status_code=404, detail="Estimate not found")
     if estimate.status == EstimateStatus.CONVERTED:
         raise HTTPException(status_code=400, detail="Estimate already converted")
+    # A contract job bills by pay application, with retainage; the whole bid
+    # as an invoice would post the contract's income a second time.
+    if (
+        estimate.job_id is not None
+        and terms_from_db(db).is_construction
+        and _pay_app_job_ids(db, [estimate.job_id])
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "job_bills_by_pay_application",
+                "message": (
+                    "This job bills by pay application; converting the "
+                    "estimate would bill the contract a second time. Bill it "
+                    "from the job's Pay apps tab."
+                ),
+            },
+        )
     # The invoice is dated the day it is made, as QuickBooks does: keeping
     # the estimate's date back-dated the sale and its due date (2.17.3
     # exploratory W-L10). Its journal posts on that date, so that is the

@@ -84,7 +84,9 @@ chart) is left exactly as typed, with a null level, and re-importing it never
 rewrites it. Everything sorts by code — list, tree, pickers, import result.
 
 The seeded set is the division titles plus a **modest set of common
-sections**. The full numbered section catalog isn't ours to publish, so it is
+sections**, including the ones a GC bids by: `02 41 19` Selective Demolition,
+`09 21 16` Gypsum Board Assemblies and `23 00 00` HVAC, each already on its
+default package (Demolition, Drywall and Ceilings, HVAC). The full numbered section catalog isn't ours to publish, so it is
 not shipped; import your own full list through **Import CSV** on the Cost
 Codes page — a CSV of just `code,name` is enough (a few hundred sections land
 normalized and auto-parented in one call, each section's division created
@@ -100,7 +102,15 @@ divisions, and a division can be split across packages. Construction setup
 seeds a default set of packages mapped to the sections it has; edit them, and
 the section mapping, under **Settings → Lists → Trade Packages** (shown only for
 construction companies). Estimate lines, commitments, the schedule of values
-and the Buyout tab all use them.
+and the Buyout tab all use them. **A section you add later joins a package
+for you:** the standard catalog's own package if it is a catalog section, else
+the one package its division's other sections already belong to (when it is
+exactly one; with two or none the section stays unmapped until you map it
+here). Packages **list in bid-book order** everywhere they appear (the
+estimate and its PDF, the schedule of values, the Buyout): by their lowest
+mapped section code, then name, so Demolition (02) precedes Concrete (03);
+a package with no mapped section follows those that have one, and Unassigned
+is last.
 
 ### Cost type per line
 
@@ -134,7 +144,8 @@ the cost posts. A unit of measure (SF, LF, EA, CY…) sits beside the quantity.
 - **Allowance** — a budgeted figure for work not yet designed. Its amount is
   in the subtotal and carries no markup unless the estimate's **Markup on
   allowances** flag is on (see below). On accept it budgets its amount as cost
-  (a budgeted figure is spent, not margined).
+  (a budgeted figure is spent, not margined), and the Buyout reads that amount
+  as the allowance's bid cost.
 - **Alternate** — an add or deduct the customer can choose. Its amount is in
   no total until it is **accepted**; a deduct carries a negative amount, so it
   subtracts. An alternate that carries a unit cost is shown to the customer at
@@ -202,15 +213,38 @@ total, Tax and Total. The seeded budget distributes the markups across the rows'
 revenue pro rata to each row's share of the markup base, so the budgeted
 revenue foots to the bid. A code you budgeted by hand keeps its own row and its
 own share of the markups; that share is not pushed onto the other rows.
-**General conditions are both revenue and cost:** the GC percent stays markup
-revenue, and on accept the GC amount is also budgeted as a cost on a "GC
-General Conditions" code (created if the books have none, reused if they do),
-so the job carries it. That row carries cost only; its revenue is already in
-the rows above, so it is not counted twice. Insurance, fee and bond are revenue
-only. Converting an accepted estimate to an invoice drops
+**General conditions, insurance and bond are both revenue and cost:** each
+percent stays markup revenue, and on accept each amount is also budgeted as a
+cost on a code of its own (`GC` General Conditions, `INS` Insurance, `BOND`
+Bond; created if the books have none, reused if they do), so the job carries
+the premiums a GC really pays. Those rows carry cost only; their revenue is
+already in the rows above, so it is not counted twice. The **fee** is the only
+markup that is not also a cost, so the job's budgeted margin is exactly the
+fee. **Accept also awards the job:** a job still `pending` becomes `awarded`
+(a job already awarded, in progress or closed is left alone), and the first
+approved pay application moves a pending or awarded job to `in progress`. The
+Accept confirm names the budget it locks (the cost budget against the bid
+total) and warns when the estimate's expiration date has passed. Converting an accepted estimate to an invoice drops
 the unit-price lines and any un-accepted alternate, carries each line's cost
 type and unit cost onto the invoice, and adds one invoice line per non-zero
 markup (on the job) so the invoice foots to the bid.
+
+**Convert is for jobs that do not bill by pay application.** A job with a
+contract type, a schedule of values or any pay application bills through
+pay applications, with retainage; converting its estimate would post the whole
+contract as income a second time, so `POST /api/estimates/{id}/convert` answers
+409 ("This job bills by pay application; …") and the estimate list and view
+hide Convert (the estimate's `bills_by_pay_app` says which). A plain job
+converts as before.
+
+**Accept, Lost and the list.** On the Estimates list a pending estimate with a
+job shows **Accept** as its main action (Convert is secondary, or absent on a
+contract job); one with no job says "Needs a job to accept" instead. **Mark
+lost** (`POST /api/estimates/{id}/lost`, with an optional `reason`) sets the
+status to `rejected` and keeps the reason, dated, in the notes; an accepted or
+converted estimate can't be marked lost. The list carries a **Status** filter
+(Pending / Accepted / Lost / Converted); `GET /api/estimates?status=` filters
+the same way.
 
 **Change orders move the locked budget.** A **change order** (#554, see
 *Change orders* below) is how a locked budget moves — a numbered document that
@@ -279,7 +313,7 @@ contingency, or one of the four markups: general conditions, insurance, fee,
 bond) and a scheduled value. The sum (and the schedule) is **pre-tax**: sales
 tax is added on each invoice, not carried in the contract. **Build from
 accepted estimate** lays it out automatically: one **work** line per trade
-package (its base lines plus any accepted alternates, **at cost** — the lines
+package, in bid-book order (its base lines plus any accepted alternates, **at cost** — the lines
 carry no markup), an **allowance** line for each allowance, then one line per
 **non-zero markup** in order (general conditions, insurance, fee, bond), each
 labelled with its percent, and a **contingency** line when the job carries one.
@@ -360,13 +394,34 @@ whole-commitment figures — a commitment has no period — so on a date-ranged
 cost tree they are all-time (the response flags this with
 `commitments_all_time`), unlike the period-scoped actuals beside them.
 
+**Issuing a commitment.** A new commitment is a **draft**, and a draft is in no
+Buyout, committed or commitment-status figure. **Issue** (on the Purchase
+Orders list and the view) moves it to `sent` (issued); Edit has a **Status**
+select too. `PUT /api/purchase-orders/{id}` with a status that isn't one of
+`draft`, `sent`, `partial`, `received`, `closed` answers 422 naming them.
+
 **Bid vs buyout.** A **Buyout** tab on the job (after Contract, construction
 mode only) pairs each trade package's **bid** — the accepted estimate's cost
-for that package — against what has been **bought** (the commitments tagged to
-it), with the **variance**, the committed-remaining, the billed-to-date and the
-commitments behind each package linked through. Packages bid but not yet bought
-show with nothing bought; commitments with no package gather under
-*Unassigned*. `GET /api/jobs/{id}/buyout` is the data, and the seam the buyout
+for that package, an allowance at its amount — against what has been **bought**
+(the commitments tagged to it). Beside them:
+
+- **Changes** — the approved change-order cost for the package (owner change
+  orders and standalone sub change orders; a sub change order that carries an
+  owner change order is counted once, on the owner's). The **variance** is
+  bid + changes − bought, so an owner change order that funds a sub change
+  order reads as covered, not as a loss. A line is placed by its own package,
+  else the package its cost code maps to.
+- **Spent, no commitment** — coded lines of bills with no commitment, placed
+  by their cost code's package, so a plain bill is not a $0 bought.
+- the committed-remaining, the billed-to-date and the commitments behind each
+  package, linked through.
+
+The three markups that are also costs show as rows of their own after the
+packages (**General conditions**, **Insurance**, **Bond**), so the table's bid
+total is the cost budget the accepted estimate locks (the Overview and Cost
+Detail budget). Packages bid but not yet bought show with nothing bought;
+commitments, changes and bills with no package gather under *Unassigned*. The
+Buyout Report carries the same two columns. `GET /api/jobs/{id}/buyout` is the data, and the seam the buyout
 report and job-cost-by-vendor (#556, see *Job reports* below) are built on.
 
 **Compliance flags.** Bills and Pay Bills carry each Sub vendor's paperwork —

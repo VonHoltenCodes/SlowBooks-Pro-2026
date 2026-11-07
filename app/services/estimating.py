@@ -58,6 +58,21 @@ def line_price(line) -> Decimal:
     return _q(qty * rate)
 
 
+def package_order_key(pkg) -> tuple:
+    """Where a trade package sits in a bid book: by its lowest mapped section
+    code (so 02 Demolition precedes 03 Concrete), then name. A package with no
+    mapped section sorts after those that have one, and no package at all
+    (Unassigned) sorts last. Shared by the estimate, its PDF, the schedule of
+    values and the Buyout."""
+    if pkg is None:
+        return (2, "", "")
+    codes = [m.cost_code.code for m in pkg.sections if m.cost_code is not None]
+    name = (pkg.name or "").lower()
+    if codes:
+        return (0, min(codes), name)
+    return (1, "", name)
+
+
 def _pct(value) -> Decimal:
     """A stored percent (5.5 = 5.5%) as a fraction."""
     return Decimal(str(value or 0)) / Decimal("100")
@@ -206,6 +221,7 @@ def estimate_totals(estimate) -> dict:
     markup_base = Decimal("0")
     priced_direct = Decimal("0")
     by_package: dict = {}
+    package_objs: dict = {}
     alternates: list = []
     unit_prices: list = []
     factor = markup_factor(estimate)
@@ -268,8 +284,10 @@ def estimate_totals(estimate) -> dict:
                 "line_count": 0,
             }
             by_package[key] = bucket
-        # An allowance's unit cost (if any was typed) is not a bid cost.
-        bucket["cost"] += Decimal("0") if kind == "allowance" else cost
+            package_objs[key] = line.trade_package
+        # An allowance's amount is its bid cost: it budgets as cost on accept
+        # (a budgeted figure is spent), whatever unit cost was typed on it.
+        bucket["cost"] += price if kind == "allowance" else cost
         bucket["price"] += price
         bucket["line_count"] += 1
 
@@ -283,10 +301,20 @@ def estimate_totals(estimate) -> dict:
     markup_total = gc + insurance + fee + bond
     bid_total = subtotal + markup_total
 
-    # Named packages by name, the unassigned bucket last.
-    packages = sorted(
-        by_package.values(),
-        key=lambda b: (b["package_id"] is None, b["package_name"].lower()),
+    # Packages in bid-book order (lowest section code, then name), the
+    # unassigned bucket last.
+    packages = [
+        by_package[k]
+        for k in sorted(by_package, key=lambda k: package_order_key(package_objs[k]))
+    ]
+    # What accepting locks as cost: every package's cost (allowances at their
+    # amount) plus the three markups that are also real job costs. The fee is
+    # the only markup that stays margin.
+    budget_cost = (
+        sum((b["cost"] for b in by_package.values()), Decimal("0"))
+        + gc
+        + insurance
+        + bond
     )
 
     return {
@@ -309,6 +337,7 @@ def estimate_totals(estimate) -> dict:
         # bid_tax / bid_total_with_tax mirror the estimate's stored tax and
         # total (total − tax == bid_total).
         "bid_total": bid_total,
+        "budget_cost": budget_cost,
         "bid_tax": _q(getattr(estimate, "tax_amount", 0) or 0),
         "bid_total_with_tax": _q(getattr(estimate, "total", 0) or 0),
         "by_package": packages,

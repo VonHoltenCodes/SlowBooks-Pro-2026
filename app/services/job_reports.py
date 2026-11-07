@@ -1073,16 +1073,20 @@ def change_order_log(
 BUYOUT_COLUMNS = [
     {"key": "package_name", "label": "Package", "kind": "text"},
     {"key": "bid_cost", "label": "Bid", "kind": "money"},
+    {"key": "changes", "label": "Changes", "kind": "money"},
     {"key": "bought", "label": "Bought", "kind": "money"},
     {"key": "variance", "label": "Variance", "kind": "money"},
+    {"key": "spent_no_commitment", "label": "Spent, no commitment", "kind": "money"},
     {"key": "committed_remaining", "label": "Remaining", "kind": "money"},
     {"key": "billed_to_date", "label": "Billed", "kind": "money"},
 ]
 
 _BUYOUT_SUMMED = (
     "bid_cost",
+    "changes",
     "bought",
     "variance",
+    "spent_no_commitment",
     "committed_remaining",
     "billed_to_date",
 )

@@ -803,14 +803,18 @@ def allocate_cost(
 
 
 GC_CODE = "GC"
+# The insurance and bond premiums are job costs on their own codes, as general
+# conditions are, so the budgeted margin is the fee (est gap 9).
+INSURANCE_CODE = "INS"
+BOND_CODE = "BOND"
 
 
-def _general_conditions_code(db: Session) -> CostCode:
-    """The cost code general conditions budget to: a custom "GC" code, reused
-    if the books already have one, else created (#551)."""
-    code = db.query(CostCode).filter(CostCode.code == GC_CODE).first()
+def _markup_cost_code(db: Session, code_text: str, name: str) -> CostCode:
+    """The cost code a markup's cost budgets to: a custom code, reused if the
+    books already have one, else created (#551)."""
+    code = db.query(CostCode).filter(CostCode.code == code_text).first()
     if code is None:
-        code = CostCode(code=GC_CODE, name="General Conditions", cost_type="other")
+        code = CostCode(code=code_text, name=name, cost_type="other")
         db.add(code)
         db.flush()
     return code
@@ -831,9 +835,10 @@ def budgets_from_estimate(db: Session, job: Job, estimate: Estimate) -> list[Job
     operator budgeted by hand keeps its own row AND its own share: that share
     is not pushed onto the other rows.
 
-    General conditions are both revenue and cost: the GC markup is spread as
-    revenue like the other markups, and its amount is also budgeted as a COST
-    on a "GC" General Conditions row so the job carries it.
+    General conditions, insurance and bond are both revenue and cost: each
+    markup is spread as revenue like the fee, and its amount is also budgeted
+    as a COST on its own row ("GC", "INS", "BOND") so the job carries it and
+    the budgeted margin is the fee.
 
     Lines without a code roll into a whole-job row. Re-seeding replaces the
     estimate rows; a row the operator edited by hand (source "manual") wins and
@@ -913,18 +918,25 @@ def budgets_from_estimate(db: Session, job: Job, estimate: Estimate) -> list[Job
         for i, (code_id, ctype, cost, rev, _base) in enumerate(entries)
         if code_id not in manual_codes
     ]
-    # General conditions also carry cost: budget the GC amount on its own code
-    # (merged into a line already coded and typed the same).
-    gc_amount = est_totals["gc"]
-    if gc_amount:
-        gc_code = _general_conditions_code(db)
-        if gc_code.id not in manual_codes:
-            for n, (code_id, ctype, cost, rev) in enumerate(seeded):
-                if (code_id, ctype) == (gc_code.id, gc_code.cost_type):
-                    seeded[n] = (code_id, ctype, cost + gc_amount, rev)
-                    break
-            else:
-                seeded.append((gc_code.id, gc_code.cost_type, gc_amount, Decimal("0")))
+    # General conditions, insurance and bond also carry cost: each amount is
+    # budgeted on its own code (merged into a line already coded and typed
+    # the same). Their revenue is already spread across the rows above.
+    for amount, code_text, name in (
+        (est_totals["gc"], GC_CODE, "General Conditions"),
+        (est_totals["insurance"], INSURANCE_CODE, "Insurance"),
+        (est_totals["bond"], BOND_CODE, "Bond"),
+    ):
+        if not amount:
+            continue
+        mk_code = _markup_cost_code(db, code_text, name)
+        if mk_code.id in manual_codes:
+            continue
+        for n, (code_id, ctype, cost, rev) in enumerate(seeded):
+            if (code_id, ctype) == (mk_code.id, mk_code.cost_type):
+                seeded[n] = (code_id, ctype, cost + amount, rev)
+                break
+        else:
+            seeded.append((mk_code.id, mk_code.cost_type, amount, Decimal("0")))
     rows = []
     for code_id, ctype, cost, rev in seeded:
         row = JobBudget(

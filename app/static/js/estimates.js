@@ -8,28 +8,52 @@ const EstimatesPage = {
 
     async render() {
         const { rows: estimates, note: capNote } = await listRows(EstimatesPage, '/estimates', 'EstimatesPage.showAll()', 'estimates');
+        const con = Terms.isConstruction();
         return renderListPage({
             title: 'Estimates',
+            // a bid log needs a status filter; a business estimate list is as it was
+            filter: con ? {
+                id: 'est-status-filter',
+                rowSelector: '.est-row',
+                options: [['pending', 'Pending'], ['accepted', 'Accepted'], ['rejected', 'Lost'], ['converted', 'Converted']],
+            } : null,
             headerHtml: `<button class="btn btn-primary" onclick="EstimatesPage.showForm()">+ New Estimate</button>` + capNote,
             empty: `<p>No estimates yet.</p>
                 <button class="btn btn-primary" onclick="EstimatesPage.showForm()" style="margin-top:10px;">+ Create your first estimate</button>`,
             columns: ['#', T('Customer'), 'Date', 'Expires', 'Status',
                 { label: 'Total', cls: 'amount' }, 'Actions'],
             items: estimates,
-            row: est => `<tr>
+            row: est => `<tr class="est-row" data-status="${est.status}">
                     <td><strong>${escapeHtml(est.estimate_number)}</strong></td>
                     <td>${escapeHtml(est.customer_name || '')}</td>
                     <td>${formatDate(est.date)}</td>
                     <td>${formatDate(est.expiration_date)}</td>
-                    <td>${statusBadge(est.status)}</td>
+                    <td>${con && est.status === 'rejected' ? '<span class="badge badge-rejected">lost</span>' : statusBadge(est.status)}${con ? EstimatesPage.acceptNoteHtml(est) : ''}</td>
                     <td class="amount">${formatCurrency(est.total)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.view(${est.id})">View</button>
                         <button class="btn btn-sm btn-secondary" onclick="EstimatesPage.showForm(${est.id})">Edit</button>
-                        ${est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : ''}
+                        ${con ? EstimatesPage.constructionActionsHtml(est) : (est.status !== 'converted' ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : '')}
                     </td>
                 </tr>`,
         });
+    },
+
+    // A construction estimate's main action is Accept (the job is won), then
+    // Convert only on a job that does not bill by pay application; a bid that
+    // is still open can be marked lost.
+    constructionActionsHtml(est) {
+        const canAccept = est.status === 'pending' && !!est.job_id;
+        const canConvert = est.status !== 'converted' && est.status !== 'rejected' && !est.bills_by_pay_app;
+        return (canAccept ? `<button class="btn btn-sm btn-primary" onclick="EstimatesPage.accept(${est.id})">Accept</button>` : '')
+            + (canConvert ? `<button class="btn btn-sm ${canAccept ? 'btn-secondary' : 'btn-primary'}" onclick="EstimatesPage.convert(${est.id})">Convert</button>` : '')
+            + (est.status === 'pending' ? `<button class="btn btn-sm btn-secondary" onclick="EstimatesPage.markLost(${est.id})">Mark lost</button>` : '');
+    },
+
+    // Why a pending estimate has no Accept: it has no job to budget.
+    acceptNoteHtml(est) {
+        if (est.status !== 'pending' || est.job_id) return '';
+        return `<div style="font-size:11px;color:var(--text-muted)">Needs a job to accept: Edit and pick one.</div>`;
     },
 
     async view(id) {
@@ -68,7 +92,8 @@ const EstimatesPage = {
                 ${EstimatesPage.acceptButtonHtml(est)}
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/estimates/${est.id}/print-preview','_blank')">Print</button>
-                ${est.status !== 'converted' ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
+                ${construction && est.status === 'pending' ? `<button class="btn btn-secondary" onclick="EstimatesPage.markLost(${est.id})">Mark lost</button>` : ''}
+                ${est.status !== 'converted' && !(construction && (est.bills_by_pay_app || est.status === 'rejected')) ? `<button class="btn btn-primary" onclick="EstimatesPage.convert(${est.id})">Convert to ${T('Invoice')}</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
     },
@@ -443,11 +468,40 @@ const EstimatesPage = {
         return `<button class="btn btn-primary" onclick="EstimatesPage.accept(${est.id})">Accept</button>`;
     },
 
+    // What the Accept confirm says: the budget it locks (cost against the
+    // bid), and a warning when the estimate has expired. Pure, for a probe.
+    acceptConfirmText(est) {
+        const t = est.totals || {};
+        let text = 'Accepting locks the job budget to this estimate.';
+        if (t.budget_cost !== undefined) {
+            text = `Accepting locks the job budget to this estimate: ${formatCurrency(t.budget_cost)} of cost against a ${formatCurrency(t.bid_total)} bid.`;
+        }
+        if (est.expiration_date && est.expiration_date < todayISO()) {
+            text += `\n\nThis estimate expired on ${formatDate(est.expiration_date)}. Accept it anyway?`;
+        }
+        return text;
+    },
+
     async accept(id) {
-        if (!confirm('Accepting locks the job budget to this estimate.')) return;
+        let est;
+        try { est = await API.get(`/estimates/${id}`); }
+        catch (err) { toast(err.message, 'error'); return; }
+        if (!confirm(EstimatesPage.acceptConfirmText(est))) return;
         try {
             await API.post(`/estimates/${id}/accept`, {});
             toast('Estimate accepted; job budget locked');
+            closeModal();
+            App.refresh();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    // Mark a bid lost: status rejected, the reason (optional) kept in the notes.
+    async markLost(id) {
+        const reason = prompt('Mark this estimate lost. Why? (optional)', '');
+        if (reason === null) return;
+        try {
+            await API.post(`/estimates/${id}/lost`, { reason: reason.trim() || null });
+            toast('Estimate marked lost');
             closeModal();
             App.refresh();
         } catch (err) { toast(err.message, 'error'); }

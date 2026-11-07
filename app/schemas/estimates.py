@@ -171,6 +171,9 @@ class EstimateTotals(BaseModel):
     allowance_total: Decimal
     subtotal: Decimal
     bid_total: Decimal
+    # The cost budget accepting locks: package costs, allowances at their
+    # amount, and the general-conditions, insurance and bond costs.
+    budget_cost: Decimal = Decimal("0")
     bid_tax: Decimal
     bid_total_with_tax: Decimal
     by_package: list[EstimatePackageTotal] = []
@@ -180,6 +183,10 @@ class EstimateTotals(BaseModel):
 
 class EstimateAccept(StrictModel):
     job_id: Optional[int] = None
+
+
+class EstimateLost(StrictModel):
+    reason: Optional[str] = None
 
 
 def totals_from_dict(data: dict) -> EstimateTotals:
@@ -213,6 +220,9 @@ class EstimateResponse(BaseModel):
     lines: list[EstimateLineResponse] = []
     customer_name: Optional[str] = None
     totals: Optional[EstimateTotals] = None
+    # True when the estimate's job bills by pay application (a contract type, a
+    # schedule of values or a pay application), so Convert is refused.
+    bills_by_pay_app: bool = False
     created_at: datetime
     updated_at: datetime
 

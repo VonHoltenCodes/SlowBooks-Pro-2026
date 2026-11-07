@@ -1089,8 +1089,12 @@ def test_accept_budgets_general_conditions_as_a_cost(client, seed_customer):
     assert client.post(f"/api/estimates/{est['id']}/accept", json={}).status_code == 200
     rows = client.get(f"/api/jobs/{job['id']}/budgets").json()
     gc_rows = [r for r in rows if r["cost_code_id"] != a["id"]]
-    assert len(gc_rows) == 1
-    gc = gc_rows[0]
+    # the GC and, now, the insurance premium are costs on codes of their own
+    assert len(gc_rows) == 2
+    gc = next(r for r in gc_rows if r["cost_code_label"].startswith("GC "))
+    ins = next(r for r in gc_rows if r["cost_code_label"].startswith("INS "))
+    assert float(ins["amount"]) == 216.0  # 2% of 10,000 + 800
+    assert float(ins["revenue_amount"]) == 0.0
     assert float(gc["amount"]) == 800.0  # the GC amount, as cost
     assert float(gc["revenue_amount"]) == 0.0  # its revenue rides the code rows
     assert gc["locked"] is True
