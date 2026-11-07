@@ -25,6 +25,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    true,
 )
 from sqlalchemy.orm import relationship
 
@@ -139,6 +140,12 @@ class SovLine(Base):
     )
     kind = Column(String(16), nullable=False, default="work")
     scheduled_value = Column(Numeric(15, 2), nullable=False, default=0)
+    # The income account the line's billing credits; null posts to 4050
+    # Contract Revenue. is_taxable: sales tax is charged on its billing.
+    revenue_account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    is_taxable = Column(Boolean, nullable=False, default=True, server_default=true())
     source_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )
@@ -157,3 +164,4 @@ class SovLine(Base):
     job = relationship("Job", back_populates="sov_lines")
     trade_package = relationship("TradePackage")
     cost_code = relationship("CostCode")
+    revenue_account = relationship("Account")

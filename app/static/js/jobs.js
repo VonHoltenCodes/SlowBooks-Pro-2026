@@ -615,13 +615,16 @@ const JobsPage = {
     async contractHtml() {
         const job = JobsPage._job;
         if (!TradePackages._list) await TradePackages.load();
-        const [data, estimates, codes] = await Promise.all([
+        const [data, estimates, codes, accounts] = await Promise.all([
             API.get(`/jobs/${job.id}/contract`),
             API.get(`/estimates?customer_id=${job.customer_id}`).catch(() => []),
             API.get('/cost-codes').catch(() => []),
+            API.get('/accounts?active_only=true').catch(() => []),
         ]);
         JobsPage._contract = data;
         JobsPage._sovCodes = codes;
+        // a line's revenue account is an income account
+        JobsPage._sovAccounts = (accounts || []).filter(a => a.account_type === 'income');
         // the accepted estimates on this job, kept so Build reuses them
         JobsPage._acceptedEstimates = (estimates || []).filter(e => e.job_id === job.id && e.status === 'accepted');
         const packages = (TradePackages._list || []);
@@ -699,14 +702,16 @@ const JobsPage = {
                     <th scope="col">Description</th>
                     <th scope="col">Package</th>
                     <th scope="col">Section</th>
+                    <th scope="col" title="The income account this line's billing credits">Revenue account</th>
+                    <th scope="col" title="Sales tax is charged on this line's billing">Tax</th>
                     <th scope="col">Kind</th>
                     <th scope="col" class="amount">Scheduled value</th>
                     <th scope="col" style="width:70px"></th>
                 </tr></thead>
-                <tbody id="sov-body">${rows || '<tr><td colspan="7" style="color:var(--text-muted)">No schedule of values yet. Add rows, or build one from an accepted estimate.</td></tr>'}</tbody>
+                <tbody id="sov-body">${rows || '<tr><td colspan="9" style="color:var(--text-muted)">No schedule of values yet. Add rows, or build one from an accepted estimate.</td></tr>'}</tbody>
                 <tfoot>
-                    <tr><td colspan="5" style="text-align:right;font-weight:600">Total</td><td class="amount" id="sov-total" style="font-weight:600">${formatCurrency(total)}</td><td></td></tr>
-                    <tr><td colspan="5" style="text-align:right">Balance vs contract sum</td><td class="amount" id="sov-balance" style="color:${balColor};font-weight:600">${formatCurrency(balance)}</td><td></td></tr>
+                    <tr><td colspan="7" style="text-align:right;font-weight:600">Total</td><td class="amount" id="sov-total" style="font-weight:600">${formatCurrency(total)}</td><td></td></tr>
+                    <tr><td colspan="7" style="text-align:right">Balance vs contract sum</td><td class="amount" id="sov-balance" style="color:${balColor};font-weight:600">${formatCurrency(balance)}</td><td></td></tr>
                 </tfoot>
             </table></div>
             <div class="form-actions" data-write style="justify-content:flex-start;gap:8px">
@@ -725,7 +730,10 @@ const JobsPage = {
             return `<tr class="sov-row sov-co-row" data-co="1">
                 <td>${escapeHtml(line.item_no || '')}</td>
                 <td>${escapeHtml(line.description || '')}</td>
-                <td colspan="2" style="color:var(--text-muted)">Change order</td>
+                <td style="color:var(--text-muted)">Change order</td>
+                <td>${escapeHtml(line.cost_code_label || '—')}</td>
+                <td>${escapeHtml(line.revenue_account_name || 'Contract Revenue')}</td>
+                <td>${line.is_taxable === false ? 'No' : 'Yes'}</td>
                 <td>Change order</td>
                 <td class="amount sov-covalue" data-value="${line.scheduled_value ?? 0}">${formatCurrency(parseFloat(line.scheduled_value) || 0)}</td>
                 <td style="color:var(--text-muted);font-size:11px">read-only</td></tr>`;
@@ -734,6 +742,9 @@ const JobsPage = {
             `<option value="${p.id}" ${String(line.trade_package_id) === String(p.id) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)).join('');
         const codeOpts = ['<option value="">—</option>'].concat((codes || []).map(c =>
             `<option value="${c.id}" ${String(line.cost_code_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.code)}</option>`)).join('');
+        // Blank posts to 4050 Contract Revenue, which construction setup made.
+        const acctOpts = ['<option value="">Contract Revenue (default)</option>'].concat((JobsPage._sovAccounts || []).map(a =>
+            `<option value="${a.id}" ${String(line.revenue_account_id) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.account_number ? a.account_number + ' ' + a.name : a.name)}</option>`)).join('');
         const kindOpts = Object.entries(JobsPage.SOV_KINDS).filter(([k]) => k !== 'change_order').map(([k, v]) =>
             `<option value="${k}" ${(line.kind || 'work') === k ? 'selected' : ''}>${v}</option>`).join('');
         // An allowance line shows its change-order draw-down (used / remaining).
@@ -744,6 +755,8 @@ const JobsPage = {
             <td><input class="sov-desc" data-write maxlength="200" value="${escapeHtml(line.description || '')}" style="width:100%">${allowanceNote}</td>
             <td><select class="sov-pkg" data-write>${pkgOpts}</select></td>
             <td><select class="sov-code" data-write>${codeOpts}</select></td>
+            <td><select class="sov-acct" data-write aria-label="Revenue account">${acctOpts}</select></td>
+            <td><input class="sov-tax" data-write type="checkbox" aria-label="Taxable" ${line.is_taxable === false ? '' : 'checked'}></td>
             <td><select class="sov-kind" data-write>${kindOpts}</select></td>
             <td><input class="sov-value money" data-write type="number" step="0.01" value="${line.scheduled_value ?? ''}" style="width:110px;text-align:right" oninput="JobsPage.retotalSov()" title="A deduct alternate may be negative"></td>
             <td style="white-space:nowrap">
@@ -761,6 +774,8 @@ const JobsPage = {
             description: tr.querySelector('.sov-desc').value.trim() || null,
             trade_package_id: tr.querySelector('.sov-pkg').value ? parseInt(tr.querySelector('.sov-pkg').value) : null,
             cost_code_id: tr.querySelector('.sov-code').value ? parseInt(tr.querySelector('.sov-code').value) : null,
+            revenue_account_id: tr.querySelector('.sov-acct').value ? parseInt(tr.querySelector('.sov-acct').value) : null,
+            is_taxable: tr.querySelector('.sov-tax').checked,
             kind: tr.querySelector('.sov-kind').value,
             scheduled_value: parseFloat(tr.querySelector('.sov-value').value) || 0,
         }));

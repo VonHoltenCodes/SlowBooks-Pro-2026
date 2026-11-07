@@ -72,11 +72,15 @@ def application_totals(
     current-due figures line up with the invoices and account 1150 (#576).
 
     Sales tax rides on top: `tax_rate` (0 when tax is off for the application
-    or the customer is exempt) taxes what this application bills, which is
-    completed to date less `previous_billed` (the prior approved application's
-    completed to date). The earned/previous figures stay before tax, so the
-    cumulative arithmetic never counts an earlier application's tax again;
-    `current_due` adds this application's tax and matches its invoice."""
+    or the customer is exempt) taxes what this application bills on its
+    taxable lines. What it bills is completed to date less `previous_billed`
+    (the prior approved application's completed to date); a line whose
+    `is_taxable` is False takes its own billing (this period plus the change
+    in stored since `prior_stored`) out of the taxed figure. The
+    earned/previous figures stay before tax, so the cumulative arithmetic
+    never counts an earlier application's tax again; `current_due` adds this
+    application's tax and matches its invoice."""
+    lines = list(lines)
     rows = [line_computed(ln, retainage_pct) for ln in lines]
     scheduled_total = _q(sum((r["scheduled_value"] for r in rows), _ZERO))
     previous_total = _q(sum((r["previous"] for r in rows), _ZERO))
@@ -99,7 +103,20 @@ def application_totals(
     total_earned_less_retainage = _q(completed - retainage_to_date)
     due_before_tax = _q(total_earned_less_retainage - prev_cert)
     billed_this_period = _q(completed - _q(previous_billed))
-    tax_amount = _q(billed_this_period * Decimal(str(tax_rate or 0)))
+    # A line not taxable (its SOV line's flag) bills this period plus the
+    # change in its stored materials, none of it taxed.
+    exempt_billed = _q(
+        sum(
+            (
+                _q(r["this_period"] + r["stored"] - _q(getattr(ln, "prior_stored", 0)))
+                for ln, r in zip(lines, rows)
+                if getattr(ln, "is_taxable", True) is False
+            ),
+            _ZERO,
+        )
+    )
+    taxable_billed = _q(billed_this_period - exempt_billed)
+    tax_amount = _q(taxable_billed * Decimal(str(tax_rate or 0)))
     current_due = _q(due_before_tax + tax_amount)
     net_due = _q(current_due - deposit)
     return {
@@ -115,6 +132,7 @@ def application_totals(
         "total_earned_less_retainage": total_earned_less_retainage,
         "previous_applications": prev_cert,
         "billed_this_period": billed_this_period,
+        "taxable_billed": taxable_billed,
         "due_before_tax": due_before_tax,
         "tax_rate": Decimal(str(tax_rate or 0)),
         "tax_amount": tax_amount,
@@ -239,6 +257,8 @@ def application_figures(db: Session, app) -> dict:
             previous=h["previous"].get(ln.sov_line_id, _ZERO),
             this_period=ln.this_period,
             stored=ln.stored,
+            is_taxable=sov_line_taxable(db, ln.sov_line_id),
+            prior_stored=h["stored"].get(ln.sov_line_id, _ZERO),
         )
         for ln in app.lines
     ]
@@ -329,14 +349,41 @@ def has_approved_application(db: Session, job_id: int, as_of=None) -> bool:
     return bool(_approved(db, job_id, as_of=as_of))
 
 
+def sov_line_taxable(db: Session, sov_line_id) -> bool:
+    """Whether an application line's SOV line is taxable; a line with no SOV
+    line (or one since removed) is taxed, as every line was before the flag."""
+    from app.models.jobs import SovLine
+
+    sov = db.get(SovLine, sov_line_id) if sov_line_id else None
+    return True if sov is None else bool(sov.is_taxable)
+
+
 class _Row:
     """A lightweight line for the pure math, so history-filled `previous`
-    rides beside the stored this_period / stored."""
+    (and, for the tax, the line's taxable flag and prior stored) rides
+    beside the stored this_period / stored."""
 
-    __slots__ = ("scheduled_value", "previous", "this_period", "stored")
+    __slots__ = (
+        "scheduled_value",
+        "previous",
+        "this_period",
+        "stored",
+        "is_taxable",
+        "prior_stored",
+    )
 
-    def __init__(self, scheduled_value, previous, this_period, stored):
+    def __init__(
+        self,
+        scheduled_value,
+        previous,
+        this_period,
+        stored,
+        is_taxable=True,
+        prior_stored=_ZERO,
+    ):
         self.scheduled_value = scheduled_value
         self.previous = previous
         self.this_period = this_period
         self.stored = stored
+        self.is_taxable = is_taxable
+        self.prior_stored = prior_stored

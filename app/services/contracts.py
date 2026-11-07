@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from app.models.estimates import Estimate, EstimateStatus
 from app.models.jobs import Job, SovLine
-from app.services.accounting import _q
+from app.services.accounting import _q, get_contract_revenue_account_id
 from app.services.estimating import (
     estimate_totals,
     fmt_pct,
@@ -158,31 +158,66 @@ def settle_contract_type(db: Session, job: Job) -> None:
         job.original_contract_amount = original_contract_sum(db, job)
 
 
+def _taxable(line) -> bool:
+    """An estimate line is taxable unless it says it is not (the estimate's
+    own tax rule reads it the same way)."""
+    return getattr(line, "is_taxable", None) is not False
+
+
+def package_section_id(package, line_codes) -> Optional[int]:
+    """The cost code (section) a package's SOV line carries: the package's
+    one mapped section, else its lowest; with no section mapped, the code
+    every one of its estimate lines shares, else none. `line_codes` is the
+    set of the lines' cost code ids (None for a line with no code)."""
+    sections = (
+        [m.cost_code for m in package.sections if m.cost_code is not None]
+        if package is not None
+        else []
+    )
+    if sections:
+        return min(sections, key=lambda c: c.code or "").id
+    if len(line_codes) == 1:
+        return next(iter(line_codes))
+    return None
+
+
 def sov_from_estimate(estimate: Estimate) -> list[dict]:
     """The SOV lines an accepted estimate produces, in print order:
 
     - one `work` line per trade package — the sum of that package's base and
       accepted-alternate line PRICES, now AT COST (the lines carry no markup),
-      packages named first then "Unassigned";
+      packages named first then "Unassigned". A package whose lines are
+      partly taxable is two lines, the taxable part and the part that is not
+      ("Electrical (not taxable)"), so the tax billed follows the bid's;
     - one `allowance` line per allowance line (its own price);
     - one line per NON-ZERO markup, in order — general_conditions, insurance,
       fee, bond — each its own kind, named "General conditions (8%)" style.
+
+    Each line carries its cost code (a work line its package's section, see
+    package_section_id; an allowance its own line's code, else its
+    package's) and whether it is taxable (a work or allowance line from its
+    estimate lines; a markup line when any included line is, as the
+    estimate taxes its markups).
 
     The work lines plus the allowance lines sum to the estimate's subtotal, and
     the markup lines add markup_total, so the whole set foots exactly to the
     estimate's pre-tax bid_total. The contingency line is added by build_sov,
     which knows the job. Returns plain dicts (no line_no / item_no yet)."""
-    work: dict = {}  # package_id -> {"name", "value"}
+    work: dict = {}  # package_id -> {"name", "value", "parts", "codes", "package"}
     allowances: list[dict] = []
+    any_taxable = False
     for line in included_lines(estimate):
         kind = line.line_kind or "base"
+        any_taxable = any_taxable or _taxable(line)
         if kind == "allowance":
             allowances.append(
                 {
                     "item_no": None,
                     "description": line.description or "Allowance",
                     "trade_package_id": line.trade_package_id,
-                    "cost_code_id": line.cost_code_id,
+                    "cost_code_id": line.cost_code_id
+                    or package_section_id(line.trade_package, set()),
+                    "is_taxable": _taxable(line),
                     "kind": "allowance",
                     "scheduled_value": line_price(line),
                     "source_estimate_id": estimate.id,
@@ -200,28 +235,45 @@ def sov_from_estimate(estimate: Estimate) -> list[dict]:
                     else "Unassigned"
                 ),
                 "value": Decimal("0"),
+                "parts": {},  # taxable flag -> value
+                "codes": set(),
+                "package": line.trade_package,
             }
             work[key] = bucket
         # an accepted deduct alternate carries a negative price; it nets in here
         bucket["value"] += line_price(line)
+        flag = _taxable(line)
+        bucket["parts"][flag] = bucket["parts"].get(flag, Decimal("0")) + line_price(
+            line
+        )
+        bucket["codes"].add(line.cost_code_id)
 
     # Named packages by name, Unassigned (None key) last — the estimate's order.
     ordered = sorted(
         work.items(),
         key=lambda kv: (kv[0] is None, kv[1]["name"].lower()),
     )
-    lines = [
-        {
-            "item_no": None,
-            "description": bucket["name"],
-            "trade_package_id": pkg_id,
-            "cost_code_id": None,
-            "kind": "work",
-            "scheduled_value": bucket["value"],
-            "source_estimate_id": estimate.id,
-        }
-        for pkg_id, bucket in ordered
-    ]
+    lines = []
+    for pkg_id, bucket in ordered:
+        code_id = package_section_id(bucket["package"], bucket["codes"])
+        split = len(bucket["parts"]) > 1
+        for flag in sorted(bucket["parts"], reverse=True):  # taxable part first
+            lines.append(
+                {
+                    "item_no": None,
+                    "description": (
+                        f"{bucket['name']} (not taxable)"
+                        if split and not flag
+                        else bucket["name"]
+                    ),
+                    "trade_package_id": pkg_id,
+                    "cost_code_id": code_id,
+                    "is_taxable": flag,
+                    "kind": "work",
+                    "scheduled_value": bucket["parts"][flag],
+                    "source_estimate_id": estimate.id,
+                }
+            )
     lines.extend(allowances)
 
     # One line per non-zero markup, in compounding order, each its own kind.
@@ -243,6 +295,7 @@ def sov_from_estimate(estimate: Estimate) -> list[dict]:
                 "description": f"{label} ({fmt_pct(pct)}%)",
                 "trade_package_id": None,
                 "cost_code_id": None,
+                "is_taxable": any_taxable,
                 "kind": kind,
                 "scheduled_value": amount,
                 "source_estimate_id": estimate.id,
@@ -300,6 +353,8 @@ def build_sov(db: Session, job: Job, estimate: Estimate, replace: bool = True) -
                 "description": "Contingency",
                 "trade_package_id": None,
                 "cost_code_id": None,
+                # taxed like the markups: when the bid taxed anything
+                "is_taxable": any(ln["is_taxable"] for ln in lines),
                 "kind": "contingency",
                 "scheduled_value": _q(job.contingency_amount),
                 "source_estimate_id": estimate.id,
@@ -312,13 +367,35 @@ def build_sov(db: Session, job: Job, estimate: Estimate, replace: bool = True) -
         # pay history. Nothing bills the SOV yet, so a plain replace is safe.
         db.query(SovLine).filter(SovLine.job_id == job.id).delete()
         db.flush()
+    # Every built line credits 4050 Contract Revenue until it is changed.
+    revenue_id = get_contract_revenue_account_id(db)
     rows = []
     for line in lines:
-        row = SovLine(job_id=job.id, **line)
+        row = SovLine(job_id=job.id, revenue_account_id=revenue_id, **line)
         db.add(row)
         rows.append(row)
     db.flush()
     return rows
+
+
+def schedule_is_taxed(job: Job) -> bool:
+    """Whether a line added to the schedule (a contingency or change-order
+    line) is taxable: when any line already on it is, or the schedule is
+    empty. A job whose bid taxed nothing bills no tax on its changes."""
+    lines = list(job.sov_lines)
+    return not lines or any(ln.is_taxable for ln in lines)
+
+
+def change_order_sov_fields(job: Job, co) -> dict:
+    """The cost code and taxable flag of the SOV line an owner change order
+    appends: the code its lines share, else the lowest of them (none when
+    no line has one), taxed as the rest of the schedule is."""
+    codes = [ln.cost_code for ln in co.lines if ln.cost_code is not None]
+    code = min(codes, key=lambda c: c.code or "") if codes else None
+    return {
+        "cost_code_id": code.id if code is not None else None,
+        "is_taxable": schedule_is_taxed(job),
+    }
 
 
 def sync_contingency_line(db: Session, job: Job) -> None:
@@ -347,6 +424,7 @@ def sync_contingency_line(db: Session, job: Job) -> None:
                 description="Contingency",
                 kind="contingency",
                 scheduled_value=value,
+                is_taxable=schedule_is_taxed(job),
             )
             db.add(row)
             remaining = list(job.sov_lines) + [row]

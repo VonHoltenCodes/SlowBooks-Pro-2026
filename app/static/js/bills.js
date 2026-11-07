@@ -818,7 +818,10 @@ const BillsPage = {
         $$('#bill-lines tr').forEach((row, i) => {
             const acct = row.querySelector('.line-account');
             const accountId = acct && !acct.disabled && acct.value ? parseInt(acct.value) : null;
-            if (!missing && acct && !acct.disabled && !accountId && BillsPage.lineAmount(row) > 0) {
+            // a construction line with a cost code or type posts to that
+            // code's or type's account when it names none (the server resolves it)
+            const costed = CostTypes.accountFor(CostCodes.fromRow(row, 'line-cost-code'), CostTypes.fromRow(row, 'line-cost-type'));
+            if (!missing && acct && !acct.disabled && !accountId && !costed && BillsPage.lineAmount(row) > 0) {
                 missing = { n: i + 1, sel: acct };
             }
             // a priced line sends its quantity and rate; one with neither

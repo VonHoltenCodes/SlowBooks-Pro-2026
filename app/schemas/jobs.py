@@ -172,6 +172,11 @@ class SovLineIn(StrictModel):
     description: Optional[str] = Field(default=None, max_length=200)
     trade_package_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    # The income account the line's billing credits (null: 4050 Contract
+    # Revenue) and whether its billing is taxed. Left out on a line that
+    # round-trips by id, each keeps what the line had; a new line is taxed.
+    revenue_account_id: Optional[int] = None
+    is_taxable: Optional[bool] = None
     kind: str = "work"
     # A scheduled value may be negative — a deduct alternate carried onto the
     # schedule reduces the contract sum (#551 allows a deduct alternate).
@@ -199,6 +204,9 @@ class SovLineOut(BaseModel):
     trade_package_name: Optional[str] = None
     cost_code_id: Optional[int] = None
     cost_code_label: Optional[str] = None
+    revenue_account_id: Optional[int] = None
+    revenue_account_name: Optional[str] = None
+    is_taxable: bool = True
     kind: str
     scheduled_value: Decimal
     source_estimate_id: Optional[int] = None

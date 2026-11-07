@@ -4,7 +4,9 @@
 # three documents can't drift apart.
 #
 # Accounts. A line posts to the account chosen on it, else its item's expense
-# account, else the vendor's default expense account. Nothing further: the old
+# account, else (construction mode, a line with a cost code or cost type) the
+# code's account or its cost type's default account, else the vendor's
+# default expense account. Nothing further: the old
 # last resort was account number "6000", which the seeded chart names
 # Advertising & Marketing, so a sign shop's panels and a bakery's flour were
 # booked as advertising and the P&L showed no cost of goods (2.17.3
@@ -93,12 +95,17 @@ def expense_account_for(
     item,
     vendor,
     fix_hint: str = "Choose an account on the line",
+    cost_code_id: Optional[int] = None,
+    cost_type: Optional[str] = None,
 ) -> int:
     """The account a non-stock purchase line posts to.
 
-    The account chosen on the line, else the item's expense account, else
-    the vendor's default expense account. When none of them names one the
-    line is refused (400) — never booked to a guessed account."""
+    The account chosen on the line, else the item's expense account, else —
+    for a construction company, on a line with a cost code or cost type — the
+    code's account or the cost type's default account, else the vendor's
+    default expense account. When none of them names one the line is refused
+    (400) — never booked to a guessed account. A Business or Nonprofit
+    company's lines resolve as they always have."""
     if account_id:
         if db.get(Account, account_id) is None:
             raise HTTPException(
@@ -112,6 +119,14 @@ def expense_account_for(
         return account_id
     if item is not None and item.expense_account_id:
         return item.expense_account_id
+    if cost_code_id or cost_type:
+        from app.services.job_costing import job_cost_account_for
+        from app.services.terminology import terms_from_db
+
+        if terms_from_db(db).is_construction:
+            job_acct = job_cost_account_for(db, cost_code_id, cost_type)
+            if job_acct:
+                return job_acct
     if vendor is not None and vendor.default_expense_account_id:
         return vendor.default_expense_account_id
     who = f"{vendor.name} " if vendor is not None and vendor.name else "the vendor "

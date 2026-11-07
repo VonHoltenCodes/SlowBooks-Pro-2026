@@ -337,7 +337,9 @@ const PurchaseOrdersPage = {
     },
 
     // To Bill asks where each line goes before anything posts: an item's
-    // expense account or the vendor's default fills the choice in, and a
+    // expense account, a construction line's cost code or cost type account
+    // (material 5100, subcontract 5300 …), or the vendor's default fills the
+    // choice in, and a
     // line neither names waits for one — it used to land on account 6000,
     // Advertising & Marketing (W-H5, F8). Stock items post to Inventory.
     async convertToBill(id) {
@@ -350,6 +352,8 @@ const PurchaseOrdersPage = {
                 API.get('/items?active_only=false'),
                 API.get('/accounts?active_only=true'),
             ]);
+            // a construction line's cost code or type names its account
+            if (Terms.isConstruction()) await Promise.all([CostCodes.load(), CostTypes.load()]);
         } catch (err) { toast(err.message, 'error'); return; }
         const itemById = Object.fromEntries(items.map(i => [i.id, i]));
         const posting = PurchaseAccounts.filter(accounts);
@@ -366,7 +370,9 @@ const PurchaseOrdersPage = {
             } else if (!Number(l.amount)) {
                 cell = '<span style="color:var(--text-muted);">Nothing to record</span>';
             } else {
-                const pick = (item && item.expense_account_id) || vendor.default_expense_account_id || '';
+                const pick = (item && item.expense_account_id)
+                    || CostTypes.accountFor(l.cost_code_id, l.cost_type)
+                    || vendor.default_expense_account_id || '';
                 cell = AccountQuickAdd.picker(`<select class="po-conv-account" data-line="${l.id}" aria-label="Account for line ${n + 1}">
                         <option value="">Choose an account...</option>${PurchaseAccounts.options(posting, pick)}</select>`, 'po-convert');
             }

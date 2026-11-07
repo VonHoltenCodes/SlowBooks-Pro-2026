@@ -642,7 +642,9 @@ def get_bad_debt_account_id(db: Session) -> int:
 # Construction accounts, created on demand (Settings -> Company Type, or the
 # /api/construction/setup route). Retainage and customer-deposit balances
 # and the use-tax a contractor self-assesses sit beside the seed chart's
-# own blocks; Construction in Progress holds costs on an unbilled job.
+# own blocks; Construction in Progress holds costs on an unbilled job;
+# Contract Revenue is where a pay application's billing posts unless its
+# schedule-of-values line names another income account.
 # Each carries an explicit detail type: the number-and-name rule would call
 # a 1xxx asset or 2xxx liability Other Current anyway, but pinning it keeps
 # these on the right balance-sheet line whatever the rule does later, and a
@@ -654,6 +656,7 @@ CONSTRUCTION_ACCOUNTS = (
     ("2050", "Retainage Payable", AccountType.LIABILITY, "other_current_liability"),
     ("2210", "Customer Deposits", AccountType.LIABILITY, "other_current_liability"),
     ("2220", "Use Tax Payable", AccountType.LIABILITY, "other_current_liability"),
+    ("4050", "Contract Revenue", AccountType.INCOME, "income"),
     ("5400", "Equipment Cost", AccountType.COGS, "cost_of_goods_sold"),
     ("5500", "Other Job Costs", AccountType.COGS, "cost_of_goods_sold"),
 )
@@ -666,3 +669,9 @@ def ensure_construction_accounts(db: Session) -> dict[str, Account]:
         number: ensure_account(db, number, name, atype, detail)
         for number, name, atype, detail in CONSTRUCTION_ACCOUNTS
     }
+
+
+def get_contract_revenue_account_id(db: Session) -> int:
+    """4050 Contract Revenue, created on demand: what a schedule-of-values
+    line with no revenue account of its own credits."""
+    return ensure_construction_accounts(db)["4050"].id
