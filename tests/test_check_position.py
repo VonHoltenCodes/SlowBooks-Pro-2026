@@ -93,7 +93,9 @@ def test_the_setting_refuses_anything_else(client):
 def test_the_settings_page_has_a_labelled_position_select():
     from pathlib import Path
 
-    js = (Path(__file__).resolve().parents[1] / "app/static/js/settings.js").read_text()
+    js = (Path(__file__).resolve().parents[1] / "app/static/js/settings.js").read_text(
+        encoding="utf-8"
+    )
     assert '<label for="settings-check-position">Check Position</label>' in js
     assert 'name="check_position" id="settings-check-position"' in js
     # the test print sends the form's position with the stock and nudges
