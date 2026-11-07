@@ -195,3 +195,14 @@ def test_accept_confirm_names_the_lines_with_no_cost_code():
     assert "1 line has no cost code, so its budget lands on no code." in one
     assert "3 lines have no cost code, so their budget lands on no code." in three
     assert "no cost code" not in none
+
+
+def test_the_construction_estimate_pdf_has_no_status(client, db_session, seed_customer):
+    """The owner is never told the estimate is "Pending"; a Business
+    estimate keeps its Status."""
+    from tests.test_pdf_estimating import _estimate as _est, _html
+
+    line = [{"description": "Slab", "quantity": 1, "rate": 100, "unit_cost": 80}]
+    est = _est(client, seed_customer.id, line)
+    assert "Status:" not in _html(db_session, est["id"], "construction")
+    assert "Status:" in _html(db_session, est["id"], "business")

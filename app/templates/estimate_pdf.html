@@ -70,7 +70,7 @@
     <table class="meta-table"><tr>
         <td class="meta-label">Date:</td><td>{{ est.date | fdate }}</td>
         {% if est.expiration_date %}<td class="meta-label">Valid Until:</td><td>{{ est.expiration_date | fdate }}</td>{% endif %}
-        <td class="meta-label">Status:</td><td>{{ est.status.value | title }}</td>
+        {% if not terms.is_construction %}<td class="meta-label">Status:</td><td>{{ est.status.value | title }}</td>{% endif %}
     </tr></table>
 
     <div class="addresses">

@@ -288,7 +288,8 @@ the same way.
 ### The bid the owner receives
 
 The customer PDF (and Print) of a construction estimate is built to go out
-under the contractor's name; a Business or Nonprofit estimate PDF is unchanged.
+under the contractor's name, so it carries no Status line (the owner is not told
+it is "Pending"); a Business or Nonprofit estimate PDF is unchanged.
 
 - **Header and cover.** The company's **contractor license #** (Settings →
   Company → Company Information, shown once the company is Construction) prints
