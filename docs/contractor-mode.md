@@ -461,6 +461,24 @@ commitment (409 `commitment_not_open`).
 **What approve does.** Every effect lands on **approve**, in one transaction,
 and reverses on **void**:
 
+**A change order takes effect on the day you say, not the day you click.**
+Approve takes an `approved_on` date. It defaults to the change order's own
+date, else today, and the Approve dialog shows it and lets you change it: a
+change order entered a few weeks late still moves the contract on the day the
+owner signed. That date is the one every as-of reader uses, the WIP schedule,
+the change order log's running approved total, a sub change order's
+commitment, and the Contract tab, while `approved_at` stays the stamp of the
+click (the audit trail). A pay application dated before a change order takes
+effect does not carry it: its **contract sum to date** and **net change by
+change orders** read the change orders that took effect on or before the
+application's date, whether it is a draft or approved (a change order entered
+before the application but taking effect after it shows on the next one).
+Approving in a closed period is refused like a bill or a pay application there:
+403 with "Transaction date … is on or before the closing date (…). Modifications
+to closed periods are not allowed." (the closing-date password override works
+the same way). Change orders approved before this keep the local day of their
+approve click.
+
 - *Owner CO, contract-funded* — adds the sell total to the **contract amount**
   (the original sum is never touched, so the Contract tab reads original +
   changes = revised), appends a read-only **change_order** line to the
@@ -473,17 +491,56 @@ and reverses on **void**:
   (refused 409 `contingency_exceeded` when it would pass the contingency
   amount).
 - *Owner CO, allowance-funded* — the contract is unchanged and no SOV line is
-  added; the budget rows carry the **cost with no revenue** (the allowance
-  already holds the money, and the work carries no markup); the draw counts
-  against the allowance line (refused 409 `allowance_exceeded` when it would
-  pass the allowance). The Contract tab shows each allowance's used and
-  remaining.
+  added. The allowance was budgeted as cost when the estimate was accepted, so
+  the change order **moves** that cost rather than adding to it: its cost goes
+  on the change order's code and type, and the same cost comes out of the
+  allowance's cell (a locked change row against the allowance's code), so the
+  job's total budgeted cost stays what it was. No revenue is written (the
+  allowance already holds the money, and the work carries no markup). Void
+  puts the cost back in the allowance's cell. A job whose allowance has no
+  budget cell (a schedule typed by hand) just gets the change order's cost.
+  The draw counts against the allowance line (refused 409
+  `allowance_exceeded` when it would pass the allowance). The Contract tab
+  shows each allowance's used and remaining.
 - *Sub CO* — appends the lines to its commitment, which must be on the **same
   job** and **open** (refused 409 `commitment_job_mismatch` or
   `commitment_not_open` otherwise), and recomputes the commitment's total; the
   buyout table's *bought* grows automatically. The budget rows carry the cost
   with no revenue (and none at all when the sub CO backs an owner CO, which
   already carried that cost).
+
+**Return unspent allowance.** An allowance is billed as scheduled whether or
+not the owner's choices used it all. The Contract tab's allowance row shows
+**Return unspent** (when something is left; or
+`POST /api/change-orders/allowance-return` with the allowance line and an
+optional `amount`, default everything unspent). It makes a **draft owner
+change order for minus the unspent amount**, no markup (whatever the job's
+default says), funded against that allowance: it is contract-funded, because
+it takes the money off the contract, and it names the allowance line. Submit
+and approve it like any other (it takes effect on its date, in the open
+period). Approving it:
+
+- takes the amount off the contract sum, and the budget gives up that cost and
+  that revenue (the cost will not be spent);
+- takes the **unbilled** part off the allowance line's scheduled value, so the
+  line's balance to finish is what is left to bill, **0** once billed up to
+  it, with no $3,500 left on the application forever;
+- when part of the allowance has already been billed, that part cannot come off
+  the line: it becomes a read-only credit line on the schedule that the next
+  pay application bills.
+
+"Unspent" is what the Contract tab shows as **remaining**: the allowance line's
+scheduled value less the allowance-funded change orders that drew it (and any
+earlier return's credit). A return of an allowance with nothing unspent is
+refused (409 `allowance_nothing_unspent`, "… has nothing unspent to return");
+so is a second return while one is still draft or pending (409
+`allowance_return_open`) and one for more than is unspent (422). Its funding,
+allowance line and markup are fixed; change the amount, title or date, or reject
+it. Void gives the line and the contract back what the return took. A
+**contract-funded deduct** made by hand is an ordinary contract-funded change
+order, so it **carries markup** (a −3,500 cost sells at −4,025 at 15%) unless
+its markup is set to 0, and it leaves the allowance line itself untouched; use
+**Return unspent** for an allowance.
 
 Because the budget key includes the row's source, a change-order budget row
 sits beside an estimate-locked or manual row on the same code and type — the
@@ -617,14 +674,21 @@ is still refused. Retainage to date can't go below zero either: a release is
 refused (422) when it is more than the retainage held at the application's own
 percent on the work completed, so dropping the percent to 0 and releasing on
 the same application is refused (release at the held percent, or bill the
-release on its own application). A lien waiver is for one payment and one
+release on its own application). A **credit** (a negative line) also takes its
+share of retainage back, so billing one **after** the final release is refused
+(422, "Retainage to date would be −350.00 …: bill the credit before the final
+retainage release, or release less retainage now and the rest after the
+credit"): bill the credit first, then release what is held. We refuse rather
+than let retainage go below zero because the release has already paid out the
+credit's share. A lien waiver is for one payment and one
 job, and its amount is the part of the payment applied to that job's invoices. At approval the application keeps the contract sums as they
 stood (original, and to date with change orders), and its PDF prints those, not
 today's job. The PDF's **net change by change orders** is the owner change
-orders approved on or before the application's approval, and the original
-plus the net change is the contract sum to date; an application approved
-before 2.31.8 with no original kept reads it as the sum less those change
-orders, so it prints right with no repair (#723). An invoice made from a payment application can't be edited on the
+orders that take effect on or before the application's **date** (see *A change
+order takes effect on the day you say*), and the original plus the net change
+is the contract sum to date; an application approved before 2.31.8 with no
+original kept reads it as the sum less the change orders approved by its
+approval, so it prints right with no repair (#723). An invoice made from a payment application can't be edited on the
 Invoices screen except for its notes (409); change the application instead.
 
 **Owner deposits.** Money an owner pays ahead of the work is a **deposit**
@@ -715,7 +779,7 @@ loss provision are left out, and so is it from the adjusting entry, until
 its cost to date reaches the contract (then it reads 100% complete, and the loss
 is the true loss, with no extra provision). Every figure reads **as of the date**: cost to date and
 posted revenue to that day, billing and retainage from the applications approved
-by then, and the revised contract with the change orders approved by then (so the
+by then, and the revised contract with the change orders in effect by then (so the
 schedule reproduces the books on an earlier close). Billed to date is the sum of
 the approved pay applications' completed-to-date when the job has one by the date
 (else the posted revenue carrying the job — the `billed_basis` column says which).

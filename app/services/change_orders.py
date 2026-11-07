@@ -13,7 +13,7 @@
 # an approved CO and void reverses the exact figures it applied.
 # ============================================================================
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -63,14 +63,23 @@ def line_sell(cost: Decimal, markup: Decimal, kind: str) -> Decimal:
     return _q(cost * (Decimal("1") + markup / _HUNDRED))
 
 
+def _line_markup(line: ChangeOrderLine, co: ChangeOrder, job: Job) -> Decimal:
+    """The markup a line carries. A return of unspent allowance carries none,
+    whatever the line, CO or job say: the owner gets the allowance back at
+    the price it was held at."""
+    if co.allowance_return:
+        return _ZERO
+    return effective_markup(
+        line.markup_pct, co.markup_pct, job.co_markup_pct, co.funding, co.apply_markup
+    )
+
+
 def compute_line(line: ChangeOrderLine, co: ChangeOrder, job: Job) -> None:
     """Stamp a line's server-computed amount (cost) and sell_amount in place,
     from the effective markup (line → CO → job → 0; 0 for allowance-/
     contingency-funded work unless the CO applies markup)."""
     cost = line_cost(line.quantity, line.unit_cost)
-    markup = effective_markup(
-        line.markup_pct, co.markup_pct, job.co_markup_pct, co.funding, co.apply_markup
-    )
+    markup = _line_markup(line, co, job)
     line.amount = cost
     line.sell_amount = line_sell(cost, markup, co.kind)
 
@@ -91,13 +100,7 @@ def _freeze(co: ChangeOrder, job: Job) -> None:
     carried — called once at approve so the CO's figures never move again."""
     for line in co.lines:
         cost = line_cost(line.quantity, line.unit_cost)
-        markup = effective_markup(
-            line.markup_pct,
-            co.markup_pct,
-            job.co_markup_pct,
-            co.funding,
-            co.apply_markup,
-        )
+        markup = _line_markup(line, co, job)
         line.markup_pct = markup  # stamp the effective markup on the line
         line.amount = cost
         line.sell_amount = line_sell(cost, markup, co.kind)
@@ -142,6 +145,28 @@ def _budget_groups(co: ChangeOrder) -> dict:
     return groups
 
 
+# ── The day a change order takes effect ─────────────────────────────────────
+
+
+def co_effective_date(co: ChangeOrder) -> date | None:
+    """The day an approved change order takes effect: the approved_on it was
+    approved with, else (a row from before approved_on existed) the local day
+    of its approve click. None for a change order that was never approved."""
+    if co.approved_on is not None:
+        return co.approved_on
+    if co.approved_at is None:
+        return None
+    from app.services.job_reports import _local_date
+
+    return _local_date(co.approved_at)
+
+
+def resolve_approved_on(co: ChangeOrder, approved_on: date | None) -> date:
+    """The date Approve takes effect on: the one given, else the change
+    order's own date, else today."""
+    return approved_on or co.date or date.today()
+
+
 # ── Usage roll-ups (read by the contract summary and the exceed guards) ────
 
 
@@ -176,6 +201,40 @@ def allowance_used(db: Session, job: Job, sov_line_id: int) -> Decimal:
     return _q(total)
 
 
+def allowance_returned_credit(db: Session, job: Job, sov_line_id: int) -> Decimal:
+    """What approved returns of this allowance took off the contract through a
+    credit line (the part already billed, so the allowance line itself could
+    not shrink). The rest of a return shrinks the allowance line's scheduled
+    value directly, so it is already out of `scheduled_value`."""
+    total = _ZERO
+    returns = (
+        db.query(ChangeOrder)
+        .filter(
+            ChangeOrder.job_id == job.id,
+            ChangeOrder.allowance_return.is_(True),
+            ChangeOrder.status == "approved",
+            ChangeOrder.allowance_sov_line_id == sov_line_id,
+        )
+        .all()
+    )
+    for co in returns:
+        for line in db.query(SovLine).filter(
+            SovLine.job_id == job.id, SovLine.change_order_id == co.id
+        ):
+            total -= _q(line.scheduled_value)
+    return _q(total)
+
+
+def allowance_unspent(db: Session, job: Job, line: SovLine) -> Decimal:
+    """What an allowance line still holds: its scheduled value, less the
+    change orders that drew on it and the credit lines of any returns."""
+    return _q(
+        _q(line.scheduled_value)
+        - allowance_used(db, job, line.id)
+        - allowance_returned_credit(db, job, line.id)
+    )
+
+
 def allowances_summary(db: Session, job: Job) -> list[dict]:
     """Per allowance SOV line: its scheduled value, used and remaining."""
     out = []
@@ -190,7 +249,7 @@ def allowances_summary(db: Session, job: Job) -> list[dict]:
                 "description": line.description,
                 "scheduled_value": float(value),
                 "used": float(used),
-                "remaining": float(_q(value - used)),
+                "remaining": float(allowance_unspent(db, job, line)),
             }
         )
     return out
@@ -224,18 +283,54 @@ def change_orders_summary(db: Session, job: Job) -> dict:
 # Approved COs accumulate into the one change row per key; void subtracts.
 
 
-def _write_change_budgets(
-    db: Session, job_id: int, co: ChangeOrder, with_revenue: bool
-) -> None:
-    """Add this CO's cost into the job's source="change" budget rows, one per
-    (cost_code_id, cost_type). A contract-funded owner CO also adds the sell as
-    revenue; a contingency-/allowance-funded CO and a sub CO write revenue 0
-    (the contract already carries that money). Bypasses _refuse_locked_budget
-    by design: a change order is the one thing that may move a locked budget."""
-    for (code_id, ctype), (cost, sell) in _budget_groups(co).items():
-        rev = sell if with_revenue else _ZERO
+def _allowance_cell(db: Session, job_id: int, sov_line: SovLine):
+    """The budget cell Accept seeded for an allowance SOV line: the job's
+    non-change row on the line's cost code (the largest when a code carries
+    several types). None when the job has no such row, as when the schedule
+    was typed by hand."""
+    q = db.query(JobBudget).filter(
+        JobBudget.job_id == job_id, JobBudget.source != "change"
+    )
+    q = (
+        q.filter(JobBudget.cost_code_id == sov_line.cost_code_id)
+        if sov_line.cost_code_id is not None
+        else q.filter(JobBudget.cost_code_id.is_(None))
+    )
+    rows = q.all()
+    return max(rows, key=lambda r: Decimal(str(r.amount or 0)), default=None)
+
+
+def _budget_deltas(db: Session, job_id: int, co: ChangeOrder, with_revenue: bool):
+    """What this CO adds to the change budget rows: {(code, type): [cost,
+    revenue]}. An allowance-funded CO spends money the budget already holds,
+    so besides its own cost it takes the same cost back out of the
+    allowance's cell, and the job's total budgeted cost stays put."""
+    deltas: dict[tuple, list] = {}
+    for key, (cost, sell) in _budget_groups(co).items():
+        deltas[key] = [cost, sell if with_revenue else _ZERO]
+    if co.kind == "owner" and co.funding == "allowance" and not co.allowance_return:
+        sov_line = (
+            db.get(SovLine, co.allowance_sov_line_id)
+            if co.allowance_sov_line_id
+            else None
+        )
+        cell = _allowance_cell(db, job_id, sov_line) if sov_line else None
+        if cell is not None:
+            drawn = sum((cost for cost, _s in _budget_groups(co).values()), _ZERO)
+            key = (cell.cost_code_id, cell.cost_type)
+            deltas.setdefault(key, [_ZERO, _ZERO])[0] -= drawn
+    return deltas
+
+
+def _apply_budget_deltas(db: Session, job_id: int, deltas: dict, sign: int) -> None:
+    """Add (sign=1) or subtract (sign=-1) the deltas on the change rows,
+    creating a row when there is none and deleting one that nets to zero."""
+    for (code_id, ctype), (cost, rev) in deltas.items():
+        cost, rev = sign * cost, sign * rev
         row = _find_change_budget(db, job_id, code_id, ctype)
         if row is None:
+            if sign < 0 or (cost == _ZERO and rev == _ZERO):
+                continue
             db.add(
                 JobBudget(
                     job_id=job_id,
@@ -247,10 +342,25 @@ def _write_change_budgets(
                     locked=True,
                 )
             )
-        else:
-            row.amount = _q(Decimal(str(row.amount)) + cost)
-            row.revenue_amount = _q(Decimal(str(row.revenue_amount)) + rev)
+            continue
+        row.amount = _q(Decimal(str(row.amount)) + cost)
+        row.revenue_amount = _q(Decimal(str(row.revenue_amount)) + rev)
+        if row.amount == _ZERO and row.revenue_amount == _ZERO:
+            db.delete(row)
     db.flush()
+
+
+def _write_change_budgets(
+    db: Session, job_id: int, co: ChangeOrder, with_revenue: bool
+) -> None:
+    """Add this CO's cost into the job's source="change" budget rows, one per
+    (cost_code_id, cost_type). A contract-funded owner CO also adds the sell as
+    revenue; a contingency-/allowance-funded CO and a sub CO write revenue 0
+    (the contract already carries that money). An allowance-funded CO also
+    draws its cost out of the allowance's cell (_budget_deltas). Bypasses
+    _refuse_locked_budget by design: a change order is the one thing that may
+    move a locked budget."""
+    _apply_budget_deltas(db, job_id, _budget_deltas(db, job_id, co, with_revenue), 1)
 
 
 def _remove_change_budgets(
@@ -259,16 +369,7 @@ def _remove_change_budgets(
     """Reverse _write_change_budgets: subtract this CO's cost/revenue from the
     change rows, deleting a row only once it is fully zero (so a deduct CO
     sharing a key with an add leaves the add's figures behind)."""
-    for (code_id, ctype), (cost, sell) in _budget_groups(co).items():
-        rev = sell if with_revenue else _ZERO
-        row = _find_change_budget(db, job_id, code_id, ctype)
-        if row is None:
-            continue
-        row.amount = _q(Decimal(str(row.amount)) - cost)
-        row.revenue_amount = _q(Decimal(str(row.revenue_amount)) - rev)
-        if row.amount == _ZERO and row.revenue_amount == _ZERO:
-            db.delete(row)
-    db.flush()
+    _apply_budget_deltas(db, job_id, _budget_deltas(db, job_id, co, with_revenue), -1)
 
 
 def _find_change_budget(db: Session, job_id: int, code_id, ctype):
@@ -425,11 +526,140 @@ def _next_sov_line_no(job: Job) -> int:
     return (max((r.line_no for r in job.sov_lines), default=0)) + 1
 
 
-def apply_change_order(db: Session, co: ChangeOrder) -> None:
+def _apply_allowance_return(db: Session, co: ChangeOrder, job: Job, sell_total):
+    """The schedule-of-values side of returning an allowance's unspent amount.
+    The unbilled part comes off the allowance line itself, so its balance to
+    finish is what it has left to bill; whatever was already billed cannot
+    come off the line, so it becomes a credit line (kind change_order) the
+    next pay application bills. Contract and budget move like any
+    contract-funded deduct, in the caller."""
+    from app.services.pay_applications import billed_completed_by_sov_line
+
+    amount = -_q(sell_total)
+    if amount <= _ZERO:
+        raise HTTPException(
+            status_code=422,
+            detail="A return of unspent allowance must take money off the contract.",
+        )
+    line = check_allowance_line(db, co.job_id, co.allowance_sov_line_id)
+    unspent = allowance_unspent(db, job, line)
+    if amount > unspent:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "allowance_exceeded",
+                "message": (
+                    f"This would return ${amount:,.2f}, and the allowance has "
+                    f"${unspent:,.2f} unspent."
+                ),
+            },
+        )
+    billed = billed_completed_by_sov_line(db, job.id).get(line.id, _ZERO)
+    shrink = min(amount, max(_q(line.scheduled_value) - _q(billed), _ZERO))
+    credit = amount - shrink
+    line.scheduled_value = _q(_q(line.scheduled_value) - shrink)
+    if credit > _ZERO:
+        db.add(
+            SovLine(
+                job_id=job.id,
+                line_no=_next_sov_line_no(job),
+                item_no=None,
+                description=f"{co.number} {co.title or ''}".strip(),
+                kind="change_order",
+                scheduled_value=-credit,
+                change_order_id=co.id,
+            )
+        )
+
+
+def create_allowance_return(
+    db: Session, job: Job, sov_line_id: int, amount=None
+) -> ChangeOrder:
+    """A draft owner change order that returns an allowance's unspent amount
+    (all of it, or `amount`): minus the amount, no markup, funded against the
+    allowance. Refused when nothing is unspent, when `amount` is more than is,
+    or when another return of this allowance is still open."""
+    from app.routes.change_orders import _create_numbered
+    from app.services.job_costing import line_cost_type
+
+    line = check_allowance_line(db, job.id, sov_line_id)
+    unspent = allowance_unspent(db, job, line)
+    if unspent <= _ZERO:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "allowance_nothing_unspent",
+                "message": f"{line.description or 'That allowance'} has nothing unspent to return.",
+            },
+        )
+    open_return = (
+        db.query(ChangeOrder)
+        .filter(
+            ChangeOrder.job_id == job.id,
+            ChangeOrder.allowance_return.is_(True),
+            ChangeOrder.allowance_sov_line_id == line.id,
+            ChangeOrder.status.in_(("draft", "pending")),
+        )
+        .first()
+    )
+    if open_return is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "allowance_return_open",
+                "message": f"{open_return.number} already returns this allowance; approve or reject it first.",
+            },
+        )
+    amount = unspent if amount is None else _q(Decimal(str(amount)))
+    if amount <= _ZERO or amount > unspent:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Return an amount above zero and no more than the ${unspent:,.2f} unspent.",
+        )
+    cell = _allowance_cell(db, job.id, line)
+    code_id = line.cost_code_id if line.cost_code_id else None
+    ctype = (cell.cost_type if cell and cell.cost_type else None) or line_cost_type(
+        db, code_id, None
+    )
+    co = _create_numbered(
+        db,
+        job,
+        kind="owner",
+        status="draft",
+        title=f"Return unspent allowance: {line.description or 'allowance'}"[:200],
+        date=date.today(),
+        funding="contract",
+        allowance_sov_line_id=line.id,
+        markup_pct=_ZERO,
+        apply_markup=True,
+        allowance_return=True,
+    )
+    db.add(
+        ChangeOrderLine(
+            change_order_id=co.id,
+            line_order=0,
+            description=f"Unspent allowance returned to the owner: {line.description or ''}".strip(),
+            cost_type=ctype or "other",
+            cost_code_id=code_id,
+            quantity=1,
+            unit_cost=-amount,
+            markup_pct=_ZERO,
+        )
+    )
+    db.flush()
+    db.refresh(co)
+    recompute(co, job)
+    return co
+
+
+def apply_change_order(
+    db: Session, co: ChangeOrder, approved_on: date | None = None
+) -> None:
     """Every effect of approving a change order, in the route's transaction.
     Freezes the CO's figures first, then applies them. Raises 409
     contingency_exceeded / allowance_exceeded when a draw would pass its
-    limit, and the commitment guards for a sub CO."""
+    limit, and the commitment guards for a sub CO. The change order takes
+    effect on `approved_on` (default its own date, else today)."""
     job = co.job
     _freeze(co, job)
     totals = co_totals(co, job)
@@ -439,16 +669,20 @@ def apply_change_order(db: Session, co: ChangeOrder) -> None:
         if co.funding == "contract":
             base = Decimal(str(job.contract_amount or 0))
             job.contract_amount = _q(base + sell_total)
-            line = SovLine(
-                job_id=job.id,
-                line_no=_next_sov_line_no(job),
-                item_no=None,
-                description=f"{co.number} {co.title or ''}".strip(),
-                kind="change_order",
-                scheduled_value=sell_total,
-                change_order_id=co.id,
-            )
-            db.add(line)
+            if co.allowance_return:
+                _apply_allowance_return(db, co, job, sell_total)
+            else:
+                db.add(
+                    SovLine(
+                        job_id=job.id,
+                        line_no=_next_sov_line_no(job),
+                        item_no=None,
+                        description=f"{co.number} {co.title or ''}".strip(),
+                        kind="change_order",
+                        scheduled_value=sell_total,
+                        change_order_id=co.id,
+                    )
+                )
             _write_change_budgets(db, job.id, co, with_revenue=True)
         elif co.funding == "contingency":
             limit = job.contingency_amount
@@ -471,7 +705,10 @@ def apply_change_order(db: Session, co: ChangeOrder) -> None:
                 )
             sov_line = check_allowance_line(db, co.job_id, co.allowance_sov_line_id)
             already = allowance_used(db, job, sov_line.id)
-            if _q(already + sell_total) > _q(sov_line.scheduled_value):
+            held = _q(sov_line.scheduled_value) - allowance_returned_credit(
+                db, job, sov_line.id
+            )
+            if _q(already + sell_total) > _q(held):
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -538,6 +775,7 @@ def apply_change_order(db: Session, co: ChangeOrder) -> None:
 
     co.status = "approved"
     co.approved_at = datetime.now(timezone.utc)
+    co.approved_on = resolve_approved_on(co, approved_on)
     db.flush()
 
 
@@ -586,6 +824,21 @@ def _raise_co_billed() -> None:
     )
 
 
+def _reverse_allowance_return(db: Session, co: ChangeOrder, sell_total) -> None:
+    """Give an allowance line back what its return took off it: the returned
+    amount less the part that went to a credit line (deleted by the caller)."""
+    line = db.get(SovLine, co.allowance_sov_line_id)
+    if line is None:
+        return
+    credit = _ZERO
+    for ln in db.query(SovLine).filter(
+        SovLine.job_id == co.job_id, SovLine.change_order_id == co.id
+    ):
+        credit -= _q(ln.scheduled_value)
+    shrink = -_q(sell_total) - credit
+    line.scheduled_value = _q(_q(line.scheduled_value) + shrink)
+
+
 def reverse_change_order(db: Session, co: ChangeOrder) -> None:
     """Undo apply_change_order from the CO's frozen figures, in the route's
     transaction."""
@@ -599,8 +852,8 @@ def reverse_change_order(db: Session, co: ChangeOrder) -> None:
             _refuse_if_co_line_billed(db, co)  # 409 co_billed
             base = Decimal(str(job.contract_amount or 0))
             job.contract_amount = _q(base - sell_total)
-            # TODO (#555): 409 co_billed when a pay application has billed this
-            # SOV line, before removing it.
+            if co.allowance_return:
+                _reverse_allowance_return(db, co, sell_total)
             db.query(SovLine).filter(
                 SovLine.job_id == job.id, SovLine.change_order_id == co.id
             ).delete()

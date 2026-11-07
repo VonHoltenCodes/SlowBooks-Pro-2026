@@ -17,10 +17,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.change_orders import ChangeOrder, ChangeOrderLine
 from app.models.cost_codes import CostCode
-from app.models.jobs import Job
+from app.models.jobs import Job, SovLine
 from app.models.purchase_orders import PurchaseOrder
 from app.models.trade_packages import TradePackage
 from app.schemas.change_orders import (
+    AllowanceReturnIn,
+    ApproveIn,
     ChangeOrderCreate,
     ChangeOrderOut,
     ChangeOrderUpdate,
@@ -33,10 +35,13 @@ from app.services.change_orders import (
     check_allowance_line,
     check_owner_link,
     co_totals,
+    create_allowance_return,
     recompute,
     refuse_with_approved_sub,
+    resolve_approved_on,
     reverse_change_order,
 )
+from app.services.closing_date import check_closing_date
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_change_order_number
 from app.services.pdf_service import generate_change_order_pdf
@@ -273,6 +278,17 @@ def update_change_order(
             },
         )
     fields = data.model_dump(exclude_unset=True, exclude={"lines"})
+    fixed = ("funding", "allowance_sov_line_id", "markup_pct", "apply_markup")
+    if co.allowance_return and any(
+        k in fields and fields[k] != getattr(co, k) for k in fixed
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "allowance_return_fixed",
+                "message": "A return of unspent allowance is contract-funded with no markup; change its amount, title or date, or reject it and make another.",
+            },
+        )
     if fields.get("funding") not in (None, co.funding) and "apply_markup" not in fields:
         # Changing what pays for the change resets markup to that funding's default.
         fields["apply_markup"] = _default_apply_markup(fields["funding"])
@@ -328,8 +344,30 @@ def submit_change_order(co_id: int, db: Session = Depends(get_db)):
     return _co_out(db, co)
 
 
+@router.post("/allowance-return", response_model=ChangeOrderOut, status_code=201)
+def return_unspent_allowance(data: AllowanceReturnIn, db: Session = Depends(get_db)):
+    """Make a draft owner change order that returns an allowance's unspent
+    amount to the owner (all of it, or `amount`): minus the amount, no markup,
+    funded against that allowance. Approving it takes the amount off the
+    contract and the allowance line, so the line has nothing left to bill."""
+    line = db.get(SovLine, data.allowance_sov_line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="Allowance line not found")
+    co = create_allowance_return(
+        db, db.get(Job, line.job_id), line.id, amount=data.amount
+    )
+    db.commit()
+    db.refresh(co)
+    return _co_out(db, co)
+
+
 @router.post("/{co_id}/approve", response_model=ChangeOrderOut)
-def approve_change_order(co_id: int, db: Session = Depends(get_db)):
+def approve_change_order(
+    co_id: int, data: ApproveIn | None = None, db: Session = Depends(get_db)
+):
+    """Approve a pending change order. It takes effect on `approved_on` (the
+    change order's own date by default, else today); a date in a closed
+    period is refused like a bill or a pay application there."""
     co = _get(db, co_id)
     if co.kind == "pco":
         raise HTTPException(
@@ -347,7 +385,9 @@ def approve_change_order(co_id: int, db: Session = Depends(get_db)):
                 "message": f"A {co.status} change order cannot be approved.",
             },
         )
-    apply_change_order(db, co)  # may 409 contingency/allowance_exceeded
+    on = resolve_approved_on(co, data.approved_on if data else None)
+    check_closing_date(db, on)
+    apply_change_order(db, co, on)  # may 409 contingency/allowance_exceeded
     db.commit()
     db.refresh(co)
     return _co_out(db, co)
