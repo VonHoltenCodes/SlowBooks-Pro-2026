@@ -124,7 +124,9 @@ def test_the_categories_are_one_query_for_the_page(client, db_session, seed_acco
 def test_the_empty_and_populated_registers_have_the_same_columns():
     from pathlib import Path
 
-    js = (Path(__file__).parent.parent / "app/static/js/banking.js").read_text()
+    js = (Path(__file__).parent.parent / "app/static/js/banking.js").read_text(
+        encoding="utf-8"
+    )
     start = js.index("async renderRegister(")
     body = js[start : js.index("_clearedCell(e, accountId) {", start)]
     # one header, drawn for both
