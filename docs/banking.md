@@ -46,8 +46,12 @@ Banking → an account (its own address, `#/banking/<account id>`, so a
 refresh stays on it). Every posting on the account — expenses, deposits,
 bill payments, customer payments, payroll, card charges, transfers, register
 entries, journal entries — with payee, reference (a bill payment's check
-number included), type, a link to the document, the running balance, and a
-✓ when it has cleared or **R** when a reconciliation has closed it.
+number included), type, the category it was posted against (an entry over
+several accounts says "3 accounts", with each account and amount in the
+cell's tooltip), a link to the document, the running balance, and a
+✓ when it has cleared or **R** when a reconciliation has closed it. The
+register opens at its newest lines and the entry row; changing a filter or
+saving an entry leaves the page where it is.
 
 **Marking a line cleared by hand.** Keeping the register against online
 banking, without a formal reconciliation, you can tick each entry as it

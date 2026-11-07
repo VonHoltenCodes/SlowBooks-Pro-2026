@@ -247,7 +247,9 @@ jobs:
           # 195 with the feed review's class/job/name browser test (#671,
           # test_browser_review_dims.py, Chromium through playwright, which
           # is not installed here; every browser test skips the same way).
-          MAX_SKIPS: "220"
+          # 221 with the Settings accessibility-tree browser test (#725,
+          # test_browser_settings_ax_tree.py).
+          MAX_SKIPS: "221"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
