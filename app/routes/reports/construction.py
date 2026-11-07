@@ -26,6 +26,7 @@ from app.routes.reports.financial import (
     _pdf_response,
     _period,
 )
+from app.services.compliance import compliance_report
 from app.services.csv_export import _SafeWriter
 from app.services.fiscal_year import fiscal_year_start
 from app.services.job_reports import (
@@ -38,6 +39,7 @@ from app.services.job_reports import (
     wip_schedule,
 )
 from app.services.ledger_exports import _Percent, _money, _pdf_money, _preamble
+from app.services.retainage_report import retainage_report
 from app.services import wip_posting
 
 # ── shared grid formatting ─────────────────────────────────────────────────
@@ -978,6 +980,168 @@ def job_cost_by_vendor_csv(
     )
 
 
+# ── 8. Retainage ─────────────────────────────────────────────────────────
+
+
+@router.get("/retainage")
+def retainage_route(
+    as_of: date = Query(default=None),
+    db: Session = Depends(get_db),
+    job_id: _JOB_Q = None,
+    customer_id: _CUST_Q = None,
+    status: _STATUS_Q = None,
+):
+    """Retainage per job as of a date: held by the owner (1150) with what has
+    been released and what is outstanding, and held from each sub (2050) per
+    commitment and per hand-entered bill. The grand totals equal the Balance
+    Sheet's 1150 and 2050 for the date. Closed jobs are included."""
+    return retainage_report(db, as_of, job_id, customer_id, status)
+
+
+def _retainage_blocks(data: dict) -> list[dict]:
+    """The report as two printed grids: owed to the contractor, then owed by
+    it. Each is its columns, its rows and a total row."""
+    out = []
+    for key, title, label in (
+        ("receivable", "Retainage owed to me (1150)", "Total owed to me"),
+        ("payable", "Retainage I owe (2050)", "Total I owe"),
+    ):
+        block = data[key]
+        cols = block["columns"]
+        rows = [
+            {"cells": [_pdf_cell(r[c["key"]], c["kind"]) for c in cols]}
+            for r in block["rows"]
+        ]
+        t = block["totals"]
+        rows.append(
+            {
+                "cells": [label]
+                + [""] * (_text_columns(cols) - 1)
+                + [
+                    _pdf_cell(t[c["key"]], c["kind"])
+                    for c in cols[_text_columns(cols) :]
+                ],
+                "style": "grand-total",
+            }
+        )
+        out.append(
+            {
+                "title": title,
+                "period": f"As of {data['as_of']}",
+                "columns": [c["label"] for c in cols],
+                "text_columns": _text_columns(cols),
+                "rows": rows,
+            }
+        )
+    return out
+
+
+@router.get("/retainage/pdf")
+def retainage_pdf(
+    as_of: date = Query(default=None),
+    db: Session = Depends(get_db),
+    job_id: _JOB_Q = None,
+    customer_id: _CUST_Q = None,
+    status: _STATUS_Q = None,
+):
+    data = retainage_report(db, as_of, job_id, customer_id, status)
+    return _pdf_response(
+        _retainage_blocks(data),
+        db,
+        f"retainage_{data['as_of']}.pdf",
+        landscape=True,
+    )
+
+
+@router.get("/retainage/csv")
+def retainage_csv(
+    request: Request,
+    as_of: date = Query(default=None),
+    db: Session = Depends(get_db),
+    job_id: _JOB_Q = None,
+    customer_id: _CUST_Q = None,
+    status: _STATUS_Q = None,
+):
+    data = retainage_report(db, as_of, job_id, customer_id, status)
+    out = io.StringIO()
+    w = _SafeWriter(out)
+    _preamble(w, _company_name(db), "Retainage", f"As of {data['as_of']}")
+    for key, label in (
+        ("receivable", "Total owed to me"),
+        ("payable", "Total I owe"),
+    ):
+        block = data[key]
+        cols = block["columns"]
+        w.writerow(["Owed to me (1150)" if key == "receivable" else "I owe (2050)"])
+        w.writerow([c["label"] for c in cols])
+        for r in block["rows"]:
+            w.writerow([_csv_cell(r[c["key"]], c["kind"]) for c in cols])
+        n = _text_columns(cols)
+        t = block["totals"]
+        w.writerow(
+            [label]
+            + [""] * (n - 1)
+            + [_csv_cell(t[c["key"]], c["kind"]) for c in cols[n:]]
+        )
+        w.writerow([])
+    return _csv_download(out.getvalue(), f"retainage_{data['as_of']}.csv", request)
+
+
+# ── 9. Compliance ────────────────────────────────────────────────────────
+
+
+@router.get("/compliance")
+def compliance_route(as_of: date = Query(default=None), db: Session = Depends(get_db)):
+    """The subs to chase: a certificate of insurance expired or expiring in 30
+    days, no W-9 on file, or a paid bill with no lien waiver."""
+    return compliance_report(db, as_of)
+
+
+def _compliance_sections(data: dict) -> list[dict]:
+    cols = data["columns"]
+    rows = [
+        {"cells": [_pdf_cell(r[c["key"]], c["kind"]) for c in cols]}
+        for r in data["rows"]
+    ]
+    return [
+        {
+            "title": "Sub Compliance",
+            "period": f"As of {data['as_of']}",
+            "columns": [c["label"] for c in cols],
+            "text_columns": _text_columns(cols),
+            "rows": rows,
+        }
+    ]
+
+
+@router.get("/compliance/pdf")
+def compliance_pdf(as_of: date = Query(default=None), db: Session = Depends(get_db)):
+    data = compliance_report(db, as_of)
+    return _pdf_response(
+        _compliance_sections(data),
+        db,
+        f"compliance_{data['as_of']}.pdf",
+        landscape=True,
+    )
+
+
+@router.get("/compliance/csv")
+def compliance_csv(
+    request: Request,
+    as_of: date = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    data = compliance_report(db, as_of)
+    cols = data["columns"]
+    out = io.StringIO()
+    w = _SafeWriter(out)
+    _preamble(w, _company_name(db), "Sub Compliance", f"As of {data['as_of']}")
+    w.writerow([c["label"] for c in cols])
+    for r in data["rows"]:
+        w.writerow([_csv_cell(r[c["key"]], c["kind"]) for c in cols])
+    return _csv_download(out.getvalue(), f"compliance_{data['as_of']}.csv", request)
+
+
 # ── Export routes for the two existing contractor reports (#556) ────────────
 # Job Profitability and Job Budget vs Actual had on-screen views but no PDF or
 # CSV; these add them on the shared renderer so the Report Center can offer the
@@ -1248,6 +1412,13 @@ def _cost_tree_shows_uncoded(un: dict) -> bool:
     return bool(un["lines"]) or any(f[c["key"]] for c in _COST_TREE_COLUMNS)
 
 
+def _uncommitted_figures(extra: float) -> dict:
+    """The tree's budget-not-yet-committed row: no budget of its own, its
+    amount in Projected and (as a shortfall against the budget) Variance."""
+    zero = {c["key"]: 0.0 for c in _COST_TREE_COLUMNS}
+    return {**zero, "projected": extra, "variance": -extra, "pct_used": None}
+
+
 def _cost_tree_rows(tree: dict, opened=None) -> list[dict]:
     """Every row of the tree in the tab's order: each cost type, its codes
     (depth-first, children under their parent), its "No cost code" row, then
@@ -1304,6 +1475,21 @@ def _cost_tree_rows(tree: dict, opened=None) -> list[dict]:
                     "figures": ty["uncoded"]["figures"],
                 }
             )
+    extra = tree["totals"].get("uncommitted_budget")
+    if extra:
+        # a contractor's projected carries the budget nothing has taken up;
+        # a row of its own keeps the Projected column footing to the total
+        rows.append(
+            {
+                "kind": "uncommitted",
+                "cost_type": "",
+                "code": "",
+                "name": "Budget not yet committed",
+                "label": "Budget not yet committed",
+                "depth": 0,
+                "figures": _uncommitted_figures(extra),
+            }
+        )
     jl = tree["job_level_budget"]
     if jl["original"] or jl["changes"] or jl["est_revenue"]:
         rows.append(

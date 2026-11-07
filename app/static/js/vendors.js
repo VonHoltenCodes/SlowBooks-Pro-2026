@@ -26,9 +26,13 @@ const VendorsPage = {
                 <button class="btn btn-primary" onclick="VendorsPage.showForm()" style="margin-top:10px;">+ Create your first vendor</button>
             </div>`;
         } else {
+            // a contractor's list shows which vendors are subs and when each
+            // certificate of insurance runs out
+            const subs = Terms.isConstruction();
             html += `<div class="table-container"><table>
                 <thead><tr>
                     <th scope="col">Name</th><th scope="col">Company</th><th scope="col">Phone</th><th scope="col">Email</th>
+                    ${subs ? '<th scope="col">Sub</th><th scope="col">COI expires</th>' : ''}
                     <th scope="col" class="amount">Balance</th><th scope="col">Actions</th>
                 </tr></thead><tbody>`;
             for (const v of vendors) {
@@ -41,6 +45,7 @@ const VendorsPage = {
                     <td>${escapeHtml(v.company) || ''}</td>
                     <td>${escapeHtml(v.phone) || ''}</td>
                     <td>${escapeHtml(v.email) || ''}</td>
+                    ${subs ? `<td>${v.vendor_type === 'sub' ? '<span class="badge badge-sent">Sub</span>' : ''}</td><td>${VendorsPage.coiCell(v)}</td>` : ''}
                     <td class="amount">${formatCurrency(v.balance)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="event.stopPropagation(); VendorsPage.showForm(${v.id})">Edit</button>
@@ -51,6 +56,17 @@ const VendorsPage = {
             html += `</tbody></table></div>`;
         }
         return html;
+    },
+
+    // A sub's COI expiry for the list: red once past (or with no date),
+    // amber within 30 days, else plain. Blank for a vendor that is not a sub.
+    coiCell(v) {
+        if (v.vendor_type !== 'sub') return '';
+        if (!v.coi_expires) return '<span style="color:var(--text-danger)" title="No certificate of insurance date on file">None on file</span>';
+        const days = Math.floor((new Date(v.coi_expires + 'T00:00:00') - new Date(new Date().toDateString())) / 86400000);
+        const color = days < 0 ? 'var(--text-danger)' : (days <= 30 ? '#b26a00' : 'inherit');
+        const note = days < 0 ? ` (expired ${-days} day${days === -1 ? '' : 's'} ago)` : (days <= 30 ? ` (${days} day${days === 1 ? '' : 's'})` : '');
+        return `<span style="color:${color}" title="Certificate of insurance expires ${escapeHtml(v.coi_expires)}">${formatDate(v.coi_expires)}${note}</span>`;
     },
 
     // The search box narrows the list as you type (#335): name, company,

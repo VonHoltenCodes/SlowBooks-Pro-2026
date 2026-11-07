@@ -251,8 +251,10 @@ jobs:
           # test_estimate_bid_presentation.py::test_total_is_never_alone_on_a_page,
           # WeasyPrint). 222 with the multi-page pay application PDF
           # (test_pay_app_billing_flow.py::test_a_long_application_prints_totals_once_at_the_end,
+          # WeasyPrint). 223 with the retainage and compliance report PDFs
+          # (test_co_dashboard.py::test_retainage_and_compliance_pdf_and_print,
           # WeasyPrint).
-          MAX_SKIPS: "222"
+          MAX_SKIPS: "223"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

@@ -49,6 +49,8 @@ const ReportsPage = {
         'cost-to-complete-forecast': { label: 'Cost-to-Complete Forecast', open: (p) => ReportsPage.costToCompleteForecast(p), asOf: true },
         'commitment-status':    { label: 'Commitment Status',  open: (p) => ReportsPage.commitmentStatus(p), asOf: true },
         'field-ticket-log':     { label: 'Field Ticket Log',   open: (p) => ReportsPage.fieldTicketLog(p), asOf: true },
+        'retainage':            { label: 'Retainage',          open: (p) => ReportsPage.retainage(p), asOf: true },
+        'compliance':           { label: 'Sub Compliance',     open: (p) => ReportsPage.subCompliance(p), asOf: true },
         'budget-vs-actual':     { label: 'Budget vs Actual',   open: (p) => { if (/^\d{4}$/.test(p.year || '')) BudgetsPage._year = parseInt(p.year, 10); return BudgetsPage.showVariance(p); } },
         'financial-statements': { label: 'Financial Statements Pack', open: (p) => ReportsPage.financialStatementsPdf(p) },
         'fixed-asset-reconciliation': { label: 'Fixed Asset Reconciliation', open: () => ReportsPage.fixedAssetReconciliation() },
@@ -424,10 +426,12 @@ const ReportsPage = {
                 card('cost-to-complete-forecast', 'Cost-to-Complete Forecast', Terms.text('Enter the cost still to come per section and cost type; the WIP schedule uses it for estimated cost')),
                 card('commitment-status', 'Commitment Status', Terms.text('Each PO and subcontract: committed, billed to date, retainage held and remaining')),
                 card('field-ticket-log', 'Field Ticket Log', Terms.text('T&M tickets not yet billed, per job: unsigned and signed, at their bill rates')),
+                card('retainage', 'Retainage', Terms.text('Per job: retainage owners hold from you and you hold from each sub, held, released and outstanding, tied to the Balance Sheet')),
+                card('compliance', 'Sub Compliance', Terms.text('Subs with an expired or expiring certificate of insurance, no W-9 on file, or a paid bill with no lien waiver')),
             );
             const lead = ['job-profitability', 'job-budget-vs-actual', 'profit-loss-by-job',
                 'wip-schedule', 'cost-to-complete', 'change-order-log', 'buyout', 'job-cost-by-vendor',
-                'cost-to-complete-forecast', 'commitment-status', 'field-ticket-log'];
+                'cost-to-complete-forecast', 'commitment-status', 'field-ticket-log', 'retainage', 'compliance'];
             const front = lead.map(v => cards.find(c => c.view === v)).filter(Boolean);
             return [...front, ...cards.filter(c => !lead.includes(c.view))];
         }
@@ -4204,6 +4208,58 @@ ReportsPage.fieldTicketLog = async function (prefill) {
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="6">Grand total</td><td class="amount">${m(t.unsigned)}</td><td class="amount">${m(t.signed_unbilled)}</td></tr></tfoot>
             </table></div>`;
     }, "As Of", true, { view: 'field-ticket-log', prefill, spotlight: false });
+};
+
+// Retainage: owed to me (1150) and owed by me (2050) per job, tied to the
+// Balance Sheet lines for the date.
+ReportsPage.retainage = async function (prefill) {
+    await ReportsPage.openPeriodModal('Retainage', ReportsPage.defaultPeriod(), async (_period, params) => {
+        const data = await API.get(`/reports/retainage?as_of=${params.as_of_date}`);
+        const m = ReportsPage._money;
+        const strong = 'font-weight:700; background:var(--gray-50);';
+        const recv = data.receivable, pay = data.payable;
+        const recvRows = recv.rows.map(r => `<tr ${r.job_id ? ReportsPage._jobRowOpen(r.job_id) : ''}>
+            <td>${escapeHtml(r.customer_name || '')}</td><td>${escapeHtml(r.job_name)}</td>
+            <td class="amount">${m(r.held)}</td><td class="amount">${m(r.released)}</td><td class="amount">${m(r.outstanding)}</td></tr>`).join('');
+        const payRows = pay.rows.map(r => `<tr ${r.job_id ? ReportsPage._jobRowOpen(r.job_id) : ''}>
+            <td>${escapeHtml(r.job_name)}</td><td>${escapeHtml(r.vendor_name || '')}</td><td>${escapeHtml(r.document)}</td>
+            <td class="amount">${m(r.held)}</td><td class="amount">${m(r.released)}</td><td class="amount">${m(r.outstanding)}</td></tr>`).join('');
+        const tie = data.filtered ? '' : `Balance Sheet 1150 ${m(data.books.receivable)}, 2050 ${m(data.books.payable)}.`;
+        return `${ReportsPage._exportButtons('retainage', `as_of=${params.as_of_date}`)}
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Held less released is what is outstanding; the totals are the Balance Sheet's Retainage Receivable and Retainage Payable. ${tie}
+                A row named “Journal entries and other” is ledger balance no pay application or bill explains. Closed jobs are included.</div>
+            <h4 style="margin:0 0 4px 0;">Owed to me (1150)</h4>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th><th scope="col" class="amount">Held by owner</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
+                <tbody>${recvRows || '<tr><td colspan="5" style="color:var(--gray-400);">No retainage held by owners</td></tr>'}</tbody>
+                <tfoot><tr style="${strong}"><td colspan="2">Total owed to me</td><td class="amount">${m(recv.totals.held)}</td><td class="amount">${m(recv.totals.released)}</td><td class="amount">${m(recv.totals.outstanding)}</td></tr></tfoot>
+            </table></div>
+            <h4 style="margin:14px 0 4px 0;">I owe (2050)</h4>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">${T('Job')}</th><th scope="col">Vendor</th><th scope="col">Commitment / bill</th><th scope="col" class="amount">Held from sub</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
+                <tbody>${payRows || '<tr><td colspan="6" style="color:var(--gray-400);">No retainage held from subs</td></tr>'}</tbody>
+                <tfoot><tr style="${strong}"><td colspan="3">Total I owe</td><td class="amount">${m(pay.totals.held)}</td><td class="amount">${m(pay.totals.released)}</td><td class="amount">${m(pay.totals.outstanding)}</td></tr></tfoot>
+            </table></div>`;
+    }, "As Of", true, { view: 'retainage', prefill, spotlight: false });
+};
+
+// Sub compliance: the subs to chase, one row per problem.
+ReportsPage.subCompliance = async function (prefill) {
+    await ReportsPage.openPeriodModal('Sub Compliance', ReportsPage.defaultPeriod(), async (_period, params) => {
+        const data = await API.get(`/reports/compliance?as_of=${params.as_of_date}`);
+        const hot = { coi_expired: 'var(--text-danger)', coi_missing: 'var(--text-danger)', coi_expiring: '#b26a00' };
+        const rows = data.rows.map(r => `<tr class="clickable" onclick="App.navigate('#/vendors')">
+            <td>${escapeHtml(r.vendor_name)}</td><td style="color:${hot[r.issue_key] || 'inherit'}">${escapeHtml(r.issue)}</td>
+            <td>${escapeHtml(r.detail)}</td><td>${escapeHtml(r.date)}</td><td class="amount">${r.amount === null ? '' : ReportsPage._money(r.amount)}</td></tr>`).join('');
+        const t = data.totals;
+        return `${ReportsPage._exportButtons('compliance', `as_of=${params.as_of_date}`)}
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Certificates that expire within ${data.window_days} days, subs with no W-9 on file, and paid bills whose lien waiver is missing or still pending. Nothing here blocks a payment.</div>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Sub</th><th scope="col">Issue</th><th scope="col">Detail</th><th scope="col">Date</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="5" style="color:var(--gray-400);">Every sub is in order.</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="5">${t.rows} to chase across ${t.subs} sub${t.subs === 1 ? '' : 's'}</td></tr></tfoot>
+            </table></div>`;
+    }, "As Of", true, { view: 'compliance', prefill, spotlight: false });
 };
 
 // ---------------------------------------------------------------------------

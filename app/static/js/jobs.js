@@ -13,7 +13,8 @@
  * Column vocabulary matches what contractors read weekly (Procore's
  * standard budget view, QuickBooks' Estimates vs Actuals):
  *   Budget = original + changes · Committed = open POs · Actual = posted
- *   JTD cost · Projected = actual + committed · Variance = budget −
+ *   JTD cost · Projected = actual + committed (a contractor's also adds
+ *   the budget no cost or commitment has taken up) · Variance = budget −
  *   projected (positive = under) · % Used = projected / budget.
  * All figures come from posted ledger lines, so the page always agrees
  * with the Job Profitability report and reconciles to the P&L.
@@ -316,12 +317,23 @@ const JobsPage = {
         const job = JobsPage._job;
         const tree = await JobsPage.loadTree();
         const t = tree.totals;
+        const construction = Terms.isConstruction();
+        // retainage on this job: owed to us (1150) and owed by us (2050)
+        let ret = null;
+        if (construction) {
+            const r = await API.get(`/reports/retainage?as_of=${todayISO()}&job_id=${job.id}`).catch(() => null);
+            ret = ((r && r.jobs) || []).find(j => j.job_id === job.id) || { receivable: { outstanding: 0 }, payable: { outstanding: 0 } };
+        }
         const stat = (label, value, color, title) => `<div style="min-width:130px;" title="${title || ''}">
             <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">${label}</div>
             <div style="font-size:18px;font-weight:700;${color ? `color:${color}` : ''}">${value}</div></div>`;
         const contract = job.contract_amount ? parseFloat(job.contract_amount) : null;
         const billedPct = contract ? (t.act_revenue / contract * 100) : null;
         const margin = t.act_revenue ? ((t.act_revenue - t.actual) / t.act_revenue * 100) : null;
+        const uncommittedRow = construction && t.uncommitted_budget ? `<tr title="Budget no cost or commitment has taken up yet, code by code: trades not yet bought">
+            <td><em>Budget not yet committed</em></td><td></td><td></td><td></td>
+            <td class="amount">${JobsPage.money(t.uncommitted_budget)}</td>
+            <td class="amount" style="${JobsPage.varColor({ revised: t.revised, variance: -t.uncommitted_budget })}">${JobsPage.money(-t.uncommitted_budget)}</td><td></td></tr>` : '';
         const typeRows = tree.types.map(ty => `<tr class="clickable" onclick="JobsPage.jumpTo('type:${ty.cost_type}')">
             <td>${escapeHtml(ty.name)}</td>
             <td class="amount">${JobsPage.money(ty.figures.revised)}</td>
@@ -331,26 +343,35 @@ const JobsPage = {
             <td class="amount" style="${JobsPage.varColor(ty.figures)}">${JobsPage.money(ty.figures.variance)}</td>
             <td class="amount">${JobsPage.pct(ty.figures.pct_used)}</td>
         </tr>`).join('');
+        // A contractor's projected carries the budget nothing has taken up
+        // yet (an unbought trade is cost to come, not a saving); its revenue
+        // is billed revenue, gross of the retainage owners hold back.
+        const projectedTitle = construction ? 'Actual + committed + budget not yet committed' : 'Actual + committed';
+        const retainageLink = `#/reports/retainage?as_of_date=${todayISO()}`;
+        const tile = (label, value, title) => `<a href="${retainageLink}" style="color:inherit;text-decoration:none">${stat(label, value, null, title)}</a>`;
         return `
             <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px">
                 ${stat('Contract', contract !== null ? formatCurrency(contract) : '—')}
                 ${stat('Budget', JobsPage.money(t.revised), null, 'Original + changes')}
                 ${stat('Committed', JobsPage.money(t.committed), null, 'Open POs not yet billed')}
                 ${stat('Actual cost', JobsPage.money(t.actual))}
-                ${stat('Projected', JobsPage.money(t.projected), null, 'Actual + committed')}
+                ${stat('Projected', JobsPage.money(t.projected), null, projectedTitle)}
+                ${construction ? stat('Budget not yet committed', JobsPage.money(t.uncommitted_budget), null, 'Budget, code by code, that no cost or commitment has taken up: trades not yet bought. Counted in Projected.') : ''}
                 ${stat('Variance', JobsPage.money(t.variance), t.revised ? (t.variance < 0 ? 'var(--text-danger)' : 'var(--text-success)') : null, 'Budget − projected')}
-                ${stat('Revenue', JobsPage.money(t.act_revenue))}
-                ${stat('Margin', JobsPage.pct(margin), margin !== null && margin < 0 ? 'var(--text-danger)' : null, '(revenue − cost) / revenue')}
+                ${stat(construction ? 'Revenue billed (gross of retainage)' : 'Revenue', JobsPage.money(t.act_revenue), null, construction ? 'Posted revenue: everything billed, including the retainage the owner holds back' : '')}
+                ${stat(construction ? 'Billed margin' : 'Margin', JobsPage.pct(margin), margin !== null && margin < 0 ? 'var(--text-danger)' : null, construction ? '(revenue billed − cost) / revenue billed: not the job margin, which is on the WIP schedule' : '(revenue − cost) / revenue')}
                 ${stat('Billed vs contract', JobsPage.pct(billedPct))}
-                ${Terms.isConstruction() ? stat('Committed total', JobsPage.money(t.committed_total), null, 'Every subcontract and PO issued on this job (not period-scoped)') : ''}
-                ${Terms.isConstruction() ? stat('Billed to date (subs)', JobsPage.money(t.billed_to_date), null, 'Billed against commitments so far — the sub/supplier side, not the owner billing on the Contract tab') : ''}
+                ${construction ? stat('Committed total', JobsPage.money(t.committed_total), null, 'Every subcontract and PO issued on this job (not period-scoped)') : ''}
+                ${construction ? stat('Billed to date (subs)', JobsPage.money(t.billed_to_date), null, 'Billed against commitments so far — the sub/supplier side, not the owner billing on the Contract tab') : ''}
+                ${construction ? tile('Retainage owed to me', formatCurrency(ret.receivable.outstanding), 'Held by the owner on this job (account 1150), not yet released. Opens the Retainage report.') : ''}
+                ${construction ? tile('Retainage I owe', formatCurrency(ret.payable.outstanding), 'Held from subs on this job (account 2050), not yet released. Opens the Retainage report.') : ''}
             </div>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start;">
                 <div>
                     <h4 style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin:0 0 4px 0">By cost type — click a row to drill down</h4>
                     <div class="table-container"><table class="data-table" style="font-size:12px">
                         <thead><tr><th scope="col">Type</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th><th scope="col" class="amount">Actual</th><th scope="col" class="amount">Projected</th><th scope="col" class="amount">Variance</th><th scope="col" class="amount">% Used</th></tr></thead>
-                        <tbody>${typeRows || '<tr><td colspan="7" style="color:var(--text-muted)">Nothing budgeted or posted yet.</td></tr>'}</tbody>
+                        <tbody>${typeRows || '<tr><td colspan="7" style="color:var(--text-muted)">Nothing budgeted or posted yet.</td></tr>'}${uncommittedRow}</tbody>
                     </table></div>
                 </div>
                 <div style="font-size:13px">
@@ -405,6 +426,14 @@ const JobsPage = {
                     if (JobsPage._showLines.has(ukey)) body += JobsPage.linesHtml(un.lines, 2);
                 }
             }
+        }
+        // a contractor's projected carries the budget nothing has taken up; a
+        // row of its own keeps the Projected column footing to the total
+        const unc = tree.totals.uncommitted_budget;
+        if (unc) {
+            body += `<tr title="Budget no cost or commitment has taken up yet, code by code: trades not yet bought"><td style="padding-left:8px"><em>Budget not yet committed</em></td>
+                <td></td><td></td><td></td><td></td><td></td><td class="amount">${JobsPage.money(unc)}</td>
+                <td class="amount" style="${JobsPage.varColor({ revised: tree.totals.revised, variance: -unc })}">${JobsPage.money(-unc)}</td><td></td><td></td><td></td></tr>`;
         }
         const jl = tree.job_level_budget;
         if (jl.original || jl.changes || jl.est_revenue) {
