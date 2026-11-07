@@ -502,9 +502,11 @@ def commitment_status_route(
     status: _STATUS_Q = None,
     include_closed: _CLOSED_Q = False,
 ):
-    """Each commitment (PO or subcontract) per job: committed, billed to date,
+    """Each commitment (PO or subcontract) per job: committed, received (the
+    delivery tickets' quantities at the line rates), billed to date,
     retainage held and remaining, with totals per job and grand. As of
-    `as_of`, only commitments and bills dated by then count."""
+    `as_of`, only commitments, delivery tickets and bills dated by then
+    count."""
     return commitment_status(db, as_of, job_id, customer_id, status, include_closed)
 
 

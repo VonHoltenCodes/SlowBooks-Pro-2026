@@ -719,12 +719,96 @@ def check_kind_lines(db: Session, t: FieldTicket) -> None:
 
 
 def apply_received(db: Session, t: FieldTicket) -> None:
-    """A delivery ticket's quantities onto its PO lines (filled in by the
-    delivery milestone)."""
+    """A saved delivery ticket's quantities count as received on its PO lines
+    (PurchaseOrderLine.received_qty), and the order moves to partial or
+    received. Nothing posts: received-not-billed is the accountant's."""
+    _move_received(db, t, 1)
 
 
 def unapply_received(db: Session, t: FieldTicket) -> None:
-    """Take a delivery ticket's quantities back off its PO lines."""
+    """Take a delivery ticket's quantities back off its PO lines (an edit, a
+    delete, a void)."""
+    _move_received(db, t, -1)
+
+
+def _move_received(db: Session, t: FieldTicket, sign: int) -> None:
+    if t.kind != "delivery" or t.status == "void":
+        return
+    for ln in t.lines:
+        if ln.po_line is None:
+            continue
+        ln.po_line.received_qty = _d(ln.po_line.received_qty) + sign * _d(ln.quantity)
+    db.flush()
+    if t.purchase_order is not None:
+        receipt_status(t.purchase_order)
+
+
+def receipt_status(po) -> None:
+    """A purchase order's status from what has arrived: every line received in
+    full is `received`; something received (or billed) is `partial`; nothing
+    is `sent`. A draft or a closed (fully billed) order is left alone."""
+    from app.models.purchase_orders import POStatus
+
+    if po.status in (POStatus.DRAFT, POStatus.CLOSED):
+        return
+    lines = [ln for ln in po.lines if _d(ln.quantity) > 0]
+    received = [_d(ln.received_qty) for ln in lines]
+    if lines and all(r >= _d(ln.quantity) for r, ln in zip(received, lines)):
+        po.status = POStatus.RECEIVED
+    elif any(r > 0 for r in received) or any(
+        _d(ln.billed_amount) > 0 for ln in po.lines
+    ):
+        po.status = POStatus.PARTIAL
+    else:
+        po.status = POStatus.SENT
+
+
+def received_value(ln) -> Decimal:
+    """What has arrived on a PO line, in money: received quantity × rate."""
+    return _q(_d(ln.received_qty) * _d(ln.rate))
+
+
+def over_received_warnings(po, this_period: dict) -> list[str]:
+    """Bill-from-PO: a line that would bill more than has been received, as a
+    warning (never a refusal). Only on an order that is being received by
+    delivery tickets (some line has a received quantity)."""
+    if not any(_d(ln.received_qty) > 0 for ln in po.lines):
+        return []
+    out = []
+    for ln in po.lines:
+        amt = this_period.get(ln.id) or _ZERO
+        if amt <= 0:
+            continue
+        billed = _q(_d(ln.billed_amount) + amt)
+        got = received_value(ln)
+        if billed > got:
+            out.append(
+                f"{ln.description or 'Line'}: billed ${billed:,.2f} against "
+                f"${got:,.2f} received ({_d(ln.received_qty).normalize():f} of "
+                f"{_d(ln.quantity).normalize():f} delivered)."
+            )
+    return out
+
+
+def received_by(db: Session, po_id: int, as_of: date) -> Decimal:
+    """The value received on a commitment by `as_of`: its delivery tickets
+    dated by then (not void), each line's quantity at its PO line's rate."""
+    total = _ZERO
+    tickets = (
+        db.query(FieldTicket)
+        .filter(
+            FieldTicket.purchase_order_id == po_id,
+            FieldTicket.kind == "delivery",
+            FieldTicket.status != "void",
+            FieldTicket.date <= as_of,
+        )
+        .all()
+    )
+    for t in tickets:
+        for ln in t.lines:
+            if ln.po_line is not None:
+                total += _d(ln.quantity) * _d(ln.po_line.rate)
+    return _q(total)
 
 
 def void_ticket(db: Session, t: FieldTicket) -> None:

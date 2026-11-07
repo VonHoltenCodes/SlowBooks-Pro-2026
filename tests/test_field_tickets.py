@@ -678,3 +678,152 @@ def test_a_material_slip_line_is_a_stock_item(con, seed_customer, db_session):
     db_session.add(service)
     db_session.commit()
     _slip(con, job["id"], service.id, 1, status=422)
+
+
+# ── M4: delivery tickets against PO lines ───────────────────────────────
+
+
+@pytest.fixture
+def po(con, seed_customer, seed_accounts):
+    """A sent PO on a job: 100 sticks of conduit at $3 and 10 boxes at $20."""
+    job = _job(con, seed_customer.id)
+    v = _vendor(
+        con, name="City Supply", default_expense_account_id=seed_accounts["5100"].id
+    )
+    order = _sent_po(
+        con,
+        v["id"],
+        job["id"],
+        [
+            {"description": "Conduit", "quantity": 100, "rate": 3},
+            {"description": "Boxes", "quantity": 10, "rate": 20},
+        ],
+    )
+    return job, order
+
+
+def _deliver(con, job_id, po_id, qtys, status=201, **extra):
+    lines = [{"po_line_id": lid, "quantity": q} for lid, q in qtys.items()]
+    return _ticket(
+        con,
+        job_id,
+        lines,
+        kind="delivery",
+        status=status,
+        purchase_order_id=po_id,
+        **extra,
+    )
+
+
+def _po_get(con, po_id):
+    return con.get(f"/api/purchase-orders/{po_id}").json()
+
+
+def test_a_delivery_adds_received_quantity_and_moves_the_po(con, po):
+    job, order = po
+    conduit, boxes = (ln["id"] for ln in order["lines"])
+    t = _deliver(
+        con, job["id"], order["id"], {conduit: 60}, vendor_ticket_ref="CS-88123"
+    )
+    assert t["purchase_order_number"] == order["po_number"]
+    assert t["lines"][0]["ordered_qty"] == 100.0
+    assert t["lines"][0]["received_qty"] == 60.0
+    got = _po_get(con, order["id"])
+    assert [float(ln["received_qty"]) for ln in got["lines"]] == [60.0, 0.0]
+    assert got["status"] == "partial"
+    # the rest arrives: every line received in full
+    _deliver(con, job["id"], order["id"], {conduit: 40, boxes: 10})
+    assert _po_get(con, order["id"])["status"] == "received"
+
+
+def test_editing_and_voiding_a_delivery_move_received_by_the_change(con, po):
+    job, order = po
+    conduit = order["lines"][0]["id"]
+    t = _deliver(con, job["id"], order["id"], {conduit: 60})
+    r = con.put(
+        f"/api/field-tickets/{t['id']}",
+        json={"lines": [{"po_line_id": conduit, "quantity": 45}]},
+    )
+    assert r.status_code == 200, r.text
+    assert float(_po_get(con, order["id"])["lines"][0]["received_qty"]) == 45.0
+    _sign(con, t["id"], name="Gate receiver")
+    assert con.post(f"/api/field-tickets/{t['id']}/void").status_code == 200
+    got = _po_get(con, order["id"])
+    assert float(got["lines"][0]["received_qty"]) == 0.0
+    assert got["status"] == "sent"
+    # a deleted draft gives its quantity back too
+    d = _deliver(con, job["id"], order["id"], {conduit: 5})
+    con.delete(f"/api/field-tickets/{d['id']}")
+    assert float(_po_get(con, order["id"])["lines"][0]["received_qty"]) == 0.0
+
+
+def test_a_delivery_line_is_one_of_its_pos_lines(con, po, seed_accounts):
+    job, order = po
+    v = _vendor(con, name="Other Supply")
+    other = _sent_po(
+        con, v["id"], job["id"], [{"description": "Wire", "quantity": 1, "rate": 5}]
+    )
+    r = _deliver(con, job["id"], order["id"], {other["lines"][0]["id"]: 1}, status=422)
+    assert "purchase order's lines" in r["detail"]
+    _deliver(con, job["id"], order["id"], {order["lines"][0]["id"]: 0}, status=422)
+
+
+def test_billing_more_than_received_warns_and_still_bills(con, po, seed_accounts):
+    job, order = po
+    conduit, boxes = (ln["id"] for ln in order["lines"])
+    _deliver(con, job["id"], order["id"], {conduit: 50})  # $150 received
+    acct = seed_accounts["5100"].id
+    r = con.post(
+        f"/api/purchase-orders/{order['id']}/convert-to-bill",
+        json={
+            "lines": [
+                {"line_id": conduit, "amount": 210, "account_id": acct},
+                {"line_id": boxes, "amount": 0, "account_id": acct},
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    [warning] = r.json()["warnings"]
+    assert "Conduit" in warning and "$210.00" in warning and "$150.00" in warning
+    # an all-zero request still bills nothing, as before
+    r = con.post(
+        f"/api/purchase-orders/{order['id']}/convert-to-bill",
+        json={
+            "lines": [
+                {"line_id": boxes, "amount": 0, "account_id": acct},
+                {"line_id": conduit, "amount": 0, "account_id": acct},
+            ]
+        },
+    )
+    assert r.status_code == 409  # nothing to bill, as before
+
+
+def test_an_order_not_received_by_ticket_never_warns(con, po, seed_accounts):
+    job, order = po
+    acct = seed_accounts["5100"].id
+    r = con.post(
+        f"/api/purchase-orders/{order['id']}/convert-to-bill",
+        json={
+            "lines": [
+                {"line_id": ln["id"], "account_id": acct} for ln in order["lines"]
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["warnings"] == []
+
+
+def test_commitment_status_has_a_received_column(con, po):
+    job, order = po
+    conduit, boxes = (ln["id"] for ln in order["lines"])
+    _deliver(con, job["id"], order["id"], {conduit: 50}, date="2026-06-10")
+    _deliver(con, job["id"], order["id"], {boxes: 5}, date="2026-07-10")
+    data = con.get("/api/reports/commitment-status?as_of=2026-06-30").json()
+    assert "Received" in [c["label"] for c in data["columns"]]
+    [row] = data["jobs"][0]["rows"]
+    assert row["received"] == 150.0  # the July delivery is after the date
+    late = con.get("/api/reports/commitment-status?as_of=2026-07-31").json()
+    assert late["jobs"][0]["rows"][0]["received"] == 250.0
+    assert late["totals"]["received"] == 250.0
+    csv = con.get("/api/reports/commitment-status/csv?as_of=2026-07-31").text
+    assert "Received" in csv and "250.00" in csv

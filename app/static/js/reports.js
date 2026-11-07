@@ -4120,24 +4120,24 @@ ReportsPage.commitmentStatus = async function (prefill) {
         const data = await API.get(`/reports/commitment-status?as_of=${params.as_of_date}`);
         const m = ReportsPage._money;
         const body = data.jobs.map(job => {
-            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="8">${escapeHtml(job.job_name)}</td></tr>`;
+            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="9">${escapeHtml(job.job_name)}</td></tr>`;
             const rows = job.rows.map(r => `<tr>
                 <td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.vendor_name)}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.status)}</td>
-                <td class="amount">${m(r.committed)}</td><td class="amount">${m(r.billed)}</td>
+                <td class="amount">${m(r.committed)}</td><td class="amount">${m(r.received)}</td><td class="amount">${m(r.billed)}</td>
                 <td class="amount">${m(r.retainage_held)}</td><td class="amount">${m(r.remaining)}</td></tr>`).join('');
             const t = job.totals;
-            const total = `<tr style="font-weight:600;"><td colspan="4">Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.billed)}</td>
+            const total = `<tr style="font-weight:600;"><td colspan="4">Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.received)}</td><td class="amount">${m(t.billed)}</td>
                 <td class="amount">${m(t.retainage_held)}</td><td class="amount">${m(t.remaining)}</td></tr>`;
-            return head + (rows || '<tr><td colspan="8" style="color:var(--gray-400);">No commitments</td></tr>') + total;
+            return head + (rows || '<tr><td colspan="9" style="color:var(--gray-400);">No commitments</td></tr>') + total;
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('commitment-status', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Committed is the pre-tax value; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Committed is the pre-tax value; received is what delivery tickets dated by then brought in, at the line rates; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Commitment</th><th scope="col">Vendor</th><th scope="col">Type</th><th scope="col">Status</th>
-                <th scope="col" class="amount">Committed</th><th scope="col" class="amount">Billed to date</th><th scope="col" class="amount">Retainage held</th><th scope="col" class="amount">Remaining</th></tr></thead>
-                <tbody>${body || '<tr><td colspan="8">No jobs</td></tr>'}</tbody>
-                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="4">Grand total</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.billed)}</td>
+                <th scope="col" class="amount">Committed</th><th scope="col" class="amount">Received</th><th scope="col" class="amount">Billed to date</th><th scope="col" class="amount">Retainage held</th><th scope="col" class="amount">Remaining</th></tr></thead>
+                <tbody>${body || '<tr><td colspan="9">No jobs</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="4">Grand total</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.received)}</td><td class="amount">${m(t.billed)}</td>
                 <td class="amount">${m(t.retainage_held)}</td><td class="amount">${m(t.remaining)}</td></tr></tfoot>
             </table></div>`;
     }, "As Of", true, { view: 'commitment-status', prefill, spotlight: false });

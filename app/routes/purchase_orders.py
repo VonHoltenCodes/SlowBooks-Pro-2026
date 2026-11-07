@@ -900,6 +900,12 @@ def convert_to_bill(
             txn_date=bill_date,
         )
 
+    # A line billed past what its delivery tickets received is warned, not
+    # refused (field tickets, construction). Before the tally below.
+    from app.services.field_tickets import over_received_warnings
+
+    warnings = over_received_warnings(po, this_period)
+
     # Tally what each line has now billed, and close the commitment when every
     # line is fully billed; while anything remains it is partial.
     for poline in billable:
@@ -917,4 +923,8 @@ def convert_to_bill(
         # parts doesn't walk it back.
         po.status = POStatus.PARTIAL
     db.commit()
-    return {"bill_id": bill.id, "message": f"Bill created from {po.po_number}"}
+    return {
+        "bill_id": bill.id,
+        "message": f"Bill created from {po.po_number}",
+        "warnings": warnings,
+    }

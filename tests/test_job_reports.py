@@ -1398,6 +1398,7 @@ def test_commitment_status_per_commitment_and_totals(db_session, seed_accounts):
     t = data["jobs"][0]["totals"]
     assert t == {
         "committed": 15000.0,
+        "received": 0.0,  # no delivery tickets
         "billed": 11000.0,
         "retainage_held": 800.0,
         "remaining": 4000.0,
