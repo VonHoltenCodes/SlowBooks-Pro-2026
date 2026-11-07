@@ -137,17 +137,17 @@ def test_top_places_the_fields_as_quickbooks_voucher_stock_does():
     # the date at the top right; the payee and the amount on one line with
     # the amount at the right edge; words below; the address under, at left
     assert (
-        ".check-top .check-date { top: 0.65in; right: 0.4in; text-align: right; }"
+        ".check-top .check-date { top: 0.57in; right: 0.4in; text-align: right; }"
         in html
     )
-    assert ".check-top .pay-to { position: absolute; top: 1.15in;" in html
-    assert ".check-top .amount-box { top: 1.09in; right: 0.1in;" in html
+    assert ".check-top .pay-to { position: absolute; top: 1.07in;" in html
+    assert ".check-top .amount-box { top: 1.01in; right: 0.1in;" in html
     assert (
-        ".check-top .amount-words { position: absolute; top: 1.48in; left: 0.1in;"
+        ".check-top .amount-words { position: absolute; top: 1.4in; left: 0.1in;"
         in html
     )
     assert (
-        ".check-top .payee-address { position: absolute; top: 1.8in; left: 0.75in;"
+        ".check-top .payee-address { position: absolute; top: 1.72in; left: 0.75in;"
         in html
     )
     assert "Oct 24, 2026" in face
@@ -203,7 +203,7 @@ def test_a_batch_prints_each_check_in_the_chosen_position():
     )
     assert html.count('class="check-area check-top"') == 2
     assert html.count('<div class="voucher">') == 4
-    assert html.count('class="check-page"') == 2
+    assert html.count('class="check-page check-page-top"') == 2
 
 
 # ----- the payee's address (#726) --------------------------------------
@@ -427,3 +427,17 @@ def test_the_test_print_refuses_a_bad_position(client):
     r = client.get("/api/checks/test-print?check_position=middle")
     assert r.status_code == 422, r.text
     assert "check_position must be one of: bottom, top" in r.json()["detail"]
+
+
+def test_top_panels_end_where_a_sheet_in_thirds_tears():
+    """W-128 (the 2.31.9 gate): the face ends at 3.67 in from the top of the
+    sheet and the first voucher at 7.33 in, where voucher stock perforated in
+    thirds tears; the second voucher runs to the foot of the printable page."""
+    html = _render(check_position="top")
+    assert ".check-page-top { height: 10.42in; }" in html
+    assert ".check-top { padding: 0; height: 3.34in; }" in html
+    assert ".voucher { height: 3.66in;" in html
+    assert ".voucher + .voucher { height: 3.42in; }" in html
+    assert '<div class="check-page check-page-top">' in html
+    bottom = _render(check_position="bottom")
+    assert "check-page-top" not in bottom and ".voucher" not in bottom
