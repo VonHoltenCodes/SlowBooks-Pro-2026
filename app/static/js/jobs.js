@@ -691,6 +691,11 @@ const JobsPage = {
                     <input id="c-ret" name="retainage_pct" type="number" step="0.01" min="0" max="100" value="${v(c.retainage_pct)}"></div>
                 <div class="form-group"><label for="c-comarkup">Markup on change orders (%)</label>
                     <input id="c-comarkup" name="co_markup_pct" type="number" step="0.0001" min="-99.9999" max="1000" value="${v(c.co_markup_pct)}" placeholder="default markup on owner COs"></div>
+                <div class="form-group"><label for="c-salestax">Sales tax</label>
+                    <select id="c-salestax" name="sales_tax_treatment" title="Contractor pays: the lump-sum real-property rule. Pay applications bill no sales tax, and material bills on the job accrue use tax.">
+                        <option value="charge_owner" ${c.sales_tax_treatment !== 'contractor_pays' ? 'selected' : ''}>Charge sales tax to the owner</option>
+                        <option value="contractor_pays" ${c.sales_tax_treatment === 'contractor_pays' ? 'selected' : ''}>Contractor pays tax on materials (no sales tax to the owner)</option>
+                    </select></div>
                 ${src}
             </div>
             <div class="form-actions"><button type="submit" class="btn btn-primary">Save contract terms</button></div>
@@ -866,6 +871,7 @@ const JobsPage = {
             contingency_amount: num('contingency_amount'),
             retainage_pct: num('retainage_pct'),
             co_markup_pct: num('co_markup_pct'),
+            sales_tax_treatment: form.sales_tax_treatment ? form.sales_tax_treatment.value : undefined,
         };
         try {
             await API.put(`/jobs/${JobsPage._job.id}/contract`, data);
@@ -1491,7 +1497,7 @@ const JobsPage = {
                 <div class="form-group"><label>Application date</label><input id="pa-date" ${d} type="date" value="${a.date || ''}" title="The invoice date and the date it posts" oninput="this.dataset.touched = '1'"></div>
                 <div class="form-group"><label>Retainage %</label><input id="pa-pct" ${d} type="number" step="0.01" min="0" max="100" value="${a.retainage_pct ?? ''}" oninput="JobsPage.paRecalc()"></div>
                 <div class="form-group"><label>Sales tax</label>
-                    <label style="font-weight:normal"><input id="pa-tax-on" ${d} type="checkbox" ${a.charge_tax !== false ? 'checked' : ''} ${a.tax_exempt ? 'disabled' : ''} onchange="JobsPage.paRecalc()"> Charge tax${a.tax_exempt ? ' (owner is tax-exempt)' : ''}</label></div>
+                    <label style="font-weight:normal"><input id="pa-tax-on" ${d} type="checkbox" ${a.charge_tax !== false && !a.contractor_pays_tax ? 'checked' : ''} ${a.tax_exempt || a.contractor_pays_tax ? 'disabled' : ''} onchange="JobsPage.paRecalc()"> Charge tax${a.tax_exempt ? ' (owner is tax-exempt)' : (a.contractor_pays_tax ? ' (off: the contractor pays tax on materials on this job)' : '')}</label></div>
                 <div class="form-group"><label>Tax rate %</label><input id="pa-tax-rate" ${d} type="number" step="0.0001" min="0" value="${Math.round(Number(a.tax_rate || 0) * 1000000) / 10000}" oninput="JobsPage.paRecalc()"></div>
                 <div class="form-group"><label>Release retainage</label><input id="pa-release" ${d} type="number" step="0.01" min="0" value="${a.release_retainage ?? 0}" oninput="JobsPage.paRecalc()"></div>
                 <div class="form-group"><label>Deposit applied <span style="color:var(--text-muted)">(${formatCurrency(a.unapplied_deposits)} unapplied)</span></label>
@@ -1596,7 +1602,7 @@ const JobsPage = {
         const priorBilled = (prior.completed_to_date || 0) - (prior.billed_this_period || 0);
         const taxOn = $('#pa-tax-on') ? $('#pa-tax-on').checked : false;
         const taxRate = Number(($('#pa-tax-rate') ? $('#pa-tax-rate').value : 0) || 0) / 100;
-        const exempt = !!(JobsPage._paEditing && JobsPage._paEditing.tax_exempt);
+        const exempt = !!(JobsPage._paEditing && (JobsPage._paEditing.tax_exempt || JobsPage._paEditing.contractor_pays_tax));
         const tax = (taxOn && !exempt) ? Math.round((completed - priorBilled) * taxRate * 100) / 100 : 0;
         const currentDue = Math.round((earnedLess - prevCert + tax) * 100) / 100;
         const totals = {

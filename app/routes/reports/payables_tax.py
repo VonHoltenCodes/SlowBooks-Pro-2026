@@ -136,6 +136,7 @@ def sales_tax_report(
         "tax_credited": float(tax_credited),
         "total_tax": float(total_tax),
         "ledger": _sales_tax_ledger(db, start_date, end_date, total_tax),
+        "use_tax": _use_tax_section(db, start_date, end_date),
         "basis": "accrual",
         "basis_note": None,
     }
@@ -251,6 +252,7 @@ def _sales_tax_cash(db: Session, start_date, end_date):
         "tax_credited": 0.0,
         "total_tax": float(total_tax),
         "ledger": _sales_tax_ledger(db, start_date, end_date, total_tax, "cash"),
+        "use_tax": _use_tax_section(db, start_date, end_date, "cash"),
         "basis": "cash",
         "basis_note": cash_basis.receivable_note(db, end_date, "cash"),
     }
@@ -305,6 +307,109 @@ def _sales_tax_ledger(
         "difference": float(_q(total_tax - posted)),
         "purchase_tax": float(-owed(*in_period, purchase)),
         "purchase_tax_to_date": float(-owed(Transaction.date <= end_date, purchase)),
+    }
+
+
+# The entries that accrue use tax on 2220 Use Tax Payable: the bills that
+# post it, their voids and edits, and (on the cash basis) the bill payments
+# that recognize it. Any other debit to 2220 is the tax paid to the agency.
+_USE_TAX_ACCRUING = (
+    "bill",
+    "bill_void",
+    "bill_edit",
+    "bill_payment",
+    "bill_payment_void",
+)
+
+
+def _use_tax_section(db: Session, start_date, end_date, basis: str = "accrual"):
+    """The Use tax section (construction): the use tax material bills accrued
+    on 2220 Use Tax Payable in the dates, line by line, what was paid, and
+    the balance owed at the end date. None for a company that is not
+    construction and whose 2220 never moved (a report read creates nothing)."""
+    from sqlalchemy import and_, or_
+
+    from app.models.bills import Bill
+    from app.models.jobs import Job
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services.purchase_posting import use_tax_rate
+    from app.services.terminology import terms_from_db
+
+    account = db.query(Account).filter(Account.name == "Use Tax Payable").first()
+    construction = terms_from_db(db).is_construction
+    if account is None:
+        return None if not construction else _empty_use_tax(db, use_tax_rate)
+
+    def lines(*conds):
+        return (
+            db.query(TransactionLine, Transaction)
+            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+            .filter(TransactionLine.account_id == account.id, *conds)
+            .execution_options(**cash_basis.reading(basis))
+        )
+
+    accruing = Transaction.source_type.in_(_USE_TAX_ACCRUING)
+    paying = or_(Transaction.source_type.is_(None), ~accruing)
+    in_period = and_(Transaction.date >= start_date, Transaction.date <= end_date)
+
+    def net(query) -> Decimal:
+        return _q(
+            sum(
+                (
+                    Decimal(str(tl.credit or 0)) - Decimal(str(tl.debit or 0))
+                    for tl, _t in query
+                ),
+                Decimal("0"),
+            )
+        )
+
+    if not construction and not lines().first():
+        return None
+    items = []
+    for tl, txn in lines(in_period, accruing).order_by(
+        Transaction.date, TransactionLine.id
+    ):
+        # a bill's own entries carry its id; a payment's carry the payment's
+        on_bill = txn.source_type in ("bill", "bill_void", "bill_edit")
+        bill = db.get(Bill, txn.source_id) if on_bill and txn.source_id else None
+        job = db.get(Job, tl.job_id) if tl.job_id else None
+        items.append(
+            {
+                "date": txn.date.isoformat(),
+                "type": txn.source_type,
+                "bill_id": bill.id if bill else None,
+                "bill_number": bill.bill_number if bill else None,
+                "vendor_name": bill.vendor.name if bill and bill.vendor else "",
+                "job_name": job.name if job else "",
+                "description": tl.description or "",
+                "amount": float(
+                    _q(Decimal(str(tl.credit or 0)) - Decimal(str(tl.debit or 0)))
+                ),
+            }
+        )
+    return {
+        "account_id": account.id,
+        "account_number": account.account_number,
+        "account_name": account.name,
+        "rate": float(use_tax_rate(db)),
+        "items": items,
+        "accrued": float(net(lines(in_period, accruing))),
+        "paid": float(-net(lines(in_period, paying))),
+        "balance": float(net(lines(Transaction.date <= end_date))),
+    }
+
+
+def _empty_use_tax(db: Session, use_tax_rate):
+    """A construction company whose 2220 does not exist yet: nothing accrued."""
+    return {
+        "account_id": None,
+        "account_number": None,
+        "account_name": "Use Tax Payable",
+        "rate": float(use_tax_rate(db)),
+        "items": [],
+        "accrued": 0.0,
+        "paid": 0.0,
+        "balance": 0.0,
     }
 
 

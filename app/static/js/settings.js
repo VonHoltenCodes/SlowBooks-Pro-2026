@@ -518,6 +518,11 @@ const SettingsPage = {
                             <input name="default_tax_rate" type="number" min="0" max="100" step="0.0001"
                                 title="A percent from 0 to 100, up to four decimal places: 8.875 means 8.875%"
                                 value="${escapeHtml(SettingsPage._ratePercent(s.default_tax_rate))}"></div>
+                        ${s.company_type === 'construction' ? `<div class="form-group"><label for="use-tax-rate">Use tax rate (%)</label>
+                            <input id="use-tax-rate" name="use_tax_rate" type="number" min="0" max="100" step="0.0001"
+                                title="What material bills on a job whose contractor pays the tax accrue to Use Tax Payable. Blank: the default tax rate."
+                                placeholder="the default tax rate"
+                                value="${escapeHtml(s.use_tax_rate ? SettingsPage._ratePercent(s.use_tax_rate) : '')}"></div>` : ''}
                         <div class="form-group full-width"><label for="new-lines-taxable">New lines and items are taxable</label>
                             <select id="new-lines-taxable" name="new_lines_taxable" aria-describedby="new-lines-taxable-help">
                                 <option value="true" ${s.new_lines_taxable !== 'false' ? 'selected' : ''}>Yes: a new line's Tax box starts ticked, and a new item is taxable</option>

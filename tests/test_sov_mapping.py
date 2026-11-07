@@ -153,13 +153,18 @@ def test_build_carries_section_revenue_account_and_tax(
     assert by["Drywall (bid)"]["cost_code_id"] == gyp["id"]
     assert by["Unassigned"]["cost_code_id"] == elec["id"]
     assert by["Finishes allowance"]["cost_code_id"] == gyp["id"]
-    # taxable per the estimate's lines; the markup is taxed because a line is
+    # taxable per the estimate's lines; the markup splits by the taxable
+    # share of its base: 8,000 of 122,000, so 640 of the 9,760 is taxed
     assert by["Demo (bid)"]["is_taxable"] is False
     assert by["Drywall (bid)"]["is_taxable"] is False
     assert by["Unassigned"]["is_taxable"] is True
     assert by["Finishes allowance"]["is_taxable"] is False
-    assert by["General conditions (8%)"]["is_taxable"] is True
-    assert by["General conditions (8%)"]["cost_code_id"] is None
+    gc_taxed = by["General conditions (8%)"]
+    gc_exempt = by["General conditions (8%) (not taxable)"]
+    assert gc_taxed["is_taxable"] is True and gc_exempt["is_taxable"] is False
+    assert float(gc_taxed["scheduled_value"]) == 640.0
+    assert float(gc_exempt["scheduled_value"]) == 9120.0
+    assert gc_taxed["cost_code_id"] is None
     # every built line credits 4050 Contract Revenue
     rev = _acct(db_session, "4050")
     assert rev is not None and rev.name == "Contract Revenue"
@@ -170,10 +175,11 @@ def test_build_carries_section_revenue_account_and_tax(
 def test_a_partly_taxable_package_is_two_lines_and_the_tax_matches_the_bid(
     client, db_session, seed_accounts, seed_customer
 ):
-    """est B2: Labor 60,000 not taxable and Materials 40,000 taxable at 6.5%,
-    markups 8 / 1.5 / 5 / 1. The estimate quotes 3,656.38 of tax; billed at
-    100%, the pay application charges the same (it used to charge 7,556.38,
-    tax on the whole billing)."""
+    """est B2/B3: Labor 60,000 not taxable and Materials 40,000 taxable at
+    6.5%, markups 8 / 1.5 / 5 / 1. The estimate taxes Materials and its share
+    of the markups, 40,000 × 1.16252 × 6.5% = 3,022.55 (it used to tax every
+    markup, 3,656.38); billed at 100%, the pay application charges the same
+    (it once charged 7,556.38, tax on the whole billing)."""
     _construction(client)
     job, sov, est_id = _accepted_build(
         client,
@@ -189,7 +195,7 @@ def test_a_partly_taxable_package_is_two_lines_and_the_tax_matches_the_bid(
         bond_pct=1,
     )
     est = client.get(f"/api/estimates/{est_id}").json()
-    assert float(est["tax_amount"]) == 3656.38
+    assert float(est["tax_amount"]) == 3022.55
     work = [line for line in sov if line["kind"] == "work"]
     assert [(w["description"], w["is_taxable"]) for w in work] == [
         ("Unassigned", True),
@@ -197,15 +203,33 @@ def test_a_partly_taxable_package_is_two_lines_and_the_tax_matches_the_bid(
     ]
     assert [float(w["scheduled_value"]) for w in work] == [40000.0, 60000.0]
 
+    # each markup is a taxable part (40% of it) and a part that is not; the
+    # taxable parts sum to the estimate's taxable share, 6,500.80
+    marks = [line for line in sov if line["kind"] != "work"]
+    assert [m["description"] for m in marks] == [
+        "General conditions (8%)",
+        "General conditions (8%) (not taxable)",
+        "Insurance (1.5%)",
+        "Insurance (1.5%) (not taxable)",
+        "Fee (5%)",
+        "Fee (5%) (not taxable)",
+        "Bond (1%)",
+        "Bond (1%) (not taxable)",
+    ]
+    taxed_marks = sum(Decimal(m["scheduled_value"]) for m in marks if m["is_taxable"])
+    assert taxed_marks == Decimal("6500.80")
+    assert sum(Decimal(m["scheduled_value"]) for m in marks) == Decimal("16252.01")
+
     approved = _bill_all(client, job["id"], sov)
-    assert float(approved["totals"]["tax_amount"]) == 3656.38
+    assert float(approved["totals"]["tax_amount"]) == 3022.55
     inv = db_session.get(Invoice, approved["invoice_id"])
-    assert inv.tax_amount == Decimal("3656.38")
+    assert inv.tax_amount == Decimal("3022.55")
     # the invoice lines say which were taxed
     taxed = {ln.description: ln.is_taxable for ln in inv.lines}
     assert taxed["01 Unassigned"] is True
     assert taxed["02 Unassigned (not taxable)"] is False
-    assert taxed["06 Bond (1%)"] is True
+    assert taxed["09 Bond (1%)"] is True
+    assert taxed["10 Bond (1%) (not taxable)"] is False
 
 
 def test_a_job_whose_estimate_taxed_nothing_bills_no_tax(

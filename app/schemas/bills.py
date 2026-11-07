@@ -45,6 +45,9 @@ class BillLineCreate(StrictModel):
     purchase_order_line_id: Optional[int] = None
     function: Optional[str] = None
     is_billable: bool = False
+    # Use tax (construction): null follows the job's sales tax rule, true
+    # accrues it on this line anyway, false never does.
+    use_tax: Optional[bool] = None
     description: Optional[str] = None
     quantity: Optional[float] = None
     rate: Optional[float] = None
@@ -118,6 +121,7 @@ class BillLineResponse(BaseModel):
     purchase_order_line_id: Optional[int] = None
     function: Optional[str] = None
     is_billable: bool = False
+    use_tax: Optional[bool] = None
     description: Optional[str] = None
     quantity: Decimal = Decimal("0")
     rate: RateOut = Decimal("0")

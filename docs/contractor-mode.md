@@ -72,9 +72,14 @@ whatever the number-and-name rule would otherwise guess.
 
 Retainage is the portion of a billing held back until a job is accepted —
 receivable when a customer holds it from you, payable when you hold it from
-a sub. Construction in Progress carries costs on a job not yet billed.
-Customer Deposits holds money taken before work. Use Tax Payable is the use
-tax a contractor self-assesses on materials. Contract Revenue is where a pay
+a sub. Construction in Progress is for a company that capitalises job cost
+until it bills: nothing posts there on its own (job cost goes to the 5100–5500
+job-cost accounts, and the WIP schedule's adjusting entry is the over- and
+under-billing mechanism), so a company that wants it books it by journal
+entry. Customer Deposits holds money taken before work. Use Tax Payable is the
+use tax a contractor self-assesses on materials: a material bill on a job
+whose contractor pays the tax accrues it there (see *Sales tax and use tax on
+a job*). Contract Revenue is where a pay
 application's billing posts unless its schedule-of-values line names another
 income account. Equipment Cost and Other Job Costs are job-cost buckets
 beside the seed chart's Materials, Labor and Subcontractor Costs. 1360, 2060,
@@ -213,9 +218,15 @@ allowances, at 8 / 1.5 / 5 / 1 percent:
 
 The **bid total** is the subtotal plus the markups, and it is **pre-tax**: the
 owner's contract sum and schedule of values (#552) are pre-tax,
-and tax is added on each invoice. Tax covers the lines and the markups
-together — the tax rate times the taxable line subtotal plus the markups —
-when any included line is taxable; an exempt customer pays no tax on anything.
+and tax is added on each invoice. Tax covers the taxable lines and **their
+share of the markups** — the tax rate times (the taxable line subtotal + the
+markups × the taxable lines' part of the markup base), the same pro-rata split
+the budget and the owner's bid use — so a markup on an exempt line is never
+taxed. A taxable line priced direct (no unit cost) carries no markup, so only
+its own price is taxed; an exempt customer pays no tax on anything. Worked
+example: A $60,000 not taxable and B $40,000 taxable, at 8 / 1.5 / 5 / 1 and
+6.5%: the markups are 16,252.01, B's 40% share is 6,500.80, and the tax is
+6.5% × 46,500.80 = **3,022.55** (40,000 × 1.16252 × 6.5%).
 The **Total** is subtotal + markups + tax. The markups are a construction-mode
 field: a Business or Nonprofit estimate stores 0 for all four whatever an API
 caller sends, so its totals are the plain Subtotal / Tax / Total.
@@ -364,6 +375,47 @@ not-to-exceed). The type decides how the fee and the cap read:
   job is accepted. Progress billing (below) holds it back and releases it.
 - **Contract date** and the **source estimate**, shown when the contract was
   built from one.
+- **Sales tax** — who pays the tax on the job: **Charge sales tax to the
+  owner** (the default, and every job before this) or **Contractor pays tax
+  on materials (no sales tax to the owner)**, the lump-sum real-property rule
+  in Florida and many states (`sales_tax_treatment`: `charge_owner` or
+  `contractor_pays`). See *Sales tax and use tax on a job* below.
+
+**Sales tax and use tax on a job.** On a *charge the owner* job the pay
+applications tax the taxable SOV lines (see *Progress billing*). On a
+*contractor pays* job the contractor is the consumer of the materials it
+installs:
+
+- **Its pay applications bill no sales tax at all** — work, stored materials
+  and change orders alike, whatever the SOV's Tax boxes say. The *Charge tax*
+  box on the application is off and greyed, saying why. The estimate keeps
+  its own tax figures; it is the bid, not the billing.
+- **Its material bills accrue use tax.** A bill line whose cost type is
+  *material*, on the job (the line's, else the bill's), on a bill the vendor
+  charged **no** sales tax on, accrues the company's **use-tax rate** × the
+  line's amount in the bill's own journal: DR the line's job-cost account
+  with its job, section and cost type / CR **2220 Use Tax Payable** with the
+  job. Accounts Payable is still the bill's total (the use tax is owed to the
+  state, not the vendor), and the job's cost carries the tax, as it would
+  had the vendor charged it. A commitment billed through **To Bill** accrues
+  the same way. Voiding the bill reverses the accrual with the rest of its
+  journal; editing it re-posts it. A stock item (received into Inventory)
+  accrues none.
+- **The Use tax box** on a bill line (beside Cost Type) accrues use tax on
+  that line whatever the job or cost type: equipment bought untaxed, material
+  for a *charge the owner* job used on the company's own work. Through the
+  API, `use_tax` is null (follow the rule), true (accrue) or false (never).
+- **The rate** is Settings → Invoice Defaults → **Use tax rate**, a percent
+  like the default tax rate; blank (the default) uses the default tax rate.
+- **The Sales Tax report** has a **Use tax** section: each accrual in the
+  dates (bill, vendor, job, line, amount; a void shows negative), the use tax
+  accrued and paid in the dates, and what is owed on 2220 at the end date. On
+  the cash basis a bill's use tax is accrued as the bill is paid. **Paying
+  it** is an ordinary payment to the tax agency: a check or bill to the
+  agency on account 2220 Use Tax Payable (Pay Sales Tax is for 2200).
+
+Changing the setting changes what is posted from then on; nothing already
+approved or posted moves.
 
 The summary stamps the **original contract amount** once, the first time a sum
 is set with a type (building from an estimate stamps it too, even when the sum
@@ -414,8 +466,15 @@ with no package roll into one "Unassigned" work line. Each built line credits
   lines are. A package whose lines are partly taxable becomes **two** work
   lines, the taxable part under the package's name and the rest as
   "*Package* (not taxable)", so a pay application at 100% charges the tax the
-  bid quoted. A markup or contingency line is taxable when any included
-  estimate line is, as the estimate taxes its markups.
+  bid quoted. A **markup** line follows the taxable share of the markup base:
+  wholly taxable when every marked-up line is, not taxable when none is, and
+  on a mixed bid **two** lines — "General conditions (8%)" for the part on
+  the taxable lines and "General conditions (8%) (not taxable)" for the rest.
+  The taxable parts sum to the estimate's taxable share to the cent (the last
+  markup takes the rounding), so the A/B example above bills exactly 3,022.55
+  of tax at 100%. A contingency line is taxable when any line on the schedule
+  is. **Convert to invoice** splits its markup lines the same way, so the
+  converted invoice charges the bid's tax.
 
 Each of the three is editable per line in the grid. A line saved through the
 API without `revenue_account_id` or `is_taxable` keeps what it had (a new
@@ -850,7 +909,8 @@ any invoice. Revenue by section then shows in the job cost tree's actual
 revenue, Job Budget vs Actual and P&L by Job. Sales tax is **on by
 default** and can be switched off per application (the *Charge tax* box); it is
 charged on the work billed this period **on the taxable SOV lines** (a line
-whose Tax box is off bills untaxed, and the invoice line says so) at the
+whose Tax box is off bills untaxed, and the invoice line says so; a job whose
+contractor pays the tax bills none, see *Sales tax and use tax on a job*) at the
 application's **tax rate**,
 defaulted from the job's accepted estimate (kept to six decimals, so 8.875%
 stays 8.875%) and editable while the application is open. A tax-exempt owner is never taxed. The application shows the tax and
@@ -858,6 +918,14 @@ its current due includes it, so the application and the invoice match. The
 invoice's balance due is that net; the invoice view and PDF show
 *Retainage withheld this period*, *Retainage released* and *Current payment
 due*.
+
+**Stored materials and tax.** On a *charge the owner* job, materials stored
+are billed (and taxed on a taxable line) the period they are stored, and the
+change is reversed the period they go into the work, as above. On a
+*contractor pays* job they bill no tax, like everything else on it. Stored
+materials are booked as billed revenue when billed — there is no
+stored-material asset — and the WIP schedule's adjusting entry takes out any
+over-billing they cause.
 
 **The customer statement** lists such an invoice at what it put on Accounts
 Receivable (its total less the retainage held, plus any released; the line says
@@ -1016,17 +1084,20 @@ carries the cost code.
 | **Owner deposit received** | the bank account chosen | 2210 Customer Deposits (job) | Held until a pay application applies it. |
 | **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, 4050, taxed as the schedule is); every kind writes budget rows. |
 | **Commitment issued; sub change order approved** | — | — | No entry. Committed cost on the job, by section and cost type. |
-| **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released (job); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. |
+| **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released (job); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines (none on a *contractor pays* job) | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. **Stored materials** are revenue the period they are billed (no stored-material asset; the WIP entry adjusts any over-billing) and taxed with their line on a *charge the owner* job. |
 | … with a deposit applied | 2210 Customer Deposits | 1100 Accounts Receivable | A payment from the deposit, applied to the application's invoice. |
 | … with retainage released | 1100 Accounts Receivable (job) | 1150 Retainage Receivable (job) | Inside the application's own entry; a release-only application bills nothing else. |
 | **Pay application voided** | — | — | Reverses the invoice's entry and any deposit payment, on their original dates. |
 | **Sub or supplier bill** (Sub pay app / To Bill, or entered by hand) | each line's cost account (job, section, cost type), with its share of the bill's tax: the line's account, else the item's expense account, else (construction) the code's account, else the cost type's default — 5100 material, 5200 labor, 5300 subcontract, 5400 equipment, 5500 other — else the vendor's default expense account | 2000 Accounts Payable for the net; 2050 Retainage Payable for the retainage held (job) | A stock item posts to Inventory. A line nothing names is refused with a sentence. |
+| … with use tax (a material line on a *contractor pays* job, no tax on the bill; or a line's Use tax box) | the line's cost account (job, section, cost type) for the rate × the line | 2220 Use Tax Payable (job) | In the bill's own journal, so a void or an edit reverses or re-posts it. |
 | **Sub retainage released** (Release retainage on the commitment) | 2050 Retainage Payable (job) | 2000 Accounts Payable | A bill with no expense line, paid through Pay Bills. |
 | **Bill payment** | 2000 Accounts Payable | the bank (1000 Checking unless another is chosen) | |
 | **Customer payment** | the deposit-to account (Undeposited Funds unless a bank is chosen) | 1100 Accounts Receivable | Retainage still held stays on 1150 until a release bills it. |
 | **Job Cost Entry** | the line's cost account (the line's, else the code's, else the cost type's default) (job, section, cost type) | the line's offset account, else the equipment's recovery account, else the cost type's offset account | |
 | **Sales tax paid** | 2200 Sales Tax Payable | the bank | |
 | **Material slip posted** (field ticket) | the line's cost account (material type; job, section) at the item's average cost | the item's inventory asset account | A Job Cost Entry; a return slip is the reverse, and a void reverses at the booked cost. T&M and delivery tickets post nothing. |
+| **Use tax paid** (a check or bill to the tax agency) | 2220 Use Tax Payable | the bank (or A/P) | The Sales Tax report's Use tax section shows it as paid. |
+| **Construction in Progress** | — | — | 1350 takes nothing on its own: job cost posts to 5100–5500 and the WIP entry carries over- and under-billing. A company that capitalises cost until billing books it by journal entry. |
 
 Because each pay-application line credits its own revenue account with its
 section, revenue by section appears beside cost by section in the job cost

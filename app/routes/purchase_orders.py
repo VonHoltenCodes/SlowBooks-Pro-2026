@@ -32,6 +32,8 @@ from app.services.purchase_posting import (
     expense_account_for,
     spread,
     unit_cost_with_tax,
+    use_tax_for,
+    use_tax_lines,
 )
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
@@ -854,6 +856,19 @@ def convert_to_bill(
                     "cost_type": poline.cost_type,
                 }
             )
+            # Use tax a "contractor pays" job owes on the line (construction).
+            if not (item and item.track_inventory):
+                job_id = poline.job_id or po.job_id
+                accrual = use_tax_for(
+                    db,
+                    amount=amt,
+                    job_id=job_id,
+                    cost_type=line_cost_type(db, poline.cost_code_id, poline.cost_type),
+                    bill_taxed=tax_amount > 0,
+                )
+                journal_lines.extend(
+                    use_tax_lines(db, journal_lines[-1], accrual, job_id)
+                )
 
     if journal_lines:
         # A/P takes the net; retainage held rides on 2050 (#553).
