@@ -381,14 +381,12 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
     assistant read these too, so no two views of payables disagree (found
     integrating the 2.17.3 exploratory fixes: the A/R side had been made to
     tie; this side still summed raw document-currency balances)."""
-    from app.models.bills import (
-        Bill,
-        BillPayment,
-        BillPaymentAllocation,
-        BillStatus,
-    )
-    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
     from app.services.contact_balances import home_amount
+    from app.services.open_balances import (
+        open_bills_as_of,
+        unapplied_bill_payments_as_of,
+        unapplied_vendor_credits_as_of,
+    )
 
     vendor_names = {v.id: v.name for v in db.query(Vendor.id, Vendor.name).all()}
     aging: dict = {}
@@ -407,18 +405,11 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
             }
         return aging[vid]
 
-    # Today's open bills dated on or before the report's date, aged against
-    # it, as the A/R side does (#285: a bill dated after the date was in
-    # the report). A bill paid since the date is not rebuilt as owed on it:
-    # this is the current ledger aged, not a reconstruction.
-    bills = (
-        db.query(Bill)
-        .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
-        .filter(Bill.balance_due > 0)
-        .filter(Bill.date <= as_of_date)
-        .all()
-    )
-    for bill in bills:
+    # What was open on the date, not what is open today: a bill paid since
+    # still counts, so the total is account 2000 on that date, as the A/R
+    # side does. Only bills dated on or before it (#285).
+    bills = open_bills_as_of(db, as_of_date)
+    for bill, open_amount in bills:
         r = row(bill.vendor_id)
         # A bill with no due date (bills made from a PO before 2.18
         # never got one) ages from its date and terms, not as current.
@@ -426,7 +417,7 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
         # else the old reading of its text, never a term added since
         due = bill.due_date or document_due_date(db, bill)
         days = (as_of_date - due).days
-        bal = home_amount(bill.balance_due, bill.exchange_rate)
+        bal = home_amount(open_amount, bill.exchange_rate)
         if days <= 0:
             r["current"] += bal
         elif days <= 30:
@@ -447,32 +438,11 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
         r["current"] -= amount
         r["total"] -= amount
 
-    for vc in (
-        db.query(VendorCredit)
-        .filter(VendorCredit.status != VendorCreditStatus.VOID)
-        .filter(VendorCredit.date <= as_of_date)
-        .filter(VendorCredit.balance_remaining > 0)
-        .all()
-    ):
-        credit(vc.vendor_id, Decimal(str(vc.balance_remaining)))
+    for vc, left in unapplied_vendor_credits_as_of(db, as_of_date):
+        credit(vc.vendor_id, _q(left))
 
-    applied = dict(
-        db.query(
-            BillPaymentAllocation.bill_payment_id,
-            sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
-        )
-        .group_by(BillPaymentAllocation.bill_payment_id)
-        .all()
-    )
-    for bp in (
-        db.query(BillPayment)
-        .filter(BillPayment.date <= as_of_date)
-        .filter(BillPayment.is_voided.isnot(True))
-        .all()
-    ):
-        left = _q(Decimal(str(bp.amount or 0)) - Decimal(str(applied.get(bp.id, 0))))
-        if left > 0:
-            credit(bp.vendor_id, home_amount(left, bp.exchange_rate))
+    for bp, left in unapplied_bill_payments_as_of(db, as_of_date):
+        credit(bp.vendor_id, home_amount(left, bp.exchange_rate))
 
     _COLS = ("current", "over_30", "over_60", "over_90", "total", "unapplied_credits")
     items = sorted(aging.values(), key=lambda i: (i["vendor_name"] or "").lower())

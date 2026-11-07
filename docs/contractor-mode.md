@@ -332,7 +332,9 @@ payable in full — so the bill credits Accounts Payable for the net and
 **Retainage Payable** (2050) for the retainage, its balance due is the net, and
 the journal still balances with the gross debits. Pay Bills pays only what's
 owed now, and the A/P aging and vendor balances show the net (the held amount
-sits on 2050, not A/P). A bill entered by hand can hold retainage the same way.
+sits on 2050, not A/P). Both agings read what was open on the report's date: a
+bill or invoice paid since still counts then, so the total equals account 2000
+(1100) on the Balance Sheet for that date. A bill entered by hand can hold retainage the same way.
 The 2050 line carries the bill's job, so release can find it by job.
 Editing the lines of a converted bill re-computes the retainage at the commitment's rate on the new subtotal, unless the edit sends `retainage_held`. A retainage that was set by hand (sent as `retainage_held` through the API; the bill's `retainage_manual` is then true) is kept across later edits of the lines, tax or date, while one the commitment's rate derived keeps following that rate even after the rate is changed; it still may not exceed the new subtotal or leave less than has been paid. A fully billed (closed) commitment refuses a higher amount (409): raise it with a sub change order.
 Release it with **Release retainage** on the commitment
@@ -598,7 +600,15 @@ stays 8.875%) and editable while the application is open. A tax-exempt owner is 
 its current due includes it, so the application and the invoice match. The
 invoice's balance due is that net; the invoice view and PDF show
 *Retainage withheld this period*, *Retainage released* and *Current payment
-due*. A dropped retainage percent makes the retainage this period negative and
+due*.
+
+**The customer statement** lists such an invoice at what it put on Accounts
+Receivable (its total less the retainage held, plus any released; the line says
+how much was held or released), so its **Balance Due** is the amount due and
+equals A/R Aging for that customer. The retainage still held across the
+customer's invoices (held − released, to the statement date) prints on its own
+line, *Retainage held, not yet due*, beside the balance. The statement takes
+`as_of_date` only; it has no start date. A dropped retainage percent makes the retainage this period negative and
 the 1150 leg a credit; the entry still balances. **Void** reverses the
 invoice (and the 1150 entries), and later applications stay correct because
 each reads its *previous* and *retainage to date* from the approved history
@@ -793,13 +803,19 @@ per job and grand. As of `as_of`, only commitments dated by then count and
 billed-to-date is the non-void bills dated by then.
 
 **Job cost by vendor** (`job-cost-by-vendor`). Posted job cost grouped job →
-vendor (the transaction header's vendor; a No vendor bucket holds journals and
-job cost entries), with each vendor's bills, paid to date (the bill payments
-allocated to that vendor's bills on the job), retainage held outstanding (held −
-released on those bills) and open A/P. The cost is for the period; the bill
-figures are job-to-date and **prorated by the job's share of each bill's line
-amounts** — a header-only bill counts whole, a bill split across jobs splits its
-payment, retainage, A/P and count — so a job's bills can read fractional.
+vendor, with each vendor's bills, paid to date (the bill payments allocated to
+that vendor's bills on the job), retainage held outstanding (held − released on
+those bills) and open A/P. Each posted entry's vendor is read from the document
+behind it — the bill (and its void), the bill payment, the vendor credit, or an
+expense's payee vendor — not from a stamp on the entry, so books posted before
+this report read right with no backfill; a No vendor bucket holds journals and
+job cost entries. The cost is for the period; the bill figures are job-to-date
+**as of the report's end date** (bills and payments dated by then; a void or
+draft bill is not counted) and in home currency at each bill's booked rate, so
+a vendor's open A/P ties to A/P Aging and Commitment Status for the same job and
+date. They are **prorated by the job's share of each bill's line amounts** — a
+header-only bill counts whole, a bill split across jobs splits its payment,
+retainage, A/P and count — so a job's bills can read fractional.
 
 The existing **Job Profitability** and **Job Budget vs Actual** reports gained
 PDF and CSV routes, so every contractor report exports the same way.

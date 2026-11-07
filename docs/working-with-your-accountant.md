@@ -71,7 +71,8 @@ If they would rather not sign in, send:
   and Trial Balance in one PDF;
 - Reports → **General Ledger** → Save CSV: every line, by account;
 - Reports → **A/R Aging** and **A/P Aging** → Save CSV: who owes, and who
-  is owed, by age;
+  is owed, by age, as of the date you pick (an invoice or bill paid since still
+  counts on a past date, so the total matches the Balance Sheet for that date);
 - the bank reconciliation reports, as needed;
 - or all of it at once: Reports → **Accountant's Package**, one zip for the
   period with the Financial Statements Pack, the General Ledger and Trial
