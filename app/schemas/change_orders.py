@@ -163,5 +163,7 @@ class ChangeOrderOut(BaseModel):
     markup_total: float = 0.0
     sell_total: float = 0.0
     by_cost_type: dict = {}
+    # Approve only: what the approval did that is worth a second look.
+    warnings: List[str] = []
 
     model_config = {"from_attributes": True}

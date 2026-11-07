@@ -570,7 +570,14 @@ def test_job_cost_by_vendor(db_session, seed_accounts):
 # ── routes: JSON / PDF / CSV answer 200 with the header row ─────────────────
 
 
+def _construction(client):
+    """The WIP schedule is construction mode's (a Business company gets 409)."""
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+
+
 def _setup_books(client, db_session, seed_accounts):
+    _construction(client)
     customer = _customer(db_session)
     _wip_job(db_session, customer)
     return customer
@@ -1309,6 +1316,7 @@ def test_adjusting_entry_empty_when_nothing_to_adjust(db_session, seed_accounts)
 
 
 def test_wip_csv_carries_the_adjusting_entry(client, db_session, seed_accounts):
+    _construction(client)
     customer = _customer(db_session)
     _wip_job(db_session, customer)
     csv = client.get("/api/reports/wip-schedule/csv?as_of=2026-06-01").text
@@ -1528,6 +1536,7 @@ def test_wip_no_basis_below_contract_is_not_earned(db_session, seed_accounts):
 def test_wip_warnings_print_in_screen_pdf_and_csv(client, db_session, seed_accounts):
     from app.routes.reports import construction
 
+    _construction(client)
     customer = _customer(db_session)
     _contract_job(db_session, customer, "No budget yet", 1000000, None, 10000)
     note = "no budget or forecast; nothing earned"

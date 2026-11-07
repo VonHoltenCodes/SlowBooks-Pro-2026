@@ -116,6 +116,7 @@ def add_print_routes(router) -> list[str]:
             name=f"{route.name}_print",
             response_class=HTMLResponse,
             tags=list(route.tags),
+            dependencies=route.dependencies,
         )
         existing.add(path)
         added.append(path)

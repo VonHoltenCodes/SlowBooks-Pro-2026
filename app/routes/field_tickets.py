@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.routes._helpers import refuse_unknown_filters
 from app.database import get_db
 from app.models.cost_codes import CostCode
 from app.models.field_tickets import FT_KINDS, FT_STATUSES, FieldTicket
@@ -109,7 +110,11 @@ def _refuse_unless_draft(t: FieldTicket, action: str) -> None:
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("", response_model=list[FieldTicketOut])
+@router.get(
+    "",
+    response_model=list[FieldTicketOut],
+    dependencies=[Depends(refuse_unknown_filters)],
+)
 def list_field_tickets(
     job_id: int = Query(None),
     kind: str = Query(None),

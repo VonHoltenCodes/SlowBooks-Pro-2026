@@ -163,6 +163,34 @@ def use_tax_rate(db: Session) -> Decimal:
         return Decimal("0")
 
 
+def use_tax_applies(
+    db: Session,
+    *,
+    amount,
+    job_id: Optional[int],
+    cost_type: Optional[str],
+    bill_taxed: bool,
+    use_tax: Optional[bool] = None,
+) -> bool:
+    """Whether one purchase line owes use tax at all, whatever the rate is.
+    Construction only. A line's own `use_tax` wins (True accrues, False
+    never); left unset, a material line on a "contractor pays" job accrues
+    when the vendor charged no sales tax on the bill (`bill_taxed` false)."""
+    from app.models.jobs import Job
+    from app.services.contracts import contractor_pays_tax
+    from app.services.terminology import terms_from_db
+
+    amount = _q(Decimal(str(amount or 0)))
+    if amount <= 0 or use_tax is False or not terms_from_db(db).is_construction:
+        return False
+    if use_tax is not True:
+        if bill_taxed or cost_type != "material" or not job_id:
+            return False
+        if not contractor_pays_tax(db.get(Job, job_id)):
+            return False
+    return True
+
+
 def use_tax_for(
     db: Session,
     *,
@@ -172,23 +200,49 @@ def use_tax_for(
     bill_taxed: bool,
     use_tax: Optional[bool] = None,
 ) -> Decimal:
-    """The use tax one purchase line accrues, 0 for none. Construction only.
-    A line's own `use_tax` wins (True accrues, False never); left unset, a
-    material line on a "contractor pays" job accrues when the vendor charged
-    no sales tax on the bill (`bill_taxed` false)."""
-    from app.models.jobs import Job
-    from app.services.contracts import contractor_pays_tax
-    from app.services.terminology import terms_from_db
-
-    amount = _q(Decimal(str(amount or 0)))
-    if amount <= 0 or use_tax is False or not terms_from_db(db).is_construction:
+    """The use tax one purchase line accrues, 0 for none (see use_tax_applies
+    for who owes it), at the company's use-tax rate."""
+    if not use_tax_applies(
+        db,
+        amount=amount,
+        job_id=job_id,
+        cost_type=cost_type,
+        bill_taxed=bill_taxed,
+        use_tax=use_tax,
+    ):
         return Decimal("0")
-    if use_tax is not True:
-        if bill_taxed or cost_type != "material" or not job_id:
-            return Decimal("0")
-        if not contractor_pays_tax(db.get(Job, job_id)):
-            return Decimal("0")
-    return _q(amount * use_tax_rate(db))
+    return _q(_q(Decimal(str(amount or 0))) * use_tax_rate(db))
+
+
+NO_USE_TAX_RATE = (
+    "Use tax is not accrued on this bill: no Use tax rate or Default tax rate is "
+    "set, so the use tax on its materials is $0.00. Set the Use tax rate in "
+    "Settings, then save the bill again."
+)
+
+
+def use_tax_rate_warnings(db: Session, bill) -> list[str]:
+    """A sentence when a saved bill has a line that owes use tax and the
+    company's use-tax rate is 0, so nothing was accrued and the books would
+    never show it. Empty for any bill that accrued, or owes none."""
+    if use_tax_rate(db) > 0:
+        return []
+    from app.models.items import Item
+
+    for ln in bill.lines:
+        item = db.get(Item, ln.item_id) if ln.item_id else None
+        if item is not None and item.track_inventory:
+            continue
+        if use_tax_applies(
+            db,
+            amount=ln.amount,
+            job_id=ln.job_id or bill.job_id,
+            cost_type=ln.cost_type,
+            bill_taxed=Decimal(str(bill.tax_amount or 0)) > 0,
+            use_tax=ln.use_tax,
+        ):
+            return [NO_USE_TAX_RATE]
+    return []
 
 
 def use_tax_lines(
@@ -196,14 +250,22 @@ def use_tax_lines(
 ) -> list[dict]:
     """The two journal lines that accrue `accrual` of use tax on a purchase
     line: DR the line's own account and dimensions (`debit_line`, the line's
-    cost debit), CR 2220 Use Tax Payable, both with the job. Nothing when
-    there is no accrual."""
+    cost debit), CR 2220 Use Tax Payable, both with the job. The memo ends
+    with the rate it was booked at. Nothing when there is no accrual."""
     if not accrual:
         return []
     from app.services.accounting import ensure_construction_accounts
 
     payable = ensure_construction_accounts(db)["2220"]
-    memo = f"Use tax - {debit_line.get('description') or 'materials'}"[:200]
+    # The rate rides on the memo, so the Sales Tax report can show the rate
+    # each accrual was booked at, not today's setting.
+    from app.services.estimating import fmt_pct
+
+    tag = f" ({fmt_pct(use_tax_rate(db) * 100)}%)"
+    memo = (
+        f"Use tax - {debit_line.get('description') or 'materials'}"[: 200 - len(tag)]
+        + tag
+    )
     return [
         {
             **debit_line,

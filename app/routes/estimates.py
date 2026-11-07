@@ -23,7 +23,11 @@ from app.routes.invoices.helpers import (
     opening_status,
     resolve_line_taxable,
 )
-from app.routes._helpers import clamp_pagination, reject_null_updates
+from app.routes._helpers import (
+    clamp_pagination,
+    refuse_unknown_filters,
+    reject_null_updates,
+)
 from app.routes.invoice_messages import default_message_body
 from app.services.audit import audited_bulk_delete
 from app.services.payment_terms import DocumentTerms, term_id_for
@@ -288,7 +292,11 @@ def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     ).update({JobBudget.locked: True}, synchronize_session=False)
 
 
-@router.get("", response_model=list[EstimateResponse])
+@router.get(
+    "",
+    response_model=list[EstimateResponse],
+    dependencies=[Depends(refuse_unknown_filters)],
+)
 def list_estimates(
     status: str = None,
     customer_id: int = None,
@@ -303,7 +311,14 @@ def list_estimates(
         selectinload(Estimate.lines),
     )
     if status:
-        q = q.filter(Estimate.status == status)
+        # "lost" is the bid log's word for a rejected estimate
+        word = "rejected" if status == "lost" else status
+        if word not in [s.value for s in EstimateStatus]:
+            raise HTTPException(
+                status_code=422,
+                detail="status must be one of pending, accepted, lost, converted.",
+            )
+        q = q.filter(Estimate.status == word)
     if customer_id:
         q = q.filter(Estimate.customer_id == customer_id)
     estimates = (

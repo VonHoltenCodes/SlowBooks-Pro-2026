@@ -407,8 +407,16 @@ installs:
   API, `use_tax` is null (follow the rule), true (accrue) or false (never).
 - **The rate** is Settings → Invoice Defaults → **Use tax rate**, a percent
   like the default tax rate; blank (the default) uses the default tax rate.
+  **When both are 0 nothing accrues, and the program says so:** saving the
+  Contract tab with *Contractor pays tax on materials* returns a warning
+  (`warnings` on the response, shown as a toast) naming the Use tax rate
+  setting, and a bill (or a commitment billed through To Bill) with a line that
+  would owe use tax at 0% carries the same kind of sentence in its response.
+  The bill still posts.
 - **The Sales Tax report** has a **Use tax** section: each accrual in the
-  dates (bill, vendor, job, line, amount; a void shows negative), the use tax
+  dates (bill, vendor, job, line, the **rate it was booked at**, amount; a void
+  shows negative; the rate is kept on the journal line's memo, so changing the
+  setting later does not rewrite it), the use tax
   accrued and paid in the dates, and what is owed on 2220 at the end date. On
   the cash basis a bill's use tax is accrued as the bill is paid. **Paying
   it** is an ordinary payment to the tax agency: a check or bill to the
@@ -579,7 +587,15 @@ for that package, an allowance at its amount — against what has been **bought*
   owner change order is counted once, on the owner's). The **variance** is
   bid + changes − bought, so an owner change order that funds a sub change
   order reads as covered, not as a loss. A line is placed by its own package,
-  else the package its cost code maps to.
+  else the package its cost code maps to. An **allowance-funded** change order
+  draws the allowance down rather than adding scope: besides its own cost,
+  which lands where its lines place it, it takes the same cost off the
+  allowance's row (the package of the allowance line's cost code), so
+  bid + changes − bought on that row is what the allowance has left. The
+  allowance's bid is placed the way its changes are: an estimate line with a
+  cost code and no package is bid in the package its code maps to, not under
+  *Unassigned* (a deduct alternate keeps to its own package, or to *Unassigned*
+  when its code is in none).
 - **Spent, no commitment** — coded lines of bills with no commitment, placed
   by their cost code's package, so a plain bill is not a $0 bought.
 - the committed-remaining, the billed-to-date and the commitments behind each
@@ -703,6 +719,13 @@ change order's line on the schedule of values stays off the application too (on
 screen, in the totals and on the PDF), so the schedule total equals the contract
 sum to date; a draft picks the line up when its date moves past the change
 order's effective date.
+Approve refuses a date that cannot be right, each with a sentence (422): an
+`approved_on` **earlier than the change order's own date**, and any effective
+date (given or defaulted) **earlier than the job's contract date**, since a WIP,
+pay application or report would show the change order before the contract
+existed. Approving with **no date** when the change order's own date is more
+than 30 days back takes effect that long ago; the response carries a `warning`
+saying so and the Approve dialog notes it under the date.
 Approving in a closed period is refused like a bill or a pay application there:
 403 with "Transaction date … is on or before the closing date (…). Modifications
 to closed periods are not allowed." (the closing-date password override works
@@ -1218,9 +1241,9 @@ a job with no open ticket is left out. The ticket's status is today's.
 
 ## Job reports
 
-Nine reports sit on the Report Center for a construction company (its first
-cards, after the three job reports every company has; a Business or Nonprofit
-company never sees them), each a plain grid with a JSON route, a PDF and a CSV
+Ten reports sit on the Report Center for a construction company, after the
+three job reports that always existed (thirteen cards in all; a Business or
+Nonprofit company never sees the ten), each a plain grid with a JSON route, a PDF and a CSV
 like P&L by Job. Each takes an `as_of` date (or
 `start_date`/`end_date` where a period applies) and optional `job_id`,
 `customer_id`, `status` and `include_closed`; by default closed and not-awarded
@@ -1381,7 +1404,9 @@ counts by status.
 bid cost against what has been bought, with the variance, committed-remaining and
 billed-to-date and the commitments behind each, the Unassigned row kept, totals
 per job and grand. As of `as_of`, only commitments dated by then count and
-billed-to-date is the non-void bills dated by then.
+billed-to-date is the non-void bills dated by then, leaving out a retainage
+release, which pays money already billed (as Commitment Status does), so the two
+reports agree on the same date.
 
 **Job cost by vendor** (`job-cost-by-vendor`). Posted job cost grouped job →
 vendor, with each vendor's bills, paid to date (the bill payments allocated to
@@ -1524,6 +1549,23 @@ Vendor**, **Cost-to-Complete Forecast**, **Commitment Status**, **Field Ticket
 Log** (see *Field tickets*), **Retainage** and **Sub Compliance** (see *Job
 reports* above). The ten show in construction mode only. Every other report
 stays where it is.
+
+A Business or Nonprofit company that opens **WIP Schedule**, **Field Ticket
+Log**, **Retainage** or **Sub Compliance** by address (`#/reports/retainage`, a
+saved report, a bookmark) is sent to the Report Center with a sentence saying
+they are construction-mode reports, and their APIs (JSON, PDF, CSV, print)
+answer 409 outside construction mode, as field tickets do. (The WIP post and void
+routes have their own rule.)
+
+**A filter the route does not read is refused, not dropped.** `GET
+/api/field-tickets`, `/api/estimates`, the Retainage, Sub Compliance and Field
+Ticket Log reports (and their PDF, CSV and print), and `POST
+/reports/wip-schedule/post` and `/void` answer 422 with a sentence naming the
+accepted parameters when a request carries any other (`jobid`, `asof`,
+`window_days`), so a misspelling cannot return the whole list or post the whole
+schedule. Retainage also refuses a `status` that is not a job status, and the
+estimate list's `status` takes `lost` for the estimates marked lost (stored as
+`rejected`; `rejected` still works).
 
 ## What this mode does not do yet
 

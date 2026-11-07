@@ -34,6 +34,7 @@ from app.services.purchase_posting import (
     unit_cost_with_tax,
     use_tax_for,
     use_tax_lines,
+    use_tax_rate_warnings,
 )
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
@@ -940,6 +941,8 @@ def convert_to_bill(
         # parts doesn't walk it back.
         po.status = POStatus.PARTIAL
     db.commit()
+    db.refresh(bill)
+    warnings = warnings + use_tax_rate_warnings(db, bill)
     return {
         "bill_id": bill.id,
         "message": f"Bill created from {po.po_number}",

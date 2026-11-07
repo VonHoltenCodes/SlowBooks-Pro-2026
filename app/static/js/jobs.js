@@ -874,8 +874,9 @@ const JobsPage = {
             sales_tax_treatment: form.sales_tax_treatment ? form.sales_tax_treatment.value : undefined,
         };
         try {
-            await API.put(`/jobs/${JobsPage._job.id}/contract`, data);
+            const saved = await API.put(`/jobs/${JobsPage._job.id}/contract`, data);
             toast('Contract terms saved');
+            for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('contract');
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -1265,11 +1266,14 @@ const JobsPage = {
         const co = (JobsPage._coList || []).find(c => c.id === id) || {};
         const today = new Date();
         const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const ageDays = co.date ? Math.floor((new Date(iso) - new Date(co.date)) / 86400000) : 0;
+        const oldNote = ageDays > 30
+            ? `<div style="font-size:11px;color:var(--text-danger)">${escapeHtml(co.number || 'This change order')} is dated ${ageDays} days ago, so it takes effect then unless you choose the day the owner signed.</div>` : '';
         openModal('Approve change order', `<form id="co-approve-form" onsubmit="JobsPage.coApproveSubmit(event, ${id})">
             <p>Approving ${escapeHtml(co.number || 'this change order')} updates the contract, budget and commitment.</p>
             <div class="form-group"><label for="co-approved-on">Takes effect on</label>
-                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}">
-                <div style="font-size:11px;color:var(--text-muted)">The date the owner signed. Reports, WIP and pay applications read the change order from this day.</div></div>
+                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}"${co.date ? ` min="${escapeHtml(co.date)}"` : ''}>
+                <div style="font-size:11px;color:var(--text-muted)">The date the owner signed. Reports, WIP and pay applications read the change order from this day. It cannot be before the change order's own date or the contract date.</div>${oldNote}</div>
             <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button type="submit" class="btn btn-primary">Approve</button></div>
         </form>`);
@@ -1278,8 +1282,9 @@ const JobsPage = {
         if (e) e.preventDefault();
         const approved_on = $('#co-approved-on').value;
         try {
-            await API.post(`/change-orders/${id}/approve`, { approved_on });
+            const approved = await API.post(`/change-orders/${id}/approve`, { approved_on });
             toast('Change order approved');
+            for (const w of (approved && approved.warnings) || []) toast(w, 'warning');
             closeModal();
             await JobsPage.setTab('changeorders');
         } catch (err) { toast(err.message, 'error'); }

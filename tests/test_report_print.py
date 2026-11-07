@@ -62,6 +62,16 @@ TITLES = {
 }
 
 
+# The construction reports that read only an as-of date, and answer 409 to a
+# company that is not in construction mode.
+AS_OF_ONLY = {
+    "/api/reports/wip-schedule/print",
+    "/api/reports/field-ticket-log/print",
+    "/api/reports/retainage/print",
+    "/api/reports/compliance/print",
+}
+
+
 @pytest.fixture
 def rendered(monkeypatch):
     """The HTML each PDF is rendered from, without running WeasyPrint."""
@@ -88,6 +98,8 @@ def urls(client, seed_accounts, seed_customer, completed):  # noqa: F811
             qs += f"&account_id={seed_accounts['1000'].id}"
         if "customer-statement" in url:
             qs = "?as_of_date=2026-09-30"
+        if path in AS_OF_ONLY:
+            qs = "?as_of=2026-12-31"
         base = url[: -len("/print")]
         out[path] = (base + "/print" + qs, base + "/pdf" + qs)
     return out
@@ -108,6 +120,10 @@ def test_every_report_pdf_route_has_a_print_route_beside_it():
 def test_each_print_page_is_the_pdfs_html_with_the_print_script(client, urls, rendered):
     for path, (print_url, pdf_url) in urls.items():
         rendered.clear()
+        mode = "construction" if path in AS_OF_ONLY else "business"
+        assert (
+            client.put("/api/settings", json={"company_type": mode}).status_code == 200
+        )
         pdf = client.get(pdf_url)
         assert pdf.status_code == 200, (pdf_url, pdf.text)
         assert pdf.headers["content-type"] == "application/pdf", pdf_url

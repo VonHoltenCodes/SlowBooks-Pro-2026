@@ -41,16 +41,16 @@ const ReportsPage = {
         'cash-flow':            { label: 'Cash Flow Statement', open: (p) => ReportsPage.cashFlow(p) },
         'job-profitability':    { label: () => T('Job Profitability'),  open: (p) => ReportsPage.jobProfitability(p) },
         'job-budget-vs-actual': { label: () => T('Job Budget vs Actual'), open: (p) => ReportsPage.jobBudgetVsActual(p) },
-        'wip-schedule':         { label: 'WIP Schedule',       open: (p) => ReportsPage.wipSchedule(p), asOf: true },
+        'wip-schedule':         { label: 'WIP Schedule',       open: (p) => ReportsPage.wipSchedule(p), asOf: true, construction: true },
         'cost-to-complete':     { label: 'Cost to Complete',   open: (p) => ReportsPage.costToComplete(p), asOf: true },
         'change-order-log':     { label: 'Change Order Log',   open: (p) => ReportsPage.changeOrderLog(p), asOf: true },
         'buyout':               { label: 'Buyout Report',      open: (p) => ReportsPage.buyoutReport(p), asOf: true },
         'job-cost-by-vendor':   { label: () => `${T('Job')} Cost by Vendor`, open: (p) => ReportsPage.jobCostByVendor(p) },
         'cost-to-complete-forecast': { label: 'Cost-to-Complete Forecast', open: (p) => ReportsPage.costToCompleteForecast(p), asOf: true },
         'commitment-status':    { label: 'Commitment Status',  open: (p) => ReportsPage.commitmentStatus(p), asOf: true },
-        'field-ticket-log':     { label: 'Field Ticket Log',   open: (p) => ReportsPage.fieldTicketLog(p), asOf: true },
-        'retainage':            { label: 'Retainage',          open: (p) => ReportsPage.retainage(p), asOf: true },
-        'compliance':           { label: 'Sub Compliance',     open: (p) => ReportsPage.subCompliance(p), asOf: true },
+        'field-ticket-log':     { label: 'Field Ticket Log',   open: (p) => ReportsPage.fieldTicketLog(p), asOf: true, construction: true },
+        'retainage':            { label: 'Retainage',          open: (p) => ReportsPage.retainage(p), asOf: true, construction: true },
+        'compliance':           { label: 'Sub Compliance',     open: (p) => ReportsPage.subCompliance(p), asOf: true, construction: true },
         'budget-vs-actual':     { label: 'Budget vs Actual',   open: (p) => { if (/^\d{4}$/.test(p.year || '')) BudgetsPage._year = parseInt(p.year, 10); return BudgetsPage.showVariance(p); } },
         'financial-statements': { label: 'Financial Statements Pack', open: (p) => ReportsPage.financialStatementsPdf(p) },
         'fixed-asset-reconciliation': { label: 'Fixed Asset Reconciliation', open: () => ReportsPage.fixedAssetReconciliation() },
@@ -289,6 +289,13 @@ const ReportsPage = {
         if (!view) {
             ReportsPage._addressReportCenter();
             toast(`There is no report called "${name}"`, 'error');
+            return;
+        }
+        // A construction report by address in a Business or Nonprofit company:
+        // the Report Center, with a sentence (the server answers 409 too).
+        if (view.construction && !Terms.isConstruction()) {
+            ReportsPage._addressReportCenter();
+            toast(`${typeof view.label === 'function' ? view.label() : view.label} is a construction-mode report. Set Company Type to Construction under Settings → Company to use it.`, 'error');
             return;
         }
         try {
@@ -2065,15 +2072,16 @@ const ReportsPage = {
                 <td>${escapeHtml(i.vendor_name || '')}</td>
                 <td>${escapeHtml(i.job_name || '')}</td>
                 <td>${escapeHtml(i.description || '')}</td>
+                <td class="amount">${i.rate === null || i.rate === undefined ? '' : SalesLines.taxPercent(i.rate) + '%'}</td>
                 <td class="amount">${formatCurrency(i.amount)}</td>
             </tr>`).join('');
         const name = u.account_number ? `${escapeHtml(u.account_number)} ${escapeHtml(u.account_name)}` : escapeHtml(u.account_name);
         return `
             <h3 style="margin:18px 0 6px; font-size:14px;">Use tax</h3>
-            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, at ${SalesLines.taxPercent(u.rate)}%. Pay it as a check or bill to the tax agency on ${name}.</p>
+            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, each at the rate it was booked at (the setting today is ${SalesLines.taxPercent(u.rate)}%). Pay it as a check or bill to the tax agency on ${name}.</p>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Vendor</th><th scope="col">${T('Job')}</th><th scope="col">Line</th><th scope="col" class="amount">Use tax</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="6" style="text-align:center; color:var(--gray-400);">No use tax accrued</td></tr>'}</tbody>
+                <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Vendor</th><th scope="col">${T('Job')}</th><th scope="col">Line</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Use tax</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No use tax accrued</td></tr>'}</tbody>
             </table></div>
             <div style="margin-top:8px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200); font-size:12px;">
                 Accrued ${formatCurrency(u.accrued)} · Paid ${formatCurrency(u.paid)} · Owed at ${formatDate(endDate)}: <strong>${formatCurrency(u.balance)}</strong>

@@ -270,6 +270,9 @@ class ContractSummary(BaseModel):
 class ContractResponse(BaseModel):
     contract: ContractSummary
     sov: List[SovLineOut] = []
+    # Set by the terms save only: a sentence for a saved term that will quietly
+    # do nothing (the contractor pays the tax with no use tax rate set).
+    warnings: List[str] = []
 
 
 class JobDetailResponse(JobResponse):

@@ -909,6 +909,8 @@ const BillsPage = {
                 const result = await API.post('/bills', body);
                 await ScanHelper.attachAfterSave('bill', result.id);
                 toastPosted('Bill saved');
+                // use tax owed at a rate of 0: posted, and said
+                for (const w of (result && result.warnings) || []) toast(w, 'warning');
             }
             closeModal();
             App.navigate('#/bills');
