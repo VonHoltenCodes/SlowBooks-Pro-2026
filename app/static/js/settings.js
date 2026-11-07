@@ -3443,10 +3443,16 @@ SettingsPage._rebuildPanelTree = function () {
     const scrolled = [content, document.scrollingElement, ...panel.querySelectorAll('*')]
         .filter(el => el && (el.scrollTop || el.scrollLeft))
         .map(el => [el, el.scrollTop, el.scrollLeft]);
-    const display = panel.style.display;
-    panel.style.display = 'none';
-    void panel.offsetHeight;  // the layout read: the renderer goes now
-    panel.style.display = display;
+    // The panel leaves the document and comes back in the same turn, the
+    // same node with the same children, values and listeners: WebKit drops
+    // its accessibility object for the panel and builds a new one, children
+    // and all. Hiding and showing the panel in place did not (the 2.31.9
+    // gate on the Mac: the panel's children list stayed empty).
+    const parent = panel.parentNode;
+    const next = panel.nextSibling;
+    parent.removeChild(panel);
+    void parent.offsetHeight;  // the layout read: the old object goes now
+    parent.insertBefore(panel, next);
     for (const [el, top, left] of scrolled) {
         if (el.scrollTop !== top) el.scrollTop = top;
         if (el.scrollLeft !== left) el.scrollLeft = left;
