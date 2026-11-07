@@ -27,7 +27,8 @@ What the role can do:
   lines between accounts with Reports → **Reclassify Transactions** (the
   lines parked on an account for a period, ticked and moved to the account
   they belong on, and a class, as one audited change naming every line),
-  and nothing else: an invoice, a bill, a payment, a bank entry, a setting
+  and, for a construction company, post or void the WIP schedule's
+  adjusting entry (see contractor-mode.md), and nothing else: an invoice, a bill, a payment, a bank entry, a setting
   or a user is refused to them with a sentence that says so;
 - payroll and HR stay the administrator's, reads included, as they are for
   every role but admin.

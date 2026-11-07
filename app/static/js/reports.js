@@ -3898,61 +3898,95 @@ ReportsPage.wipSchedule = async function (prefill) {
             <td>${escapeHtml(r.job_name)}</td>
             <td class="amount">${m(r.revised_contract)}</td>
             <td class="amount">${m(r.estimated_total_cost)}</td>
+            <td class="amount">${m(r.estimated_gross_profit)}</td>
             <td class="amount">${pct(r.margin_pct)}</td>
             <td class="amount">${m(r.cost_to_date)}</td>
             <td class="amount">${pct(r.percent_complete)}</td>
             <td class="amount">${m(r.earned_revenue)}</td>
+            <td class="amount">${m(r.gross_profit_to_date)}</td>
             <td class="amount">${m(r.billed_to_date)}</td>
             <td style="font-size:10px; color:var(--gray-500);">${escapeHtml(basis(r.billed_basis))}</td>
             <td class="amount">${m(r.over_billing)}</td>
             <td class="amount">${m(r.under_billing)}</td>
             <td class="amount">${m(r.retainage_outstanding)}</td>
+            <td class="amount">${m(r.backlog)}</td>
             <td class="amount">${m(r.cost_to_complete)}</td>
             <td class="amount">${m(r.projected_loss)}</td>
             <td class="amount">${m(r.loss_provision)}</td>
         </tr>`).join('');
         const t = data.totals;
-        // The adjusting entry with amounts: each job's lines, then the net entry.
-        // Computed only — nothing here posts it.
+        // The adjusting entry with amounts: each job's lines, then the net
+        // entry, accounts by number and name. Post books it (accountant or
+        // administrator) with its reversal the next day.
         const entry = data.adjusting_entry;
+        const acct = (ln) => ln.account_number ? `${ln.account_number} ${ln.account}` : ln.account;
         const lineRows = (lines, label, bold) => lines.map((ln, i) => `<tr style="${bold ? 'font-weight:600;' : ''}">
-            <td>${i === 0 ? escapeHtml(label) : ''}</td><td>${escapeHtml(ln.account)}</td>
+            <td>${i === 0 ? escapeHtml(label) : ''}</td><td>${escapeHtml(acct(ln))}</td>
             <td class="amount">${ln.debit ? m(ln.debit) : ''}</td><td class="amount">${ln.credit ? m(ln.credit) : ''}</td></tr>`).join('');
         const entryBody = entry.jobs.map(j => lineRows(j.lines, j.job_name, false)).join('')
             + lineRows(entry.lines, 'Net entry', true);
-        const entryHtml = entry.lines.length ? `
+        const posted = entry.posted_entry;
+        const mayPost = App.role === 'admin' || App.role === 'accountant';
+        const asOf = escapeHtml(data.as_of);
+        const postHtml = posted
+            ? `<div style="font-size:12px; margin:8px 0;">Posted as journal entry ${posted.transaction_id} on ${escapeHtml(posted.date)}${posted.posted_by ? ` by ${escapeHtml(posted.posted_by)}` : ''}, reversed ${escapeHtml(posted.reversal_date || '')}.
+                ${mayPost ? `<button type="button" class="btn btn-sm btn-danger" data-write data-accountant-ok data-destructive onclick="ReportsPage._voidWip('${asOf}')">Void posted entry</button>` : ''}</div>`
+            : (mayPost && entry.lines.length ? `<div style="margin:8px 0;"><button type="button" class="btn btn-sm btn-primary" data-write data-accountant-ok onclick="ReportsPage._postWip('${asOf}')">Post adjusting entry</button>
+                <span style="font-size:11px; color:var(--gray-500);">Posts an adjusting journal dated ${asOf}, reversed the next day.</span></div>` : '');
+        const entryHtml = entry.lines.length || posted ? `
             <h4 style="margin:16px 0 4px;">Adjusting entry as of ${escapeHtml(entry.as_of)}</h4>
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
                 Under-billings ${m(entry.totals.under_billing)}, over-billings ${m(entry.totals.over_billing)}, net ${m(entry.totals.net_under_over)}, loss provision ${m(entry.totals.loss_provision)}.
-                These are the balances to carry as of this date; if an earlier entry was posted, reverse it or post the difference. Nothing here posts.
-            </div>
+                These are the balances to carry as of this date. Posted, the entry reverses the next day, so each month's entry stands alone.
+            </div>${postHtml}
             <div class="table-container"><table>
                 <thead><tr><th scope="col">${T('Job')}</th><th scope="col">Account</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th></tr></thead>
                 <tbody>${entryBody}</tbody>
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td></td><td>Total</td><td class="amount">${m(entry.total_debits)}</td><td class="amount">${m(entry.total_credits)}</td></tr></tfoot>
             </table></div>` : '<div style="font-size:11px; color:var(--gray-500); margin-top:12px;">No WIP adjustment to book as of this date.</div>';
-        // Warnings (jobs left out, forecast dating) sit under the table.
+        // Warnings (jobs left out, budgets that never burn down, finished
+        // jobs still showing cost to come, forecast dating) sit under the table.
         const warningsHtml = (data.warnings || []).map(w => `<p class="report-warning" style="margin:8px 0 0; font-size:12px; color:var(--gray-600);">${escapeHtml(w)}</p>`).join('');
         return `${ReportsPage._exportButtons('wip-schedule', `as_of=${params.as_of_date}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                As of ${escapeHtml(data.as_of)} · cost-to-cost (percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. Basis shows whether billing is from approved pay applications or posted revenue. This report posts nothing.
+                As of ${escapeHtml(data.as_of)} · cost-to-cost (percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. GP to date is earned less cost; backlog is the revised contract less earned. Basis shows whether billing is from approved pay applications or posted revenue.
             </div>
             <div class="table-container table-container--sticky"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th>
-                <th scope="col" class="amount">Revised</th><th scope="col" class="amount">Est. cost</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Cost to date</th>
-                <th scope="col" class="amount">% complete</th><th scope="col" class="amount">Earned</th><th scope="col" class="amount">Billed</th><th scope="col">Basis</th>
-                <th scope="col" class="amount">Over billed</th><th scope="col" class="amount">Under billed</th><th scope="col" class="amount">Retainage</th><th scope="col" class="amount">To complete</th>
+                <th scope="col" class="amount">Revised</th><th scope="col" class="amount">Est. cost</th><th scope="col" class="amount">Est. GP</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Cost to date</th>
+                <th scope="col" class="amount">% complete</th><th scope="col" class="amount">Earned</th><th scope="col" class="amount">GP to date</th><th scope="col" class="amount">Billed</th><th scope="col">Basis</th>
+                <th scope="col" class="amount">Over billed</th><th scope="col" class="amount">Under billed</th><th scope="col" class="amount">Retainage</th><th scope="col" class="amount">Backlog</th><th scope="col" class="amount">To complete</th>
                 <th scope="col" class="amount">Proj. loss</th><th scope="col" class="amount">Loss provision</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="16">No jobs</td></tr>'}</tbody>
+                <tbody>${rows || '<tr><td colspan="19">No jobs</td></tr>'}</tbody>
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);">
                     <td colspan="2">Total</td>
-                    <td class="amount">${m(t.revised_contract)}</td><td class="amount">${m(t.estimated_total_cost)}</td><td class="amount">${pct(t.margin_pct)}</td><td class="amount">${m(t.cost_to_date)}</td>
-                    <td></td><td class="amount">${m(t.earned_revenue)}</td><td class="amount">${m(t.billed_to_date)}</td><td></td>
-                    <td class="amount">${m(t.over_billing)}</td><td class="amount">${m(t.under_billing)}</td><td class="amount">${m(t.retainage_outstanding)}</td><td class="amount">${m(t.cost_to_complete)}</td>
+                    <td class="amount">${m(t.revised_contract)}</td><td class="amount">${m(t.estimated_total_cost)}</td><td class="amount">${m(t.estimated_gross_profit)}</td><td class="amount">${pct(t.margin_pct)}</td><td class="amount">${m(t.cost_to_date)}</td>
+                    <td></td><td class="amount">${m(t.earned_revenue)}</td><td class="amount">${m(t.gross_profit_to_date)}</td><td class="amount">${m(t.billed_to_date)}</td><td></td>
+                    <td class="amount">${m(t.over_billing)}</td><td class="amount">${m(t.under_billing)}</td><td class="amount">${m(t.retainage_outstanding)}</td><td class="amount">${m(t.backlog)}</td><td class="amount">${m(t.cost_to_complete)}</td>
                     <td class="amount">${m(t.projected_loss)}</td><td class="amount">${m(t.loss_provision)}</td>
                 </tr></tfoot>
             </table></div>${warningsHtml}${entryHtml}`;
-    }, "As Of", true, { view: 'wip-schedule', prefill, spotlight: false });
+    }, "As Of", true, { view: 'wip-schedule', prefill, spotlight: false, wide: true });
+};
+
+// Post the WIP adjusting entry for the date (and its next-day reversal), or
+// void what was posted so the date can be posted again; the report redraws.
+ReportsPage._postWip = async function (asOf) {
+    if (!confirm(`Post the WIP adjusting entry as of ${asOf}? It is reversed on the next day.`)) return;
+    try {
+        await API.post(`/reports/wip-schedule/post?as_of=${encodeURIComponent(asOf)}`);
+        toast('WIP adjusting entry posted', 'success');
+        ReportsPage.refresh();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+ReportsPage._voidWip = async function (asOf) {
+    if (!confirm(`Void the WIP adjusting entry posted as of ${asOf} and its reversal?`)) return;
+    try {
+        await API.post(`/reports/wip-schedule/void?as_of=${encodeURIComponent(asOf)}`);
+        toast('WIP adjusting entry voided', 'success');
+        ReportsPage.refresh();
+    } catch (err) { toast(err.message, 'error'); }
 };
 
 ReportsPage.costToComplete = async function (prefill) {

@@ -6,8 +6,9 @@
 # Pure functions over the figures the other services already compute — the
 # contract summary (#552), the cost tree and budgets (M3), buyout (#553), change
 # orders (#554) and pay applications (#555). Nothing here posts: the WIP
-# adjusting entry is computed with its amounts for the accountant to post, never
-# written. The one thing stored is the cost-to-complete forecast the user types.
+# adjusting entry is computed with its amounts, and posting it is the WIP
+# schedule's Post (app/services/wip_posting.py). The one thing stored is the
+# cost-to-complete forecast the user types.
 # Money is Decimal, quantized to cents half-up through accounting._q.
 # ============================================================================
 
@@ -103,11 +104,39 @@ def _customer_name(job: Job) -> str:
 # the rows into the entry with amounts — per job and net. It computes the entry;
 # it does not post it.
 
+# The accounts are construction setup's (CONSTRUCTION_ACCOUNTS), by name.
 WIP_OVERBILLING_ACCOUNT = "Billings in Excess of Costs and Estimated Earnings"
 WIP_UNDERBILLING_ACCOUNT = "Costs and Estimated Earnings in Excess of Billings"
-WIP_REVENUE_ACCOUNT = "Contract Revenue (WIP adjustment)"
+WIP_REVENUE_ACCOUNT = "Contract Revenue – WIP Adjustment"
 WIP_LOSS_EXPENSE_ACCOUNT = "Loss on Uncompleted Contracts"
 WIP_LOSS_ACCOUNT = "Provision for Loss on Uncompleted Contracts"
+WIP_ACCOUNTS = (
+    WIP_UNDERBILLING_ACCOUNT,
+    WIP_OVERBILLING_ACCOUNT,
+    WIP_REVENUE_ACCOUNT,
+    WIP_LOSS_EXPENSE_ACCOUNT,
+    WIP_LOSS_ACCOUNT,
+)
+
+
+def wip_account_numbers(db: Session) -> dict:
+    """The number each WIP account carries: its number in the chart, else the
+    one construction setup (or Post) would give it — the suggested number
+    when no account holds it yet, else none. A read: nothing is created."""
+    from app.services.accounting import CONSTRUCTION_ACCOUNTS
+
+    suggested = {name: number for number, name, _t, _d in CONSTRUCTION_ACCOUNTS}
+    out = {}
+    for name in WIP_ACCOUNTS:
+        acct = db.query(Account).filter(Account.name == name).first()
+        if acct is not None:
+            out[name] = acct.account_number
+            continue
+        number = suggested[name]
+        taken = db.query(Account.id).filter(Account.account_number == number).first()
+        out[name] = None if taken else number
+    return out
+
 
 WIP_COLUMNS = [
     {"key": "customer_name", "label": "Customer", "kind": "text"},
@@ -121,10 +150,12 @@ WIP_COLUMNS = [
     {"key": "cost_to_date", "label": "Cost to date", "kind": "money"},
     {"key": "percent_complete", "label": "% complete", "kind": "pct"},
     {"key": "earned_revenue", "label": "Earned", "kind": "money"},
+    {"key": "gross_profit_to_date", "label": "GP to date", "kind": "money"},
     {"key": "billed_to_date", "label": "Billed", "kind": "money"},
     {"key": "over_billing", "label": "Over billed", "kind": "money"},
     {"key": "under_billing", "label": "Under billed", "kind": "money"},
     {"key": "retainage_outstanding", "label": "Retainage", "kind": "money"},
+    {"key": "backlog", "label": "Backlog", "kind": "money"},
     {"key": "cost_to_complete", "label": "Cost to complete", "kind": "money"},
     {"key": "projected_gross_profit", "label": "Proj. GP", "kind": "money"},
     {"key": "projected_loss", "label": "Proj. loss", "kind": "money"},
@@ -140,10 +171,12 @@ _WIP_SUMMED = (
     "estimated_gross_profit",
     "cost_to_date",
     "earned_revenue",
+    "gross_profit_to_date",
     "billed_to_date",
     "over_billing",
     "under_billing",
     "retainage_outstanding",
+    "backlog",
     "cost_to_complete",
     "projected_gross_profit",
     "projected_loss",
@@ -253,12 +286,14 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
     # no budget and no forecast has nothing to measure against: it counts as
     # 100% complete only once its cost has reached the contract (a loss,
     # recognised once); before that it is listed and left out of the figures.
+    # A closed job is finished: 100% complete, nothing still to spend.
     forecast = ctc_forecast(db, job, as_of)
-    cost_to_complete = _q(forecast["totals"]["cost_to_complete"])
-    if forecast["has_basis"]:
-        est_total_cost = _q(cost_to_date + cost_to_complete)
+    closed = forecast["closed"]
+    if forecast["has_basis"] or closed:
+        cost_to_complete = _q(forecast["totals"]["cost_to_complete"])
     else:
-        est_total_cost = cost_to_date
+        cost_to_complete = _ZERO
+    est_total_cost = _q(cost_to_date + cost_to_complete)
     posted_revenue = _q(totals["act_revenue"])
 
     summary = contract_summary(
@@ -277,12 +312,14 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
     billed = _q(summary["billed_to_date"])
     retainage_out = _q(summary["retainage"]["outstanding"])
 
-    if not forecast["has_basis"] and cost_to_date < revised:
+    if not forecast["has_basis"] and not closed and cost_to_date < revised:
         return _unmeasured_wip_row(
             job, original, approved_cos, revised, cost_to_date, billed, retainage_out
         )
 
-    if est_total_cost > _ZERO:
+    if closed:
+        pct = _ONE
+    elif est_total_cost > _ZERO:
         pct = cost_to_date / est_total_cost
         if pct > _ONE:
             pct = _ONE  # capped at 100% — a cost overrun does not earn past the sum
@@ -309,6 +346,9 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
         if has_approved_application(db, job.id, as_of)
         else "posted_revenue"
     )
+    warnings = _wip_row_warnings(
+        db, job, forecast, revised, billed, retainage_out, cost_to_complete
+    )
     return {
         "job_id": job.id,
         "job_name": job.name,
@@ -326,15 +366,93 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
         "cost_to_date": float(cost_to_date),
         "percent_complete": float(_q(pct * 100)),
         "earned_revenue": float(earned),
+        "gross_profit_to_date": float(_q(earned - cost_to_date)),
         "billed_to_date": float(billed),
         "over_billing": float(over),
         "under_billing": float(under),
         "retainage_outstanding": float(retainage_out),
+        "backlog": float(_q(revised - earned)),
         "cost_to_complete": float(cost_to_complete),
         "projected_gross_profit": float(projected_gp),
         "projected_loss": float(projected_loss),
         "loss_provision": float(loss_provision),
+        "warnings": warnings,
     }
+
+
+# A job billed at least this share of its revised contract is near its end:
+# a budget cell that has had no cost and no forecast is then named in the
+# warnings, since its whole budget still counts as cost to come.
+_NEARLY_BILLED = Decimal("0.90")
+
+
+def _money_text(value: Decimal) -> str:
+    return f"${_q(value):,.2f}"
+
+
+def _open_commitments(db: Session, job: Job) -> int:
+    """How many issued, not closed commitments (PO or subcontract) the job
+    has, on the header or on a line."""
+    from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
+
+    on_line = (
+        db.query(PurchaseOrderLine.purchase_order_id)
+        .filter(PurchaseOrderLine.job_id == job.id)
+        .subquery()
+    )
+    return (
+        db.query(PurchaseOrder.id)
+        .filter(
+            (PurchaseOrder.job_id == job.id) | PurchaseOrder.id.in_(on_line),
+            PurchaseOrder.status.in_(
+                (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
+            ),
+        )
+        .count()
+    )
+
+
+def _wip_row_warnings(
+    db: Session, job: Job, forecast: dict, revised, billed, retainage_out, ctc
+) -> list[str]:
+    """What a measured row should say about its cost to complete: a section
+    that never burns down on a job billed near its end (budget, no cost, no
+    forecast entered), and a job billed in full, its retainage collected and
+    every commitment closed that still shows cost to come."""
+    out = []
+    if ctc <= _ZERO or forecast["closed"] or revised <= _ZERO:
+        return out
+    billed_share = billed / revised
+    if billed_share >= _NEARLY_BILLED:
+        sections: dict = {}
+        for r in forecast["rows"]:
+            s = sections.setdefault(
+                r["cost_code_id"],
+                {"label": r["section"], "budget": _ZERO, "actual": _ZERO},
+            )
+            s["budget"] += Decimal(str(r["budget"]))
+            s["actual"] += Decimal(str(r["actual"]))
+            s["entered"] = s.get("entered") or r["entered"] is not None
+            s["ctc"] = s.get("ctc", _ZERO) + Decimal(str(r["cost_to_complete"]))
+        for s in sections.values():
+            if s["budget"] > _ZERO and s["actual"] == _ZERO and not s["entered"]:
+                out.append(
+                    f"{job.name}: {s['label']} has a budget of "
+                    f"{_money_text(s['budget'])} with no cost posted and no "
+                    f"forecast entered, so {_money_text(s['ctc'])} counts as "
+                    f"cost still to come on a job billed "
+                    f"{billed_share * 100:.1f}% of its contract. If that work "
+                    "is done or was never going to post there, enter 0 for "
+                    "it in the Cost-to-Complete Forecast."
+                )
+    if billed >= revised and retainage_out <= _ZERO and not _open_commitments(db, job):
+        out.append(
+            f"{job.name}: billed in full, retainage collected and every "
+            f"commitment closed, yet {_money_text(ctc)} of cost to complete "
+            "remains. If the job is finished, close it (a closed job reads "
+            "100% complete) or enter 0 in the Cost-to-Complete Forecast."
+        )
+    return out
 
 
 def _forecast_dating_warnings(db: Session, jobs: list, rows: list, as_of: date):
@@ -378,6 +496,8 @@ def wip_schedule(
     jobs = select_jobs(db, job_id, customer_id, status, include_closed)
     rows = [wip_row(db, job, as_of) for job in jobs]
     warnings = [r["warning"] for r in rows if r.get("excluded")]
+    for r in rows:
+        warnings += r.get("warnings") or []
     warnings += _forecast_dating_warnings(db, jobs, rows, as_of)
 
     totals = {key: _ZERO for key in _WIP_SUMMED}
@@ -398,6 +518,13 @@ def wip_schedule(
         if measured_revised
         else None
     )
+    from app.services.wip_posting import posted_entry_info
+
+    entry = wip_adjusting_entry(rows, as_of, wip_account_numbers(db))
+    # Post books the company's whole schedule for the date; whether that is
+    # done is said whatever filter this run has.
+    entry["posted_entry"] = posted_entry_info(db, as_of)
+    entry["posted"] = entry["posted_entry"] is not None
     return {
         "as_of": as_of.isoformat(),
         "method": "cost_to_cost",
@@ -412,42 +539,52 @@ def wip_schedule(
             "loss_expense": WIP_LOSS_EXPENSE_ACCOUNT,
             "loss_provision": WIP_LOSS_ACCOUNT,
         },
-        "adjusting_entry": wip_adjusting_entry(rows, as_of),
+        "adjusting_entry": entry,
     }
 
 
 # ── WIP adjusting entry ───────────────────────────────────────────────────
 
 
-def _entry_line(account: str, debit: Decimal, credit: Decimal) -> dict:
-    return {"account": account, "debit": float(debit), "credit": float(credit)}
+def _entry_line(account: str, debit: Decimal, credit: Decimal, numbers: dict) -> dict:
+    return {
+        "account": account,
+        "account_number": numbers.get(account),
+        "debit": float(debit),
+        "credit": float(credit),
+    }
 
 
-def _job_entry_lines(under: Decimal, over: Decimal, provision: Decimal) -> list:
+def _job_entry_lines(
+    under: Decimal, over: Decimal, provision: Decimal, numbers: dict
+) -> list:
     """The lines for one job's balances: an under-billing is an asset against
     revenue, an over-billing is revenue deferred to a liability, and the loss
     provision is an expense against its liability."""
     lines = []
     if under > _ZERO:
-        lines.append(_entry_line(WIP_UNDERBILLING_ACCOUNT, under, _ZERO))
+        lines.append(_entry_line(WIP_UNDERBILLING_ACCOUNT, under, _ZERO, numbers))
     if over > _ZERO:
-        lines.append(_entry_line(WIP_OVERBILLING_ACCOUNT, _ZERO, over))
+        lines.append(_entry_line(WIP_OVERBILLING_ACCOUNT, _ZERO, over, numbers))
     net_revenue = under - over  # credit when under-billed, debit when over
     if net_revenue > _ZERO:
-        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, _ZERO, net_revenue))
+        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, _ZERO, net_revenue, numbers))
     elif net_revenue < _ZERO:
-        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, -net_revenue, _ZERO))
+        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, -net_revenue, _ZERO, numbers))
     if provision > _ZERO:
-        lines.append(_entry_line(WIP_LOSS_EXPENSE_ACCOUNT, provision, _ZERO))
-        lines.append(_entry_line(WIP_LOSS_ACCOUNT, _ZERO, provision))
+        lines.append(_entry_line(WIP_LOSS_EXPENSE_ACCOUNT, provision, _ZERO, numbers))
+        lines.append(_entry_line(WIP_LOSS_ACCOUNT, _ZERO, provision, numbers))
     return lines
 
 
-def wip_adjusting_entry(rows: list[dict], as_of: date) -> dict:
+def wip_adjusting_entry(
+    rows: list[dict], as_of: date, numbers: Optional[dict] = None
+) -> dict:
     """The WIP adjusting entry with amounts, per job and net, from the schedule
-    rows. The balances are carried to `as_of` in full — if an earlier entry was
-    posted, the accountant reverses it first or posts the difference. Computed
-    only: nothing is written to the books."""
+    rows. The balances are carried to `as_of` in full; Post (wip_posting)
+    books them with a reversal the next day, so each period's entry stands
+    alone. Computed here: nothing is written to the books."""
+    numbers = numbers or {}
     jobs = []
     t_under = t_over = t_prov = _ZERO
     for r in rows:
@@ -471,10 +608,10 @@ def wip_adjusting_entry(rows: list[dict], as_of: date) -> dict:
                 "net_under_over": float(_q(under - over)),
                 "projected_loss": r["projected_loss"],
                 "loss_provision": float(prov),
-                "lines": _job_entry_lines(under, over, prov),
+                "lines": _job_entry_lines(under, over, prov, numbers),
             }
         )
-    net = _job_entry_lines(_q(t_under), _q(t_over), _q(t_prov))
+    net = _job_entry_lines(_q(t_under), _q(t_over), _q(t_prov), numbers)
     debits = sum((Decimal(str(ln["debit"])) for ln in net), _ZERO)
     credits = sum((Decimal(str(ln["credit"])) for ln in net), _ZERO)
     return {
@@ -495,10 +632,12 @@ def wip_adjusting_entry(rows: list[dict], as_of: date) -> dict:
 
 # ── Cost-to-complete forecast (per job, section and cost type) ───────────────
 #
-# A cell is a section × cost type. Its default cost to complete is the budget
-# less the actual cost, floored at zero; a typed amount (job_cost_to_complete)
-# replaces the default. Budget and cost with no code share one Unassigned cell,
-# so an uncoded budget is measured against uncoded cost.
+# A cell is a section × cost type. The default cost to complete nets the cost
+# types within a section — the section's budget less its actual, floored at
+# zero — and shows it against the cells with budget left; a typed amount
+# (job_cost_to_complete) replaces its cell's share. Budget and cost with no
+# code share one Unassigned cell, so an uncoded budget is measured against
+# uncoded cost. A closed job has no cost to complete.
 
 
 def _section_id(code: CostCode, code_by_id: dict) -> int:
@@ -574,11 +713,16 @@ def ctc_forecast(db: Session, job: Job, as_of: Optional[date] = None) -> dict:
     for row in saved:
         cell((row.cost_code_id, row.cost_type or ""))["typed"] = _q(row.amount)
 
+    defaults = _netted_defaults(cells)
+    closed = job.status in _CLOSED
     rows = []
     for (section_id, cost_type), c in cells.items():
         budget, actual = _q(c["budget"]), _q(c["actual"])
-        default = max(_q(budget - actual), _ZERO)
+        default = defaults[(section_id, cost_type)]
         ctc = c["typed"] if c["typed"] is not None else default
+        if closed:
+            # a closed job has nothing left to spend, whatever the budget
+            default = ctc = _ZERO
         section = code_by_id.get(section_id)
         rows.append(
             {
@@ -602,16 +746,57 @@ def ctc_forecast(db: Session, job: Job, as_of: Optional[date] = None) -> dict:
     totals = {
         k: total(k) for k in ("budget", "actual", "cost_to_complete", "projected_final")
     }
+    # A budget written by a change order alone is no estimate of the job: a
+    # job whose only budget rows came from change orders (a hand-typed SOV
+    # and one owner CO) has nothing to measure against, as one with none.
+    contract_budget = (
+        db.query(sqlfunc.coalesce(sqlfunc.sum(JobBudget.amount), 0))
+        .filter(JobBudget.job_id == job.id, JobBudget.source != "change")
+        .scalar()
+    )
     return {
         "job_id": job.id,
         "job_name": job.name,
         "customer_id": job.customer_id,
         "customer_name": _customer_name(job),
         "as_of": as_of.isoformat() if as_of else None,
-        "has_basis": bool(saved) or totals["budget"] > 0,
+        "has_basis": bool(saved) or Decimal(str(contract_budget)) > _ZERO,
+        "closed": closed,
         "rows": rows,
         "totals": totals,
     }
+
+
+def _netted_defaults(cells: dict) -> dict:
+    """The default cost to complete of each section × cost type cell. Cost
+    types net within a section: its default is the section's budget less its
+    actual, floored at zero, so a trade bid as subcontract and bought as
+    material does not keep its whole subcontract budget still to spend. The
+    section's default is shown against the cells that still have budget left,
+    in proportion to what each has left, the last taking the rounding."""
+    by_section: dict = {}
+    for key in cells:
+        by_section.setdefault(key[0], []).append(key)
+    out = {}
+    for keys in by_section.values():
+        budget = sum((cells[k]["budget"] for k in keys), _ZERO)
+        actual = sum((cells[k]["actual"] for k in keys), _ZERO)
+        pool = max(_q(budget - actual), _ZERO)
+        left = {
+            k: max(_q(cells[k]["budget"] - cells[k]["actual"]), _ZERO) for k in keys
+        }
+        weight = sum(left.values(), _ZERO)
+        shared = [k for k in keys if left[k] > _ZERO]
+        given = _ZERO
+        for k in keys:
+            out[k] = _ZERO
+        for i, k in enumerate(shared):
+            if i == len(shared) - 1:
+                out[k] = _q(pool - given)
+            else:
+                out[k] = _q(pool * left[k] / weight)
+                given += out[k]
+    return out
 
 
 def set_ctc_entries(db: Session, job: Job, entries: list[dict]) -> dict:

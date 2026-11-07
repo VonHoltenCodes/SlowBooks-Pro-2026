@@ -71,6 +71,8 @@ BILL_SOURCES = frozenset({"bill", "bill_edit"})
 
 SOURCE_LABELS = {
     "manual": "Journal entry",
+    "wip_adjustment": "WIP adjusting entry",
+    "wip_reversal": "WIP adjusting entry reversal",
     "qbo_journal": "Journal entry",
     "iif_import": "Imported journal",
     "qb_ledger_import": "Imported journal",

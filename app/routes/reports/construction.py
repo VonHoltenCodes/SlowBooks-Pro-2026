@@ -13,10 +13,12 @@ import io
 from datetime import date
 from typing import Annotated, Optional
 
-from fastapi import Depends, Query, Request
+from fastapi import Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.models.users import ROLE_ACCOUNTANT, ROLE_ADMIN
+from app.routes._roles import current_role
 from app.routes.reports._router import router
 from app.routes.reports.financial import (
     _company_name,
@@ -36,6 +38,7 @@ from app.services.job_reports import (
     wip_schedule,
 )
 from app.services.ledger_exports import _Percent, _money, _pdf_money, _preamble
+from app.services import wip_posting
 
 # ── shared grid formatting ─────────────────────────────────────────────────
 
@@ -106,8 +109,72 @@ def wip_schedule_route(
     contract, over and under billing, retainage, cost to complete (from the
     cost-to-complete forecast) and any projected loss. `adjusting_entry` is the
     entry with amounts, per job and net, between the WIP accounts named in
-    `adjustment_accounts`. It posts nothing."""
+    `adjustment_accounts`, and whether one is posted for the date. Reading it
+    posts nothing; POST /wip-schedule/post does."""
     return wip_schedule(db, as_of, job_id, customer_id, status, include_closed)
+
+
+def _acting(db: Session) -> str:
+    """The sign-in making this request, as the audit log names it."""
+    return db.info.get("acting_username") or "operator"
+
+
+def _may_post_wip(request: Request) -> str:
+    """The role, when it may post or void the WIP entry: an administrator's
+    or an accountant's (the middleware lets the accountant through to these
+    two routes only). A bookkeeper's sign-in is refused with a sentence."""
+    role = current_role(request)
+    if role not in (ROLE_ADMIN, ROLE_ACCOUNTANT):
+        raise HTTPException(
+            status_code=403,
+            detail="Posting the WIP adjusting entry is an accountant's or an "
+            "administrator's job; this sign-in cannot post or void it.",
+        )
+    return role
+
+
+@router.post("/wip-schedule/post")
+def wip_schedule_post(
+    request: Request,
+    as_of: date = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Post the WIP schedule's adjusting entry for `as_of` — the whole
+    schedule, as it reads with no filter — as an adjusting journal dated that
+    day, with its reversal dated the next. 409 when an entry for the date is
+    already posted (void it first), 422 when there is nothing to post; the
+    closing date applies to both dates. Accountant or administrator."""
+    _may_post_wip(request)
+    out = wip_posting.post_wip_entry(db, as_of, _acting(db))
+    db.commit()
+    return out
+
+
+@router.post("/wip-schedule/void")
+def wip_schedule_void(
+    request: Request,
+    as_of: date = Query(...),
+    db: Session = Depends(get_db),
+):
+    """Void the WIP adjusting entry posted for `as_of` and its reversal, so the
+    date can be posted again. Accountant (its own entries) or administrator."""
+    role = _may_post_wip(request)
+    found = wip_posting.posted_entry(db, as_of)
+    acting = _acting(db)
+    if found is not None and role == ROLE_ACCOUNTANT:
+        posted_by = found[0].posted_by or ""
+        if posted_by != acting:
+            # as the journal's Void: an accountant voids only what it posted
+            raise HTTPException(
+                status_code=403,
+                detail="An accountant's sign-in voids only the journal entries "
+                "it posted; this one was posted by "
+                + (posted_by or "someone else")
+                + ".",
+            )
+    out = wip_posting.void_wip_entry(db, as_of, acting)
+    db.commit()
+    return out
 
 
 def _warnings_note(data: dict):
@@ -146,6 +213,23 @@ def _wip_sections(data: dict) -> list[dict]:
 _ENTRY_COLUMNS = ["Job", "Account", "Debit", "Credit"]
 
 
+def _account_text(ln: dict) -> str:
+    """An entry line's account as the chart names it: number and name."""
+    number = ln.get("account_number")
+    return f"{number} {ln['account']}" if number else ln["account"]
+
+
+def _entry_state(entry: dict) -> str:
+    """Whether the entry for the date is posted, in the words a grid heads."""
+    posted = entry.get("posted_entry")
+    if posted:
+        return (
+            f"posted (journal entry {posted['transaction_id']}, reversed "
+            f"{posted['reversal_date']})"
+        )
+    return "computed, not posted"
+
+
 def _wip_entry_sections(data: dict) -> list[dict]:
     """The adjusting entry as a second printed grid: each job's lines, then the
     net entry to post."""
@@ -157,7 +241,7 @@ def _wip_entry_sections(data: dict) -> list[dict]:
                 {
                     "cells": [
                         job["job_name"] if i == 0 else "",
-                        ln["account"],
+                        _account_text(ln),
                         _pdf_cell(ln["debit"] or None, "money"),
                         _pdf_cell(ln["credit"] or None, "money"),
                     ]
@@ -168,7 +252,7 @@ def _wip_entry_sections(data: dict) -> list[dict]:
             {
                 "cells": [
                     "Net entry" if i == 0 else "",
-                    ln["account"],
+                    _account_text(ln),
                     _pdf_cell(ln["debit"] or None, "money"),
                     _pdf_cell(ln["credit"] or None, "money"),
                 ],
@@ -190,7 +274,7 @@ def _wip_entry_sections(data: dict) -> list[dict]:
     return [
         {
             "title": "WIP Adjusting Entry",
-            "period": f"As of {data['as_of']} · computed, not posted",
+            "period": f"As of {data['as_of']} · {_entry_state(entry)}",
             "columns": _ENTRY_COLUMNS,
             "text_columns": 2,
             "rows": rows,
@@ -201,14 +285,14 @@ def _wip_entry_sections(data: dict) -> list[dict]:
 def _wip_entry_csv_rows(data: dict, w) -> None:
     entry = data["adjusting_entry"]
     w.writerow([])
-    w.writerow(["WIP Adjusting Entry (computed, not posted)"])
+    w.writerow([f"WIP Adjusting Entry ({_entry_state(entry)})"])
     w.writerow(_ENTRY_COLUMNS)
     for job in entry["jobs"]:
         for ln in job["lines"]:
             w.writerow(
                 [
                     job["job_name"],
-                    ln["account"],
+                    _account_text(ln),
                     _csv_cell(ln["debit"] or None, "money"),
                     _csv_cell(ln["credit"] or None, "money"),
                 ]
@@ -217,7 +301,7 @@ def _wip_entry_csv_rows(data: dict, w) -> None:
         w.writerow(
             [
                 "Net entry",
-                ln["account"],
+                _account_text(ln),
                 _csv_cell(ln["debit"] or None, "money"),
                 _csv_cell(ln["credit"] or None, "money"),
             ]

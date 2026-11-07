@@ -46,15 +46,20 @@ each keeps its suggested number only if the chart has not already used it
 number). Each is pinned to a balance-sheet detail type so it lands on the
 right line whatever the number-and-name rule would otherwise guess.
 
-| Number | Name                     | Type      | Detail type            |
-| ------ | ------------------------ | --------- | ---------------------- |
-| 1150   | Retainage Receivable     | Asset     | Other Current Asset    |
-| 1350   | Construction in Progress | Asset     | Other Current Asset    |
-| 2050   | Retainage Payable        | Liability | Other Current Liability|
-| 2210   | Customer Deposits        | Liability | Other Current Liability|
-| 2220   | Use Tax Payable          | Liability | Other Current Liability|
-| 5400   | Equipment Cost           | COGS      | Cost of Goods Sold     |
-| 5500   | Other Job Costs          | COGS      | Cost of Goods Sold     |
+| Number | Name                                                | Type      | Detail type             |
+| ------ | --------------------------------------------------- | --------- | ----------------------- |
+| 1150   | Retainage Receivable                                | Asset     | Other Current Asset     |
+| 1350   | Construction in Progress                            | Asset     | Other Current Asset     |
+| 1360   | Costs and Estimated Earnings in Excess of Billings  | Asset     | Other Current Asset     |
+| 2050   | Retainage Payable                                   | Liability | Other Current Liability |
+| 2060   | Billings in Excess of Costs and Estimated Earnings  | Liability | Other Current Liability |
+| 2070   | Provision for Loss on Uncompleted Contracts         | Liability | Other Current Liability |
+| 2210   | Customer Deposits                                   | Liability | Other Current Liability |
+| 2220   | Use Tax Payable                                     | Liability | Other Current Liability |
+| 4060   | Contract Revenue – WIP Adjustment                   | Income    | Income                  |
+| 5400   | Equipment Cost                                      | COGS      | Cost of Goods Sold      |
+| 5500   | Other Job Costs                                     | COGS      | Cost of Goods Sold      |
+| 5600   | Loss on Uncompleted Contracts                       | COGS      | Cost of Goods Sold      |
 
 Retainage is the portion of a billing held back until a job is accepted —
 receivable when a customer holds it from you, payable when you hold it from
@@ -62,7 +67,10 @@ a sub. Construction in Progress carries costs on a job not yet billed.
 Customer Deposits holds money taken before work. Use Tax Payable is the use
 tax a contractor self-assesses on materials. Equipment Cost and Other Job
 Costs are job-cost buckets beside the seed chart's Materials, Labor and
-Subcontractor Costs.
+Subcontractor Costs. 1360, 2060, 2070, 4060 and 5600 take the WIP schedule's
+posted adjusting entry (under and over billing, the revenue adjustment and the
+loss provision; see *Job reports*). A company set up before they existed gets
+them the next time setup runs, or the first time the WIP entry is posted.
 
 ## The cost codes
 
@@ -706,10 +714,12 @@ liability — billings in excess of costs and estimated earnings) or **under
 billing** (earned − billed, an asset — costs and estimated earnings in excess of
 billings) is the difference. The **estimated total cost is actual cost plus the
 cost-to-complete forecast** (below), so a job past its budget with work still to
-do reads under 100%; with no forecast entered the default is budget − actual per
-cell, floored at zero, and a job with no budget and no forecast has nothing to
-measure against, so it earns nothing: it is listed with a warning ("no budget or
-forecast; nothing earned"); its contract, cost to date, billed to date and
+do reads under 100%; with no forecast entered the default is the section's
+budget − actual, floored at zero (cost types net within a section). A job
+with no budget and no forecast has nothing to measure against, so it earns
+nothing — and a budget written only by change orders does not count as one (a
+hand-typed SOV with one owner change order is still unmeasured): it is listed
+with a warning ("no budget or forecast; nothing earned"); its contract, cost to date, billed to date and
 retainage count in the totals, but its earned revenue, over/under billing and
 loss provision are left out, and so is it from the adjusting entry, until
 its cost to date reaches the contract (then it reads 100% complete, and the loss
@@ -719,6 +729,32 @@ by then, and the revised contract with the change orders approved by then (so th
 schedule reproduces the books on an earlier close). Billed to date is the sum of
 the approved pay applications' completed-to-date when the job has one by the date
 (else the posted revenue carrying the job — the `billed_basis` column says which).
+
+**Gross profit to date** is earned revenue less cost to date; **backlog** is the
+revised contract less earned revenue (the work still to earn); **estimated gross
+profit** is the revised contract less the estimated total cost. All three are in
+the JSON, the PDF, the CSV and on screen. The screen opens the schedule in the
+wide dialog, since its columns don't fit a narrow one.
+
+**A closed job is finished.** A job whose status is Closed reads 100% complete
+with no cost to complete, whatever its budget: earned is the revised contract,
+and any difference from billing is over or under billing. Closed jobs are left
+out unless *include closed* (or the status filter) asks for them.
+
+**Warnings about cost to complete.** Two cases are named in `warnings` (and under
+the table, in the PDF note and the CSV):
+
+- *A budget that never burns down.* On a job billed 90% or more of its revised
+  contract, a section with a budget, no cost posted and no forecast entered is
+  named with its budget and the cost to complete it adds. The usual one is
+  general conditions — accepting an estimate budgets the GC markup on its own
+  code, and a small GC's costs never post there. **To clear it, enter 0** for
+  that section in the Cost-to-Complete Forecast (or the amount truly still to
+  spend).
+- *A finished job still showing cost to come.* A job billed in full (billed to
+  date at or over the revised contract), its retainage collected and every
+  commitment closed, that still has cost to complete. Close the job (it then
+  reads 100% complete) or enter 0 in the forecast.
 
 **Projected loss.** When actual + cost to complete is over the revised contract,
 the whole loss is recognised now, the usual treatment of a loss contract. Earned
@@ -733,22 +769,51 @@ amounts:
 
 | line | debit | credit |
 |---|---|---|
-| Costs and Estimated Earnings in Excess of Billings (under-billing, asset) | under | |
-| Billings in Excess of Costs and Estimated Earnings (over-billing, liability) | | over |
-| Contract Revenue (WIP adjustment) | over − under when over is larger | under − over when under is larger |
-| Loss on Uncompleted Contracts (expense) | provision | |
-| Provision for Loss on Uncompleted Contracts (liability) | | provision |
+| 1360 Costs and Estimated Earnings in Excess of Billings (under-billing, asset) | under | |
+| 2060 Billings in Excess of Costs and Estimated Earnings (over-billing, liability) | | over |
+| 4060 Contract Revenue – WIP Adjustment | over − under when over is larger | under − over when under is larger |
+| 5600 Loss on Uncompleted Contracts (expense) | provision | |
+| 2070 Provision for Loss on Uncompleted Contracts (liability) | | provision |
 
-The entry balances. These are the balances to carry **as of the date**; if an
-earlier WIP entry was posted, reverse it first or post only the difference. **The
-report posts nothing** — there is no post button; the entry is for the accountant
-to journal.
+The entry balances. Each line names the account by its number in the chart (an
+account not yet created shows the number setup would give it; a chart that
+already owns that number shows the name alone). These are the balances to carry
+**as of the date**.
+
+**Post** (on screen under the entry, or `POST /api/reports/wip-schedule/post?as_of=`)
+books it: an adjusting journal dated the as-of date, per job (each line's memo
+names the job), with an automatic **reversal dated the next day**, so each
+month's entry carries that month's balances and the next starts from zero. Only
+an accountant's or an administrator's sign-in may post (a bookkeeper's is
+refused, read-only sees no button). It posts the whole schedule as it reads with
+no filter, and creates the five WIP accounts if the chart lacks them. The
+closing date applies. The lines carry no job tag, so a posted entry never comes
+back into a job's cost to date or posted revenue: the schedule reads the same
+after posting as before. The schedule says when an entry is posted for the date
+(`adjusting_entry.posted` and `posted_entry`: the journal's id, date, who posted
+it and the reversal's id and date).
+
+**Posting the same date again is refused** (409) while an entry for it stands.
+To redo it, **Void posted entry** on the WIP schedule (or
+`POST /api/reports/wip-schedule/void?as_of=`): it voids the entry and its
+reversal together, each by a mirror image on its own date, and the date can
+then be posted again. The journal's own Void refuses either half, since voiding
+one alone would leave the other on the books. An accountant voids only the
+entries it posted. The report itself still posts nothing on its own: running,
+printing or exporting it writes nothing.
 
 **Cost-to-complete forecast** (`cost-to-complete-forecast`). A per-job table of
-section × cost type: budget, actual (to the date), the default cost to complete
-(budget − actual, floored at zero), the amount you entered, the cost to complete
-that counts, and the projected final. A sub-code rolls up to its section; budget
-and cost with no code share one Unassigned cell. Type an amount in the Report
+section × cost type: budget, actual (to the date), the default cost to complete,
+the amount you entered, the cost to complete that counts, and the projected
+final. A sub-code rolls up to its section; budget and cost with no code share
+one Unassigned cell. **Cost types net within a section:** the section's default
+is its budget less its actual, floored at zero, so a trade bid as subcontract
+and bought as material does not keep its whole subcontract budget still to
+spend. The cost-type split is for display: the section's default is shown
+against the cells that still have budget left, in proportion to what each has
+left (the last cell takes the cent of rounding), so the cells foot to the
+section. An amount you enter replaces its own cell's share. A closed job shows
+no cost to complete. Type an amount in the Report
 Center table (or `PUT /api/jobs/{id}/cost-to-complete-forecast` with
 `{"entries": [{"cost_code_id", "cost_type", "amount"}]}`; `null` clears a cell
 back to its default). Entries are stored in `job_cost_to_complete` and are

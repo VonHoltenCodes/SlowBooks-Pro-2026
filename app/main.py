@@ -1094,8 +1094,11 @@ _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 # ... and moves lines between accounts with the reclassify tool (#337),
 # the accountant's own job: nothing new is posted, and the audit log
 # names every line.
+# ... and posts or voids the WIP schedule's adjusting entry, a journal entry
+# the report computes.
 _ACCOUNTANT_WRITE_RE = _re.compile(
-    r"^/api/(journal(/\d+/void)?|attachments/journal_entry/\d+|reclassify)$"
+    r"^/api/(journal(/\d+/void)?|attachments/journal_entry/\d+|reclassify"
+    r"|reports/wip-schedule/(post|void))$"
 )
 ACCOUNTANT_REFUSAL = (
     "An accountant's sign-in posts journal entries and reads everything "
