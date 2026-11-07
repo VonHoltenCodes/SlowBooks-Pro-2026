@@ -26,6 +26,7 @@ from app.models.jobs import Job, SovLine
 from app.services.accounting import _q
 from app.services.estimating import (
     estimate_totals,
+    package_order_key,
     fmt_pct,
     included_lines,
     line_price,
@@ -199,17 +200,16 @@ def sov_from_estimate(estimate: Estimate) -> list[dict]:
                     if line.trade_package is not None
                     else "Unassigned"
                 ),
+                "package": line.trade_package,
                 "value": Decimal("0"),
             }
             work[key] = bucket
         # an accepted deduct alternate carries a negative price; it nets in here
         bucket["value"] += line_price(line)
 
-    # Named packages by name, Unassigned (None key) last — the estimate's order.
-    ordered = sorted(
-        work.items(),
-        key=lambda kv: (kv[0] is None, kv[1]["name"].lower()),
-    )
+    # Packages in bid-book order (lowest section code, then name), Unassigned
+    # (None key) last — the estimate's order.
+    ordered = sorted(work.items(), key=lambda kv: package_order_key(kv[1]["package"]))
     lines = [
         {
             "item_no": None,

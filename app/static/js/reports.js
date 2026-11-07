@@ -4018,24 +4018,24 @@ ReportsPage.buyoutReport = async function (prefill) {
         const data = await API.get(`/reports/buyout?as_of=${params.as_of_date}`);
         const m = ReportsPage._money;
         const body = data.jobs.map(job => {
-            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="6">${escapeHtml(job.job_name)}</td></tr>`;
+            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="8">${escapeHtml(job.job_name)}</td></tr>`;
             const pkgs = job.rows.map(r => `<tr>
-                <td>${escapeHtml(r.package_name)}</td><td class="amount">${m(r.bid_cost)}</td><td class="amount">${m(r.bought)}</td>
-                <td class="amount">${m(r.variance)}</td><td class="amount">${m(r.committed_remaining)}</td><td class="amount">${m(r.billed_to_date)}</td></tr>`).join('');
+                <td>${escapeHtml(r.package_name)}</td><td class="amount">${m(r.bid_cost)}</td><td class="amount">${m(r.changes)}</td><td class="amount">${m(r.bought)}</td>
+                <td class="amount">${m(r.variance)}</td><td class="amount">${m(r.spent_no_commitment)}</td><td class="amount">${m(r.committed_remaining)}</td><td class="amount">${m(r.billed_to_date)}</td></tr>`).join('');
             const t = job.totals;
-            const total = `<tr style="font-weight:600;"><td>Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.bought)}</td>
-                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr>`;
+            const total = `<tr style="font-weight:600;"><td>Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.changes)}</td><td class="amount">${m(t.bought)}</td>
+                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.spent_no_commitment)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr>`;
             return head + pkgs + total;
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('buyout', `as_of=${params.as_of_date}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}</div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Package</th><th scope="col" class="amount">Bid</th><th scope="col" class="amount">Bought</th>
-                <th scope="col" class="amount">Variance</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">Billed</th></tr></thead>
-                <tbody>${body || '<tr><td colspan="6">No jobs</td></tr>'}</tbody>
-                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td>Grand total</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.bought)}</td>
-                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr></tfoot>
+                <thead><tr><th scope="col">Package</th><th scope="col" class="amount">Bid</th><th scope="col" class="amount">Changes</th><th scope="col" class="amount">Bought</th>
+                <th scope="col" class="amount">Variance</th><th scope="col" class="amount">Spent, no commitment</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">Billed</th></tr></thead>
+                <tbody>${body || '<tr><td colspan="8">No jobs</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td>Grand total</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.changes)}</td><td class="amount">${m(t.bought)}</td>
+                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.spent_no_commitment)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr></tfoot>
             </table></div>`;
     }, "As Of", true, { view: 'buyout', prefill, spotlight: false });
 };

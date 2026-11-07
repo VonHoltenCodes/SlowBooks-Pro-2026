@@ -899,8 +899,10 @@ const JobsPage = {
             return `<tr>
                 <td>${escapeHtml(r.package_name)}${commits ? `<div style="margin-top:4px">${commits}</div>` : ''}</td>
                 <td class="amount">${m(r.bid_cost)}</td>
+                <td class="amount">${m(r.changes)}</td>
                 <td class="amount">${m(r.bought)}</td>
                 <td class="amount" style="${r.variance < 0 ? 'color:var(--text-danger)' : ''}">${m(r.variance)}</td>
+                <td class="amount">${m(r.spent_no_commitment)}</td>
                 <td class="amount">${m(r.committed_remaining)}</td>
                 <td class="amount">${m(r.billed_to_date)}</td>
             </tr>`;
@@ -909,9 +911,11 @@ const JobsPage = {
         return `<div class="table-container"><table class="data-table" id="buyout-table" style="font-size:12px">
             <thead><tr>
                 <th scope="col">Package</th>
-                <th scope="col" class="amount">Bid</th>
+                <th scope="col" class="amount" title="The accepted estimate's cost, allowances at their amount">Bid</th>
+                <th scope="col" class="amount" title="Approved change-order budget">Changes</th>
                 <th scope="col" class="amount">Bought</th>
-                <th scope="col" class="amount">Variance</th>
+                <th scope="col" class="amount" title="Bid + changes - bought">Variance</th>
+                <th scope="col" class="amount" title="Bills with a cost code and no commitment">Spent, no commitment</th>
                 <th scope="col" class="amount">Committed left</th>
                 <th scope="col" class="amount">Billed to date</th>
             </tr></thead>
@@ -919,8 +923,10 @@ const JobsPage = {
             <tfoot><tr style="font-weight:700">
                 <td>Total</td>
                 <td class="amount">${m(t.bid_cost)}</td>
+                <td class="amount">${m(t.changes)}</td>
                 <td class="amount">${m(t.bought)}</td>
                 <td class="amount" style="${t.variance < 0 ? 'color:var(--text-danger)' : ''}">${m(t.variance)}</td>
+                <td class="amount">${m(t.spent_no_commitment)}</td>
                 <td class="amount">${m(t.committed_remaining)}</td>
                 <td class="amount">${m(t.billed_to_date)}</td>
             </tr></tfoot>
