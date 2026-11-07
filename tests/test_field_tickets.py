@@ -1040,6 +1040,16 @@ def test_a_slip_dated_in_a_closed_period_is_not_posted(con, seed_customer, stock
     finally:
         con.put("/api/settings", json={"closing_date": ""})
     assert con.get(f"/api/field-tickets/{slip['id']}").json()["status"] == "draft"
+    # a posted slip's void is refused there too, and the tab does not offer it
+    assert con.post(f"/api/field-tickets/{slip['id']}/post", json={}).status_code == 200
+    con.put("/api/settings", json={"closing_date": "2026-09-30"})
+    try:
+        assert con.get(f"/api/field-tickets/{slip['id']}").json()["can_void"] is False
+        r = con.post(f"/api/field-tickets/{slip['id']}/void")
+        assert r.status_code == 403 and "closing date" in r.json()["detail"]
+    finally:
+        con.put("/api/settings", json={"closing_date": ""})
+    assert con.post(f"/api/field-tickets/{slip['id']}/void").status_code == 200
 
 
 def test_a_delivery_in_a_closed_period_is_not_edited_deleted_or_voided(con, po):
