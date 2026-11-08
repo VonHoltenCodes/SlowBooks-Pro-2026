@@ -596,3 +596,85 @@ def test_approve_re_checks_a_change_order_line_before_its_date(
     assert r.status_code == 409, r.text
     assert co["number"] in r.json()["detail"]["message"]
     assert client.get(url).json()["status"] == "draft"
+
+
+# ── 4. Job Cost by Vendor foots with a vendor credit (every mode) ───────────
+
+
+def test_job_cost_by_vendor_foots_with_an_unapplied_vendor_credit(
+    client, db_session, seed_accounts, seed_customer
+):
+    """M bug 7 / L weakness: a $500 vendor credit for Ready Mix on the job
+    read cost 37,500, paid 38,000, retainage 0, open A/P 0 (paid + held +
+    open ≠ cost) while A/P Aging showed Ready Mix -500. A Business company,
+    since the report is in every mode."""
+    from app.models.contacts import Vendor
+
+    mix = Vendor(
+        name="Ready Mix",
+        is_active=True,
+        default_expense_account_id=seed_accounts["6000"].id,
+    )
+    db_session.add(mix)
+    db_session.commit()
+    job = _job(client, seed_customer.id, name="Bayview")
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": mix.id,
+            "date": "2026-08-01",
+            "job_id": job["id"],
+            "lines": [{"description": "Concrete", "quantity": 1, "rate": 38000}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    bill = r.json()
+    r = client.post(
+        "/api/bill-payments",
+        json={
+            "vendor_id": mix.id,
+            "date": "2026-08-15",
+            "amount": 38000,
+            "allocations": [{"bill_id": bill["id"], "amount": 38000}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    r = client.post(
+        "/api/vendor-credits",
+        json={
+            "vendor_id": mix.id,
+            "date": "2026-09-02",
+            "lines": [
+                {
+                    "description": "Short load",
+                    "quantity": 1,
+                    "rate": 500,
+                    "account_id": seed_accounts["6000"].id,
+                    "job_id": job["id"],
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    def row(end):
+        data = client.get(
+            f"/api/reports/job-cost-by-vendor?job_id={job['id']}&end_date={end}"
+        ).json()
+        return next(x for x in data["jobs"][0]["rows"] if x["vendor_id"] == mix.id)
+
+    now = row("2026-12-31")
+    assert (now["cost"], now["paid_to_date"], now["open_ap"]) == (
+        37500.0,
+        38000.0,
+        -500.0,
+    )
+    assert now["cost"] == (
+        now["paid_to_date"] + now["retainage_outstanding"] + now["open_ap"]
+    )
+    aging = client.get("/api/reports/ap-aging?as_of_date=2026-12-31").json()
+    assert next(i for i in aging["items"] if i["vendor_id"] == mix.id)["total"] == (
+        now["open_ap"]
+    )
+    # before the credit, nothing is open
+    assert row("2026-08-31")["open_ap"] == 0.0

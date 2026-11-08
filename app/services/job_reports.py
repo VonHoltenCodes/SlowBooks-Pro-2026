@@ -1440,10 +1440,14 @@ def _vendor_bill_figures(
     retainage held-less-released and open A/P on them — each prorated by the
     job's share of the bill's line amounts (a header-only bill is a whole 1),
     so a bill split across two jobs lands half on each. A bill carries the job
-    on its header or on any of its lines. Read as of `as_of` (bills dated by
-    then, payments dated by then, open as A/P Aging would age it) and in home
-    currency at each bill's booked rate, so the figures tie to A/P Aging and
-    Commitment Status for the same job and date; with no date, everything."""
+    on its header or on any of its lines. Open A/P is less the vendor's
+    credits on the job not yet applied to a bill (prorated the same way), as
+    A/P Aging nets them, so cost = paid + retainage held + open A/P (M bug 7:
+    a $500 credit read cost 37,500 against paid 38,000 and open A/P 0). Read
+    as of `as_of` (bills dated by then, payments dated by then, open as A/P
+    Aging would age it) and in home currency at each bill's booked rate, so
+    the figures tie to A/P Aging and Commitment Status for the same job and
+    date; with no date, everything."""
     from sqlalchemy import or_
 
     from app.models.bills import (
@@ -1454,7 +1458,28 @@ def _vendor_bill_figures(
         BillStatus,
     )
     from app.services.contact_balances import home_amount
-    from app.services.open_balances import open_bills_as_of
+    from app.services.open_balances import (
+        open_bills_as_of,
+        unapplied_vendor_credits_as_of,
+    )
+
+    out: dict[int, dict] = {}
+
+    def figures(vendor_id) -> dict:
+        return out.setdefault(
+            vendor_id,
+            {
+                "bills_count": _ZERO,
+                "paid_to_date": _ZERO,
+                "retainage_outstanding": _ZERO,
+                "open_ap": _ZERO,
+            },
+        )
+
+    for vc, left in unapplied_vendor_credits_as_of(db, as_of or date.max):
+        share = _bill_job_share(vc, job_id)
+        if share != _ZERO:
+            figures(vc.vendor_id)["open_ap"] -= share * left
 
     on_line = db.query(BillLine.bill_id).filter(BillLine.job_id == job_id)
     q = (
@@ -1466,8 +1491,6 @@ def _vendor_bill_figures(
         q = q.filter(Bill.date <= as_of)
     bills = q.all()
     bill_ids = {b.id for b in bills}
-    if not bill_ids:
-        return {}
     open_by_bill = {
         b.id: amt for b, amt in open_bills_as_of(db, as_of or date.max, bill_ids)
     }
@@ -1491,20 +1514,11 @@ def _vendor_bill_figures(
         for bid, amt in paid_q.group_by(BillPaymentAllocation.bill_id)
     }
 
-    out: dict[int, dict] = {}
     for b in bills:
         share = _bill_job_share(b, job_id)
         if share == _ZERO:
             continue
-        f = out.setdefault(
-            b.vendor_id,
-            {
-                "bills_count": _ZERO,
-                "paid_to_date": _ZERO,
-                "retainage_outstanding": _ZERO,
-                "open_ap": _ZERO,
-            },
-        )
+        f = figures(b.vendor_id)
         rate = b.exchange_rate
 
         def home(amount):
