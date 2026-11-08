@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from datetime import date as dt_date
 from decimal import Decimal
@@ -381,7 +382,8 @@ def _use_tax_section(db: Session, start_date, end_date, basis: str = "accrual"):
                 "bill_number": bill.bill_number if bill else None,
                 "vendor_name": bill.vendor.name if bill and bill.vendor else "",
                 "job_name": job.name if job else "",
-                "description": tl.description or "",
+                "description": re.sub(r" \([\d.]+%\)$", "", tl.description or ""),
+                "rate": _booked_use_tax_rate(tl.description),
                 "amount": float(
                     _q(Decimal(str(tl.credit or 0)) - Decimal(str(tl.debit or 0)))
                 ),
@@ -397,6 +399,15 @@ def _use_tax_section(db: Session, start_date, end_date, basis: str = "accrual"):
         "paid": float(-net(lines(in_period, paying))),
         "balance": float(net(lines(Transaction.date <= end_date))),
     }
+
+
+def _booked_use_tax_rate(memo: Optional[str]):
+    """The rate (a fraction) an accrual was booked at, read from the "(6.5%)"
+    its memo ends with; None for an entry that does not carry one."""
+    match = re.search(r"\(([\d.]+)%\)$", memo or "")
+    if match is None:
+        return None
+    return float(Decimal(match.group(1)) / Decimal("100"))
 
 
 def _empty_use_tax(db: Session, use_tax_rate):

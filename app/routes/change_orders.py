@@ -39,6 +39,8 @@ from app.services.change_orders import (
     create_allowance_return,
     recompute,
     refuse_with_approved_sub,
+    back_dating_warnings,
+    check_approved_on,
     resolve_approved_on,
     reverse_change_order,
 )
@@ -386,12 +388,16 @@ def approve_change_order(
                 "message": f"A {co.status} change order cannot be approved.",
             },
         )
-    on = resolve_approved_on(co, data.approved_on if data else None)
+    given = data.approved_on if data else None
+    on = resolve_approved_on(co, given)
+    check_approved_on(co, given, on)
     check_closing_date(db, on)
     apply_change_order(db, co, on)  # may 409 contingency/allowance_exceeded
     db.commit()
     db.refresh(co)
-    return _co_out(db, co)
+    out = _co_out(db, co)
+    out.warnings = back_dating_warnings(co, given, on)
+    return out
 
 
 @router.post("/{co_id}/reject", response_model=ChangeOrderOut)

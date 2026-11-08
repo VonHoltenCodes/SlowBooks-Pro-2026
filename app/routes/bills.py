@@ -51,6 +51,7 @@ from app.services.purchase_posting import (
     unit_cost_with_tax,
     use_tax_for,
     use_tax_lines,
+    use_tax_rate_warnings,
 )
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
@@ -586,6 +587,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
+    resp.warnings = use_tax_rate_warnings(db, bill)
     return resp
 
 
@@ -967,7 +969,9 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
     DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
-    resp.warnings = stock_warnings
+    resp.warnings = stock_warnings + (
+        use_tax_rate_warnings(db, bill) if needs_repost else []
+    )
     return resp
 
 

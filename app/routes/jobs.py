@@ -545,7 +545,25 @@ def set_contract(job_id: int, data: ContractTerms, db: Session = Depends(get_db)
         sync_contingency_line(db, job)
     db.commit()
     db.refresh(job)
-    return _contract_response(db, job)
+    resp = _contract_response(db, job)
+    resp.warnings = _contract_warnings(db, job)
+    return resp
+
+
+def _contract_warnings(db: Session, job: Job) -> list[str]:
+    """A sentence for a saved term that does nothing yet: a job whose
+    contractor pays the tax on its materials, with no use tax rate (or
+    default tax rate) set, accrues no use tax on those bills."""
+    from app.services.contracts import contractor_pays_tax
+    from app.services.purchase_posting import use_tax_rate
+
+    if contractor_pays_tax(job) and use_tax_rate(db) <= 0:
+        return [
+            "The contractor pays the tax on this job's materials, but no Use tax "
+            "rate or Default tax rate is set, so its material bills will accrue "
+            "no use tax. Set the Use tax rate in Settings."
+        ]
+    return []
 
 
 @router.post(

@@ -324,6 +324,9 @@ def test_cost_type_reads_seed_nothing(client, db_session, db_engine, seed_accoun
         },
     )
     assert job.status_code == 201, job.text
+    # the WIP schedule below is construction mode's (a Business company: 409)
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
     db_session.query(CostType).delete()
     db_session.commit()
     jid = job.json()["id"]

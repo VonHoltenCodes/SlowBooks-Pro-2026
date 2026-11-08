@@ -168,6 +168,53 @@ def resolve_approved_on(co: ChangeOrder, approved_on: date | None) -> date:
     return approved_on or co.date or date.today()
 
 
+# A change order dated further back than this, approved with no date of its own,
+# takes effect that far in the past: worth a word.
+BACKDATE_WARN_DAYS = 30
+
+
+def check_approved_on(co: ChangeOrder, given: date | None, on: date) -> None:
+    """Refuse an effective date that cannot be right: before the change order's
+    own date (an `approved_on` given), or before the job's contract date, since
+    a WIP, pay application or report would then show it before the contract
+    existed. 422 with a sentence either way."""
+    if given is not None and co.date is not None and given < co.date:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{co.number} is dated {co.date.isoformat()}; it cannot take effect "
+                f"earlier, on {given.isoformat()}. Choose {co.date.isoformat()} "
+                "or a later day."
+            ),
+        )
+    contract_date = co.job.contract_date if co.job is not None else None
+    if contract_date is not None and on < contract_date:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{co.number} would take effect on {on.isoformat()}, before the "
+                f"contract is dated ({contract_date.isoformat()}). Approve it with "
+                f"{contract_date.isoformat()} or a later day."
+            ),
+        )
+
+
+def back_dating_warnings(co: ChangeOrder, given: date | None, on: date) -> list[str]:
+    """A sentence when Approve was given no date and so dated the change order
+    to its own date, more than 30 days ago: the owner's signature is rarely
+    that old, and every report reads the change order from then."""
+    if given is not None:
+        return []
+    days = (date.today() - on).days
+    if days <= BACKDATE_WARN_DAYS:
+        return []
+    return [
+        f"{co.number} takes effect on {on.isoformat()}, {days} days ago, because "
+        "no date was given. If the owner signed later, void it and approve it "
+        "again with that date."
+    ]
+
+
 # ── Usage roll-ups (read by the contract summary and the exceed guards) ────
 
 

@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.users import ROLE_ACCOUNTANT, ROLE_ADMIN
+from app.routes._helpers import refuse_unknown_filters
 from app.routes._roles import current_role
 from app.routes.reports._router import router
 from app.routes.reports.financial import (
@@ -86,6 +87,19 @@ def _text_columns(columns: list[dict]) -> int:
     return max(n, 1)
 
 
+def _construction_only(db: Session = Depends(get_db)) -> None:
+    """These reports are construction mode's: a Business or Nonprofit company
+    has no retainage, WIP, sub compliance or field tickets to read."""
+    from app.services.terminology import terms_from_db
+
+    if not terms_from_db(db).is_construction:
+        raise HTTPException(
+            status_code=409,
+            detail="This report is part of construction mode. Set Company Type to "
+            "Construction under Settings → Company to use it.",
+        )
+
+
 _STATUS_Q = Annotated[
     Optional[str],
     Query(description="One job status; default leaves out closed and not-awarded"),
@@ -98,7 +112,7 @@ _CLOSED_Q = Annotated[bool, Query(description="Include closed jobs")]
 # ── 1. WIP schedule ─────────────────────────────────────────────────────────
 
 
-@router.get("/wip-schedule")
+@router.get("/wip-schedule", dependencies=[Depends(_construction_only)])
 def wip_schedule_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -135,7 +149,7 @@ def _may_post_wip(request: Request) -> str:
     return role
 
 
-@router.post("/wip-schedule/post")
+@router.post("/wip-schedule/post", dependencies=[Depends(refuse_unknown_filters)])
 def wip_schedule_post(
     request: Request,
     as_of: date = Query(...),
@@ -152,7 +166,7 @@ def wip_schedule_post(
     return out
 
 
-@router.post("/wip-schedule/void")
+@router.post("/wip-schedule/void", dependencies=[Depends(refuse_unknown_filters)])
 def wip_schedule_void(
     request: Request,
     as_of: date = Query(...),
@@ -345,7 +359,7 @@ def _grid_csv(data: dict, company: str, report: str, period: str, extra=None) ->
     return out.getvalue()
 
 
-@router.get("/wip-schedule/pdf")
+@router.get("/wip-schedule/pdf", dependencies=[Depends(_construction_only)])
 def wip_schedule_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -363,7 +377,7 @@ def wip_schedule_pdf(
     )
 
 
-@router.get("/wip-schedule/csv")
+@router.get("/wip-schedule/csv", dependencies=[Depends(_construction_only)])
 def wip_schedule_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -983,7 +997,21 @@ def job_cost_by_vendor_csv(
 # ── 8. Retainage ─────────────────────────────────────────────────────────
 
 
-@router.get("/retainage")
+def _check_job_status(status: Optional[str]) -> None:
+    """Refuse a job status the report cannot match (it would read as 'no jobs')."""
+    from app.models.jobs import JOB_STATUSES
+
+    if status and status not in JOB_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of {', '.join(JOB_STATUSES)}.",
+        )
+
+
+@router.get(
+    "/retainage",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def retainage_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -995,6 +1023,7 @@ def retainage_route(
     been released and what is outstanding, and held from each sub (2050) per
     commitment and per hand-entered bill. The grand totals equal the Balance
     Sheet's 1150 and 2050 for the date. Closed jobs are included."""
+    _check_job_status(status)
     return retainage_report(db, as_of, job_id, customer_id, status)
 
 
@@ -1036,7 +1065,10 @@ def _retainage_blocks(data: dict) -> list[dict]:
     return out
 
 
-@router.get("/retainage/pdf")
+@router.get(
+    "/retainage/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def retainage_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -1044,6 +1076,7 @@ def retainage_pdf(
     customer_id: _CUST_Q = None,
     status: _STATUS_Q = None,
 ):
+    _check_job_status(status)
     data = retainage_report(db, as_of, job_id, customer_id, status)
     return _pdf_response(
         _retainage_blocks(data),
@@ -1053,7 +1086,10 @@ def retainage_pdf(
     )
 
 
-@router.get("/retainage/csv")
+@router.get(
+    "/retainage/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def retainage_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -1062,6 +1098,7 @@ def retainage_csv(
     customer_id: _CUST_Q = None,
     status: _STATUS_Q = None,
 ):
+    _check_job_status(status)
     data = retainage_report(db, as_of, job_id, customer_id, status)
     out = io.StringIO()
     w = _SafeWriter(out)
@@ -1090,7 +1127,10 @@ def retainage_csv(
 # ── 9. Compliance ────────────────────────────────────────────────────────
 
 
-@router.get("/compliance")
+@router.get(
+    "/compliance",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def compliance_route(as_of: date = Query(default=None), db: Session = Depends(get_db)):
     """The subs to chase: a certificate of insurance expired or expiring in 30
     days, no W-9 on file, or a paid bill with no lien waiver."""
@@ -1114,7 +1154,10 @@ def _compliance_sections(data: dict) -> list[dict]:
     ]
 
 
-@router.get("/compliance/pdf")
+@router.get(
+    "/compliance/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def compliance_pdf(as_of: date = Query(default=None), db: Session = Depends(get_db)):
     data = compliance_report(db, as_of)
     return _pdf_response(
@@ -1125,7 +1168,10 @@ def compliance_pdf(as_of: date = Query(default=None), db: Session = Depends(get_
     )
 
 
-@router.get("/compliance/csv")
+@router.get(
+    "/compliance/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def compliance_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -1574,7 +1620,10 @@ def cost_tree_csv(tree: dict, job_name: str, company: str) -> str:
 # signed but not yet billed, at their bill rates (app/services/field_tickets).
 
 
-@router.get("/field-ticket-log")
+@router.get(
+    "/field-ticket-log",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def field_ticket_log_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -1592,7 +1641,10 @@ def field_ticket_log_route(
     return field_ticket_log(db, as_of, job_id, customer_id, status, include_closed)
 
 
-@router.get("/field-ticket-log/pdf")
+@router.get(
+    "/field-ticket-log/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def field_ticket_log_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -1612,7 +1664,10 @@ def field_ticket_log_pdf(
     )
 
 
-@router.get("/field-ticket-log/csv")
+@router.get(
+    "/field-ticket-log/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def field_ticket_log_csv(
     request: Request,
     as_of: date = Query(default=None),

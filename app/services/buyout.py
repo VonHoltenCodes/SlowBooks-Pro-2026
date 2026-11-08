@@ -21,7 +21,13 @@ from app.models.purchase_orders import POStatus, PurchaseOrder
 from app.models.trade_packages import TradePackage, TradePackageSection
 from app.services.accounting import _q
 from app.services.compliance import vendor_compliance
-from app.services.estimating import estimate_totals, package_order_key
+from app.services.estimating import (
+    estimate_totals,
+    included_lines,
+    line_cost,
+    line_price,
+    package_order_key,
+)
 
 # A commitment counts once it has left draft; its remaining (unbilled) part
 # counts only while it is still open.
@@ -56,16 +62,17 @@ def _bid_estimate(db: Session, job: Job):
 
 def _billed_as_of(db: Session, po: PurchaseOrder, as_of) -> Decimal:
     """What has been billed against a commitment as of a date: the pre-tax
-    subtotal of its non-void bills dated on or before `as_of`. With no date the
-    caller uses the lines' cumulative billed_amount instead."""
-    from app.models.bills import Bill, BillStatus
-
+    subtotal of its non-void bills dated on or before `as_of`. A retainage
+    release pays money already billed, so it is left out, as Commitment Status
+    leaves it. With no date the caller uses the lines' cumulative billed_amount
+    instead."""
     bills = (
         db.query(Bill)
         .filter(
             Bill.po_id == po.id,
             Bill.status != BillStatus.VOID,
             Bill.date <= as_of,
+            func.coalesce(Bill.retainage_released, 0) == 0,
         )
         .all()
     )
@@ -89,14 +96,42 @@ def _package_by_code(db: Session, preferred: set) -> dict:
     return out
 
 
+def _bid_by_package(db: Session, est: Estimate, pkg_of: dict) -> dict:
+    """The bid cost per package (None = no package) from the estimate's lines.
+    A line's own package wins, else the package its cost code maps to, the
+    same placement its change orders get; an allowance counts at its amount
+    (it budgets as cost on accept), any other line at its unit cost."""
+    pkg_names = {p.id: p.name for p in db.query(TradePackage)}
+    out: dict = {}
+    for line in included_lines(est):
+        key = line.trade_package_id
+        if key is None:
+            key = pkg_of.get(line.cost_code_id)
+        row = out.setdefault(
+            key,
+            {
+                "name": pkg_names.get(key, _UNASSIGNED),
+                "cost": Decimal("0"),
+            },
+        )
+        if (line.line_kind or "base") == "allowance":
+            row["cost"] += line_price(line)
+        else:
+            row["cost"] += line_cost(line)
+    return {k: {"name": v["name"], "cost": _q(v["cost"])} for k, v in out.items()}
+
+
 def _changes_by_package(db: Session, job: Job, pkg_of: dict, as_of=None) -> dict:
     """Approved change-order cost per package (None = no package): the lines of
     the job's approved owner change orders and standalone sub change orders (a
     sub CO that carries an owner CO writes no budget of its own, so its money
     is counted once, on the owner CO). A line's own package wins, else the
-    package its cost code maps to. With `as_of`, only change orders in effect
-    by then count."""
+    package its cost code maps to. An allowance-funded change order also draws
+    its cost off the allowance's row: it spends money the bid already holds,
+    so it is not new scope. With `as_of`, only change orders in effect by then
+    count."""
     from app.models.change_orders import ChangeOrder
+    from app.models.jobs import SovLine
     from app.services.change_orders import _writes_budget, co_effective_date
 
     out: dict = {}
@@ -117,6 +152,20 @@ def _changes_by_package(db: Session, job: Job, pkg_of: dict, as_of=None) -> dict
             if key is None:
                 key = pkg_of.get(line.cost_code_id)
             out[key] = out.get(key, Decimal("0")) + Decimal(str(line.amount or 0))
+        if co.kind == "owner" and co.funding == "allowance" and not co.allowance_return:
+            sov_line = (
+                db.get(SovLine, co.allowance_sov_line_id)
+                if co.allowance_sov_line_id
+                else None
+            )
+            if sov_line is not None:
+                key = sov_line.trade_package_id
+                if key is None:
+                    key = pkg_of.get(sov_line.cost_code_id)
+                drawn = sum(
+                    (Decimal(str(ln.amount or 0)) for ln in co.lines), Decimal("0")
+                )
+                out[key] = out.get(key, Decimal("0")) - drawn
     return out
 
 
@@ -155,14 +204,14 @@ def job_buyout(db: Session, job: Job, as_of=None) -> dict:
     # Bid cost per package from the accepted estimate.
     bid_by_pkg: dict = {}  # package_id (or None) -> {"name", "cost"}
     markup_costs: dict = {}  # "gc" / "insurance" / "bond" -> amount
+    pkg_of: dict = {}
     est = _bid_estimate(db, job)
     if est is not None:
         totals_ = estimate_totals(est)
-        for row in totals_["by_package"]:
-            bid_by_pkg[row["package_id"]] = {
-                "name": row["package_name"],
-                "cost": _q(row["cost"]),
-            }
+        # The bid's own packages win a tie when a code sits in several.
+        preferred = {r["package_id"] for r in totals_["by_package"] if r["package_id"]}
+        pkg_of = _package_by_code(db, preferred)
+        bid_by_pkg = _bid_by_package(db, est, pkg_of)
         for key, _label in _MARKUP_ROWS:
             if totals_[key]:
                 markup_costs[key] = _q(totals_[key])
@@ -210,7 +259,8 @@ def job_buyout(db: Session, job: Job, as_of=None) -> dict:
 
     # Approved change-order budget and plain bills, placed by cost code into
     # the package that maps it (the bid's own packages win a tie).
-    pkg_of = _package_by_code(db, {k for k in bid_by_pkg if k is not None})
+    if est is None:
+        pkg_of = _package_by_code(db, set())
     pkg_names = {p.id: p.name for p in db.query(TradePackage)}
     for pkg_id, amount in _changes_by_package(db, job, pkg_of, as_of).items():
         row_for(pkg_id, pkg_names.get(pkg_id, _UNASSIGNED))["changes"] += amount

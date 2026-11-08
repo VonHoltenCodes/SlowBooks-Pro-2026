@@ -353,6 +353,9 @@ def test_the_screen_shows_the_bank_columns_full_width():
 
 
 def _setup_and_job(client, db):
+    # the schedule's reads are construction mode's (a Business company: 409)
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
     assert client.post("/api/construction/setup").status_code == 200
     job = _job(db)
     _budget(db, job, None, "material", "80000", source="manual")
