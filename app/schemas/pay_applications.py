@@ -121,6 +121,9 @@ class PayApplicationOut(BaseModel):
     # Void would be accepted now: the latest approved application, its
     # invoice unpaid. The Pay apps tab offers Void only then.
     can_void: bool = False
+    # Sentences for what the application will quietly not do: a schedule that
+    # does not foot to the contract sum, taxable lines at a tax rate of 0.
+    warnings: List[str] = []
 
     model_config = {"from_attributes": True}
 

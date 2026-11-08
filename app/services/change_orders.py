@@ -701,12 +701,13 @@ def _apply_allowance_return(db: Session, co: ChangeOrder, job: Job, sell_total):
 
 
 def create_allowance_return(
-    db: Session, job: Job, sov_line_id: int, amount=None
+    db: Session, job: Job, sov_line_id: int, amount=None, on=None
 ) -> ChangeOrder:
     """A draft owner change order that returns an allowance's unspent amount
     (all of it, or `amount`): minus the amount, no markup, funded against the
-    allowance. Refused when nothing is unspent, when `amount` is more than is,
-    or when another return of this allowance is still open."""
+    allowance, dated `on` (default today). Refused when nothing is unspent,
+    when `amount` is more than is, or when another return of this allowance is
+    still open."""
     from app.routes.change_orders import _create_numbered
     from app.services.job_costing import line_cost_type
 
@@ -755,7 +756,7 @@ def create_allowance_return(
         kind="owner",
         status="draft",
         title=f"Return unspent allowance: {line.description or 'allowance'}"[:200],
-        date=date.today(),
+        date=on or date.today(),
         funding="contract",
         allowance_sov_line_id=line.id,
         markup_pct=_ZERO,

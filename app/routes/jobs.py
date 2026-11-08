@@ -39,6 +39,7 @@ from app.schemas.jobs import (
     JobUpdate,
     SovLineOut,
     SovSave,
+    SovSaveResponse,
 )
 from app.schemas.pay_applications import JobDepositCreate
 from app.models.estimates import Estimate
@@ -631,11 +632,12 @@ def contract_from_estimate(
     return _contract_response(db, job)
 
 
-@router.put("/{job_id}/sov", response_model=ContractSummary)
+@router.put("/{job_id}/sov", response_model=SovSaveResponse)
 def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
     """Replace the schedule of values with the given lines, renumbered 1..n
     in the order sent. Returns the contract summary (whose sov_balance
-    shows whether the SOV balances to the contract sum)."""
+    shows whether the SOV balances to the contract sum). A schedule that does
+    not add up to it is saved, with a warning (a job may be mid-setup)."""
     job = _get(db, job_id)
     for line in data.lines:
         if line.trade_package_id and not db.get(TradePackage, line.trade_package_id):
@@ -671,7 +673,10 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
     # line must round-trip by id and may not shrink below what it has billed,
     # and it may not be dropped (#555). With no approved application the save
     # is an ordinary full replace — existing lines are rebuilt from scratch.
-    from app.services.pay_applications import billed_completed_by_sov_line
+    from app.services.pay_applications import (
+        billed_completed_by_sov_line,
+        sov_balance_warnings,
+    )
 
     billed = billed_completed_by_sov_line(db, job.id)
     if billed:
@@ -685,7 +690,9 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
         settle_contract_type(db, job)
     db.commit()
     db.refresh(job)
-    return ContractSummary(**contract_summary(db, job))
+    return SovSaveResponse(
+        **contract_summary(db, job), warnings=sov_balance_warnings(job)
+    )
 
 
 def _sov_mapping(line, row) -> dict:

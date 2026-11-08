@@ -915,8 +915,9 @@ const JobsPage = {
 
     async saveSov() {
         try {
-            await API.put(`/jobs/${JobsPage._job.id}/sov`, { lines: JobsPage._readSov() });
+            const saved = await API.put(`/jobs/${JobsPage._job.id}/sov`, { lines: JobsPage._readSov() });
             toast('Schedule of values saved');
+            for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('contract');
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -1331,11 +1332,25 @@ const JobsPage = {
     },
     // Make a draft owner change order for the allowance's unspent amount
     // (the Contract tab's allowance row offers it).
-    async coReturnAllowance(sovLineId, remaining) {
-        if (!confirm(`Return the ${formatCurrency(remaining)} left on this allowance to the owner? This makes a draft change order for minus that amount, with no markup.`)) return;
+    coReturnAllowance(sovLineId, remaining) {
+        const iso = new Date().toISOString().slice(0, 10);
+        const contractDate = ((JobsPage._contract && JobsPage._contract.contract) || {}).contract_date || '';
+        openModal('Return unspent allowance', `<form id="co-return-form" onsubmit="JobsPage.coReturnAllowanceSubmit(event, ${sovLineId})">
+            <p>Return the ${formatCurrency(remaining)} left on this allowance to the owner. This makes a draft change order for minus that amount, with no markup.</p>
+            <div class="form-group"><label for="co-return-date">Change order date</label>
+                <input id="co-return-date" type="date" required value="${iso}"${contractDate ? ` min="${escapeHtml(contractDate)}"` : ''}>
+                <div style="font-size:11px;color:var(--text-muted)">Approving it cannot take effect before this date, so use the day the allowance closed out (for a month-end return, a date in that month). It cannot be before the contract date or in a closed period.</div></div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Make change order</button></div>
+        </form>`);
+    },
+    async coReturnAllowanceSubmit(e, sovLineId) {
+        if (e) e.preventDefault();
+        const date = $('#co-return-date').value;
         try {
-            await API.post('/change-orders/allowance-return', { allowance_sov_line_id: sovLineId });
+            await API.post('/change-orders/allowance-return', { allowance_sov_line_id: sovLineId, date });
             toast('Draft change order made: submit and approve it to take effect');
+            closeModal();
             await JobsPage.setTab('changeorders');
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -1476,6 +1491,7 @@ const JobsPage = {
     async paNew() {
         try {
             const a = await API.post('/pay-applications', { job_id: JobsPage._job.id });
+            for (const w of (a && a.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('payapps');
             JobsPage.paEdit(a.id);
         } catch (err) { toast(err.message, 'error'); }
@@ -1696,8 +1712,9 @@ const JobsPage = {
     async paSave(e, id) {
         if (e) e.preventDefault();
         try {
-            await API.put(`/pay-applications/${id}`, JobsPage.paReadForm());
+            const saved = await API.put(`/pay-applications/${id}`, JobsPage.paReadForm());
             toast('Pay application saved');
+            for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('payapps');
             JobsPage.paEdit(id);
         } catch (err) { toast(err.message, 'error'); }
@@ -1716,8 +1733,9 @@ const JobsPage = {
         if (!confirm('Approve this pay application? Creates the invoice for the job\'s customer.')) return;
         try {
             if ($('#pa-form')) await API.put(`/pay-applications/${id}`, JobsPage.paReadForm());
-            await API.post(`/pay-applications/${id}/approve`, {});
+            const approved = await API.post(`/pay-applications/${id}/approve`, {});
             toast('Pay application approved — invoice created');
+            for (const w of (approved && approved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('payapps');
         } catch (err) { toast(err.message, 'error'); }
     },

@@ -18,7 +18,8 @@
     .cert { float: right; width: 300px; margin-bottom: 16px; }
     .cert table { width: 100%; }
     .cert td { padding: 3px 8px; font-size: 9pt; }
-    .cert td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    /* nowrap: a negative amount breaks after its minus sign otherwise, leaving "-" alone on a line. */
+    .cert td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .cert .label { font-weight: 700; color: #4a4a6a; }
     .cert .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     h2.sheet { clear: both; font-size: 11pt; color: #003366; margin: 22px 0 8px 0; text-transform: uppercase; letter-spacing: 0.03em; }
@@ -26,7 +27,7 @@
     table.cont th { background: #003366; color: white; padding: 5px 6px; font-size: 7.5pt; text-transform: uppercase; text-align: left; letter-spacing: 0.02em; }
     table.cont th.r { text-align: right; }
     table.cont td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
-    table.cont td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    table.cont td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     table.cont tr.totals td { font-weight: 700; border-top: 2px solid #003366; }
     table.cont tr { page-break-inside: avoid; }
     .note { font-size: 8pt; color: #4a4a6a; margin: 6px 0 0 0; }
@@ -108,7 +109,9 @@
                 <td class="r">{{ line.this_period | currency }}</td>
                 <td class="r">{{ line.stored | currency }}</td>
                 <td class="r">{{ line.completed_to_date | currency }}</td>
-                <td class="r">{{ '%.1f' | format(line.pct_complete) }}%</td>
+                {# A deduct line with nothing billed rounds to -0.0: print 0.0. #}
+                {% set pct = '%.1f' | format(line.pct_complete) %}
+                <td class="r">{{ '0.0' if pct == '-0.0' else pct }}%</td>
                 <td class="r">{{ line.balance_to_finish | currency }}</td>
                 <td class="r">{{ line.retainage | currency }}</td>
             </tr>

@@ -285,6 +285,11 @@ class ContractSummary(BaseModel):
     retainage: dict = {}
 
 
+class SovSaveResponse(ContractSummary):
+    # A sentence when the saved schedule does not add up to the contract sum.
+    warnings: List[str] = []
+
+
 class ContractResponse(BaseModel):
     contract: ContractSummary
     sov: List[SovLineOut] = []
