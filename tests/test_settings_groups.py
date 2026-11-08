@@ -50,6 +50,7 @@ EXPECTED = {
         "settings-h-equipment",
     ],
     "connections": [
+        "settings-h-deposits",
         "settings-h-online-payments",
         "settings-h-ai-insights",
         "settings-h-receipt-scanning",
