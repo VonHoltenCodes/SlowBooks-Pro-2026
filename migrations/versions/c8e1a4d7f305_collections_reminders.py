@@ -17,6 +17,10 @@ a company that deletes them all keeps an empty list (review of #654). The
 wording is the same as app/services/collections.DEFAULT_RULES at this
 revision; the migration keeps its own copy so it never depends on app code.
 
+Books that already have a table or column (made by create_all and stamped
+back) keep it as it is, and only a rules table made here is seeded;
+downgrade drops what is there.
+
 Revision ID: c8e1a4d7f305
 Revises: d7f3a9c1b5e2
 Create Date: 2026-10-29
@@ -80,7 +84,48 @@ DEFAULT_RULES = [
 ]
 
 
+def _columns(insp, table):
+    return {c["name"] for c in insp.get_columns(table)}
+
+
+def _indexes(insp, table):
+    return {i["name"] for i in insp.get_indexes(table)}
+
+
 def upgrade() -> None:
+    # books that already have the tables or columns (made by create_all and
+    # stamped back) are left as they are
+    insp = sa.inspect(op.get_bind())
+    tables = set(insp.get_table_names())
+    if "invoice_reminder_rules" not in tables:
+        _create_rules()
+    if "invoice_reminders" not in tables:
+        _create_reminders()
+    if "customer_statements" not in tables:
+        _create_statements()
+    have = _columns(insp, "customers")
+    missing = [
+        sa.Column(
+            "invoice_reminders_enabled",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.true(),
+        ),
+        sa.Column(
+            "monthly_statement",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.false(),
+        ),
+    ]
+    missing = [c for c in missing if c.name not in have]
+    if missing:
+        with op.batch_alter_table("customers") as batch:
+            for column in missing:
+                batch.add_column(column)
+
+
+def _create_rules() -> None:
     op.create_table(
         "invoice_reminder_rules",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -110,6 +155,9 @@ def upgrade() -> None:
             for d, subj, body in DEFAULT_RULES
         ],
     )
+
+
+def _create_reminders() -> None:
     op.create_table(
         "invoice_reminders",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -148,6 +196,9 @@ def upgrade() -> None:
         sqlite_where=sa.text(_LIVE),
         postgresql_where=sa.text(_LIVE),
     )
+
+
+def _create_statements() -> None:
     op.create_table(
         "customer_statements",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -168,34 +219,36 @@ def upgrade() -> None:
         ),
     )
     op.create_index("ix_customer_statements_id", "customer_statements", ["id"])
-    with op.batch_alter_table("customers") as batch:
-        batch.add_column(
-            sa.Column(
-                "invoice_reminders_enabled",
-                sa.Boolean(),
-                nullable=False,
-                server_default=sa.true(),
-            )
-        )
-        batch.add_column(
-            sa.Column(
-                "monthly_statement",
-                sa.Boolean(),
-                nullable=False,
-                server_default=sa.false(),
-            )
-        )
 
 
 def downgrade() -> None:
-    with op.batch_alter_table("customers") as batch:
-        batch.drop_column("monthly_statement")
-        batch.drop_column("invoice_reminders_enabled")
-    op.drop_index("ix_customer_statements_id", table_name="customer_statements")
-    op.drop_table("customer_statements")
-    op.drop_index("uq_invoice_reminders_live", table_name="invoice_reminders")
-    op.drop_index("ix_invoice_reminders_invoice_id", table_name="invoice_reminders")
-    op.drop_index("ix_invoice_reminders_id", table_name="invoice_reminders")
-    op.drop_table("invoice_reminders")
-    op.drop_index("ix_invoice_reminder_rules_id", table_name="invoice_reminder_rules")
-    op.drop_table("invoice_reminder_rules")
+    insp = sa.inspect(op.get_bind())
+    tables = set(insp.get_table_names())
+    gone = [
+        c
+        for c in ("monthly_statement", "invoice_reminders_enabled")
+        if c in _columns(insp, "customers")
+    ]
+    if gone:
+        with op.batch_alter_table("customers") as batch:
+            for column in gone:
+                batch.drop_column(column)
+    for table, indexes in (
+        ("customer_statements", ("ix_customer_statements_id",)),
+        (
+            "invoice_reminders",
+            (
+                "uq_invoice_reminders_live",
+                "ix_invoice_reminders_invoice_id",
+                "ix_invoice_reminders_id",
+            ),
+        ),
+        ("invoice_reminder_rules", ("ix_invoice_reminder_rules_id",)),
+    ):
+        if table not in tables:
+            continue
+        have = _indexes(insp, table)
+        for index in indexes:
+            if index in have:
+                op.drop_index(index, table_name=table)
+        op.drop_table(table)
