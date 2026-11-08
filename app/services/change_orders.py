@@ -85,6 +85,38 @@ def compute_line(line: ChangeOrderLine, co: ChangeOrder, job: Job) -> None:
     line.sell_amount = line_sell(cost, markup, co.kind)
 
 
+# A line's amount and sell amount are Numeric(15, 2), and so is the contract
+# an approve adds the total to.
+MAX_AMOUNT = Decimal("9999999999999.99")
+
+
+def check_line_figures(co: ChangeOrder) -> None:
+    """Each line's cost and sell (quantity × unit cost, then the markup) and
+    the change order's totals fit a money column: a 422 before the change
+    order is saved (L bug 1: 99,999,999,999 × 99,999,999,999 made a line of
+    9,999,999,999,800,000,000,001.00). Call it after recompute."""
+    cost_total = sell_total = _ZERO
+    for n, line in enumerate(co.lines, 1):
+        cost = Decimal(str(line.amount or 0))
+        sell = Decimal(str(line.sell_amount or 0))
+        if max(abs(cost), abs(sell)) > MAX_AMOUNT:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Line {n} comes to {max(abs(cost), abs(sell)):,.2f}, more "
+                f"than a line can be ({MAX_AMOUNT:,.2f}). Check its quantity and "
+                "unit cost.",
+            )
+        cost_total += cost
+        sell_total += sell
+    if max(abs(cost_total), abs(sell_total)) > MAX_AMOUNT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"The change order's lines come to "
+            f"{max(abs(cost_total), abs(sell_total)):,.2f}, more than a change "
+            f"order can be ({MAX_AMOUNT:,.2f}).",
+        )
+
+
 def recompute(co: ChangeOrder, job: Job) -> None:
     """Refresh every line's stored figures from its inputs — but only while the
     CO is draft or pending. Once approved (or void) the figures are frozen:

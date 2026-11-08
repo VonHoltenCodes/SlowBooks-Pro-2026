@@ -7,6 +7,10 @@ from pydantic import BaseModel, field_validator
 from app.models.field_tickets import FT_KINDS, FT_LINE_TYPES
 from app.schemas.common import StrictModel
 
+# A line's quantity and rates are Numeric(15, 4): eleven whole digits.
+_LINE_LIMIT = Decimal("100000000000")
+_LINE_TYPE_LABELS = "Labor, Equipment, Material or Other"
+
 
 class FieldTicketLineIn(StrictModel):
     line_type: str = "other"
@@ -30,14 +34,24 @@ class FieldTicketLineIn(StrictModel):
     def _line_type(cls, v):
         v = (v or "other").strip().lower()
         if v not in FT_LINE_TYPES:
-            raise ValueError(f"line_type must be one of {', '.join(FT_LINE_TYPES)}")
+            raise ValueError(f"Line type must be {_LINE_TYPE_LABELS}.")
+        return v
+
+    @field_validator("quantity")
+    @classmethod
+    def _quantity(cls, v):
+        if abs(v) >= _LINE_LIMIT:
+            raise ValueError(f"Quantity must be less than {_LINE_LIMIT:,}.")
         return v
 
     @field_validator("cost_rate", "bill_rate")
     @classmethod
-    def _rate(cls, v):
+    def _rate(cls, v, info):
         if v is not None and v < 0:
             raise ValueError("a rate cannot be negative")
+        if v is not None and v >= _LINE_LIMIT:
+            what = "Cost rate" if info.field_name == "cost_rate" else "Bill rate"
+            raise ValueError(f"{what} must be less than {_LINE_LIMIT:,}.")
         return v
 
 

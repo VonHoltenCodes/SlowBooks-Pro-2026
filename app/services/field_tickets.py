@@ -12,7 +12,7 @@
 
 import re
 from datetime import date, datetime, time, timezone
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Optional
 
 from fastapi import HTTPException
@@ -30,8 +30,16 @@ from app.services.job_costing import employee_cost_rate, line_cost_type
 from app.services.terminology import terms_from_db
 
 _ZERO = Decimal("0")
-MAX_QUANTITY = Decimal("100000000000")
 _CENT = Decimal("0.01")
+# The columns a ticket's figures land in. SQLite keeps a figure past them
+# without a word and every later read of the ticket failed, so they are
+# checked before anything is saved: a line's amount (and the change order,
+# invoice or job cost line it becomes) is Numeric(15, 2), and a PO line's
+# received quantity Numeric(12, 4). Quantities and rates are capped by the
+# schema (app/schemas/field_tickets.py).
+MAX_AMOUNT = Decimal("9999999999999.99")
+MAX_RECEIVED = Decimal("99999999.9999")
+RATE_LIMIT = Decimal("100000000000")
 
 _PREFIX = {"tm": "TM", "material": "MS", "delivery": "DT"}
 KIND_LABELS = {
@@ -49,6 +57,15 @@ def _q(v) -> Decimal:
 
 def _d(v) -> Decimal:
     return Decimal(str(v or 0))
+
+
+def _q_read(v) -> Decimal:
+    """_q for a read: a stored figure too large to round (a ticket saved
+    before the limits above) is shown as it is, not a 500 on the list."""
+    try:
+        return _q(v)
+    except InvalidOperation:
+        return _d(v)
 
 
 def require_construction(db: Session) -> None:
@@ -89,13 +106,13 @@ def next_ticket_number(db: Session, job: Job, kind: str) -> str:
 
 
 def line_cost(ln: FieldTicketLine) -> Decimal:
-    return _q(_d(ln.quantity) * _d(ln.cost_rate))
+    return _q_read(_d(ln.quantity) * _d(ln.cost_rate))
 
 
 def line_bill(ln: FieldTicketLine) -> Optional[Decimal]:
     if ln.bill_rate is None:
         return None
-    return _q(_d(ln.quantity) * _d(ln.bill_rate))
+    return _q_read(_d(ln.quantity) * _d(ln.bill_rate))
 
 
 def ticket_totals(t: FieldTicket) -> tuple[Decimal, Optional[Decimal]]:
@@ -354,7 +371,11 @@ def make_change_order(db: Session, ticket_ids: list[int]) -> dict:
     the sub's contract rises with the owner's. The tickets close when the
     owner change order is approved."""
     from app.routes.change_orders import _create_numbered
-    from app.services.change_orders import _check_commitment, recompute
+    from app.services.change_orders import (
+        _check_commitment,
+        check_line_figures,
+        recompute,
+    )
 
     job, tickets = billable_tickets(db, ticket_ids)
     numbers = ", ".join(t.number for t in tickets)
@@ -380,6 +401,7 @@ def make_change_order(db: Session, ticket_ids: list[int]) -> dict:
     db.flush()
     db.refresh(pco)
     recompute(pco, job)
+    check_line_figures(pco)  # several tickets can sum past what one CO holds
 
     subs = []
     by_commitment: dict[int, list] = {}
@@ -407,6 +429,7 @@ def make_change_order(db: Session, ticket_ids: list[int]) -> dict:
         db.flush()
         db.refresh(sub)
         recompute(sub, job)
+        check_line_figures(sub)
         for t in group:
             t.sub_change_order_id = sub.id
         subs.append(sub)
@@ -636,13 +659,13 @@ def field_ticket_log(
                 "customer_id": job.customer_id,
                 "customer_name": _customer_name(job),
                 "rows": rows,
-                "totals": {k: float(_q(v)) for k, v in totals.items()},
+                "totals": {k: float(_q_read(v)) for k, v in totals.items()},
             }
         )
     return {
         "as_of": as_of.isoformat(),
         "jobs": out,
-        "totals": {k: float(_q(v)) for k, v in grand.items()},
+        "totals": {k: float(_q_read(v)) for k, v in grand.items()},
         "columns": FT_LOG_COLUMNS,
     }
 
@@ -682,6 +705,7 @@ def check_kind_lines(db: Session, t: FieldTicket, over_receipt: bool = False) ->
     what was ordered unless `over_receipt` says the supplier really
     delivered more (the line is then marked and the ticket warns). Called
     with the ticket's own quantities off the PO lines."""
+    check_line_figures(t)
     if t.kind == "tm":
         for ln in t.lines:
             if _d(ln.quantity) < 0:
@@ -734,16 +758,54 @@ def check_kind_lines(db: Session, t: FieldTicket, over_receipt: bool = False) ->
             ordered = _d(ln.po_line.quantity)
             before = _d(ln.po_line.received_qty)
             after = before + _d(ln.quantity)
+            if after > MAX_RECEIVED:  # received_qty's column, over_receipt or not
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{_line_name(ln)}: {_plain(before)} already received, so "
+                    f"{_plain(ln.quantity)} more would make {_plain(after)}; a "
+                    f"purchase order line holds at most {MAX_RECEIVED:,} received.",
+                )
             # A line kept from an earlier save keeps its mark (None on a new one)
             meant = over_receipt or bool(ln.over_receipt)
             ln.over_receipt = after > ordered
             if ln.over_receipt and not meant:
                 _refuse_over_receipt(ln, ordered, before, after)
-            if _d(ln.quantity) >= MAX_QUANTITY:  # the column's limit: a typo
+
+
+def check_line_figures(t: FieldTicket) -> None:
+    """Each line's amount (quantity × cost rate, and × bill rate on a T&M
+    ticket) and the ticket's totals fit a money column, and a bill rate the
+    job's markup filled in fits its own: a 422 before the ticket is saved
+    (L bug 1: 1e15 × 1e15 was saved behind a 500 and then failed the list)."""
+    totals = {"cost": _ZERO, "bill": _ZERO}
+    for n, ln in enumerate(t.lines, 1):
+        if ln.bill_rate is not None and _d(ln.bill_rate) >= RATE_LIMIT:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Line {n}: its bill rate with the job's markup comes to "
+                f"{_d(ln.bill_rate):,.4f}; a rate must be less than "
+                f"{RATE_LIMIT:,}.",
+            )
+        for kind, rate in (("cost", ln.cost_rate), ("bill", ln.bill_rate)):
+            if rate is None:
+                continue
+            amount = _d(ln.quantity) * _d(rate)
+            if abs(amount) > MAX_AMOUNT:
                 raise HTTPException(
                     status_code=422,
-                    detail="A delivery line's quantity cannot be 100,000,000,000 or more.",
+                    detail=f"Line {n}: {_plain(ln.quantity)} at {_plain(rate)} "
+                    f"comes to {amount:,.2f}, more than a line can be "
+                    f"({MAX_AMOUNT:,.2f}). Check the quantity and the {kind} rate.",
                 )
+            totals[kind] += amount
+    for kind, total in totals.items():
+        if abs(total) > MAX_AMOUNT:
+            raise HTTPException(
+                status_code=422,
+                detail=f"The ticket's lines come to {total:,.2f} at {kind} rates, "
+                f"more than a ticket can be ({MAX_AMOUNT:,.2f}). Split the work "
+                "across tickets or check the quantities.",
+            )
 
 
 def _plain(v) -> str:

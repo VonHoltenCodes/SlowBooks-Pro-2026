@@ -16,6 +16,10 @@ def _bounded_markup(v):
     return v
 
 
+# A line's quantity and unit cost are Numeric(15, 4): eleven whole digits.
+_LINE_LIMIT = Decimal("100000000000")
+
+
 class ChangeOrderLineIn(StrictModel):
     description: Optional[str] = None
     cost_type: str
@@ -27,6 +31,16 @@ class ChangeOrderLineIn(StrictModel):
     markup_pct: Optional[Decimal] = None
 
     _markup = field_validator("markup_pct")(_bounded_markup)
+
+    @field_validator("quantity", "unit_cost")
+    @classmethod
+    def _in_column(cls, v, info):
+        if abs(v) >= _LINE_LIMIT:
+            what = "Quantity" if info.field_name == "quantity" else "Unit cost"
+            raise ValueError(
+                f"{what} must be between -{_LINE_LIMIT:,} and {_LINE_LIMIT:,}."
+            )
+        return v
 
 
 class ChangeOrderCreate(StrictModel):

@@ -840,7 +840,8 @@ def test_a_delivery_past_the_ordered_quantity_is_refused_with_a_sentence(con, po
     job, order = po
     conduit = order["lines"][0]["id"]
     _deliver(con, job["id"], order["id"], {conduit: 60})
-    for qty in (50, 10**12):
+    # (a quantity past what the columns hold is a 422 before this question)
+    for qty in (50, 10**6):
         lines = [{"po_line_id": conduit, "quantity": qty}]
         r = con.post(
             "/api/field-tickets",
