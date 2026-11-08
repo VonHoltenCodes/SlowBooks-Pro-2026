@@ -1446,6 +1446,7 @@ def test_commitment_status_and_forecast_exports(client, db_session, seed_account
     po = _commitment(db_session, job, v, "SC-X", 7000)
     _po_bill(db_session, po, "X-1", 2000, held="200")
     db_session.commit()
+    client.put("/api/settings", json={"company_type": "construction"})
 
     cs = client.get("/api/reports/commitment-status/csv?as_of=2026-06-01").text
     assert "Retainage held" in cs and "SC-X" in cs and "Total Export" in cs

@@ -24,7 +24,7 @@ from app.schemas.purchase_orders import (
 )
 from app.schemas.pay_applications import ReleaseRetainageRequest
 from app.services.accounting import _q, compute_line_totals
-from app.services.field_tickets import received_line_refusal
+from app.services.field_tickets import receipt_status, received_line_refusal
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_po_number
 from app.services.payment_terms import term_id_for
@@ -350,6 +350,11 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
         po.subtotal = subtotal
         po.tax_amount = tax_amount
         po.total = total
+        # A line that grew (or a new one) puts a fully received order back to
+        # partly received; one that shrank to what arrived completes it.
+        db.flush()
+        db.expire(po, ["lines"])
+        receipt_status(po)
     elif data.tax_rate is not None:
         # A new rate without the lines re-totals the stored lines. It changed
         # the rate and kept the old tax and total, and the bill the order

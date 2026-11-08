@@ -470,8 +470,10 @@ whose lines sit on several is a line per section, in code order, named
 "Concrete — 03 30 00 Cast-in-Place Concrete". A line with **no package** is
 its own work line under its own description (an accepted deduct alternate
 reads as its own text), so the owner's schedule, pay applications and PDF
-never print "Unassigned"; the internal reports (Buyout, the cost tree) keep
-that row. Each built line credits **4050 Contract Revenue** and carries:
+never print "Unassigned", and neither does the owner's bid PDF (lines with no
+package print without a heading; with the markup rows off their price stands on
+the one line, or on an unlabelled row under them); the internal reports (Buyout,
+the cost tree) and screens keep that row. Each built line credits **4050 Contract Revenue** and carries:
 
 - **its section** — a work line carries the cost code its estimate lines
   carry, the code Accept budgets them on, so its billing lands on the section
@@ -916,7 +918,9 @@ is set by hand; the closing-date guard applies when it is saved and when the
 application is approved. The invoice is due by the customer's payment terms
 (their terms, else the company's Default Terms, through the same parser as
 every other invoice), counted from the application date: an owner on Net 45
-billed July 31 owes on September 14, and one on Due on Receipt owes that day. The
+billed July 31 owes on September 14, and one on Due on Receipt owes that day. A
+date so near 9999-12-31 that the terms run past the calendar is refused with a 422
+sentence on approve. The
 invoice is tied to that entry of the Payment Terms list, which is seeded first on
 a company whose list is still empty.
 
@@ -1136,7 +1140,8 @@ states require their own waiver form, so check yours before relying on these.
 **The schedule is now anchored.** Once an approved application has billed the
 schedule of values, it can no longer be rebuilt from the estimate (409
 `sov_has_billings`), a line cannot be dropped or shrunk below what it has billed
-(422), and a billed change order cannot be voided (409 `co_billed`). New lines
+(422; a deduct line billed down to -1,000 is pinned the same way, and cannot be
+cut back above -1,000), and a billed change order cannot be voided (409 `co_billed`). New lines
 can still be added.
 
 **The job reports read these figures.** The WIP schedule, cost-to-complete, the
@@ -1225,7 +1230,8 @@ invoice that is not void, is refused until that is rejected or voided. The
 ticket's `can_void` says whether a void would be accepted now (it is false on
 a closed T&M ticket that is still priced or billed, on a void ticket, and on a
 posted slip or a delivery dated in a closed period of a company with no
-closing-date password); the tab shows **Void** only then.
+closing-date password); the tab shows **Void** only then. A delivery ticket
+cannot be **created** in a closed period either (403, the closing-date sentence).
 
 ### T&M tickets
 
@@ -1295,7 +1301,9 @@ quantity received, and the supplier's own ticket number. **Saving** a delivery
 ticket adds its quantities to each PO line's received quantity and moves the
 order to `partial` (something received) or `received` (every line in full);
 an edit moves it by the change, and deleting or voiding the ticket takes the
-quantity back. Nothing posts: received-not-billed accruals are the
+quantity back. Editing the order moves it too: a received order whose line is
+raised (or a line added) goes back to `partial`, and one cut to what arrived
+is `received`. Nothing posts: received-not-billed accruals are the
 accountant's. When the supplier's bill is entered from the PO, the
 construction **To Bill** dialog of an order being received this way shows
 ordered and received per line beside what is billed, and **warns** (never
@@ -1684,19 +1692,23 @@ and **P&L by Job** — then the ten construction reports: **WIP Schedule**,
 **Cost to Complete**, **Change Order Log**, **Buyout Report**, **Job Cost by
 Vendor**, **Cost-to-Complete Forecast**, **Commitment Status**, **Field Ticket
 Log** (see *Field tickets*), **Retainage** and **Sub Compliance** (see *Job
-reports* above). The ten show in construction mode only. Every other report
-stays where it is.
+reports* above). The ten show in construction mode only, except Job Cost by Vendor (below).
+Every other report stays where it is.
 
-A Business or Nonprofit company that opens **WIP Schedule**, **Field Ticket
-Log**, **Retainage** or **Sub Compliance** by address (`#/reports/retainage`, a
+A Business or Nonprofit company that opens **WIP Schedule**, **Cost to
+Complete**, **Cost-to-Complete Forecast**, **Commitment Status**, **Change Order
+Log**, **Buyout Report**, **Field Ticket Log**, **Retainage** or **Sub
+Compliance** by address (`#/reports/retainage`, a
 saved report, a bookmark) is sent to the Report Center with a sentence saying
 they are construction-mode reports, and their APIs (JSON, PDF, CSV, print)
 answer 409 outside construction mode, as field tickets do. (The WIP post and void
-routes have their own rule.)
+routes have their own rule.) **Job Cost by Vendor** stays open to every company.
 
 **A filter the route does not read is refused, not dropped.** `GET
-/api/field-tickets`, `/api/estimates`, the Retainage, Sub Compliance and Field
-Ticket Log reports (and their PDF, CSV and print), and `POST
+/api/field-tickets`, `/api/estimates`, the Retainage, Sub Compliance, Field
+Ticket Log, Cost to Complete, Cost-to-Complete Forecast, Commitment Status,
+Change Order Log, Buyout and Job Cost by Vendor reports (and their PDF, CSV and
+print), and `POST
 /reports/wip-schedule/post` and `/void` answer 422 with a sentence naming the
 accepted parameters when a request carries any other (`jobid`, `asof`,
 `window_days`), so a misspelling cannot return the whole list or post the whole

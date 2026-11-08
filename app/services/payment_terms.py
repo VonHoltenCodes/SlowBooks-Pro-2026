@@ -356,7 +356,18 @@ def terms_dates(
 
 
 def due_date_for(db: Session, on: date, text: Optional[str]) -> date:
-    return terms_dates(db, on, text).due_date
+    """The due date for a document dated `on` with these terms. A date so near
+    the calendar's end that the terms run past it is a 422, not an overflow."""
+    from fastapi import HTTPException
+
+    try:
+        return terms_dates(db, on, text).due_date
+    except OverflowError:
+        raise HTTPException(
+            status_code=422,
+            detail=f'"{(text or "").strip()}" from {on.isoformat()} runs past '
+            "the calendar; date the document earlier.",
+        )
 
 
 def describe(rule: Rule) -> str:

@@ -198,6 +198,12 @@ def create_field_ticket(data: FieldTicketCreate, db: Session = Depends(get_db)):
     header = data.model_dump(exclude={"lines", "job_id", "kind", "over_receipt"})
     _check_header(db, job, data.kind, header)
     header["date"] = header.get("date") or date.today()
+    # A delivery moves received quantity as of its date: creating one in a
+    # closed period is refused like editing, deleting or voiding it.
+    if data.kind == "delivery":
+        from app.services.closing_date import check_closing_date
+
+        check_closing_date(db, header["date"])
     t = _create_numbered(db, job, data.kind, status="draft", **header)
     svc.set_lines(db, t, data.lines)
     svc.check_kind_lines(db, t, data.over_receipt)

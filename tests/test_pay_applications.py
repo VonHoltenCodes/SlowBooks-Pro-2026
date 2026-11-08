@@ -1818,3 +1818,106 @@ def test_a_pay_application_locks_the_contract_sum_and_contingency(
     r = client.post(f"/api/pay-applications/{app['id']}/void")
     assert r.status_code == 200, r.text
     assert client.put(base, json={"contract_amount": 120000}).status_code == 200
+
+
+def _billed_deduct_job(client, customer_id):
+    """A job whose deduct line (-1,000) is fully billed on an approved app."""
+    job = _job(client, customer_id)
+    _contract(
+        client,
+        job["id"],
+        contract_type="lump_sum",
+        contract_amount=9000,
+        retainage_pct=0,
+    )
+    sov = _sov(
+        client,
+        job["id"],
+        [
+            {"description": "Work", "kind": "work", "scheduled_value": 10000},
+            {"description": "Deduct alt", "kind": "work", "scheduled_value": -1000},
+        ],
+    )
+    app = _new_app(client, job["id"])
+    _edit(
+        client,
+        app["id"],
+        lines=[
+            {"sov_line_id": sov[0]["id"], "this_period": 10000, "stored": 0},
+            {"sov_line_id": sov[1]["id"], "this_period": -1000, "stored": 0},
+        ],
+    )
+    assert _approve(client, app["id"]).status_code == 200
+    return job, sov
+
+
+def test_put_sov_dropping_a_billed_deduct_line_422(
+    client, db_session, seed_accounts, seed_customer
+):
+    job, sov = _billed_deduct_job(client, seed_customer.id)
+    r = client.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={
+            "lines": [
+                {
+                    "id": sov[0]["id"],
+                    "description": "Work",
+                    "kind": "work",
+                    "scheduled_value": 10000,
+                }
+            ]
+        },
+    )
+    assert r.status_code == 422
+    assert "has been billed" in r.json()["detail"]
+
+
+def test_put_sov_cannot_cut_a_billed_deduct_line_back(
+    client, db_session, seed_accounts, seed_customer
+):
+    job, sov = _billed_deduct_job(client, seed_customer.id)
+    r = client.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={
+            "lines": [
+                {
+                    "id": sov[0]["id"],
+                    "description": "Work",
+                    "kind": "work",
+                    "scheduled_value": 10000,
+                },
+                {
+                    "id": sov[1]["id"],
+                    "description": "Deduct alt",
+                    "kind": "work",
+                    "scheduled_value": -400,
+                },
+            ]
+        },
+    )
+    assert r.status_code == 422
+    assert "has billed -1000.00" in r.json()["detail"]
+
+
+def test_an_application_dated_at_the_calendars_end_is_refused_not_a_500(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The invoice's due date is the date plus its terms; 9999-12-31 plus 30
+    days runs past the calendar. The request schemas stop such a date, but one
+    stored by an import reaches approve: a 422 sentence, not an OverflowError."""
+    job, sov = _two_line_job(client, seed_customer.id)
+    app = _new_app(client, job["id"])
+    r = _edit(
+        client,
+        app["id"],
+        lines=[{"sov_line_id": sov[0]["id"], "this_period": 1000, "stored": 0}],
+    )
+    assert r.status_code == 200, r.text
+    db_session.query(PayApplication).filter_by(id=app["id"]).update(
+        {"date": date(9999, 12, 31)}
+    )
+    db_session.commit()
+    r = _approve(client, app["id"])
+    assert r.status_code == 422, r.text
+    assert "runs past the calendar" in r.json()["detail"]
+    assert db_session.query(Invoice).count() == 0

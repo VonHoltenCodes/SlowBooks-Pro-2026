@@ -66,6 +66,11 @@ TITLES = {
 # company that is not in construction mode.
 AS_OF_ONLY = {
     "/api/reports/wip-schedule/print",
+    "/api/reports/cost-to-complete/print",
+    "/api/reports/cost-to-complete-forecast/print",
+    "/api/reports/commitment-status/print",
+    "/api/reports/change-order-log/print",
+    "/api/reports/buyout/print",
     "/api/reports/field-ticket-log/print",
     "/api/reports/retainage/print",
     "/api/reports/compliance/print",
