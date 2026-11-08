@@ -25,6 +25,7 @@ from app.schemas.field_tickets import (
     PostIn,
     SignIn,
     TicketIdsIn,
+    VoidIn,
 )
 from app.services import field_tickets as svc
 
@@ -313,7 +314,9 @@ def post_material_slip(
 
 
 @router.post("/{ticket_id}/void", response_model=FieldTicketOut)
-def void_field_ticket(ticket_id: int, db: Session = Depends(get_db)):
+def void_field_ticket(
+    ticket_id: int, data: VoidIn | None = None, db: Session = Depends(get_db)
+):
     """Void a ticket while nothing it led to is approved: a T&M ticket on a
     live change order or a billed invoice is refused (reject or void that
     first); a posted material slip reverses its job cost at the booked cost;

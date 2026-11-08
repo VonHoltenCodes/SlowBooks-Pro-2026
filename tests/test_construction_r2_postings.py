@@ -678,3 +678,117 @@ def test_job_cost_by_vendor_foots_with_an_unapplied_vendor_credit(
     )
     # before the credit, nothing is open
     assert row("2026-08-31")["open_ap"] == 0.0
+
+
+# ── 5. The smaller refusals ─────────────────────────────────────────────────
+
+
+def test_void_refuses_an_unknown_field_as_post_does(con, seed_customer):
+    """M bug 9: POST /api/field-tickets/{id}/void {"foo": 1} voided (200)
+    while /post answered 422 "'foo' is not a field this accepts."."""
+    job = _job(con, seed_customer.id)
+    t = con.post(
+        "/api/field-tickets",
+        json={
+            "job_id": job["id"],
+            "lines": [{"line_type": "other", "quantity": 1, "cost_rate": 5}],
+        },
+    ).json()
+    r = con.post(f"/api/field-tickets/{t['id']}/void", json={"foo": 1})
+    assert r.status_code == 422, r.text
+    assert "'foo' is not a field this accepts" in _message(r)
+    assert con.get(f"/api/field-tickets/{t['id']}").json()["status"] == "draft"
+    for action, body in (("sign", {"signed_by_name": "Pat", "foo": 1}),):
+        r = con.post(f"/api/field-tickets/{t['id']}/{action}", json=body)
+        assert r.status_code == 422, (action, r.text)
+    # no body, or an empty one, still voids
+    assert con.post(f"/api/field-tickets/{t['id']}/void", json={}).status_code == 200
+
+
+def test_a_po_with_receipts_does_not_go_back_to_draft(con, po):
+    """M / L4 edge: PUT status draft on a PO with a delivery received on it
+    was accepted."""
+    job, order = po
+    t = con.post(
+        "/api/field-tickets",
+        json={
+            "job_id": job["id"],
+            "kind": "delivery",
+            "purchase_order_id": order["id"],
+            "lines": [{"po_line_id": order["lines"][0]["id"], "quantity": 10}],
+        },
+    ).json()
+    url = f"/api/purchase-orders/{order['id']}"
+    r = con.put(url, json={"status": "draft"})
+    assert r.status_code == 409, r.text
+    assert "cannot go back to draft" in r.json()["detail"]["message"]
+    assert t["number"] in r.json()["detail"]["message"]
+    assert con.get(url).json()["status"] == "partial"
+    # with the ticket void, it can
+    assert con.post(f"/api/field-tickets/{t['id']}/void").status_code == 200
+    assert con.put(url, json={"status": "draft"}).status_code == 200
+
+
+def test_a_billed_supplier_po_says_to_void_the_bill_not_a_sub_change_order(con, po):
+    """L weakness: a billed supplier PO refused a cut with "change it with a
+    sub change order", which is for subcontracts."""
+    job, order = po
+    r = con.post(f"/api/purchase-orders/{order['id']}/convert-to-bill", json={})
+    assert r.status_code in (200, 201), r.text
+    line = con.get(f"/api/purchase-orders/{order['id']}").json()["lines"][0]
+    r = con.put(
+        f"/api/purchase-orders/{order['id']}",
+        json={
+            "lines": [
+                {
+                    "id": line["id"],
+                    "description": "Conduit",
+                    "quantity": 10,
+                    "rate": 3,
+                }
+            ]
+        },
+    )
+    assert r.status_code == 409, r.text
+    message = r.json()["detail"]["message"]
+    assert "void the bill" in message and "sub change order" not in message
+
+
+def test_validation_sentences_name_the_field_and_its_choices_by_label(
+    con, seed_customer
+):
+    """M weakness 9: "Sales_tax_treatment must be charge_owner …" and "Line 1:
+    Line_type must be one of labor, equipment, material, ot…"."""
+    job = _job(con, seed_customer.id)
+    r = con.put(
+        f"/api/jobs/{job['id']}/contract", json={"sales_tax_treatment": "owner"}
+    )
+    assert r.status_code == 422, r.text
+    assert _message(r) == (
+        "Sales tax must be Charge sales tax to the owner or Contractor pays tax "
+        "on materials."
+    )
+    assert "sales_tax_treatment is one of" in r.json()["detail"][0]["msg"]
+    r = con.post(
+        "/api/field-tickets",
+        json={"job_id": job["id"], "lines": [{"line_type": "labour", "quantity": 1}]},
+    )
+    assert r.status_code == 422, r.text
+    assert (
+        _message(r) == "Line 1: Line type must be Labor, Equipment, Material or Other."
+    )
+    for url, body, label in (
+        ("/api/field-tickets", {"job_id": job["id"], "kind": "slip"}, "Kind"),
+        ("/api/change-orders", {"job_id": job["id"], "funding": "x"}, "Funding"),
+        (
+            f"/api/jobs/{job['id']}/contract",
+            {"contract_type": "fixed"},
+            "Contract type",
+        ),
+        (f"/api/jobs/{job['id']}/contract", {"retainage_pct": 150}, "Retainage"),
+    ):
+        r = con.request("PUT" if "contract" in url else "POST", url, json=body)
+        assert r.status_code == 422, (url, r.text)
+        message = _message(r)
+        assert message.startswith(label + " must be"), message
+        assert "_" not in message, message

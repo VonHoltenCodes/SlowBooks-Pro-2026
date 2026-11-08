@@ -60,6 +60,18 @@ def clean_line_cost_type(v):
     return v
 
 
+def choice_error(label: str, choices: dict, field: str) -> ValueError:
+    """A refused choice as a sentence a person reads: the field's label and
+    the choices' labels ("Line type must be Labor, Equipment, Material or
+    Other."), with the codes an API caller sends in a trailing note that
+    validation_messages keeps in "msg" only."""
+    names = list(choices.values())
+    listed = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " or " + names[-1]
+    return ValueError(
+        f"{label} must be {listed}. (API: {field} is one of {', '.join(choices)}.)"
+    )
+
+
 # An email field that treats blank as absent. HTML forms submit every empty
 # input as "" — Optional[OptionalEmail] alone rejects that with a pattern
 # 422 even though the user typed nothing (#64). Blank collapses to None

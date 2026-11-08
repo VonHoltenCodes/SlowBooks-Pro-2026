@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
-from app.schemas.common import StrictModel
+from app.schemas.common import StrictModel, choice_error
 
 from app.models.jobs import (
     CONTRACT_TYPES,
@@ -122,18 +122,38 @@ class JobSummary(BaseModel):
     billed_to_date: float = 0.0  # Σ billed against commitments (#553)
 
 
+# The choices as the contract form labels them (app/static/js/jobs.js).
+_CONTRACT_TYPE_LABELS = dict(
+    lump_sum="Lump sum", gmp="GMP (guaranteed max)", cost_plus="Cost-plus"
+)
+_TAX_TREATMENT_LABELS = dict(
+    charge_owner="Charge sales tax to the owner",
+    contractor_pays="Contractor pays tax on materials",
+)
+_SOV_KIND_LABELS = dict(
+    work="Work",
+    allowance="Allowance",
+    contingency="Contingency",
+    general_conditions="General conditions",
+    insurance="Insurance",
+    fee="Fee",
+    bond="Bond",
+    change_order="Change order",
+)
+
+
 def _check_contract_type(v):
     if v is None:
         return v
     v = v.strip().lower().replace(" ", "_").replace("-", "_")
     if v not in CONTRACT_TYPES:
-        raise ValueError(f"contract_type must be one of {', '.join(CONTRACT_TYPES)}")
+        raise choice_error("Contract type", _CONTRACT_TYPE_LABELS, "contract_type")
     return v
 
 
 def _bounded_markup(v):
     if v is not None and not (-100 < v <= 1000):
-        raise ValueError("co_markup_pct must be above -100 and at most 1000")
+        raise ValueError("Change-order markup must be above -100% and at most 1000%.")
     return v
 
 
@@ -160,10 +180,8 @@ class ContractTerms(StrictModel):
     @classmethod
     def _tax_treatment(cls, v):
         if v is not None and v not in SALES_TAX_TREATMENTS:
-            raise ValueError(
-                "sales_tax_treatment must be charge_owner (sales tax on the "
-                "owner's pay applications) or contractor_pays (the contractor "
-                "pays tax on materials)"
+            raise choice_error(
+                "Sales tax", _TAX_TREATMENT_LABELS, "sales_tax_treatment"
             )
         return v
 
@@ -171,14 +189,14 @@ class ContractTerms(StrictModel):
     @classmethod
     def _fee_pct(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("fee_pct must be between 0 and 100")
+            raise ValueError("Fee must be between 0 and 100%.")
         return v
 
     @field_validator("retainage_pct")
     @classmethod
     def _retainage(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("retainage_pct must be between 0 and 100")
+            raise ValueError("Retainage must be between 0 and 100%.")
         return v
 
 
@@ -205,7 +223,7 @@ class SovLineIn(StrictModel):
     def _kind(cls, v):
         v = (v or "work").strip().lower()
         if v not in SOV_KINDS:
-            raise ValueError(f"kind must be one of {', '.join(SOV_KINDS)}")
+            raise choice_error("Kind", _SOV_KIND_LABELS, "kind")
         return v
 
 

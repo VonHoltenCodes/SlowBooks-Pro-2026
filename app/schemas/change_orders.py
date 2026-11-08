@@ -5,14 +5,21 @@ from typing import List, Optional
 from pydantic import BaseModel, field_validator
 
 from app.models.change_orders import CO_FUNDING, CO_KINDS
-from app.schemas.common import StrictModel
+from app.schemas.common import StrictModel, choice_error
+
+_KIND_LABELS = dict(
+    pco="Potential change order", owner="Owner change order", sub="Sub change order"
+)
+_FUNDING_LABELS = dict(
+    contract="Contract", allowance="Allowance", contingency="Contingency"
+)
 
 
 def _bounded_markup(v):
     """A markup percent must keep the sell above zero (more than -100%) and
     stay sane (up to 1000%)."""
     if v is not None and not (Decimal("-100") < v <= Decimal("1000")):
-        raise ValueError("markup_pct must be above -100 and at most 1000")
+        raise ValueError("Markup must be above -100% and at most 1000%.")
     return v
 
 
@@ -65,7 +72,7 @@ class ChangeOrderCreate(StrictModel):
     def _kind(cls, v):
         v = (v or "owner").strip().lower()
         if v not in CO_KINDS:
-            raise ValueError(f"kind must be one of {', '.join(CO_KINDS)}")
+            raise choice_error("Kind", _KIND_LABELS, "kind")
         return v
 
     @field_validator("funding")
@@ -73,7 +80,7 @@ class ChangeOrderCreate(StrictModel):
     def _funding(cls, v):
         v = (v or "contract").strip().lower()
         if v not in CO_FUNDING:
-            raise ValueError(f"funding must be one of {', '.join(CO_FUNDING)}")
+            raise choice_error("Funding", _FUNDING_LABELS, "funding")
         return v
 
 
@@ -100,7 +107,7 @@ class ChangeOrderUpdate(StrictModel):
             return v
         v = v.strip().lower()
         if v not in CO_FUNDING:
-            raise ValueError(f"funding must be one of {', '.join(CO_FUNDING)}")
+            raise choice_error("Funding", _FUNDING_LABELS, "funding")
         return v
 
 
