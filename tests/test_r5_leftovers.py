@@ -61,7 +61,8 @@ def test_job_cost_by_vendor_stays_open_to_a_business_company(client, seed_accoun
 def test_the_report_center_routes_the_gated_reports_by_mode():
     from pathlib import Path
 
-    js = (Path(__file__).resolve().parents[1] / "app/static/js/reports.js").read_text()
+    path = Path(__file__).resolve().parents[1] / "app/static/js/reports.js"
+    js = path.read_text(encoding="utf-8")
     for name in _GATED:
         line = next(ln for ln in js.splitlines() if f"'{name}':" in ln)
         assert "construction: true" in line, name
