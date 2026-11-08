@@ -349,7 +349,7 @@ def test_a_replaced_address_keeps_the_entrys_state_and_the_button_follows():
     ):
         assert "replaceState(null" not in _src(name), name
     reports = _src("reports.js")
-    assert reports.count("ReportsPage._addressReportCenter();") == 3
+    assert reports.count("ReportsPage._addressReportCenter();") == 4
     assert (
         "history.replaceState(history.state, '', '#/reports');\n        App.addressShown();"
         in reports
