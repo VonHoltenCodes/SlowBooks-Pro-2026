@@ -1084,6 +1084,49 @@ def test_a_delivery_in_a_closed_period_is_not_edited_deleted_or_voided(con, po):
     assert con.post(f"/api/field-tickets/{signed['id']}/void").status_code == 200
 
 
+def test_a_delivery_cannot_be_created_in_a_closed_period(con, po):
+    job, order = po
+    conduit = order["lines"][0]["id"]
+    assert (
+        con.put("/api/settings", json={"closing_date": "2026-09-30"}).status_code == 200
+    )
+    try:
+        r = _deliver(
+            con, job["id"], order["id"], {conduit: 10}, status=403, date="2026-09-05"
+        )
+        assert "closing date" in r["detail"]
+        # nothing was received, and a delivery after the closing date is fine
+        assert float(_po_get(con, order["id"])["lines"][0]["received_qty"]) == 0.0
+        _deliver(con, job["id"], order["id"], {conduit: 10}, date="2026-10-05")
+    finally:
+        con.put("/api/settings", json={"closing_date": ""})
+
+
+def test_growing_a_received_po_line_puts_the_order_back_to_partly_received(con, po):
+    job, order = po
+    conduit, boxes = (ln["id"] for ln in order["lines"])
+    _deliver(con, job["id"], order["id"], {conduit: 100, boxes: 10})
+    assert _po_get(con, order["id"])["status"] == "received"
+
+    def edit(conduit_qty):
+        lines = [
+            {
+                "id": conduit,
+                "description": "Conduit",
+                "quantity": conduit_qty,
+                "rate": 3,
+            },
+            {"id": boxes, "description": "Boxes", "quantity": 10, "rate": 20},
+        ]
+        r = con.put(f"/api/purchase-orders/{order['id']}", json={"lines": lines})
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    assert edit(150)["status"] == "partial"
+    # and back to received when the line shrinks to what arrived
+    assert edit(100)["status"] == "received"
+
+
 def test_a_tm_ticket_line_cannot_have_a_negative_quantity(con, seed_customer):
     job = _job(con, seed_customer.id)
     r = con.post(

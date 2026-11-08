@@ -394,3 +394,40 @@ def test_email_rejects_a_bad_copy_address(client, seed_customer, monkeypatch):
     )
     assert r.status_code == 400 and "Not an email address" in r.json()["detail"]
     assert client.post("/api/estimates/9999/email", json={}).status_code == 404
+
+
+@pytest.mark.parametrize("rows", [True, False])
+def test_lines_with_no_package_print_with_no_unassigned_heading(
+    client, db_session, seed_customer, rows
+):
+    """The owner's bid names packages only; the internal screens keep
+    "Unassigned" (estimate_totals still returns it)."""
+    _construction(client)
+    concrete = _package(client, "Concrete")
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [
+            {
+                "description": "Slab",
+                "quantity": 1,
+                "unit_cost": 40000,
+                "trade_package_id": concrete,
+            },
+            {"description": "Permit fees", "quantity": 1, "unit_cost": 1500},
+            {"description": "Dumpster", "quantity": 1, "unit_cost": 500},
+        ],
+        gc_pct=8,
+        show_markup_rows=rows,
+    )
+    html = _html(db_session, est["id"])
+    assert "Unassigned" not in html
+    assert "Permit fees" in html and "Dumpster" in html and "Concrete" in html
+    totals = estimate_totals(db_session.get(Estimate, est["id"]))
+    assert "Unassigned" in [p["package_name"] for p in totals["by_package"]]
+    if not rows:
+        # spread, the no-package price still prints (an unlabelled row)
+        prices = spread_markup_prices(
+            db_session.get(Estimate, est["id"]), totals["markup_total"]
+        )
+        assert f"${prices['packages'][None]:,.2f}" in html

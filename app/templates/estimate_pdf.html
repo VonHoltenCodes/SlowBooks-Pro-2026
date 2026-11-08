@@ -121,15 +121,22 @@
                 {% endif %}
             {% endfor %}
             {% if pkg_lines %}
-            <tr><td colspan="{{ 2 if spread else 3 }}" style="background:#eef3f8; font-weight:700; color:#003366;">{{ pkg.package_name }}</td><td class="r" style="background:#eef3f8; font-weight:700; color:#003366;">{% if spread %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td></tr>
+            {# Lines with no package print with no heading (the internal screens
+               keep "Unassigned"); spread, their price stands on the one line or
+               on an unlabelled row under them. #}
+            {% set bare = pkg.package_id is none %}
+            {% if not bare %}<tr><td colspan="{{ 2 if spread else 3 }}" style="background:#eef3f8; font-weight:700; color:#003366;">{{ pkg.package_name }}</td><td class="r" style="background:#eef3f8; font-weight:700; color:#003366;">{% if spread %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td></tr>{% endif %}
             {% for line in pkg_lines %}
             <tr>
                 <td>{% if line.cost_code %}{{ line.cost_code.code }} {% endif %}{{ line.description or '' }}{% if (line.line_kind or 'base') == 'alternate' %}<span class="alt-tag">{{ 'Deduct' if line.amount < 0 else 'Add' }} alternate, accepted</span>{% endif %}</td>
                 <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
                 {% if not spread %}<td class="r">{{ line.rate | rate }}</td>{% endif %}
-                <td class="r">{% if not spread %}{{ line.amount | currency }}{% endif %}</td>
+                <td class="r">{% if not spread %}{{ line.amount | currency }}{% elif bare and pkg_lines | length == 1 %}{{ prices.packages[pkg.package_id] | currency }}{% endif %}</td>
             </tr>
             {% endfor %}
+            {% if bare and spread and pkg_lines | length > 1 %}
+            <tr><td colspan="2"></td><td class="r" style="font-weight:700;">{{ prices.packages[pkg.package_id] | currency }}</td></tr>
+            {% endif %}
             {% endif %}
         {% endfor %}
         </tbody>

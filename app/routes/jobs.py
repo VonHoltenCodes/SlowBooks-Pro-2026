@@ -751,7 +751,8 @@ def _save_sov_with_billings(db: Session, job: Job, lines, kept, billed) -> None:
     }
     sent_ids = {line.id for line in lines if line.id is not None}
     for line_id, row in existing.items():
-        if line_id not in sent_ids and _q(billed.get(line_id, 0)) > 0:
+        # A deduct line bills down: a negative billed amount pins it as well.
+        if line_id not in sent_ids and _q(billed.get(line_id, 0)) != 0:
             raise HTTPException(
                 status_code=422,
                 detail=(
@@ -768,12 +769,15 @@ def _save_sov_with_billings(db: Session, job: Job, lines, kept, billed) -> None:
         if row is not None:
             seen.add(row.id)
             floor = _q(billed.get(row.id, 0))
-            if _q(line.scheduled_value) < floor:
+            # In the line's own direction: a deduct line billed -6,000 cannot
+            # be cut back to -3,000.
+            value = _q(line.scheduled_value)
+            if (value < floor) if floor >= 0 else (value > floor):
                 raise HTTPException(
                     status_code=422,
                     detail=(
                         f"Line {item_no} has billed {floor:.2f}; its scheduled "
-                        f"value cannot drop below that."
+                        f"value cannot {'drop below' if floor >= 0 else 'rise above'} that."
                     ),
                 )
             row.line_no = n

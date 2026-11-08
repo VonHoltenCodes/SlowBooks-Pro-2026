@@ -401,7 +401,10 @@ def wip_schedule_csv(
 # ── 2. Cost to complete ───────────────────────────────────────────────────
 
 
-@router.get("/cost-to-complete")
+@router.get(
+    "/cost-to-complete",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def cost_to_complete_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -495,7 +498,10 @@ def _ctc_csv_job_node(node: dict, job_name: str, cols: list[dict], w, prefix: st
         _ctc_csv_job_node(ch, job_name, cols, w, prefix + "  ")
 
 
-@router.get("/cost-to-complete/pdf")
+@router.get(
+    "/cost-to-complete/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def cost_to_complete_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -510,7 +516,10 @@ def cost_to_complete_pdf(
     )
 
 
-@router.get("/cost-to-complete/csv")
+@router.get(
+    "/cost-to-complete/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def cost_to_complete_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -531,7 +540,10 @@ def cost_to_complete_csv(
 # ── 2b. Cost-to-complete forecast ─────────────────────────────────────────
 
 
-@router.get("/cost-to-complete-forecast")
+@router.get(
+    "/cost-to-complete-forecast",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def cost_to_complete_forecast_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -547,7 +559,10 @@ def cost_to_complete_forecast_route(
     return ctc_forecast_report(db, as_of, job_id, customer_id, status, include_closed)
 
 
-@router.get("/cost-to-complete-forecast/pdf")
+@router.get(
+    "/cost-to-complete-forecast/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def cost_to_complete_forecast_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -567,7 +582,10 @@ def cost_to_complete_forecast_pdf(
     )
 
 
-@router.get("/cost-to-complete-forecast/csv")
+@router.get(
+    "/cost-to-complete-forecast/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def cost_to_complete_forecast_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -593,7 +611,10 @@ def cost_to_complete_forecast_csv(
 # ── 6. Commitment status ──────────────────────────────────────────────────
 
 
-@router.get("/commitment-status")
+@router.get(
+    "/commitment-status",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def commitment_status_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -610,7 +631,10 @@ def commitment_status_route(
     return commitment_status(db, as_of, job_id, customer_id, status, include_closed)
 
 
-@router.get("/commitment-status/pdf")
+@router.get(
+    "/commitment-status/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def commitment_status_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -628,7 +652,10 @@ def commitment_status_pdf(
     )
 
 
-@router.get("/commitment-status/csv")
+@router.get(
+    "/commitment-status/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def commitment_status_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -651,7 +678,10 @@ def commitment_status_csv(
 # ── 3. Change-order log ───────────────────────────────────────────────────
 
 
-@router.get("/change-order-log")
+@router.get(
+    "/change-order-log",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def change_order_log_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -749,7 +779,10 @@ def _co_csv(data: dict, company: str) -> str:
     return out.getvalue()
 
 
-@router.get("/change-order-log/pdf")
+@router.get(
+    "/change-order-log/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def change_order_log_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -762,7 +795,10 @@ def change_order_log_pdf(
     return _pdf_response(_co_sections(data), db, "change-order-log.pdf", landscape=True)
 
 
-@router.get("/change-order-log/csv")
+@router.get(
+    "/change-order-log/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def change_order_log_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -781,7 +817,10 @@ def change_order_log_csv(
 # ── 4. Buyout report ──────────────────────────────────────────────────────
 
 
-@router.get("/buyout")
+@router.get(
+    "/buyout",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def buyout_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -862,7 +901,10 @@ def _per_job_grid_csv(data: dict, company: str, report: str, period: str = "") -
     return out.getvalue()
 
 
-@router.get("/buyout/pdf")
+@router.get(
+    "/buyout/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def buyout_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -880,7 +922,10 @@ def buyout_pdf(
     )
 
 
-@router.get("/buyout/csv")
+@router.get(
+    "/buyout/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def buyout_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -903,7 +948,7 @@ def buyout_csv(
 # ── 5. Job cost by vendor ─────────────────────────────────────────────────
 
 
-@router.get("/job-cost-by-vendor")
+@router.get("/job-cost-by-vendor", dependencies=[Depends(refuse_unknown_filters)])
 def job_cost_by_vendor_route(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -929,7 +974,7 @@ def _vendor_period(data: dict) -> str:
     return f"{data['start_date']} — {data['end_date']}"
 
 
-@router.get("/job-cost-by-vendor/pdf")
+@router.get("/job-cost-by-vendor/pdf", dependencies=[Depends(refuse_unknown_filters)])
 def job_cost_by_vendor_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -953,7 +998,7 @@ def job_cost_by_vendor_pdf(
     )
 
 
-@router.get("/job-cost-by-vendor/csv")
+@router.get("/job-cost-by-vendor/csv", dependencies=[Depends(refuse_unknown_filters)])
 def job_cost_by_vendor_csv(
     request: Request,
     start_date: date = Query(default=None),
