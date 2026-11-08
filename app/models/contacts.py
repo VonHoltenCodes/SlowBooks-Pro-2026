@@ -13,7 +13,9 @@ from sqlalchemy import (
     DateTime,
     Text,
     ForeignKey,
+    false,
     func,
+    true,
 )
 from sqlalchemy.orm import backref, relationship
 
@@ -71,6 +73,14 @@ class Customer(Base):
         Integer, ForeignKey("customers.id"), nullable=True, index=True
     )
     bill_with_parent = Column(Boolean, nullable=False, default=False)
+    # Collections (#653): payment reminders go out unless the customer is
+    # opted out; the monthly statement only goes to customers who opt in.
+    invoice_reminders_enabled = Column(
+        Boolean, nullable=False, default=True, server_default=true()
+    )
+    monthly_statement = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
