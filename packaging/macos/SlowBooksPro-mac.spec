@@ -10,7 +10,7 @@
 #     build stages its gtk-dlls.
 #   * pywebview uses the Cocoa/WebKit backend on macOS (pyobjc) — no
 #     pythonnet, no WebView2, one less runtime dependency than Windows.
-#   * Icon: assets/icon-256.png → .icns (see the workflow step).
+#   * Icon: assets/icon-1024.png → .icns (see the workflow step).
 
 import os
 import subprocess
