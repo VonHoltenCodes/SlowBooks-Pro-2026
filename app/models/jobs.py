@@ -149,7 +149,7 @@ class SovLine(Base):
     cost_code_id = Column(
         Integer, ForeignKey("cost_codes.id", ondelete="SET NULL"), nullable=True
     )
-    kind = Column(String(16), nullable=False, default="work")
+    kind = Column(String(24), nullable=False, default="work")
     scheduled_value = Column(Numeric(15, 2), nullable=False, default=0)
     # The income account the line's billing credits; null posts to 4050
     # Contract Revenue. is_taxable: sales tax is charged on its billing.
