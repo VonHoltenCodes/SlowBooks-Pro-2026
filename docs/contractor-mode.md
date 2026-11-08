@@ -46,6 +46,14 @@ Switching back to Business leaves the accounts and codes in
 place (as switching away from Nonprofit leaves its net-asset accounts); they
 are ordinary accounts once created.
 
+**Downgrading the database** (Alembic `downgrade` to a version before
+construction mode) is lossier than the switch: the field tickets tables are
+dropped, so **tickets and their lines are gone**; the SOV's Tax box and
+revenue account columns are dropped, so every SOV line **returns taxable** and
+posts to 4050 again; and the received quantity a delivery ticket wrote on a
+purchase order line **stays** on the line, with no ticket left to void it.
+Take a backup first.
+
 ## The accounts
 
 Each is created only if an account of that name does not already exist, and
@@ -448,7 +456,13 @@ the fee percent must be between 0 and 100. Building from an estimate also
 copies the estimate's fee markup into the job's fee percent when the job has
 none, so the fee tile and the SOV fee line agree on a GMP.
 
-**The schedule of values.** The SOV is the contract sum broken into the lines
+**The schedule of values.** (Saving one that does not add up to the contract
+sum to date is allowed, since a job may be mid-setup, but the save answers with
+a `warnings` sentence ("The schedule of values totals $116,500.00, $2,000.00
+short of the contract sum to date of $118,500.00…"), shown as a toast, and
+every read of a pay application on that job carries it, approve included: the
+application prints the contract sum above line detail that totals something
+else.) The SOV is the contract sum broken into the lines
 an owner pay application bills against — each with an item number, a
 description, an optional package and section, a **revenue account**, a
 **Tax** box, a kind (work, allowance, contingency, or one of the four
@@ -613,7 +627,10 @@ for that package, an allowance at its amount — against what has been **bought*
   *Unassigned* (a deduct alternate keeps to its own package, or to *Unassigned*
   when its code is in none).
 - **Spent, no commitment** — coded lines of bills with no commitment, placed
-  by their cost code's package, so a plain bill is not a $0 bought.
+  by their cost code's package, so a plain bill is not a $0 bought. It counts
+  bills only: a material slip (a field ticket that posts job cost from stock)
+  is job cost in no Buyout column, so the job's cost to date can run past
+  bought plus spent here by the slips on it.
 - the committed-remaining, the billed-to-date and the commitments behind each
   package, linked through.
 
@@ -798,8 +815,12 @@ approve click.
 **Return unspent allowance.** An allowance is billed as scheduled whether or
 not the owner's choices used it all. The Contract tab's allowance row shows
 **Return unspent** (when something is left; or
-`POST /api/change-orders/allowance-return` with the allowance line and an
-optional `amount`, default everything unspent). It makes a **draft owner
+`POST /api/change-orders/allowance-return` with the allowance line, an
+optional `amount` (default everything unspent) and an optional `date`
+(default today; the dialog asks for it). The date is the change order's date,
+and approving it cannot take effect earlier, so a month-end return is dated in
+that month; it cannot be before the contract date (422) or in a closed period
+(403). It makes a **draft owner
 change order for minus the unspent amount**, no markup (whatever the job's
 default says), funded against that allowance: it is contract-funded, because
 it takes the money off the contract, and it names the allowance line. Submit
@@ -918,9 +939,15 @@ is set by hand; the closing-date guard applies when it is saved and when the
 application is approved. The invoice is due by the customer's payment terms
 (their terms, else the company's Default Terms, through the same parser as
 every other invoice), counted from the application date: an owner on Net 45
-billed July 31 owes on September 14, and one on Due on Receipt owes that day. A
-date so near 9999-12-31 that the terms run past the calendar is refused with a 422
-sentence on approve. The
+billed July 31 owes on September 14, and one on Due on Receipt owes that day. Request
+dates are held to 1900–2199 by the general validator, so a date near the
+calendar's end cannot reach this through the API; one stored by an import and
+dated so near 9999-12-31 that the terms run past it is refused with a 422
+sentence on approve ("runs past the calendar"). Terms are never clamped to a
+last day: text longer than 99,999 days ("Net 3000000") reads as no terms at all,
+so the invoice takes the default 30 days with a note that the terms were not
+understood (dated 2199-12-01 it falls due 2199-12-31 by that 30 days), and "Net
+99999" is simply due on the day 99,999 days on. The
 invoice is tied to that entry of the Payment Terms list, which is seeded first on
 a company whose list is still empty.
 
@@ -991,11 +1018,18 @@ whose Tax box is off bills untaxed, and the invoice line says so; a job whose
 contractor pays the tax bills none, see *Sales tax and use tax on a job*) at the
 application's **tax rate**,
 defaulted from the job's accepted estimate (kept to six decimals, so 8.875%
-stays 8.875%) and editable while the application is open. A tax-exempt owner is never taxed. The application shows the tax and
+stays 8.875%) and editable while the application is open. A job with no accepted estimate has no rate to default from, so its
+applications start at **0**: while an application has a taxable line, tax is
+charged and the rate is 0, the application carries a `warnings` sentence naming
+the Tax rate field (shown as a toast), and it clears once the rate is set or
+Charge tax is unticked. A *contractor pays* job's application reads `taxable_billed` 0 beside its 0 tax,
+since nothing it bills is taxed. A tax-exempt owner is never taxed. The application shows the tax and
 its current due includes it, so the application and the invoice match. The
 invoice's balance due is that net; the invoice view and PDF show
 *Retainage withheld this period*, *Retainage released* and *Current payment
-due*.
+due*. On the application's PDF every amount keeps its minus sign on the same
+line as its figure (a negative current payment due prints "-$7,894.13" whole),
+and a deduct line with nothing billed prints 0.0%, never -0.0%.
 
 **Stored materials and tax.** On a *charge the owner* job, materials stored
 are billed (and taxed on a taxable line) the period they are stored, and the
@@ -1164,7 +1198,7 @@ carries the cost code.
 | **Owner deposit received** | the bank account chosen | 2210 Customer Deposits (job) | Held until a pay application applies it. |
 | **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, that section's revenue account else 4050, taxed as that section is; see *Change orders*); every kind writes budget rows of its own, in effect from its approved-on date (void deletes them). |
 | **Commitment issued; sub change order approved** | — | — | No entry. Committed cost on the job, by section and cost type. |
-| **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released (job); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines (none on a *contractor pays* job) | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. **Stored materials** are revenue the period they are billed (no stored-material asset; the WIP entry adjusts any over-billing) and taxed with their line on a *charge the owner* job. |
+| **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released + sales tax (job; PA 1 of one job posted 102,111.87 − 10,211.19 + 5,410.23 tax = 97,310.91); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines (none on a *contractor pays* job) | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. **Stored materials** are revenue the period they are billed (no stored-material asset; the WIP entry adjusts any over-billing) and taxed with their line on a *charge the owner* job. |
 | … with a deposit applied | 2210 Customer Deposits | 1100 Accounts Receivable | A payment from the deposit, applied to the application's invoice. |
 | … with retainage released | 1100 Accounts Receivable (job) | 1150 Retainage Receivable (job) | Inside the application's own entry; a release-only application bills nothing else. |
 | **Pay application voided** | — | — | Reverses the invoice's entry and any deposit payment, on their original dates. |
@@ -1329,6 +1363,10 @@ ticket (not void) received on cannot be removed by `PUT /api/purchase-orders/
 `commitment_received`, naming the ticket ("Conduit has 100 received on delivery
 ticket 2601-DT-001, so it cannot be cut to 20. Void the ticket, or keep at
 least 100."). Void the delivery ticket first. A line can still grow.
+Voiding a ticket is construction mode's (409 "Field tickets are part of
+construction mode…" outside it), so once a company leaves construction mode a
+delivery ticket can no longer be voided and the quantity it received stays on
+the purchase order line. Switch back to Construction to void it.
 
 **Closed periods.** A delivery ticket changes received quantity as of its
 date, so editing it, deleting it or voiding it with that date on or

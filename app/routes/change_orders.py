@@ -352,13 +352,26 @@ def return_unspent_allowance(data: AllowanceReturnIn, db: Session = Depends(get_
     """Make a draft owner change order that returns an allowance's unspent
     amount to the owner (all of it, or `amount`): minus the amount, no markup,
     funded against that allowance. Approving it takes the amount off the
-    contract and the allowance line, so the line has nothing left to bill."""
+    contract and the allowance line, so the line has nothing left to bill.
+    `date` (default today) dates the change order: not before the contract
+    date, and not in a closed period."""
     line = db.get(SovLine, data.allowance_sov_line_id)
     if line is None:
         raise HTTPException(status_code=404, detail="Allowance line not found")
-    co = create_allowance_return(
-        db, db.get(Job, line.job_id), line.id, amount=data.amount
-    )
+    job = db.get(Job, line.job_id)
+    if data.date is not None:
+        contract_date = job.contract_date
+        if contract_date is not None and data.date < contract_date:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"The return is dated {data.date.isoformat()}, before the "
+                    f"contract is dated ({contract_date.isoformat()}). Choose "
+                    f"{contract_date.isoformat()} or a later day."
+                ),
+            )
+        check_closing_date(db, data.date)
+    co = create_allowance_return(db, job, line.id, amount=data.amount, on=data.date)
     db.commit()
     db.refresh(co)
     return _co_out(db, co)

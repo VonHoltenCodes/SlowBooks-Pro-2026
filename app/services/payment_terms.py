@@ -357,7 +357,10 @@ def terms_dates(
 
 def due_date_for(db: Session, on: date, text: Optional[str]) -> date:
     """The due date for a document dated `on` with these terms. A date so near
-    the calendar's end that the terms run past it is a 422, not an overflow."""
+    the calendar's end that the terms run past it is a 422, not an overflow;
+    that takes a date stored by an import, since request dates stop at 2199.
+    Nothing is clamped to the last day: text of more than MAX_TEXT_DAYS days
+    reads as no terms (the 30-day default, with a note)."""
     from fastapi import HTTPException
 
     try:

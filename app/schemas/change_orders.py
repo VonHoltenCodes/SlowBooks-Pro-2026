@@ -100,6 +100,9 @@ class AllowanceReturnIn(StrictModel):
     allowance_sov_line_id: int
     # None = everything the allowance has unspent.
     amount: Optional[Decimal] = None
+    # The change order's date: approving it cannot take effect earlier.
+    # None = today.
+    date: Optional[dt_date] = None
 
 
 class PromoteIn(StrictModel):

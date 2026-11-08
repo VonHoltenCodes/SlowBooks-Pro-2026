@@ -296,7 +296,7 @@ def application_figures(db: Session, app) -> dict:
         )
         for ln in lines_in_effect(db, app)
     ]
-    return application_totals(
+    figures = application_totals(
         rows,
         retainage_pct=app.retainage_pct,
         previous_retainage=h["prev_retainage"],
@@ -307,6 +307,63 @@ def application_figures(db: Session, app) -> dict:
         release_retainage=app.release_retainage,
         deposit_applied=app.deposit_applied,
     )
+    # The contractor pays the tax on this job's materials: nothing billed is
+    # taxed, so "taxable billed" reads 0 beside the 0 tax.
+    from app.services.contracts import contractor_pays_tax
+
+    if contractor_pays_tax(app.job):
+        figures["taxable_billed"] = _ZERO
+    return figures
+
+
+def sov_balance_warnings(job) -> list[str]:
+    """A sentence when the schedule of values does not add up to the contract
+    sum to date: a pay application prints the sum above line detail that
+    totals something else. Not a refusal (a job may be mid-setup). Nothing for
+    a job with no sum or no lines yet."""
+    if job.contract_amount is None or not job.sov_lines:
+        return []
+    sov_total = _q(sum((Decimal(str(r.scheduled_value)) for r in job.sov_lines), _ZERO))
+    gap = _q(Decimal(str(job.contract_amount)) - sov_total)
+    if gap == 0:
+        return []
+    way = "short of" if gap > 0 else "over"
+    return [
+        f"The schedule of values totals ${sov_total:,.2f}, ${abs(gap):,.2f} {way} "
+        f"the contract sum to date of ${_q(Decimal(str(job.contract_amount))):,.2f}. "
+        "Pay applications print the contract sum above lines that do not add up "
+        "to it: add the difference to the schedule or correct the contract sum."
+    ]
+
+
+def application_warnings(db: Session, app) -> list[str]:
+    """Sentences for an open or approved pay application that will quietly do
+    less than it looks like: a schedule of values that does not foot to the
+    contract sum, and taxable lines billed at a tax rate of 0 on a job where
+    the owner is charged tax."""
+    if app.status == "void":
+        return []
+    warnings = sov_balance_warnings(app.job) if app.job is not None else []
+    customer = app.job.customer if app.job is not None else None
+    from app.services.contracts import contractor_pays_tax
+
+    taxed = (
+        app.charge_tax
+        and not (customer is not None and customer.is_taxable is False)
+        and not contractor_pays_tax(app.job)
+    )
+    if (
+        taxed
+        and not Decimal(str(app.tax_rate or 0))
+        and any(sov_line_taxable(db, ln.sov_line_id) for ln in lines_in_effect(db, app))
+    ):
+        warnings.append(
+            f"{app.number} has taxable lines but a tax rate of 0, so it bills no "
+            "sales tax. A job takes its pay application tax rate from its accepted "
+            "estimate, and this one has none: set the Tax rate on the application, "
+            "or untick Charge tax if none is due."
+        )
+    return warnings
 
 
 def retainage_outstanding(db: Session, job_id: int, as_of=None) -> Decimal:

@@ -48,6 +48,7 @@ from app.services.numbering import next_invoice_number
 from app.services.payment_terms import due_date_for, term_id_for
 from app.services.pay_applications import (
     application_figures,
+    application_warnings,
     deposits_figures,
     effective_tax_rate,
     line_computed,
@@ -204,6 +205,7 @@ def _out(db: Session, app: PayApplication) -> PayApplicationOut:
     out.unapplied_deposits = float(deposits_figures(db, app.job_id)["unapplied"])
     out.retainage_outstanding = float(retainage_outstanding(db, app.job_id))
     out.can_void = _can_void(db, app)
+    out.warnings = application_warnings(db, app)
     return out
 
 
