@@ -18,7 +18,7 @@ wording is the same as app/services/collections.DEFAULT_RULES at this
 revision; the migration keeps its own copy so it never depends on app code.
 
 Revision ID: c8e1a4d7f305
-Revises: d7b3f9a1c5e2
+Revises: d7f3a9c1b5e2
 Create Date: 2026-10-29
 
 """
@@ -29,7 +29,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "c8e1a4d7f305"
-down_revision: Union[str, None] = "d7b3f9a1c5e2"
+down_revision: Union[str, None] = "d7f3a9c1b5e2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
