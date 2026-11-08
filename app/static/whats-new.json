@@ -1,4 +1,14 @@
 {
+  "2.31.10": {
+    "title": "Collections reminders and statements, where deposits go, and the SBP icon",
+    "items": [
+      "Collections: reminder rules that send each open invoice its reminder once, a monthly statement for the customers you flag, and a Collections page of open invoices with the last and next reminder. The automatic daily run is off until an administrator turns it on in Settings and sees who the first run will email.",
+      "Settings → Connections → Deposits: a Default deposit account that Make Deposits opens on, and Deposit into these accounts, which trims the deposit pickers to the bank accounts you actually use. Nothing is hidden anywhere else.",
+      "Checks at the bottom: the two stubs end where stock perforated in thirds tears, as the check-on-top layout already did; the face's fields stay where they were on the face.",
+      "A register entry or expense with a vendor and no payee text prints the vendor's name on the Pay to line.",
+      "The app's icon is the SBP monogram."
+    ]
+  },
   "2.31.9": {
     "title": "Checks on top, the payee's address on a check, and a register that opens at today",
     "items": [
