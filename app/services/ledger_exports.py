@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import csv
 import io
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from app.services.csv_export import _SafeWriter
 
@@ -22,7 +22,11 @@ from app.services.csv_export import _SafeWriter
 def _money(v) -> Decimal:
     # A Decimal, not a string: the safe writer only guards text cells, so a
     # negative amount stays a number in the spreadsheet instead of "'-300.00".
-    return Decimal(str(v or 0)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    d = Decimal(str(v or 0))
+    try:
+        return d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    except InvalidOperation:  # too large to round (a row from before a limit)
+        return d
 
 
 class _Percent:

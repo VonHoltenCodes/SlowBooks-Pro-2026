@@ -5,7 +5,16 @@ from typing import List, Optional
 from pydantic import BaseModel, field_validator
 
 from app.models.field_tickets import FT_KINDS, FT_LINE_TYPES
-from app.schemas.common import StrictModel
+from app.schemas.common import StrictModel, choice_error
+
+# A line's quantity and rates are Numeric(15, 4): eleven whole digits.
+_LINE_LIMIT = Decimal("100000000000")
+_LINE_TYPE_LABELS = dict(
+    labor="Labor", equipment="Equipment", material="Material", other="Other"
+)
+_KIND_LABELS = dict(
+    tm="T&M ticket", material="Material slip", delivery="Delivery ticket"
+)
 
 
 class FieldTicketLineIn(StrictModel):
@@ -30,14 +39,24 @@ class FieldTicketLineIn(StrictModel):
     def _line_type(cls, v):
         v = (v or "other").strip().lower()
         if v not in FT_LINE_TYPES:
-            raise ValueError(f"line_type must be one of {', '.join(FT_LINE_TYPES)}")
+            raise choice_error("Line type", _LINE_TYPE_LABELS, "line_type")
+        return v
+
+    @field_validator("quantity")
+    @classmethod
+    def _quantity(cls, v):
+        if abs(v) >= _LINE_LIMIT:
+            raise ValueError(f"Quantity must be less than {_LINE_LIMIT:,}.")
         return v
 
     @field_validator("cost_rate", "bill_rate")
     @classmethod
-    def _rate(cls, v):
+    def _rate(cls, v, info):
         if v is not None and v < 0:
             raise ValueError("a rate cannot be negative")
+        if v is not None and v >= _LINE_LIMIT:
+            what = "Cost rate" if info.field_name == "cost_rate" else "Bill rate"
+            raise ValueError(f"{what} must be less than {_LINE_LIMIT:,}.")
         return v
 
 
@@ -61,7 +80,7 @@ class FieldTicketCreate(StrictModel):
     def _kind(cls, v):
         v = (v or "tm").strip().lower()
         if v not in FT_KINDS:
-            raise ValueError(f"kind must be one of {', '.join(FT_KINDS)}")
+            raise choice_error("Kind", _KIND_LABELS, "kind")
         return v
 
 
@@ -103,6 +122,10 @@ class BillIn(TicketIdsIn):
 
 class PostIn(StrictModel):
     date: Optional[dt_date] = None
+
+
+class VoidIn(StrictModel):
+    """Void takes nothing: an unknown field is a 422, as on post."""
 
 
 class FieldTicketLineOut(BaseModel):

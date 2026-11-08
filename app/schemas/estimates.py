@@ -14,6 +14,7 @@ from app.models.estimates import EstimateStatus
 from app.schemas.common import (
     StrictModel,
     TaxRate,
+    choice_error,
     TaxRateOut,
     clean_line_cost_type,
     validate_non_negative_line,
@@ -22,6 +23,9 @@ from app.schemas.common import (
 from app.schemas.invoices import RateOut
 
 LINE_KINDS = ("base", "allowance", "alternate", "unit_price")
+_LINE_KIND_LABELS = dict(
+    base="Base", allowance="Allowance", alternate="Alternate", unit_price="Unit price"
+)
 
 
 class EstimateLineCreate(StrictModel):
@@ -50,7 +54,7 @@ class EstimateLineCreate(StrictModel):
     def _kind(cls, v):
         v = (v or "base").strip() or "base"
         if v not in LINE_KINDS:
-            raise ValueError(f"line_kind must be one of {', '.join(LINE_KINDS)}")
+            raise choice_error("Line kind", _LINE_KIND_LABELS, "line_kind")
         return v
 
     @model_validator(mode="after")

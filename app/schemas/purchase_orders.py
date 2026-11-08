@@ -83,7 +83,7 @@ def _check_commitment_type(v):
 
 def _check_retainage_pct(v):
     if v is not None and not (0 <= v <= 100):
-        raise ValueError("retainage_pct must be between 0 and 100")
+        raise ValueError("Retainage must be between 0 and 100%.")
     return v
 
 

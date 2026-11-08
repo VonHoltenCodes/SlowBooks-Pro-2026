@@ -409,6 +409,15 @@ installs:
   API, `use_tax` is null (follow the rule), true (accrue) or false (never).
 - **The rate** is Settings → Invoice Defaults → **Use tax rate**, a percent
   like the default tax rate; blank (the default) uses the default tax rate.
+  **A bill keeps the rate it was booked at.** The rate is stored on each bill
+  line when its use tax first accrues (`bill_lines.use_tax_rate`), and every
+  edit of the bill re-posts at it: changing the setting from 6.5 to 7 and then
+  changing a line's description, amount or the bill number leaves an 8/20
+  accrual at 6.5%. A line keeps the rate of the line in its place on the bill;
+  only a line that accrues for the first time on the edit (one newly marked
+  Use tax, say) takes today's setting. A void reverses the booked figures.
+  Books from before this have the rate filled in from each bill's entry (the
+  rate on the memo, else the accrual over the line's amount).
   **When both are 0 nothing accrues, and the program says so:** saving the
   Contract tab with *Contractor pays tax on materials* returns a warning
   (`warnings` on the response, shown as a toast) naming the Use tax rate
@@ -417,8 +426,8 @@ installs:
   The bill still posts.
 - **The Sales Tax report** has a **Use tax** section: each accrual in the
   dates (bill, vendor, job, line, the **rate it was booked at**, amount; a void
-  shows negative; the rate is kept on the journal line's memo, so changing the
-  setting later does not rewrite it), the use tax
+  shows negative; the rate is the one stored on the bill line, written on the
+  journal line's memo, so changing the setting later does not rewrite it), the use tax
   accrued and paid in the dates, and what is owed on 2220 at the end date. On
   the cash basis a bill's use tax is accrued as the bill is paid. **Paying
   it** is an ordinary payment to the tax agency: a check or bill to the
@@ -530,7 +539,9 @@ commitment opens the usual convert dialog with an amount-this-period column
 prefilled with each line's remaining (scheduled value less what's already
 billed). Bill some or all of it: each line tallies its billed-to-date, the
 commitment reads **partial** while anything remains and **closed** once every
-line is fully billed. A business company's PO bills in one go exactly as before. The dialog takes a
+line is fully billed. A billed line cannot be removed or cut below what was
+billed on it (409, code `commitment_billed`): on a subcontract, change it with
+a sub change order; on a supplier PO, void the bill first. A business company's PO bills in one go exactly as before. The dialog takes a
 **bill date**, defaulting to today: the bill, its journal entry and the
 closing-date check all use it, so a progress bill ages from the day it is
 billed and a later period can still be billed once the PO's own month is
@@ -734,7 +745,13 @@ before the application but taking effect after it shows on the next one). That
 change order's line on the schedule of values stays off the application too (on
 screen, in the totals and on the PDF), so the schedule total equals the contract
 sum to date; a draft picks the line up when its date moves past the change
-order's effective date.
+order's effective date. The application cannot bill that line before then:
+saving it with a date before the change order takes effect while the line
+carries an amount (this period or stored) is refused, 409 code
+`change_order_not_in_effect`, naming the change order and its date ("CO-003
+takes effect on 2026-09-20, after this application's date (2026-09-01) …");
+clear the line or keep the later date. Submit and approve check the same. A
+line with nothing on it just drops off the application, as before.
 Approve refuses a date that cannot be right, each with a sentence (422): an
 `approved_on` **earlier than the change order's own date**, and any effective
 date (given or defaulted) **earlier than the job's contract date**, since a WIP,
@@ -1217,6 +1234,17 @@ entries post at), the equipment's hourly rate, or the item's average cost
 plus the job's **Markup on change orders**. A line's cost type follows its
 kind (labor, equipment, material), else its cost code's.
 
+**Figures are held to what the books store.** A line's quantity, cost rate
+and bill rate (a filled-in bill rate too) are each less than 100,000,000,000,
+and its amount (quantity × either rate) and the ticket's totals at most
+9,999,999,999,999.99, the most a money column holds: anything past that is
+refused (422, a sentence naming the line) before the ticket is saved. A
+change order's lines are held the same way (quantity and unit cost, each
+line's cost and sell, the change order's totals), on create, edit (a markup
+change too), promote and make-change-order. A ticket stored past these limits
+before they existed still reads, on the tab, the list, and the Field Ticket
+Log and its CSV.
+
 **Status.** A ticket is `draft` while it is written, `signed` once someone
 signs it, `closed` once it has had its effect (billed, its change order
 approved, posted), and `void`. Only a draft is edited or deleted; a signed
@@ -1230,7 +1258,8 @@ invoice that is not void, is refused until that is rejected or voided. The
 ticket's `can_void` says whether a void would be accepted now (it is false on
 a closed T&M ticket that is still priced or billed, on a void ticket, and on a
 posted slip or a delivery dated in a closed period of a company with no
-closing-date password); the tab shows **Void** only then. A delivery ticket
+closing-date password); the tab shows **Void** only then. Void takes no
+fields: a body with one (`{"foo": 1}`) is a 422, as on sign and post. A delivery ticket
 cannot be **created** in a closed period either (403, the closing-date sentence).
 
 ### T&M tickets
@@ -1319,13 +1348,16 @@ already received, so 50 more would make 110 received." The ticket form asks
 `over_receipt: true` (create and edit both take it). The ticket then saves,
 the line is marked (`over_receipt` on the ticket line, an **over** tag beside
 its received quantity), and the ticket carries a `warnings` sentence on this
-and every later read until it is voided. A quantity of 100,000,000,000 or more
-is refused even then (the column's limit). An edit that keeps an
+and every later read until it is voided. A delivery that would take a PO line's
+received quantity past 99,999,999.9999 (counting what is already received) is
+refused even then (the column's limit). An edit that keeps an
 over-delivered line unchanged does not ask again.
 
 **Deliveries and the purchase order's lines.** A PO line that a delivery
 ticket (not void) received on cannot be removed by `PUT /api/purchase-orders/
-{id}`, and cannot be cut below the quantity received: 409, code
+{id}`, and an order with a delivery received on it cannot be set back to
+`draft` (409, code `commitment_received`, naming the tickets; void them
+first). A line cannot be cut below the quantity received: 409, code
 `commitment_received`, naming the ticket ("Conduit has 100 received on delivery
 ticket 2601-DT-001, so it cannot be cut to 20. Void the ticket, or keep at
 least 100."). Void the delivery ticket first. A line can still grow.
@@ -1564,7 +1596,13 @@ draft bill is not counted) and in home currency at each bill's booked rate, so
 a vendor's open A/P ties to A/P Aging and Commitment Status for the same job and
 date. They are **prorated by the job's share of each bill's line amounts** — a
 header-only bill counts whole, a bill split across jobs splits its payment,
-retainage, A/P and count — so a job's bills can read fractional.
+retainage, A/P and count — so a job's bills can read fractional. Open A/P is
+**net of the vendor's credits on the job not yet applied to a bill** (prorated
+the same way), as A/P Aging nets them: a $500 credit for Ready Mix on the job
+reads open A/P −500.00, so cost = paid + retainage held + open A/P for the job
+to date, and the vendor's open A/P equals its A/P Aging total. Material slips
+post job cost entries, so their cost sits under No vendor (stock is the
+company's own); that is expected.
 
 **Retainage** (`retainage`). Retainage in one place, per job, as of a date.
 *Owed to me* (account 1150) is what the owner holds back: per job, **held**

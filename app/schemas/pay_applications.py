@@ -22,7 +22,7 @@ class PayApplicationCreate(StrictModel):
     @classmethod
     def _ret(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("retainage_pct must be between 0 and 100")
+            raise ValueError("Retainage must be between 0 and 100%.")
         return v
 
 
@@ -56,7 +56,7 @@ class PayApplicationUpdate(StrictModel):
     @classmethod
     def _ret(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("retainage_pct must be between 0 and 100")
+            raise ValueError("Retainage must be between 0 and 100%.")
         return v
 
     @field_validator("tax_rate", "release_retainage", "deposit_applied")

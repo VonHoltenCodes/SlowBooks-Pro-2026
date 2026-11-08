@@ -53,6 +53,7 @@ from app.services.pay_applications import (
     line_computed,
     lines_in_effect,
     previous_by_sov_line,
+    refuse_lines_not_in_effect,
     retainage_outstanding,
     sov_line_in_effect,
     sov_line_taxable,
@@ -210,7 +211,10 @@ def _out(db: Session, app: PayApplication) -> PayApplicationOut:
 def _validate(db: Session, app: PayApplication) -> None:
     """The per-line and header guards (422): a line billed past its scheduled
     value (in its own direction — a deduct line bills down), a release past
-    the held-to-date, a deposit past what is unapplied or past the current due."""
+    the held-to-date, a deposit past what is unapplied or past the current due;
+    and (409) a change order's line billed on an application dated before the
+    change order takes effect."""
+    refuse_lines_not_in_effect(db, app)
     prev = previous_by_sov_line(db, app.job_id, app.application_no)
     for ln in app.lines:
         scheduled = _q(ln.scheduled_value)

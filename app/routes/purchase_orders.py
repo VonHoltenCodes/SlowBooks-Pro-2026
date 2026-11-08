@@ -24,7 +24,11 @@ from app.schemas.purchase_orders import (
 )
 from app.schemas.pay_applications import ReleaseRetainageRequest
 from app.services.accounting import _q, compute_line_totals
-from app.services.field_tickets import receipt_status, received_line_refusal
+from app.services.field_tickets import (
+    delivery_tickets_on,
+    receipt_status,
+    received_line_refusal,
+)
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_po_number
 from app.services.payment_terms import term_id_for
@@ -35,6 +39,7 @@ from app.services.purchase_posting import (
     unit_cost_with_tax,
     use_tax_for,
     use_tax_lines,
+    use_tax_rate,
     use_tax_rate_warnings,
 )
 
@@ -218,6 +223,27 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
     update_data = reject_null_updates(
         PurchaseOrder, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
+    # An order with deliveries received on it was issued: it does not go back
+    # to draft (a draft is not received against) until the tickets are void.
+    if (
+        "status" in update_data
+        and POStatus(update_data["status"]) == POStatus.DRAFT
+        and po.status != POStatus.DRAFT
+    ):
+        for ln in po.lines:
+            refusal = received_line_refusal(db, ln)
+            if refusal:
+                tickets = delivery_tickets_on(db, ln.id)
+                on = f" ({', '.join(tickets)})" if tickets else ""
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "commitment_received",
+                        "message": "This order has deliveries received on it"
+                        f"{on}, so it cannot go back to draft. Void the "
+                        "delivery tickets first.",
+                    },
+                )
     for key, val in update_data.items():
         if key == "status":
             setattr(po, key, POStatus(val))
@@ -235,7 +261,14 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
         line_amounts = [
             _q(Decimal(str(ld.quantity)) * Decimal(str(ld.rate))) for ld in data.lines
         ]
-        _billed = "This commitment has been billed; change it with a sub change order."
+        # A supplier PO has no sub change order: what was billed on a line
+        # comes off by voiding the bill.
+        _billed = (
+            "This purchase order has been billed on that line; void the bill to "
+            "remove the line or cut it below what was billed."
+            if po.commitment_type == "po"
+            else "This commitment has been billed; change it with a sub change order."
+        )
         for ln in po.lines:
             if float(ln.billed_amount or 0) > 0 and ln.id not in incoming_ids:
                 raise HTTPException(
@@ -856,22 +889,21 @@ def convert_to_bill(
         rate = Decimal(str(poline.rate)) if is_whole else amt
         if item and item.track_inventory and qty and qty > 0:
             inv_receipts.append((item, qty, unit_cost_with_tax(amt, share, qty, rate)))
-        db.add(
-            BillLine(
-                bill_id=bill.id,
-                job_id=poline.job_id or po.job_id,
-                cost_code_id=poline.cost_code_id,
-                cost_type=poline.cost_type,
-                purchase_order_line_id=poline.id,
-                item_id=poline.item_id,
-                account_id=posting_acct,
-                description=poline.description,
-                quantity=qty,
-                rate=rate,
-                amount=amt,
-                line_order=poline.line_order,
-            )
+        bill_line = BillLine(
+            bill_id=bill.id,
+            job_id=poline.job_id or po.job_id,
+            cost_code_id=poline.cost_code_id,
+            cost_type=poline.cost_type,
+            purchase_order_line_id=poline.id,
+            item_id=poline.item_id,
+            account_id=posting_acct,
+            description=poline.description,
+            quantity=qty,
+            rate=rate,
+            amount=amt,
+            line_order=poline.line_order,
         )
+        db.add(bill_line)
         if amt > 0 and posting_acct:
             journal_lines.append(
                 {
@@ -887,15 +919,19 @@ def convert_to_bill(
             # Use tax a "contractor pays" job owes on the line (construction).
             if not (item and item.track_inventory):
                 job_id = poline.job_id or po.job_id
+                ut_rate = use_tax_rate(db)
                 accrual = use_tax_for(
                     db,
                     amount=amt,
                     job_id=job_id,
                     cost_type=line_cost_type(db, poline.cost_code_id, poline.cost_type),
                     bill_taxed=tax_amount > 0,
+                    rate=ut_rate,
                 )
+                if accrual:
+                    bill_line.use_tax_rate = ut_rate  # an edit re-posts at it
                 journal_lines.extend(
-                    use_tax_lines(db, journal_lines[-1], accrual, job_id)
+                    use_tax_lines(db, journal_lines[-1], accrual, job_id, ut_rate)
                 )
 
     if journal_lines:

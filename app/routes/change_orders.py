@@ -32,6 +32,7 @@ from app.schemas.change_orders import (
 from app.services.change_orders import (
     _check_commitment,
     apply_change_order,
+    check_line_figures,
     check_allowance_line,
     check_owner_link,
     co_effective_date,
@@ -262,6 +263,7 @@ def create_change_order(data: ChangeOrderCreate, db: Session = Depends(get_db)):
         owner_change_order_id=data.owner_change_order_id,
     )
     _set_lines(db, co, data.lines)
+    check_line_figures(co)
     db.commit()
     db.refresh(co)
     return _co_out(db, co)
@@ -306,6 +308,9 @@ def update_change_order(
     )
     if data.lines is not None:
         _set_lines(db, co, data.lines)
+    # a markup change alone moves the sell too
+    recompute(co, co.job)
+    check_line_figures(co)
     db.commit()
     db.refresh(co)
     return _co_out(db, co)
@@ -518,6 +523,9 @@ def promote_change_order(
     for pco in pcos:
         pco.status = "promoted"
         pco.promoted_to_id = owner.id
+    db.refresh(owner)
+    recompute(owner, owner.job)
+    check_line_figures(owner)  # several PCOs can sum past what one CO holds
     db.commit()
     db.refresh(owner)
     return _co_out(db, owner)
