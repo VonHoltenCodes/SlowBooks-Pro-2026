@@ -263,11 +263,17 @@ const PaymentsPage = {
         PaymentsPage._accounts = accounts;
 
         const custOpts = customers.map(c => `<option value="${c.id}"${prefillCustomerId === c.id ? ' selected' : ''}>${escapeHtml(customerLabel(c))}</option>`).join('');
-        const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
         // A blank Deposit To posts to Undeposited Funds (1200) — say so, the
         // way QuickBooks names it, when the company has that account (#709).
         const undeposited = accounts.some(a => a.is_control && a.account_number === '1200');
         const blankDeposit = undeposited ? 'Undeposited Funds (deposit later)' : '--';
+        // Settings' default deposit account (#734) is the first bank under
+        // Undeposited Funds, which stays the opening choice; a company with
+        // no Undeposited Funds account posts straight to a bank, so the box
+        // starts on the default there.
+        const depositBanks = typeof DepositAccounts !== 'undefined' ? DepositAccounts.defaultFirst(bankAccts) : bankAccts;
+        const startBank = !undeposited && typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(depositBanks) : '';
+        const bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
 
         openModal('Record Payment', `
             <form id="payment-form" onsubmit="PaymentsPage.save(event)">

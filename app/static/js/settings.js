@@ -141,6 +141,37 @@ const SettingsPage = {
         if (box && fields) fields.hidden = !box.checked;
     },
 
+    // Make Deposits' destination (#734): a labelled picker of the chart's
+    // active bank accounts, blank for none (the list's first, as before). A
+    // saved id that is no longer an active bank account stays selected and
+    // named, so Save says what is wrong instead of blanking it. String
+    // concatenation, like _payrollAccountsHtml.
+    _depositAccountsHtml(s, accounts) {
+        const all = Array.isArray(accounts) ? accounts : [];
+        const banks = all.filter(a => a.bank_kind === 'bank' && a.is_active !== false);
+        const sel = String(s.default_deposit_account_id || '');
+        let h = '<div class="form-grid">';
+        h += '<div class="form-group full-width"><label for="settings-default-deposit-account">Default deposit account</label>';
+        h += '<select name="default_deposit_account_id" id="settings-default-deposit-account" aria-describedby="settings-default-deposit-account-help">';
+        h += '<option value=""' + (sel ? '' : ' selected') + '>None: the first bank account on the list</option>';
+        let matched = false;
+        for (const a of banks) {
+            const isSel = String(a.id) === sel;
+            if (isSel) matched = true;
+            h += '<option value="' + Number(a.id) + '"' + (isSel ? ' selected' : '') + '>' + escapeHtml(accountWords(a)) + '</option>';
+        }
+        if (sel && !matched) {
+            const gone = all.find(a => String(a.id) === sel);
+            h += '<option value="' + escapeHtml(sel) + '" selected>(unavailable) ' + escapeHtml(gone ? accountWords(gone) : '#' + sel) + '</option>';
+        }
+        h += '</select>';
+        h += '<div id="settings-default-deposit-account-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">';
+        h += 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds.';
+        h += '</div></div>';
+        h += '</div>';
+        return h;
+    },
+
     // Where a pay run posts (#620): one picker per piece, the seeded default
     // first and named ("Default (1000 Checking)"). The choices come from
     // GET /settings/payroll-accounts, filtered by the same rule the save
@@ -704,6 +735,14 @@ const SettingsPage = {
                         and voiding it reverses those.
                     </div>
                     ${SettingsPage._payrollAccountsHtml(payrollAccounts)}
+                </div>
+
+                <div class="settings-section" data-group="connections" id="settings-deposits" role="group" aria-labelledby="settings-h-deposits">
+                    <h3 id="settings-h-deposits">Deposits</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.
+                    </div>
+                    ${SettingsPage._depositAccountsHtml(s, accounts)}
                 </div>
 
                 <div class="settings-section" data-group="connections" role="group" aria-labelledby="settings-h-online-payments">
@@ -1889,7 +1928,7 @@ const SettingsPage = {
     async showProviderPayout(provider, label) {
         const accounts = await API.get('/accounts?bank=1&active_only=true').catch(() => []);
         const opts = (Array.isArray(accounts) ? accounts : [])
-            .map(a => `<option value="${a.id}">${escapeHtml(accountLabel(a))}</option>`).join('');
+            .map(a => `<option value="${a.id}">${accountLabel(a)}</option>`).join('');
         const today = new Date().toISOString().slice(0, 10);
         openModal(`Record ${escapeHtml(label)} payout`, `
             <form onsubmit="SettingsPage.submitProviderPayout(event, '${provider}')">

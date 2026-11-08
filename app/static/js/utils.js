@@ -1663,6 +1663,34 @@ const ClassWarn = {
     },
 };
 
+// Make Deposits' destination (#734), from Settings → Connections → Deposits:
+// default_deposit_account_id is the bank account Make Deposits opens on, and
+// the first bank listed under Undeposited Funds in a payment's or a sales
+// receipt's Deposit To ("" = none: today's order). Pure functions of the
+// settings and the bank accounts a page already has; a page loaded alone
+// (the node probes) may not have this object, so pages ask with typeof.
+const DepositAccounts = {
+    _settings(s) {
+        return s || (typeof App !== 'undefined' && App.settings) || {};
+    },
+    // the default's id as a string, '' for none
+    defaultId(s) {
+        const v = String(DepositAccounts._settings(s).default_deposit_account_id || '').trim();
+        return /^\d+$/.test(v) ? v : '';
+    },
+    // the default, when it is one of `banks`; '' otherwise
+    startId(banks, s) {
+        const d = DepositAccounts.defaultId(s);
+        return d && (banks || []).some(a => String(a.id) === d) ? d : '';
+    },
+    // `banks` with the default first, the rest in their own order
+    defaultFirst(banks, s) {
+        const d = DepositAccounts.startId(banks, s);
+        if (!d) return banks;
+        return banks.filter(a => String(a.id) === d).concat(banks.filter(a => String(a.id) !== d));
+    },
+};
+
 // ---- QuickBooks Desktop's transaction warnings (#481) --------------------
 // Company settings (Settings → Transaction Warnings), off until a company
 // turns them on. They arrive with the company settings the shell loads

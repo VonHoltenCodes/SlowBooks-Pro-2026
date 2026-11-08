@@ -137,11 +137,17 @@ const SalesReceiptsPage = {
         const walkInLabel = Terms.isNonprofit() ? 'Anonymous Donor' : 'Walk-in Customer';
         const custOpts = customers.filter(c => String(c.id) !== walkInId)
             .map(c => `<option value="${c.id}">${escapeHtml(customerLabel(c))}</option>`).join('');
-        const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
         // A blank Deposit To posts to Undeposited Funds (1200), named as
         // Receive Payment names it (#709).
         const undeposited = accounts.some(a => a.is_control && a.account_number === '1200');
         const blankDeposit = undeposited ? 'Undeposited Funds (deposit later)' : '--';
+        // Settings' default deposit account (#734) is the first bank under
+        // Undeposited Funds, which stays the opening choice; a company with
+        // no Undeposited Funds account posts straight to a bank, so the box
+        // starts on the default there.
+        const depositBanks = typeof DepositAccounts !== 'undefined' ? DepositAccounts.defaultFirst(bankAccts) : bankAccts;
+        const startBank = !undeposited && typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(depositBanks) : '';
+        const bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
 
         openModal(Terms.text('Enter Sales Receipt'), `
             <form id="sales-receipt-form" onsubmit="SalesReceiptsPage.save(event)">

@@ -302,6 +302,46 @@ def _guard_payroll_accounts(db: Session, cleaned: dict) -> None:
             raise HTTPException(status_code=400, detail=problem)
 
 
+def _deposit_bank_account(db: Session, value, label: str):
+    """The bank account a Make Deposits setting names, or a 422 saying what
+    is wrong with it (#734): an id in the chart, a bank account (not
+    Undeposited Funds, a credit card or any other kind), and active."""
+    from app.models.accounts import Account
+
+    text = str(value).strip()
+    acct = db.get(Account, int(text)) if text.isdigit() else None
+    if acct is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label}: no account {text} in the chart. Nothing was saved.",
+        )
+    if acct.bank_kind != "bank":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{label} must be a bank account; {acct.name} is not one. "
+                "Nothing was saved."
+            ),
+        )
+    if acct.is_active is False:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label}: {acct.name} is inactive. Nothing was saved.",
+        )
+    return acct
+
+
+def _guard_deposit_accounts(db: Session, cleaned: dict) -> None:
+    """Make Deposits' default destination (#734) is "" or an active bank
+    account from the chart; anything else is refused with a 422 before
+    any setting is written. Stored as the account id."""
+    if "default_deposit_account_id" in cleaned:
+        value = cleaned["default_deposit_account_id"]
+        if value:
+            acct = _deposit_bank_account(db, value, "Default deposit account")
+            cleaned["default_deposit_account_id"] = str(acct.id)
+
+
 def _clearing_off_warnings(db: Session, cleaned: dict) -> list[str]:
     """Turning a provider's clearing off while its clearing account still
     holds money is allowed, with a warning (#584): payouts stay available
@@ -392,6 +432,7 @@ def update_settings(
         )
     _guard_clearing_accounts(db, cleaned)
     _guard_payroll_accounts(db, cleaned)
+    _guard_deposit_accounts(db, cleaned)
     # The "Taxed as" select is hidden for a non-LLC but the form still submits
     # its last value; drop a stale election so it never lingers (#488).
     if "llc_tax_election" in cleaned:

@@ -137,6 +137,18 @@ line says so, as the journal entry's edit does. An accountant's
 sign-in posts and voids journal entries but does not edit them, so it is
 offered no Edit on these rows.
 
+### Where deposits go
+
+Settings → Connections → Deposits holds the **default deposit account**
+(#734): the bank account Make Deposits opens on. Left blank, Make Deposits
+opens on the first bank account in the list, as it always did. Receive
+Payment and Enter Sales Receipt still open Deposit To on Undeposited Funds;
+the default is the first bank account listed under it, so posting straight
+to the bank is one step down. A company with no Undeposited Funds account
+has nothing to deposit later, so Deposit To starts on the default there. Only
+a bank account from the chart can be the default. A deposit or a payment
+already saved keeps the account it went into.
+
 Above the register, **From**, **To** and **Class** narrow what it shows. A
 From date adds a *Balance brought forward* row, and the running balance
 counts the lines shown. The dates apply when you press Enter or leave the
