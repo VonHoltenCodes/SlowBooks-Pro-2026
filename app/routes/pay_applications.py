@@ -341,12 +341,15 @@ def _refresh_lines(db: Session, app: PayApplication) -> bool:
     scheduled value as the SOV has them now. The amounts typed on a line are
     kept. Only a draft is refreshed; a submitted application is as it was sent,
     and one with no lines at all (made before the job had a schedule of
-    values, #714) is deleted, not filled. True when anything changed."""
+    values, #714) is deleted, not filled. A line whose SOV line is gone (its
+    change order voided, or the line taken off the schedule) is dropped when
+    it carries no amounts; one that does stays, and approve refuses it. True
+    when anything changed."""
     if app.status != "draft" or not app.lines:
         return False
     job = db.get(Job, app.job_id)
+    changed = _drop_orphan_lines(db, app, job)
     by_sov = {ln.sov_line_id: ln for ln in app.lines if ln.sov_line_id}
-    changed = False
     for n, sov in enumerate(job.sov_lines, start=1):
         ln = by_sov.get(sov.id)
         if ln is None:
@@ -376,12 +379,60 @@ def _refresh_lines(db: Session, app: PayApplication) -> bool:
     return changed
 
 
+def _orphan_lines(app: PayApplication, job: Job) -> list:
+    """The application's lines whose SOV line is no longer on the job's
+    schedule of values."""
+    live = {sov.id for sov in job.sov_lines}
+    return [ln for ln in app.lines if ln.sov_line_id not in live]
+
+
+def _drop_orphan_lines(db: Session, app: PayApplication, job: Job) -> bool:
+    """Delete the orphan lines that carry no amounts (nothing typed, nothing
+    to bill). True when any went."""
+    gone = [
+        ln
+        for ln in _orphan_lines(app, job)
+        if _q(ln.this_period) == _ZERO and _q(ln.stored) == _ZERO
+    ]
+    for ln in gone:
+        db.delete(ln)
+    if gone:
+        db.flush()
+        db.refresh(app)
+    return bool(gone)
+
+
+def _refuse_orphan_lines(app: PayApplication, job: Job) -> None:
+    """No approve saves a line whose SOV line no longer exists: it would bill
+    work off the schedule and leave a balance to finish on nothing (409)."""
+    orphans = _orphan_lines(app, job)
+    if orphans:
+        ln = orphans[0]
+        label = f"{ln.item_no or ''} {ln.description or ''}".strip() or "A line"
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{label} is no longer on the job's schedule of values. Take "
+                f"its amounts off {app.number} (or delete the application), "
+                "then approve."
+            ),
+        )
+
+
 @router.post("/{app_id}/refresh-lines", response_model=PayApplicationOut)
 def refresh_pay_application_lines(app_id: int, db: Session = Depends(get_db)):
     """Pick up the schedule of values' changes on a draft (the Pay apps tab
-    calls this when it opens one). A submitted or approved application is not
-    changed."""
+    calls this when it opens one). A submitted application is not changed; an
+    approved or void one is refused (409), since nothing can change it."""
     app = _get(db, app_id)
+    if app.status in ("approved", "void"):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"{app.number} is {app.status}; only a draft picks up changes "
+                "to the schedule of values."
+            ),
+        )
     if _refresh_lines(db, app):
         db.commit()
         db.refresh(app)
@@ -631,6 +682,10 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     when = app.date or dt_date.today()
     check_closing_date(db, when)
     _refresh_lines(db, app)
+    # A submitted application is not refreshed, but a line whose SOV line is
+    # gone and carries nothing still drops; one with amounts is refused.
+    _drop_orphan_lines(db, app, job)
+    _refuse_orphan_lines(app, job)
     _validate(db, app)
 
     figures = application_figures(db, app)

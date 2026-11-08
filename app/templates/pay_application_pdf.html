@@ -123,12 +123,14 @@
             <td class="r">{{ totals.completed_to_date | currency }}</td>
             <td class="r"></td>
             <td class="r">{{ totals.balance_to_finish_total | currency }}</td>
-            <td class="r">{{ pa.lines | sum(attribute='retainage') | currency }}</td>
+            {% set retainage_column = pa.lines | sum(attribute='retainage') %}
+            <td class="r">{{ retainage_column | currency }}</td>
         </tr>
         </tbody>
     </table>
+    {# The whole equation: column total, less released, equals retainage to date. #}
     {% set released_to_date = totals.previous_released + totals.release_retainage %}
-    {% if released_to_date %}<p class="note">The retainage column is before releases. Less retainage released to date {{ released_to_date | currency }} = retainage to date {{ totals.retainage_to_date | currency }}.</p>{% endif %}
+    {% if released_to_date %}<p class="note">The retainage column is before releases: its total of {{ retainage_column | currency }}, less retainage released to date of {{ released_to_date | currency }}, equals retainage to date of {{ totals.retainage_to_date | currency }}.</p>{% endif %}
 
     <div class="footer">{{ app.number }} · {{ header.job_name }}</div>
 </body>

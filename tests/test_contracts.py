@@ -474,17 +474,18 @@ def test_from_estimate_builds_and_balances(client, db_session, seed_customer):
     sov = body["sov"]
     work = [line for line in sov if line["kind"] == "work"]
     allow = [line for line in sov if line["kind"] == "allowance"]
-    # one work line per package in order (Concrete, Electrical) + Unassigned last
+    # one work line per package in order (Concrete, Electrical), then the
+    # line with no package under its own description
     assert [line["description"] for line in work] == [
         "Concrete",
         "Electrical",
-        "Unassigned",
+        "General",
     ]
     by_desc = {line["description"]: float(line["scheduled_value"]) for line in work}
     # the work lines carry cost now — no markup rides the line
     assert by_desc["Concrete"] == 14000.0  # slab 10,000 + accepted alt 4,000
     assert by_desc["Electrical"] == 20000.0
-    assert by_desc["Unassigned"] == 5000.0  # the direct-priced line
+    assert by_desc["General"] == 5000.0  # the direct-priced line
     # the declined alternate is in no line
     assert all("declined" not in line["description"].lower() for line in sov)
     assert len(allow) == 1 and float(allow[0]["scheduled_value"]) == 3000.0
