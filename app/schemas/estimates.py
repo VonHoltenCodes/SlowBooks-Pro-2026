@@ -2,7 +2,13 @@ from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, field_validator, model_validator, field_serializer
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+    field_serializer,
+)
 
 from app.models.estimates import EstimateStatus
 from app.schemas.common import (
@@ -193,7 +199,7 @@ class EstimateAccept(StrictModel):
 
 
 class EstimateLost(StrictModel):
-    reason: Optional[str] = None
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 def totals_from_dict(data: dict) -> EstimateTotals:

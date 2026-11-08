@@ -11,7 +11,7 @@
 # ============================================================================
 
 import re
-from datetime import date
+from datetime import date, datetime, time, timezone
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
@@ -30,6 +30,7 @@ from app.services.job_costing import employee_cost_rate, line_cost_type
 from app.services.terminology import terms_from_db
 
 _ZERO = Decimal("0")
+MAX_QUANTITY = Decimal("100000000000")
 _CENT = Decimal("0.01")
 
 _PREFIX = {"tm": "TM", "material": "MS", "delivery": "DT"}
@@ -504,6 +505,7 @@ def ticket_out(db: Session, t: FieldTicket) -> dict:
                 "bill_amount": float(b) if b is not None else None,
                 "ordered_qty": float(_d(po_line.quantity)) if po_line else None,
                 "received_qty": float(_d(po_line.received_qty)) if po_line else None,
+                "over_receipt": bool(ln.over_receipt),
             }
         )
     attachments = (
@@ -551,6 +553,7 @@ def ticket_out(db: Session, t: FieldTicket) -> dict:
         "cost_total": float(cost),
         "bill_total": float(bill) if bill is not None else None,
         "attachment_count": attachments,
+        "warnings": over_receipt_warnings(t),
         "lines": lines,
     }
 
@@ -672,10 +675,22 @@ def check_delivery_po(db: Session, job: Job, po_id: Optional[int]) -> None:
         )
 
 
-def check_kind_lines(db: Session, t: FieldTicket) -> None:
-    """The lines each kind allows. A material slip's lines are items from
-    stock; a delivery ticket's lines are its purchase order's lines."""
-    if t.kind == "material":
+def check_kind_lines(db: Session, t: FieldTicket, over_receipt: bool = False) -> None:
+    """The lines each kind allows. A T&M ticket's quantities are not
+    negative; a material slip's lines are items from stock; a delivery
+    ticket's lines are its purchase order's lines, and it takes none past
+    what was ordered unless `over_receipt` says the supplier really
+    delivered more (the line is then marked and the ticket warns). Called
+    with the ticket's own quantities off the PO lines."""
+    if t.kind == "tm":
+        for ln in t.lines:
+            if _d(ln.quantity) < 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail="A T&M ticket line cannot have a negative quantity. "
+                    "A return slip is the only negative kind.",
+                )
+    elif t.kind == "material":
         for ln in t.lines:
             if ln.item_id is None:
                 raise HTTPException(
@@ -716,6 +731,61 @@ def check_kind_lines(db: Session, t: FieldTicket) -> None:
                     status_code=422,
                     detail="A delivery line's quantity received must be more than zero.",
                 )
+            ordered = _d(ln.po_line.quantity)
+            before = _d(ln.po_line.received_qty)
+            after = before + _d(ln.quantity)
+            # A line kept from an earlier save keeps its mark (None on a new one)
+            meant = over_receipt or bool(ln.over_receipt)
+            ln.over_receipt = after > ordered
+            if ln.over_receipt and not meant:
+                _refuse_over_receipt(ln, ordered, before, after)
+            if _d(ln.quantity) >= MAX_QUANTITY:  # the column's limit: a typo
+                raise HTTPException(
+                    status_code=422,
+                    detail="A delivery line's quantity cannot be 100,000,000,000 or more.",
+                )
+
+
+def _plain(v) -> str:
+    """A quantity in plain figures: 100, 2.5."""
+    text = format(_d(v).normalize(), "f")
+    return "0" if text in ("0", "-0") else text
+
+
+def _line_name(ln: FieldTicketLine) -> str:
+    return ln.po_line.description or (ln.item.name if ln.item else None) or "A line"
+
+
+def _refuse_over_receipt(ln, ordered: Decimal, before: Decimal, after: Decimal):
+    """409 naming what was ordered and what the ticket would make received;
+    the page asks the question and sends the ticket again with
+    `over_receipt: true`."""
+    message = (
+        f"{_line_name(ln)}: {_plain(ordered)} ordered and {_plain(before)} already "
+        f"received, so {_plain(ln.quantity)} more would make {_plain(after)} received."
+    )
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "over_receipt",
+            "message": message + " Save it with over_receipt: true if the supplier "
+            "really delivered more.",
+            "question": message + " Record the over-delivery anyway?",
+        },
+    )
+
+
+def over_receipt_warnings(t: FieldTicket) -> list[str]:
+    """A delivery ticket's lines that took a PO line past what was ordered,
+    one sentence each (read from the line's mark and the PO line's totals)."""
+    if t.kind != "delivery" or t.status == "void":
+        return []
+    return [
+        f"{_line_name(ln)}: {_plain(ln.po_line.received_qty)} received against "
+        f"{_plain(ln.po_line.quantity)} ordered (over-delivery recorded)."
+        for ln in t.lines
+        if ln.over_receipt and ln.po_line is not None
+    ]
 
 
 def apply_received(db: Session, t: FieldTicket) -> None:
@@ -761,6 +831,48 @@ def receipt_status(po) -> None:
         po.status = POStatus.PARTIAL
     else:
         po.status = POStatus.SENT
+
+
+def delivery_tickets_on(db: Session, po_line_id: int) -> list[str]:
+    """The numbers of the delivery tickets (not void) that received against a
+    PO line."""
+    rows = (
+        db.query(FieldTicket.number)
+        .join(FieldTicketLine, FieldTicketLine.field_ticket_id == FieldTicket.id)
+        .filter(
+            FieldTicketLine.po_line_id == po_line_id,
+            FieldTicket.kind == "delivery",
+            FieldTicket.status != "void",
+        )
+        .order_by(FieldTicket.number)
+        .all()
+    )
+    return [n for (n,) in rows]
+
+
+def received_line_refusal(
+    db: Session, ln, new_quantity: Optional[Decimal] = None
+) -> Optional[str]:
+    """The sentence a purchase order edit is refused with when it drops a line
+    that delivery tickets received on (new_quantity None), or cuts one below
+    what they received; None when the edit leaves the deliveries standing.
+    Like a billed line, it is changed by voiding the ticket first."""
+    got = _d(ln.received_qty)
+    tickets = delivery_tickets_on(db, ln.id)
+    if not tickets and got <= 0:
+        return None
+    name = ln.description or "This line"
+    on = f"delivery ticket {', '.join(tickets)}" if tickets else "a delivery ticket"
+    if new_quantity is None:
+        return (
+            f"{name} was received on {on}. Void that ticket before removing the line."
+        )
+    if new_quantity >= got:
+        return None
+    return (
+        f"{name} has {_plain(got)} received on {on}, so it cannot be cut to "
+        f"{_plain(new_quantity)}. Void the ticket, or keep at least {_plain(got)}."
+    )
 
 
 def received_value(ln) -> Decimal:
@@ -811,25 +923,73 @@ def received_by(db: Session, po_id: int, as_of: date) -> Decimal:
     return _q(total)
 
 
-def void_ticket(db: Session, t: FieldTicket) -> None:
-    """Undo what a ticket led to, or refuse while that is approved."""
+def void_blocker(db: Session, t: FieldTicket) -> Optional[str]:
+    """The sentence a void is refused with while what the ticket led to is
+    approved or billed, else None. Reads only, so ticket_out can tell the page
+    whether to offer Void."""
     if t.kind == "tm":
         live = live_change_order(db, t.change_order) if t.change_order_id else None
         if live is not None:
-            raise HTTPException(
-                status_code=409,
-                detail=f"This ticket is priced on change order {live.number}. Reject "
-                "or void that change order first.",
+            return (
+                f"This ticket is priced on change order {live.number}. Reject "
+                "or void that change order first."
             )
         if t.invoice is not None and _invoice_live(t.invoice):
-            raise HTTPException(
-                status_code=409,
-                detail=f"This ticket is billed on invoice {t.invoice.invoice_number}. "
-                "Void that invoice first.",
+            return (
+                f"This ticket is billed on invoice {t.invoice.invoice_number}. "
+                "Void that invoice first."
             )
-    elif t.kind == "material" and t.status == "closed":
+    return None
+
+
+def _locked_for_good(db: Session, on: Optional[date]) -> bool:
+    """A date in a closed period on a company with no closing-date password:
+    a change dated then is refused outright. (With a password it can still be
+    made, so the page keeps offering it.)"""
+    from app.models.settings import Settings
+    from app.services.closing_date import get_closing_date
+
+    closing = get_closing_date(db)
+    if on is None or closing is None or on > closing:
+        return False
+    row = db.query(Settings).filter(Settings.key == "closing_date_password").first()
+    return not (row and row.value)
+
+
+def can_void(db: Session, t: FieldTicket) -> bool:
+    """Whether Void would be accepted now: not void already, nothing it led to
+    approved or billed, and (a posted slip, a delivery) not dated in a closed
+    period."""
+    if t.status == "void" or void_blocker(db, t) is not None:
+        return False
+    if t.kind == "material" and t.status == "closed" and t.job_cost is not None:
+        return not _locked_for_good(db, t.job_cost.date)
+    if t.kind == "delivery":
+        return not _locked_for_good(db, t.date)
+    return True
+
+
+def check_delivery_period(db: Session, t: FieldTicket, *dates: date) -> None:
+    """A delivery ticket changes received quantity as of its date, so saving,
+    editing, deleting or voiding it in a closed period is refused like any
+    other entry there. Other kinds move nothing on their date."""
+    from app.services.closing_date import check_closing_date
+
+    if t.kind != "delivery":
+        return
+    for d in dict.fromkeys(dates or (t.date,)):
+        check_closing_date(db, d)
+
+
+def void_ticket(db: Session, t: FieldTicket) -> None:
+    """Undo what a ticket led to, or refuse while that is approved."""
+    blocker = void_blocker(db, t)
+    if blocker:
+        raise HTTPException(status_code=409, detail=blocker)
+    if t.kind == "material" and t.status == "closed":
         reverse_material_slip(db, t)
     elif t.kind == "delivery":
+        check_delivery_period(db, t)
         unapply_received(db, t)
 
 
@@ -841,14 +1001,28 @@ def _invoice_live(invoice) -> bool:
 # ── Material slip → job cost ────────────────────────────────────────────────
 
 
-def post_material_slip(db: Session, t: FieldTicket, post_date: Optional[date]):
+def _stamp(day: date) -> datetime:
+    """A movement's timestamp for a document dated `day` (midday, so no time
+    zone moves it to the next or previous day)."""
+    return datetime.combine(day, time(12, 0), tzinfo=timezone.utc)
+
+
+def post_material_slip(
+    db: Session, t: FieldTicket, post_date: Optional[date]
+) -> list[str]:
     """Put a material slip's stock on the job: one Job Cost Entry
     (source "material_slip"), DR job cost (material, the line's code; the
     account is the code's, else the material cost type's default account) /
     CR the item's inventory asset account, at the item's average cost, and
     the item's on-hand quantity goes down by the slip's quantity. A negative
     quantity is a return: the same entry the other way, the stock back on
-    the shelf at the average cost. The slip closes."""
+    the shelf at the average cost. The slip closes.
+
+    It posts on the slip's own date, the closing date checked on that date,
+    and its stock movements carry that date too. A `post_date` that is not
+    the slip's date is refused (change the slip's date first). Stock gone
+    short follows the company's refuse-oversell setting as an invoice does:
+    refused when it is on, else the returned sentences are the warnings."""
     from app.models.items import MovementType
     from app.models.job_costing import JobCost, JobCostLine
     from app.services.accounting import create_journal_entry
@@ -862,6 +1036,7 @@ def post_material_slip(db: Session, t: FieldTicket, post_date: Optional[date]):
         next_job_cost_number,
         resolve_line_accounts,
     )
+    from app.routes.invoices.helpers import warn_or_refuse_oversell
     from app.services.safe_errors import DataProblem
 
     if t.kind != "material":
@@ -876,8 +1051,16 @@ def post_material_slip(db: Session, t: FieldTicket, post_date: Optional[date]):
         raise HTTPException(
             status_code=422, detail="Add the stock items before posting the slip."
         )
-    post_date = post_date or t.date
+    if post_date is not None and post_date != t.date:
+        raise HTTPException(
+            status_code=422,
+            detail=f"A material slip posts on its own date ({t.date}). Change the "
+            "slip's date first, then post it.",
+        )
+    post_date = t.date
     check_closing_date(db, post_date)
+    # Before anything is written, so a refused slip leaves no trace
+    warnings = warn_or_refuse_oversell(db, t.lines, action="slip")
     types = cost_type_map(db)
     jc = JobCost(
         number=next_job_cost_number(db),
@@ -959,7 +1142,7 @@ def post_material_slip(db: Session, t: FieldTicket, post_date: Optional[date]):
     jc.transaction_id = txn.id
     jc.total = sum((_q(ln.amount) for ln in jc.lines), _ZERO)
     for item, qty, unit_cost in issues:
-        _append_at_cost(
+        mv = _append_at_cost(
             db,
             item,
             MovementType.ADJUSTMENT,
@@ -972,10 +1155,11 @@ def post_material_slip(db: Session, t: FieldTicket, post_date: Optional[date]):
             transaction_id=txn.id,
             memo=f"Material slip {t.number}",
         )
+        mv.date = _stamp(post_date)
     t.job_cost_id = jc.id
     t.status = "closed"
     db.flush()
-    return jc
+    return warnings
 
 
 def reverse_material_slip(db: Session, t: FieldTicket) -> None:
@@ -1012,7 +1196,7 @@ def reverse_material_slip(db: Session, t: FieldTicket) -> None:
         .all()
     )
     for mv in moves:
-        _append_at_cost(
+        reversal = _append_at_cost(
             db,
             mv.item,
             MovementType.VOID,
@@ -1025,3 +1209,4 @@ def reverse_material_slip(db: Session, t: FieldTicket) -> None:
             memo=f"VOID material slip {t.number}",
             reverses_movement_id=mv.id,
         )
+        reversal.date = _stamp(jc.date)

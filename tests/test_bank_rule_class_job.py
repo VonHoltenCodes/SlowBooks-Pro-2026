@@ -257,7 +257,7 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == [
-        "c7e3a1f5d9b2"
+        "a3d8f1c6b9e4"
     ]  # the job's sales tax treatment and use tax are the head above it
     assert script.get_revision(REVISION).down_revision == "4810bd59e481"
     command.upgrade(cfg, "head")

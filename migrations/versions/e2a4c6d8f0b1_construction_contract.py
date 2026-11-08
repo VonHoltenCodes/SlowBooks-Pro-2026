@@ -36,7 +36,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     with op.batch_alter_table("jobs") as batch:
-        batch.add_column(sa.Column("contract_type", sa.String(length=12), nullable=True))
+        batch.add_column(
+            sa.Column("contract_type", sa.String(length=12), nullable=True)
+        )
         batch.add_column(
             sa.Column("original_contract_amount", sa.Numeric(15, 2), nullable=True)
         )
@@ -48,9 +50,7 @@ def upgrade() -> None:
         )
         batch.add_column(sa.Column("retainage_pct", sa.Numeric(5, 2), nullable=True))
         batch.add_column(sa.Column("contract_date", sa.Date(), nullable=True))
-        batch.add_column(
-            sa.Column("contract_estimate_id", sa.Integer(), nullable=True)
-        )
+        batch.add_column(sa.Column("contract_estimate_id", sa.Integer(), nullable=True))
         batch.create_foreign_key(
             "fk_jobs_contract_estimate",
             "estimates",
@@ -93,8 +93,12 @@ def upgrade() -> None:
             sa.ForeignKey("estimates.id", ondelete="SET NULL"),
             nullable=True,
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
+        sa.Column(
+            "updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()
+        ),
         sa.UniqueConstraint("job_id", "line_no", name="uq_sov_line_no"),
     )
     op.create_index("ix_sov_lines_job_id", "sov_lines", ["job_id"])

@@ -632,3 +632,19 @@ def test_a_new_section_is_left_alone_when_its_division_has_two_packages(
         db_session.query(TradePackageSection).filter_by(cost_code_id=c["id"]).count()
         == 0
     )
+
+
+def test_mark_lost_validates_its_body(client, seed_customer):
+    _set_construction(client)
+    est = _estimate(client, seed_customer.id, [LINE])
+    url = f"/api/estimates/{est['id']}/lost"
+    for bad in (
+        {"reason": "x" * 501},  # a note, not a document
+        {"reason": 7},
+        {"reason": ["a"]},
+        {"why": "Went with a cheaper GC"},  # a misspelled field is not ignored
+        ["Went with a cheaper GC"],
+    ):
+        assert client.post(url, json=bad).status_code == 422, bad
+    assert client.get(f"/api/estimates/{est['id']}").json()["status"] == "pending"
+    assert client.post(url, json={"reason": "x" * 500}).status_code == 200
