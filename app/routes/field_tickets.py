@@ -41,7 +41,9 @@ def _get(db: Session, ticket_id: int) -> FieldTicket:
 
 
 def _out(db: Session, t: FieldTicket) -> FieldTicketOut:
-    return FieldTicketOut.model_validate(svc.ticket_out(db, t))
+    out = FieldTicketOut.model_validate(svc.ticket_out(db, t))
+    out.can_void = svc.can_void(db, t)
+    return out
 
 
 def _check_header(db: Session, job: Job, kind: str, data) -> None:

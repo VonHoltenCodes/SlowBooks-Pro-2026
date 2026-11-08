@@ -553,7 +553,6 @@ def ticket_out(db: Session, t: FieldTicket) -> dict:
         "cost_total": float(cost),
         "bill_total": float(bill) if bill is not None else None,
         "attachment_count": attachments,
-        "can_void": can_void(db, t),
         "warnings": over_receipt_warnings(t),
         "lines": lines,
     }
