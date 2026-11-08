@@ -459,7 +459,27 @@ const JobsPage = {
                     <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('csv')" title="Every type and cost code, for this period">Save CSV</button>
                 </span>
             </div>
-            <div class="table-container"><table class="data-table job-tree" style="font-size:12px">${head}<tbody>${body}</tbody>${foot}</table></div>`;
+            <div class="table-container"><table class="data-table job-tree" style="font-size:12px">${head}<tbody>${body}</tbody>${foot}</table></div>
+            ${JobsPage.revenueSectionsHtml(tree.revenue_sections)}`;
+    },
+
+    // A contractor's revenue by section, beside the section's cost: a pay
+    // application's revenue has no cost type, so the tree above is cost only.
+    revenueSectionsHtml(rows) {
+        if (!rows || !rows.length) return '';
+        const m = JobsPage.money;
+        const body = rows.map(r => `<tr>
+            <td>${r.code ? `<code>${escapeHtml(r.code)}</code> ` : ''}${escapeHtml(r.name)}</td>
+            <td class="amount">${m(r.budget)}</td><td class="amount">${m(r.actual)}</td>
+            <td class="amount">${m(r.est_revenue)}</td><td class="amount">${m(r.act_revenue)}</td>
+            <td class="amount">${m(r.revenue_diff)}</td><td class="amount">${m(r.gross_profit)}</td></tr>`).join('');
+        return `<h4 style="font-size:12px;margin:14px 0 6px 0">Revenue by section</h4>
+            <div class="table-container"><table class="data-table" style="font-size:12px">
+                <thead><tr><th scope="col">Section</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Actual cost</th>
+                <th scope="col" class="amount">Est. revenue</th><th scope="col" class="amount">Act. revenue</th>
+                <th scope="col" class="amount" title="Actual revenue less estimated">Revenue diff</th>
+                <th scope="col" class="amount" title="Actual revenue less actual cost">Act. revenue − cost</th></tr></thead>
+                <tbody>${body}</tbody></table></div>`;
     },
 
     nodeHtml(node, depth) {

@@ -468,8 +468,8 @@ def test_books_from_before_2_9_get_the_default_asset_type_at_the_upgrade(tmp_pat
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("407d52f22d78").down_revision == "d7b3f9a1c5e2"
     assert script.get_heads() == [
-        "c7e3a1f5d9b2"
-    ]  # the job's sales tax treatment and use tax are the head above it
+        "b5d2e8f4a6c3"
+    ]  # the WIP as-of budgets and lock are the head above it
     command.upgrade(cfg, "407d52f22d78")
     types, accounts = _after_upgrade(db)
     expense = accounts["Depreciation Expense"]

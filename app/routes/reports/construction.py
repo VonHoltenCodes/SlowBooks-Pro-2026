@@ -699,32 +699,39 @@ def _co_sections(data: dict) -> list[dict]:
 
 
 def _co_csv(data: dict, company: str) -> str:
-    cols = data["columns"]
+    """Every change order under one header (the log's columns, then the day
+    it took effect and was voided, its source PCO and a sub CO's
+    commitment), then each job's contract under a header of its own, so no
+    figure sits under another column's name, then the pending total and the
+    counts as of the date."""
+    cols = data["export_columns"]
     out = io.StringIO()
     w = _SafeWriter(out)
     _preamble(w, company, "Change Order Log", _co_period(data))
     w.writerow(["Job"] + [c["label"] for c in cols])
     for job in data["jobs"]:
-        c = job["contract"]
-        # The contract the change orders build, in a labelled row of its own.
-        w.writerow(
-            [
-                job["job_name"],
-                "Contract (original + approved changes = revised)",
-                _money(c["original"] or 0),
-                _money(c["approved_changes"] or 0),
-                _money(c["revised"] or 0),
-            ]
-        )
         for r in job["rows"]:
             w.writerow(
                 [job["job_name"]]
                 + [_csv_cell(r[col["key"]], col["kind"]) for col in cols]
             )
+    w.writerow([])
+    w.writerow(["Job", "Original contract", "Approved changes", "Revised contract"])
+    for job in data["jobs"]:
+        c = job["contract"]
+        w.writerow(
+            [
+                job["job_name"],
+                _money(c["original"] or 0),
+                _money(c["approved_changes"] or 0),
+                _money(c["revised"] or 0),
+            ]
+        )
     counts = data["totals"]["counts"]
     count_text = "; ".join(f"{k}: {v}" for k, v in sorted(counts.items()))
-    w.writerow(["", "Pending total", _money(data["totals"]["pending_total"])])
-    w.writerow(["", "Counts", count_text])
+    w.writerow([])
+    w.writerow(["Pending total", _money(data["totals"]["pending_total"])])
+    w.writerow([f"Counts as of {data['as_of']}", count_text])
     return out.getvalue()
 
 
@@ -1511,6 +1518,34 @@ _COST_TREE_NOTE = (
     "for the period."
 )
 
+# A contractor's revenue by section, beside the section's cost (the tree's
+# type branches carry cost only: a pay application's revenue has no type).
+_REVENUE_SECTION_COLUMNS = [
+    {"key": "budget", "label": "Budget", "kind": "money"},
+    {"key": "actual", "label": "Actual cost", "kind": "money"},
+    {"key": "est_revenue", "label": "Est. revenue", "kind": "money"},
+    {"key": "act_revenue", "label": "Act. revenue", "kind": "money"},
+    {"key": "revenue_diff", "label": "Revenue diff", "kind": "money"},
+    {"key": "gross_profit", "label": "Act. revenue − cost", "kind": "money"},
+]
+
+
+def _revenue_section_grid(tree: dict, job_name: str):
+    rows = tree.get("revenue_sections")
+    if not rows:
+        return None
+    cols = _REVENUE_SECTION_COLUMNS
+    return {
+        "title": f"Revenue by section — {job_name}",
+        "period": cost_tree_period(tree),
+        "columns": ["Section"] + [c["label"] for c in cols],
+        "text_columns": 1,
+        "rows": [
+            {"cells": [r["label"]] + [_pdf_cell(r[c["key"]], c["kind"]) for c in cols]}
+            for r in rows
+        ],
+    }
+
 
 def cost_tree_sections(tree: dict, job_name: str, opened=None) -> list[dict]:
     """The Cost Detail tab as one landscape grid: types bold, codes indented
@@ -1535,7 +1570,7 @@ def cost_tree_sections(tree: dict, job_name: str, opened=None) -> list[dict]:
         }
     )
     dated = tree.get("start_date") or tree.get("end_date")
-    return [
+    out = [
         {
             "title": f"Job Cost Detail — {job_name}",
             "period": cost_tree_period(tree),
@@ -1545,6 +1580,10 @@ def cost_tree_sections(tree: dict, job_name: str, opened=None) -> list[dict]:
             "note": _COST_TREE_NOTE if dated else None,
         }
     ]
+    by_section = _revenue_section_grid(tree, job_name)
+    if by_section is not None:
+        out.append(by_section)
+    return out
 
 
 def cost_tree_csv(tree: dict, job_name: str, company: str) -> str:
@@ -1566,6 +1605,16 @@ def cost_tree_csv(tree: dict, job_name: str, company: str) -> str:
     )
     if tree.get("start_date") or tree.get("end_date"):
         w.writerow([_COST_TREE_NOTE])
+    if tree.get("revenue_sections"):
+        rcols = _REVENUE_SECTION_COLUMNS
+        w.writerow([])
+        w.writerow(["Revenue by section"])
+        w.writerow(["Code", "Section"] + [c["label"] for c in rcols])
+        for r in tree["revenue_sections"]:
+            w.writerow(
+                [r["code"], r["name"]]
+                + [_csv_cell(r[c["key"]], c["kind"]) for c in rcols]
+            )
     return out.getvalue()
 
 

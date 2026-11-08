@@ -354,6 +354,7 @@ def test_the_screen_shows_the_bank_columns_full_width():
 
 def _setup_and_job(client, db):
     assert client.post("/api/construction/setup").status_code == 200
+    db.add(Settings(key="company_type", value="construction"))
     job = _job(db)
     _budget(db, job, None, "material", "80000", source="manual")
     _cost(db, job, None, "material", "40000")
@@ -430,7 +431,7 @@ def test_post_books_the_entry_and_reverses_it_the_next_day(
     assert entry.date == AS_OF and reversal.date == date(2026, 7, 1)
     lines = db_session.query(TransactionLine).filter_by(transaction_id=entry.id).all()
     assert all(job.name in ln.description for ln in lines)
-    assert all(ln.job_id is None for ln in lines)
+    assert all(ln.job_id == job.id for ln in lines)  # each line carries its job
 
     # the balances stand on the as-of date and are gone the next day
     assert _balance(db_session, "2060", AS_OF) == Decimal("10000.00")
@@ -494,6 +495,8 @@ def test_post_respects_the_closing_date(client, db_session, seed_accounts):
 
 def test_nothing_to_post_is_said(client, db_session, seed_accounts):
     client.post("/api/construction/setup")
+    db_session.add(Settings(key="company_type", value="construction"))
+    db_session.commit()
     r = client.post(f"/api/reports/wip-schedule/post?as_of={AS_OF}")
     assert r.status_code == 422
     assert "Nothing to post" in r.json()["detail"]

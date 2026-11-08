@@ -278,10 +278,14 @@ def change_orders_summary(db: Session, job: Job) -> dict:
 
 # ── Budget rows (source="change", locked) ──────────────────────────────────
 #
-# Keyed (job, cost_code_id, cost_type, source="change") — the uq_job_budget key
-# includes source, so a change row coexists with an estimate-locked row on the
-# same code/type (the tree shows one under original, the other under changes).
-# Approved COs accumulate into the one change row per key; void subtracts.
+# Each approved CO writes rows of its own, keyed (change_order_id,
+# cost_code_id, cost_type): a change row coexists with an estimate-locked row
+# on the same code/type (the tree shows one under original, the other under
+# changes), and a report as of a date takes only the rows of the change
+# orders in effect by then. An allowance-funded CO's draw on its allowance's
+# cell is a row of the same CO. Void deletes the CO's rows. A change order
+# approved before the link wrote into one shared row per key (change_order_id
+# null); its void subtracts from that row, as it always did.
 
 
 def _allowance_cell(db: Session, job_id: int, sov_line: SovLine):
@@ -323,29 +327,45 @@ def _budget_deltas(db: Session, job_id: int, co: ChangeOrder, with_revenue: bool
     return deltas
 
 
-def _apply_budget_deltas(db: Session, job_id: int, deltas: dict, sign: int) -> None:
-    """Add (sign=1) or subtract (sign=-1) the deltas on the change rows,
-    creating a row when there is none and deleting one that nets to zero."""
+def _add_budget_rows(db: Session, job_id: int, co: ChangeOrder, deltas: dict) -> None:
+    """Write the CO's own change rows, one per (code, type) with a figure."""
     for (code_id, ctype), (cost, rev) in deltas.items():
-        cost, rev = sign * cost, sign * rev
+        cost, rev = _q(cost), _q(rev)
+        if cost == _ZERO and rev == _ZERO:
+            continue
+        db.add(
+            JobBudget(
+                job_id=job_id,
+                cost_code_id=code_id,
+                cost_type=ctype,
+                amount=cost,
+                revenue_amount=rev,
+                source="change",
+                locked=True,
+                change_order_id=co.id,
+            )
+        )
+    db.flush()
+
+
+def _remove_budget_rows(
+    db: Session, job_id: int, co: ChangeOrder, deltas: dict
+) -> None:
+    """Take the CO's figures back off the budget: delete its own rows, or
+    (a CO approved before the link) subtract from the shared row per key,
+    deleting one that nets to zero."""
+    own = db.query(JobBudget).filter(JobBudget.change_order_id == co.id).all()
+    if own:
+        for row in own:
+            db.delete(row)
+        db.flush()
+        return
+    for (code_id, ctype), (cost, rev) in deltas.items():
         row = _find_change_budget(db, job_id, code_id, ctype)
         if row is None:
-            if sign < 0 or (cost == _ZERO and rev == _ZERO):
-                continue
-            db.add(
-                JobBudget(
-                    job_id=job_id,
-                    cost_code_id=code_id,
-                    cost_type=ctype,
-                    amount=cost,
-                    revenue_amount=rev,
-                    source="change",
-                    locked=True,
-                )
-            )
             continue
-        row.amount = _q(Decimal(str(row.amount)) + cost)
-        row.revenue_amount = _q(Decimal(str(row.revenue_amount)) + rev)
+        row.amount = _q(Decimal(str(row.amount)) - cost)
+        row.revenue_amount = _q(Decimal(str(row.revenue_amount)) - rev)
         if row.amount == _ZERO and row.revenue_amount == _ZERO:
             db.delete(row)
     db.flush()
@@ -361,22 +381,25 @@ def _write_change_budgets(
     draws its cost out of the allowance's cell (_budget_deltas). Bypasses
     _refuse_locked_budget by design: a change order is the one thing that may
     move a locked budget."""
-    _apply_budget_deltas(db, job_id, _budget_deltas(db, job_id, co, with_revenue), 1)
+    _add_budget_rows(db, job_id, co, _budget_deltas(db, job_id, co, with_revenue))
 
 
 def _remove_change_budgets(
     db: Session, job_id: int, co: ChangeOrder, with_revenue: bool
 ) -> None:
-    """Reverse _write_change_budgets: subtract this CO's cost/revenue from the
-    change rows, deleting a row only once it is fully zero (so a deduct CO
-    sharing a key with an add leaves the add's figures behind)."""
-    _apply_budget_deltas(db, job_id, _budget_deltas(db, job_id, co, with_revenue), -1)
+    """Reverse _write_change_budgets: the CO's own rows go; a CO approved
+    before the link has its cost/revenue subtracted from the shared row,
+    deleted only once it is fully zero (so a deduct CO sharing a key with an
+    add leaves the add's figures behind)."""
+    _remove_budget_rows(db, job_id, co, _budget_deltas(db, job_id, co, with_revenue))
 
 
 def _find_change_budget(db: Session, job_id: int, code_id, ctype):
+    """The shared change row of a key, from before rows were per CO."""
     q = db.query(JobBudget).filter(
         JobBudget.job_id == job_id,
         JobBudget.source == "change",
+        JobBudget.change_order_id.is_(None),
     )
     q = (
         q.filter(JobBudget.cost_code_id == code_id)

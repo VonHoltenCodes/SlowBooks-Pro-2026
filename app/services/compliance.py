@@ -64,7 +64,9 @@ def compliance_report(db, as_of: _date | None = None) -> dict:
     from app.models.contacts import Vendor
 
     as_of = as_of or _date.today()
-    horizon = as_of + timedelta(days=COMPLIANCE_WINDOW_DAYS)
+    # (the calendar's last days have no window after them to look into)
+    window = timedelta(days=COMPLIANCE_WINDOW_DAYS)
+    horizon = as_of + window if as_of <= _date.max - window else _date.max
     subs = (
         db.query(Vendor)
         .filter(Vendor.vendor_type == "sub", Vendor.is_active.is_(True))

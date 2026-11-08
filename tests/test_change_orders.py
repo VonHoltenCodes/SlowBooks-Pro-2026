@@ -818,14 +818,17 @@ def test_deduct_co_sharing_a_key_leaves_the_add_on_void(
     )
     assert _submit_approve(client, deduct["id"]).status_code == 200
 
-    # both share (None, material): one change row holding the net
+    # both on (None, material): a change row each, linked to its change
+    # order, netting to 600 between them
     rows = (
         db_session.query(JobBudget)
         .filter(JobBudget.job_id == job["id"], JobBudget.source == "change")
         .all()
     )
-    assert len(rows) == 1
-    assert Decimal(str(rows[0].amount)) == Decimal("600.00")  # 1000 − 400
+    assert {r.change_order_id: Decimal(str(r.amount)) for r in rows} == {
+        add["id"]: Decimal("1000.00"),
+        deduct["id"]: Decimal("-400.00"),
+    }
 
     # voiding the add leaves the deduct's figures behind (row not deleted)
     assert client.post(f"/api/change-orders/{add['id']}/void").status_code == 200
@@ -837,6 +840,7 @@ def test_deduct_co_sharing_a_key_leaves_the_add_on_void(
     )
     assert len(rows) == 1
     assert Decimal(str(rows[0].amount)) == Decimal("-400.00")
+    assert rows[0].change_order_id == deduct["id"]
 
 
 # ── PDF (HTML stage) ────────────────────────────────────────────────────────
