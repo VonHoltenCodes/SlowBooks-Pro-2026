@@ -502,3 +502,97 @@ def test_the_migration_backfills_the_booked_rate_from_the_entry(
         (second["id"], "Labor"): None,
         (second["id"], "Block"): Decimal("0.07"),
     }
+
+
+# ── 3. A pay application cannot bill a change order by moving its date ─────
+
+
+def _bayview(client, seed_customer):
+    """M bug 2's job: a $100,000 contract, CO-003 dated 8/10 and approved
+    effective 9/20, and a pay application on 9/01 (CO line absent)."""
+    job = _job(client, seed_customer.id, name="Bayview")
+    r = client.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={
+            "contract_type": "lump_sum",
+            "contract_amount": 100000,
+            "retainage_pct": 10,
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={"lines": [{"description": "Base", "scheduled_value": 100000}]},
+    )
+    assert r.status_code == 200, r.text
+    co = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "kind": "owner",
+            "date": "2026-08-10",
+            "lines": [{"cost_type": "material", "quantity": 1, "unit_cost": 1000}],
+        },
+    ).json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-09-20"}
+    )
+    assert r.status_code == 200, r.text
+    sov = client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
+    co_line = next(s for s in sov if s["kind"] == "change_order")
+    r = client.post(
+        "/api/pay-applications", json={"job_id": job["id"], "date": "2026-09-01"}
+    )
+    assert r.status_code == 201, r.text
+    app = r.json()
+    assert co_line["id"] not in {ln["sov_line_id"] for ln in app["lines"]}
+    return job, co, co_line, app
+
+
+def test_moving_a_billed_change_order_line_before_its_date_is_refused(
+    client, seed_accounts, seed_customer
+):
+    """M bug 2: PUT date 9/25 (the CO line appears), bill 100 on it, PUT
+    date 9/01 → was 200 and approve billed CO-003 on a 9/01 invoice."""
+    job, co, co_line, app = _bayview(client, seed_customer)
+    url = f"/api/pay-applications/{app['id']}"
+    assert client.put(url, json={"date": "2026-09-25"}).status_code == 200
+    r = client.put(
+        url, json={"lines": [{"sov_line_id": co_line["id"], "this_period": 100}]}
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(url, json={"date": "2026-09-01"})
+    assert r.status_code == 409, r.text
+    message = r.json()["detail"]["message"]
+    assert co["number"] in message and "2026-09-20" in message
+    assert client.get(url).json()["date"] == "2026-09-25"
+    # cleared, the line no longer carries the change, and the date moves
+    r = client.put(
+        url, json={"lines": [{"sov_line_id": co_line["id"], "this_period": 0}]}
+    )
+    assert r.status_code == 200, r.text
+    assert client.put(url, json={"date": "2026-09-01"}).status_code == 200
+
+
+def test_approve_re_checks_a_change_order_line_before_its_date(
+    client, db_session, seed_accounts, seed_customer
+):
+    """M bug 2: approve re-checks what the date PUT does (an application whose
+    date reached the row some other way)."""
+    job, co, co_line, app = _bayview(client, seed_customer)
+    url = f"/api/pay-applications/{app['id']}"
+    assert client.put(url, json={"date": "2026-09-25"}).status_code == 200
+    r = client.put(
+        url, json={"lines": [{"sov_line_id": co_line["id"], "this_period": 100}]}
+    )
+    assert r.status_code == 200, r.text
+    from app.models.pay_applications import PayApplication
+
+    db_session.expire_all()
+    db_session.get(PayApplication, app["id"]).date = date(2026, 9, 1)
+    db_session.commit()
+    r = client.post(f"{url}/approve")
+    assert r.status_code == 409, r.text
+    assert co["number"] in r.json()["detail"]["message"]
+    assert client.get(url).json()["status"] == "draft"

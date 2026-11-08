@@ -17,6 +17,7 @@
 
 from decimal import Decimal
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.services.accounting import _q
@@ -265,6 +266,37 @@ def sov_line_in_effect(db: Session, sov, on) -> bool:
     co = db.get(ChangeOrder, sov.change_order_id)
     effective = co_effective_date(co) if co is not None else None
     return effective is None or effective <= on
+
+
+def refuse_lines_not_in_effect(db: Session, app) -> None:
+    """409 when a line carrying an amount is a change order's schedule line
+    and the application is dated before that change order takes effect: the
+    application's contract sum does not carry the change yet, so it cannot
+    bill it (M bug 2: moving the date to 9/25, billing CO-003's line, and
+    moving it back to 9/01 billed a change effective 9/20). A zero line is
+    left alone (it is hidden, as before)."""
+    from app.models.change_orders import ChangeOrder
+    from app.models.jobs import SovLine
+    from app.services.change_orders import co_effective_date
+
+    for ln in app.lines:
+        if _q(ln.this_period) == _ZERO and _q(ln.stored) == _ZERO:
+            continue
+        sov = db.get(SovLine, ln.sov_line_id) if ln.sov_line_id else None
+        if sov_line_in_effect(db, sov, app.date):
+            continue
+        co = db.get(ChangeOrder, sov.change_order_id)
+        effective = co_effective_date(co)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "change_order_not_in_effect",
+                "message": f"{co.number} takes effect on {effective.isoformat()}, "
+                f"after this application's date ({app.date.isoformat()}), so its "
+                f"line {sov.item_no or ''} cannot bill on it. Date the application "
+                f"{effective.isoformat()} or later, or clear the line's amounts.",
+            },
+        )
 
 
 def lines_in_effect(db: Session, app) -> list:
