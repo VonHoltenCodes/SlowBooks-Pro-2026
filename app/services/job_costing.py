@@ -1259,7 +1259,36 @@ def commitment_lines(
             for co in db.query(ChangeOrder).filter(ChangeOrder.id.in_(co_ids))
             if (co_effective_date(co) or as_of) > as_of
         }
+    # Lines a sub change order added that stood on the date and were voided
+    # since: the void removed them, but that day they were committed.
+    voided: dict = {}
+    if as_of is not None:
+        from app.services.job_reports import sub_lines_voided_since
+
+        po_q = db.query(PurchaseOrder).filter(
+            PurchaseOrder.job_id.in_(job_ids),
+            PurchaseOrder.status != POStatus.DRAFT,
+            PurchaseOrder.date <= as_of,
+        )
+        pos = {po.id: po for po in po_q}
+        voided = sub_lines_voided_since(db, set(pos), as_of)
+        billed_later_po |= set(voided)
     out = []
+    for po_id, lines in voided.items():
+        po = pos[po_id]
+        is_open = po.status in _OPEN_PO or po.status == POStatus.CLOSED
+        for ln in lines:
+            amount = Decimal(str(ln.amount or 0))
+            out.append(
+                {
+                    "job_id": int(po.job_id),
+                    "cost_code_id": ln.cost_code_id,
+                    "cost_type": ln.cost_type,
+                    "amount": amount,
+                    "billed": Decimal("0"),
+                    "remaining": amount if is_open else Decimal("0"),
+                }
+            )
     for ln, po, job_id in found:
         if ln.change_order_id in later_co:
             continue

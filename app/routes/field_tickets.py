@@ -17,8 +17,11 @@ from app.models.cost_codes import CostCode
 from app.models.field_tickets import FT_KINDS, FT_STATUSES, FieldTicket
 from app.models.jobs import Job
 from app.models.purchase_orders import PurchaseOrder
+from app.schemas.common import choice_error
 from app.schemas.field_tickets import (
     BillIn,
+    KIND_LABELS,
+    STATUS_LABELS,
     FieldTicketCreate,
     FieldTicketOut,
     FieldTicketUpdate,
@@ -132,14 +135,14 @@ def list_field_tickets(
     if kind:
         if kind not in FT_KINDS:
             raise HTTPException(
-                status_code=422, detail=f"kind must be one of {', '.join(FT_KINDS)}"
+                status_code=422, detail=str(choice_error("Kind", KIND_LABELS, "kind"))
             )
         q = q.filter(FieldTicket.kind == kind)
     if status:
         if status not in FT_STATUSES:
             raise HTTPException(
                 status_code=422,
-                detail=f"status must be one of {', '.join(FT_STATUSES)}",
+                detail=str(choice_error("Status", STATUS_LABELS, "status")),
             )
         q = q.filter(FieldTicket.status == status)
     tickets = q.order_by(FieldTicket.date.desc(), FieldTicket.id.desc()).all()

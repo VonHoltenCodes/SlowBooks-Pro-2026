@@ -15,6 +15,9 @@ _LINE_TYPE_LABELS = dict(
 _KIND_LABELS = dict(
     tm="T&M ticket", material="Material slip", delivery="Delivery ticket"
 )
+# The list filter's status choices, as the screen names them.
+STATUS_LABELS = dict(draft="Draft", signed="Signed", closed="Closed", void="Void")
+KIND_LABELS = _KIND_LABELS
 
 
 class FieldTicketLineIn(StrictModel):

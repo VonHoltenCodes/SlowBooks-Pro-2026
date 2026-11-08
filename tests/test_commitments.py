@@ -1408,5 +1408,5 @@ def test_raising_a_closed_commitment_is_refused(
 
     r = put(12000)
     assert r.status_code == 409, r.text
-    assert "sub change order" in r.text
+    assert "new commitment" in r.text
     assert put(10000).status_code == 200  # unchanged amounts still save

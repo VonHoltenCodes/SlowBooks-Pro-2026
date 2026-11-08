@@ -105,6 +105,26 @@ def voided_since(db: Session, job_ids: list[int], on: date) -> list:
     return [co for co in cos if co_stood_on(co, on)]
 
 
+def sub_lines_voided_since(db: Session, po_ids, on: date) -> dict:
+    """The commitment lines sub change orders added that stood on `on` and
+    were voided since, per commitment id: the void removed them from the
+    commitment, but on that day they were part of it. Each is the change
+    order's own line (the void refuses a billed one, so none was billed)."""
+    from app.models.change_orders import ChangeOrder
+
+    if not po_ids:
+        return {}
+    out: dict = {}
+    for co in db.query(ChangeOrder).filter(
+        ChangeOrder.kind == "sub",
+        ChangeOrder.status == "void",
+        ChangeOrder.commitment_id.in_(list(po_ids)),
+    ):
+        if co_stood_on(co, on):
+            out.setdefault(co.commitment_id, []).extend(co.lines)
+    return out
+
+
 def contract_on(db: Session, job: Job, on: date) -> Optional[Decimal]:
     """The job's contract sum as it stood on `on`: today's, less the
     contract-funded owner change orders that take effect after the day, plus
@@ -1937,7 +1957,12 @@ _COMMITMENT_SUMMED = ("committed", "received", "billed", "retainage_held", "rema
 
 
 def _commitment_row(
-    po, bills: list, as_of: date, co_by_id: dict, billed_later: bool = False
+    po,
+    bills: list,
+    as_of: date,
+    co_by_id: dict,
+    billed_later: bool = False,
+    voided_lines: list = (),
 ) -> dict:
     """One commitment as of a date. Committed is the pre-tax value; billed is
     the work billed on it by then (a retainage-release bill pays money already
@@ -1961,9 +1986,13 @@ def _commitment_row(
         co = ln.change_order_id and co_by_id.get(ln.change_order_id)
         if co is not None and (co_effective_date(co) or as_of) > as_of:
             later += Decimal(str(ln.amount or 0))
-    committed = _q(Decimal(str(po.subtotal or 0)) - later)
+    # ...and lines a sub change order voided since were part of it then.
+    restored = sum((Decimal(str(ln.amount or 0)) for ln in voided_lines), _ZERO)
+    committed = _q(Decimal(str(po.subtotal or 0)) - later + restored)
     # A closed commitment counts closed on every date, unless a bill against it
-    # is dated after `as_of`: then it was still taking bills, so still open.
+    # is dated after `as_of`, or a voided sub change order's unbilled lines
+    # were still on it: then it was still open.
+    billed_later = billed_later or bool(voided_lines)
     is_open = po.status in (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED) or (
         po.status == POStatus.CLOSED and billed_later
     )
@@ -2023,6 +2052,7 @@ def commitment_status(
             co.id: co
             for co in db.query(ChangeOrder).filter(ChangeOrder.id.in_(co_ids)).all()
         }
+        voided = sub_lines_voided_since(db, {po.id for po in pos}, as_of)
         rows = []
         totals = {k: _ZERO for k in _COMMITMENT_SUMMED}
         for po in pos:
@@ -2047,7 +2077,9 @@ def commitment_status(
                 .first()
                 is not None
             )
-            row = _commitment_row(po, bills, as_of, co_by_id, billed_later)
+            row = _commitment_row(
+                po, bills, as_of, co_by_id, billed_later, voided.get(po.id, [])
+            )
             from app.services.field_tickets import received_by
 
             row["received"] = float(received_by(db, po.id, as_of))

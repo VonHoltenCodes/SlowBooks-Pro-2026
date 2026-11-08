@@ -576,7 +576,7 @@ sits on 2050, not A/P). Both agings read what was open on the report's date: a
 bill or invoice paid since still counts then, so the total equals account 2000
 (1100) on the Balance Sheet for that date. A bill entered by hand can hold retainage the same way.
 The 2050 line carries the bill's job, so release can find it by job.
-Editing the lines of a converted bill re-computes the retainage at the commitment's rate on the new subtotal, unless the edit sends `retainage_held`. A retainage that was set by hand (sent as `retainage_held` through the API; the bill's `retainage_manual` is then true) is kept across later edits of the lines, tax or date, while one the commitment's rate derived keeps following that rate even after the rate is changed; it still may not exceed the new subtotal or leave less than has been paid. A fully billed (closed) commitment refuses a higher amount (409): raise it with a sub change order.
+Editing the lines of a converted bill re-computes the retainage at the commitment's rate on the new subtotal, unless the edit sends `retainage_held`. A retainage that was set by hand (sent as `retainage_held` through the API; the bill's `retainage_manual` is then true) is kept across later edits of the lines, tax or date, while one the commitment's rate derived keeps following that rate even after the rate is changed; it still may not exceed the new subtotal or leave less than has been paid. A fully billed (closed) commitment refuses a higher amount (409), and it takes no sub change order: write the added work on a new commitment.
 Release it with **Release retainage** on the commitment
 (`POST /api/purchase-orders/{id}/release-retainage`): a release bill debits
 2050 back for the amount released, see *Progress billing and retainage* below.
@@ -1612,9 +1612,11 @@ rates; see *Field tickets*), billed to date
 (bills dated by then; a retainage-release bill pays money already billed and is
 not counted), retainage held (held less released) and remaining (committed less
 billed, open commitments only), with totals per job and grand. Committed leaves
-out lines added by a sub change order approved after the date. A closed
+out lines added by a sub change order approved after the date, and keeps the
+lines of one that stood on the date and was voided since. A closed
 commitment counts closed on every date, unless a bill against it is dated after
-the date: then it was still open on it, and remaining is committed less billed by
+the date, or a sub change order voided since still had lines on it: then it was
+still open on it, and remaining is committed less billed by
 then. PDF and CSV.
 
 **Cost to complete** (`cost-to-complete`). Per job, per cost code (division ›

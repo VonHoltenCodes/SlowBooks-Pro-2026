@@ -267,7 +267,14 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
             "This purchase order has been billed on that line; void the bill to "
             "remove the line or cut it below what was billed."
             if po.commitment_type == "po"
-            else "This commitment has been billed; change it with a sub change order."
+            # A closed commitment takes no sub change order (it is fully
+            # billed), so that advice would send the user to a refusal.
+            else (
+                "This commitment is fully billed and closed; void the bill to "
+                "change what was billed on it."
+                if was_closed
+                else "This commitment has been billed; change it with a sub change order."
+            )
         )
         for ln in po.lines:
             if float(ln.billed_amount or 0) > 0 and ln.id not in incoming_ids:
@@ -340,8 +347,8 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
                 detail={
                     "code": "commitment_closed",
                     "message": (
-                        "This commitment is fully billed; raise it with a "
-                        "sub change order."
+                        "This commitment is fully billed and closed; write the "
+                        "added work on a new commitment."
                     ),
                 },
             )

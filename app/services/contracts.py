@@ -105,7 +105,12 @@ def contract_changes_after(db: Session, job: Job, on) -> Decimal:
     """Σ sell of the approved, contract-funded owner change orders that take
     effect after `on` — what to back out of the job's contract sum to read it
     as it stood that day. A pay application dated before a change order's
-    approval does not carry it in its contract sum to date."""
+    approval does not carry it in its contract sum to date.
+
+    A change order voided since `on` is left out too, unlike contract_on for
+    reports: the void removed its schedule lines (and refuses one that was
+    billed), so a pay application's header must leave it out to foot with
+    its schedule."""
     from app.services.change_orders import co_effective_date, co_totals
 
     total = Decimal("0")
