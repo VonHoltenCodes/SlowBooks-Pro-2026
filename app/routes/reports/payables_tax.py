@@ -17,6 +17,7 @@ from app.models.contacts import Vendor
 from app.routes.reports._router import router
 from app.services.payment_terms import document_due_date
 from app.services import cash_basis
+from app.routes._helpers import refuse_unknown_filters
 
 # accrual, cash, or the company default (#483), as the statements take it
 _BASIS_QUERY = Query(
@@ -571,13 +572,13 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
     return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
 
 
-@router.get("/ap-aging")
+@router.get("/ap-aging", dependencies=[Depends(refuse_unknown_filters)])
 def ap_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
     """AP Aging report — mirrors AR aging but for bills."""
     return ap_aging_report(db, as_of_date or date.today())
 
 
-@router.get("/ap-aging/csv")
+@router.get("/ap-aging/csv", dependencies=[Depends(refuse_unknown_filters)])
 def ap_aging_csv_route(
     request: Request,
     as_of_date: date = Query(default=None),

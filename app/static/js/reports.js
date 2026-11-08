@@ -3968,9 +3968,15 @@ ReportsPage.wipSchedule = async function (prefill) {
         const posted = entry.posted_entry;
         const mayPost = App.role === 'admin' || App.role === 'accountant';
         const asOf = escapeHtml(data.as_of);
+        // Posted, the lines below are the posted entry's; when the schedule
+        // no longer reads the same, say so beside Void with both figures.
+        const c = entry.computed && entry.computed.totals;
+        const differsHtml = posted && entry.posted_differs && c
+            ? `<div class="report-warning" data-posted-differs style="font-size:12px; margin:4px 0; color:var(--text-danger);">The schedule no longer matches this posted entry: it now reads over-billings ${m(c.over_billing)}, under-billings ${m(c.under_billing)}, loss provision ${m(c.loss_provision)} (posted ${m(entry.totals.over_billing)}, ${m(entry.totals.under_billing)}, ${m(entry.totals.loss_provision)}). Void the posted entry and post again to book the schedule's figures.</div>`
+            : '';
         const postHtml = posted
-            ? `<div style="font-size:12px; margin:8px 0;">Posted as journal entry ${posted.transaction_id} on ${escapeHtml(posted.date)}${posted.posted_by ? ` by ${escapeHtml(posted.posted_by)}` : ''}, reversed ${escapeHtml(posted.reversal_date || '')}.
-                ${mayPost ? `<button type="button" class="btn btn-sm btn-danger" data-write data-accountant-ok data-destructive onclick="ReportsPage._voidWip('${asOf}')">Void posted entry</button>` : ''}</div>`
+            ? `<div style="font-size:12px; margin:8px 0;">Posted as journal entry ${posted.transaction_id} on ${escapeHtml(posted.date)}${posted.posted_by ? ` by ${escapeHtml(posted.posted_by)}` : ''}, reversed ${escapeHtml(posted.reversal_date || '')}. The lines below are what was posted.
+                ${mayPost ? `<button type="button" class="btn btn-sm btn-danger" data-write data-accountant-ok data-destructive onclick="ReportsPage._voidWip('${asOf}')">Void posted entry</button>` : ''}${differsHtml}</div>`
             : (mayPost && entry.lines.length ? `<div style="margin:8px 0;"><button type="button" class="btn btn-sm btn-primary" data-write data-accountant-ok onclick="ReportsPage._postWip('${asOf}')">Post adjusting entry</button>
                 <span style="font-size:11px; color:var(--gray-500);">Posts an adjusting journal dated ${asOf}, reversed the next day.</span></div>` : '');
         const entryHtml = entry.lines.length || posted ? `
@@ -3986,7 +3992,7 @@ ReportsPage.wipSchedule = async function (prefill) {
             </table></div>` : '<div style="font-size:11px; color:var(--gray-500); margin-top:12px;">No WIP adjustment to book as of this date.</div>';
         // Warnings (jobs left out, budgets that never burn down, finished
         // jobs still showing cost to come, forecast dating) sit under the table.
-        const warningsHtml = (data.warnings || []).map(w => `<p class="report-warning" style="margin:8px 0 0; font-size:12px; color:var(--gray-600);">${escapeHtml(w)}</p>`).join('');
+        const warningsHtml = (data.warnings || []).filter(w => w !== entry.posted_warning).map(w => `<p class="report-warning" style="margin:8px 0 0; font-size:12px; color:var(--gray-600);">${escapeHtml(w)}</p>`).join('');
         return `${ReportsPage._exportButtons('wip-schedule', `as_of=${params.as_of_date}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
                 As of ${escapeHtml(data.as_of)} · cost-to-cost (percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. GP to date is earned less cost; backlog is the revised contract less earned. Basis shows whether billing is from approved pay applications or posted revenue.

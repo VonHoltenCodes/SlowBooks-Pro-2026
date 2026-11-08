@@ -60,6 +60,71 @@ def job_closed_by(job: Job, as_of: Optional[date] = None) -> bool:
     return as_of is None or job.closed_on is None or job.closed_on <= as_of
 
 
+def status_on(job: Job, as_of: Optional[date] = None) -> str:
+    """The job's status as it read on `as_of`: a job closed after the day was
+    still in progress on it."""
+    if job.status in _CLOSED and not job_closed_by(job, as_of):
+        return "in_progress"
+    return job.status
+
+
+def co_stood_on(co, on: date) -> bool:
+    """Whether a change order stood approved on `on`: it had taken effect by
+    then and was not voided until after it. A change order counts as of a
+    day in the state it had that day, in every report."""
+    from app.services.change_orders import co_effective_date
+
+    effective = co_effective_date(co)
+    if effective is None or effective > on:
+        return False
+    if co.status == "approved":
+        return True
+    return (
+        co.status == "void"
+        and co.voided_at is not None
+        and _local_date(co.voided_at) > on
+    )
+
+
+def voided_since(db: Session, job_ids: list[int], on: date) -> list:
+    """The jobs' change orders voided after `on` that stood approved on it:
+    their effects are gone from the books today, but not from that day."""
+    from app.models.change_orders import ChangeOrder
+
+    if not job_ids:
+        return []
+    cos = (
+        db.query(ChangeOrder)
+        .filter(
+            ChangeOrder.job_id.in_(job_ids),
+            ChangeOrder.status == "void",
+            ChangeOrder.voided_at.isnot(None),
+        )
+        .all()
+    )
+    return [co for co in cos if co_stood_on(co, on)]
+
+
+def contract_on(db: Session, job: Job, on: date) -> Optional[Decimal]:
+    """The job's contract sum as it stood on `on`: today's, less the
+    contract-funded owner change orders that take effect after the day, plus
+    those that stood on it and have been voided since."""
+    from app.services.change_orders import co_totals
+    from app.services.contracts import contract_changes_after
+
+    if job.contract_amount is None:
+        return None
+    restored = sum(
+        (
+            co_totals(co, job)["sell_total"]
+            for co in voided_since(db, [job.id], on)
+            if co.kind == "owner" and co.funding == "contract"
+        ),
+        _ZERO,
+    )
+    return _q(_q(job.contract_amount) - contract_changes_after(db, job, on) + restored)
+
+
 def select_jobs(
     db: Session,
     job_id: Optional[int] = None,
@@ -261,11 +326,7 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
     books as of `as_of`: actuals and posted revenue to that date, billing and
     retainage from the approved applications dated that day or earlier, and the
     revised contract with the change orders approved by then."""
-    from app.services.contracts import (
-        contract_changes_after,
-        contract_summary,
-        original_contract_sum,
-    )
+    from app.services.contracts import contract_summary, original_contract_sum
     from app.services.job_costing import job_cost_tree
     from app.services.pay_applications import has_approved_application
 
@@ -291,15 +352,14 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
     summary = contract_summary(
         db, job, cost=cost_to_date, billed=posted_revenue, as_of=as_of
     )
-    current_revised = _q(summary["contract_amount"])
     # The original as the pay application prints it (#723): the stamped one,
     # else the sum less the approved change orders (a sum from the job form
     # with no contract type saved was never stamped).
     original = original_contract_sum(db, job)
     # The contract as of the date: back out the contract-funded COs approved
-    # after it, so original + approved-as-of = revised-as-of.
-    changes_after = contract_changes_after(db, job, as_of)
-    revised = _q(current_revised - changes_after)
+    # after it and put back those voided since that stood on it, so original
+    # + approved-as-of = revised-as-of (the Change Order Log's rule).
+    revised = contract_on(db, job, as_of)
     approved_cos = _q(revised - original)
     billed = _q(summary["billed_to_date"])
     retainage_out = _q(summary["retainage"]["outstanding"])
@@ -488,7 +548,11 @@ def wip_schedule(
     The WIP adjusting entry itself is in none of these figures."""
     as_of = as_of or date.today()
     jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
+    # A job whose contract is dated after the day had no contract on it.
+    jobs = [j for j in jobs if j.contract_date is None or j.contract_date <= as_of]
     rows = [wip_row(db, job, as_of) for job in jobs]
+    for job, r in zip(jobs, rows):
+        r["status"] = status_on(job, as_of)
     warnings = [r["warning"] for r in rows if r.get("excluded")]
     for r in rows:
         warnings += r.get("warnings") or []
@@ -514,11 +578,25 @@ def wip_schedule(
     )
     from app.services.wip_posting import posted_entry_info
 
-    entry = wip_adjusting_entry(rows, as_of, wip_account_numbers(db))
+    numbers = wip_account_numbers(db)
+    entry = wip_adjusting_entry(rows, as_of, numbers)
     # Post books the company's whole schedule for the date; whether that is
     # done is said whatever filter this run has.
-    entry["posted_entry"] = posted_entry_info(db, as_of)
-    entry["posted"] = entry["posted_entry"] is not None
+    posted_info = posted_entry_info(db, as_of)
+    if posted_info is not None:
+        # What is on the books is the posted entry: show its lines, and say
+        # when the schedule no longer reads the same (a change order approved
+        # back-dated, a late bill on or before the date).
+        keep = (
+            {r["job_id"] for r in rows}
+            if job_id is not None or customer_id is not None or status
+            else None
+        )
+        entry, warning = _posted_view(db, posted_info, entry, rows, keep, as_of)
+        if warning:
+            warnings.append(warning)
+    entry["posted_entry"] = posted_info
+    entry["posted"] = posted_info is not None
     return {
         "as_of": as_of.isoformat(),
         "method": "cost_to_cost",
@@ -622,6 +700,92 @@ def wip_adjusting_entry(
         "total_debits": float(_q(debits)),
         "total_credits": float(_q(credits)),
     }
+
+
+def _posted_rows(db: Session, transaction_id: int, rows: list[dict]) -> list[dict]:
+    """The posted WIP entry's figures per job, in the shape wip_adjusting_entry
+    reads: each job's under- and over-billing and loss provision from the
+    lines on its accounts."""
+    by_job: dict = {}
+    for ln, name in (
+        db.query(TransactionLine, Account.name)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(TransactionLine.transaction_id == transaction_id)
+    ):
+        f = by_job.setdefault(ln.job_id, {"under": _ZERO, "over": _ZERO, "prov": _ZERO})
+        net = Decimal(str(ln.debit or 0)) - Decimal(str(ln.credit or 0))
+        if name == WIP_UNDERBILLING_ACCOUNT:
+            f["under"] += net
+        elif name == WIP_OVERBILLING_ACCOUNT:
+            f["over"] -= net
+        elif name == WIP_LOSS_ACCOUNT:
+            f["prov"] -= net
+    computed = {r["job_id"]: r for r in rows}
+    out = []
+    for jid, f in by_job.items():
+        job = db.get(Job, jid) if jid is not None else None
+        r = computed.get(jid, {})
+        out.append(
+            {
+                "job_id": jid,
+                "job_name": job.name if job else "No job",
+                "customer_name": _customer_name(job) if job else "",
+                "has_contract": True,
+                "under_billing": float(_q(f["under"])),
+                "over_billing": float(_q(f["over"])),
+                "loss_provision": float(_q(f["prov"])),
+                "projected_loss": r.get("projected_loss") or 0.0,
+            }
+        )
+    out.sort(key=lambda r: (r["customer_name"].lower(), r["job_name"].lower()))
+    return out
+
+
+def _entry_figures(entry: dict) -> dict:
+    """Each job's (under, over, provision) in an entry, for comparing two."""
+    return {
+        j["job_id"]: (j["under_billing"], j["over_billing"], j["loss_provision"])
+        for j in entry["jobs"]
+    }
+
+
+def _posted_view(
+    db: Session, info: dict, computed: dict, rows: list, keep, as_of: date
+) -> tuple[dict, Optional[str]]:
+    """The adjusting entry as posted for the date (only the jobs in `keep`
+    when the run is filtered), with `posted_differs`, the schedule's own
+    figures under `computed` and, when they differ, a sentence to say so."""
+    posted_rows = [
+        r
+        for r in _posted_rows(db, info["transaction_id"], rows)
+        if keep is None or r["job_id"] in keep
+    ]
+    entry = wip_adjusting_entry(posted_rows, as_of, wip_account_numbers(db))
+    differs = _entry_figures(entry) != _entry_figures(computed)
+    entry["posted_differs"] = differs
+    entry["posted_warning"] = None
+    entry["computed"] = {
+        k: computed[k]
+        for k in ("jobs", "totals", "lines", "total_debits", "total_credits")
+    }
+    if not differs:
+        return entry, None
+    p, c = entry["totals"], computed["totals"]
+    warning = (
+        f"The WIP entry posted for {as_of.isoformat()} (journal entry "
+        f"{info['transaction_id']}) books over-billings "
+        f"{_money_text(Decimal(str(p['over_billing'])))}, under-billings "
+        f"{_money_text(Decimal(str(p['under_billing'])))} and a loss provision "
+        f"of {_money_text(Decimal(str(p['loss_provision'])))}; the schedule now "
+        f"reads {_money_text(Decimal(str(c['over_billing'])))}, "
+        f"{_money_text(Decimal(str(c['under_billing'])))} and "
+        f"{_money_text(Decimal(str(c['loss_provision'])))}, because something "
+        f"dated on or before {as_of.isoformat()} changed after it was posted "
+        "(a change order approved back-dated, a late bill). Void the posted "
+        "entry and post it again to book the schedule's figures."
+    )
+    entry["posted_warning"] = warning
+    return entry, warning
 
 
 # ── Cost-to-complete forecast (per job, section and cost type) ───────────────
@@ -1198,19 +1362,18 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
     out_rows = []
     for co in cos:
         st = _co_status_on(co, as_of)
-        if st is not None:
-            counts[st] = counts.get(st, 0) + 1
+        if st is None:
+            continue  # dated after the day: not on its log
+        counts[st] = counts.get(st, 0) + 1
         figs = co_totals(co, job)
         cost = figs["cost_total"]
         sell = figs["sell_total"]
         markup = figs["markup_total"]
         approved_on = co_effective_date(co)
-        approved_by_as_of = (
-            co.status == "approved" and approved_on is not None and approved_on <= as_of
-        )
-        # The running approved total follows the contract as of the date: an
-        # approved, contract-funded owner CO approved by then adds its sell.
-        if approved_by_as_of and co.kind == "owner" and co.funding == "contract":
+        # The running approved total follows the contract as of the date: a
+        # contract-funded owner CO that stood approved then adds its sell,
+        # the same rule the counts and the WIP schedule read.
+        if st == "approved" and co.kind == "owner" and co.funding == "contract":
             running = _q(running + sell)
             approved_changes = running
         # Pending is read as of today (a live figure, not dated).
@@ -1230,7 +1393,8 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
                 "id": co.id,
                 "number": co.number,
                 "kind": co.kind,
-                "status": co.status,
+                "status": st,
+                "status_today": co.status,
                 "title": co.title or "",
                 "date": co.date.isoformat() if co.date else None,
                 "funding": co.funding,
@@ -1277,23 +1441,23 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
 
 
 def _co_status_on(co, as_of: date) -> Optional[str]:
-    """The status a change order had on `as_of`, read from the days it took
-    effect and was voided; a draft, pending or rejected one reads as it is
-    today (those carry no date of their own). None for one dated after the
-    day that had not taken effect by then."""
+    """The status a change order had on `as_of`: approved when it stood
+    approved that day (co_stood_on), pending when it was approved or voided
+    after it; a draft, pending or rejected one reads as it is today (those
+    carry no date of their own). None for one dated after the day: it is not
+    on that day's log."""
     from app.services.change_orders import co_effective_date
 
+    if co_stood_on(co, as_of):
+        return "approved"
+    if co.date is not None and co.date > as_of:
+        return None
     effective = co_effective_date(co)
     voided = _local_date(co.voided_at) if co.voided_at else None
-    later = co.date is not None and co.date > as_of
     if co.status == "void" and voided is not None and voided > as_of:
-        if effective is not None and effective <= as_of:
-            return "approved"  # still standing on the day
-        return None if later else "pending"
+        return "pending"
     if co.status == "approved" and effective is not None and effective > as_of:
-        return None if later else "pending"
-    if later and co.status not in ("approved", "void"):
-        return None
+        return "pending"
     return co.status
 
 

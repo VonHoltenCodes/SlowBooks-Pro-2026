@@ -45,6 +45,7 @@ from app.services.contracts import (
     settle_contract_type,
 )
 from app.services.numbering import next_invoice_number
+from app.routes._helpers import refuse_unknown_filters
 from app.services.payment_terms import due_date_for, term_id_for
 from app.services.pay_applications import (
     application_figures,
@@ -439,7 +440,11 @@ def refresh_pay_application_lines(app_id: int, db: Session = Depends(get_db)):
     return _out(db, app)
 
 
-@router.get("", response_model=list[PayApplicationOut])
+@router.get(
+    "",
+    response_model=list[PayApplicationOut],
+    dependencies=[Depends(refuse_unknown_filters)],
+)
 def list_pay_applications(job_id: int = Query(...), db: Session = Depends(get_db)):
     apps = (
         db.query(PayApplication)

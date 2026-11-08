@@ -215,6 +215,27 @@ def back_dating_warnings(co: ChangeOrder, given: date | None, on: date) -> list[
     ]
 
 
+def posted_wip_warnings(db: Session, co: ChangeOrder, on: date) -> list[str]:
+    """A sentence when the change order takes effect on or before a date a
+    WIP entry is posted for: those schedules now read it, and the entries on
+    the books do not."""
+    from app.services.wip_posting import posted_dates_from
+
+    dates = [d.isoformat() for d in posted_dates_from(db, on)]
+    if not dates:
+        return []
+    listed = (
+        dates[0] if len(dates) == 1 else ", ".join(dates[:-1]) + " and " + dates[-1]
+    )
+    noun = "entry" if len(dates) == 1 else "entries"
+    them = "it" if len(dates) == 1 else "them"
+    return [
+        f"{co.number} takes effect on {on.isoformat()}, so it changes the WIP "
+        f"{noun} posted for {listed}; void and re-post {them} on the WIP "
+        "schedule."
+    ]
+
+
 # ── Usage roll-ups (read by the contract summary and the exceed guards) ────
 
 

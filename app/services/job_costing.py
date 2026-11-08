@@ -21,7 +21,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Optional
 
@@ -881,43 +881,33 @@ def _markup_cost_code(db: Session, code_text: str, name: str) -> CostCode:
     return code
 
 
-def budgets_from_estimate(db: Session, job: Job, estimate: Estimate) -> list[JobBudget]:
-    """One budget row per cost code on the estimate: cost = qty × unit cost
-    (0 when no cost is entered — budgeting the sale price as cost would
-    hide the margin), revenue = the line amount plus the row's share of the
-    markups. An ALLOWANCE line budgets its amount as cost (a budgeted figure
-    for undesigned work is spent, not marked up), even with no unit cost.
+def _markup_spread(bases: list[Decimal], markup_total: Decimal) -> list[Decimal]:
+    """Each row's share of the markups, pro rata to its markup base; the last
+    row with a base takes the rounding remainder. A row with a negative base
+    (an accepted deduct alternate) takes its negative share, so the markup it
+    takes off is not pushed onto the other rows."""
+    shares = [Decimal("0")] * len(bases)
+    base_total = sum(bases, Decimal("0"))
+    if not markup_total or not base_total:
+        return shares
+    with_base = [i for i, b in enumerate(bases) if b != 0]
+    assigned = Decimal("0")
+    for n, i in enumerate(with_base):
+        if n == len(with_base) - 1:
+            shares[i] = markup_total - assigned
+        else:
+            share = _q(markup_total * bases[i] / base_total)
+            shares[i] = share
+            assigned += share
+    return shares
 
-    Construction lines are priced at cost, so the markups (general conditions,
-    insurance, fee, bond) are the only budgeted margin; they are distributed
-    across the rows' revenue pro rata to each row's share of the markup base
-    (rows with no markup-able cost get none), with the rounding remainder on
-    the last such row, so Σ revenue == the pre-tax bid total. A code the
-    operator budgeted by hand keeps its own row AND its own share: that share
-    is not pushed onto the other rows.
 
-    General conditions, insurance and bond are both revenue and cost: each
-    markup is spread as revenue like the fee, and its amount is also budgeted
-    as a COST on its own row ("GC", "INS", "BOND") so the job carries it and
-    the budgeted margin is the fee.
+def _estimate_buckets(estimate: Estimate) -> dict[tuple, list[Decimal]]:
+    """The estimate's bought scope by (cost_code_id, cost_type): [cost,
+    revenue, markup base]."""
+    from app.services.estimating import included_lines, markup_base_amount
 
-    Lines without a code roll into a whole-job row. Re-seeding replaces the
-    estimate rows; a row the operator edited by hand (source "manual") wins and
-    is left alone."""
-    # Key on (cost_code_id, cost_type): a line carries its own type (#550), and
-    # the budget's unique key allows both a code and a type on one row. Only
-    # the bought scope seeds a budget — a unit-price line is a rate card and an
-    # un-accepted alternate is not scope yet (#551).
-    from app.services.estimating import (
-        estimate_totals,
-        included_lines,
-        markup_base_amount,
-    )
-
-    est_totals = estimate_totals(estimate)
     markup_allowances = bool(estimate.markup_allowances)
-
-    # bucket: [cost, revenue, markup_base]
     totals: dict[tuple, list[Decimal]] = {}
     for ln in included_lines(estimate):
         qty = Decimal(str(ln.quantity or 0))
@@ -937,6 +927,54 @@ def budgets_from_estimate(db: Session, job: Job, estimate: Estimate) -> list[Job
         bucket[0] += cost
         bucket[1] += rev
         bucket[2] += base
+    return totals
+
+
+def estimate_markup_shares(estimate: Estimate) -> dict[tuple, Decimal]:
+    """The markup revenue the budget spreads onto each (cost_code_id,
+    cost_type) row of the estimate, as budgets_from_estimate spreads it."""
+    from app.services.estimating import estimate_totals
+
+    totals = _estimate_buckets(estimate)
+    keys = list(totals)
+    shares = _markup_spread(
+        [totals[k][2] for k in keys], estimate_totals(estimate)["markup_total"]
+    )
+    return dict(zip(keys, shares))
+
+
+def budgets_from_estimate(db: Session, job: Job, estimate: Estimate) -> list[JobBudget]:
+    """One budget row per cost code on the estimate: cost = qty × unit cost
+    (0 when no cost is entered — budgeting the sale price as cost would
+    hide the margin), revenue = the line amount plus the row's share of the
+    markups. An ALLOWANCE line budgets its amount as cost (a budgeted figure
+    for undesigned work is spent, not marked up), even with no unit cost.
+
+    Construction lines are priced at cost, so the markups (general conditions,
+    insurance, fee, bond) are the only budgeted margin; they are distributed
+    across the rows' revenue pro rata to each row's share of the markup base
+    (rows with no markup-able cost get none; an accepted deduct alternate
+    takes its negative share), with the rounding remainder on the last such
+    row, so Σ revenue == the pre-tax bid total. A code the
+    operator budgeted by hand keeps its own row AND its own share: that share
+    is not pushed onto the other rows.
+
+    General conditions, insurance and bond are both revenue and cost: each
+    markup is spread as revenue like the fee, and its amount is also budgeted
+    as a COST on its own row ("GC", "INS", "BOND") so the job carries it and
+    the budgeted margin is the fee.
+
+    Lines without a code roll into a whole-job row. Re-seeding replaces the
+    estimate rows; a row the operator edited by hand (source "manual") wins and
+    is left alone."""
+    # Key on (cost_code_id, cost_type): a line carries its own type (#550), and
+    # the budget's unique key allows both a code and a type on one row. Only
+    # the bought scope seeds a budget — a unit-price line is a rate card and an
+    # un-accepted alternate is not scope yet (#551).
+    from app.services.estimating import estimate_totals
+
+    est_totals = estimate_totals(estimate)
+    totals = _estimate_buckets(estimate)
     db.query(JobBudget).filter(
         JobBudget.job_id == job.id, JobBudget.source == "estimate"
     ).delete()
@@ -959,19 +997,7 @@ def budgets_from_estimate(db: Session, job: Job, estimate: Estimate) -> list[Job
         (code_id, ctype, cost, rev, base)
         for (code_id, ctype), (cost, rev, base) in totals.items()
     ]
-    markup_total = est_totals["markup_total"]
-    base_total = sum((e[4] for e in entries), Decimal("0"))
-    markup_rev = [Decimal("0")] * len(entries)
-    if markup_total and base_total:
-        with_base = [i for i, e in enumerate(entries) if e[4] > 0]
-        assigned = Decimal("0")
-        for n, i in enumerate(with_base):
-            if n == len(with_base) - 1:
-                markup_rev[i] = markup_total - assigned
-            else:
-                share = _q(markup_total * entries[i][4] / base_total)
-                markup_rev[i] = share
-                assigned += share
+    markup_rev = _markup_spread([e[4] for e in entries], est_totals["markup_total"])
     # (code, type, cost, revenue) for each row that will seed; manual-owned
     # codes are left alone.
     seeded = [
@@ -1054,20 +1080,55 @@ def _finish(f: dict, deducts: bool = False) -> dict:
     return out
 
 
-def _with_uncommitted(totals: dict, extra: Decimal) -> dict:
+def _with_uncommitted(totals: dict, extra: Decimal, before=Decimal("0")) -> dict:
     """`totals` with the budget not yet committed added to projected final
-    cost (and variance and % used following it)."""
+    cost (and variance and % used following it). `before`, the job's cost
+    posted before a dated run's start, goes in too: projected final cost is
+    the whole job's, whatever period the actuals are read for."""
     projected = (
-        Decimal(str(totals["actual"])) + Decimal(str(totals["committed"])) + extra
+        Decimal(str(totals["actual"]))
+        + Decimal(str(totals["committed"]))
+        + extra
+        + before
     )
     revised = Decimal(str(totals["revised"]))
     return {
         **totals,
         "uncommitted_budget": float(extra),
+        "cost_before_period": float(before),
         "projected": float(projected),
         "variance": float(revised - projected),
         "pct_used": float(projected / revised * 100) if revised else None,
     }
+
+
+def projected_with_budget(
+    db: Session, job_id: int, totals: dict, start_date=None, end_date=None
+) -> dict:
+    """A contractor's job totals with projected final cost as the job's
+    Overview reads it: actual + committed + the budget nothing has taken up
+    yet (uncommitted_budget), and, on a run dated from a start, the cost
+    posted before it. Budget vs Actual, its exports and the cost tree all
+    take it, so their Projected and Variance agree."""
+    before = Decimal("0")
+    if start_date is not None:
+        q = (
+            db.query(
+                sqlfunc.coalesce(
+                    sqlfunc.sum(TransactionLine.debit - TransactionLine.credit), 0
+                )
+            )
+            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+            .join(Account, TransactionLine.account_id == Account.id)
+            .filter(
+                job_attribution() == job_id,
+                Account.account_type.in_((AccountType.COGS, AccountType.EXPENSE)),
+                not_wip_entry(),
+                Transaction.date < start_date,
+            )
+        )
+        before = _q(Decimal(str(q.scalar() or 0)))
+    return _with_uncommitted(totals, uncommitted_budget(db, job_id, end_date), before)
 
 
 def budget_rows(
@@ -1075,13 +1136,19 @@ def budget_rows(
 ) -> list[JobBudget]:
     """The jobs' budget rows in effect on `as_of`: every row, less those a
     change order wrote that takes effect after the date (co_effective_date,
-    the day the revenue side reads it on too). A change row from before the
-    link to its change order counts on every date. None: every row."""
+    the day the revenue side reads it on too), plus the rows of a change
+    order that stood on the date and was voided since (voiding deleted
+    them; they are rebuilt from its frozen lines, not stored). A change row
+    from before the link to its change order counts on every date. None:
+    every row."""
     if not job_ids:
         return []
     rows = db.query(JobBudget).filter(JobBudget.job_id.in_(job_ids)).all()
+    if as_of is None:
+        return rows
+    rows = rows + _voided_change_rows(db, job_ids, as_of)
     co_ids = {r.change_order_id for r in rows} - {None}
-    if as_of is None or not co_ids:
+    if not co_ids:
         return rows
     from app.models.change_orders import ChangeOrder
     from app.services.change_orders import co_effective_date
@@ -1092,6 +1159,43 @@ def budget_rows(
         if (co_effective_date(co) or as_of) > as_of
     }
     return [r for r in rows if r.change_order_id not in later]
+
+
+def _voided_change_rows(db: Session, job_ids: list[int], as_of: date) -> list:
+    """The budget rows the change orders voided after `as_of` (that stood
+    on it) had written, as Approve wrote them: plain read-only records, not
+    added to the session."""
+    from types import SimpleNamespace
+
+    from app.services.change_orders import _budget_deltas, _writes_budget
+    from app.services.job_reports import voided_since
+
+    out = []
+    for co in voided_since(db, job_ids, as_of):
+        if not _writes_budget(co):
+            continue
+        with_revenue = co.kind == "owner" and co.funding == "contract"
+        for (code_id, ctype), (cost, rev) in _budget_deltas(
+            db, co.job_id, co, with_revenue
+        ).items():
+            cost, rev = _q(cost), _q(rev)
+            if cost == 0 and rev == 0:
+                continue
+            out.append(
+                SimpleNamespace(
+                    id=None,
+                    job_id=co.job_id,
+                    cost_code_id=code_id,
+                    cost_type=ctype,
+                    amount=cost,
+                    revenue_amount=rev,
+                    source="change",
+                    locked=True,
+                    change_order_id=co.id,
+                    estimate_id=None,
+                )
+            )
+    return out
 
 
 _OPEN_PO = (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
@@ -1311,16 +1415,18 @@ def job_cost_tree(
     # None (Unassigned) for a line or budget with no code.
     sections: dict = {}
 
-    def section_cell(code_id):
+    def section_of(code_id):
         from app.services.job_reports import _section_id
 
-        sid = (
+        return (
             _section_id(code_by_id[code_id], code_by_id)
             if code_id in code_by_id
             else None
         )
+
+    def section_cell(code_id):
         return sections.setdefault(
-            sid,
+            section_of(code_id),
             {
                 "budget": Decimal("0"),
                 "actual": Decimal("0"),
@@ -1489,6 +1595,9 @@ def job_cost_tree(
             strip(r)
     revenue_sections = None
     if construction:
+        _spread_markup_revenue(
+            db, job_id, budgets, sections, section_of, start_date, end_date
+        )
         revenue_sections = _revenue_sections(sections, code_by_id)
         for sc in sections.values():
             grand["est_revenue"] += sc["est_revenue"]
@@ -1496,9 +1605,9 @@ def job_cost_tree(
     totals = _finish(grand)
     # A contractor's projected final cost carries the budget nothing has taken
     # up yet, so a trade not bought reads as cost to come, not a saving. It is
-    # a job-to-date figure, left out of a tree dated from a start date.
-    if start_date is None and construction:
-        totals = _with_uncommitted(totals, uncommitted_budget(db, job_id, end_date))
+    # the whole job's, so a tree dated from a start date adds the cost before.
+    if construction:
+        totals = projected_with_budget(db, job_id, totals, start_date, end_date)
     # committed_total / billed_to_date ride alongside the committed (remaining)
     # figure, additive (#553): committed stays "not yet billed", while these
     # two carry the whole commitment and what has been billed against it.
@@ -1535,6 +1644,95 @@ def job_cost_tree(
     return out
 
 
+# The schedule-of-values kinds that carry the estimate's markups.
+_MARKUP_SOV_KINDS = ("general_conditions", "insurance", "fee", "bond")
+
+
+def _markup_billed(db: Session, job_id: int, on: Optional[date]) -> Decimal:
+    """What the job's approved pay applications dated on or before `on` (all
+    of them when None) billed on markup lines with no cost code: each
+    period's amount plus what the latest of them holds as stored."""
+    from app.models.pay_applications import PayApplication, PayApplicationLine
+    from app.models.jobs import SovLine
+
+    q = (
+        db.query(PayApplication.application_no, PayApplicationLine)
+        .join(
+            PayApplicationLine,
+            PayApplicationLine.pay_application_id == PayApplication.id,
+        )
+        .join(SovLine, PayApplicationLine.sov_line_id == SovLine.id)
+        .filter(
+            PayApplication.job_id == job_id,
+            PayApplication.status == "approved",
+            SovLine.kind.in_(_MARKUP_SOV_KINDS),
+            SovLine.cost_code_id.is_(None),
+        )
+    )
+    if on is not None:
+        q = q.filter(PayApplication.date <= on)
+    total = Decimal("0")
+    latest: dict = {}  # sov line → (application_no, stored)
+    for no, ln in q:
+        total += Decimal(str(ln.this_period or 0))
+        if ln.sov_line_id not in latest or no > latest[ln.sov_line_id][0]:
+            latest[ln.sov_line_id] = (no, Decimal(str(ln.stored or 0)))
+    return _q(total + sum((v[1] for v in latest.values()), Decimal("0")))
+
+
+def _spread_markup_revenue(
+    db: Session, job_id: int, budgets, sections: dict, section_of, start, end
+) -> None:
+    """Move the revenue billed on the markup lines (no cost code, so posted
+    under Unassigned) onto the sections the budget spread the markups over.
+    Each section takes its budgeted markup in step with its own billing (its
+    budgeted markup × its actual revenue ÷ its budgeted revenue before
+    markup), scaled so the sections take exactly what was billed: a section
+    billed in full reads its budgeted revenue, markups and all."""
+    from app.models.estimates import Estimate
+
+    estimate_ids = {b.estimate_id for b in budgets if b.source == "estimate"}
+    estimate_ids.discard(None)
+    unassigned = sections.get(None)
+    if not estimate_ids or unassigned is None:
+        return
+    billed = _markup_billed(db, job_id, end)
+    if start is not None:
+        billed -= _markup_billed(db, job_id, start - timedelta(days=1))
+    if not billed:
+        return
+    markup: dict = {}  # section → its budgeted markup
+    for est in db.query(Estimate).filter(Estimate.id.in_(estimate_ids)):
+        for (code_id, _t), share in estimate_markup_shares(est).items():
+            sid = section_of(code_id)
+            markup[sid] = markup.get(sid, Decimal("0")) + share
+    markup = {
+        sid: m for sid, m in markup.items() if m and sid is not None and sid in sections
+    }
+    if not markup:
+        return
+    weights = {}
+    for sid, m in markup.items():
+        f = sections[sid]
+        base = f["est_revenue"] - m
+        weights[sid] = m * f["act_revenue"] / base if base else Decimal("0")
+    if not sum(weights.values(), Decimal("0")):
+        weights = dict(markup)  # nothing billed on the work yet: the budget's split
+    weight_total = sum(weights.values(), Decimal("0"))
+    if not weight_total:
+        return
+    order = [sid for sid in weights if weights[sid]]
+    assigned = Decimal("0")
+    for n, sid in enumerate(order):
+        if n == len(order) - 1:
+            part = billed - assigned
+        else:
+            part = _q(billed * weights[sid] / weight_total)
+            assigned += part
+        sections[sid]["act_revenue"] += part
+    unassigned["act_revenue"] -= billed
+
+
 def _revenue_sections(sections: dict, code_by_id: dict) -> list[dict]:
     """The cost tree's revenue by section: each section's budgeted cost,
     actual cost, budgeted and actual revenue, in code order, the Unassigned
@@ -1560,6 +1758,17 @@ def _revenue_sections(sections: dict, code_by_id: dict) -> list[dict]:
         )
     out.sort(key=lambda r: (r["cost_code_id"] is None, r["code"], r["name"]))
     return out
+
+
+def _contract_float(db: Session, job: Job, end_date, construction: bool):
+    """The job's contract sum for a report: a contractor's as it stood on the
+    report's end date (change orders approved later out, those voided since
+    back in); otherwise, and with no end date, today's."""
+    if construction and end_date is not None and job.contract_amount is not None:
+        from app.services.job_reports import contract_on
+
+        return float(contract_on(db, job, end_date)) or None
+    return float(job.contract_amount) if job.contract_amount else None
 
 
 def budget_vs_actual_all_jobs(
@@ -1616,17 +1825,15 @@ def budget_vs_actual_all_jobs(
         f["act_revenue"] = Decimal(str(p.get("income", 0)))
         f["committed"] = Decimal(str(committed.get(j.id, 0)))
         fin = _finish(f, deducts=construction)
-        if construction and not start_date:
-            fin = _with_uncommitted(fin, uncommitted_budget(db, j.id, end_date))
+        if construction:
+            fin = projected_with_budget(db, j.id, fin, start_date, end_date)
         fin.update(
             {
                 "job_id": j.id,
                 "job_name": j.name,
                 "customer_name": j.customer.name if j.customer else "",
                 "status": j.status,
-                "contract_amount": (
-                    float(j.contract_amount) if j.contract_amount else None
-                ),
+                "contract_amount": _contract_float(db, j, end_date, construction),
             }
         )
         out.append(fin)
