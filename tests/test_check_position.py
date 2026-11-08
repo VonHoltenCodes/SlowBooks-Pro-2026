@@ -500,3 +500,80 @@ def test_a_batch_and_the_test_print_follow_the_bottom_panels(client, captured):
     assert client.get("/api/checks/test-print").status_code == 200
     assert '<div class="check-page check-page-bottom">' in captured["html"]
     assert ".check-page-bottom .stub + .stub { height: 3.66in; }" in captured["html"]
+
+
+# ----- the Pay to line names the vendor when no payee was typed (#733) --
+
+
+def _vendor(client, name="Main Street Properties"):
+    v = client.post("/api/vendors", json={"name": name, "address1": "9 Elm St"})
+    assert v.status_code in (200, 201), v.text
+    return v.json()["id"]
+
+
+def test_a_register_check_with_a_vendor_and_no_payee_pays_the_vendor(
+    client, db_session, seed_accounts
+):
+    """#733: an entry saved through the API with a vendor and no payee text
+    printed a blank Pay to line over the vendor's address."""
+    e = _entry(
+        client,
+        seed_accounts,
+        payee=None,
+        description="",
+        vendor_id=_vendor(client),
+    )
+    data = register_check_data(db_session, e["id"])
+    assert data["payee"] == "Main Street Properties"
+    html = render_checks_html([data], _COMPANY)
+    face = _face(html)
+    assert '<span class="pay-to-line">Main Street Properties</span>' in face
+    # the stubs name the vendor too
+    assert html.count("<strong>Pay To:</strong> Main Street Properties") == 2
+    top = render_checks_html([data], {**_COMPANY, "check_position": "top"})
+    assert top.count('<span class="voucher-payee">Main Street Properties</span>') == 2
+
+
+def test_a_register_check_with_a_vendor_and_a_typed_payee_pays_the_payee(
+    client, db_session, seed_accounts
+):
+    e = _entry(
+        client, seed_accounts, payee="M. S. Properties LLC", vendor_id=_vendor(client)
+    )
+    data = register_check_data(db_session, e["id"])
+    assert data["payee"] == "M. S. Properties LLC"
+    assert '<span class="pay-to-line">M. S. Properties LLC</span>' in _face(
+        render_checks_html([data], _COMPANY)
+    )
+
+
+def test_a_register_check_with_neither_prints_as_today(
+    client, db_session, seed_accounts
+):
+    e = _entry(client, seed_accounts, payee=None, description="")
+    data = register_check_data(db_session, e["id"])
+    assert data["payee"] == ""
+    assert data["payee_address"] == []
+    assert '<span class="pay-to-line"></span>' in _face(
+        render_checks_html([data], _COMPANY)
+    )
+
+
+def test_an_expense_check_with_a_vendor_and_no_payee_pays_the_vendor(
+    client, db_session, seed_accounts
+):
+    r = client.post(
+        "/api/expenses",
+        json={
+            "date": "2026-09-02",
+            "vendor_id": _vendor(client, "Sweet Forest Cafe"),
+            "expense_account_id": seed_accounts["6000"].id,
+            "paid_from_account_id": seed_accounts["1000"].id,
+            "amount": "30.30",
+            "reference": "1074",
+        },
+    )
+    assert r.status_code == 201, r.text
+    data = register_check_data(db_session, r.json()["id"])
+    assert data["payee"] == "Sweet Forest Cafe"
+    assert data["memo"] == ""
