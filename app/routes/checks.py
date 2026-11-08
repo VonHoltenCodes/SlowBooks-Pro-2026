@@ -106,7 +106,18 @@ def register_check_data(db: Session, txn_id: int) -> dict:
         raise HTTPException(
             status_code=400, detail="This entry is void, so there is no check to print."
         )
+    # The vendor behind the check, for its address (#726): an expense names
+    # its vendor as its source, a register entry on its own row (#491).
+    vendor_id = txn.source_id if txn.source_type == "expense" else txn.vendor_id
+    vendor = (
+        db.query(Vendor).filter(Vendor.id == vendor_id).first() if vendor_id else None
+    )
+    # The payee typed on the entry; with none typed, the vendor's name, so an
+    # entry saved with a vendor and no payee text does not print a blank Pay
+    # to line over the vendor's address (#733).
     payee = payees_for(db, [txn]).get(txn.id, "") or ""
+    if not payee and vendor is not None:
+        payee = vendor.name or ""
     # the stub lists what the check paid: the category of each line, with
     # its memo when the line carries one of its own. A credit line is a
     # refund netted against the check (#387), shown as a negative amount so
@@ -127,12 +138,6 @@ def register_check_data(db: Session, txn_id: int) -> dict:
         amount = debit if debit > 0 else -credit
         details.append({"description": name or "Payment", "amount": amount})
     memo = (bank_line.description or "").strip()
-    # The vendor behind the check, for its address (#726): an expense names
-    # its vendor as its source, a register entry on its own row (#491).
-    vendor_id = txn.source_id if txn.source_type == "expense" else txn.vendor_id
-    vendor = (
-        db.query(Vendor).filter(Vendor.id == vendor_id).first() if vendor_id else None
-    )
     return {
         "payee": payee,
         "date": txn.date,
