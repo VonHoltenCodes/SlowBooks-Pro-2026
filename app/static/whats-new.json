@@ -1,4 +1,14 @@
 {
+  "2.31.9": {
+    "title": "Checks on top, the payee's address on a check, and a register that opens at today",
+    "items": [
+      "Check Printing has a Check position: the check at the bottom as before, or on top with two vouchers below, the way QuickBooks voucher stock is cut, with the fields where that stock prints them.",
+      "A check prints the vendor's postal address under the amount in words, for window envelopes and pre-printed stock; a vendor with no address prints as before.",
+      "A bank or card register opens at its newest lines and the entry row; filters and saves leave the page where it is.",
+      "The register has a Category column beside Type: the account a line was posted against, or “3 accounts” with the list in its tooltip.",
+      "macOS: the Settings panel stays in the accessibility tree after switching groups."
+    ]
+  },
   "2.31.8": {
     "title": "Settings in groups, a Text size setting, and a way back in when the password is forgotten",
     "items": [

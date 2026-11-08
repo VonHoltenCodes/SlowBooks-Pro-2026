@@ -198,3 +198,35 @@ def test_the_guide_names_the_group_where_it_names_a_setting():
             if any(first == n or first.startswith(n + " ") for n in names):
                 stale.append(f"{doc.name}: Settings → {first}")
     assert stale == []
+
+
+def test_one_path_shows_and_hides_the_sections():
+    """#725: a loader shows or hides its section through
+    SettingsPage._showSection, the same path as the group switch, so a
+    change of the sections showing always reaches the panel's rebuild on the
+    Mac. None sets its section's hidden or style.display by hand, and none
+    is drawn with an inline display: none."""
+    show = JS[JS.index("SettingsPage._showSection = function") :]
+    show = show[: show.index("\n};")]
+    assert "section.hidden = !on;" in show
+    assert "SettingsPage._refreshGroups({ filled: on ? section : null });" in show
+    rest = JS.replace(show, "")
+    assert re.findall(r"\bsection\.(?:hidden|style\.display)\s*=(?!=)", rest) == []
+    for tag in _section_tags():
+        assert "display:none" not in tag.replace(" ", ""), tag
+    for loader in (
+        "loadEmailLog",
+        "loadCompanyFile",
+        "loadUsers",
+        "loadSignInPref",
+        "loadApiTokens",
+        "loadBackups",
+        "loadLegacyFiles",
+    ):
+        start = JS.index(f"async {loader}(")
+        body = JS[start : JS.index("\n    },\n", start)]
+        assert "SettingsPage._showSection(" in body, loader
+    # the rebuild runs when the set showing changes, from the refresh
+    refresh = JS[JS.index("SettingsPage._refreshGroups = function") :]
+    refresh = refresh[: refresh.index("\n};")]
+    assert "SettingsPage._rebuildPanelTree();" in refresh

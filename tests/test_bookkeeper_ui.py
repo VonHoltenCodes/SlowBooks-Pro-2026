@@ -76,8 +76,11 @@ SETTINGS_KEPT = {
     ],
     "Edit Email Template › Cancel": [],
     # the groups' list and Find a setting (#720): they only show a group,
-    # and send nothing (Users and security holds only the administrator's
-    # sections, so a bookkeeper's list leaves it out)
+    # and send nothing. The probe is the desktop app (/api/system says so),
+    # where Users and security holds Sign-in, shown locked to a bookkeeper,
+    # so the group is listed; in a browser it is left out. (The probe's page
+    # listed it once its loader showed it through SettingsPage._showSection,
+    # #725; its stand-in observer sees no attribute changes.)
     "#settings-find": [],
     "Company": [],
     "Sales documents": [],
@@ -86,6 +89,7 @@ SETTINGS_KEPT = {
     "Lists": [],
     "Connections": [],
     "Preferences": [],
+    "Users and security": [],
     "Backups": [],
     "Classes › Add Class": [("POST", "/api/classes", {"name": "Wholesale"}, 201)],
     "Classes › Rename": [("PUT", "/api/classes/{klass}", {"name": "Counter"}, 200)],

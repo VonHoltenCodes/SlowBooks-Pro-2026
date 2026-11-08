@@ -86,7 +86,7 @@ async function read(ctx) {
   for (const tr of html.match(/<tr data-txn="\d+"[\s\S]*?<\/tr>/g) || []) {
     const txn = Number(tr.match(/data-txn="(\d+)"/)[1]);
     const cells = tr.match(/<td[^>]*>[\s\S]*?<\/td>/g) || [];
-    rows.push([txn, textOf(cells[7])]);
+    rows.push([txn, textOf(cells[8])]);  // Balance, after Category (#729)
   }
   const box = (html.match(/<input type="checkbox" id="reg-hide-voided"[^>]*>/) || [''])[0];
   const label = textOf((html.match(/<label for="reg-hide-voided"[\s\S]*?<\/label>/) || [''])[0]);

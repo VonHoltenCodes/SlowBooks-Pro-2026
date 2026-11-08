@@ -77,6 +77,9 @@ ENUM_SETTINGS = {
     "new_lines_taxable": frozenset({"true", "false"}),
     "use_account_numbers": frozenset({"true", "false"}),
     "check_stock": frozenset({"plain", "preprinted"}),
+    # Where the check face prints (#727): bottom = stub / stub / check,
+    # top = check / voucher / voucher (QuickBooks' standard voucher stock).
+    "check_position": frozenset({"bottom", "top"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),

@@ -44,10 +44,107 @@
     .check-date-label, .pay-to-label, .memo-label, .signature-line { visibility: hidden; }
 </style>
 {%- endif %}
+{%- if checks | selectattr('payee_address') | list %}
+<style>
+    /* The payee's postal address (#726), under the amount in words at the
+       left, where a window envelope shows it. Only printed when a check
+       carries one, so a check without it is unchanged. */
+    .payee-address { margin: 6px 0 0 0.5in; font-size: 9pt; line-height: 1.2; }
+</style>
+{%- endif %}
+{%- if position == 'top' %}
+<style>
+    /* Check on top (#727): the face in the top third and two vouchers
+       below, as on QuickBooks Desktop's standard voucher check stock. Each
+       value is placed where that stock expects it, measured from the top
+       left of the face: the date at the top right, the payee with the
+       numeric amount at the right edge, the amount in words below, the
+       payee's address under that, then the memo and the signature. */
+    /* The three panels end where a sheet perforated in thirds tears: the
+       face at 3.67 in from the top of the sheet (0.25 in of page margin,
+       the body's 8 px and 3.34 in of face), the first voucher at 7.33 in, the
+       second at the foot of the printable page (W-128, the 2.31.9 gate). */
+    .check-page-top { height: 10.42in; }
+    .check-top { padding: 0; height: 3.34in; }
+    .check-top .check-company { position: absolute; top: 0.1in; left: 0.1in; margin: 0; }
+    .check-top .check-company-addr { position: absolute; top: 0.3in; left: 0.1in; margin: 0; }
+    .check-top .check-number { top: 0.1in; right: 0.1in; }
+    .check-top .check-date { top: 0.57in; right: 0.4in; text-align: right; }
+    .check-top .pay-to { position: absolute; top: 1.07in; left: 0; margin: 0; }
+    .check-top .pay-to-label { position: absolute; top: 0; left: 0.05in; width: 0.6in; font-size: 6.5pt; line-height: 1.1; }
+    .check-top .pay-to-line { position: absolute; top: 0; left: 0.75in; min-width: 4.6in; white-space: nowrap; }
+    .check-top .amount-box { top: 1.01in; right: 0.1in; font-size: 12pt; }
+    .check-top .amount-words { position: absolute; top: 1.4in; left: 0.1in; right: 1.1in; margin: 0; }
+    .check-top .payee-address { position: absolute; top: 1.72in; left: 0.75in; margin: 0; }
+    .check-top .memo-line { top: 2.5in; bottom: auto; left: 0.1in; }
+    .check-top .signature-line { top: 2.7in; bottom: auto; right: 0.1in; }
+    .voucher { height: 3.66in; border-top: 1px dashed #999; padding: 0.25in 0.25in; box-sizing: border-box; position: relative; font-size: 9pt; }
+    .voucher + .voucher { height: 3.42in; }
+    .voucher-head { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 10pt; }
+    .voucher-payee { font-weight: bold; }
+    .voucher-table { width: 100%; border-collapse: collapse; }
+    .voucher-table td { padding: 2px 6px; }
+    .voucher-table td.r { text-align: right; }
+    .voucher-foot { position: absolute; bottom: 0.45in; left: 0.25in; right: 0.25in; display: flex; justify-content: space-between; font-weight: bold; }
+</style>
+{%- endif %}
 </head>
 <body>
+{%- macro payee_address(check) -%}
+<div class="payee-address">{% for line in check.payee_address %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
+{%- endmacro %}
 {%- for check in checks %}
-    <div class="check-page">
+    <div class="check-page{% if position == 'top' %} check-page-top{% endif %}">
+{%- if position == 'top' %}
+        <!-- Check (top) -->
+        <div class="check-area check-top"{% if nudge_x or nudge_y %} style="transform: translate({{ nudge_x }}in, {{ nudge_y }}in);"{% endif %}>
+            <div class="check-company">{{ company.company_name or 'Company' }}</div>
+            <div class="check-company-addr">
+                {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
+                {% if company.company_city %}{{ company.company_city }}, {{ company.company_state }} {{ company.company_zip }}{% endif %}
+            </div>
+            <div class="check-number">#{{ check.check_number }}</div>
+            <div class="check-date"><span class="check-date-label">DATE</span> {{ check.date | fdate }}</div>
+            <div class="pay-to">
+                <span class="pay-to-label">PAY TO THE ORDER OF</span>
+                <span class="pay-to-line">{{ check.payee }}</span>
+            </div>
+            <div class="amount-box">{{ check.amount | currency }}</div>
+            <div class="amount-words">{{ check.amount_words }} ******</div>
+{%- if check.payee_address %}
+            {{ payee_address(check) }}
+{%- endif %}
+            <div class="memo-line">
+                <span class="memo-label">MEMO</span>
+                <span class="memo-text">{{ check.memo or '' }}</span>
+            </div>
+            <div class="signature-line"></div>
+        </div>
+{%- for _ in range(2) %}
+
+        <!-- Voucher -->
+        <div class="voucher">
+            <div class="voucher-head">
+                <span class="voucher-payee">{{ check.payee }}</span>
+                <span>{{ check.date | fdate }}</span>
+            </div>
+            <table class="voucher-table">
+                <tbody>
+                {% for d in check.details %}
+                <tr><td>{{ d.description }}</td><td class="r">{{ d.amount | currency }}</td></tr>
+                {% endfor %}
+                {% if not check.details %}
+                <tr><td>Payment</td><td class="r">{{ check.amount | currency }}</td></tr>
+                {% endif %}
+                </tbody>
+            </table>
+            <div class="voucher-foot">
+                <span>{{ check.bank_account or '' }}</span>
+                <span>{{ check.amount | currency }}</span>
+            </div>
+        </div>
+{%- endfor %}
+{%- else %}
         <!-- Top Stub -->
         <div class="stub">
             <div class="stub-header">
@@ -114,12 +211,16 @@
             </div>
             <div class="amount-box">{{ check.amount | currency }}</div>
             <div class="amount-words">{{ check.amount_words }} ******</div>
+{%- if check.payee_address %}
+            {{ payee_address(check) }}
+{%- endif %}
             <div class="memo-line">
                 <span class="memo-label">MEMO</span>
                 <span class="memo-text">{{ check.memo or '' }}</span>
             </div>
             <div class="signature-line"></div>
         </div>
+{%- endif %}
     </div>
 {%- endfor %}
 </body>
