@@ -35,6 +35,7 @@ from app.services.purchase_posting import (
     unit_cost_with_tax,
     use_tax_for,
     use_tax_lines,
+    use_tax_rate,
     use_tax_rate_warnings,
 )
 
@@ -856,22 +857,21 @@ def convert_to_bill(
         rate = Decimal(str(poline.rate)) if is_whole else amt
         if item and item.track_inventory and qty and qty > 0:
             inv_receipts.append((item, qty, unit_cost_with_tax(amt, share, qty, rate)))
-        db.add(
-            BillLine(
-                bill_id=bill.id,
-                job_id=poline.job_id or po.job_id,
-                cost_code_id=poline.cost_code_id,
-                cost_type=poline.cost_type,
-                purchase_order_line_id=poline.id,
-                item_id=poline.item_id,
-                account_id=posting_acct,
-                description=poline.description,
-                quantity=qty,
-                rate=rate,
-                amount=amt,
-                line_order=poline.line_order,
-            )
+        bill_line = BillLine(
+            bill_id=bill.id,
+            job_id=poline.job_id or po.job_id,
+            cost_code_id=poline.cost_code_id,
+            cost_type=poline.cost_type,
+            purchase_order_line_id=poline.id,
+            item_id=poline.item_id,
+            account_id=posting_acct,
+            description=poline.description,
+            quantity=qty,
+            rate=rate,
+            amount=amt,
+            line_order=poline.line_order,
         )
+        db.add(bill_line)
         if amt > 0 and posting_acct:
             journal_lines.append(
                 {
@@ -887,15 +887,19 @@ def convert_to_bill(
             # Use tax a "contractor pays" job owes on the line (construction).
             if not (item and item.track_inventory):
                 job_id = poline.job_id or po.job_id
+                ut_rate = use_tax_rate(db)
                 accrual = use_tax_for(
                     db,
                     amount=amt,
                     job_id=job_id,
                     cost_type=line_cost_type(db, poline.cost_code_id, poline.cost_type),
                     bill_taxed=tax_amount > 0,
+                    rate=ut_rate,
                 )
+                if accrual:
+                    bill_line.use_tax_rate = ut_rate  # an edit re-posts at it
                 journal_lines.extend(
-                    use_tax_lines(db, journal_lines[-1], accrual, job_id)
+                    use_tax_lines(db, journal_lines[-1], accrual, job_id, ut_rate)
                 )
 
     if journal_lines:

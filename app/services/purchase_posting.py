@@ -27,7 +27,9 @@
 # the line's job-cost account (job, section, cost type) / CR 2220 Use Tax
 # Payable, at the company's use-tax rate. A line's Use tax box accrues it on
 # anything else; voiding or editing the bill reverses or re-posts it with
-# the rest of the journal.
+# the rest of the journal. The rate is kept on the bill line when the tax
+# first accrues (BillLine.use_tax_rate), and every re-post uses it: changing
+# the setting later never moves a bill already booked.
 # ============================================================================
 
 from decimal import Decimal
@@ -199,9 +201,11 @@ def use_tax_for(
     cost_type: Optional[str],
     bill_taxed: bool,
     use_tax: Optional[bool] = None,
+    rate: Optional[Decimal] = None,
 ) -> Decimal:
     """The use tax one purchase line accrues, 0 for none (see use_tax_applies
-    for who owes it), at the company's use-tax rate."""
+    for who owes it), at `rate` (the rate the line was booked at) or else
+    the company's use-tax rate."""
     if not use_tax_applies(
         db,
         amount=amount,
@@ -211,7 +215,9 @@ def use_tax_for(
         use_tax=use_tax,
     ):
         return Decimal("0")
-    return _q(_q(Decimal(str(amount or 0))) * use_tax_rate(db))
+    if rate is None:
+        rate = use_tax_rate(db)
+    return _q(_q(Decimal(str(amount or 0))) * Decimal(str(rate)))
 
 
 NO_USE_TAX_RATE = (
@@ -230,6 +236,8 @@ def use_tax_rate_warnings(db: Session, bill) -> list[str]:
     from app.models.items import Item
 
     for ln in bill.lines:
+        if ln.use_tax_rate:
+            continue  # accrued at the rate it was booked at
         item = db.get(Item, ln.item_id) if ln.item_id else None
         if item is not None and item.track_inventory:
             continue
@@ -246,12 +254,17 @@ def use_tax_rate_warnings(db: Session, bill) -> list[str]:
 
 
 def use_tax_lines(
-    db: Session, debit_line: dict, accrual: Decimal, job_id: Optional[int]
+    db: Session,
+    debit_line: dict,
+    accrual: Decimal,
+    job_id: Optional[int],
+    rate: Optional[Decimal] = None,
 ) -> list[dict]:
     """The two journal lines that accrue `accrual` of use tax on a purchase
     line: DR the line's own account and dimensions (`debit_line`, the line's
     cost debit), CR 2220 Use Tax Payable, both with the job. The memo ends
-    with the rate it was booked at. Nothing when there is no accrual."""
+    with the rate it was booked at (`rate`, else today's setting). Nothing
+    when there is no accrual."""
     if not accrual:
         return []
     from app.services.accounting import ensure_construction_accounts
@@ -261,7 +274,9 @@ def use_tax_lines(
     # each accrual was booked at, not today's setting.
     from app.services.estimating import fmt_pct
 
-    tag = f" ({fmt_pct(use_tax_rate(db) * 100)}%)"
+    if rate is None:
+        rate = use_tax_rate(db)
+    tag = f" ({fmt_pct(Decimal(str(rate)) * 100)}%)"
     memo = (
         f"Use tax - {debit_line.get('description') or 'materials'}"[: 200 - len(tag)]
         + tag

@@ -270,3 +270,235 @@ def test_a_delivery_is_capped_at_what_received_qty_holds(con, po, db_session):
     assert deliver(99999939.9999).status_code == 201
     po_now = con.get(f"/api/purchase-orders/{order['id']}").json()
     assert float(po_now["lines"][0]["received_qty"]) == 99999999.9999
+
+
+# ── 2. Use tax re-posts at the rate it was booked at ────────────────────────
+
+
+def _use_tax_job(client, db_session, seed_customer):
+    from app.models.accounts import Account
+
+    r = client.put(
+        "/api/settings",
+        json={"company_type": "construction", "default_tax_rate": "6.5"},
+    )
+    assert r.status_code == 200, r.text
+    assert client.post("/api/construction/setup").status_code == 200
+    job = _job(client, seed_customer.id, name="Clinic")
+    r = client.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={"sales_tax_treatment": "contractor_pays"},
+    )
+    assert r.status_code == 200, r.text
+    vendor = client.post("/api/vendors", json={"name": "Brick Co"}).json()
+    payable = db_session.query(Account).filter_by(name="Use Tax Payable").one()
+    return job, vendor, payable
+
+
+def _brick(job_id, desc="Brick", rate=4000, **extra):
+    return {
+        "description": desc,
+        "rate": rate,
+        "cost_type": "material",
+        "job_id": job_id,
+        **extra,
+    }
+
+
+def _accruals(db_session, payable_id, bill_id):
+    from app.models.bills import Bill
+    from app.models.transactions import TransactionLine
+
+    db_session.expire_all()
+    txn_id = db_session.get(Bill, bill_id).transaction_id
+    return [
+        (tl.credit, tl.description)
+        for tl in db_session.query(TransactionLine)
+        .filter_by(transaction_id=txn_id, account_id=payable_id)
+        .order_by(TransactionLine.id)
+    ]
+
+
+def _ut4(client, db_session, seed_customer):
+    """L bug 3's bill: UT-4 dated 2026-08-20, $4,000 of brick on a
+    contractor-pays job, 260.00 of use tax at 6.5%; then the Use tax rate
+    setting goes to 7."""
+    job, vendor, payable = _use_tax_job(client, db_session, seed_customer)
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": vendor["id"],
+            "bill_number": "UT-4",
+            "date": "2026-08-20",
+            "job_id": job["id"],
+            "lines": [_brick(job["id"])],
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    bill = r.json()
+    assert _accruals(db_session, payable.id, bill["id"]) == [
+        (Decimal("260.00"), "Use tax - Brick (6.5%)")
+    ]
+    assert client.put("/api/settings", json={"use_tax_rate": "7"}).status_code == 200
+    return job, bill, payable
+
+
+def test_a_description_edit_re_posts_use_tax_at_the_booked_rate(
+    client, db_session, seed_accounts, seed_customer
+):
+    """L bug 3: PUT /api/bills/{id} with only the line's description changed
+    re-booked the 8/20 accrual at today's 7% (280.00), and the Sales Tax
+    report row read rate 0.07."""
+    job, bill, payable = _ut4(client, db_session, seed_customer)
+    r = client.put(
+        f"/api/bills/{bill['id']}",
+        json={"lines": [_brick(job["id"], desc="Brick (corrected desc)")]},
+    )
+    assert r.status_code == 200, r.text
+    assert _accruals(db_session, payable.id, bill["id"]) == [
+        (Decimal("260.00"), "Use tax - Brick (corrected desc) (6.5%)")
+    ]
+    u = client.get(
+        "/api/reports/sales-tax?start_date=2026-08-01&end_date=2026-08-31"
+    ).json()["use_tax"]
+    assert [(i["rate"], i["amount"]) for i in u["items"]] == [(0.065, 260.0)]
+
+
+def test_a_bill_number_edit_re_posts_use_tax_at_the_booked_rate(
+    client, db_session, seed_accounts, seed_customer
+):
+    """M bug 4: PUT with only bill_number changed re-posted at 7%."""
+    job, bill, payable = _ut4(client, db_session, seed_customer)
+    r = client.put(f"/api/bills/{bill['id']}", json={"bill_number": "UT-4A"})
+    assert r.status_code == 200, r.text
+    assert _accruals(db_session, payable.id, bill["id"]) == [
+        (Decimal("260.00"), "Use tax - Brick (6.5%)")
+    ]
+
+
+def test_an_amount_change_keeps_the_rate_and_a_new_use_tax_line_takes_todays(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A line whose amount changes keeps its stored rate; only a line newly
+    marked for use tax accrues at today's setting."""
+    job, bill, payable = _ut4(client, db_session, seed_customer)
+    r = client.put(
+        f"/api/bills/{bill['id']}",
+        json={
+            "lines": [
+                _brick(job["id"], rate=5000),
+                _brick(
+                    job["id"], desc="Sand", rate=1000, cost_type="other", use_tax=True
+                ),
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert _accruals(db_session, payable.id, bill["id"]) == [
+        (Decimal("325.00"), "Use tax - Brick (6.5%)"),
+        (Decimal("70.00"), "Use tax - Sand (7%)"),
+    ]
+    # and both keep their own rate on the next edit, after the setting moves
+    assert client.put("/api/settings", json={"use_tax_rate": "8"}).status_code == 200
+    r = client.put(f"/api/bills/{bill['id']}", json={"bill_number": "UT-4B"})
+    assert r.status_code == 200, r.text
+    assert [a for a, _ in _accruals(db_session, payable.id, bill["id"])] == [
+        Decimal("325.00"),
+        Decimal("70.00"),
+    ]
+
+
+def test_a_void_after_an_edit_reverses_at_the_booked_rate(
+    client, db_session, seed_accounts, seed_customer
+):
+    job, bill, payable = _ut4(client, db_session, seed_customer)
+    r = client.put(f"/api/bills/{bill['id']}", json={"bill_number": "UT-4A"})
+    assert r.status_code == 200, r.text
+    assert client.post(f"/api/bills/{bill['id']}/void").status_code == 200
+    from app.models.transactions import TransactionLine
+
+    lines = db_session.query(TransactionLine).filter_by(account_id=payable.id).all()
+    assert sum((tl.credit - tl.debit for tl in lines), Decimal("0")) == 0
+    assert sorted(tl.debit for tl in lines if tl.debit) == [Decimal("260.00")]
+
+
+def test_a_bill_from_a_po_keeps_its_use_tax_rate_on_an_edit(
+    client, db_session, seed_accounts, seed_customer
+):
+    job, vendor, payable = _use_tax_job(client, db_session, seed_customer)
+    po = client.post(
+        "/api/purchase-orders",
+        json={
+            "vendor_id": vendor["id"],
+            "date": "2026-07-06",
+            "job_id": job["id"],
+            "lines": [_brick(job["id"], quantity=1, rate=2000)],
+        },
+    )
+    assert po.status_code == 201, po.text
+    r = client.post(f"/api/purchase-orders/{po.json()['id']}/convert-to-bill", json={})
+    assert r.status_code in (200, 201), r.text
+    bill_id = r.json()["bill_id"] if "bill_id" in r.json() else r.json()["id"]
+    assert client.put("/api/settings", json={"use_tax_rate": "7"}).status_code == 200
+    r = client.put(f"/api/bills/{bill_id}", json={"bill_number": "PO-B"})
+    assert r.status_code == 200, r.text
+    assert _accruals(db_session, payable.id, bill_id) == [
+        (Decimal("130.00"), "Use tax - Brick (6.5%)")
+    ]
+
+
+def test_the_migration_backfills_the_booked_rate_from_the_entry(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Bills booked before the column: each line named by a 2220 credit
+    takes the rate its memo ends with, else credit / amount."""
+    import importlib.util
+    from pathlib import Path
+
+    from app.models.bills import Bill, BillLine
+    from app.models.transactions import TransactionLine
+
+    job, bill, payable = _ut4(client, db_session, seed_customer)
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": bill["vendor_id"],
+            "bill_number": "UT-5",
+            "date": "2026-08-21",
+            "job_id": job["id"],
+            "lines": [
+                {"description": "Labor", "rate": 300, "cost_type": "labor"},
+                _brick(job["id"], desc="Block", rate=1000),
+            ],
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    second = r.json()
+    # the older memo had no rate on it: credit / amount
+    txn_id = db_session.get(Bill, second["id"]).transaction_id
+    for tl in db_session.query(TransactionLine).filter_by(
+        transaction_id=txn_id, account_id=payable.id
+    ):
+        tl.description = "Use tax - Block"
+    db_session.query(BillLine).update({BillLine.use_tax_rate: None})
+    db_session.commit()
+
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "migrations/versions/c7e4a9b2d1f5_bill_line_use_tax_rate.py"
+    )
+    spec = importlib.util.spec_from_file_location("ut_rate_migration", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    mod._backfill(db_session.connection())
+    db_session.commit()
+    db_session.expire_all()
+    rates = {
+        (ln.bill_id, ln.description): ln.use_tax_rate
+        for ln in db_session.query(BillLine)
+    }
+    assert rates == {
+        (bill["id"], "Brick"): Decimal("0.065"),
+        (second["id"], "Labor"): None,
+        (second["id"], "Block"): Decimal("0.07"),
+    }

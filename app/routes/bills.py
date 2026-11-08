@@ -51,6 +51,7 @@ from app.services.purchase_posting import (
     unit_cost_with_tax,
     use_tax_for,
     use_tax_lines,
+    use_tax_rate,
     use_tax_rate_warnings,
 )
 
@@ -193,11 +194,17 @@ def _post_bill_lines(
     txn_date,
     existing_transaction=None,
     retainage_held: Decimal = Decimal("0"),
+    booked_use_tax_rates=(),
 ):
     """Write the bill's lines, post its journal (DR each line's account or
     Inventory, CR Accounts Payable) and record its inventory receipts. Used
     by create and, with `existing_transaction`, by an edit that re-posts
-    the same journal (#225), so both post exactly the same way."""
+    the same journal (#225), so both post exactly the same way.
+
+    `booked_use_tax_rates` (an edit's): the use-tax rate each of the bill's
+    lines accrued at before the edit, by its place on the bill. A line keeps
+    the rate of the line it replaces; one that had none accrues at today's
+    setting (L bug 3, M bug 4)."""
     from app.services.currency import convert_lines
 
     # A missing Accounts Payable account is the first thing to say (#119),
@@ -278,28 +285,25 @@ def _post_bill_lines(
                 vendor.default_expense_account_id
             )
 
-        db.add(
-            BillLine(
-                bill_id=bill.id,
-                item_id=line_data.item_id,
-                account_id=posting_acct,
-                description=line_data.description,
-                quantity=line_data.quantity,
-                rate=line_data.rate,
-                amount=amt,
-                job_id=line_data.job_id,
-                class_id=line_data.class_id,
-                cost_code_id=line_data.cost_code_id,
-                cost_type=eff_cost_type,
-                purchase_order_line_id=getattr(
-                    line_data, "purchase_order_line_id", None
-                ),
-                function=line_data.function,
-                is_billable=line_data.is_billable,
-                use_tax=getattr(line_data, "use_tax", None),
-                line_order=i,
-            )
+        bill_line = BillLine(
+            bill_id=bill.id,
+            item_id=line_data.item_id,
+            account_id=posting_acct,
+            description=line_data.description,
+            quantity=line_data.quantity,
+            rate=line_data.rate,
+            amount=amt,
+            job_id=line_data.job_id,
+            class_id=line_data.class_id,
+            cost_code_id=line_data.cost_code_id,
+            cost_type=eff_cost_type,
+            purchase_order_line_id=getattr(line_data, "purchase_order_line_id", None),
+            function=line_data.function,
+            is_billable=line_data.is_billable,
+            use_tax=getattr(line_data, "use_tax", None),
+            line_order=i,
         )
+        db.add(bill_line)
 
         if amt > 0 and posting_acct:
             journal_lines.append(
@@ -324,6 +328,10 @@ def _post_bill_lines(
             # Use tax a "contractor pays" job owes on the line (construction).
             if not (item and item.track_inventory):
                 job_id = line_data.job_id or bill.job_id
+                booked = (
+                    booked_use_tax_rates[i] if i < len(booked_use_tax_rates) else None
+                )
+                ut_rate = booked if booked is not None else use_tax_rate(db)
                 accrual = use_tax_for(
                     db,
                     amount=amt,
@@ -331,9 +339,12 @@ def _post_bill_lines(
                     cost_type=eff_cost_type,
                     bill_taxed=tax_amount > 0,
                     use_tax=getattr(line_data, "use_tax", None),
+                    rate=ut_rate,
                 )
+                if accrual:
+                    bill_line.use_tax_rate = ut_rate
                 journal_lines.extend(
-                    use_tax_lines(db, journal_lines[-1], accrual, job_id)
+                    use_tax_lines(db, journal_lines[-1], accrual, job_id, ut_rate)
                 )
 
     # Credit AP for the net; any retainage held rides on Retainage Payable
@@ -895,6 +906,13 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         from app.routes.invoices.helpers import _reverse_and_delete_journal
         from app.services.inventory_hooks import reverse_receipts_for_bill
 
+        # the rate each line's use tax was booked at, by its place on the
+        # bill, before the lines are deleted: the re-post keeps it
+        booked_use_tax_rates = [
+            ln.use_tax_rate
+            for ln in sorted(bill.lines, key=lambda x: (x.line_order or 0, x.id))
+        ]
+
         # each old line leaves a DELETE event with its amounts (#289)
         audited_bulk_delete(db, db.query(BillLine).filter(BillLine.bill_id == bill.id))
         db.flush()
@@ -934,6 +952,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
             bill.date,
             existing_transaction=txn,
             retainage_held=retainage_held,
+            booked_use_tax_rates=booked_use_tax_rates,
         )
         db.flush()
         db.refresh(bill)
