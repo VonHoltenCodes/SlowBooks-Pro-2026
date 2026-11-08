@@ -334,6 +334,10 @@ const JobsPage = {
             <td><em>Budget not yet committed</em></td><td></td><td></td><td></td>
             <td class="amount">${JobsPage.money(t.uncommitted_budget)}</td>
             <td class="amount" style="${JobsPage.varColor({ revised: t.revised, variance: -t.uncommitted_budget })}">${JobsPage.money(-t.uncommitted_budget)}</td><td></td></tr>` : '';
+        const beforeRow = construction && t.cost_before_period ? `<tr title="Cost posted before the period: projected final cost is the whole job's">
+            <td><em>Cost before ${escapeHtml(tree.start_date || '')}</em></td><td></td><td></td><td></td>
+            <td class="amount">${JobsPage.money(t.cost_before_period)}</td>
+            <td class="amount">${JobsPage.money(-t.cost_before_period)}</td><td></td></tr>` : '';
         const typeRows = tree.types.map(ty => `<tr class="clickable" onclick="JobsPage.jumpTo('type:${ty.cost_type}')">
             <td>${escapeHtml(ty.name)}</td>
             <td class="amount">${JobsPage.money(ty.figures.revised)}</td>
@@ -371,7 +375,7 @@ const JobsPage = {
                     <h4 style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin:0 0 4px 0">By cost type — click a row to drill down</h4>
                     <div class="table-container"><table class="data-table" style="font-size:12px">
                         <thead><tr><th scope="col">Type</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th><th scope="col" class="amount">Actual</th><th scope="col" class="amount">Projected</th><th scope="col" class="amount">Variance</th><th scope="col" class="amount">% Used</th></tr></thead>
-                        <tbody>${typeRows || '<tr><td colspan="7" style="color:var(--text-muted)">Nothing budgeted or posted yet.</td></tr>'}${uncommittedRow}</tbody>
+                        <tbody>${typeRows || '<tr><td colspan="7" style="color:var(--text-muted)">Nothing budgeted or posted yet.</td></tr>'}${uncommittedRow}${beforeRow}</tbody>
                     </table></div>
                 </div>
                 <div style="font-size:13px">
@@ -434,6 +438,14 @@ const JobsPage = {
             body += `<tr title="Budget no cost or commitment has taken up yet, code by code: trades not yet bought"><td style="padding-left:8px"><em>Budget not yet committed</em></td>
                 <td></td><td></td><td></td><td></td><td></td><td class="amount">${JobsPage.money(unc)}</td>
                 <td class="amount" style="${JobsPage.varColor({ revised: tree.totals.revised, variance: -unc })}">${JobsPage.money(-unc)}</td><td></td><td></td><td></td></tr>`;
+        }
+        // on a dated tab, projected is the whole job's: the cost before the
+        // period is counted in it
+        const before = tree.totals.cost_before_period;
+        if (before) {
+            body += `<tr title="Cost posted before the period: projected final cost is the whole job's"><td style="padding-left:8px"><em>Cost before ${escapeHtml(tree.start_date || '')}</em></td>
+                <td></td><td></td><td></td><td></td><td></td><td class="amount">${JobsPage.money(before)}</td>
+                <td class="amount">${JobsPage.money(-before)}</td><td></td><td></td><td></td></tr>`;
         }
         const jl = tree.job_level_budget;
         if (jl.original || jl.changes || jl.est_revenue) {
@@ -1304,9 +1316,17 @@ const JobsPage = {
         try {
             const approved = await API.post(`/change-orders/${id}/approve`, { approved_on });
             toast('Change order approved');
-            for (const w of (approved && approved.warnings) || []) toast(w, 'warning');
-            closeModal();
+            const warnings = (approved && approved.warnings) || [];
             await JobsPage.setTab('changeorders');
+            // What the approval moved (a posted WIP month, a far-back date)
+            // stays on screen in the dialog until it is read, not a toast.
+            if (warnings.length) {
+                openModal('Change order approved', `<div id="co-approve-warnings">
+                    ${warnings.map(w => `<p class="report-warning" style="margin:0 0 8px;color:var(--text-danger)">${escapeHtml(w)}</p>`).join('')}
+                    <div class="form-actions"><button type="button" class="btn btn-primary" onclick="closeModal()">OK</button></div></div>`);
+            } else {
+                closeModal();
+            }
         } catch (err) { toast(err.message, 'error'); }
     },
     // Make a draft owner change order for the allowance's unspent amount

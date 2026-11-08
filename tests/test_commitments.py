@@ -432,6 +432,12 @@ def _accepted_two_package_estimate(client, customer_id, job_id):
     return pkg_c, pkg_e
 
 
+def _buyout(client, job_id):
+    """The job's buyout, which is construction mode's, as its report is."""
+    client.put("/api/settings", json={"company_type": "construction"})
+    return client.get(f"/api/jobs/{job_id}/buyout").json()
+
+
 def test_buyout_rows_and_totals(client, db_session, seed_accounts, seed_customer):
     job = _job(client, seed_customer.id)
     pkg_c, pkg_e = _accepted_two_package_estimate(client, seed_customer.id, job["id"])
@@ -468,7 +474,7 @@ def test_buyout_rows_and_totals(client, db_session, seed_accounts, seed_customer
         job_id=job["id"],
     )
 
-    data = client.get(f"/api/jobs/{job['id']}/buyout").json()
+    data = _buyout(client, job["id"])
     rows = {r["package_name"]: r for r in data["rows"]}
 
     assert rows["Concrete"]["bid_cost"] == 14000.0
@@ -778,7 +784,7 @@ def test_buyout_bought_is_the_pretax_subtotal(
         trade_package_id=pkg_c["id"],
         tax_rate=0.08,
     )
-    data = client.get(f"/api/jobs/{job['id']}/buyout").json()
+    data = _buyout(client, job["id"])
     row = next(r for r in data["rows"] if r["package_name"] == "Concrete")
     assert row["bought"] == 10000.0  # pre-tax, not 10,800
     assert row["commitments"][0]["subtotal"] == 10000.0

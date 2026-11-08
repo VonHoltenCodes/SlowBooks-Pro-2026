@@ -633,7 +633,8 @@ packages (**General conditions**, **Insurance**, **Bond**), so the table's bid
 total is the cost budget the accepted estimate locks (the Overview and Cost
 Detail budget). Packages bid but not yet bought show with nothing bought;
 commitments, changes and bills with no package gather under *Unassigned*. The
-Buyout Report carries the same two columns. `GET /api/jobs/{id}/buyout` is the data, and the seam the buyout
+Buyout Report carries the same two columns. `GET /api/jobs/{id}/buyout` is the data (construction mode only, 409
+elsewhere, as the Buyout Report is), and the seam the buyout
 report and job-cost-by-vendor (#556, see *Job reports* below) are built on.
 
 **Compliance flags.** Bills and Pay Bills carry each Sub vendor's paperwork —
@@ -758,7 +759,14 @@ date (given or defaulted) **earlier than the job's contract date**, since a WIP,
 pay application or report would show the change order before the contract
 existed. Approving with **no date** when the change order's own date is more
 than 30 days back takes effect that long ago; the response carries a `warning`
-saying so and the Approve dialog notes it under the date.
+saying so and the Approve dialog notes it under the date. Approving with an
+effective date **on or before a date a WIP entry is posted for** (given or
+defaulted) changes those schedules while the entries on the books stay as
+posted, so the response's `warnings` names each posted date ("…takes effect on
+2026-08-10, so it changes the WIP entries posted for 2026-08-31 and
+2026-09-30; void and re-post them on the WIP schedule.") and the dialog stays
+open with the sentences until OK. The WIP schedule flags the same entries
+(*Job reports*).
 Approving in a closed period is refused like a bill or a pay application there:
 403 with "Transaction date … is on or before the closing date (…). Modifications
 to closed periods are not allowed." (the closing-date password override works
@@ -1205,7 +1213,13 @@ branches carry cost only, and its *Revenue by section* table (and
 `revenue_sections` in the JSON, a grid of its own in the PDF and CSV) gives
 each section's budgeted cost, actual cost, budgeted revenue and actual
 revenue together, a sub-code rolling up to its section. A line or budget
-with no section (a markup line, unless one is set) reads under Unassigned. Because each
+with no section reads under Unassigned, except the **markups**: the budget
+spreads them over the sections by markup base (an accepted deduct alternate
+takes its negative share), so what the markup lines with no section bill is
+spread the same way: each section takes its budgeted markup in step with its
+own billing (budgeted markup × its actual revenue ÷ its budgeted revenue
+before markup), scaled so the sections take exactly what was billed. A
+section billed in full then reads its budgeted revenue, markups and all. Because each
 cost type has a default account, the P&L's cost lines (5100–5500) and the job
 reports' cost types agree for a costed line that names no account of its own.
 
@@ -1413,12 +1427,17 @@ loss provision are left out, and so is it from the adjusting entry, until
 its cost to date reaches the contract (then it reads 100% complete, and the loss
 is the true loss, with no extra provision). Every figure reads **as of the date**: cost to date and
 posted revenue to that day, billing and retainage from the applications approved
-by then, the revised contract with the change orders in effect by then, and the
+by then, the revised contract with the change orders that stood approved on
+the day (one voided since still counts; one approved later does not: the
+Change Order Log's rule), and the
 estimated total cost from the budget with the same change orders (so the
 schedule reproduces the books on an earlier close, and a month already posted
 reads the same entry after a later change order). Billed to date is the sum of
 the approved pay applications' completed-to-date when the job has one by the date
 (else the posted revenue carrying the job — the `billed_basis` column says which).
+A job whose **contract date** is after the as-of date had no contract then and
+is not on that schedule (nor in its entry). Each row's `status` is the one the
+job had on the day: a job closed after it reads in progress.
 
 **Gross profit to date** is earned revenue less cost to date; **backlog** is the
 revised contract less earned revenue (the work still to earn); **estimated gross
@@ -1495,7 +1514,14 @@ as do Budget vs Actual, Cost to Complete, Job Cost by Vendor and a cost
 allocation by revenue or cost, so the schedule reads the same after posting as
 before. The schedule says when an entry is posted for the date
 (`adjusting_entry.posted` and `posted_entry`: the journal's id, date, who posted
-it and the reversal's id and date).
+it and the reversal's id and date). Once posted, the entry the schedule shows
+(on screen, in the JSON, PDF and CSV) is **the posted one**, line for line;
+the schedule's own figures ride under `adjusting_entry.computed`. When they no
+longer match (something dated on or before the day changed after the post: a
+change order approved back-dated, a late bill), `posted_differs` is true and a
+sentence in `warnings` (`posted_warning`), and on screen beside Void, gives
+the posted and the current over-billings, under-billings and loss provision
+and says to void the posted entry and post again.
 
 **Posting the same date again is refused** (409) while an entry for it stands,
 two posts sent at the same moment included: Post first writes a row keyed on the
@@ -1569,8 +1595,13 @@ kind, status, title, date, funding, cost, markup, sell, approved and voided
 dates, source PCO and (for a sub CO) its commitment — with the running approved
 total (the change orders approved by `as_of`) and the contract it builds
 (original + approved changes = revised), the pending total (as of today) and
-counts by status **as of the date** (one approved or voided after it counts as
-it stood then). The JSON rows carry `approved_on` and `voided_on`; the CSV puts
+counts by status **as of the date**. **A change order counts as of a day in the
+state it had that day**: approved on it when it took effect by then
+(`approved_on` on or before) and was not voided until after; one approved or
+voided after the day reads pending. The status column, the counts, the running
+total and the contract all use that rule (and so does the WIP schedule, its
+budget included), and a change order dated after the day is not on that log.
+The JSON rows carry `approved_on`, `voided_on` and `status_today`; the CSV puts
 every change order under one header with those columns, the source PCO and the
 commitment, then each job's contract (original, approved changes, revised)
 under a header of its own.
@@ -1634,7 +1665,10 @@ not yet paid, or paid after the date, is not listed, and *not required*,
 Sub are read. Nothing here blocks a payment. PDF and CSV like the others.
 
 The existing **Job Profitability** and **Job Budget vs Actual** reports gained
-PDF and CSV routes, so every contractor report exports the same way.
+PDF and CSV routes, so every contractor report exports the same way. In
+construction mode both read each job's **contract as of their end date** (the
+WIP schedule's revised contract on that day: a change order approved later is
+out, one voided since is back in); with no end date, today's.
 
 ## The dashboard
 
@@ -1674,9 +1708,12 @@ The Overview tab of a construction job:
   trade bid as subcontract and bought as material nets within its code, as it
   does in the cost-to-complete forecast. Budget with no cost code shares one
   cell with the cost and commitments that have none. The figure is job to
-  date (a cost tree dated from a start date leaves it out; one with an end date
-  reads the change orders and commitments as of it) and a job closed by then
-  has none. A code with a negative budget (a deduct alternate) takes it off the
+  date (one with an end date reads the change orders and commitments as of
+  it) and a job closed by then has none. Projected final cost is the whole
+  job's, so a cost tree or Budget vs Actual dated from a start date counts it
+  too, and the cost posted before the start (`cost_before_period`, a row of
+  its own beside Budget not yet committed): the Overview, Job Budget vs Actual
+  (its PDF and CSV) and the cost tree read the same Projected and Variance. A code with a negative budget (a deduct alternate) takes it off the
   others' budget not yet committed, never below zero. **Budget not yet committed** is its own tile, a row under the
   cost-type table and a row on Cost Detail (and in its PDF and CSV), so the
   Projected column foots to the total; **Variance** is the budget less the
@@ -1743,10 +1780,15 @@ answer 409 outside construction mode, as field tickets do. (The WIP post and voi
 routes have their own rule.) **Job Cost by Vendor** stays open to every company.
 
 **A filter the route does not read is refused, not dropped.** `GET
-/api/field-tickets`, `/api/estimates`, the Retainage, Sub Compliance, Field
-Ticket Log, Cost to Complete, Cost-to-Complete Forecast, Commitment Status,
-Change Order Log, Buyout and Job Cost by Vendor reports (and their PDF, CSV and
-print), and `POST
+/api/field-tickets`, `/api/field-tickets/purchase-orders`, `/api/estimates`,
+`/api/change-orders`, `/api/pay-applications`, `/api/jobs/{id}/cost-tree`
+(and its PDF and CSV), `/api/jobs/budget-vs-actual`, the WIP Schedule,
+Retainage, Sub Compliance, Field Ticket Log, Cost to Complete,
+Cost-to-Complete Forecast, Commitment Status, Change Order Log, Buyout, Job
+Cost by Vendor, P&L by Job, Job Profitability and Job Budget vs Actual
+reports (and their PDF, CSV and print), the A/R and A/P Agings and their CSV
+(in every mode: `customer_id` or `vendor_id` there is refused too, since the
+aging is always the whole company), and `POST
 /reports/wip-schedule/post` and `/void` answer 422 with a sentence naming the
 accepted parameters when a request carries any other (`jobid`, `asof`,
 `window_days`), so a misspelling cannot return the whole list or post the whole

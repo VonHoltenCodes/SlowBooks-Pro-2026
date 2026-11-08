@@ -83,6 +83,20 @@ def posted_entry(db: Session, as_of: date):
     return None
 
 
+def posted_dates_from(db: Session, start: date) -> list[date]:
+    """The dates on or after `start` a WIP entry stands for (posted, not
+    voided), oldest first."""
+    out = []
+    for txn in (
+        db.query(Transaction)
+        .filter(Transaction.source_type == SOURCE_ENTRY, Transaction.date >= start)
+        .order_by(Transaction.date, Transaction.id)
+    ):
+        if txn.date not in out and not _voided(db, txn):
+            out.append(txn.date)
+    return out
+
+
 def posted_entry_info(db: Session, as_of: date):
     """What the schedule says about a posted entry for `as_of` (None if none)."""
     found = posted_entry(db, as_of)

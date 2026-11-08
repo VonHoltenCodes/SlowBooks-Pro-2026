@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.models.transactions import LEDGER_BASIS_OPTION, READ_ALL
 from app.database import get_db
-from app.routes._helpers import reject_null_updates
+from app.routes._helpers import refuse_unknown_filters, reject_null_updates
 from app.models.accounts import Account, AccountType
 from app.models.contacts import Customer
 from app.models.cost_codes import CostCode
@@ -136,7 +136,7 @@ def jobs_profitability(
     return rows
 
 
-@router.get("/budget-vs-actual")
+@router.get("/budget-vs-actual", dependencies=[Depends(refuse_unknown_filters)])
 def jobs_budget_vs_actual(
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),
@@ -203,7 +203,7 @@ def get_job_transactions(
     return job_transactions(db, job_id, start_date, end_date)
 
 
-@router.get("/{job_id}/cost-tree")
+@router.get("/{job_id}/cost-tree", dependencies=[Depends(refuse_unknown_filters)])
 def get_job_cost_tree(
     job_id: int,
     start_date: Optional[date] = Query(default=None),
@@ -221,7 +221,7 @@ def _cost_tree_filename(job_id: int, start_date, end_date, ext: str) -> str:
     return f"job-cost-detail_{job_id}{dates or '_job-to-date'}.{ext}"
 
 
-@router.get("/{job_id}/cost-tree/pdf")
+@router.get("/{job_id}/cost-tree/pdf", dependencies=[Depends(refuse_unknown_filters)])
 def get_job_cost_tree_pdf(
     job_id: int,
     start_date: Optional[date] = Query(default=None),
@@ -249,7 +249,7 @@ def get_job_cost_tree_pdf(
     )
 
 
-@router.get("/{job_id}/cost-tree/csv")
+@router.get("/{job_id}/cost-tree/csv", dependencies=[Depends(refuse_unknown_filters)])
 def get_job_cost_tree_csv(
     job_id: int,
     request: Request,
@@ -839,9 +839,12 @@ def save_cost_to_complete_forecast(
 def get_buyout(job_id: int, db: Session = Depends(get_db)):
     """Bid vs buyout per trade package (#553): the bid cost from the accepted
     estimate, what has been bought on the job, the variance, and the
-    commitments behind each package with their compliance flags."""
+    commitments behind each package with their compliance flags.
+    Construction mode only, as the Report Center's Buyout Report is."""
+    from app.routes.reports.construction import _construction_only
     from app.services.buyout import job_buyout
 
+    _construction_only(db)
     job = _get(db, job_id)
     return job_buyout(db, job)
 

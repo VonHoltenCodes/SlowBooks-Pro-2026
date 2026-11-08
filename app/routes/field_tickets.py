@@ -146,7 +146,7 @@ def list_field_tickets(
     return [_out(db, t) for t in tickets]
 
 
-@router.get("/purchase-orders")
+@router.get("/purchase-orders", dependencies=[Depends(refuse_unknown_filters)])
 def job_purchase_orders(job_id: int = Query(...), db: Session = Depends(get_db)):
     """The job's purchase orders and subcontracts a ticket can point at (not
     drafts), each with its lines: ordered, received and billed to date. The

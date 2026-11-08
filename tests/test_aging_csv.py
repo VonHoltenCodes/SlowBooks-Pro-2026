@@ -144,32 +144,41 @@ def test_opened_from_a_customer_or_vendor_page_the_file_is_the_whole_company(
     client, seed_accounts, db_session, customers
 ):
     # The screen shows the whole company with that row highlighted, so the
-    # file is the same: no narrowing, no party in the file name.
+    # file is the same: no narrowing, no party in the file name. The page
+    # asks for the file by date alone; a customer_id or vendor_id on the
+    # request is a filter the aging does not read, so it is refused with
+    # the one it does (skeptic round 2), not dropped in silence.
     acme, muller = customers
     _invoice(client, acme, 400)
     _invoice(client, muller, 935)
-    whole = _csv(client, f"/api/reports/ar-aging/csv?as_of_date={AS_OF}")
-    r = _csv(client, f"/api/reports/ar-aging/csv?as_of_date={AS_OF}&customer_id={acme}")
-    assert r.text == whole.text
+    r = _csv(client, f"/api/reports/ar-aging/csv?as_of_date={AS_OF}")
     assert r.headers["content-disposition"].endswith(
         "filename*=UTF-8''ar-aging_2026-09-30.csv"
     )
     names = [row[0] for row in rows_of(r.text.lstrip(BOM))]
     assert names[0] == "Customer" and names[-1] == "Total"
     assert "Acme Diner" in names and len(names) > 3
+    narrowed = client.get(
+        f"/api/reports/ar-aging/csv?as_of_date={AS_OF}&customer_id={acme}"
+    )
+    assert narrowed.status_code == 422
+    assert narrowed.json()["detail"] == (
+        "customer_id is not a filter here. This request accepts: as_of_date."
+    )
 
     cascade = _bill(db_session, "Cascade Flour Mill", "777.24", 75)
     _bill(db_session, "Puget Dairy", "120.00", 10)
-    whole = _csv(client, f"/api/reports/ap-aging/csv?as_of_date={AS_OF}")
-    r = _csv(
-        client, f"/api/reports/ap-aging/csv?as_of_date={AS_OF}&vendor_id={cascade}"
-    )
-    assert r.text == whole.text
+    r = _csv(client, f"/api/reports/ap-aging/csv?as_of_date={AS_OF}")
     assert r.headers["content-disposition"].endswith(
         "filename*=UTF-8''ap-aging_2026-09-30.csv"
     )
     names = [row[0] for row in rows_of(r.text.lstrip(BOM))]
     assert "Cascade Flour Mill" in names and "Puget Dairy" in names
+    narrowed = client.get(
+        f"/api/reports/ap-aging/csv?as_of_date={AS_OF}&vendor_id={cascade}"
+    )
+    assert narrowed.status_code == 422
+    assert "vendor_id is not a filter here" in narrowed.json()["detail"]
 
 
 def test_the_desktop_shell_gets_the_file_inline(client, seed_accounts):

@@ -501,6 +501,8 @@ def test_sub_co_grows_a_partial_commitment_and_buyout(
     assert fresh["status"] == "partial"
     assert float(fresh["total"]) == 6500.0
 
+    # the job's buyout is construction mode's, as its report is
+    client.put("/api/settings", json={"company_type": "construction"})
     buyout = client.get(f"/api/jobs/{job['id']}/buyout").json()
     row = next(r for r in buyout["rows"] if r["package_id"] == pkg["id"])
     assert row["bought"] == 6500.0

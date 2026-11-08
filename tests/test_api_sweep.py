@@ -63,4 +63,9 @@ def test_get_with_one_id(client, seed_accounts, seed_customer, path, params):
     concrete = path.replace("{" + params[0] + "}", "1")
     resp = client.get(concrete)
     assert resp.status_code < 500, f"{concrete}: {resp.status_code} {resp.text[:200]}"
+    if resp.status_code == 409:
+        # a construction-mode route on these (Business) books: the gate's
+        # sentence, nothing else
+        assert "part of construction mode" in resp.json()["detail"], concrete
+        return
     assert resp.status_code in (200, 400, 404, 422), f"{concrete}: {resp.status_code}"

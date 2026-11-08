@@ -41,6 +41,7 @@ from app.services.change_orders import (
     recompute,
     refuse_with_approved_sub,
     back_dating_warnings,
+    posted_wip_warnings,
     check_approved_on,
     resolve_approved_on,
     reverse_change_order,
@@ -51,6 +52,7 @@ from app.services.numbering import next_change_order_number
 from app.services.pdf_service import generate_change_order_pdf
 from app.services.request_utils import content_disposition
 from app.services.settings_service import get_all_settings as get_settings
+from app.routes._helpers import refuse_unknown_filters
 
 router = APIRouter(prefix="/api/change-orders", tags=["change-orders"])
 
@@ -207,7 +209,11 @@ def _copy_lines(
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("", response_model=list[ChangeOrderOut])
+@router.get(
+    "",
+    response_model=list[ChangeOrderOut],
+    dependencies=[Depends(refuse_unknown_filters)],
+)
 def list_change_orders(
     job_id: int = Query(...),
     history: bool = Query(False),
@@ -401,7 +407,7 @@ def approve_change_order(
     db.commit()
     db.refresh(co)
     out = _co_out(db, co)
-    out.warnings = back_dating_warnings(co, given, on)
+    out.warnings = back_dating_warnings(co, given, on) + posted_wip_warnings(db, co, on)
     return out
 
 

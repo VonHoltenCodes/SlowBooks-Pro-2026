@@ -25,6 +25,7 @@ from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
 from app.routes._roles import is_admin
 from app.services.email_errors import where_to_see_why
+from app.routes._helpers import refuse_unknown_filters
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,7 @@ def _customer_labels(db: Session) -> dict[int, str]:
     }
 
 
-@router.get("/ar-aging")
+@router.get("/ar-aging", dependencies=[Depends(refuse_unknown_filters)])
 def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
     """What each customer owes, by age, in home currency — and net of the
     credits they hold, so the total is what account 1100 says.
@@ -75,7 +76,7 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
     return ar_aging_report(db, as_of_date or date.today())
 
 
-@router.get("/ar-aging/csv")
+@router.get("/ar-aging/csv", dependencies=[Depends(refuse_unknown_filters)])
 def ar_aging_csv_route(
     request: Request,
     as_of_date: date = Query(default=None),

@@ -112,7 +112,10 @@ _CLOSED_Q = Annotated[bool, Query(description="Include closed jobs")]
 # ── 1. WIP schedule ─────────────────────────────────────────────────────────
 
 
-@router.get("/wip-schedule", dependencies=[Depends(_construction_only)])
+@router.get(
+    "/wip-schedule",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def wip_schedule_route(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -359,7 +362,10 @@ def _grid_csv(data: dict, company: str, report: str, period: str, extra=None) ->
     return out.getvalue()
 
 
-@router.get("/wip-schedule/pdf", dependencies=[Depends(_construction_only)])
+@router.get(
+    "/wip-schedule/pdf",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def wip_schedule_pdf(
     as_of: date = Query(default=None),
     db: Session = Depends(get_db),
@@ -377,7 +383,10 @@ def wip_schedule_pdf(
     )
 
 
-@router.get("/wip-schedule/csv", dependencies=[Depends(_construction_only)])
+@router.get(
+    "/wip-schedule/csv",
+    dependencies=[Depends(refuse_unknown_filters), Depends(_construction_only)],
+)
 def wip_schedule_csv(
     request: Request,
     as_of: date = Query(default=None),
@@ -1276,7 +1285,7 @@ def _job_profitability_grid(data: dict) -> dict:
     }
 
 
-@router.get("/job-profitability/pdf")
+@router.get("/job-profitability/pdf", dependencies=[Depends(refuse_unknown_filters)])
 def job_profitability_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -1318,7 +1327,7 @@ def job_profitability_pdf(
     )
 
 
-@router.get("/job-profitability/csv")
+@router.get("/job-profitability/csv", dependencies=[Depends(refuse_unknown_filters)])
 def job_profitability_csv(
     request: Request,
     start_date: date = Query(default=None),
@@ -1390,7 +1399,7 @@ def _bva_rows(db, start_date, end_date, customer_id=None, include_inactive=False
     )
 
 
-@router.get("/job-budget-vs-actual/pdf")
+@router.get("/job-budget-vs-actual/pdf", dependencies=[Depends(refuse_unknown_filters)])
 def job_budget_vs_actual_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -1440,7 +1449,7 @@ def job_budget_vs_actual_pdf(
     )
 
 
-@router.get("/job-budget-vs-actual/csv")
+@router.get("/job-budget-vs-actual/csv", dependencies=[Depends(refuse_unknown_filters)])
 def job_budget_vs_actual_csv(
     request: Request,
     start_date: date = Query(default=None),
@@ -1586,6 +1595,21 @@ def _cost_tree_rows(tree: dict, opened=None) -> list[dict]:
                 "label": "Budget not yet committed",
                 "depth": 0,
                 "figures": _uncommitted_figures(extra),
+            }
+        )
+    before = tree["totals"].get("cost_before_period")
+    if before:
+        # a dated tree's projected is the whole job's: the cost before the
+        # period is in it, on a row of its own
+        rows.append(
+            {
+                "kind": "before",
+                "cost_type": "",
+                "code": "",
+                "name": f"Cost before {tree['start_date']}",
+                "label": f"Cost before {tree['start_date']}",
+                "depth": 0,
+                "figures": _uncommitted_figures(before),
             }
         )
     jl = tree["job_level_budget"]
