@@ -114,6 +114,12 @@ SECTIONS = (
     ("31 60 00", "Special Foundations and Load-Bearing Elements"),
     ("32 10 00", "Bases, Ballasts, and Paving"),
     ("32 30 00", "Site Improvements"),
+    ("32 31 00", "Fences and Gates"),
+    ("32 31 11", "Gate Operators"),
+    ("32 31 13", "Chain Link Fences and Gates"),
+    ("32 31 19", "Decorative Metal Fences and Gates"),
+    ("32 31 23", "Plastic Fences and Gates"),
+    ("32 31 29", "Wood Fences and Gates"),
     ("32 90 00", "Planting"),
     ("33 10 00", "Water Utilities"),
     ("33 30 00", "Sanitary Sewerage Utilities"),
@@ -161,6 +167,10 @@ TRADE_PACKAGES = (
     ("Low Voltage and Life Safety", ("27 10 00", "28 10 00", "28 46 00")),
     ("Earthwork", ("31 10 00", "31 20 00", "31 60 00")),
     ("Paving and Site Improvements", ("32 10 00", "32 30 00")),
+    (
+        "Fences and Gates",
+        ("32 31 00", "32 31 11", "32 31 13", "32 31 19", "32 31 23", "32 31 29"),
+    ),
     ("Landscaping", ("32 90 00",)),
     ("Site Utilities", ("33 10 00", "33 30 00", "33 40 00")),
 )

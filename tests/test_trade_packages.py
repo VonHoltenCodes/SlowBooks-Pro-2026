@@ -119,3 +119,23 @@ def test_setup_maps_only_the_sections_present(client, seed_accounts):
     assert {s["code"] for s in pkgs["Concrete"]["sections"]} == {"03 30 00"}
     # a package whose sections the chart lacks seeds empty, not errored
     assert pkgs["HVAC"]["sections"] == []
+
+
+def test_fences_and_gates_ship_as_sections_and_a_package(client, seed_accounts):
+    # a fence sub is a common trade: its sections sit under division 32 and
+    # its own package bids them
+    client.post("/api/construction/setup")
+    codes = {c["code"]: c for c in client.get("/api/cost-codes").json()}
+    fence = codes["32 31 00"]
+    assert fence["name"] == "Fences and Gates"
+    assert fence["level"] == "section" and fence["parent_code"] == "32"
+    assert codes["32 31 29"]["name"] == "Wood Fences and Gates"
+    pkgs = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {
+        "32 31 00",
+        "32 31 11",
+        "32 31 13",
+        "32 31 19",
+        "32 31 23",
+        "32 31 29",
+    }
