@@ -4,7 +4,7 @@ pay application's contract sum read; a closed period refuses an approval; an
 allowance-funded CO draws the allowance's budget down instead of adding to it;
 and "return unspent allowance" leaves the allowance with nothing to bill."""
 
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from app.models.cost_codes import CostCode
@@ -82,7 +82,12 @@ def test_approve_defaults_to_the_change_orders_own_date(client, seed_customer):
     r = _approve(client, co["id"])
     assert r.status_code == 200, r.text
     assert r.json()["approved_on"] == "2026-08-03"
-    assert r.json()["approved_at"][:10] == date.today().isoformat()  # the click
+    # the click, stamped in UTC (it can be tomorrow's date there in the evening)
+    clicked = r.json()["approved_at"][:10]
+    assert clicked in {
+        date.today().isoformat(),
+        datetime.now(timezone.utc).date().isoformat(),
+    }
 
 
 def test_approve_takes_a_date_and_falls_back_to_today(client, seed_customer):
