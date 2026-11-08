@@ -300,21 +300,13 @@ def test_each_line_credits_its_revenue_account_with_job_and_code(
     # nothing to 4000 Service Income any more
     assert "4000" not in by_number
 
-    # revenue by section reaches the job cost tree
+    # revenue by section reaches the job cost tree (by section, not under a
+    # cost type: a pay application's revenue has none)
     tree = client.get(f"/api/jobs/{job['id']}/cost-tree").json()
-    nodes = [n for t in tree["types"] for n in t["codes"]]
-
-    def find(ns):
-        for n in ns:
-            if n["id"] == conc["id"]:
-                return n
-            hit = find(n["children"])
-            if hit:
-                return hit
-        return None
-
-    node = find(nodes)
-    assert node is not None and node["figures"]["act_revenue"] == 20000.0
+    by_section = {r["cost_code_id"]: r for r in tree["revenue_sections"]}
+    assert by_section[conc["id"]]["act_revenue"] == 20000.0
+    assert by_section[None]["act_revenue"] == 10000.0  # the line with no section
+    assert tree["totals"]["act_revenue"] == 30000.0
 
 
 def test_put_sov_refuses_a_revenue_account_that_is_not_income(

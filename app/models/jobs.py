@@ -103,6 +103,9 @@ class Job(Base):
     contract_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )
+    # The day the job went to Closed (cleared when it reopens), so a report
+    # run back-dated to before it reads the job as it was then: still open.
+    closed_on = Column(Date, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(

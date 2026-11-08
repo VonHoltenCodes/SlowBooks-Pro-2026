@@ -575,10 +575,14 @@ yet in the ledger". Beside it the job now carries **committed total** (the
 whole of every issued commitment) and **billed to date** (what has been billed
 against them), shown as tiles on the job Overview (construction mode) and in the
 cost-tree totals; the Overview's "Billed to date (subs)" is the sub/supplier
-side and is distinct from the Contract tab's owner "Billed to date". Both are
-whole-commitment figures — a commitment has no period — so on a date-ranged
-cost tree they are all-time (the response flags this with
-`commitments_all_time`), unlike the period-scoped actuals beside them.
+side and is distinct from the Contract tab's owner "Billed to date". A
+contractor's cost tree, Job Budget vs Actual and Cost to Complete read all
+three **as of the end date**, as Commitment Status does that day: a commitment
+dated by then, a sub change order's lines once it is in effect, billed less the
+linked bill lines dated after it, and a closed commitment still open when a
+bill after the date closed it (`commitments_all_time` is then false). A
+Business or Nonprofit company's are whole-commitment figures on every date, as
+before (`commitments_all_time` true).
 
 **Issuing a commitment.** A new commitment is a **draft**, and a draft is in no
 Buyout, committed or commitment-status figure. **Issue** (on the Purchase
@@ -759,6 +763,12 @@ approve click.
   schedule is mixed** or taxes nothing. So a change order on exempt work
   (electrical on a bid that taxes only materials) bills no tax; tick its Tax
   box on the Contract tab's grid if it should.
+  Every kind of change order writes **rows of its own** (one per code and cost
+  type, linked by `change_order_id`), and every report run as of a date takes
+  only the rows of the change orders **in effect by then** (their approved-on
+  date, the day the revenue side reads too): the WIP's estimated total cost,
+  Budget vs Actual, the cost tree, Cost to Complete and the forecast. So a
+  month already posted reproduces its entry after a later change order.
 - *Owner CO, contingency-funded* — the contract is unchanged; the budget rows
   carry the **cost with no revenue** (the contract already holds the
   contingency money); the draw counts against the contract's contingency
@@ -819,6 +829,13 @@ its markup is set to 0, and it leaves the allowance line itself untouched; use
 Because the budget key includes the row's source, a change-order budget row
 sits beside an estimate-locked or manual row on the same code and type — the
 job-cost tree reads one under **Original** and the other under **Changes**.
+A change order's own rows are keyed on the change order, so an allowance draw
+and a later return of the same allowance are two rows, each in effect from its
+own date. Books from before the link had one shared change row per code and
+type; upgrading splits a shared row into one row per change order when the
+approved change orders' own figures add up to it to the cent, and leaves it
+shared (counted on every date, as before) when they do not, as when the
+allowance cell is no longer the largest row on its code.
 
 A change order's figures **freeze** when it is approved: the cost, sell and
 the effective markup each line carried are stored, so changing the job's
@@ -962,8 +979,8 @@ the net (total − retainage held this period + retainage released), DR
 **Retainage Receivable** (1150) for the retainage held, CR 1150 for any
 released, CR each line's **revenue account** (its SOV line's, else 4050
 Contract Revenue) with the job and the line's **cost code**, CR sales tax as
-any invoice. Revenue by section then shows in the job cost tree's actual
-revenue, Job Budget vs Actual and P&L by Job. Sales tax is **on by
+any invoice. Revenue by section then shows in the job cost tree's *Revenue
+by section* table (beside each section's cost) and P&L by Job. Sales tax is **on by
 default** and can be switched off per application (the *Charge tax* box); it is
 charged on the work billed this period **on the taxable SOV lines** (a line
 whose Tax box is off bills untaxed, and the invoice line says so; a job whose
@@ -1140,7 +1157,7 @@ carries the cost code.
 | **Estimate accepted** | — | — | No entry. Seeds and locks the job budget (cost per section and cost type, revenue spread pro rata so it foots to the bid). |
 | **Contract built / schedule of values saved** | — | — | No entry. Each SOV line carries its section, its revenue account (4050 Contract Revenue unless changed) and its Tax box. |
 | **Owner deposit received** | the bank account chosen | 2210 Customer Deposits (job) | Held until a pay application applies it. |
-| **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, that section's revenue account else 4050, taxed as that section is; see *Change orders*); every kind writes budget rows. |
+| **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, that section's revenue account else 4050, taxed as that section is; see *Change orders*); every kind writes budget rows of its own, in effect from its approved-on date (void deletes them). |
 | **Commitment issued; sub change order approved** | — | — | No entry. Committed cost on the job, by section and cost type. |
 | **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released (job); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines (none on a *contractor pays* job) | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. **Stored materials** are revenue the period they are billed (no stored-material asset; the WIP entry adjusts any over-billing) and taxed with their line on a *charge the owner* job. |
 | … with a deposit applied | 2210 Customer Deposits | 1100 Accounts Receivable | A payment from the deposit, applied to the application's invoice. |
@@ -1155,12 +1172,18 @@ carries the cost code.
 | **Sales tax paid** | 2200 Sales Tax Payable | the bank | |
 | **Material slip posted** (field ticket) | the line's cost account (material type; job, section) at the item's average cost | the item's inventory asset account | A Job Cost Entry; a return slip is the reverse, and a void reverses at the booked cost. T&M and delivery tickets post nothing. |
 | **Use tax paid** (a check or bill to the tax agency) | 2220 Use Tax Payable | the bank (or A/P) | The Sales Tax report's Use tax section shows it as paid. |
+| **WIP adjusting entry posted** (Post on the WIP schedule) | 1360 Costs and Estimated Earnings in Excess of Billings for an under-billing (job); 4060 Contract Revenue – WIP Adjustment when over-billed (job); 5600 Loss on Uncompleted Contracts for a loss provision (job) | 2060 Billings in Excess of Costs and Estimated Earnings for an over-billing (job); 4060 when under-billed (job); 2070 Provision for Loss on Uncompleted Contracts (job) | Dated the as-of date, reversed the next day. Each line carries its job, so P&L by Job and Job Profitability show each job's adjustment and its gross profit there ties to the WIP's gross profit to date (less any loss provision). The WIP's own inputs, the cost tree, Budget vs Actual, Cost to Complete and Job Cost by Vendor leave it out. |
 | **Construction in Progress** | — | — | 1350 takes nothing on its own: job cost posts to 5100–5500 and the WIP entry carries over- and under-billing. A company that capitalises cost until billing books it by journal entry. |
 
 Because each pay-application line credits its own revenue account with its
 section, revenue by section appears beside cost by section in the job cost
-tree (actual revenue), Job Budget vs Actual and P&L by Job; a line with no
-section (a markup line, unless one is set) reads under "Other". Because each
+tree and P&L by Job. A pay application's revenue has no cost type, so the
+cost tree compares revenue **per section, across cost types**: its type
+branches carry cost only, and its *Revenue by section* table (and
+`revenue_sections` in the JSON, a grid of its own in the PDF and CSV) gives
+each section's budgeted cost, actual cost, budgeted revenue and actual
+revenue together, a sub-code rolling up to its section. A line or budget
+with no section (a markup line, unless one is set) reads under Unassigned. Because each
 cost type has a default account, the P&L's cost lines (5100–5500) and the job
 reports' cost types agree for a costed line that names no account of its own.
 
@@ -1337,7 +1360,10 @@ billing** (earned − billed, an asset — costs and estimated earnings in exces
 billings) is the difference. The **estimated total cost is actual cost plus the
 cost-to-complete forecast** (below), so a job past its budget with work still to
 do reads under 100%; with no forecast entered the default is the section's
-budget − actual, floored at zero (cost types net within a section). A job
+budget − actual, floored at zero (cost types net within a section). An accepted
+**deduct alternate** whose section has nothing else to deduct from is a
+negative budget: it takes its amount off the cost still to come elsewhere, so
+it adds no estimated cost and reads no variance (see the forecast below). A job
 with no budget and no forecast has nothing to measure against, so it earns
 nothing — and a budget written only by change orders does not count as one (a
 hand-typed SOV with one owner change order is still unmeasured): it is listed
@@ -1347,8 +1373,10 @@ loss provision are left out, and so is it from the adjusting entry, until
 its cost to date reaches the contract (then it reads 100% complete, and the loss
 is the true loss, with no extra provision). Every figure reads **as of the date**: cost to date and
 posted revenue to that day, billing and retainage from the applications approved
-by then, and the revised contract with the change orders in effect by then (so the
-schedule reproduces the books on an earlier close). Billed to date is the sum of
+by then, the revised contract with the change orders in effect by then, and the
+estimated total cost from the budget with the same change orders (so the
+schedule reproduces the books on an earlier close, and a month already posted
+reads the same entry after a later change order). Billed to date is the sum of
 the approved pay applications' completed-to-date when the job has one by the date
 (else the posted revenue carrying the job — the `billed_basis` column says which).
 
@@ -1361,7 +1389,12 @@ wide dialog, since its columns don't fit a narrow one.
 **A closed job is finished.** A job whose status is Closed reads 100% complete
 with no cost to complete, whatever its budget: earned is the revised contract,
 and any difference from billing is over or under billing. Closed jobs are left
-out unless *include closed* (or the status filter) asks for them.
+out unless *include closed* (or the status filter) asks for them. Closing is
+read **as of the date**: the job keeps the day it went to Closed (cleared if it
+reopens), so a job closed in November is an open job, measured as any other,
+in September's schedule and its adjusting entry. A job already closed when
+this was added takes the day its record was last changed (the latest it can
+have closed); one with no date on file counts as closed on every date.
 
 **Warnings about cost to complete.** Two cases are named in `warnings` (and under
 the table, in the PDF note and the CSV):
@@ -1403,19 +1436,31 @@ already owns that number shows the name alone). These are the balances to carry
 **as of the date**.
 
 **Post** (on screen under the entry, or `POST /api/reports/wip-schedule/post?as_of=`)
-books it: an adjusting journal dated the as-of date, per job (each line's memo
-names the job), with an automatic **reversal dated the next day**, so each
-month's entry carries that month's balances and the next starts from zero. Only
-an accountant's or an administrator's sign-in may post (a bookkeeper's is
-refused, read-only sees no button). It posts the whole schedule as it reads with
-no filter, and creates the five WIP accounts if the chart lacks them. The
-closing date applies. The lines carry no job tag, so a posted entry never comes
-back into a job's cost to date or posted revenue: the schedule reads the same
-after posting as before. The schedule says when an entry is posted for the date
+books it: an adjusting journal dated the as-of date, per job (each line carries
+its job and its memo names it), with an automatic **reversal dated the next
+day**, so each month's entry carries that month's balances and the next starts
+from zero. Only an accountant's or an administrator's sign-in may post (a
+bookkeeper's is refused, read-only sees no button), and only in construction
+mode (a Business or Nonprofit company is refused: "The WIP adjusting entry is
+part of construction mode…"). It posts the whole schedule as it reads with no
+filter, and creates the five WIP accounts if the chart lacks them. The closing
+date applies, and a date with no next day (9999-12-31) is refused with a
+sentence. Because the lines carry the job, **P&L by Job and Job Profitability
+show each job's WIP adjustment** (no "No job" row for it), and a job's gross
+profit there for the period ending on the date is the schedule's gross profit
+to date (less a loss provision, which is an expense). Every figure the schedule
+is computed from leaves the WIP journals out — cost to date, posted revenue and
+the billed basis, cost to complete, the cost tree's actuals, the cost-plus fee —
+as do Budget vs Actual, Cost to Complete, Job Cost by Vendor and a cost
+allocation by revenue or cost, so the schedule reads the same after posting as
+before. The schedule says when an entry is posted for the date
 (`adjusting_entry.posted` and `posted_entry`: the journal's id, date, who posted
 it and the reversal's id and date).
 
-**Posting the same date again is refused** (409) while an entry for it stands.
+**Posting the same date again is refused** (409) while an entry for it stands,
+two posts sent at the same moment included: Post first writes a row keyed on the
+date (`wip_entry_locks`), so the second meets the database's unique key, and
+Void deletes it.
 To redo it, **Void posted entry** on the WIP schedule (or
 `POST /api/reports/wip-schedule/void?as_of=`): it voids the entry and its
 reversal together, each by a mirror image on its own date, and the date can
@@ -1434,7 +1479,16 @@ and bought as material does not keep its whole subcontract budget still to
 spend. The cost-type split is for display: the section's default is shown
 against the cells that still have budget left, in proportion to what each has
 left (the last cell takes the cent of rounding), so the cells foot to the
-section. An amount you enter replaces its own cell's share. A closed job shows
+section. A section whose budget is below zero (an accepted deduct alternate
+with nothing in its section to deduct from) shows that budget as a **negative
+cost to complete**, which comes off the cost still to come in the other cells;
+cost posted there is cost beyond the plan, so it does not deepen the deduct.
+The job's cost to complete never goes below zero: once the other cells have
+nothing left to come, the deduct is scaled back (it cannot un-spend cost
+already posted). Budget vs Actual, the cost tree and Cost to Complete treat a
+negative budget the same way: it reads no variance until cost posts against it,
+and it comes off the budget not yet committed. An amount you enter replaces its
+own cell's share. A closed job shows
 no cost to complete. Type an amount in the Report
 Center table (or `PUT /api/jobs/{id}/cost-to-complete-forecast` with
 `{"entries": [{"cost_code_id", "cost_type", "amount"}]}`; `null` clears a cell
@@ -1463,7 +1517,9 @@ then. PDF and CSV.
 section), with budget revised, committed (remaining), actual, cost to complete
 (the remaining budget plus open commitments), projected final (actual + cost to
 complete), variance to budget and percent complete by cost, with totals per job
-and grand totals. The totals **foot the rows** — cost to complete, projected and
+and grand totals. Budgets take the change orders in effect by `as_of` and
+committed is Commitment Status's remaining that day; a deduct alternate's code
+carries its negative budget as cost to complete, so it reads no variance. The totals **foot the rows** — cost to complete, projected and
 variance are the sum of the clamped per-code figures (Σ max(…) ≠ max(Σ …) once a
 code runs over), budget/committed/actual the raw sums. The JSON keeps the
 cost-code tree (`children`); the PDF and CSV flatten it with the code path.
@@ -1473,7 +1529,11 @@ kind, status, title, date, funding, cost, markup, sell, approved and voided
 dates, source PCO and (for a sub CO) its commitment — with the running approved
 total (the change orders approved by `as_of`) and the contract it builds
 (original + approved changes = revised), the pending total (as of today) and
-counts by status.
+counts by status **as of the date** (one approved or voided after it counts as
+it stood then). The JSON rows carry `approved_on` and `voided_on`; the CSV puts
+every change order under one header with those columns, the source PCO and the
+commitment, then each job's contract (original, approved changes, revised)
+under a header of its own.
 
 **Buyout report** (`buyout`). The job buyout across jobs: each trade package's
 bid cost against what has been bought, with the variance, committed-remaining and
@@ -1568,8 +1628,10 @@ The Overview tab of a construction job:
   trade bid as subcontract and bought as material nets within its code, as it
   does in the cost-to-complete forecast. Budget with no cost code shares one
   cell with the cost and commitments that have none. The figure is job to
-  date (a cost tree dated from a start date leaves it out) and a closed job
-  has none. **Budget not yet committed** is its own tile, a row under the
+  date (a cost tree dated from a start date leaves it out; one with an end date
+  reads the change orders and commitments as of it) and a job closed by then
+  has none. A code with a negative budget (a deduct alternate) takes it off the
+  others' budget not yet committed, never below zero. **Budget not yet committed** is its own tile, a row under the
   cost-type table and a row on Cost Detail (and in its PDF and CSV), so the
   Projected column foots to the total; **Variance** is the budget less the
   new Projected. The Jobs list, Job Budget vs Actual and the cost-tree totals

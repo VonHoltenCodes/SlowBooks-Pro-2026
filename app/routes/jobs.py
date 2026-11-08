@@ -976,12 +976,22 @@ def void_deposit(job_id: int, deposit_id: int, db: Session = Depends(get_db)):
     return JobDepositOut.model_validate(dep)
 
 
+def _stamp_closed_on(job: Job, was: Optional[str]) -> None:
+    """The day the job went to Closed (today), so a back-dated WIP reads it
+    open before then; reopening clears it."""
+    if job.status == "closed" and was != "closed":
+        job.closed_on = date.today()
+    elif job.status != "closed":
+        job.closed_on = None
+
+
 @router.post("", response_model=JobResponse, status_code=201)
 def create_job(data: JobCreate, db: Session = Depends(get_db)):
     if not db.get(Customer, data.customer_id):
         raise HTTPException(status_code=404, detail="Customer not found")
     _check_name_clash(db, data.customer_id, data.name)
     job = Job(**data.model_dump())
+    _stamp_closed_on(job, None)
     db.add(job)
     db.commit()
     db.refresh(job)
@@ -1007,8 +1017,10 @@ def update_job(job_id: int, data: JobUpdate, db: Session = Depends(get_db)):
             changes["contract_amount"] = _q(changes["contract_amount"])
         _refuse_sum_change(db, job, changes["contract_amount"])
     _follow_original(job, changes)
+    was = job.status
     for key, value in changes.items():
         setattr(job, key, value)
+    _stamp_closed_on(job, was)
     # The job form's plain contract amount runs through the same stamp as the
     # Contract tab (#552): set the amount with a type already on the job and
     # the original is stamped once here too.

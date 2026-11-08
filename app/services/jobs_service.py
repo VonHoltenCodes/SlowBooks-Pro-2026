@@ -8,6 +8,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import case, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
@@ -383,6 +384,28 @@ def job_attribution():
     return sqlfunc.coalesce(TransactionLine.job_id, Transaction.job_id)
 
 
+# The WIP adjusting entry's journals (app/services/wip_posting.py): the entry,
+# its next-day reversal and the voids of both. Their lines carry the job, so
+# P&L by Job and Job Profitability tie to the WIP schedule; every figure the
+# schedule is computed from (cost to date, posted revenue, cost to complete,
+# the cost tree) leaves them out, so posting never moves the schedule.
+WIP_SOURCE_TYPES = (
+    "wip_adjustment",
+    "wip_reversal",
+    "wip_adjustment_void",
+    "wip_reversal_void",
+)
+
+
+def not_wip_entry():
+    """SQL filter: the transaction is no part of a WIP adjusting entry (a
+    journal with no source type counts as not)."""
+    return or_(
+        Transaction.source_type.is_(None),
+        Transaction.source_type.notin_(WIP_SOURCE_TYPES),
+    )
+
+
 def job_profitability(
     db: Session,
     start_date: Optional[date] = None,
@@ -391,12 +414,16 @@ def job_profitability(
     customer_id: Optional[int] = None,
     include_no_job: bool = True,
     basis: str = "accrual",
+    include_wip: bool = True,
 ) -> list[dict]:
     """Income / COGS / expenses per job from posted lines (`basis`: accrual
     or cash, #483).
 
     Untagged activity lands in the "No job" bucket (job_id None) so the
-    report's totals equal the plain P&L for the same period.
+    report's totals equal the plain P&L for the same period. The WIP
+    adjusting entry counts on its jobs (the report ties to the WIP schedule)
+    unless `include_wip` is False, for a reader that compares a job's own
+    cost with its budget; a cost-plus fee is never earned on it.
     """
     # The untagged bucket is labelled in the business word; a nonprofit's
     # report reads "No grant" (vocabulary audit, 2.13.x).
@@ -405,10 +432,14 @@ def job_profitability(
     no_job_label = terms_from_db(db).text(NO_JOB_LABEL)
     pl_types = (AccountType.INCOME, AccountType.COGS, AccountType.EXPENSE)
     attributed = job_attribution().label("job")
+    is_wip = case((Transaction.source_type.in_(WIP_SOURCE_TYPES), 1), else_=0).label(
+        "wip"
+    )
     q = (
         db.query(
             attributed,
             Account.account_type,
+            is_wip,
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
         )
@@ -424,7 +455,7 @@ def job_profitability(
     if job_ids is not None:
         q = q.filter(job_attribution().in_(job_ids))
     rows = (
-        q.group_by("job", Account.account_type)
+        q.group_by("job", Account.account_type, "wip")
         .execution_options(**cash_basis.reading(basis))
         .all()
     )
@@ -432,7 +463,9 @@ def job_profitability(
     jobs = {j.id: j for j in db.query(Job).all()}
     customers = {c.id: c.name for c in db.query(Customer).all()}
     buckets: dict[Optional[int], dict] = {}
-    for job_id, acct_type, dr, cr in rows:
+    for job_id, acct_type, wip, dr, cr in rows:
+        if wip and not include_wip:
+            continue
         job = jobs.get(job_id)
         if customer_id is not None and (job is None or job.customer_id != customer_id):
             continue
@@ -455,6 +488,7 @@ def job_profitability(
                 "income": Decimal("0"),
                 "cogs": Decimal("0"),
                 "expenses": Decimal("0"),
+                "_wip_cost": Decimal("0"),
             },
         )
         dr, cr = Decimal(str(dr)), Decimal(str(cr))
@@ -464,6 +498,8 @@ def job_profitability(
             b["cogs"] += dr - cr
         else:
             b["expenses"] += dr - cr
+        if wip and acct_type != AccountType.INCOME:
+            b["_wip_cost"] += dr - cr
 
     out = []
     for b in sorted(
@@ -476,6 +512,7 @@ def job_profitability(
     ):
         income, cogs, expenses = b["income"], b["cogs"], b["expenses"]
         costs = cogs + expenses
+        wip_cost = b.pop("_wip_cost")
         net = income - costs
         b.update(
             {
@@ -497,10 +534,11 @@ def job_profitability(
             # A fixed fee is a job-level figure, not a period one — it would
             # repeat whole on every period — so it shows no fee_period.
             if job.fee_amount is None and job.fee_pct is not None:
+                # (a WIP loss provision is no cost the fee is earned on)
                 b["fee_period"] = float(
-                    (costs * Decimal(str(job.fee_pct)) / Decimal("100")).quantize(
-                        Decimal("0.01")
-                    )
+                    (
+                        (costs - wip_cost) * Decimal(str(job.fee_pct)) / Decimal("100")
+                    ).quantize(Decimal("0.01"))
                 )
         out.append(b)
     return out

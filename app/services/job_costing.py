@@ -47,7 +47,7 @@ from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLin
 from app.models.time_entries import TimeEntry, TimeEntryStatus
 from app.models.transactions import Transaction, TransactionLine
 from app.services.accounting import create_journal_entry, void_line_memo
-from app.services.jobs_service import job_attribution
+from app.services.jobs_service import job_attribution, not_wip_entry
 from app.services.safe_errors import DataProblem
 
 TWO = Decimal("0.01")
@@ -781,7 +781,12 @@ def allocation_weights(
     from app.services.jobs_service import job_profitability
 
     rows = job_profitability(
-        db, start_date, end_date, job_ids=job_ids, include_no_job=False
+        db,
+        start_date,
+        end_date,
+        job_ids=job_ids,
+        include_no_job=False,
+        include_wip=False,
     )
     key = "income" if method == "revenue" else "total_costs"
     return {r["job_id"]: Decimal(str(r[key])) for r in rows if r[key] and r[key] > 0}
@@ -1026,9 +1031,15 @@ def _blank() -> dict:
     }
 
 
-def _finish(f: dict) -> dict:
+def _finish(f: dict, deducts: bool = False) -> dict:
+    """The derived columns of a node. With `deducts` (construction), a node
+    whose budget is below zero (an accepted deduct alternate with nothing in
+    its code to deduct from) projects that budget: the cost the job will not
+    spend, so it reads no variance until cost posts against it."""
     revised = f["original"] + f["changes"]
     projected = f["actual"] + f["committed"]
+    if deducts and revised < 0:
+        projected += revised
     variance = revised - projected
     out = {k: float(v) for k, v in f.items()}
     out.update(
@@ -1046,7 +1057,9 @@ def _finish(f: dict) -> dict:
 def _with_uncommitted(totals: dict, extra: Decimal) -> dict:
     """`totals` with the budget not yet committed added to projected final
     cost (and variance and % used following it)."""
-    projected = Decimal(str(totals["projected"])) + extra
+    projected = (
+        Decimal(str(totals["actual"])) + Decimal(str(totals["committed"])) + extra
+    )
     revised = Decimal(str(totals["revised"]))
     return {
         **totals,
@@ -1055,6 +1068,113 @@ def _with_uncommitted(totals: dict, extra: Decimal) -> dict:
         "variance": float(revised - projected),
         "pct_used": float(projected / revised * 100) if revised else None,
     }
+
+
+def budget_rows(
+    db: Session, job_ids: list[int], as_of: Optional[date] = None
+) -> list[JobBudget]:
+    """The jobs' budget rows in effect on `as_of`: every row, less those a
+    change order wrote that takes effect after the date (co_effective_date,
+    the day the revenue side reads it on too). A change row from before the
+    link to its change order counts on every date. None: every row."""
+    if not job_ids:
+        return []
+    rows = db.query(JobBudget).filter(JobBudget.job_id.in_(job_ids)).all()
+    co_ids = {r.change_order_id for r in rows} - {None}
+    if as_of is None or not co_ids:
+        return rows
+    from app.models.change_orders import ChangeOrder
+    from app.services.change_orders import co_effective_date
+
+    later = {
+        co.id
+        for co in db.query(ChangeOrder).filter(ChangeOrder.id.in_(co_ids))
+        if (co_effective_date(co) or as_of) > as_of
+    }
+    return [r for r in rows if r.change_order_id not in later]
+
+
+_OPEN_PO = (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
+
+
+def commitment_lines(
+    db: Session, job_ids: list[int], as_of: Optional[date] = None
+) -> list[dict]:
+    """Every line of the jobs' issued commitments (a line's job is its own,
+    else the header's): job, code, cost type, its amount, what is billed on
+    it and what is still committed (amount less billed, on an open
+    commitment). With `as_of`, as Commitment Status reads that day: a
+    commitment dated by then, a sub change order's line only once that
+    change order is in effect, billed less the linked bill lines dated after
+    it, and a closed commitment still open when a bill after the date closed
+    it."""
+    from app.models.bills import Bill, BillLine, BillStatus
+    from app.models.change_orders import ChangeOrder
+    from app.services.change_orders import co_effective_date
+
+    if not job_ids:
+        return []
+    line_job = sqlfunc.coalesce(PurchaseOrderLine.job_id, PurchaseOrder.job_id)
+    q = (
+        db.query(PurchaseOrderLine, PurchaseOrder, line_job)
+        .join(PurchaseOrder, PurchaseOrderLine.purchase_order_id == PurchaseOrder.id)
+        .filter(line_job.in_(job_ids), PurchaseOrder.status != POStatus.DRAFT)
+    )
+    if as_of is not None:
+        q = q.filter(PurchaseOrder.date <= as_of)
+    found = q.all()
+    later_billed: dict = {}
+    billed_later_po: set = set()
+    later_co: set = set()
+    if as_of is not None and found:
+        line_ids = [ln.id for ln, _po, _j in found]
+        for line_id, amount in (
+            db.query(BillLine.purchase_order_line_id, sqlfunc.sum(BillLine.amount))
+            .join(Bill, BillLine.bill_id == Bill.id)
+            .filter(
+                BillLine.purchase_order_line_id.in_(line_ids),
+                Bill.status != BillStatus.VOID,
+                Bill.date > as_of,
+            )
+            .group_by(BillLine.purchase_order_line_id)
+        ):
+            later_billed[line_id] = Decimal(str(amount or 0))
+        po_ids = {po.id for _ln, po, _j in found}
+        billed_later_po = {
+            po_id
+            for (po_id,) in db.query(Bill.po_id).filter(
+                Bill.po_id.in_(po_ids),
+                Bill.status != BillStatus.VOID,
+                Bill.date > as_of,
+                sqlfunc.coalesce(Bill.retainage_released, 0) == 0,
+            )
+        }
+        co_ids = {ln.change_order_id for ln, _po, _j in found} - {None}
+        later_co = {
+            co.id
+            for co in db.query(ChangeOrder).filter(ChangeOrder.id.in_(co_ids))
+            if (co_effective_date(co) or as_of) > as_of
+        }
+    out = []
+    for ln, po, job_id in found:
+        if ln.change_order_id in later_co:
+            continue
+        amount = Decimal(str(ln.amount or 0))
+        billed = Decimal(str(ln.billed_amount or 0)) - later_billed.get(ln.id, 0)
+        is_open = po.status in _OPEN_PO or (
+            po.status == POStatus.CLOSED and po.id in billed_later_po
+        )
+        out.append(
+            {
+                "job_id": int(job_id),
+                "cost_code_id": ln.cost_code_id,
+                "cost_type": ln.cost_type,
+                "amount": amount,
+                "billed": billed,
+                "remaining": amount - billed if is_open else Decimal("0"),
+            }
+        )
+    return out
 
 
 def uncommitted_budget(db: Session, job_id: int, end_date: Optional[date] = None):
@@ -1066,10 +1186,14 @@ def uncommitted_budget(db: Session, job_id: int, end_date: Optional[date] = None
     does not leave its whole budget uncommitted, and budget with no code
     shares one cell with the cost and commitments that have none (the cost-to-
     complete forecast's Unassigned cell). Job to date: a budget has no
-    period, and cost is counted through `end_date`. A closed job is finished:
-    nothing is left to spend."""
+    period; cost, the change orders' budgets and commitments are counted as
+    of `end_date`. A code whose budget is below zero (a deduct alternate)
+    takes its budget off what the others have still to come, never below
+    zero. A job closed by then is finished: nothing is left to spend."""
+    from app.services.job_reports import job_closed_by
+
     job = db.get(Job, job_id)
-    if job is not None and job.status == "closed":
+    if job is not None and job_closed_by(job, end_date):
         return Decimal("0.00")
     code_ids = {c.id for c in db.query(CostCode.id)}
 
@@ -1077,15 +1201,13 @@ def uncommitted_budget(db: Session, job_id: int, end_date: Optional[date] = None
         return code_id if code_id in code_ids else None
 
     cells: dict = {}  # code id | None → budget less cost less commitment
+    budget: dict = {}  # code id | None → its budget
 
-    for code_id, amount in (
-        db.query(JobBudget.cost_code_id, sqlfunc.sum(JobBudget.amount))
-        .filter(JobBudget.job_id == job_id)
-        .group_by(JobBudget.cost_code_id)
-    ):
-        cells[cell(code_id)] = cells.get(cell(code_id), Decimal("0")) + Decimal(
-            str(amount or 0)
-        )
+    for b in budget_rows(db, [job_id], end_date):
+        k = cell(b.cost_code_id)
+        amount = Decimal(str(b.amount or 0))
+        cells[k] = cells.get(k, Decimal("0")) + amount
+        budget[k] = budget.get(k, Decimal("0")) + amount
 
     cost_q = (
         db.query(
@@ -1099,6 +1221,7 @@ def uncommitted_budget(db: Session, job_id: int, end_date: Optional[date] = None
         .filter(
             job_attribution() == job_id,
             Account.account_type.in_((AccountType.COGS, AccountType.EXPENSE)),
+            not_wip_entry(),
         )
     )
     if end_date:
@@ -1108,26 +1231,15 @@ def uncommitted_budget(db: Session, job_id: int, end_date: Optional[date] = None
             str(amount or 0)
         )
 
-    line_job = sqlfunc.coalesce(PurchaseOrderLine.job_id, PurchaseOrder.job_id)
-    for code_id, amount in (
-        db.query(
-            PurchaseOrderLine.cost_code_id,
-            sqlfunc.sum(PurchaseOrderLine.amount - PurchaseOrderLine.billed_amount),
-        )
-        .select_from(PurchaseOrderLine)
-        .join(PurchaseOrder, PurchaseOrderLine.purchase_order_id == PurchaseOrder.id)
-        .filter(
-            line_job == job_id,
-            PurchaseOrder.status.in_(
-                (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
-            ),
-        )
-        .group_by(PurchaseOrderLine.cost_code_id)
-    ):
-        cells[cell(code_id)] = cells.get(cell(code_id), Decimal("0")) - Decimal(
-            str(amount or 0)
-        )
-    return _q(sum((v for v in cells.values() if v > 0), Decimal("0")))
+    for ln in commitment_lines(db, [job_id], end_date):
+        k = cell(ln["cost_code_id"])
+        cells[k] = cells.get(k, Decimal("0")) - ln["remaining"]
+    to_come = sum(
+        (v for k, v in cells.items() if v > 0 and budget.get(k, 0) >= 0),
+        Decimal("0"),
+    )
+    deducts = sum((v for v in budget.values() if v < 0), Decimal("0"))
+    return _q(max(to_come + deducts, Decimal("0")))
 
 
 def _is_construction(db: Session) -> bool:
@@ -1145,11 +1257,26 @@ def job_cost_tree(
     """The whole drill-down in one call: cost types → code tree → lines,
     every level carrying budget / committed / actual / projected /
     variance and the revenue pair. Budgets and committed cost are
-    job-to-date (a budget has no period); actuals honour the period."""
+    job-to-date (a budget has no period); actuals honour the period. The WIP
+    adjusting entry is not the job's own cost or revenue, so it is left out.
+
+    A contractor's tree reads as of `end_date` throughout: the change
+    orders' budgets in effect by then and the commitments as Commitment
+    Status reads them that day. Its revenue is compared by section, not by
+    cost type (a pay application's revenue has no cost type): the type
+    branches carry cost only, and `revenue_sections` puts each section's
+    budgeted and actual revenue beside its budgeted and actual cost."""
+    construction = _is_construction(db)
+    # a contractor's commitments read as of the end date, as Commitment
+    # Status does; other companies keep today's open commitments
+    dated = construction
     types = read_cost_type_map(db)
     ordered_types = sorted(types.values(), key=lambda t: (t.sort_order, t.code))
     codes = db.query(CostCode).all()
     code_by_id = {c.id: c for c in codes}
+
+    def fin(f: dict) -> dict:
+        return _finish(f, deducts=construction)
 
     # actual cost / revenue lines
     q = (
@@ -1161,6 +1288,7 @@ def job_cost_tree(
             Account.account_type.in_(
                 (AccountType.INCOME, AccountType.COGS, AccountType.EXPENSE)
             ),
+            not_wip_entry(),
         )
     )
     if start_date:
@@ -1169,32 +1297,37 @@ def job_cost_tree(
         q = q.filter(Transaction.date <= end_date)
     lines = q.order_by(Transaction.date, Transaction.id, TransactionLine.id).all()
 
-    # committed: open PO lines on this job, by code
-    line_job = sqlfunc.coalesce(PurchaseOrderLine.job_id, PurchaseOrder.job_id)
     # committed = the remaining, unbilled part of each open commitment line
     # (amount − billed_amount), so the number stays "open PO value not yet
-    # billed" as partial bills draw it down (#553).
-    committed_rows = (
-        db.query(
-            PurchaseOrderLine.cost_code_id,
-            PurchaseOrderLine.cost_type,
-            sqlfunc.coalesce(
-                sqlfunc.sum(PurchaseOrderLine.amount - PurchaseOrderLine.billed_amount),
-                0,
-            ),
+    # billed" as partial bills draw it down (#553); a contractor's as of the
+    # end date.
+    commitments = commitment_lines(db, [job_id], end_date if dated else None)
+    committed_rows = [
+        (ln["cost_code_id"], ln["cost_type"], ln["remaining"]) for ln in commitments
+    ]
+    budgets = budget_rows(db, [job_id], end_date if construction else None)
+
+    # Revenue by section (construction): the section a code rolls up to, or
+    # None (Unassigned) for a line or budget with no code.
+    sections: dict = {}
+
+    def section_cell(code_id):
+        from app.services.job_reports import _section_id
+
+        sid = (
+            _section_id(code_by_id[code_id], code_by_id)
+            if code_id in code_by_id
+            else None
         )
-        .select_from(PurchaseOrderLine)
-        .join(PurchaseOrder, PurchaseOrderLine.purchase_order_id == PurchaseOrder.id)
-        .filter(
-            line_job == job_id,
-            PurchaseOrder.status.in_(
-                (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
-            ),
+        return sections.setdefault(
+            sid,
+            {
+                "budget": Decimal("0"),
+                "actual": Decimal("0"),
+                "est_revenue": Decimal("0"),
+                "act_revenue": Decimal("0"),
+            },
         )
-        .group_by(PurchaseOrderLine.cost_code_id, PurchaseOrderLine.cost_type)
-        .all()
-    )
-    budgets = db.query(JobBudget).filter(JobBudget.job_id == job_id).all()
 
     # Per-code figures keyed by the EFFECTIVE cost type (#550): the line's own
     # type wins, the code's is the fallback, and a type the cost_types table no
@@ -1222,11 +1355,16 @@ def job_cost_tree(
         f = fig.setdefault(k, _blank())
         if acct.account_type == AccountType.INCOME:
             amt = Decimal(str(ln.credit)) - Decimal(str(ln.debit))
-            f["act_revenue"] += amt
+            if construction:
+                section_cell(ln.cost_code_id)["act_revenue"] += amt
+            else:
+                f["act_revenue"] += amt
             kind = "income"
         else:
             amt = Decimal(str(ln.debit)) - Decimal(str(ln.credit))
             f["actual"] += amt
+            if construction:
+                section_cell(ln.cost_code_id)["actual"] += amt
             kind = "cost"
         line_rows.setdefault(k, []).append(
             {
@@ -1263,7 +1401,12 @@ def job_cost_tree(
             f["changes"] += Decimal(str(b.amount))
         else:
             f["original"] += Decimal(str(b.amount))
-        f["est_revenue"] += Decimal(str(b.revenue_amount or 0))
+        if construction:
+            sc = section_cell(b.cost_code_id)
+            sc["budget"] += Decimal(str(b.amount))
+            sc["est_revenue"] += Decimal(str(b.revenue_amount or 0))
+        else:
+            f["est_revenue"] += Decimal(str(b.revenue_amount or 0))
 
     # build the code tree per cost type with roll-ups. A code node appears
     # under a type when its subtree carries any figure for that type OR the
@@ -1291,8 +1434,8 @@ def job_cost_tree(
             "label": c.label,
             "cost_type": c.cost_type,
             "is_active": c.is_active,
-            "own": _finish(own),
-            "figures": _finish(agg),
+            "own": fin(own),
+            "figures": fin(agg),
             "lines": line_rows.get(("code", c.id, type_code), []),
             "children": children,
             "_raw": agg,
@@ -1324,10 +1467,10 @@ def job_cost_tree(
                 "cost_type": t.code,
                 "name": t.name,
                 "is_labor": bool(t.is_labor),
-                "figures": _finish(agg),
+                "figures": fin(agg),
                 "codes": roots,
                 "uncoded": {
-                    "figures": _finish(uncoded_own),
+                    "figures": fin(uncoded_own),
                     "lines": line_rows.get(("uncoded", t.code), []),
                 },
             }
@@ -1344,34 +1487,79 @@ def job_cost_tree(
     for t in type_nodes:
         for r in t["codes"]:
             strip(r)
+    revenue_sections = None
+    if construction:
+        revenue_sections = _revenue_sections(sections, code_by_id)
+        for sc in sections.values():
+            grand["est_revenue"] += sc["est_revenue"]
+            grand["act_revenue"] += sc["act_revenue"]
     totals = _finish(grand)
     # A contractor's projected final cost carries the budget nothing has taken
     # up yet, so a trade not bought reads as cost to come, not a saving. It is
     # a job-to-date figure, left out of a tree dated from a start date.
-    if start_date is None and _is_construction(db):
+    if start_date is None and construction:
         totals = _with_uncommitted(totals, uncommitted_budget(db, job_id, end_date))
     # committed_total / billed_to_date ride alongside the committed (remaining)
     # figure, additive (#553): committed stays "not yet billed", while these
     # two carry the whole commitment and what has been billed against it.
-    from app.services.jobs_service import commitment_figures
+    if dated:
+        totals["committed_total"] = float(
+            _q(sum((ln["amount"] for ln in commitments), Decimal("0")))
+        )
+        totals["billed_to_date"] = float(
+            _q(sum((ln["billed"] for ln in commitments), Decimal("0")))
+        )
+    else:
+        from app.services.jobs_service import commitment_figures
 
-    cf = commitment_figures(db, [job_id]).get(
-        job_id, {"committed_total": 0.0, "billed_to_date": 0.0}
-    )
-    totals["committed_total"] = cf["committed_total"]
-    totals["billed_to_date"] = cf["billed_to_date"]
-    # committed_total and billed_to_date are whole-commitment figures, not
-    # period-scoped like the actuals above — a commitment has no period. The
-    # flag says so for a dated cost tree (#553).
-    totals["commitments_all_time"] = True
-    return {
+        cf = commitment_figures(db, [job_id]).get(
+            job_id, {"committed_total": 0.0, "billed_to_date": 0.0}
+        )
+        totals["committed_total"] = cf["committed_total"]
+        totals["billed_to_date"] = cf["billed_to_date"]
+    # Outside construction, committed_total and billed_to_date are
+    # whole-commitment figures, not period-scoped like the actuals above. The
+    # flag says so for a dated cost tree (#553); a contractor's tree reads
+    # them as of its end date.
+    totals["commitments_all_time"] = not (dated and end_date is not None)
+    out = {
         "job_id": job_id,
         "start_date": start_date.isoformat() if start_date else None,
         "end_date": end_date.isoformat() if end_date else None,
         "types": type_nodes,
-        "job_level_budget": _finish(job_level),
+        "job_level_budget": fin(job_level),
         "totals": totals,
     }
+    if revenue_sections is not None:
+        out["revenue_sections"] = revenue_sections
+    return out
+
+
+def _revenue_sections(sections: dict, code_by_id: dict) -> list[dict]:
+    """The cost tree's revenue by section: each section's budgeted cost,
+    actual cost, budgeted and actual revenue, in code order, the Unassigned
+    row (no code: markup lines, a whole-job budget) last."""
+    out = []
+    for sid, f in sections.items():
+        if not any(f.values()):
+            continue
+        code = code_by_id.get(sid)
+        out.append(
+            {
+                "cost_code_id": sid,
+                "code": code.code if code else "",
+                "name": code.name if code else "Unassigned",
+                "label": code.label if code else "Unassigned",
+                "budget": float(_q(f["budget"])),
+                "actual": float(_q(f["actual"])),
+                "est_revenue": float(_q(f["est_revenue"])),
+                "act_revenue": float(_q(f["act_revenue"])),
+                "revenue_diff": float(_q(f["act_revenue"] - f["est_revenue"])),
+                "gross_profit": float(_q(f["act_revenue"] - f["actual"])),
+            }
+        )
+    out.sort(key=lambda r: (r["cost_code_id"] is None, r["code"], r["name"]))
+    return out
 
 
 def budget_vs_actual_all_jobs(
@@ -1381,7 +1569,11 @@ def budget_vs_actual_all_jobs(
     customer_id: Optional[int] = None,
     include_inactive: bool = False,
 ) -> list[dict]:
-    """One row per job with the headline figures, for the report card."""
+    """One row per job with the headline figures, for the report card. Cost
+    and revenue are the job's own (the WIP adjusting entry is left out, as in
+    the cost tree); a contractor's budgets and commitments read as of
+    `end_date` (the change orders in effect by then, Commitment Status's
+    remaining that day)."""
     from app.services.jobs_service import committed_cost, job_profitability
 
     q = db.query(Job)
@@ -1392,15 +1584,19 @@ def budget_vs_actual_all_jobs(
     jobs = q.all()
     prof = {
         r["job_id"]: r
-        for r in job_profitability(db, start_date, end_date, include_no_job=False)
+        for r in job_profitability(
+            db, start_date, end_date, include_no_job=False, include_wip=False
+        )
     }
-    committed = committed_cost(db)
     construction = _is_construction(db)
-    budgets = (
-        db.query(JobBudget).filter(JobBudget.job_id.in_([j.id for j in jobs])).all()
-        if jobs
-        else []
-    )
+    job_ids = [j.id for j in jobs]
+    if construction and end_date is not None:
+        committed: dict = {}
+        for ln in commitment_lines(db, job_ids, end_date):
+            committed[ln["job_id"]] = committed.get(ln["job_id"], 0) + ln["remaining"]
+    else:
+        committed = committed_cost(db)
+    budgets = budget_rows(db, job_ids, end_date if construction else None)
     bsum: dict[int, dict] = {}
     for b in budgets:
         f = bsum.setdefault(b.job_id, _blank())
@@ -1419,7 +1615,7 @@ def budget_vs_actual_all_jobs(
         f["actual"] = Decimal(str(p.get("total_costs", 0)))
         f["act_revenue"] = Decimal(str(p.get("income", 0)))
         f["committed"] = Decimal(str(committed.get(j.id, 0)))
-        fin = _finish(f)
+        fin = _finish(f, deducts=construction)
         if construction and not start_date:
             fin = _with_uncommitted(fin, uncommitted_budget(db, j.id, end_date))
         fin.update(

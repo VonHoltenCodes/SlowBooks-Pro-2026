@@ -58,6 +58,9 @@ TRANSACTION_KEYED_VOIDS = frozenset(
         "qbo_journal_void",
         "payment_apply_void",  # reverses a payment's applied-FX posting row
         "qbo_cogs_void",  # reverses a local cost-of-goods posting row
+        # the WIP adjusting entry and its reversal (wip_posting)
+        "wip_adjustment_void",
+        "wip_reversal_void",
     }
 )
 
