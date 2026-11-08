@@ -202,6 +202,13 @@ DEFAULT_SETTINGS = {
     # sales receipt's Deposit To. "" = none, the list's own order as before.
     # A deposit or a payment already saved keeps its own account.
     "default_deposit_account_id": "",
+    # Make Deposits (#735): a JSON list of the bank account ids the
+    # destination list offers (Make Deposits, and the bank accounts in a
+    # payment's or a sales receipt's Deposit To); "[]" = every bank account,
+    # as before. An account off the list is hidden nowhere else (chart,
+    # registers, reports), and a deposit already in it keeps it. The default
+    # deposit account above must be on the list, or the list empty.
+    "deposit_account_ids": "[]",
     # Class tracking (#243): "true" starts every entry form with no class
     # chosen and asks before a transaction is saved without one (it would
     # be reported under Uncategorized); "false" starts the picker on

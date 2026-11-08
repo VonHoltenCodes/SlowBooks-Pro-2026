@@ -333,13 +333,41 @@ def _deposit_bank_account(db: Session, value, label: str):
 
 def _guard_deposit_accounts(db: Session, cleaned: dict) -> None:
     """Make Deposits' default destination (#734) is "" or an active bank
-    account from the chart; anything else is refused with a 422 before
-    any setting is written. Stored as the account id."""
+    account from the chart, and so is every account on its destination
+    list (#735, cleaned to a JSON list of ids). The default must be on the
+    list, or the list empty; each saved value counts where the request
+    leaves it out. Anything else is refused with a 422 before any setting
+    is written."""
+    import json
+
     if "default_deposit_account_id" in cleaned:
         value = cleaned["default_deposit_account_id"]
         if value:
             acct = _deposit_bank_account(db, value, "Default deposit account")
             cleaned["default_deposit_account_id"] = str(acct.id)
+    if "deposit_account_ids" in cleaned:
+        for acct_id in json.loads(cleaned["deposit_account_ids"]):
+            _deposit_bank_account(db, acct_id, "Deposit into these accounts")
+    if "default_deposit_account_id" in cleaned or "deposit_account_ids" in cleaned:
+        default = cleaned.get("default_deposit_account_id")
+        if default is None:
+            default = get_setting_raw(db, "default_deposit_account_id") or ""
+        chosen = cleaned.get("deposit_account_ids")
+        if chosen is None:
+            chosen = get_setting_raw(db, "deposit_account_ids") or "[]"
+        try:
+            chosen_ids = {str(i) for i in json.loads(chosen)}
+        except (TypeError, ValueError):
+            chosen_ids = set()
+        if default and chosen_ids and default not in chosen_ids:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "The default deposit account must be one of the accounts "
+                    "under Deposit into these accounts, or that list must be "
+                    "empty. Nothing was saved."
+                ),
+            )
 
 
 def _clearing_off_warnings(db: Session, cleaned: dict) -> list[str]:

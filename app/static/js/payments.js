@@ -220,7 +220,7 @@ const PaymentsPage = {
     async replace(id) {
         const p = await API.get(`/payments/${id}`);
         if (p.is_voided) { toast('This payment is void; there is nothing to change.', 'error'); return; }
-        await PaymentsPage.showForm();
+        await PaymentsPage.showForm(null, null, p.deposit_to_account_id || null);
         const form = $('#payment-form');
         if (!form) return;
         const back = {};
@@ -250,7 +250,9 @@ const PaymentsPage = {
     },
     _giveBack: null,
 
-    async showForm(_ignoredId = null, prefillCustomerId = null) {
+    // `keepDepositId`: Edit's payment's own Deposit To account, offered even
+    // when Settings' "Deposit into these accounts" leaves it out (#735)
+    async showForm(_ignoredId = null, prefillCustomerId = null, keepDepositId = null) {
         PaymentsPage._requestKey = null; // a new form, a new key (#292)
         PaymentsPage._giveBack = null;
         const [customers, accounts] = await Promise.all([
@@ -271,7 +273,9 @@ const PaymentsPage = {
         // Undeposited Funds, which stays the opening choice; a company with
         // no Undeposited Funds account posts straight to a bank, so the box
         // starts on the default there.
-        const depositBanks = typeof DepositAccounts !== 'undefined' ? DepositAccounts.defaultFirst(bankAccts) : bankAccts;
+        // "Deposit into these accounts" (#735) narrows the bank accounts.
+        const depositBanks = typeof DepositAccounts !== 'undefined'
+            ? DepositAccounts.defaultFirst(DepositAccounts.banks(bankAccts, null, keepDepositId)) : bankAccts;
         const startBank = !undeposited && typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(depositBanks) : '';
         const bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
 

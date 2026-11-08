@@ -145,7 +145,9 @@ const SalesReceiptsPage = {
         // Undeposited Funds, which stays the opening choice; a company with
         // no Undeposited Funds account posts straight to a bank, so the box
         // starts on the default there.
-        const depositBanks = typeof DepositAccounts !== 'undefined' ? DepositAccounts.defaultFirst(bankAccts) : bankAccts;
+        // "Deposit into these accounts" (#735) narrows the bank accounts.
+        const depositBanks = typeof DepositAccounts !== 'undefined'
+            ? DepositAccounts.defaultFirst(DepositAccounts.banks(bankAccts, null, null)) : bankAccts;
         const startBank = !undeposited && typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(depositBanks) : '';
         const bankOpts = depositBanks.map(a => `<option value="${a.id}"${String(a.id) === startBank ? ' selected' : ''}>${escapeHtml(a.name)}</option>`).join('');
 

@@ -136,3 +136,126 @@ def test_a_saved_deposit_keeps_its_account_when_the_default_is_another(
     after = client.get(f"/api/deposits/{dep}").json()
     assert after["reference"] == "SLIP-1A"
     assert after["account_name"] == "Checking"
+
+
+# --- #735: Deposit into these accounts -------------------------------------
+
+
+def _chosen(client):
+    import json
+
+    return json.loads(_settings(client)["deposit_account_ids"])
+
+
+def test_the_deposit_list_is_empty_until_chosen(client, seed_accounts):
+    assert _chosen(client) == []
+
+
+@pytest.mark.parametrize("as_text", [True, False])
+def test_bank_accounts_save_as_the_deposit_list_and_empty_clears_it(
+    client, seed_accounts, as_text
+):
+    import json
+
+    checking = seed_accounts["1000"].id
+    savings = seed_accounts["1010"].id
+    ids = [savings, checking, savings]
+    r = _put(client, deposit_account_ids=json.dumps(ids) if as_text else ids)
+    assert r.status_code == 200, r.text
+    # each once, in id order
+    assert _chosen(client) == sorted({checking, savings})
+    r = _put(client, deposit_account_ids="[]" if as_text else [])
+    assert r.status_code == 200, r.text
+    assert _chosen(client) == []
+    r = _put(client, deposit_account_ids="")
+    assert r.status_code == 200, r.text
+    assert _chosen(client) == []
+
+
+@pytest.mark.parametrize("number", ["1200", "1100", "4000"])
+def test_an_account_that_is_not_a_bank_is_refused_on_the_deposit_list(
+    client, seed_accounts, number
+):
+    acct = seed_accounts.get(number)
+    if acct is None:
+        pytest.skip(f"no {number} in the seeded chart")
+    ids = [seed_accounts["1000"].id, acct.id]
+    r = _put(client, deposit_account_ids=ids)
+    assert r.status_code == 422, r.text
+    assert "must be a bank account" in r.json()["detail"]
+    assert _chosen(client) == []
+
+
+@pytest.mark.parametrize("bad", ['["x"]', "[99999]", "not a list", '{"a": 1}'])
+def test_a_deposit_list_that_is_not_bank_ids_from_the_chart_is_refused(
+    client, seed_accounts, bad
+):
+    r = _put(client, deposit_account_ids=bad)
+    assert r.status_code == 422, r.text
+    assert _chosen(client) == []
+
+
+def test_the_default_must_be_on_the_deposit_list(client, seed_accounts):
+    checking = seed_accounts["1000"].id
+    savings = seed_accounts["1010"].id
+    # both at once
+    r = _put(
+        client,
+        deposit_account_ids=[checking],
+        default_deposit_account_id=str(savings),
+    )
+    assert r.status_code == 422, r.text
+    detail = r.json()["detail"]
+    assert "The default deposit account must be one of the accounts" in detail
+    assert _chosen(client) == []
+    assert _settings(client)["default_deposit_account_id"] == ""
+    # a default against the list already saved
+    assert _put(client, deposit_account_ids=[checking]).status_code == 200
+    r = _put(client, default_deposit_account_id=str(savings))
+    assert r.status_code == 422, r.text
+    assert "must be one of the accounts" in r.json()["detail"]
+    # a list that leaves out the default already saved
+    assert _put(client, deposit_account_ids=[]).status_code == 200
+    assert _put(client, default_deposit_account_id=str(savings)).status_code == 200
+    r = _put(client, deposit_account_ids=[checking])
+    assert r.status_code == 422, r.text
+    assert _chosen(client) == []
+    # on the list, or the list empty: saved
+    r = _put(
+        client,
+        deposit_account_ids=[checking, savings],
+        default_deposit_account_id=str(savings),
+    )
+    assert r.status_code == 200, r.text
+    r = _put(client, deposit_account_ids=[savings], default_deposit_account_id="")
+    assert r.status_code == 200, r.text
+
+
+def test_a_deposit_into_an_account_off_the_list_keeps_it_on_edit(
+    client, seed_accounts, acme
+):
+    checking = seed_accounts["1000"].id
+    savings = seed_accounts["1010"].id
+    dep = _deposit_into(client, acme, savings)
+    r = _put(client, deposit_account_ids=[checking])
+    assert r.status_code == 200, r.text
+    assert _chosen(client) == [checking]
+    r = client.put(f"/api/deposits/{dep}", json={"reference": "SLIP-1B"})
+    assert r.status_code == 200, r.text
+    after = client.get(f"/api/deposits/{dep}").json()
+    assert after["reference"] == "SLIP-1B"
+    assert after["account_name"] == "Savings"
+    assert any(d["id"] == dep for d in client.get("/api/deposits").json())
+
+
+def test_the_deposit_list_hides_no_account_anywhere_else(client, seed_accounts):
+    checking = seed_accounts["1000"].id
+    savings = seed_accounts["1010"].id
+    assert _put(client, deposit_account_ids=[checking]).status_code == 200
+    assert _chosen(client) == [checking]
+    listed = {a["id"]: a for a in client.get("/api/accounts").json()}
+    assert listed[savings]["is_active"] is True
+    banks = {a["id"] for a in client.get("/api/accounts?bank=1").json()}
+    assert savings in banks
+    r = client.get(f"/api/banking/check-register?account_id={savings}")
+    assert r.status_code == 200, r.text

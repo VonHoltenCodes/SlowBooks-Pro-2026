@@ -141,11 +141,13 @@ const SettingsPage = {
         if (box && fields) fields.hidden = !box.checked;
     },
 
-    // Make Deposits' destination (#734): a labelled picker of the chart's
-    // active bank accounts, blank for none (the list's first, as before). A
-    // saved id that is no longer an active bank account stays selected and
-    // named, so Save says what is wrong instead of blanking it. String
-    // concatenation, like _payrollAccountsHtml.
+    // Make Deposits' destination (#734, #735): a labelled picker of the
+    // chart's active bank accounts, blank for none (the list's first, as
+    // before), and a labelled box per bank account for the list it offers,
+    // none ticked for every one. A saved id that is no longer an active bank
+    // account stays selected (or ticked) and named, so Save says what is
+    // wrong instead of dropping it. String concatenation, like
+    // _payrollAccountsHtml.
     _depositAccountsHtml(s, accounts) {
         const all = Array.isArray(accounts) ? accounts : [];
         const banks = all.filter(a => a.bank_kind === 'bank' && a.is_active !== false);
@@ -166,10 +168,35 @@ const SettingsPage = {
         }
         h += '</select>';
         h += '<div id="settings-default-deposit-account-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">';
-        h += 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds.';
+        h += 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.';
         h += '</div></div>';
+        let chosen = [];
+        try { chosen = JSON.parse(s.deposit_account_ids || '[]'); } catch (err) { chosen = []; }
+        chosen = (Array.isArray(chosen) ? chosen : []).map(String);
+        const ticked = new Set(chosen);
+        h += '<fieldset class="form-group full-width" aria-describedby="settings-deposit-accounts-help" style="border:0; padding:0; margin:0;">';
+        h += '<legend style="font-weight:700; font-size:11px; padding:0;">Deposit into these accounts</legend>';
+        const box = (id, words) => '<label style="display:block; font-weight:normal;">'
+            + '<input type="checkbox" name="deposit-account:' + escapeHtml(id) + '" data-deposit-account="' + escapeHtml(id) + '"'
+            + (ticked.has(id) ? ' checked' : '') + ' style="width:auto; vertical-align:middle; margin-right:6px;">'
+            + escapeHtml(words) + '</label>';
+        for (const a of banks) h += box(String(Number(a.id)), accountWords(a));
+        for (const id of chosen) {
+            if (banks.some(a => String(a.id) === id)) continue;
+            const gone = all.find(a => String(a.id) === id);
+            h += box(id, '(unavailable) ' + (gone ? accountWords(gone) : '#' + id));
+        }
+        if (!banks.length && !chosen.length) h += '<div style="font-size:11px; color:var(--text-muted);">The chart has no active bank account.</div>';
+        h += '<div id="settings-deposit-accounts-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">';
+        h += 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.';
+        h += '</div></fieldset>';
         h += '</div>';
         return h;
+    },
+
+    // the ticked Deposit into these accounts boxes (#735), as the list to save
+    _depositAccountsToSave(boxes) {
+        return boxes.filter(b => b.checked).map(b => parseInt(b.getAttribute('data-deposit-account'), 10)).filter(n => n > 0);
     },
 
     // Where a pay run posts (#620): one picker per piece, the seeded default
@@ -1989,6 +2016,12 @@ const SettingsPage = {
             const hidden = SettingsPage._hiddenMenuToSave(menuBoxes);
             data.hidden_menu = JSON.stringify(hidden);
             for (const key of Object.keys(data)) if (key.startsWith('show-menu:')) delete data[key];
+        }
+        // Deposit into these accounts (#735), as a list; the boxes are not form fields
+        const depositBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-deposit-account]')] : [];
+        for (const key of Object.keys(data)) if (key.startsWith('deposit-account:')) delete data[key];
+        if (depositBoxes.length || 'default_deposit_account_id' in data) {
+            data.deposit_account_ids = JSON.stringify(SettingsPage._depositAccountsToSave(depositBoxes));
         }
         const btn = document.getElementById('settings-save-btn');
         if (btn) btn.disabled = true;

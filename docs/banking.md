@@ -149,6 +149,15 @@ has nothing to deposit later, so Deposit To starts on the default there. Only
 a bank account from the chart can be the default. A deposit or a payment
 already saved keeps the account it went into.
 
+The same section's **Deposit into these accounts** (#735) ticks the bank
+accounts a deposit goes into: Make Deposits lists only those, and so does
+Deposit To on Receive Payment and Enter Sales Receipt, under Undeposited
+Funds. With none ticked, every bank account is listed. The list only
+shortens those pickers: an account left off stays active, with its register,
+its reconciliations and its lines in every report, and a deposit or a
+payment already made into it keeps that account when it is edited. When
+accounts are ticked, the default deposit account must be one of them.
+
 Above the register, **From**, **To** and **Class** narrow what it shows. A
 From date adds a *Balance brought forward* row, and the running balance
 counts the lines shown. The dates apply when you press Enter or leave the

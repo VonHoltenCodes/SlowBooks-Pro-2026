@@ -2,7 +2,9 @@
 // account" (default_deposit_account_id) is the bank account Make Deposits
 // opens on and the first bank in a payment's or a sales receipt's Deposit
 // To, below Undeposited Funds, which stays the opening choice there (#709).
-// Blank is today's order. Each page is loaded alone, as the other probes
+// "Deposit into these accounts" (deposit_account_ids) narrows those lists
+// to the accounts chosen, and an edit keeps its own account. Blank is
+// today's order. Each page is loaded alone, as the other probes
 // load them, with DepositAccounts taken from utils.js.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -177,4 +179,82 @@ test('Settings: an account name reaches the page escaped', () => {
     const html = settingsPage()._depositAccountsHtml({}, [{ ...CHECKING, name: '<b>Chk</b>' }]);
     assert.ok(!html.includes('<b>Chk</b>'));
     assert.ok(html.includes('&lt;b&gt;Chk&lt;/b&gt;'));
+});
+
+// --- #735: Deposit into these accounts ------------------------------------
+
+test('Make Deposits lists only the accounts chosen, the default chosen among them', async () => {
+    const opts = picker(await makeDeposits({ deposit_account_ids: '[1,3]', default_deposit_account_id: '3' }));
+    assert.deepEqual(opts.map(o => o[0]), ['1', '3']);
+    assert.deepEqual(opts.filter(o => o[2]).map(o => o[0]), ['3']);
+});
+
+test('an empty list, or one naming no bank account here, lists every bank account', async () => {
+    for (const ids of ['[]', '', '[77]', 'garbage']) {
+        const opts = picker(await makeDeposits({ deposit_account_ids: ids }));
+        assert.deepEqual(opts.map(o => o[0]), ['1', '2', '3'], ids);
+    }
+});
+
+test('a recent deposit into an account off the list is still listed', async () => {
+    const recent = [{ id: 31, date: '2026-11-03', account_name: 'Savings', reference: 'SLIP-1', items: 1, amount: 125, voided: false, reconciled: false }];
+    const html = await makeDeposits({ deposit_account_ids: '[1]' }, undefined, recent);
+    assert.deepEqual(picker(html).map(o => o[0]), ['1']);
+    assert.match(html, /<td>Savings<\/td>/);
+    assert.match(html, /DepositsPage\.view\(31\)/);
+});
+
+test('editing a deposit offers no account to change: it keeps its own', async () => {
+    const p = load('deposits.js', 'DepositsPage', {
+        accounts: [CHECKING, SAVINGS], settings: { deposit_account_ids: '[1]', default_deposit_account_id: '1' },
+        routes: { '/deposits/pending': [], '/deposits/31': { id: 31, date: '2026-11-03', account_name: 'Savings', reference: 'SLIP-1', amount: 125, payments: [] } },
+    });
+    await p.page.editDeposit(31);
+    assert.ok(p.modal().includes('DepositsPage.saveEdit(31)'));
+    assert.ok(!/deposit_to_account_id|deposit-bank-acct|<select/.test(p.modal()));
+});
+
+for (const [file, name, open] of forms) {
+    test(`${file}: Deposit To offers Undeposited Funds and only the chosen bank accounts`, async () => {
+        const html = await open(load(file, name, { accounts: [CHECKING, UF, SAVINGS, PETTY], settings: { deposit_account_ids: '[1,3]', default_deposit_account_id: '3' } }));
+        assert.deepEqual(depositTo(html).map(o => o[0]), ['', '3', '1']);
+    });
+}
+
+test('payments.js: editing a payment into an account off the list keeps that account', async () => {
+    const p = load('payments.js', 'PaymentsPage', { accounts: [CHECKING, UF, SAVINGS, PETTY], settings: { deposit_account_ids: '[1]' } });
+    await p.page.showForm(null, null, 2);
+    const opts = depositTo(p.modal());
+    assert.deepEqual(opts.map(o => o[0]), ['', '1', '2']);
+    // a new payment does not offer it
+    await p.page.showForm();
+    assert.deepEqual(depositTo(p.modal()).map(o => o[0]), ['', '1']);
+});
+
+test('Settings: Deposit into these accounts is a labelled box per active bank account', () => {
+    const html = settingsPage()._depositAccountsHtml({ deposit_account_ids: '[1,3]' }, ALL);
+    assert.match(html, /<fieldset[^>]*>\s*<legend[^>]*>Deposit into these accounts<\/legend>/);
+    const boxes = [...html.matchAll(/<label[^>]*><input type="checkbox" name="deposit-account:(\d+)" data-deposit-account="\d+"( checked)?[^>]*>([^<]*)<\/label>/g)]
+        .map(m => [m[1], !!m[2], m[3]]);
+    assert.deepEqual(boxes, [
+        ['1', true, '1000 - Checking'],
+        ['2', false, '1010 - Savings'],
+        ['3', true, '1020 - Petty Cash'],
+    ]);
+});
+
+test('Settings: a chosen account no longer an active bank stays ticked and says so', () => {
+    const html = settingsPage()._depositAccountsHtml({ deposit_account_ids: '[6]' }, ALL);
+    assert.match(html, /data-deposit-account="6" checked[^>]*>\(unavailable\) 1030 - Old Reserve<\/label>/);
+});
+
+test('Settings: Save sends the ticked boxes as the list, none ticked as []', async () => {
+    const page = settingsPage();
+    const box = (id, checked) => ({ checked, getAttribute: () => String(id) });
+    assert.deepEqual(page._depositAccountsToSave([box(1, true), box(2, false), box(3, true)]), [1, 3]);
+    assert.deepEqual(page._depositAccountsToSave([box(1, false)]), []);
+    const src = fs.readFileSync(path.join(JS, 'settings.js'), 'utf8');
+    const save = src.slice(src.indexOf('    async save(e) {'), src.indexOf("await API.put('/settings', data);"));
+    assert.match(save, /data\.deposit_account_ids = JSON\.stringify\(SettingsPage\._depositAccountsToSave\(depositBoxes\)\)/);
+    assert.match(save, /key\.startsWith\('deposit-account:'\)\) delete data\[key\]/);
 });
