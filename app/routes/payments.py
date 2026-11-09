@@ -189,6 +189,11 @@ def create_payment(
         raise HTTPException(status_code=404, detail="Customer not found")
     # the payment's class (#686): one that exists and is not archived
     require_dimensions(db, data.class_id)
+    # Deposit To is not an account deactivated in the chart (#741), unless
+    # this is an edit keeping the account the payment already had
+    from app.services.undeposited_funds import refuse_inactive_deposit_account
+
+    refuse_inactive_deposit_account(db, data.deposit_to_account_id)
 
     # Reject non-positive amounts at the boundary; otherwise create_journal_entry
     # raises ValueError on the AR/bank line, which the framework surfaces as a
@@ -1012,5 +1017,9 @@ def replace_payment(
     two linked, under the void's refusals: a closed period, money already
     deposited, a deposit a payment application applied."""
     from app.services.replace_transaction import replace
+    from app.services.undeposited_funds import keeping_deposit_account
 
-    return replace(db, "payment", payment_id, data)
+    # the edit keeps its own Deposit To even if deactivated since (#741)
+    original = db.get(Payment, payment_id)
+    with keeping_deposit_account(original.deposit_to_account_id if original else None):
+        return replace(db, "payment", payment_id, data)

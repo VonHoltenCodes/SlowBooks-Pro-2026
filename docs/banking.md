@@ -158,6 +158,13 @@ its reconciliations and its lines in every report, and a deposit or a
 payment already made into it keeps that account when it is edited. When
 accounts are ticked, the default deposit account must be one of them.
 
+A bank account made inactive in the chart is left off all of these pickers
+(#741), and a new deposit, payment, batch payment or sales receipt into one
+is refused, naming the account, with nothing saved. A deposit or a payment
+already in it keeps it: the deposit still opens, prints and edits, and the
+payment's edit still offers its own account. A blank Deposit To still
+posts to Undeposited Funds.
+
 Above the register, **From**, **To** and **Class** narrow what it shows. A
 From date adds a *Balance brought forward* row, and the running balance
 counts the lines shown. The dates apply when you press Enter or leave the

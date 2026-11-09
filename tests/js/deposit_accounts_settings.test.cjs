@@ -264,3 +264,55 @@ test('Settings: Save sends the ticked boxes as the list, none ticked as []', asy
     assert.match(save, /data\.deposit_account_ids = JSON\.stringify\(SettingsPage\._depositAccountsToSave\(depositBoxes\)\)/);
     assert.match(save, /key\.startsWith\('deposit-account:'\)\) delete data\[key\]/);
 });
+
+// --- an account deactivated in the chart (#741) ----------------------------
+
+const RETIRED = { ...SAVINGS, is_active: false };
+
+test('Make Deposits leaves out a bank account deactivated in the chart', async () => {
+    const opts = picker(await makeDeposits({}, [CHECKING, UF, RETIRED, PETTY, CARD]));
+    assert.deepEqual(opts.map(o => o[0]), ['1', '3']);
+});
+
+test('Make Deposits leaves out a chosen account deactivated since it was chosen', async () => {
+    const accounts = [CHECKING, UF, RETIRED, PETTY, CARD];
+    assert.deepEqual(picker(await makeDeposits({ deposit_account_ids: '[1,2]' }, accounts)).map(o => o[0]), ['1']);
+    // every chosen one deactivated: every active bank account, as with none chosen
+    assert.deepEqual(picker(await makeDeposits({ deposit_account_ids: '[2]' }, accounts)).map(o => o[0]), ['1', '3']);
+});
+
+for (const [file, name, open] of forms) {
+    test(`${file}: Deposit To leaves out a bank account deactivated in the chart`, async () => {
+        const html = await open(load(file, name, { accounts: [CHECKING, UF, RETIRED, PETTY], settings: {} }));
+        assert.deepEqual(depositTo(html).map(o => o[0]), ['', '1', '3']);
+    });
+}
+
+test('payments.js: editing a payment into an account deactivated since keeps that account', async () => {
+    const p = load('payments.js', 'PaymentsPage', { accounts: [CHECKING, UF, RETIRED, PETTY], settings: {} });
+    await p.page.showForm(null, null, 2);
+    assert.deepEqual(depositTo(p.modal()).map(o => o[0]), ['', '1', '2', '3']);
+    // left off the list as well (#735), and still kept
+    const p2 = load('payments.js', 'PaymentsPage', { accounts: [CHECKING, UF, RETIRED, PETTY], settings: { deposit_account_ids: '[1]' } });
+    await p2.page.showForm(null, null, 2);
+    assert.deepEqual(depositTo(p2.modal()).map(o => o[0]), ['', '1', '2']);
+    // a new payment does not offer it
+    await p.page.showForm();
+    assert.deepEqual(depositTo(p.modal()).map(o => o[0]), ['', '1', '3']);
+});
+
+test('DepositAccounts.active keeps active accounts and the record\'s own, in order', () => {
+    const DA = depositAccounts({ settings: {} });
+    const ids = list => list.map(a => a.id);
+    assert.deepEqual(ids(DA.active([CHECKING, RETIRED, PETTY])), [1, 3]);
+    assert.deepEqual(ids(DA.active([CHECKING, RETIRED, PETTY], 2)), [1, 2, 3]);
+    assert.deepEqual(ids(DA.active([CHECKING, RETIRED, PETTY], '2')), [1, 2, 3]);
+    // an account with no is_active (an older answer) counts as active
+    assert.deepEqual(ids(DA.active([{ id: 9 }])), [9]);
+});
+
+test('Batch payments: Deposit To leaves out an account deactivated in the chart', async () => {
+    const p = load('batch_payments.js', 'BatchPaymentsPage', { accounts: [CHECKING, UF, RETIRED, PETTY], settings: {} });
+    const html = await p.page.render();
+    assert.deepEqual(depositTo(html).map(o => o[0]), ['', '1', '3']);
+});

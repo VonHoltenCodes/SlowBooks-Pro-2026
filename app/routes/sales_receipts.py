@@ -27,6 +27,7 @@ from app.schemas.sales_receipts import SalesReceiptCreate, SalesReceiptResponse
 from app.services.donor_documents import document_label
 from app.services.jobs_service import refuse_other_customers_jobs
 from app.services.terminology import terms_from_db
+from app.services.undeposited_funds import refuse_inactive_deposit_account
 
 router = APIRouter(prefix="/api/sales-receipts", tags=["sales-receipts"])
 
@@ -101,6 +102,8 @@ def create_sales_receipt(data: SalesReceiptCreate, db: Session = Depends(get_db)
         )
         if not acct:
             raise HTTPException(status_code=404, detail="Deposit account not found")
+        # nor an account deactivated in the chart (#741)
+        refuse_inactive_deposit_account(db, acct.id)
 
     customer_id = data.customer_id
     if customer_id is None:
