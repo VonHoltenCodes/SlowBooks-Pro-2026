@@ -141,6 +141,21 @@ def check_line_fits(quantity, rate) -> None:
         )
 
 
+# Percent columns (an estimate's markups, a change order's markup, a job's
+# default change-order markup) are Numeric(7, 4): three whole digits. A
+# larger figure overflows Postgres (a 500) and "1e30" raised in the money
+# rounding before it got there.
+MAX_PERCENT = Decimal("999.9999")
+
+
+def check_markup_percent(v, label: str):
+    """A markup percent is 0 to 999.9999; the sentence names the field by
+    `label`. A negative markup would price the work below its cost."""
+    if v is not None and not (0 <= v <= MAX_PERCENT):
+        raise ValueError(f"{label} must be between 0 and {MAX_PERCENT}%.")
+    return v
+
+
 def check_lines_fit(lines) -> None:
     """The lines' sum also fits a money column."""
     total = sum((abs(line_total(ln.quantity, ln.rate)) for ln in lines), Decimal(0))

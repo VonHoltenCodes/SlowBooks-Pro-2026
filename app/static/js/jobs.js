@@ -722,7 +722,7 @@ const JobsPage = {
                 <div class="form-group"><label for="c-ret">Retainage %</label>
                     <input id="c-ret" name="retainage_pct" type="number" step="0.01" min="0" max="100" value="${v(c.retainage_pct)}"></div>
                 <div class="form-group"><label for="c-comarkup">Markup on change orders (%)</label>
-                    <input id="c-comarkup" name="co_markup_pct" type="number" step="0.0001" min="-99.9999" max="1000" value="${v(c.co_markup_pct)}" placeholder="default markup on owner COs"></div>
+                    <input id="c-comarkup" name="co_markup_pct" type="number" step="0.0001" min="-99.9999" max="999.9999" value="${v(c.co_markup_pct)}" placeholder="default markup on owner COs"></div>
                 <div class="form-group"><label for="c-salestax">Sales tax</label>
                     <select id="c-salestax" name="sales_tax_treatment" title="Contractor pays: the lump-sum real-property rule. Pay applications bill no sales tax, and material bills on the job accrue use tax.">
                         <option value="charge_owner" ${c.sales_tax_treatment !== 'contractor_pays' ? 'selected' : ''}>Charge sales tax to the owner</option>
@@ -1128,7 +1128,7 @@ const JobsPage = {
                 <div class="form-group"><label>Allowance line</label><select id="co-allowance" ${d}>${allowOpts}</select></div>
                 <div class="form-group"><label>Commitment (sub)</label><select id="co-commitment" ${d}>${commitOpts}</select></div>
                 <div class="form-group"><label>Apply markup</label><label style="font-weight:400"><input id="co-apply-markup" ${d} ${co.funding === 'contract' ? 'disabled' : ''} type="checkbox" ${(co.apply_markup ?? (co.funding === 'contract')) ? 'checked' : ''} onchange="JobsPage.coRecalc()"> ${co.funding === 'contract' ? 'Markup applied' : 'Add markup to this allowance/contingency work'}</label></div>
-                <div class="form-group"><label>Markup %</label><input id="co-markup" ${d} type="number" step="0.0001" min="-99.9999" max="1000" value="${co.markup_pct ?? ''}" placeholder="default from contract" oninput="JobsPage.coRecalc()"></div>
+                <div class="form-group"><label>Markup %</label><input id="co-markup" ${d} type="number" step="0.0001" min="-99.9999" max="999.9999" value="${co.markup_pct ?? ''}" placeholder="default from contract" oninput="JobsPage.coRecalc()"></div>
                 <div class="form-group"><label>Date</label><input id="co-date" ${d} type="date" value="${co.date || ''}"></div>
                 <div class="form-group full-width"><label>Description</label><textarea id="co-desc" ${d} rows="2">${escapeHtml(co.description || '')}</textarea></div>
             </div>
@@ -1165,7 +1165,7 @@ const JobsPage = {
             <td><input class="co-l-qty" data-write type="number" step="0.0001" value="${line.quantity ?? 1}" style="width:64px;text-align:right" oninput="JobsPage.coRecalc()"></td>
             <td><input class="co-l-unit" data-write maxlength="20" value="${escapeHtml(line.unit || '')}" style="width:52px"></td>
             <td><input class="co-l-cost" data-write type="number" step="0.0001" value="${line.unit_cost ?? 0}" style="width:84px;text-align:right" oninput="JobsPage.coRecalc()"></td>
-            <td><input class="co-l-markup" data-write type="number" step="0.0001" min="-99.9999" max="1000" value="${line.markup_pct ?? ''}" style="width:64px;text-align:right" placeholder="dflt" oninput="JobsPage.coRecalc()"></td>
+            <td><input class="co-l-markup" data-write type="number" step="0.0001" min="-99.9999" max="999.9999" value="${line.markup_pct ?? ''}" style="width:64px;text-align:right" placeholder="dflt" oninput="JobsPage.coRecalc()"></td>
             <td class="amount co-l-amt">0.00</td>
             <td class="amount co-l-sell">0.00</td>
             <td><button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coRemoveLine(this)">✕</button></td>

@@ -20,9 +20,19 @@ from app.schemas.common import (
     validate_non_negative_line,
     check_line_fits,
     check_lines_fit,
+    check_markup_percent,
     quantity_text,
 )
 from app.schemas.invoices import RateOut
+
+# The four compounding markups (#551), by the label the Markups block uses.
+_MARKUP_LABELS = dict(
+    gc_pct="General conditions",
+    insurance_pct="Insurance",
+    fee_pct="Fee",
+    bond_pct="Bond",
+)
+
 
 LINE_KINDS = ("base", "allowance", "alternate", "unit_price")
 _LINE_KIND_LABELS = dict(
@@ -124,6 +134,11 @@ class EstimateCreate(StrictModel):
     terms: Optional[str] = None
     lines: list[EstimateLineCreate] = []
 
+    @field_validator(*_MARKUP_LABELS)
+    @classmethod
+    def _markups_in_column(cls, v, info):
+        return check_markup_percent(v, _MARKUP_LABELS[info.field_name])
+
     @field_validator("lines")
     @classmethod
     def _require_lines(cls, v):
@@ -150,6 +165,11 @@ class EstimateUpdate(StrictModel):
     show_markup_rows: Optional[bool] = None
     terms: Optional[str] = None
     lines: Optional[list[EstimateLineCreate]] = None
+
+    @field_validator(*_MARKUP_LABELS)
+    @classmethod
+    def _markups_in_column(cls, v, info):
+        return check_markup_percent(v, _MARKUP_LABELS[info.field_name])
 
     @field_validator("lines")
     @classmethod

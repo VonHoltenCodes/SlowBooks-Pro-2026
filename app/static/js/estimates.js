@@ -401,7 +401,7 @@ const EstimatesPage = {
     markupsBlockHtml(est) {
         if (!Terms.isConstruction()) return '';
         const f = (name, val, label) =>
-            `<div class="form-group"><label>${label} (%)</label><input name="${name}" type="number" step="0.0001" value="${+(Number(val) || 0).toFixed(4)}" oninput="EstimatesPage.recalc()"></div>`;
+            `<div class="form-group"><label>${label} (%)</label><input name="${name}" type="number" step="0.0001" min="0" max="999.9999" value="${+(Number(val) || 0).toFixed(4)}" oninput="EstimatesPage.recalc()"></div>`;
         return `<h3 style="margin:16px 0 8px; font-size:14px; color:var(--gray-600);">Markups</h3>
             <div class="form-grid">
                 ${f('gc_pct', est.gc_pct, 'General conditions')}

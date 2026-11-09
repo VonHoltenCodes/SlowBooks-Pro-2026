@@ -34,6 +34,7 @@ from app.services.accounting import (
     get_default_income_account_id,
     get_sales_tax_account_id,
     compute_line_totals,
+    refuse_total_past_column,
     _q,
 )
 from app.routes.invoices.helpers import confirm_zero_total, resolve_line_taxable
@@ -158,6 +159,8 @@ def create_credit_memo(data: CreditMemoCreate, db: Session = Depends(get_db)):
     # and nothing at all for a non-taxable customer.
     resolve_line_taxable(db, data.lines, customer)
     subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
+    # lines that fit can still come past the column once tax is added
+    refuse_total_past_column(subtotal, tax_amount, total)
     confirm_zero_total(total, data.allow_zero_total, "credit memo")
 
     cm = None

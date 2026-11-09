@@ -1100,7 +1100,7 @@ def test_markup_pct_is_bounded(client, seed_customer):
     assert r.status_code == 422
     r = client.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": -150})
     assert r.status_code == 422
-    ok = _co(client, job["id"], [{**LABOR, "markup_pct": -10}], markup_pct=1000)
+    ok = _co(client, job["id"], [{**LABOR, "markup_pct": -10}], markup_pct=999.9999)
     assert ok["sell_total"] == 450.0  # the line's own -10% wins
 
 

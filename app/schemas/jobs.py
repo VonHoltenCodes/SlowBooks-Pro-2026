@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
-from app.schemas.common import StrictModel, choice_error
+from app.schemas.common import MAX_PERCENT, StrictModel, choice_error
 
 from app.models.jobs import (
     CONTRACT_TYPES,
@@ -152,8 +152,11 @@ def _check_contract_type(v):
 
 
 def _bounded_markup(v):
-    if v is not None and not (-100 < v <= 1000):
-        raise ValueError("Change-order markup must be above -100% and at most 1000%.")
+    # at most what the Numeric(7, 4) column holds (1000 overflowed Postgres)
+    if v is not None and not (-100 < v <= MAX_PERCENT):
+        raise ValueError(
+            f"Change-order markup must be above -100% and at most {MAX_PERCENT}%."
+        )
     return v
 
 
