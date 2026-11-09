@@ -20,8 +20,14 @@ const DepositsPage = {
             `<option value="${c.id}" ${c.is_system_default && !blank ? 'selected' : ''}>${escapeHtml(c.name)}</option>`
         ).join('');
 
-        const bankAccts = accounts.filter(a => a.bank_kind === 'bank');
-        const bankOpts = bankAccts.map(a => `<option value="${a.id}">${escapeHtml(a.name)} (${formatCurrency(a.balance)})</option>`).join('');
+        // Settings' "Deposit into these accounts" (#735) narrows the list
+        // to the ones chosen; Deposit To opens on the default deposit
+        // account (#734), when it is on the list; none chosen, the browser
+        // opens on the first.
+        const allBanks = accounts.filter(a => a.bank_kind === 'bank');
+        const bankAccts = typeof DepositAccounts !== 'undefined' ? DepositAccounts.banks(allBanks) : allBanks;
+        const startId = typeof DepositAccounts !== 'undefined' ? DepositAccounts.startId(bankAccts) : '';
+        const bankOpts = bankAccts.map(a => `<option value="${a.id}"${String(a.id) === startId ? ' selected' : ''}>${escapeHtml(a.name)} (${formatCurrency(a.balance)})</option>`).join('');
 
         let html = `
             <div class="page-header">

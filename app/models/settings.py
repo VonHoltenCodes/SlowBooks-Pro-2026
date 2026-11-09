@@ -206,6 +206,18 @@ DEFAULT_SETTINGS = {
     # Mercury read-only feed; mapping and sync state are managed by its routes.
     "mercury_api_token": "",
     "mercury_webhook_secret": "",
+    # Make Deposits (#734): the bank account id the Deposits page opens on,
+    # and the one listed first under Undeposited Funds in a payment's or a
+    # sales receipt's Deposit To. "" = none, the list's own order as before.
+    # A deposit or a payment already saved keeps its own account.
+    "default_deposit_account_id": "",
+    # Make Deposits (#735): a JSON list of the bank account ids the
+    # destination list offers (Make Deposits, and the bank accounts in a
+    # payment's or a sales receipt's Deposit To); "[]" = every bank account,
+    # as before. An account off the list is hidden nowhere else (chart,
+    # registers, reports), and a deposit already in it keeps it. The default
+    # deposit account above must be on the list, or the list empty.
+    "deposit_account_ids": "[]",
     # Class tracking (#243): "true" starts every entry form with no class
     # chosen and asks before a transaction is saved without one (it would
     # be reported under Uncategorized); "false" starts the picker on
@@ -269,4 +281,13 @@ DEFAULT_SETTINGS = {
     "late_fee_enabled": "false",
     "late_fee_rate": "1.5",
     "late_fee_grace_days": "15",
+    # Collections (#653): "true" lets the app send the due payment reminders
+    # itself, once a day, when someone opens it. last_run is the ISO date of
+    # that automatic run, so it happens once however often the app loads.
+    "invoice_reminders_auto": "false",
+    "invoice_reminders_last_run": "",
+    # Who is reminded about a sub-customer billed with its parent (a tenant
+    # billed with its property): property, tenant or both. The property,
+    # whose A/R the invoice sits on, unless chosen otherwise.
+    "invoice_reminders_billed_sub_to": "property",
 }

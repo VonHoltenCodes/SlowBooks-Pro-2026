@@ -90,9 +90,9 @@ jobs:
       - name: Build the application icon
         run: |
           python packaging/macos/build_icon.py \
-            assets/icon-256.png "$RUNNER_TEMP/SlowBooksPro.iconset"
+            assets/icon-1024.png "$RUNNER_TEMP/SlowBooksPro.iconset"
           iconutil -c icns "$RUNNER_TEMP/SlowBooksPro.iconset" \
-            -o packaging/macos/slowbookspro.icns
+            -o packaging/macos/slowbookspro-sbp.icns
 
       - name: Build the app with PyInstaller
         run: |

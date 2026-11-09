@@ -141,6 +141,64 @@ const SettingsPage = {
         if (box && fields) fields.hidden = !box.checked;
     },
 
+    // Make Deposits' destination (#734, #735): a labelled picker of the
+    // chart's active bank accounts, blank for none (the list's first, as
+    // before), and a labelled box per bank account for the list it offers,
+    // none ticked for every one. A saved id that is no longer an active bank
+    // account stays selected (or ticked) and named, so Save says what is
+    // wrong instead of dropping it. String concatenation, like
+    // _payrollAccountsHtml.
+    _depositAccountsHtml(s, accounts) {
+        const all = Array.isArray(accounts) ? accounts : [];
+        const banks = all.filter(a => a.bank_kind === 'bank' && a.is_active !== false);
+        const sel = String(s.default_deposit_account_id || '');
+        let h = '<div class="form-grid">';
+        h += '<div class="form-group full-width"><label for="settings-default-deposit-account">Default deposit account</label>';
+        h += '<select name="default_deposit_account_id" id="settings-default-deposit-account" data-no-search aria-describedby="settings-default-deposit-account-help">';
+        h += '<option value=""' + (sel ? '' : ' selected') + '>None: the first bank account on the list</option>';
+        let matched = false;
+        for (const a of banks) {
+            const isSel = String(a.id) === sel;
+            if (isSel) matched = true;
+            h += '<option value="' + Number(a.id) + '"' + (isSel ? ' selected' : '') + '>' + escapeHtml(accountWords(a)) + '</option>';
+        }
+        if (sel && !matched) {
+            const gone = all.find(a => String(a.id) === sel);
+            h += '<option value="' + escapeHtml(sel) + '" selected>(unavailable) ' + escapeHtml(gone ? accountWords(gone) : '#' + sel) + '</option>';
+        }
+        h += '</select>';
+        h += '<div id="settings-default-deposit-account-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">';
+        h += 'Make Deposits opens on this account. On Receive Payment and Enter Sales Receipt it is the first bank account under Undeposited Funds in Deposit To, which still starts on Undeposited Funds. When accounts are ticked below, it must be one of them.';
+        h += '</div></div>';
+        let chosen = [];
+        try { chosen = JSON.parse(s.deposit_account_ids || '[]'); } catch (err) { chosen = []; }
+        chosen = (Array.isArray(chosen) ? chosen : []).map(String);
+        const ticked = new Set(chosen);
+        h += '<fieldset class="form-group full-width" aria-describedby="settings-deposit-accounts-help" style="border:0; padding:0; margin:0;">';
+        h += '<legend style="font-weight:700; font-size:11px; padding:0;">Deposit into these accounts</legend>';
+        const box = (id, words) => '<label style="display:block; font-weight:normal;">'
+            + '<input type="checkbox" name="deposit-account:' + escapeHtml(id) + '" data-deposit-account="' + escapeHtml(id) + '"'
+            + (ticked.has(id) ? ' checked' : '') + ' style="width:auto; vertical-align:middle; margin-right:6px;">'
+            + escapeHtml(words) + '</label>';
+        for (const a of banks) h += box(String(Number(a.id)), accountWords(a));
+        for (const id of chosen) {
+            if (banks.some(a => String(a.id) === id)) continue;
+            const gone = all.find(a => String(a.id) === id);
+            h += box(id, '(unavailable) ' + (gone ? accountWords(gone) : '#' + id));
+        }
+        if (!banks.length && !chosen.length) h += '<div style="font-size:11px; color:var(--text-muted);">The chart has no active bank account.</div>';
+        h += '<div id="settings-deposit-accounts-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">';
+        h += 'Make Deposits, and Deposit To on Receive Payment and Enter Sales Receipt, offer only the accounts ticked here; none ticked offers every bank account. An account left off is still in the chart, its register and the reports, and a deposit already made into it keeps it.';
+        h += '</div></fieldset>';
+        h += '</div>';
+        return h;
+    },
+
+    // the ticked Deposit into these accounts boxes (#735), as the list to save
+    _depositAccountsToSave(boxes) {
+        return boxes.filter(b => b.checked).map(b => parseInt(b.getAttribute('data-deposit-account'), 10)).filter(n => n > 0);
+    },
+
     // Where a pay run posts (#620): one picker per piece, the seeded default
     // first and named ("Default (1000 Checking)"). The choices come from
     // GET /settings/payroll-accounts, filtered by the same rule the save
@@ -373,6 +431,7 @@ const SettingsPage = {
             SettingsPage.loadCompanyFile();
             SettingsPage.loadLegacyFiles();
             SettingsPage.loadEmailTemplates();
+            SettingsPage.loadReminderRules();
             SettingsPage.loadInvoiceMessages();
             if (Terms.isNonprofit()) SettingsPage.loadInvoiceMessages('giving_statement');
             SettingsPage.loadPaymentTerms();
@@ -717,6 +776,14 @@ const SettingsPage = {
                     ${SettingsPage._payrollAccountsHtml(payrollAccounts)}
                 </div>
 
+                <div class="settings-section" data-group="connections" id="settings-deposits" role="group" aria-labelledby="settings-h-deposits">
+                    <h3 id="settings-h-deposits">Deposits</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Where Make Deposits puts the money. A deposit or a payment already saved keeps its own account.
+                    </div>
+                    ${SettingsPage._depositAccountsHtml(s, accounts)}
+                </div>
+
                 <div class="settings-section" data-group="connections" role="group" aria-labelledby="settings-h-online-payments">
                     <h3 id="settings-h-online-payments">Online Payments</h3>
                     <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
@@ -853,6 +920,35 @@ const SettingsPage = {
                         <div class="form-group"><label>Grace Days</label>
                             <input name="late_fee_grace_days" type="number" min="0" step="1" value="${escapeHtml(s.late_fee_grace_days || '15')}"></div>
                     </div>
+                </div>
+
+                <div class="settings-section" data-group="sales" id="settings-collections" role="group" aria-labelledby="settings-h-collections">
+                    <h3 id="settings-h-collections">Collections</h3>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Reminders go to a customer's email when an ${T('invoice')} is coming due or is overdue. Run them from the <a href="#/collections">Collections</a> page, or let SlowBooks Pro send them for you.
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group"><label for="invoice-reminders-auto">Send reminders automatically</label>
+                            <select name="invoice_reminders_auto" id="invoice-reminders-auto" data-no-search onchange="SettingsPage.previewAutoReminders(this)">
+                                <option value="false" ${s.invoice_reminders_auto !== 'true' ? 'selected' : ''}>Off</option>
+                                <option value="true" ${s.invoice_reminders_auto === 'true' ? 'selected' : ''}>On</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Once a day, when SlowBooks Pro is opened. Needs email set up.
+                                ${s.invoice_reminders_last_run ? `Last ran ${escapeHtml(formatDate(s.invoice_reminders_last_run))}.` : ''}</div></div>
+                        <div class="form-group"><label for="invoice-reminders-billed-sub-to">Remind about a sub-${T('customer').toLowerCase()} billed with its parent</label>
+                            <select name="invoice_reminders_billed_sub_to" id="invoice-reminders-billed-sub-to" data-no-search>
+                                <option value="property" ${(s.invoice_reminders_billed_sub_to || 'property') === 'property' ? 'selected' : ''}>The parent (whose account it is billed to)</option>
+                                <option value="tenant" ${s.invoice_reminders_billed_sub_to === 'tenant' ? 'selected' : ''}>The sub-${T('customer').toLowerCase()} itself</option>
+                                <option value="both" ${s.invoice_reminders_billed_sub_to === 'both' ? 'selected' : ''}>Both</option>
+                            </select>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A tenant billed with its property, say. Whoever is written to must have an email and not be opted out.</div></div>
+                    </div>
+                    <h4 id="settings-h-reminder-rules" style="margin:12px 0 4px; font-size:12px;">Reminder rules</h4>
+                    <div style="font-size:10px; color:var(--text-muted); margin-bottom:8px;">
+                        Days from due: negative is before the due date, 0 is the day, positive is after. Each ${T('invoice')} gets one email per run: the latest rule it has reached.
+                        Placeholders: {{ customer_name }} {{ invoice_number }} {{ invoice_label }} {{ balance_due }} {{ due_date }} {{ days_overdue }} {{ company_name }}
+                    </div>
+                    <div id="reminder-rules-list"></div>
                 </div>
 
                 <div class="settings-section" data-group="email" role="group" aria-labelledby="settings-h-email-templates">
@@ -1900,7 +1996,7 @@ const SettingsPage = {
     async showProviderPayout(provider, label) {
         const accounts = await API.get('/accounts?bank=1&active_only=true').catch(() => []);
         const opts = (Array.isArray(accounts) ? accounts : [])
-            .map(a => `<option value="${a.id}">${escapeHtml(accountLabel(a))}</option>`).join('');
+            .map(a => `<option value="${a.id}">${accountLabel(a)}</option>`).join('');
         const today = new Date().toISOString().slice(0, 10);
         openModal(`Record ${escapeHtml(label)} payout`, `
             <form onsubmit="SettingsPage.submitProviderPayout(event, '${provider}')">
@@ -1961,6 +2057,12 @@ const SettingsPage = {
             const hidden = SettingsPage._hiddenMenuToSave(menuBoxes);
             data.hidden_menu = JSON.stringify(hidden);
             for (const key of Object.keys(data)) if (key.startsWith('show-menu:')) delete data[key];
+        }
+        // Deposit into these accounts (#735), as a list; the boxes are not form fields
+        const depositBoxes = typeof e.target.querySelectorAll === 'function' ? [...e.target.querySelectorAll('input[data-deposit-account]')] : [];
+        for (const key of Object.keys(data)) if (key.startsWith('deposit-account:')) delete data[key];
+        if (depositBoxes.length || 'default_deposit_account_id' in data) {
+            data.deposit_account_ids = JSON.stringify(SettingsPage._depositAccountsToSave(depositBoxes));
         }
         const btn = document.getElementById('settings-save-btn');
         if (btn) btn.disabled = true;
@@ -2672,6 +2774,97 @@ const SettingsPage = {
         }
         if (set !== undefined) SettingsPage._messages = set;
         return SettingsPage._messages;
+    },
+
+    // Switching the automatic run on: show who gets an email on the first run
+    // before the setting is saved (review of #654). Turning rules on for a
+    // company with old open invoices sends the firmest reminder on each one.
+    async previewAutoReminders(select) {
+        if (!select || select.value !== 'true') return;
+        const back = () => { select.value = 'false'; SettingsPage._updateDirty(); };
+        let summary;
+        try { summary = await CollectionsPage.dueSummary(); } catch (err) { toast(err.message, 'error'); return; }
+        const n = summary.due.items.length;
+        if (!n) { toast('Nothing is due today. Once saved, the first automatic run sends whatever is due when SlowBooks Pro next opens.', 'info'); return; }
+        openModal('Reminders the first run will send', `
+            <p>The first automatic run, the next time SlowBooks Pro opens after you save, emails <strong>${n}</strong> reminder${n === 1 ? '' : 's'}:</p>
+            ${summary.html}
+            <p style="font-size:11px; color:var(--text-muted);">To hold any of them back, turn reminders off on that ${T('customer').toLowerCase()} first, or send them yourself from Collections and review the result.</p>
+            <div class="form-actions">
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Leave it off</button>
+                <button type="button" class="btn btn-primary" onclick="closeModal({ chosen: true })">Keep it on</button>
+            </div>`, {
+            // Only "Keep it on" keeps it on: ×, Escape, Leave it off and a page
+            // change all put the switch back (W-131, the 2.31.10 gate).
+            onClose: (kept) => { if (!kept) back(); },
+        });
+        SettingsPage._autoPreviewCancel = back;
+    },
+    _autoPreviewCancel() {},
+
+    // Reminder rules (#653). The rows sit inside the Settings form, so the
+    // controls carry no name (nothing here is sent to PUT /api/settings) and
+    // Enter is held back in the single-line boxes. Writes are an
+    // administrator's: every control is data-admin data-write.
+    _rules: [],
+
+    async loadReminderRules() {
+        const el = $('#reminder-rules-list');
+        if (!el) return;
+        // A stubbed API (the admin-controls probe) may answer with no list
+        try { const got = await API.get('/collections/rules'); SettingsPage._rules = Array.isArray(got) ? got : []; } catch (e) {
+            el.innerHTML = `<div style="font-size:11px; color:var(--text-muted);">${escapeHtml(e.message)}</div>`;
+            return;
+        }
+        const rows = SettingsPage._rules.map(r => SettingsPage._ruleRowHtml(r)).join('');
+        el.innerHTML = `<div class="table-container"><table>
+            <thead><tr><th scope="col">Days from due</th><th scope="col">Enabled</th><th scope="col">Subject</th><th scope="col">Body</th><th scope="col">Actions</th></tr></thead>
+            <tbody>${rows}${SettingsPage._ruleRowHtml(null)}</tbody></table></div>`;
+    },
+
+    // One editable row; `r` null is the blank Add rule row
+    _ruleRowHtml(r) {
+        const id = r ? r.id : 'new';
+        const f = (part) => `id="rule-${part}-${id}"`;
+        const guard = `onkeydown="if (event.key === 'Enter') event.preventDefault()"`;
+        return `<tr data-rule="${id}">
+            <td><input type="number" step="1" style="width:70px" ${f('days')} ${guard} data-admin data-write aria-label="Days from due"
+                value="${r ? r.days_from_due : ''}" placeholder="e.g. 7">
+                ${r ? `<div style="font-size:10px; color:var(--text-muted);">${escapeHtml(r.label)}</div>` : ''}</td>
+            <td><input type="checkbox" ${f('enabled')} data-admin data-write aria-label="Enabled" ${!r || r.enabled ? 'checked' : ''}></td>
+            <td><input type="text" maxlength="500" style="width:100%" ${f('subject')} ${guard} data-admin data-write aria-label="Subject" value="${escapeHtml(r ? r.subject : '')}"></td>
+            <td><textarea rows="4" style="width:100%" ${f('body')} data-admin data-write aria-label="Body">${escapeHtml(r ? r.body : '')}</textarea></td>
+            <td class="actions">
+                <button type="button" class="btn btn-sm btn-primary" data-admin data-write onclick="SettingsPage.saveReminderRule(${r ? r.id : 'null'})">${r ? 'Save' : 'Add rule'}</button>
+                ${r ? `<button type="button" class="btn btn-sm btn-secondary" data-destructive data-admin data-write onclick="SettingsPage.deleteReminderRule(${r.id})">Delete</button>` : ''}
+            </td></tr>`;
+    },
+
+    async saveReminderRule(id) {
+        const key = id === null ? 'new' : id;
+        const days = $(`#rule-days-${key}`).value;
+        if (days === '' || !Number.isInteger(Number(days))) { toast('Enter the days from due as a whole number', 'error'); return; }
+        const body = {
+            days_from_due: parseInt(days, 10),
+            enabled: $(`#rule-enabled-${key}`).checked,
+            subject: $(`#rule-subject-${key}`).value,
+            body: $(`#rule-body-${key}`).value,
+        };
+        try {
+            if (id === null) await API.post('/collections/rules', body);
+            else await API.put(`/collections/rules/${id}`, body);
+            toast('Reminder rule saved');
+            SettingsPage.loadReminderRules();
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async deleteReminderRule(id) {
+        if (!confirm('Delete this reminder rule?')) return;
+        try {
+            await API.del(`/collections/rules/${id}`);
+            toast('Reminder rule deleted');
+            SettingsPage.loadReminderRules();
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     async loadInvoiceMessages() {

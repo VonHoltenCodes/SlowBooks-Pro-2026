@@ -52,6 +52,22 @@
     .payee-address { margin: 6px 0 0 0.5in; font-size: 9pt; line-height: 1.2; }
 </style>
 {%- endif %}
+{%- if position != 'top' %}
+<style>
+    /* Check at the bottom (#732): the two stubs end where a sheet
+       perforated in thirds tears, the first at 3.67 in from the top of the
+       sheet (0.25 in of page margin, the body's 8 px and 3.34 in of stub),
+       the second at 7.33 in, and the face runs to the foot of the printable
+       page. The memo and the signature are placed from the face's foot, so
+       they move with its 0.09 in of extra height and every field keeps its
+       place on the face (the pre-printed stock and the nudges, #440). */
+    .check-page-bottom { height: 10.42in; }
+    .check-page-bottom .stub { height: 3.34in; }
+    .check-page-bottom .stub + .stub { height: 3.66in; }
+    .check-page-bottom .check-area { height: 3.42in; }
+    .check-page-bottom .memo-line, .check-page-bottom .signature-line { bottom: 0.59in; }
+</style>
+{%- endif %}
 {%- if position == 'top' %}
 <style>
     /* Check on top (#727): the face in the top third and two vouchers
@@ -94,7 +110,7 @@
 <div class="payee-address">{% for line in check.payee_address %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
 {%- endmacro %}
 {%- for check in checks %}
-    <div class="check-page{% if position == 'top' %} check-page-top{% endif %}">
+    <div class="check-page {% if position == 'top' %}check-page-top{% else %}check-page-bottom{% endif %}">
 {%- if position == 'top' %}
         <!-- Check (top) -->
         <div class="check-area check-top"{% if nudge_x or nudge_y %} style="transform: translate({{ nudge_x }}in, {{ nudge_y }}in);"{% endif %}>

@@ -441,3 +441,139 @@ def test_top_panels_end_where_a_sheet_in_thirds_tears():
     assert '<div class="check-page check-page-top">' in html
     bottom = _render(check_position="bottom")
     assert "check-page-top" not in bottom and ".voucher" not in bottom
+
+
+# ----- the bottom layout's panels (#732) --------------------------------
+
+
+def test_bottom_panels_end_where_a_sheet_in_thirds_tears():
+    """#732: the first stub ends at 3.67 in from the top of the sheet and the
+    second at 7.33 in (0.25 in of page margin and the body's 8 px counted),
+    where stock perforated in thirds tears; the face runs to the foot of the
+    printable page, as the top layout's panels do (#727)."""
+    html = _render()
+    assert ".check-page-bottom { height: 10.42in; }" in html
+    assert ".check-page-bottom .stub { height: 3.34in; }" in html
+    assert ".check-page-bottom .stub + .stub { height: 3.66in; }" in html
+    assert ".check-page-bottom .check-area { height: 3.42in; }" in html
+    assert html.count('<div class="check-page check-page-bottom">') == 1
+    # the panels fill the page exactly: 3.34 + 3.66 + 3.42 = 10.42 in
+    assert round(3.34 + 3.66 + 3.42, 2) == 10.42
+    top = _render(check_position="top")
+    assert "check-page-bottom" not in top
+
+
+def test_bottom_face_fields_keep_their_places_on_the_face():
+    """The face is 0.09 in taller, so what was placed from its foot (the memo
+    and the signature, 0.5 in up on a 3.33 in face) is placed 0.59 in up:
+    2.83 in from the face's top either way. Everything placed from the top
+    of the face is untouched, so the pre-printed stock and the nudges (#440)
+    line up as before."""
+    html = _render(_check(payee_address=_ADDRESS))
+    assert (
+        ".check-page-bottom .memo-line, .check-page-bottom .signature-line "
+        "{ bottom: 0.59in; }"
+    ) in html
+    assert round(3.42 - 0.59, 2) == round(3.33 - 0.5, 2)
+    for rule in (
+        ".check-number { position: absolute; top: 0.25in; right: 0.25in;",
+        ".check-date { position: absolute; top: 0.25in; right: 2.5in;",
+        ".pay-to { margin-top: 0.5in; }",
+        ".amount-box { position: absolute; top: 1in; right: 0.25in;",
+        ".check-area { height: 3.33in; padding: 0.25in 0.25in;",
+    ):
+        assert rule in html, rule
+    pre = _render(check_stock="preprinted", check_nudge_y_in="0.1")
+    assert "{ bottom: 0.59in; }" in pre
+    assert re.search(
+        r'<div class="check-page check-page-bottom">\s*<!-- Top Stub -->', pre
+    )
+    assert 'style="transform: translate(0.0in, 0.1in);"' in _face(pre)
+
+
+def test_a_batch_and_the_test_print_follow_the_bottom_panels(client, captured):
+    html = render_checks_html(
+        [_check(), _check(check_number="1073", payee="Bay Rentals")], _COMPANY
+    )
+    assert html.count('<div class="check-page check-page-bottom">') == 2
+    assert html.count(".check-page-bottom .stub { height: 3.34in; }") == 1
+    assert client.get("/api/checks/test-print").status_code == 200
+    assert '<div class="check-page check-page-bottom">' in captured["html"]
+    assert ".check-page-bottom .stub + .stub { height: 3.66in; }" in captured["html"]
+
+
+# ----- the Pay to line names the vendor when no payee was typed (#733) --
+
+
+def _vendor(client, name="Main Street Properties"):
+    v = client.post("/api/vendors", json={"name": name, "address1": "9 Elm St"})
+    assert v.status_code in (200, 201), v.text
+    return v.json()["id"]
+
+
+def test_a_register_check_with_a_vendor_and_no_payee_pays_the_vendor(
+    client, db_session, seed_accounts
+):
+    """#733: an entry saved through the API with a vendor and no payee text
+    printed a blank Pay to line over the vendor's address."""
+    e = _entry(
+        client,
+        seed_accounts,
+        payee=None,
+        description="",
+        vendor_id=_vendor(client),
+    )
+    data = register_check_data(db_session, e["id"])
+    assert data["payee"] == "Main Street Properties"
+    html = render_checks_html([data], _COMPANY)
+    face = _face(html)
+    assert '<span class="pay-to-line">Main Street Properties</span>' in face
+    # the stubs name the vendor too
+    assert html.count("<strong>Pay To:</strong> Main Street Properties") == 2
+    top = render_checks_html([data], {**_COMPANY, "check_position": "top"})
+    assert top.count('<span class="voucher-payee">Main Street Properties</span>') == 2
+
+
+def test_a_register_check_with_a_vendor_and_a_typed_payee_pays_the_payee(
+    client, db_session, seed_accounts
+):
+    e = _entry(
+        client, seed_accounts, payee="M. S. Properties LLC", vendor_id=_vendor(client)
+    )
+    data = register_check_data(db_session, e["id"])
+    assert data["payee"] == "M. S. Properties LLC"
+    assert '<span class="pay-to-line">M. S. Properties LLC</span>' in _face(
+        render_checks_html([data], _COMPANY)
+    )
+
+
+def test_a_register_check_with_neither_prints_as_today(
+    client, db_session, seed_accounts
+):
+    e = _entry(client, seed_accounts, payee=None, description="")
+    data = register_check_data(db_session, e["id"])
+    assert data["payee"] == ""
+    assert data["payee_address"] == []
+    assert '<span class="pay-to-line"></span>' in _face(
+        render_checks_html([data], _COMPANY)
+    )
+
+
+def test_an_expense_check_with_a_vendor_and_no_payee_pays_the_vendor(
+    client, db_session, seed_accounts
+):
+    r = client.post(
+        "/api/expenses",
+        json={
+            "date": "2026-09-02",
+            "vendor_id": _vendor(client, "Sweet Forest Cafe"),
+            "expense_account_id": seed_accounts["6000"].id,
+            "paid_from_account_id": seed_accounts["1000"].id,
+            "amount": "30.30",
+            "reference": "1074",
+        },
+    )
+    assert r.status_code == 201, r.text
+    data = register_check_data(db_session, r.json()["id"])
+    assert data["payee"] == "Sweet Forest Cafe"
+    assert data["memo"] == ""

@@ -20,7 +20,7 @@ Two additive columns on change_orders:
 downgrade drops all three.
 
 Revision ID: e2a6c8f4b1d9
-Revises: d7f3a9c1b5e2
+Revises: c8e1a4d7f305
 Create Date: 2026-11-07
 
 """
@@ -32,7 +32,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "e2a6c8f4b1d9"
-down_revision: Union[str, None] = "d7f3a9c1b5e2"
+down_revision: Union[str, None] = "c8e1a4d7f305"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

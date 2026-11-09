@@ -276,10 +276,48 @@ _ADDRESS_LIST_SETTINGS = {
 }
 
 
+def _clean_deposit_account_ids(value, text: str) -> str:
+    """Make Deposits' destination list (#735) as stored: a JSON list of
+    account ids, each once, in id order; "[]" for every bank account. The
+    API may send the list itself or its JSON text; an empty value is the
+    empty list. Whether each id is a bank account in the chart is checked
+    by the settings route, which has the database."""
+    import json
+
+    if isinstance(value, (list, tuple)):
+        items = list(value)
+    elif text == "":
+        items = []
+    else:
+        try:
+            items = json.loads(text)
+        except ValueError:
+            items = None
+    wanted = (
+        "Deposit into these accounts must be a list of bank account ids, "
+        "such as [1, 2], or [] for every bank account."
+    )
+    if not isinstance(items, list):
+        raise SettingValueError(wanted)
+    ids = set()
+    for item in items:
+        if isinstance(item, bool):
+            raise SettingValueError(wanted)
+        if isinstance(item, int):
+            ids.add(item)
+        elif isinstance(item, str) and _DIGITS.fullmatch(item.strip()):
+            ids.add(int(item.strip()))
+        else:
+            raise SettingValueError(wanted)
+    return json.dumps(sorted(ids))
+
+
 def clean_setting_value(key: str, value) -> str:
     """The string to store for ``key``, or SettingValueError saying what to
     type instead. Settings without a rule are stored as given."""
     text = "" if value is None else str(value).strip()
+    if key == "deposit_account_ids":
+        return _clean_deposit_account_ids(value, text)
     if key in _ADDRESS_LIST_SETTINGS:
         # stored as the clean comma-separated list, so what the send uses is
         # what the page shows; an entry that is not an address is refused

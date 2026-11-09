@@ -302,6 +302,74 @@ def _guard_payroll_accounts(db: Session, cleaned: dict) -> None:
             raise HTTPException(status_code=400, detail=problem)
 
 
+def _deposit_bank_account(db: Session, value, label: str):
+    """The bank account a Make Deposits setting names, or a 422 saying what
+    is wrong with it (#734): an id in the chart, a bank account (not
+    Undeposited Funds, a credit card or any other kind), and active."""
+    from app.models.accounts import Account
+
+    text = str(value).strip()
+    acct = db.get(Account, int(text)) if text.isdigit() else None
+    if acct is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label}: no account {text} in the chart. Nothing was saved.",
+        )
+    if acct.bank_kind != "bank":
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{label} must be a bank account; {acct.name} is not one. "
+                "Nothing was saved."
+            ),
+        )
+    if acct.is_active is False:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{label}: {acct.name} is inactive. Nothing was saved.",
+        )
+    return acct
+
+
+def _guard_deposit_accounts(db: Session, cleaned: dict) -> None:
+    """Make Deposits' default destination (#734) is "" or an active bank
+    account from the chart, and so is every account on its destination
+    list (#735, cleaned to a JSON list of ids). The default must be on the
+    list, or the list empty; each saved value counts where the request
+    leaves it out. Anything else is refused with a 422 before any setting
+    is written."""
+    import json
+
+    if "default_deposit_account_id" in cleaned:
+        value = cleaned["default_deposit_account_id"]
+        if value:
+            acct = _deposit_bank_account(db, value, "Default deposit account")
+            cleaned["default_deposit_account_id"] = str(acct.id)
+    if "deposit_account_ids" in cleaned:
+        for acct_id in json.loads(cleaned["deposit_account_ids"]):
+            _deposit_bank_account(db, acct_id, "Deposit into these accounts")
+    if "default_deposit_account_id" in cleaned or "deposit_account_ids" in cleaned:
+        default = cleaned.get("default_deposit_account_id")
+        if default is None:
+            default = get_setting_raw(db, "default_deposit_account_id") or ""
+        chosen = cleaned.get("deposit_account_ids")
+        if chosen is None:
+            chosen = get_setting_raw(db, "deposit_account_ids") or "[]"
+        try:
+            chosen_ids = {str(i) for i in json.loads(chosen)}
+        except (TypeError, ValueError):
+            chosen_ids = set()
+        if default and chosen_ids and default not in chosen_ids:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "The default deposit account must be one of the accounts "
+                    "under Deposit into these accounts, or that list must be "
+                    "empty. Nothing was saved."
+                ),
+            )
+
+
 def _clearing_off_warnings(db: Session, cleaned: dict) -> list[str]:
     """Turning a provider's clearing off while its clearing account still
     holds money is allowed, with a warning (#584): payouts stay available
@@ -392,6 +460,7 @@ def update_settings(
         )
     _guard_clearing_accounts(db, cleaned)
     _guard_payroll_accounts(db, cleaned)
+    _guard_deposit_accounts(db, cleaned)
     # The "Taxed as" select is hidden for a non-LLC but the form still submits
     # its last value; drop a stale election so it never lingers (#488).
     if "llc_tax_election" in cleaned:

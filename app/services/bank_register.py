@@ -297,6 +297,16 @@ def payees_for(db: Session, txns) -> dict[int, str]:
         pay_names = {}
     # the names on a register deposit's lines (#606), one query for the page
     entry_ids = [t.id for t in by_type.get("bank_entry", [])]
+    # ...and the vendor an entry was linked to (#590) when no payee was typed,
+    # as the check it prints names the vendor (#733; the 2.31.10 gate's Mac)
+    entry_vendor_ids = {
+        t.vendor_id for t in by_type.get("bank_entry", []) if t.vendor_id
+    }
+    entry_vendors = (
+        {v.id: v.name for v in db.query(Vendor).filter(Vendor.id.in_(entry_vendor_ids))}
+        if entry_vendor_ids
+        else {}
+    )
     donors = defaultdict(list)
     if entry_ids:
         for txn_id, cname in (
@@ -323,6 +333,8 @@ def payees_for(db: Session, txns) -> dict[int, str]:
         # its header (bank_entry_lines), not a counterparty: show it blank
         if t.source_type == "bank_entry" and name == BANK_ENTRY_HEADER:
             name = ""
+        if t.source_type == "bank_entry" and not name and t.vendor_id:
+            name = entry_vendors.get(t.vendor_id, "")
         # ...and with no payee typed, the name on its lines stands in: the
         # donor of a one-name deposit, "Split (2 names)" for several
         if t.source_type == "bank_entry" and not name and donors.get(t.id):

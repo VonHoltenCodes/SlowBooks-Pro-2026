@@ -10,7 +10,7 @@
 #     build stages its gtk-dlls.
 #   * pywebview uses the Cocoa/WebKit backend on macOS (pyobjc) — no
 #     pythonnet, no WebView2, one less runtime dependency than Windows.
-#   * Icon: assets/icon-256.png → .icns (see the workflow step).
+#   * Icon: assets/icon-1024.png → .icns (see the workflow step).
 
 import os
 import subprocess
@@ -199,7 +199,7 @@ exe = EXE(
     exclude_binaries=True,
     name="SlowBooksPro",
     console=False,
-    icon=os.path.join(SPECPATH, "slowbookspro.icns"),
+    icon=os.path.join(SPECPATH, "slowbookspro-sbp.icns"),
 )
 
 coll = COLLECT(
@@ -231,7 +231,7 @@ def _bundle_version() -> str:
 app = BUNDLE(
     coll,
     name="SlowBooks Pro.app",
-    icon=os.path.join(SPECPATH, "slowbookspro.icns"),
+    icon=os.path.join(SPECPATH, "slowbookspro-sbp.icns"),
     bundle_identifier="com.vonholtencodes.slowbookspro",
     info_plist={
         "CFBundleShortVersionString": os.environ.get("APP_VERSION", "0.0.0"),
