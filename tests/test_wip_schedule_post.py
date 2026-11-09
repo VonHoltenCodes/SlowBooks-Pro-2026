@@ -1,13 +1,17 @@
-"""The WIP schedule a bank can read (construction overhaul, workstream H):
+"""The WIP schedule a bank can read:
 cost types net within a section, budgets that never burn down are named, a
 closed or finished job reads finished, a change order's budget alone is no
 estimate, the bank's columns (GP to date, backlog), and Post / Void of the
 adjusting entry with its next-day reversal on construction setup's accounts.
 """
 
+import threading
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.models.accounts import Account
 from app.models.contacts import Customer, Vendor
@@ -19,9 +23,13 @@ from app.models.settings import Settings
 from app.models.transactions import Transaction, TransactionLine
 from app.models.users import ROLE_ACCOUNTANT, ROLE_BOOKKEEPER, User
 from app.services import auth as auth_service
-from app.services import job_reports
+from app.services import job_reports, wip_posting
 from app.services.accounting import create_journal_entry
-from app.services.job_costing import ensure_default_cost_types
+from app.services.job_costing import (
+    budget_vs_actual_all_jobs,
+    ensure_default_cost_types,
+    job_cost_tree,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 AS_OF = date(2026, 6, 30)
@@ -118,7 +126,7 @@ def _row(db, job_id, **kw):
 
 
 def _drywall_job(db):
-    """The persona job in small: drywall bid as subcontract 96,000, bought as
+    """A job in small: drywall bid as subcontract 96,000, bought as
     material 38,000; electrical 88,000 spent 84,500. Contract 250,000, billed
     240,000 (96%)."""
     job = _job(db, contract="250000")
@@ -587,3 +595,540 @@ def test_the_upgrade_does_not_date_a_closed_job(tmp_path):
     command.upgrade(cfg, "head")
     with engine.connect() as conn:
         assert conn.execute(text("SELECT closed_on FROM jobs")).scalar() is None
+
+
+AUG31 = date(2026, 8, 31)
+
+
+SEP30 = date(2026, 9, 30)
+
+
+def _approve(client, co_id, on=None):
+    body = {"approved_on": on.isoformat()} if on else {}
+    r = client.post(f"/api/change-orders/{co_id}/approve", json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _co(client, job_id, unit_cost, when=None):
+    """A pending owner change order (contract-funded, material, no markup)."""
+    body = {
+        "job_id": job_id,
+        "kind": "owner",
+        "funding": "contract",
+        "lines": [
+            {
+                "description": "Added scope",
+                "cost_type": "material",
+                "quantity": 1,
+                "unit_cost": unit_cost,
+                "markup_pct": 0,
+            }
+        ],
+    }
+    if when is not None:
+        body["date"] = when.isoformat()
+    r = client.post("/api/change-orders", json=body)
+    assert r.status_code == 201, r.text
+    co = r.json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    return co
+
+
+def _over_billed_job(db, name="Clinic"):
+    """Contract 100,000, budget 80,000 (material), cost 40,000 by 3/1,
+    billed 60,000 by 4/1: earned 50,000, over-billed 10,000."""
+    job = _job(db, name=name)
+    _budget(db, job, None, "material", "80000", source="manual")
+    _cost(db, job, None, "material", "40000")
+    _bill_owner(db, job, "60000")
+    db.commit()
+    return job
+
+
+def _post(client, as_of):
+    r = client.post(f"/api/reports/wip-schedule/post?as_of={as_of}")
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _construction(db):
+    db.add(Settings(key="company_type", value="construction"))
+    db.commit()
+
+
+def _setup(client, db):
+    assert client.post("/api/construction/setup").status_code == 200
+    _construction(db)
+
+
+def test_a_back_dated_approval_names_the_posted_wip_months_it_moves(
+    client, db_session, seed_accounts
+):
+    """Post 8/31 and 9/30, then approve a CO dated
+    8/10 (+2,000 cost): the approval says which posted months it changes."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    _post(client, AUG31)
+    _post(client, SEP30)
+
+    co = _co(client, job.id, 2000, when=date(2026, 8, 10))
+    out = _approve(client, co["id"], date(2026, 8, 10))
+    assert out["warnings"] == [
+        f"{co['number']} takes effect on 2026-08-10, so it changes the WIP "
+        "entries posted for 2026-08-31 and 2026-09-30; void and re-post them "
+        "on the WIP schedule."
+    ]
+
+
+def test_an_approval_after_the_posted_months_says_nothing_of_them(
+    client, db_session, seed_accounts
+):
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    _post(client, AUG31)
+    _post(client, SEP30)
+    # a voided month is not on the books: only 9/30 is named
+    assert (
+        client.post(f"/api/reports/wip-schedule/void?as_of={AUG31}").status_code == 200
+    )
+    co = _co(client, job.id, 2000, when=date(2026, 8, 10))
+    out = _approve(client, co["id"], date(2026, 8, 20))
+    assert "posted for 2026-09-30; void and re-post it" in out["warnings"][0]
+    assert "2026-08-31" not in out["warnings"][0]
+
+    later = _co(client, job.id, 500, when=date(2026, 10, 1))
+    assert _approve(client, later["id"], date(2026, 10, 1))["warnings"] == []
+
+
+def _wip_row(db, job_id, as_of, **kw):
+    data = job_reports.wip_schedule(db, as_of=as_of, **kw)
+    return next((r for r in data["rows"] if r["job_id"] == job_id), None), data
+
+
+def test_the_schedule_shows_the_posted_entry_and_says_when_it_differs(
+    client, db_session, seed_accounts
+):
+    """After the back-dated CO the 8/31 schedule reads 10,243.90 over-billed
+    while 10,000 is posted: the entry shown is the posted one, with the
+    schedule's own figures and a sentence beside it."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    _post(client, AUG31)
+    data = job_reports.wip_schedule(db_session, AUG31)
+    assert data["adjusting_entry"]["posted"] is True
+    assert data["adjusting_entry"]["posted_differs"] is False
+    assert not any("WIP entry posted" in w for w in data["warnings"])
+
+    co = _co(client, job.id, 2000, when=date(2026, 8, 10))
+    _approve(client, co["id"], date(2026, 8, 10))
+    db_session.expire_all()
+
+    row, data = _wip_row(db_session, job.id, AUG31)
+    entry = data["adjusting_entry"]
+    assert row["over_billing"] == 10243.9  # 60,000 − 102,000 × 40/82
+    assert entry["posted"] is True and entry["posted_differs"] is True
+    # the lines shown are what was posted
+    assert entry["totals"]["over_billing"] == 10000.0
+    assert entry["jobs"][0]["over_billing"] == 10000.0
+    assert entry["total_debits"] == 10000.0
+    assert entry["computed"]["totals"]["over_billing"] == 10243.9
+    sentence = next(w for w in data["warnings"] if "WIP entry posted" in w)
+    assert sentence == entry["posted_warning"]
+    assert "books over-billings $10,000.00" in sentence
+    assert "the schedule now reads $10,243.90" in sentence
+    assert "Void the posted entry and post it again" in sentence
+
+    csv_text = client.get(f"/api/reports/wip-schedule/csv?as_of={AUG31}").text
+    assert "books over-billings $10,000.00" in csv_text
+
+    # void and re-post: the books and the schedule agree again
+    assert (
+        client.post(f"/api/reports/wip-schedule/void?as_of={AUG31}").status_code == 200
+    )
+    _post(client, AUG31)
+    db_session.expire_all()
+    entry = job_reports.wip_schedule(db_session, AUG31)["adjusting_entry"]
+    assert entry["posted_differs"] is False
+    assert entry["totals"]["over_billing"] == 10243.9
+
+
+def test_the_wip_screen_shows_the_difference_beside_void():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "app/static/js/reports.js").read_text(
+        encoding="utf-8"
+    )
+    assert "entry.posted_differs" in js and "data-posted-differs" in js
+    jobs_js = (Path(__file__).resolve().parents[1] / "app/static/js/jobs.js").read_text(
+        encoding="utf-8"
+    )
+    assert "co-approve-warnings" in jobs_js
+
+
+SEP30_2 = date(2026, 9, 30)
+
+
+def test_a_second_post_that_passed_the_check_meets_the_lock_row(
+    client, db_session, seed_accounts, monkeypatch
+):
+    """Both requests read "nothing posted" before either wrote: the lock
+    row's unique key, not the re-check, refuses the second."""
+    _setup(client, db_session)
+    _over_billed_job(db_session)
+    monkeypatch.setattr(wip_posting, "posted_entry", lambda db, as_of: None)
+    url = f"/api/reports/wip-schedule/post?as_of={SEP30_2}"
+    assert client.post(url).status_code == 200
+    again = client.post(url)
+    assert again.status_code == 409, again.text
+    assert "already posted for 2026-09-30" in again.json()["detail"]
+    assert (
+        db_session.query(Transaction).filter_by(source_type="wip_adjustment").count()
+        == 1
+    )
+
+
+def test_void_frees_the_date_for_a_new_post(client, db_session, seed_accounts):
+    _setup(client, db_session)
+    _over_billed_job(db_session)
+    url = f"/api/reports/wip-schedule/post?as_of={SEP30_2}"
+    assert client.post(url).status_code == 200
+    assert (
+        client.post(f"/api/reports/wip-schedule/void?as_of={SEP30_2}").status_code
+        == 200
+    )
+    assert client.post(url).status_code == 200
+
+
+def _file_books(tmp_path):
+    """A company file on disk, so two threads can each have a session."""
+    from app.database import Base, enable_sqlite_tuning
+    from app.models.accounts import Account, AccountType
+    from app.seed.chart_of_accounts import CHART_OF_ACCOUNTS
+    from app.services.accounting import ensure_construction_accounts
+
+    eng = create_engine(
+        f"sqlite:///{tmp_path / 'race.db'}", connect_args={"check_same_thread": False}
+    )
+    enable_sqlite_tuning(eng)
+    Base.metadata.create_all(eng)
+    with Session(eng) as s:
+        for data in CHART_OF_ACCOUNTS:
+            s.add(
+                Account(
+                    account_number=data["account_number"],
+                    name=data["name"],
+                    account_type=AccountType(data["account_type"]),
+                    detail_type=data.get("detail_type"),
+                    is_system=True,
+                    balance=Decimal("0"),
+                )
+            )
+        s.commit()
+        ensure_construction_accounts(s)
+        _construction(s)
+        _over_billed_job(s)
+    return eng
+
+
+def test_two_posts_at_once_only_one_lands(tmp_path, monkeypatch):
+    eng = _file_books(tmp_path)
+    # both requests read "nothing posted" (the race), so only the lock row
+    # can stop the second
+    monkeypatch.setattr(wip_posting, "posted_entry", lambda db, as_of: None)
+    Local = sessionmaker(bind=eng)
+    go = threading.Event()
+    results = []
+
+    def post():
+        with Local() as s:
+            go.wait()
+            try:
+                wip_posting.post_wip_entry(s, SEP30_2, "admin")
+                s.commit()
+                results.append(200)
+            except Exception as e:  # HTTPException carries the status
+                s.rollback()
+                results.append(getattr(e, "status_code", repr(e)))
+
+    threads = [threading.Thread(target=post) for _ in range(2)]
+    for t in threads:
+        t.start()
+    go.set()
+    for t in threads:
+        t.join(30)
+    assert sorted(results, key=str) == [200, 409], results
+    with Session(eng) as s:
+        assert s.query(Transaction).filter_by(source_type="wip_adjustment").count() == 1
+    eng.dispose()
+
+
+OCT15 = date(2026, 10, 15)
+
+
+def _approve_co(client, job_id, unit_cost, approved_on, cost_type="material"):
+    r = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job_id,
+            "kind": "owner",
+            "funding": "contract",
+            "lines": [
+                {
+                    "description": "Added scope",
+                    "cost_type": cost_type,
+                    "quantity": 1,
+                    "unit_cost": unit_cost,
+                    "markup_pct": 0,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    co = r.json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve",
+        json={"approved_on": approved_on.isoformat()},
+    )
+    assert r.status_code == 200, r.text
+    return co
+
+
+def test_a_later_change_order_leaves_the_posted_month_alone(
+    client, db_session, seed_accounts
+):
+    """Post 9/30, approve a CO effective 10/15, and the
+    9/30 schedule still reproduces the posted entry."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    before, _ = _wip_row(db_session, job.id, SEP30_2)
+    posted = client.post(f"/api/reports/wip-schedule/post?as_of={SEP30_2}")
+    assert posted.status_code == 200, posted.text
+
+    _approve_co(client, job.id, 20000, OCT15)
+    db_session.expire_all()
+
+    row, data = _wip_row(db_session, job.id, SEP30_2)
+    assert row["estimated_total_cost"] == before["estimated_total_cost"] == 80000.0
+    assert row["over_billing"] == before["over_billing"] == 10000.0
+    assert data["adjusting_entry"]["posted"] is True
+    assert data["adjusting_entry"]["total_debits"] == posted.json()["total_debits"]
+    # on and after the CO's day its budget counts
+    later, _ = _wip_row(db_session, job.id, OCT15)
+    assert later["estimated_total_cost"] == 100000.0
+
+
+def test_a_job_closed_in_november_is_in_septembers_wip(
+    client, db_session, seed_accounts
+):
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    job.status, job.closed_on = "closed", date(2026, 11, 5)
+    db_session.commit()
+
+    row, data = _wip_row(db_session, job.id, SEP30_2)
+    assert row is not None and row["percent_complete"] == 50.0  # open on 9/30
+    assert [j["job_id"] for j in data["adjusting_entry"]["jobs"]] == [job.id]
+    # from the day it closed it is off the board (and 100% with include_closed)
+    assert _wip_row(db_session, job.id, date(2026, 11, 30))[0] is None
+    closed, _ = _wip_row(db_session, job.id, date(2026, 11, 30), include_closed=True)
+    assert closed["percent_complete"] == 100.0
+
+
+def test_closing_a_job_stamps_the_day_and_reopening_clears_it(
+    client, db_session, seed_accounts, seed_customer
+):
+    r = client.post("/api/jobs", json={"customer_id": seed_customer.id, "name": "J"})
+    job_id = r.json()["id"]
+    client.put(f"/api/jobs/{job_id}", json={"status": "closed"})
+    db_session.expire_all()
+    assert db_session.get(Job, job_id).closed_on == date.today()
+    client.put(f"/api/jobs/{job_id}", json={"status": "in_progress"})
+    db_session.expire_all()
+    assert db_session.get(Job, job_id).closed_on is None
+
+
+def test_the_last_day_of_the_calendar_gets_a_sentence(
+    client, db_session, seed_accounts
+):
+    _setup(client, db_session)
+    _over_billed_job(db_session)
+    r = client.post("/api/reports/wip-schedule/post?as_of=9999-12-31")
+    assert r.status_code == 422, r.text
+    assert "last day the calendar has" in r.json()["detail"]
+    assert client.get("/api/reports/compliance?as_of=9999-12-31").status_code == 200
+
+
+def test_post_is_refused_outside_construction(client, db_session, seed_accounts):
+    client.post("/api/construction/setup")
+    _over_billed_job(db_session)
+    for mode in ("business", "nonprofit"):
+        db_session.query(Settings).filter_by(key="company_type").delete()
+        db_session.add(Settings(key="company_type", value=mode))
+        db_session.commit()
+        r = client.post(f"/api/reports/wip-schedule/post?as_of={SEP30_2}")
+        assert r.status_code == 409, r.text
+        assert "part of construction mode" in r.json()["detail"]
+    assert (
+        db_session.query(Transaction).filter_by(source_type="wip_adjustment").count()
+        == 0
+    )
+
+
+def _two_jobs(db):
+    """One over-billed job and one under-billed: cost 40,000 of 80,000 on a
+    100,000 contract, billed 30,000 (earned 50,000)."""
+    over = _over_billed_job(db, "Clinic")
+    under = _job(db, name="Library")
+    _budget(db, under, None, "material", "80000", source="manual")
+    _cost(db, under, None, "material", "40000")
+    _bill_owner(db, under, "30000")
+    db.commit()
+    return over, under
+
+
+def test_posting_ties_job_reports_to_the_schedule(client, db_session, seed_accounts):
+    _setup(client, db_session)
+    over, under = _two_jobs(db_session)
+    before = client.get(f"/api/reports/wip-schedule?as_of={SEP30_2}").json()
+    tree_before = job_cost_tree(db_session, over.id, end_date=SEP30_2)["totals"]
+    assert (
+        client.post(f"/api/reports/wip-schedule/post?as_of={SEP30_2}").status_code
+        == 200
+    )
+
+    after = client.get(f"/api/reports/wip-schedule?as_of={SEP30_2}").json()
+    assert after["rows"] == before["rows"]  # posting moves nothing the WIP reads
+    tree_after = job_cost_tree(db_session, over.id, end_date=SEP30_2)["totals"]
+    assert (tree_after["actual"], tree_after["act_revenue"]) == (
+        tree_before["actual"],
+        tree_before["act_revenue"],
+    )
+
+    gp = {r["job_id"]: r["gross_profit_to_date"] for r in after["rows"]}
+    by_job = client.get(
+        f"/api/reports/profit-loss-by-job?start_date=2026-01-01&end_date={SEP30_2}"
+    ).json()
+    cols = {c["job_id"]: c for c in by_job["jobs"]}
+    for job in (over, under):
+        assert cols[job.id]["gross_profit"] == gp[job.id], job.name
+
+    prof = client.get(
+        f"/api/reports/job-profitability?start_date=2026-01-01&end_date={SEP30_2}"
+    ).json()["jobs"]
+    assert [r["job_id"] for r in prof if r["job_id"] is None] == []  # no No-job row
+    by_id = {r["job_id"]: r for r in prof}
+    assert by_id[over.id]["gross_profit"] == gp[over.id] == 10000.0
+    assert by_id[under.id]["gross_profit"] == gp[under.id] == 10000.0
+
+
+def test_a_loss_provision_is_not_the_jobs_cost(client, db_session, seed_accounts):
+    """A loss job's provision posts to 5600 on the job; its cost to date,
+    forecast and Budget vs Actual stay the job's own cost."""
+    _setup(client, db_session)
+    job = _job(db_session)
+    _budget(db_session, job, None, "material", "120000", source="manual")
+    _cost(db_session, job, None, "material", "60000")
+    _bill_owner(db_session, job, "50000")
+    db_session.commit()
+    row, data = _wip_row(db_session, job.id, SEP30_2)
+    assert row["loss_provision"] > 0
+    assert (
+        client.post(f"/api/reports/wip-schedule/post?as_of={SEP30_2}").status_code
+        == 200
+    )
+    db_session.expire_all()
+    loss = (
+        db_session.query(TransactionLine)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(Account.name == job_reports.WIP_LOSS_EXPENSE_ACCOUNT)
+        .all()
+    )
+    assert len(loss) == 2  # the entry and its reversal
+    assert all(ln.job_id == job.id for ln in loss)
+    again, _ = _wip_row(db_session, job.id, SEP30_2)
+    assert again == row
+    assert (
+        job_reports.ctc_forecast(db_session, job, SEP30_2)["totals"]["actual"]
+        == 60000.0
+    )
+    bva = {r["job_id"]: r for r in budget_vs_actual_all_jobs(db_session, None, SEP30_2)}
+    assert bva[job.id]["actual"] == 60000.0
+
+
+def test_the_migration_up_down_and_up(tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import inspect, text
+
+    db = tmp_path / "r1.db"
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
+    command.upgrade(cfg, "c7e3a1f5d9b2")
+    engine = create_engine(f"sqlite:///{db}")
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO customers (id, name, is_active) VALUES (1, 'C', 1)")
+        )
+        conn.execute(
+            text(
+                "INSERT INTO jobs (id, customer_id, name, status, is_active, updated_at) "
+                "VALUES (1, 1, 'J', 'closed', 1, '2026-11-05 14:00:00')"
+            )
+        )
+        for co_id, number, cost, on in (
+            (1, "CO-1", 1000, "2026-08-10"),
+            (2, "CO-2", -400, "2026-10-15"),
+        ):
+            conn.execute(
+                text(
+                    "INSERT INTO change_orders (id, job_id, number, kind, status, funding, "
+                    "apply_markup, revision, allowance_return, approved_on) VALUES "
+                    "(:i, 1, :n, 'owner', 'approved', 'contract', 1, 1, 0, :on)"
+                ),
+                {"i": co_id, "n": number, "on": on},
+            )
+            conn.execute(
+                text(
+                    "INSERT INTO change_order_lines (change_order_id, line_order, cost_type, "
+                    "quantity, unit_cost, amount, sell_amount) VALUES "
+                    "(:i, 0, 'material', 1, :c, :c, :c)"
+                ),
+                {"i": co_id, "c": cost},
+            )
+        conn.execute(
+            text(
+                "INSERT INTO job_budgets (job_id, cost_type, amount, revenue_amount, "
+                "source, locked) VALUES (1, 'material', 600, 600, 'change', 1)"
+            )
+        )
+        conn.execute(
+            text(
+                "INSERT INTO transactions (id, date, description, source_type, source_id) "
+                "VALUES (7, '2026-09-30', 'WIP', 'wip_adjustment', 20260930)"
+            )
+        )
+    command.upgrade(cfg, "head")
+    with engine.begin() as conn:
+        rows = conn.execute(
+            text(
+                "SELECT change_order_id, amount FROM job_budgets ORDER BY change_order_id"
+            )
+        ).fetchall()
+        assert [(r[0], float(r[1])) for r in rows] == [(1, 1000.0), (2, -400.0)]
+        assert conn.execute(text("SELECT closed_on FROM jobs")).scalar() is None
+        assert conn.execute(
+            text("SELECT as_of, transaction_id FROM wip_entry_locks")
+        ).fetchall() == [("2026-09-30", 7)]
+    names = {i["name"] for i in inspect(engine).get_indexes("job_budgets")}
+    assert {"uq_job_budget", "uq_job_budget_change_order"} <= names
+
+    command.downgrade(cfg, "c7e3a1f5d9b2")
+    with engine.begin() as conn:
+        rows = conn.execute(text("SELECT amount FROM job_budgets")).fetchall()
+        assert [float(r[0]) for r in rows] == [600.0]  # folded back into one row
+    assert "wip_entry_locks" not in inspect(engine).get_table_names()
+    command.upgrade(cfg, "head")
+    engine.dispose()

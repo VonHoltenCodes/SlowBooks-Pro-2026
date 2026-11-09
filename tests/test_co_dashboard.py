@@ -1,7 +1,7 @@
-"""The GC's view of the business (construction overhaul, workstream I): the
+"""The GC's view of the business: the
 contractor's dashboard tiles, the Retainage report that ties to 1150 and 2050,
 the job Overview's projected final cost, the vendor list's COI cell and the
-Sub Compliance report. The scenario is the accountant persona's: pay
+Sub Compliance report. The scenario: pay
 applications at 10% retainage with a release, and two subs held at 10%,
 released and paid (tests.test_cash_basis_construction)."""
 

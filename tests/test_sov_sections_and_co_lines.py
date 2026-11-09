@@ -1,5 +1,4 @@
-"""The schedule of values' sections, change-order lines and pay-app drafts
-(construction overhaul, skeptic round 1, R2).
+"""The schedule of values' sections, change-order lines and pay-app drafts.
 
 A work line carries the section its estimate lines carry, so revenue lands
 where the budget and cost are; a line with no package reads as its own
@@ -55,8 +54,8 @@ def _build(client, customer_id, lines, **est):
     return job, r.json()["sov"], client.get(f"/api/estimates/{est_id}").json()
 
 
-def _persona_bid(client, customer_id):
-    """The skeptic's Lakeside Clinic TI bid on the seeded packages, whose
+def _lakeside_bid(client, customer_id):
+    """A Lakeside Clinic TI bid on the seeded packages, whose
     lowest sections (02 41 00, 03 10 00, 09 20 00) are not the lines' own."""
     _construction(client)
     c, p = _codes(client), _packages(client)
@@ -123,7 +122,7 @@ def _persona_bid(client, customer_id):
 def test_every_sov_work_line_is_on_a_budgeted_section(
     client, db_session, seed_accounts, seed_customer
 ):
-    job, sov, est = _persona_bid(client, seed_customer.id)
+    job, sov, est = _lakeside_bid(client, seed_customer.id)
     assert D(est["totals"]["bid_total"]) == D("387706.27")
     assert sum(D(str(s["scheduled_value"])) for s in sov) == D("387706.27")
 

@@ -147,7 +147,7 @@ def test_opened_from_a_customer_or_vendor_page_the_file_is_the_whole_company(
     # file is the same: no narrowing, no party in the file name. The page
     # asks for the file by date alone; a customer_id or vendor_id on the
     # request is a filter the aging does not read, so it is refused with
-    # the one it does (skeptic round 2), not dropped in silence.
+    # the one it does, not dropped in silence.
     acme, muller = customers
     _invoice(client, acme, 400)
     _invoice(client, muller, 935)

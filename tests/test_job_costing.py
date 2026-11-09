@@ -3,11 +3,29 @@ import, Job Cost Entries (post / void / accounts resolution), time entries
 posted to jobs at a loaded rate with burden, allocations, budgets seeded
 from estimates, and the budget-vs-actual drill-down tree."""
 
+import csv
+import io
+from datetime import date
 from decimal import Decimal
 
 from app.models.accounts import Account, AccountType
+from app.models.bills import Bill, BillLine, BillStatus
+from app.models.contacts import Vendor
+from app.models.job_costing import JobBudget
+from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
+from app.models.settings import Settings
 from app.models.transactions import Transaction
-from app.services.job_costing import ensure_default_cost_types
+from app.services import job_reports
+from app.services.job_costing import (
+    budget_vs_actual_all_jobs,
+    ensure_default_cost_types,
+    job_cost_tree,
+)
+from tests.test_sov_mapping import _accepted_build, _section
+from tests.test_wip_schedule_post import _acct, _bill_owner, _budget, _cost
+from tests.test_wip_schedule_post import _job as _wip_job
+from tests.test_wip_schedule_post import _section as _db_section
+from tests.test_wip_schedule_post import _section as _wip_section
 
 
 def _income_expense(db):
@@ -688,3 +706,458 @@ def test_reseeding_budget_keeps_manual_rows_and_zero_costs_unknown(
     assert rows[fram["id"]]["source"] == "manual"
     assert rows[trim["id"]]["source"] == "estimate"
     assert sum(1 for r in rows.values() if r["cost_code_id"] == fram["id"]) == 1
+
+
+def _partly_bought_job(db):
+    """Budget 100,000 over two sections: Concrete 40,000 (cost 30,000 on
+    3/1), Electrical 60,000 not bought yet. Projected final cost counts the
+    budget nothing has taken up (10,000 + 60,000): 100,000, variance 0,
+    where actual + committed alone reads 30,000."""
+    job = _wip_job(db, name="Annex", contract="150000")
+    conc = _db_section(db, "97 30 00", "Concrete")
+    elec = _db_section(db, "98 05 00", "Electrical")
+    _budget(db, job, conc, "subcontract", "40000")
+    _budget(db, job, elec, "subcontract", "60000")
+    _cost(db, job, conc, "subcontract", "30000")
+    db.commit()
+    return job
+
+
+def _construction(db):
+    db.add(Settings(key="company_type", value="construction"))
+    db.commit()
+
+
+def _setup_2(client, db):
+    assert client.post("/api/construction/setup").status_code == 200
+    _construction(db)
+
+
+def test_budget_vs_actual_and_the_cost_tree_project_like_the_overview(
+    client, db_session, seed_accounts
+):
+    """The Overview (the undated tree) read Projected 377,525.55,
+    Variance 0; BvA, its exports and the dated tree left out the budget not
+    yet committed."""
+    _setup_2(client, db_session)
+    job = _partly_bought_job(db_session)
+    end = date(2026, 12, 31)
+    overview = job_cost_tree(db_session, job.id)["totals"]
+    assert overview["projected"] == 100000.0 and overview["variance"] == 0.0
+
+    start = date(2026, 1, 1)  # the Report Center's default period
+    dated = job_cost_tree(db_session, job.id, start, end)["totals"]
+    bva = {r["job_id"]: r for r in budget_vs_actual_all_jobs(db_session, start, end)}[
+        job.id
+    ]
+    assert dated["projected"] == bva["projected"] == overview["projected"]
+    assert dated["variance"] == bva["variance"] == overview["variance"]
+
+    r = client.get(
+        f"/api/reports/job-budget-vs-actual/csv?start_date={start}&end_date={end}"
+    )
+    rows = list(csv.reader(io.StringIO(r.text.lstrip("﻿"))))
+    head = next(row for row in rows if row and row[0] == "Customer")
+    annex = next(row for row in rows if len(row) > 1 and row[1] == "Annex")
+    assert annex[head.index("Projected")] == "100000.00"
+    assert annex[head.index("Variance")] == "0.00"
+    tree = client.get(
+        f"/api/jobs/{job.id}/cost-tree?start_date={start}&end_date={end}"
+    ).json()
+    assert tree["totals"]["projected"] == 100000.0
+
+
+def test_a_period_after_the_first_cost_still_projects_the_whole_job(
+    client, db_session, seed_accounts
+):
+    _setup_2(client, db_session)
+    job = _partly_bought_job(db_session)
+    end = date(2026, 12, 31)
+    start = date(2026, 6, 1)  # after the 3/1 cost
+    dated = job_cost_tree(db_session, job.id, start, end)["totals"]
+    assert dated["actual"] == 0.0
+    assert dated["cost_before_period"] == 30000.0
+    assert dated["projected"] == 100000.0 and dated["variance"] == 0.0
+    bva = budget_vs_actual_all_jobs(db_session, start, end)
+    assert {r["job_id"]: r["projected"] for r in bva}[job.id] == 100000.0
+
+
+def test_a_business_budget_vs_actual_projects_as_before(db_session, seed_accounts):
+    job = _partly_bought_job(db_session)  # no company type: Business
+    end = date(2026, 12, 31)
+    row = {
+        r["job_id"]: r
+        for r in budget_vs_actual_all_jobs(db_session, date(2026, 1, 1), end)
+    }[job.id]
+    assert row["projected"] == 30000.0 and row["variance"] == 70000.0
+    assert "uncommitted_budget" not in row
+    totals = job_cost_tree(db_session, job.id)["totals"]
+    assert totals["projected"] == 30000.0
+
+
+def _markup_job(client, customer_id):
+    """Concrete 40,000 and Electrical 60,000, an accepted −10,000 deduct on
+    Sitework, fee 10%: the 9,000 fee spreads 4,000 / 6,000 / −1,000."""
+    conc = _section(client, "03 30 00", "Concrete")
+    elec = _section(client, "26 05 00", "Electrical")
+    site = _section(client, "31 00 00", "Earthwork")
+    lines = [
+        {
+            "description": "Slab",
+            "quantity": 1,
+            "rate": 40000,
+            "unit_cost": 40000,
+            "cost_code_id": conc["id"],
+        },
+        {
+            "description": "Wiring",
+            "quantity": 1,
+            "rate": 60000,
+            "unit_cost": 60000,
+            "cost_code_id": elec["id"],
+        },
+        {
+            "description": "Deduct: owner does the grading",
+            "quantity": 1,
+            "rate": -10000,
+            "unit_cost": -10000,
+            "cost_code_id": site["id"],
+            "line_kind": "alternate",
+            "alternate_accepted": True,
+        },
+    ]
+    job, sov, _est = _accepted_build(client, customer_id, lines, fee_pct=10)
+    return job, sov, conc, elec, site
+
+
+def test_a_deduct_alternate_takes_its_share_of_the_markups(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The accepted −6,000 deduct got no share and HVAC absorbed
+    −975.12. Here the −10,000 deduct takes −1,000 of the 9,000 fee."""
+    _setup_2(client, db_session)
+    job, _sov, conc, elec, site = _markup_job(client, seed_customer.id)
+    revenue = {
+        b.cost_code_id: Decimal(str(b.revenue_amount))
+        for b in db_session.query(JobBudget).filter(JobBudget.job_id == job["id"])
+    }
+    assert revenue[conc["id"]] == Decimal("44000.00")
+    assert revenue[elec["id"]] == Decimal("66000.00")
+    assert revenue[site["id"]] == Decimal("-11000.00")
+
+
+def test_markup_billing_sits_on_the_sections_a_full_section_reads_its_budget(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Demo billed 100% read est 20,925.36 vs act 18,000, and the
+    markup lines' 45,635.61 sat under Unassigned."""
+    _setup_2(client, db_session)
+    job, sov, conc, elec, site = _markup_job(client, seed_customer.id)
+    fee = next(s for s in sov if s["kind"] == "fee")
+    assert fee["cost_code_id"] is None
+    billed = {s["id"]: 0 for s in sov}
+    for s in sov:
+        if s["cost_code_id"] == conc["id"]:
+            billed[s["id"]] = 40000  # all of Concrete
+        elif s["cost_code_id"] == elec["id"]:
+            billed[s["id"]] = 30000  # half of Electrical
+    billed[fee["id"]] = 7000  # the fee on the work billed
+    r = client.post(
+        "/api/pay-applications", json={"job_id": job["id"], "date": "2026-07-31"}
+    )
+    assert r.status_code == 201, r.text
+    app_id = r.json()["id"]
+    lines = [
+        {"sov_line_id": sid, "this_period": amt, "stored": 0}
+        for sid, amt in billed.items()
+    ]
+    r = client.put(f"/api/pay-applications/{app_id}", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/pay-applications/{app_id}/approve")
+    assert r.status_code == 200, r.text
+
+    tree = client.get(f"/api/jobs/{job['id']}/cost-tree").json()
+    by = {r["cost_code_id"]: r for r in tree["revenue_sections"]}
+    assert by[conc["id"]]["est_revenue"] == by[conc["id"]]["act_revenue"] == 44000.0
+    assert by[elec["id"]]["act_revenue"] == 33000.0
+    assert None not in by or by[None]["act_revenue"] == 0.0
+    assert tree["totals"]["act_revenue"] == 77000.0
+
+
+OCT15 = date(2026, 10, 15)
+
+
+SEP30 = date(2026, 9, 30)
+
+
+def _approve_co(client, job_id, unit_cost, approved_on, cost_type="material"):
+    r = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job_id,
+            "kind": "owner",
+            "funding": "contract",
+            "lines": [
+                {
+                    "description": "Added scope",
+                    "cost_type": cost_type,
+                    "quantity": 1,
+                    "unit_cost": unit_cost,
+                    "markup_pct": 0,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    co = r.json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve",
+        json={"approved_on": approved_on.isoformat()},
+    )
+    assert r.status_code == 200, r.text
+    return co
+
+
+def _over_billed_job(db, name="Clinic"):
+    """Contract 100,000, budget 80,000 (material), cost 40,000 by 3/1,
+    billed 60,000 by 4/1: earned 50,000, over-billed 10,000."""
+    job = _wip_job(db, name=name)
+    _budget(db, job, None, "material", "80000", source="manual")
+    _cost(db, job, None, "material", "40000")
+    _bill_owner(db, job, "60000")
+    db.commit()
+    return job
+
+
+def test_cost_tree_budget_vs_actual_and_ctc_read_the_change_as_of(
+    client, db_session, seed_accounts
+):
+    _setup_2(client, db_session)
+    job = _over_billed_job(db_session)
+    _approve_co(client, job.id, 20000, OCT15)
+    db_session.expire_all()
+
+    assert job_cost_tree(db_session, job.id, end_date=SEP30)["totals"]["changes"] == 0
+    assert (
+        job_cost_tree(db_session, job.id, end_date=OCT15)["totals"]["changes"]
+        == 20000.0
+    )
+    bva = {r["job_id"]: r for r in budget_vs_actual_all_jobs(db_session, None, SEP30)}
+    assert bva[job.id]["changes"] == 0
+    ctc = job_reports.cost_to_complete(db_session, as_of=SEP30, job_id=job.id)
+    assert ctc["jobs"][0]["totals"]["budget_revised"] == 80000.0
+    forecast = job_reports.ctc_forecast(db_session, job, SEP30)
+    assert forecast["totals"]["budget"] == 80000.0
+
+
+def _po_billed_later(db, job):
+    """A 50,000 subcontract issued 8/1, 20,000 of it billed 9/15."""
+    vendor = Vendor(name="Sparks Electric", is_active=True)
+    db.add(vendor)
+    db.flush()
+    po = PurchaseOrder(
+        po_number="PO-R1",
+        vendor_id=vendor.id,
+        status=POStatus.PARTIAL,
+        date=date(2026, 8, 1),
+        job_id=job.id,
+        commitment_type="subcontract",
+        subtotal=Decimal("50000"),
+        total=Decimal("50000"),
+    )
+    db.add(po)
+    db.flush()
+    line = PurchaseOrderLine(
+        purchase_order_id=po.id,
+        description="Electrical",
+        quantity=1,
+        rate=Decimal("50000"),
+        amount=Decimal("50000"),
+        billed_amount=Decimal("20000"),
+        cost_type="subcontract",
+    )
+    db.add(line)
+    db.flush()
+    bill = Bill(
+        bill_number="B-1",
+        vendor_id=vendor.id,
+        status=BillStatus.UNPAID,
+        po_id=po.id,
+        date=date(2026, 9, 15),
+        subtotal=Decimal("20000"),
+        total=Decimal("20000"),
+        balance_due=Decimal("20000"),
+    )
+    db.add(bill)
+    db.flush()
+    db.add(
+        BillLine(
+            bill_id=bill.id,
+            description="Electrical",
+            amount=Decimal("20000"),
+            job_id=job.id,
+            cost_type="subcontract",
+            purchase_order_line_id=line.id,
+        )
+    )
+    db.commit()
+
+
+def test_committed_reads_as_of_the_date(client, db_session, seed_accounts):
+    _setup_2(client, db_session)
+    job = _wip_job(db_session)
+    _po_billed_later(db_session, job)
+
+    aug = job_cost_tree(db_session, job.id, end_date=date(2026, 8, 31))["totals"]
+    assert aug["committed"] == 50000.0
+    assert aug["committed_total"] == 50000.0 and aug["billed_to_date"] == 0.0
+    assert aug["commitments_all_time"] is False
+    now = job_cost_tree(db_session, job.id)["totals"]
+    assert now["committed"] == 30000.0
+    # before the commitment was issued there is none
+    jul = job_cost_tree(db_session, job.id, end_date=date(2026, 7, 31))["totals"]
+    assert jul["committed"] == 0.0
+
+    bva = {
+        r["job_id"]: r
+        for r in budget_vs_actual_all_jobs(db_session, None, date(2026, 8, 31))
+    }
+    assert bva[job.id]["committed"] == 50000.0
+    status = job_reports.commitment_status(db_session, date(2026, 8, 31), job.id)
+    assert status["totals"]["remaining"] == bva[job.id]["committed"]
+
+
+def test_a_business_company_keeps_todays_commitments(client, db_session, seed_accounts):
+    job = _wip_job(db_session)
+    _po_billed_later(db_session, job)
+    aug = job_cost_tree(db_session, job.id, end_date=date(2026, 8, 31))["totals"]
+    assert aug["committed"] == 30000.0 and aug["commitments_all_time"] is True
+
+
+def _deduct_job(db):
+    """Electrical 100,000 (subcontract) and an accepted −6,000 deduct
+    alternate on a section of its own."""
+    job = _wip_job(db)
+    elec = _wip_section(db, "81 05 00", "Electrical")
+    tile = _wip_section(db, "82 30 00", "Tiling")
+    _budget(db, job, elec, "subcontract", "100000")
+    _budget(db, job, tile, "material", "-6000")
+    db.commit()
+    return job, elec, tile
+
+
+def _wip_row(db, job_id, as_of, **kw):
+    data = job_reports.wip_schedule(db, as_of=as_of, **kw)
+    return next((r for r in data["rows"] if r["job_id"] == job_id), None), data
+
+
+def test_an_accepted_deduct_shows_no_variance_and_no_extra_cost(
+    client, db_session, seed_accounts
+):
+    _setup_2(client, db_session)
+    job, elec, tile = _deduct_job(db_session)
+    _cost(db_session, job, elec, "subcontract", "47000")
+    db_session.commit()
+
+    row, _ = _wip_row(db_session, job.id, SEP30)
+    assert row["estimated_total_cost"] == 94000.0  # 100,000 − 6,000, not 100,000
+    assert row["cost_to_complete"] == 47000.0  # 53,000 still to come less 6,000
+
+    tree = job_cost_tree(db_session, job.id, end_date=SEP30)
+    assert tree["totals"]["variance"] == 0.0
+    material = next(t for t in tree["types"] if t["cost_type"] == "material")
+    assert material["figures"]["variance"] == 0.0
+    bva = {r["job_id"]: r for r in budget_vs_actual_all_jobs(db_session, None, SEP30)}
+    assert bva[job.id]["variance"] == 0.0
+
+    ctc = job_reports.cost_to_complete(db_session, as_of=SEP30, job_id=job.id)
+    assert ctc["jobs"][0]["totals"]["variance"] == 0.0
+
+
+def test_a_deduct_cannot_hide_cost_already_spent(client, db_session, seed_accounts):
+    """Electrical spent its whole 100,000: the job is 6,000 over its 94,000,
+    and the deduct takes nothing off cost already posted."""
+    _setup_2(client, db_session)
+    job, elec, _tile = _deduct_job(db_session)
+    _cost(db_session, job, elec, "subcontract", "100000")
+    db_session.commit()
+    row, _ = _wip_row(db_session, job.id, SEP30)
+    assert row["estimated_total_cost"] == 100000.0 and row["cost_to_complete"] == 0.0
+    forecast = job_reports.ctc_forecast(db_session, job, SEP30)
+    assert forecast["totals"]["cost_to_complete"] == 0.0
+    bva = {r["job_id"]: r for r in budget_vs_actual_all_jobs(db_session, None, SEP30)}
+    assert bva[job.id]["variance"] == -6000.0
+
+
+def _revenue_on(db, job, code, amount, when=date(2026, 4, 1)):
+    """Pay-application-style revenue: on the job and section, no cost type."""
+    from app.services.accounting import create_journal_entry
+
+    create_journal_entry(
+        db,
+        when,
+        "owner billing",
+        [
+            {"account_id": _acct(db, "1100").id, "debit": Decimal(amount)},
+            {
+                "account_id": _acct(db, "4000").id,
+                "credit": Decimal(amount),
+                "job_id": job.id,
+                "cost_code_id": code.id,
+            },
+        ],
+    )
+
+
+def test_a_sections_revenue_sits_beside_its_cost(client, db_session, seed_accounts):
+    _setup_2(client, db_session)
+    job = _wip_job(db_session)
+    elec = _wip_section(db_session, "81 05 00", "Electrical")
+    db_session.add(
+        JobBudget(
+            job_id=job.id,
+            cost_code_id=elec.id,
+            cost_type="subcontract",
+            amount=Decimal("88000"),
+            revenue_amount=Decimal("95000"),
+            source="estimate",
+            locked=True,
+        )
+    )
+    _cost(db_session, job, elec, "subcontract", "40000")
+    _revenue_on(db_session, job, elec, "45000")
+    db_session.commit()
+
+    tree = job_cost_tree(db_session, job.id)
+    row = next(r for r in tree["revenue_sections"] if r["cost_code_id"] == elec.id)
+    assert (row["budget"], row["actual"]) == (88000.0, 40000.0)
+    assert (row["est_revenue"], row["act_revenue"]) == (95000.0, 45000.0)
+    # the type branches carry cost only: no revenue under Other
+    for t in tree["types"]:
+        assert t["figures"]["act_revenue"] == 0 and t["figures"]["est_revenue"] == 0
+    assert tree["totals"]["act_revenue"] == 45000.0
+    assert tree["totals"]["est_revenue"] == 95000.0
+
+
+def test_a_business_tree_keeps_revenue_on_its_types(db_session, seed_accounts):
+    job = _wip_job(db_session)
+    elec = _wip_section(db_session, "81 05 00", "Electrical")
+    _revenue_on(db_session, job, elec, "45000")
+    db_session.commit()
+    tree = job_cost_tree(db_session, job.id)
+    assert "revenue_sections" not in tree
+    assert sum(t["figures"]["act_revenue"] for t in tree["types"]) == 45000.0
+
+
+def test_the_cost_tree_exports_carry_revenue_by_section(
+    client, db_session, seed_accounts
+):
+    _setup_2(client, db_session)
+    job = _wip_job(db_session)
+    elec = _wip_section(db_session, "81 05 00", "Electrical")
+    _revenue_on(db_session, job, elec, "45000")
+    db_session.commit()
+    text = client.get(f"/api/jobs/{job.id}/cost-tree/csv").text
+    assert "Revenue by section" in text
+    assert any("81 05 00" in ln and "45000.00" in ln for ln in text.splitlines())

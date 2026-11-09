@@ -1,5 +1,4 @@
-"""A customer statement shows held retainage on its own line (persona acct
-F1): the balance due is what A/R Aging says, and the retainage the invoices
+"""A customer statement shows held retainage on its own line: the balance due is what A/R Aging says, and the retainage the invoices
 hold back is shown apart as not yet due."""
 
 from datetime import date

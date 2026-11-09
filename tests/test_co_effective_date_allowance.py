@@ -390,7 +390,8 @@ def test_a_billed_allowance_returns_through_a_credit_line(
     )
     assert _approve(client, spend["id"]).status_code == 200
 
-    co = _return(client, allowance_id).json()  # everything unspent: 15,200
+    # everything unspent: 15,200
+    co = _return(client, allowance_id, date="2026-09-30").json()
     assert co["sell_total"] == -15200.0
     assert _approve(client, co["id"]).status_code == 200
     summary = _contract(client, job["id"])
@@ -500,10 +501,11 @@ def test_a_credit_after_the_final_release_says_what_to_do(
 
 
 def test_the_migration_gives_existing_approved_rows_their_day(tmp_path):
+    from pathlib import Path
+
     import sqlalchemy as sa
     from alembic import command
     from alembic.config import Config
-    from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
     db = tmp_path / "co.db"
@@ -688,3 +690,116 @@ def test_a_change_order_billed_only_on_approved_applications_keeps_the_click_day
     db_session.commit()
     db_session.expire_all()
     assert db_session.get(ChangeOrder, co["id"]).approved_on == date(2026, 9, 2)
+
+
+def _setup_2(client, customer_id, lines, amount, name="Tower", **terms):
+    job = _job(client, customer_id, name=name)
+    r = client.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={
+            "contract_type": "lump_sum",
+            "contract_amount": amount,
+            "retainage_pct": 10,
+            **terms,
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(f"/api/jobs/{job['id']}/sov", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    return job, r.json(), client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
+
+
+def _allowance(client, db_session, customer_id, contract_date="2026-07-15"):
+    code = CostCode(code="09 70 00", name="Finishes", cost_type="material")
+    db_session.add(code)
+    db_session.commit()
+    job, _saved, sov = _setup_2(
+        client,
+        customer_id,
+        [
+            {"description": "Base", "kind": "work", "scheduled_value": 75000},
+            {
+                "description": "Finishes allowance",
+                "kind": "allowance",
+                "scheduled_value": 25000,
+                "cost_code_id": code.id,
+            },
+        ],
+        100000,
+        contract_date=contract_date,
+    )
+    db_session.add(
+        JobBudget(
+            job_id=job["id"],
+            cost_code_id=code.id,
+            cost_type="material",
+            amount=Decimal("25000"),
+            revenue_amount=Decimal("25000"),
+            source="estimate",
+            locked=True,
+        )
+    )
+    db_session.commit()
+    return job, next(s for s in sov if s["kind"] == "allowance")["id"]
+
+
+def test_an_allowance_return_takes_a_date_and_approves_effective_that_day(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The return was dated today (11/08), so approving it
+    effective 10/28 was refused until a PUT moved the CO's date."""
+    job, allowance_id = _allowance(client, db_session, seed_customer.id)
+    r = _return(client, allowance_id, date="2026-10-28")
+    assert r.status_code == 201, r.text
+    co = r.json()
+    assert co["date"] == "2026-10-28"
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-10-28"}
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["approved_on"] == "2026-10-28"
+
+
+def test_an_allowance_return_without_a_date_is_dated_today(
+    client, db_session, seed_accounts, seed_customer
+):
+    _job_, allowance_id = _allowance(client, db_session, seed_customer.id)
+    r = _return(client, allowance_id)
+    assert r.status_code == 201, r.text
+    assert r.json()["date"] == date.today().isoformat()
+
+
+def test_an_allowance_return_date_is_not_before_the_contract(
+    client, db_session, seed_accounts, seed_customer
+):
+    job, allowance_id = _allowance(client, db_session, seed_customer.id)
+    r = _return(client, allowance_id, date="2026-07-14")
+    assert r.status_code == 422, r.text
+    assert "2026-07-15" in r.json()["detail"]
+    # nothing was made: a good date still works
+    assert _return(client, allowance_id, date="2026-07-15").status_code == 201
+
+
+def test_an_allowance_return_date_in_a_closed_period_is_refused(
+    client, db_session, seed_accounts, seed_customer
+):
+    _job_, allowance_id = _allowance(client, db_session, seed_customer.id)
+    assert (
+        client.put("/api/settings", json={"closing_date": "2026-09-30"}).status_code
+        == 200
+    )
+    r = _return(client, allowance_id, date="2026-09-15")
+    assert r.status_code == 403, r.text
+    assert "closing date" in r.json()["detail"]
+    assert _return(client, allowance_id, date="2026-10-05").status_code == 201
+
+
+def test_the_return_unspent_dialog_asks_for_the_date():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / "app/static/js/jobs.js").read_text(
+        encoding="utf-8"
+    )
+    assert "co-return-date" in js
+    assert "allowance_sov_line_id: sovLineId, date" in js

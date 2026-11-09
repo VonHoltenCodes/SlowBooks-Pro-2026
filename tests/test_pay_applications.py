@@ -8,15 +8,20 @@ WIP / cost-to-complete / the change-order log / buyout report / job cost by
 vendor are #556; this one leaves those figures reachable.
 """
 
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 
 from app.models.bills import Bill
+from app.models.change_orders import ChangeOrder
 from app.models.invoices import Invoice
 from app.models.pay_applications import PayApplication
 from app.models.transactions import TransactionLine
-from app.services.pay_applications import application_totals, line_computed, _Row
+from app.services.pay_applications import _Row, application_totals, line_computed
+from app.services.pdf_service import _render
+from tests.test_change_orders import _co, _sub_line, _submit_approve
+from tests.test_change_orders import _job as _change_job
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -526,10 +531,10 @@ def test_contract_summary_billed_retainage_deposits(
 
 
 def test_pdf_renders_both_sheets(client, db_session, seed_accounts, seed_customer):
+    from app.models.jobs import Job
+    from app.routes.pay_applications import _out
     from app.services.pdf_service import render_pay_application_html
     from app.services.settings_service import get_all_settings
-    from app.routes.pay_applications import _out
-    from app.models.jobs import Job
 
     job, sov = _two_line_job(client, seed_customer.id)
     app = _new_app(client, job["id"])
@@ -2080,3 +2085,368 @@ def test_an_existing_schedule_line_keeps_crediting_the_default_income_account(
         assert _approve(client, app_id).status_code == 200
     assert _gl(db_session, "4000") == Decimal("-15000")
     assert _acct(db_session, "4050") is None
+
+
+def _bayview(client, seed_customer):
+    """The job: a $100,000 contract, CO-003 dated 8/10 and approved
+    effective 9/20, and a pay application on 9/01 (CO line absent)."""
+    job = _job(client, seed_customer.id, name="Bayview")
+    r = client.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={
+            "contract_type": "lump_sum",
+            "contract_amount": 100000,
+            "retainage_pct": 10,
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={"lines": [{"description": "Base", "scheduled_value": 100000}]},
+    )
+    assert r.status_code == 200, r.text
+    co = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "kind": "owner",
+            "date": "2026-08-10",
+            "lines": [{"cost_type": "material", "quantity": 1, "unit_cost": 1000}],
+        },
+    ).json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-09-20"}
+    )
+    assert r.status_code == 200, r.text
+    sov = client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
+    co_line = next(s for s in sov if s["kind"] == "change_order")
+    r = client.post(
+        "/api/pay-applications", json={"job_id": job["id"], "date": "2026-09-01"}
+    )
+    assert r.status_code == 201, r.text
+    app = r.json()
+    assert co_line["id"] not in {ln["sov_line_id"] for ln in app["lines"]}
+    return job, co, co_line, app
+
+
+def test_moving_a_billed_change_order_line_before_its_date_is_refused(
+    client, seed_accounts, seed_customer
+):
+    """PUT date 9/25 (the CO line appears), bill 100 on it, PUT
+    date 9/01 → was 200 and approve billed CO-003 on a 9/01 invoice."""
+    job, co, co_line, app = _bayview(client, seed_customer)
+    url = f"/api/pay-applications/{app['id']}"
+    assert client.put(url, json={"date": "2026-09-25"}).status_code == 200
+    r = client.put(
+        url, json={"lines": [{"sov_line_id": co_line["id"], "this_period": 100}]}
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(url, json={"date": "2026-09-01"})
+    assert r.status_code == 409, r.text
+    message = r.json()["detail"]["message"]
+    assert co["number"] in message and "2026-09-20" in message
+    assert client.get(url).json()["date"] == "2026-09-25"
+    # cleared, the line no longer carries the change, and the date moves
+    r = client.put(
+        url, json={"lines": [{"sov_line_id": co_line["id"], "this_period": 0}]}
+    )
+    assert r.status_code == 200, r.text
+    assert client.put(url, json={"date": "2026-09-01"}).status_code == 200
+
+
+def test_approve_re_checks_a_change_order_line_before_its_date(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Approve re-checks what the date PUT does (an application whose
+    date reached the row some other way)."""
+    job, co, co_line, app = _bayview(client, seed_customer)
+    url = f"/api/pay-applications/{app['id']}"
+    assert client.put(url, json={"date": "2026-09-25"}).status_code == 200
+    r = client.put(
+        url, json={"lines": [{"sov_line_id": co_line["id"], "this_period": 100}]}
+    )
+    assert r.status_code == 200, r.text
+    from app.models.pay_applications import PayApplication
+
+    db_session.expire_all()
+    db_session.get(PayApplication, app["id"]).date = date(2026, 9, 1)
+    db_session.commit()
+    r = client.post(f"{url}/approve")
+    assert r.status_code == 409, r.text
+    assert co["number"] in r.json()["detail"]["message"]
+    assert client.get(url).json()["status"] == "draft"
+
+
+def _pdf_html(current_due, pct):
+    """The template over a synthetic application: no database, no WeasyPrint."""
+    totals = {
+        k: 0
+        for k in (
+            "completed_to_date",
+            "previous_retainage",
+            "retainage_this_period",
+            "release_retainage",
+            "retainage_to_date",
+            "total_earned_less_retainage",
+            "previous_applications",
+            "tax_amount",
+            "deposit_applied",
+            "net_due",
+            "balance_to_finish_total",
+            "scheduled_total",
+            "previous_total",
+            "this_period_total",
+            "stored_total",
+            "previous_released",
+        )
+    }
+    totals.update(current_due=current_due, this_period_total=current_due)
+    line = {
+        "item_no": "01",
+        "description": "Deduct alternate",
+        "scheduled_value": -1000,
+        "previous": 0,
+        "this_period": 0,
+        "stored": 0,
+        "completed_to_date": 0,
+        "pct_complete": pct,
+        "balance_to_finish": -1000,
+        "retainage": 0,
+    }
+    pa = SimpleNamespace(lines=[SimpleNamespace(**line)], totals=totals)
+    app = SimpleNamespace(
+        number="PA-5-02",
+        application_no=2,
+        status="draft",
+        period_to=date(2026, 9, 30),
+        date=date(2026, 9, 30),
+    )
+    header = {
+        "owner": "Owner",
+        "job_name": "Tower",
+        "net_change": 0,
+        "contract_sum_original": 1,
+        "contract_sum_to_date": 1,
+    }
+    return _render(
+        "pay_application_pdf.html",
+        {"company_name": "Co"},
+        app=app,
+        pa=pa,
+        job=None,
+        header=header,
+        totals=totals,
+    )
+
+
+def test_a_negative_current_payment_due_keeps_its_sign_on_one_line():
+    """PA-5-02 (-10% application) printed "-" on one line and
+    "$7,894.13" below; the totals row wrapped "-$8,366.51" the same way. Every
+    money cell, in the summary and in the line detail, is nowrap."""
+    html = _pdf_html(Decimal("-7894.13"), 0.0)
+    assert '<td class="r grand">-$7,894.13</td>' in html
+    assert html.count("-$7,894.13") >= 2  # summary and the line-detail totals
+    for selector in (".cert td.r", "table.cont td.r"):
+        rule = next(
+            ln for ln in html.splitlines() if ln.strip().startswith(selector + " {")
+        )
+        assert "white-space: nowrap" in rule, selector
+
+
+def test_a_deduct_line_with_nothing_billed_prints_zero_percent_not_minus_zero():
+    """A deduct line with nothing billed printed "-0.0%"."""
+    html = _pdf_html(Decimal("0"), -0.0)
+    assert "-0.0%" not in html
+    assert ">0.0%</td>" in html
+    # a real percentage still prints as it was
+    assert ">12.5%</td>" in _pdf_html(Decimal("0"), 12.5)
+    assert ">-12.5%</td>" in _pdf_html(Decimal("0"), -12.5)
+
+
+WORK = {"description": "Work", "kind": "work", "scheduled_value": 116500}
+
+
+def _setup(client, customer_id, lines, amount, name="Tower", **terms):
+    job = _job(client, customer_id, name=name)
+    r = client.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={
+            "contract_type": "lump_sum",
+            "contract_amount": amount,
+            "retainage_pct": 10,
+            **terms,
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.put(f"/api/jobs/{job['id']}/sov", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    return job, r.json(), client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
+
+
+def test_a_schedule_short_of_the_contract_saves_with_a_warning(client, seed_customer):
+    """Contract 118,500, SOV 116,500 saved with sov_balance 2000.0
+    and warnings None. It still saves (a job may be mid-setup)."""
+    job, saved, _sov = _setup(client, seed_customer.id, [WORK], 118500)
+    assert saved["sov_balance"] == 2000.0
+    assert len(saved["warnings"]) == 1
+    assert "$116,500.00" in saved["warnings"][0]
+    assert "$2,000.00 short of" in saved["warnings"][0]
+    assert "$118,500.00" in saved["warnings"][0]
+    # over the contract says so too
+    r = client.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={"lines": [{**WORK, "scheduled_value": 120000}]},
+    )
+    assert r.status_code == 200, r.text
+    assert "$1,500.00 over" in r.json()["warnings"][0]
+    # a schedule that foots has nothing to say
+    r = client.put(
+        f"/api/jobs/{job['id']}/sov",
+        json={"lines": [{**WORK, "scheduled_value": 118500}]},
+    )
+    assert r.json()["warnings"] == []
+
+
+def _new_app_2(client, job_id, day="2026-09-30"):
+    r = client.post("/api/pay-applications", json={"job_id": job_id, "date": day})
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_the_pay_app_approve_response_warns_of_a_short_schedule(
+    client, seed_accounts, seed_customer
+):
+    job, _saved, sov = _setup(client, seed_customer.id, [WORK], 118500)
+    app = _new_app_2(client, job["id"])
+    assert any("short of" in w for w in app["warnings"])
+    r = client.put(
+        f"/api/pay-applications/{app['id']}",
+        json={
+            "tax_rate": 0.065,
+            "lines": [{"sov_line_id": sov[0]["id"], "this_period": 10000}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/pay-applications/{app['id']}/approve")
+    assert r.status_code == 200, r.text
+    warnings = r.json()["warnings"]
+    assert any("short of" in w for w in warnings), warnings
+    assert not any("tax rate of 0" in w for w in warnings), warnings
+
+
+def test_a_job_with_no_schedule_or_no_sum_has_no_balance_warning(client, seed_customer):
+    job = _job(client, seed_customer.id)
+    r = client.put(f"/api/jobs/{job['id']}/sov", json={"lines": []})
+    assert r.status_code == 200, r.text
+    assert r.json()["warnings"] == []
+
+
+TAXABLE = {"description": "Work", "kind": "work", "scheduled_value": 60000}
+
+
+def test_taxable_lines_at_a_tax_rate_of_0_warn_where_to_set_the_rate(
+    client, seed_accounts, seed_customer
+):
+    """A job with no accepted estimate defaults its pay apps to
+    tax rate 0; lines taxable, app 1 returned tax_amount 0.0 with
+    taxable_billed 59000.0 and said nothing."""
+    job, _saved, sov = _setup(client, seed_customer.id, [TAXABLE], 60000)
+    app = _new_app_2(client, job["id"])
+    assert Decimal(app["tax_rate"]) == 0
+    tax_warnings = [w for w in app["warnings"] if "tax rate of 0" in w]
+    assert len(tax_warnings) == 1
+    assert "Tax rate" in tax_warnings[0]
+    # setting the rate clears it
+    body = {"lines": [{"sov_line_id": sov[0]["id"], "this_period": 59000}]}
+    r = client.put(
+        f"/api/pay-applications/{app['id']}", json={**body, "tax_rate": 0.065}
+    )
+    assert not any("tax rate of 0" in w for w in r.json()["warnings"])
+    assert r.json()["totals"]["tax_amount"] == 3835.0
+    # unticking Charge tax is an answer too
+    r = client.put(
+        f"/api/pay-applications/{app['id']}", json={"tax_rate": 0, "charge_tax": False}
+    )
+    assert not any("tax rate of 0" in w for w in r.json()["warnings"])
+    # and ticking it back brings the warning back
+    r = client.put(f"/api/pay-applications/{app['id']}", json={"charge_tax": True})
+    assert any("tax rate of 0" in w for w in r.json()["warnings"])
+
+
+def test_no_tax_warning_when_no_line_is_taxable(client, seed_accounts, seed_customer):
+    line = {**TAXABLE, "is_taxable": False}
+    job, _saved, _sov = _setup(client, seed_customer.id, [line], 60000)
+    app = _new_app_2(client, job["id"])
+    assert not any("tax rate of 0" in w for w in app["warnings"])
+
+
+def test_a_contractor_pays_pay_app_reads_no_taxable_billing(
+    client, seed_accounts, seed_customer
+):
+    """A contractor-pays pay app returned taxable_billed 5000.0
+    beside tax_amount 0.0, which read like a missed tax. It reads 0, and the
+    tax-rate-0 warning stays quiet (no tax is due)."""
+    job, _saved, sov = _setup(
+        client,
+        seed_customer.id,
+        [{**TAXABLE, "scheduled_value": 60000}],
+        60000,
+        sales_tax_treatment="contractor_pays",
+    )
+    app = _new_app_2(client, job["id"])
+    r = client.put(
+        f"/api/pay-applications/{app['id']}",
+        json={"lines": [{"sov_line_id": sov[0]["id"], "this_period": 5000}]},
+    )
+    assert r.status_code == 200, r.text
+    totals = r.json()["totals"]
+    assert totals["tax_amount"] == 0.0
+    assert totals["taxable_billed"] == 0.0
+    assert totals["billed_this_period"] == 5000.0
+    assert not any("tax rate of 0" in w for w in r.json()["warnings"])
+
+
+def test_a_charge_owner_pay_app_still_reports_its_taxable_billing(
+    client, seed_accounts, seed_customer
+):
+    job, _saved, sov = _setup(client, seed_customer.id, [TAXABLE], 60000)
+    app = _new_app_2(client, job["id"])
+    r = client.put(
+        f"/api/pay-applications/{app['id']}",
+        json={
+            "tax_rate": 0.065,
+            "lines": [{"sov_line_id": sov[0]["id"], "this_period": 5000}],
+        },
+    )
+    assert r.json()["totals"]["taxable_billed"] == 5000.0
+    assert r.json()["totals"]["tax_amount"] == 325.0
+
+
+TODAY = date.today()
+
+
+def _void_later(db, co_id, on):
+    """Mark a CO voided on `on` (the void route stamps now)."""
+    co = db.get(ChangeOrder, co_id)
+    co.voided_at = datetime(on.year, on.month, on.day, 12, tzinfo=timezone.utc)
+    db.commit()
+
+
+def test_a_draft_pay_app_leaves_out_a_change_order_voided_since(
+    client, db_session, seed_customer
+):
+    """The void took the change order's schedule lines, so the draft's
+    contract sum to date reads without it and still foots with them."""
+    from app.services.contracts import contract_changes_after
+
+    job = _change_job(client, seed_customer.id)
+    co = _co(client, job["id"], [_sub_line("Added", 1000)])
+    assert _submit_approve(client, co["id"]).status_code == 200
+    assert client.post(f"/api/change-orders/{co['id']}/void").status_code == 200
+    _void_later(db_session, co["id"], TODAY + timedelta(days=5))
+    db_session.expire_all()
+    from app.models.jobs import Job
+
+    row = db_session.get(Job, job["id"])
+    assert contract_changes_after(db_session, row, TODAY) == 0

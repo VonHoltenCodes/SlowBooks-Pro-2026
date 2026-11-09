@@ -7,18 +7,25 @@ Progress billing against the revised SOV and the change-order log report are
 later issues (#555, #556); this one leaves those seams.
 """
 
+import importlib.util
 import os
 import subprocess
 import sys
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from app.models.change_orders import ChangeOrder
+import pytest
+
+from app.models.change_orders import ChangeOrder, ChangeOrderLine
 from app.models.job_costing import JobBudget
-from app.services.change_orders import co_totals, line_sell, effective_markup, line_cost
+from app.models.settings import Settings
+from app.services.change_orders import co_totals, effective_markup, line_cost, line_sell
 from app.services.job_costing import job_cost_tree
 from app.services.pdf_service import render_change_order_html
 from app.services.settings_service import get_all_settings
+from tests.test_wip_schedule_post import _bill_owner, _budget, _cost
+from tests.test_wip_schedule_post import _job as _wip_job
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1535,3 +1542,323 @@ def test_approving_a_change_order_that_overflows_the_contract_is_a_422(
         "9999999999000.00",
         9999999999000.0,
     )
+
+
+def _message(r) -> str:
+    """A 422's sentence, from an HTTPException detail or a schema error."""
+    body = r.json()
+    detail = body.get("detail")
+    if isinstance(detail, list):
+        return " ".join(e.get("message", "") for e in detail)
+    return detail if isinstance(detail, str) else str(detail)
+
+
+def _construction(client):
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+
+
+@pytest.fixture
+def con(client):
+    _construction(client)
+    return client
+
+
+def test_a_change_order_line_past_the_money_column_is_refused(
+    con, seed_customer, db_session
+):
+    """A direct POST /api/change-orders took 99,999,999,999 ×
+    99,999,999,999 too."""
+    from app.models.change_orders import ChangeOrder
+
+    job = _job(con, seed_customer.id)
+    line = {"cost_type": "labor", "quantity": 99999999999, "unit_cost": 99999999999}
+    r = con.post("/api/change-orders", json={"job_id": job["id"], "lines": [line]})
+    assert r.status_code == 422, r.text
+    assert "Line 1 comes to" in _message(r)
+    assert db_session.query(ChangeOrder).count() == 0
+    r = con.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "lines": [{"cost_type": "labor", "quantity": 1e15, "unit_cost": 1}],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "Quantity must be between" in _message(r)
+    # a markup change alone can take the sell past the column
+    co = con.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "lines": [
+                {"cost_type": "labor", "quantity": 100, "unit_cost": 90000000000}
+            ],
+        },
+    )
+    assert co.status_code == 201, co.text
+    r = con.put(f"/api/change-orders/{co.json()['id']}", json={"markup_pct": 50})
+    assert r.status_code == 422, r.text
+    assert "more than a line can be" in _message(r)
+
+
+def _approve(client, co_id, **body):
+    assert client.post(f"/api/change-orders/{co_id}/submit").status_code == 200
+    return client.post(f"/api/change-orders/{co_id}/approve", json=body)
+
+
+def _co_job(client, customer_id, contract_date="2026-06-15"):
+    job = _job(client, customer_id)
+    r = client.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={
+            "contract_type": "lump_sum",
+            "contract_amount": 100000,
+            "contract_date": contract_date,
+        },
+    )
+    assert r.status_code == 200, r.text
+    return job
+
+
+def _draft_co(client, job_id, when):
+    r = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job_id,
+            "kind": "owner",
+            "funding": "contract",
+            "date": when,
+            "lines": [
+                {
+                    "description": "Extra",
+                    "cost_type": "material",
+                    "quantity": 1,
+                    "unit_cost": 1000,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_approved_on_before_the_change_orders_own_date_is_refused(
+    client, seed_accounts, seed_customer
+):
+    job = _co_job(client, seed_customer.id)
+    co = _draft_co(client, job["id"], "2026-08-10")
+    r = _approve(client, co["id"], approved_on="2026-08-01")
+    assert r.status_code == 422
+    assert "dated 2026-08-10" in r.json()["detail"]
+    assert client.get(f"/api/change-orders/{co['id']}").json()["status"] == "pending"
+    # its own date, and a later one, are fine
+    assert (
+        client.post(
+            f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-08-10"}
+        ).status_code
+        == 200
+    )
+
+
+def test_a_change_order_dated_before_the_contract_is_refused(
+    client, seed_accounts, seed_customer
+):
+    job = _co_job(client, seed_customer.id, contract_date="2026-06-15")
+    co = _draft_co(client, job["id"], "2026-01-05")
+    # no date given: it would take effect on its own date, before the contract
+    r = _approve(client, co["id"])
+    assert r.status_code == 422
+    assert "before the contract is dated (2026-06-15)" in r.json()["detail"]
+    # a day before the contract is refused too; the contract's own day is fine
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-06-14"}
+    )
+    assert r.status_code == 422
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-06-15"}
+    )
+    assert r.status_code == 200, r.text
+
+
+def test_approving_with_no_date_a_month_back_warns(
+    client, seed_accounts, seed_customer
+):
+    job = _co_job(client, seed_customer.id, contract_date="2020-01-01")
+    old = (date.today() - timedelta(days=365)).isoformat()
+    co = _draft_co(client, job["id"], old)
+    r = _approve(client, co["id"])
+    assert r.status_code == 200, r.text
+    assert len(r.json()["warnings"]) == 1
+    assert "days ago" in r.json()["warnings"][0] and old in r.json()["warnings"][0]
+
+    # a date the person chose is not second-guessed, nor is a recent one
+    co2 = _draft_co(client, job["id"], old)
+    r = _approve(client, co2["id"], approved_on=old)
+    assert r.json()["warnings"] == []
+    co3 = _draft_co(client, job["id"], date.today().isoformat())
+    assert _approve(client, co3["id"]).json()["warnings"] == []
+
+
+OCT15 = date(2026, 10, 15)
+
+
+def _approve_co(client, job_id, unit_cost, approved_on, cost_type="material"):
+    r = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job_id,
+            "kind": "owner",
+            "funding": "contract",
+            "lines": [
+                {
+                    "description": "Added scope",
+                    "cost_type": cost_type,
+                    "quantity": 1,
+                    "unit_cost": unit_cost,
+                    "markup_pct": 0,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    co = r.json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve",
+        json={"approved_on": approved_on.isoformat()},
+    )
+    assert r.status_code == 200, r.text
+    return co
+
+
+def _over_billed_job(db, name="Clinic"):
+    """Contract 100,000, budget 80,000 (material), cost 40,000 by 3/1,
+    billed 60,000 by 4/1: earned 50,000, over-billed 10,000."""
+    job = _wip_job(db, name=name)
+    _budget(db, job, None, "material", "80000", source="manual")
+    _cost(db, job, None, "material", "40000")
+    _bill_owner(db, job, "60000")
+    db.commit()
+    return job
+
+
+def _construction_2(db):
+    db.add(Settings(key="company_type", value="construction"))
+    db.commit()
+
+
+def _setup(client, db):
+    assert client.post("/api/construction/setup").status_code == 200
+    _construction_2(db)
+
+
+def test_each_change_order_writes_its_own_rows(client, db_session, seed_accounts):
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    a = _approve_co(client, job.id, 1000, date(2026, 8, 10))
+    b = _approve_co(client, job.id, -400, OCT15)
+    rows = (
+        db_session.query(JobBudget)
+        .filter(JobBudget.job_id == job.id, JobBudget.source == "change")
+        .all()
+    )
+    assert {r.change_order_id: Decimal(str(r.amount)) for r in rows} == {
+        a["id"]: Decimal("1000.00"),
+        b["id"]: Decimal("-400.00"),
+    }
+    # void takes the CO's own row only
+    assert client.post(f"/api/change-orders/{a['id']}/void").status_code == 200
+    db_session.expire_all()
+    left = db_session.query(JobBudget).filter(JobBudget.source == "change").all()
+    assert [r.change_order_id for r in left] == [b["id"]]
+
+
+SEP30 = date(2026, 9, 30)
+
+
+def _approved_co(db, job, number, lines, on, funding="contract", **extra):
+    co = ChangeOrder(
+        job_id=job.id,
+        number=number,
+        kind="owner",
+        status="approved",
+        funding=funding,
+        approved_on=on,
+        **extra,
+    )
+    db.add(co)
+    db.flush()
+    for i, (code_id, ctype, cost, sell) in enumerate(lines):
+        db.add(
+            ChangeOrderLine(
+                change_order_id=co.id,
+                line_order=i,
+                description="x",
+                cost_type=ctype,
+                cost_code_id=code_id,
+                quantity=1,
+                unit_cost=Decimal(cost),
+                amount=Decimal(cost),
+                sell_amount=Decimal(sell),
+            )
+        )
+    db.flush()
+    return co
+
+
+def _migration():
+    path = ROOT / "migrations/versions/b5d2e8f4a6c3_wip_as_of_budgets_and_lock.py"
+    spec = importlib.util.spec_from_file_location("r1_migration", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_the_backfill_splits_a_shared_row_that_adds_up(db_session, seed_accounts):
+    job = _wip_job(db_session)
+    a = _approved_co(
+        db_session, job, "CO-A", [(None, "material", "1000", "1100")], SEP30
+    )
+    b = _approved_co(
+        db_session, job, "CO-B", [(None, "material", "-400", "-440")], OCT15
+    )
+    # the merged row the old code wrote for both, and one that no longer adds up
+    db_session.add(
+        JobBudget(
+            job_id=job.id,
+            cost_type="material",
+            amount=Decimal("600"),
+            revenue_amount=Decimal("660"),
+            source="change",
+            locked=True,
+        )
+    )
+    _approved_co(db_session, job, "CO-C", [(None, "labor", "500", "500")], SEP30)
+    db_session.add(
+        JobBudget(
+            job_id=job.id,
+            cost_type="labor",
+            amount=Decimal("700"),  # edited since: 500 cannot be recovered
+            revenue_amount=Decimal("500"),
+            source="change",
+            locked=True,
+        )
+    )
+    db_session.commit()
+
+    _migration()._link_change_budgets(db_session.connection())
+    db_session.commit()
+    db_session.expire_all()
+    rows = db_session.query(JobBudget).filter(JobBudget.source == "change").all()
+    material = {
+        r.change_order_id: (Decimal(str(r.amount)), Decimal(str(r.revenue_amount)))
+        for r in rows
+        if r.cost_type == "material"
+    }
+    assert material == {
+        a.id: (Decimal("1000.00"), Decimal("1100.00")),
+        b.id: (Decimal("-400.00"), Decimal("-440.00")),
+    }
+    labor = [r for r in rows if r.cost_type == "labor"]
+    assert len(labor) == 1 and labor[0].change_order_id is None
