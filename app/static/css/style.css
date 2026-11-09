@@ -2089,7 +2089,8 @@ a:hover { text-decoration: underline; }
    (2.31.1 gate, NEW-187). Each control keeps its size; 2px apart, their
    centres stay 24px apart. The sizes are set here, not by the font: the
    handle is a grip drawn in CSS (two by three dots) and each button is 22px
-   with its glyph centred, so a row of them is 82px on every font set. With
+   with its glyph centred (.btn is a flex box, so justify-content, not
+   text-align, centres it), so a row of them is 82px on every font set. With
    glyph-sized controls, a font set whose handle ran 6px wider folded them at
    the wide dialog's cap, where the twelve-column construction bill left the
    column 91px (2.31.11 gate, L-1). */
@@ -2102,7 +2103,7 @@ a:hover { text-decoration: underline; }
     min-width: 46px;
     vertical-align: middle;
 }
-.line-order-cell .btn { padding: 0; width: 22px; min-width: 22px; }
+.line-order-cell .btn { padding: 0; width: 22px; min-width: 22px; justify-content: center; }
 .line-order-handle {
     display: inline-block;
     width: 10px;

@@ -132,6 +132,20 @@ SLACK = """() => {
 }"""
 
 
+# Each move button's glyph against its button: how far the glyph's centre
+# sits from the button's, in px, left negative.
+GLYPH_OFFSETS = """() => {
+    const c = document.querySelector('#bill-lines tr .line-order-controls');
+    return [...c.querySelectorAll('button')].map(b => {
+        const r = document.createRange();
+        r.selectNodeContents(b);
+        const g = r.getBoundingClientRect();
+        const bb = b.getBoundingClientRect();
+        return Math.round(((g.left + g.right) - (bb.left + bb.right)) / 2 * 10) / 10;
+    });
+}"""
+
+
 def test_a_construction_bill_shows_every_column_at_the_agents_window(
     browser, company, books, classed, client
 ):
@@ -143,8 +157,10 @@ def test_a_construction_bill_shows_every_column_at_the_agents_window(
     the move controls with them; with room, the controls keep one row. At
     the cap (1300px, 2.31.11 gate, L-1) the row has slack to spare: the
     controls' widths are set in CSS, not by the font (one font set's wider
-    handle folded them at the old 1280px cap), and the column has 16px more
-    than a row of them needs."""
+    handle folded them at the old 1280px cap), the column has 16px more
+    than a row of them needs, and each glyph sits in the middle of its
+    button (NEW-214: a flex box with no justify-content left them at the
+    left edge)."""
     before = client.get("/api/settings").json().get("company_type") or "business"
     r = client.put("/api/settings", json={"company_type": "construction"})
     assert r.status_code == 200, r.text
@@ -169,6 +185,11 @@ def test_a_construction_bill_shows_every_column_at_the_agents_window(
                     slack = page.evaluate(SLACK)
                     assert slack["need"] <= 84, slack  # set in CSS, not by the font
                     assert slack["content"] - slack["need"] >= 16, slack
+                    # the glyphs sit in the middle of their 22px buttons: a
+                    # flex box with no justify-content put them at the left
+                    # (2.31.11 gate, NEW-214)
+                    offsets = page.evaluate(GLYPH_OFFSETS)
+                    assert len(offsets) == 3 and all(abs(o) <= 1.5 for o in offsets), offsets
                 else:
                     assert rows in (1, 2), (width, rows)
             finally:
