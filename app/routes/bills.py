@@ -30,6 +30,7 @@ from app.services.accounting import (
     _q,
     create_journal_entry,
     compute_line_totals,
+    refuse_total_past_column,
     get_ap_account_id,
     reversing_lines,
 )
@@ -529,7 +530,14 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     term_id = picked_term_id(db, terms, data.payment_term_id)
     due_date = data.due_date or _due_date_from_terms(db, data.date, terms)
 
+    # A new bill has no lines yet for an id to point at.
+    if any(ln.id is not None for ln in data.lines):
+        raise HTTPException(
+            status_code=422,
+            detail="A new bill has no lines yet; send its lines without an id.",
+        )
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    refuse_total_past_column(subtotal, tax_amount, total)
     if total <= 0:
         raise HTTPException(
             status_code=400,
@@ -911,7 +919,14 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         # lines are deleted: the re-post keeps it for a line sent with its id
         booked_use_tax_rates = {ln.id: ln.use_tax_rate for ln in bill.lines}
         if data.lines is not None:
+            sent_ids = set()
             for sent in data.lines:
+                if sent.id is not None and sent.id in sent_ids:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Line id {sent.id} is sent twice.",
+                    )
+                sent_ids.add(sent.id)
                 if sent.id is not None and sent.id not in booked_use_tax_rates:
                     raise HTTPException(
                         status_code=422,

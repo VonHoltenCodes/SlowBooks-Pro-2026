@@ -166,6 +166,12 @@ def _check_po_line(db: Session, ticket: FieldTicket, po_line_id) -> None:
     if pol is None:
         raise HTTPException(status_code=404, detail="Purchase order line not found")
     job_id = pol.job_id or (pol.purchase_order.job_id if pol.purchase_order else None)
+    if job_id is None:
+        raise HTTPException(
+            status_code=422,
+            detail="That purchase order line is on no job; put its purchase "
+            "order on this job first.",
+        )
     if job_id != ticket.job_id:
         raise HTTPException(
             status_code=422, detail="That purchase order line is on another job."

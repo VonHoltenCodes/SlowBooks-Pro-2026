@@ -1894,8 +1894,21 @@ estimate list's `status` takes `lost` for the estimates marked lost (stored as
   the division titles and a set of common sections ship, and you import the
   rest.
 
-**Amounts that do not fit.** A bill, purchase order or estimate line whose
-quantity × rate (or amount) is past 9,999,999,999,999.99, or whose lines sum
-past it, is refused with a 422 sentence before anything is saved. Approving an
+**Amounts that do not fit.** A bill, purchase order, estimate or invoice line
+whose quantity × rate (or amount) is past 9,999,999,999,999.99, or whose lines
+sum past it, is refused with a 422 sentence before anything is saved. So is an
+estimate, purchase order, invoice or bill whose subtotal, tax or total (after
+markups and tax) would not fit. Approving an
 owner change order is refused the same way when the contract plus its sell
 total would not fit.
+
+**Inputs that are refused, not ignored.** A bill edit that sends the same line
+`id` twice, and a new bill whose line carries an `id`, are 422s. Marking an
+estimate lost and the WIP schedule's Post and Void take no body field beyond
+the one they document; any other is a 422 naming it. The Field Ticket Log
+refuses a `status` that is not a job status, with the Retainage report's
+sentence. Listing field tickets and returning an allowance outside construction
+mode are 409s, like the writes. A ticket line naming a purchase order line on a
+purchase order with no job is told the line is on no job. A query parameter a
+list or report does not read is a 422 that names it ("a is not a filter
+here", "a and b are not filters here", "a, b and c are not filters here").

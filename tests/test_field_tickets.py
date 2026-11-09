@@ -87,8 +87,10 @@ def test_a_business_company_writes_no_ticket(client, seed_customer):
     r = client.post("/api/field-tickets", json={"job_id": job["id"], "lines": []})
     assert r.status_code == 409
     assert "construction mode" in r.json()["detail"]
-    # reading answers, empty
-    assert client.get(f"/api/field-tickets?job_id={job['id']}").json() == []
+    # reading is refused with the same sentence
+    r = client.get(f"/api/field-tickets?job_id={job['id']}")
+    assert r.status_code == 409
+    assert "construction mode" in r.json()["detail"]
 
 
 def test_numbering_per_job_and_kind(con, seed_customer):
@@ -1522,3 +1524,45 @@ def test_the_field_ticket_filters_answer_in_labels(client):
     assert r.json()["detail"].startswith(
         "Status must be Draft, Signed, Closed or Void."
     )
+
+
+def test_the_log_refuses_a_status_that_is_not_a_job_status(con):
+    """status=bogus on the log (page, PDF and CSV) is a 422 with the sentence
+    the Retainage report gives."""
+    for path in ("", "/pdf", "/csv"):
+        r = con.get(f"/api/reports/field-ticket-log{path}?status=bogus")
+        assert r.status_code == 422, (path, r.text)
+        assert r.json()["detail"] == (
+            "status must be one of pending, awarded, in_progress, closed, "
+            "not_awarded."
+        )
+
+
+def test_a_po_line_on_a_po_with_no_job_is_said_to_be_on_no_job(
+    con, seed_customer, seed_accounts
+):
+    """The refusal says the line is on no job, not on another one."""
+    job = _job(con, seed_customer.id)
+    v = _vendor(
+        con, name="City Supply", default_expense_account_id=seed_accounts["5100"].id
+    )
+    r = con.post(
+        "/api/purchase-orders",
+        json={
+            "vendor_id": v["id"],
+            "date": "2026-06-01",
+            "lines": [{"description": "Conduit", "quantity": 1, "rate": 3}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    line_id = r.json()["lines"][0]["id"]
+    r = _ticket(con, job["id"], [{**LABOR, "po_line_id": line_id}], status=422)
+    assert r["detail"].startswith("That purchase order line is on no job;")
+
+
+def test_listing_tickets_outside_construction_is_a_409(client):
+    """A Business company reads no ticket list: the same mode sentence the
+    writes give."""
+    r = client.get("/api/field-tickets")
+    assert r.status_code == 409, r.text
+    assert "construction mode" in r.json()["detail"]

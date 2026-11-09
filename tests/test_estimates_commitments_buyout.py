@@ -868,3 +868,28 @@ def test_the_jobs_buyout_is_construction_modes(client, db_session, seed_accounts
     assert client.get(f"/api/jobs/{job.id}/cost-tree").status_code == 200
     client.put("/api/settings", json={"company_type": "construction"})
     assert client.get(f"/api/jobs/{job.id}/buyout").status_code == 200
+
+
+def test_marking_an_estimate_lost_refuses_a_field_it_does_not_take(
+    client, seed_customer
+):
+    """A body field other than the reason is a 422 naming it; the estimate
+    stays open."""
+    r = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-03-01",
+            "lines": [{"description": "Slab", "quantity": 1, "rate": 100}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    est = r.json()["id"]
+    r = client.post(f"/api/estimates/{est}/lost", json={"why": "x"})
+    assert r.status_code == 422, r.text
+    assert "'why' is not a field this accepts" in r.text
+    assert client.get(f"/api/estimates/{est}").json()["status"] == "pending"
+    assert (
+        client.post(f"/api/estimates/{est}/lost", json={"reason": "x"}).status_code
+        == 200
+    )

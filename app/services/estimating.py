@@ -16,7 +16,7 @@
 
 from decimal import Decimal
 
-from app.services.accounting import _q
+from app.services.accounting import _q, refuse_total_past_column
 
 # A package with no id groups here; a real package named "Unassigned" keeps
 # its own id, so grouping is by id, never by this label.
@@ -231,6 +231,7 @@ def estimate_document_totals(
         tax_amount = Decimal("0")
 
     total = _q(subtotal + markup_total + tax_amount)
+    refuse_total_past_column(subtotal, markup_total, tax_amount, total)
     return subtotal, tax_amount, total
 
 

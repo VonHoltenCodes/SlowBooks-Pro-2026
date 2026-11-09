@@ -676,3 +676,54 @@ def test_bill_lines_that_together_overflow_are_a_422(client, seed_accounts):
     )
     assert r.status_code == 422, r.text
     assert "more than a document can be" in r.text
+
+
+# ── Line ids on a bill ──────────────────────────────────────────────────────
+
+
+def test_a_bill_edit_that_sends_one_line_id_twice_is_a_422(client, seed_accounts):
+    acct = seed_accounts["6000"].id
+    """The second copy of a line id would take the first line's booked rate;
+    it is refused, and the bill is left as it was."""
+    vendor_id = _vendor(client)["id"]
+    bill = _bill(
+        client,
+        vendor_id,
+        [
+            {"description": "Lumber", "amount": 100, "account_id": acct},
+            {"description": "Nails", "amount": 50, "account_id": acct},
+        ],
+    )
+    first = bill["lines"][0]["id"]
+    line = {"id": first, "description": "Lumber", "amount": 100, "account_id": acct}
+    r = client.put(
+        f"/api/bills/{bill['id']}",
+        json={"lines": [line, {**line, "description": "Dup"}]},
+    )
+    assert r.status_code == 422, r.text
+    assert r.json()["detail"] == f"Line id {first} is sent twice."
+    assert len(client.get(f"/api/bills/{bill['id']}").json()["lines"]) == 2
+
+
+def test_a_new_bill_with_a_line_id_is_a_422(client, seed_accounts):
+    """A new bill has no lines for an id to point at, so one is refused
+    instead of ignored."""
+    vendor_id = _vendor(client)["id"]
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": vendor_id,
+            "bill_number": "ID-1",
+            "date": "2026-03-01",
+            "lines": [
+                {
+                    "id": 99999,
+                    "description": "x",
+                    "amount": 10,
+                    "account_id": seed_accounts["6000"].id,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "without an id" in r.json()["detail"]

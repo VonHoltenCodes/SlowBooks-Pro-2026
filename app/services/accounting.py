@@ -7,6 +7,7 @@
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+from fastapi import HTTPException
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.util import identity_key
@@ -49,6 +50,25 @@ def _q(value) -> Decimal:
 
 # Public alias — reads more clearly at call sites that prefer a descriptive name.
 quantize_cents = _q
+
+
+# Money columns are Numeric(15, 2); app.schemas.common.MAX_LINE_AMOUNT is the
+# same figure for a single line.
+MAX_DOCUMENT_AMOUNT = Decimal("9999999999999.99")
+
+
+def refuse_total_past_column(*figures) -> None:
+    """422 when a document's subtotal, tax or total (after markups and tax)
+    would not fit a money column, so it is a sentence, never a 500."""
+    if any(abs(Decimal(str(f))) > MAX_DOCUMENT_AMOUNT for f in figures):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "This document comes to more than a document can be "
+                f"({MAX_DOCUMENT_AMOUNT:,.2f}) once markups and tax are added. "
+                "Split the work across documents."
+            ),
+        )
 
 
 def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:

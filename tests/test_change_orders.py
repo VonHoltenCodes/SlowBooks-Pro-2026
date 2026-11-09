@@ -1862,3 +1862,12 @@ def test_the_backfill_splits_a_shared_row_that_adds_up(db_session, seed_accounts
     }
     labor = [r for r in rows if r.cost_type == "labor"]
     assert len(labor) == 1 and labor[0].change_order_id is None
+
+
+def test_allowance_return_outside_construction_is_a_409(client):
+    """The mode sentence comes before any look at the line."""
+    r = client.post(
+        "/api/change-orders/allowance-return", json={"allowance_sov_line_id": 1}
+    )
+    assert r.status_code == 409, r.text
+    assert "construction mode" in r.json()["detail"]

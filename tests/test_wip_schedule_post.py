@@ -1132,3 +1132,19 @@ def test_the_migration_up_down_and_up(tmp_path):
     assert "wip_entry_locks" not in inspect(engine).get_table_names()
     command.upgrade(cfg, "head")
     engine.dispose()
+
+
+def test_post_and_void_refuse_an_unknown_body_field(client, db_session, seed_accounts):
+    """The date is a query value; a body with any field is a 422 naming it,
+    and nothing is posted or voided."""
+    _setup_and_job(client, db_session)
+    url = f"/api/reports/wip-schedule/post?as_of={AS_OF}"
+    r = client.post(url, json={"x": 1})
+    assert r.status_code == 422, r.text
+    assert "'x' is not a field this accepts" in r.text
+    assert client.post(url).status_code == 200
+    r = client.post(f"/api/reports/wip-schedule/void?as_of={AS_OF}", json={"x": 1})
+    assert r.status_code == 422, r.text
+    assert (
+        client.post(f"/api/reports/wip-schedule/void?as_of={AS_OF}").status_code == 200
+    )

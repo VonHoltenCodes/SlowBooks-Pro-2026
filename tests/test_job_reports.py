@@ -2368,3 +2368,20 @@ def test_retainage_status_filter_reads_the_status_of_the_date(
     assert [j["job_id"] for j in whole["jobs"]] == [job.id]
     assert whole["totals"]["payable"] == 100.0 == whole["books"]["payable"]
     assert whole["filtered"] is False
+
+
+def test_the_unknown_filter_sentence_reads_right_for_one_two_and_three(
+    client, seed_accounts
+):
+    """One bad key is "is not a filter", two read "a and b are not filters",
+    three "a, b and c are not filters"."""
+    base = "/api/reports/wip-schedule?as_of=2026-09-30"
+    cases = {
+        "&jobid=1": "jobid is not a filter here.",
+        "&cust=1&jobid=1": "cust and jobid are not filters here.",
+        "&cust=1&jobid=1&zed=1": "cust, jobid and zed are not filters here.",
+    }
+    for query, start in cases.items():
+        r = client.get(base + query)
+        assert r.status_code == 422, r.text
+        assert r.json()["detail"].startswith(start), r.json()
