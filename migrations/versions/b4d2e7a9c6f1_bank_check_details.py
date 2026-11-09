@@ -7,7 +7,7 @@ last four in the clear. Books that already have the table (made by
 create_all and stamped back) keep it as it is.
 
 Revision ID: b4d2e7a9c6f1
-Revises: c8e1a4d7f305
+Revises: d8f1b3c5e7a9
 Create Date: 2026-11-09
 
 """
@@ -18,7 +18,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "b4d2e7a9c6f1"
-down_revision: Union[str, None] = "c8e1a4d7f305"
+down_revision: Union[str, None] = "d8f1b3c5e7a9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
