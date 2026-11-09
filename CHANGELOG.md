@@ -25,7 +25,7 @@ on what the software does, not on what sprint shipped what.
 
 **Cash basis and retainage.** Paying a sub's retainage release recognises the held cost on the job's own lines (it fell to 6990 with no job); held owner retainage is income only when the release is paid (it was counted when the invoice was paid, and 1150 showed as an asset).
 
-**Reports.** Job Cost by Vendor reads each bill's vendor (every dollar sat under "No vendor"); A/R and A/P Aging read as of their date, so a past date ties to 1100 / 2000 with the invoices and bills paid since; a customer statement shows retainage held as its own line, not as due; a late fee stays in the aging. Commitment Status, Buyout, Job Cost by Vendor and the Field Ticket Log keep a job closed after their as-of date, and their `status` filter reads the job's status on that date.
+**Reports.** Job Cost by Vendor reads each bill's vendor (every dollar sat under "No vendor"); A/R and A/P Aging read as of their date, so a past date ties to 1100 / 2000 with the invoices and bills paid since; a customer statement shows retainage held as its own line, not as due; a late fee stays in the aging. Commitment Status, Buyout, Job Cost by Vendor and the Field Ticket Log keep a job closed after their as-of date, and their `status` filter, like the Retainage report's, reads the job's status on that date. Job Profitability's PDF, print page and CSV say "(cash basis)" when run on cash basis.
 
 **Sales tax and use tax on a job.** A contract can say the contractor pays tax on materials (the lump-sum rule in Florida and many states): its pay applications charge no tax and its material bills accrue use tax to 2220 at the company's use-tax rate, shown on the Sales Tax report.
 
