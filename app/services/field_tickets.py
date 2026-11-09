@@ -596,6 +596,24 @@ FT_LOG_COLUMNS = [
 _FT_LOG_SUMMED = ("unsigned", "signed_unbilled")
 
 
+def _log_state(t: FieldTicket, as_of: date) -> Optional[str]:
+    """A T&M ticket's state on `as_of` for the log: "draft" (unsigned),
+    "signed" (not yet billed), or None when it was closed or void by then."""
+    from app.services.job_reports import _local_date
+
+    if t.status == "void":
+        if t.voided_at is None or _local_date(t.voided_at) <= as_of:
+            return None
+    elif t.status == "closed":
+        # billed on an invoice dated after the day: it was still unbilled
+        if t.invoice is None or t.invoice.date <= as_of:
+            return None
+    elif t.status not in ("draft", "signed"):
+        return None
+    signed = t.signed_at is not None and t.signed_at <= as_of
+    return "signed" if signed else "draft"
+
+
 def field_ticket_log(
     db: Session,
     as_of: Optional[date] = None,
@@ -608,11 +626,14 @@ def field_ticket_log(
     table: open (unsigned) tickets and signed tickets not yet billed, each at
     its bill rates. A signed ticket priced on a change order that is not yet
     approved still counts as not billed (the CO is named). A closed or void
-    ticket is not listed. The ticket's status is today's."""
+    ticket is not listed. A ticket is read in the state it had on `as_of`:
+    signed by then, not billed on an invoice dated by then, not voided by
+    then. A ticket closed by a change order has no date for that on file, so
+    it is not listed."""
     from app.services.job_reports import _customer_name, select_jobs
 
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     out = []
     grand = {k: _ZERO for k in _FT_LOG_SUMMED}
     for job in jobs:
@@ -621,20 +642,20 @@ def field_ticket_log(
             .filter(
                 FieldTicket.job_id == job.id,
                 FieldTicket.kind == "tm",
-                FieldTicket.status.in_(("draft", "signed")),
                 FieldTicket.date <= as_of,
             )
             .order_by(FieldTicket.date, FieldTicket.number)
             .all()
         )
+        tickets = [(t, st) for t in tickets if (st := _log_state(t, as_of))]
         if not tickets:
             continue
         rows = []
         totals = {k: _ZERO for k in _FT_LOG_SUMMED}
-        for t in tickets:
+        for t, state in tickets:
             _cost, bill = ticket_totals(t)
             live = live_change_order(db, t.change_order) if t.change_order_id else None
-            signed = t.status == "signed"
+            signed = state == "signed"
             key = "signed_unbilled" if signed else "unsigned"
             totals[key] += bill
             rows.append(

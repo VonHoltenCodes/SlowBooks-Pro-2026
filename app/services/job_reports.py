@@ -164,9 +164,10 @@ def select_jobs(
         q = q.filter(Job.id == job_id)
     if customer_id is not None:
         q = q.filter(Job.customer_id == customer_id)
-    if status:
+    # with `as_of` a named status is matched below, on the status the day had
+    if status and as_of is None:
         q = q.filter(Job.status == status)
-    else:
+    elif not status:
         q = q.filter(~Job.status.in_(_NEVER_DEFAULT))
         if not include_closed:
             closed = Job.status.in_(_CLOSED)
@@ -174,6 +175,8 @@ def select_jobs(
                 closed = closed & (Job.closed_on.is_(None) | (Job.closed_on <= as_of))
             q = q.filter(~closed)
     jobs = q.all()
+    if status and as_of is not None:
+        jobs = [j for j in jobs if status_on(j, as_of) == status]
     return sorted(
         jobs,
         key=lambda j: (
@@ -1550,7 +1553,7 @@ def buyout_report(
     from app.services.buyout import job_buyout
 
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     rows = []
     grand = {k: _ZERO for k in _BUYOUT_SUMMED}
     for job in jobs:
@@ -1923,7 +1926,7 @@ def job_cost_by_vendor(
 
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date is after end_date")
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, end_date)
     rows = [_vendor_job(db, job, start_date, end_date) for job in jobs]
     grand = {k: _ZERO for k in _VENDOR_SUMMED}
     for job_data in rows:
@@ -2033,7 +2036,7 @@ def commitment_status(
     from app.models.purchase_orders import POStatus, PurchaseOrder
 
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     out = []
     grand = {k: _ZERO for k in _COMMITMENT_SUMMED}
     for job in jobs:

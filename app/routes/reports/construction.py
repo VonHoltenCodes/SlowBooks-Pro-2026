@@ -1266,10 +1266,16 @@ _JOB_PROFIT_COLUMNS = [
 ]
 
 
-def _job_profitability_data(db, start_date, end_date, customer_id):
+def _job_profitability_data(db, start_date, end_date, customer_id, basis=None):
     from app.routes.reports.financial import job_profitability_report
 
-    return job_profitability_report(start_date, end_date, customer_id, db)
+    return job_profitability_report(
+        start_date=start_date,
+        end_date=end_date,
+        customer_id=customer_id,
+        db=db,
+        basis=basis,
+    )
 
 
 def _job_profitability_grid(data: dict) -> dict:
@@ -1290,9 +1296,10 @@ def job_profitability_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     customer_id: int = Query(default=None),
+    basis: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    data = _job_profitability_data(db, start_date, end_date, customer_id)
+    data = _job_profitability_data(db, start_date, end_date, customer_id, basis)
     grid = _job_profitability_grid(data)
     cols = grid["columns"]
     rows = [
@@ -1333,9 +1340,10 @@ def job_profitability_csv(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
     customer_id: int = Query(default=None),
+    basis: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
-    data = _job_profitability_data(db, start_date, end_date, customer_id)
+    data = _job_profitability_data(db, start_date, end_date, customer_id, basis)
     grid = _job_profitability_grid(data)
     cols = grid["columns"]
     out = io.StringIO()
