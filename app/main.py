@@ -955,6 +955,16 @@ async def security_headers(request: Request, call_next):
         disposition = response.headers.get("Content-Disposition", "")
         if disposition.lower().startswith("attachment"):
             response.headers["Content-Disposition"] = "inline" + disposition[10:]
+    # JSON is UTF-8 (RFC 8259), but a client that finds no charset on the
+    # Content-Type may guess: Windows PowerShell 5.1's Invoke-RestMethod
+    # reads ISO-8859-1, so the QBO importer's "Payment — Dana" printed as
+    # "Payment â€” Dana" (#742). FastAPI's serialization fast path and
+    # JSONResponse both send a bare application/json (and a custom
+    # default_response_class would switch that fast path off), so the
+    # charset is named here, once, for every route, error handler and
+    # gate refusal.
+    if response.headers.get("content-type") == "application/json":
+        response.headers["content-type"] = "application/json; charset=utf-8"
     _set_if_unset(response.headers, "X-Content-Type-Options", "nosniff")
     _set_if_unset(response.headers, "X-Frame-Options", "DENY")
     _set_if_unset(
