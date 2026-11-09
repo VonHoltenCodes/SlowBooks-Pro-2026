@@ -1,7 +1,7 @@
 # Field tickets: plan
 
 Status: built (2026-11-07). The design as drafted for
-Keith, the PM persona's additions, and the decisions taken while building it
+Keith, the additions from review, and the decisions taken while building it
 at the end. `docs/contractor-mode.md` "Field tickets" is the user-facing spec.
 
 ## What a field ticket is
@@ -65,8 +65,7 @@ billing record.
 (a return slip is the same with negative quantities). Posting it writes a
 `JobCost` entry with `source="material_slip"`: DR job cost (material type,
 the line's code) / CR the item's inventory asset account, at the item's
-average cost. Voiding it reverses at the booked cost, not today's cost (the
-mistake the skeptic keeps finding elsewhere).
+average cost. Voiding it reverses at the booked cost, not today's cost.
 
 **Delivery ticket.** Picked against an open PO: one line per PO line with the
 quantity delivered. Saving it adds to `received_qty` and moves the PO to
@@ -96,7 +95,7 @@ back. No posting: received-not-billed accruals are left to the accountant.
 
 2, 3 and 4 depend only on 1 and can run in parallel after it merges.
 
-## From the PM persona (2026-11-07)
+## Additions from review (2026-11-07)
 
 - A **sub's** T&M ticket ties to its commitment and becomes a sub change-order
   line under the owner CO it prices, so add `commitment_id` on the header.

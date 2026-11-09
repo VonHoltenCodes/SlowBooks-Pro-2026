@@ -481,8 +481,7 @@ the journal form's basis choice (see the step 3 PR).
     The ledger block (tax posted, paid, balance) reads 2200 on the basis, so
     the two are checked against each other; a cent can differ from the
     ledger (each payment's own lines are rounded to the largest share).
-16. **Retainage releases are recognized on their payment** (construction
-    overhaul, 2026-11-07): a paid release bill or release pay application
+16. **Retainage releases are recognized on their payment** (v2.31.11): a paid release bill or release pay application
     recognizes the held documents' own lines, not 6990 / 4950, and an
     owner payment collects its tax whole with the net, so held owner
     retainage is neither cash income nor a cash 1150 asset. A deposit stays

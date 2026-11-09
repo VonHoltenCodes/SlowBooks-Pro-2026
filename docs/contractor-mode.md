@@ -50,7 +50,7 @@ are ordinary accounts once created.
 construction mode) is lossier than the switch: the field tickets tables are
 dropped, so **tickets and their lines are gone**; the SOV's Tax box and
 revenue account columns are dropped, so every SOV line **returns taxable** and
-posts to 4050 again; and the received quantity a delivery ticket wrote on a
+posts to the default income account again; and the received quantity a delivery ticket wrote on a
 purchase order line **stays** on the line, with no ticket left to void it.
 Take a backup first.
 
