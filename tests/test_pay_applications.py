@@ -1921,3 +1921,118 @@ def test_an_application_dated_at_the_calendars_end_is_refused_not_a_500(
     assert r.status_code == 422, r.text
     assert "runs past the calendar" in r.json()["detail"]
     assert db_session.query(Invoice).count() == 0
+
+
+def _dated_co_job(client, customer_id):
+    """A 100,000 job at 10% retainage with one 10,000 change order approved
+    effective 2026-08-10; returns (job, base SOV line, CO SOV line)."""
+    job = _job(client, customer_id)
+    _contract(
+        client,
+        job["id"],
+        contract_type="lump_sum",
+        contract_amount=100000,
+        retainage_pct=10,
+    )
+    base = _sov(
+        client,
+        job["id"],
+        [{"description": "Base", "kind": "work", "scheduled_value": 100000}],
+    )[0]
+    co = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "kind": "owner",
+            "funding": "contract",
+            "lines": [
+                {
+                    "description": "Extra",
+                    "cost_type": "material",
+                    "quantity": 1,
+                    "unit_cost": 10000,
+                }
+            ],
+        },
+    ).json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve", json={"approved_on": "2026-08-10"}
+    )
+    assert r.status_code == 200, r.text
+    sov = client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
+    co_line = next(l for l in sov if l["kind"] == "change_order")
+    return job, base, co_line
+
+
+def _dated_app(client, job_id, on, lines):
+    app = client.post(
+        "/api/pay-applications", json={"job_id": job_id, "date": on}
+    ).json()
+    assert _edit(client, app["id"], lines=lines).status_code == 200
+    return app
+
+
+def test_a_back_dated_application_keeps_a_line_an_earlier_one_billed(
+    client, db_session, seed_accounts, seed_customer
+):
+    """An application dated before a change order takes effect still carries
+    that change order's line when an earlier approved application billed it,
+    so completed-to-date never falls and approve posts no retainage release."""
+    job, base, co_line = _dated_co_job(client, seed_customer.id)
+    a1 = _dated_app(
+        client,
+        job["id"],
+        "2026-09-01",
+        [
+            {"sov_line_id": base["id"], "this_period": 10000, "stored": 0},
+            {"sov_line_id": co_line["id"], "this_period": 10000, "stored": 0},
+        ],
+    )
+    assert _approve(client, a1["id"]).status_code == 200
+    a2 = _dated_app(
+        client,
+        job["id"],
+        "2026-08-01",
+        [{"sov_line_id": base["id"], "this_period": 5000, "stored": 0}],
+    )
+    r = _approve(client, a2["id"])
+    assert r.status_code == 200, r.text
+    totals = r.json()["totals"]
+    assert totals["completed_to_date"] == 25000.0
+    assert totals["retainage_to_date"] == 2500.0
+    inv = db_session.query(Invoice).filter_by(id=r.json()["invoice_id"]).first()
+    assert inv.retainage_held == Decimal("500.00")
+    assert inv.retainage_held >= 0
+    rows = (
+        db_session.query(TransactionLine)
+        .filter_by(transaction_id=inv.transaction_id)
+        .all()
+    )
+    by_acct = {}
+    for row in rows:
+        num = row.account.account_number
+        net = Decimal(str(row.debit)) - Decimal(str(row.credit))
+        by_acct[num] = by_acct.get(num, Decimal("0")) + net
+    assert by_acct["1100"] == Decimal("4500.00")
+    assert by_acct["1150"] == Decimal("500.00")  # a debit: held, never released
+    assert sum(by_acct.values()) == Decimal("0.00")
+
+
+def test_a_back_dated_application_leaves_off_a_line_nobody_billed(
+    client, seed_accounts, seed_customer
+):
+    """A change order's line nothing has billed yet stays off an application
+    dated before the change order takes effect."""
+    job, base, co_line = _dated_co_job(client, seed_customer.id)
+    a = _dated_app(
+        client,
+        job["id"],
+        "2026-08-01",
+        [{"sov_line_id": base["id"], "this_period": 5000, "stored": 0}],
+    )
+    ids = [
+        ln["sov_line_id"]
+        for ln in client.get(f"/api/pay-applications/{a['id']}").json()["lines"]
+    ]
+    assert base["id"] in ids and co_line["id"] not in ids

@@ -770,6 +770,11 @@ carries an amount (this period or stored) is refused, 409 code
 takes effect on 2026-09-20, after this application's date (2026-09-01) …");
 clear the line or keep the later date. Submit and approve check the same. A
 line with nothing on it just drops off the application, as before.
+The exception is a line an earlier approved application already billed: it
+stays on a later-numbered application dated before the change order takes
+effect, so completed-to-date never falls below what was billed and approve
+never posts a retainage release for the difference. (The application's
+contract sum to date still reads the change orders in effect by its date.)
 Approve refuses a date that cannot be right, each with a sentence (422): an
 `approved_on` **earlier than the change order's own date**, and any effective
 date (given or defaulted) **earlier than the job's contract date**, since a WIP,
