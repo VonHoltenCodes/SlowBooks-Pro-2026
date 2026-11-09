@@ -315,6 +315,60 @@ check has no vendor), no address prints and nothing else on the check
 moves. The test check prints a made-up address so the block can be lined
 up too.
 
+### Blank check stock
+
+**Print on blank check stock** (Settings → Payroll and checks → Check
+Printing, off by default) prints the whole check onto stock that carries
+nothing: the company's logo (when one is saved under Company Logo), name and
+address at the top left, with the logo first and the name and address beside
+it; the bank's name and city and state centered below them; the check number
+at the top right with the fractional routing number under it; and the MICR
+line along the bottom edge of the check. The labels, lines and borders print
+as they do on plain stock, whatever the Check Stock choice says, and the
+date, payee, amount, amount in words, payee's address, memo and signature
+line print exactly where they do without it. It works with the check at the
+bottom or on top, the nudges, and every print path: a bill payment, Pay
+Bills, the batch print and a register check or expense.
+
+Each bank account keeps its own details, under **Bank account details for
+blank stock** in the same section: pick the account, then enter the bank's
+name, its city and state, the 9-digit **routing number** (checked against
+the ABA check digit), the **account number** (digits, with dashes where the
+bank prints them, up to 17 characters) and, if your bank's checks show one,
+the **fractional routing number** (like 70-1234/719). **Save bank account
+details** saves them on their own, apart from the settings form. The
+account number is stored encrypted and reads back as its last four; leave
+the box empty to keep it. With blank stock on, a check on an account that
+has no routing or account number is refused with a message saying where to
+enter them, and nothing is numbered.
+
+**The MICR line** follows the ANSI X9.100-160 layout: characters 1/8 inch
+apart, their baseline 3/16 inch above the check's bottom edge, the fields
+counted from the right edge. From left to right it carries the check number
+between two On-Us symbols, the routing number between two Transit symbols,
+and the account number followed by an On-Us symbol. The characters are the
+E-13B set, drawn by SlowBooks, so no MICR font is needed.
+
+**Encode the amount in the MICR line** (off by default) also prints the
+amount, in cents, between two Amount symbols at the right end of the line.
+That field is normally encoded by the bank where the check is deposited;
+printing it yourself means the amount cannot be changed without it showing.
+
+The blank check stock and the MICR toner are yours to buy. A bank's
+equipment reads the MICR line magnetically, which works only when it is
+printed with MICR toner; printed with ordinary toner it is readable by eye
+and by camera but may be rejected by a reader-sorter. Ask your bank to test
+a few checks before you rely on them. The test check on blank stock prints
+a sample bank, routing number and account number, never a saved account's,
+so it can be lined up without printing a check a bank would take
+(`GET /api/checks/test-print?check_blank_stock=true&check_micr_amount=true`).
+
+`GET /api/settings/check-bank-details/{account_id}` answers `bank_name`,
+`bank_city_state`, `fractional_routing`, `routing_number`,
+`account_number_last_four` and `has_account_number`; `PUT` takes any of the
+first four and `account_number` (an empty one clears it); an unknown field
+or a bad value is a 422.
+
 ## Transfers
 
 **Transfer** on the Banking page or a register: date, amount, from, to, and

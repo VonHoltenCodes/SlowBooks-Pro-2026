@@ -204,6 +204,13 @@ def _strip_owner(plain_db: Path, copy: dict) -> None:
         }
         for key in gone:
             cur.execute("DELETE FROM settings WHERE key = ?", (key,))
+        # a bank account's check account number (#739) is encrypted under
+        # the same key as those settings, which the copy does not carry
+        if "bank_check_details" in tables:
+            cur.execute(
+                "UPDATE bank_check_details "
+                "SET account_number_enc = NULL, account_last_four = NULL"
+            )
         # the audit log stays (seeing what moved is the job), its snapshots
         # of the owner's hashes and secret settings redacted (NEW-148)
         if "audit_log" in tables:

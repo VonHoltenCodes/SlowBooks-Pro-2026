@@ -104,6 +104,34 @@
     .voucher-foot { position: absolute; bottom: 0.45in; left: 0.25in; right: 0.25in; display: flex; justify-content: space-between; font-weight: bold; }
 </style>
 {%- endif %}
+{%- if blank %}
+<style>
+    /* Blank check stock (#739): what pre-printed stock carries, printed by
+       us, each piece in space the fields leave free so every field keeps
+       the place it has on plain stock. The logo sits at the top left with
+       the company's name and address beside it; the bank's name and city
+       are centered under them; the fractional routing number is under the
+       check number. The MICR line spans the sheet's width with its bottom
+       on the check's bottom edge (the perforation for a check on top, the
+       foot of the sheet for one at the bottom), its glyphs placed in
+       inches from the check's right and bottom edges (app/services/micr.py).
+       Its offsets run from the face's box to the sheet's edges: across,
+       0.5 in of page margin and the body's 8 px; down, the face at the
+       bottom ends 0.2467 in above the foot of the sheet (10.7533 in from
+       the top), and the face on top 0.0067 in below the tear at 3.6667 in. */
+    .check-logo { position: absolute; top: 0.25in; left: 0.25in; max-width: 1.1in; max-height: 0.6in; }
+    .check-has-logo .check-company, .check-has-logo .check-company-addr { margin-left: 1.25in; }
+    .check-bank { position: absolute; top: 0.75in; left: 0; right: 0; text-align: center; font-size: 8pt; line-height: 1.2; }
+    .check-bank-name { font-weight: bold; }
+    .check-fraction { position: absolute; top: 0.47in; right: 0.25in; font-size: 7pt; }
+    .micr { position: absolute; left: -0.5833in; bottom: -0.2467in; }
+    .check-top .check-logo { top: 0.1in; left: 0.1in; }
+    .check-top.check-has-logo .check-company, .check-top.check-has-logo .check-company-addr { margin: 0; left: 1.35in; }
+    .check-top .check-bank { top: 0.62in; }
+    .check-top .check-fraction { top: 0.3in; right: 0.1in; }
+    .check-top .micr { bottom: 0.0067in; }
+</style>
+{%- endif %}
 </head>
 <body>
 {%- macro payee_address(check) -%}
@@ -113,7 +141,7 @@
     <div class="check-page {% if position == 'top' %}check-page-top{% else %}check-page-bottom{% endif %}">
 {%- if position == 'top' %}
         <!-- Check (top) -->
-        <div class="check-area check-top"{% if nudge_x or nudge_y %} style="transform: translate({{ nudge_x }}in, {{ nudge_y }}in);"{% endif %}>
+        <div class="check-area check-top{% if blank and logo %} check-has-logo{% endif %}"{% if nudge_x or nudge_y %} style="transform: translate({{ nudge_x }}in, {{ nudge_y }}in);"{% endif %}>
             <div class="check-company">{{ company.company_name or 'Company' }}</div>
             <div class="check-company-addr">
                 {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
@@ -135,6 +163,20 @@
                 <span class="memo-text">{{ check.memo or '' }}</span>
             </div>
             <div class="signature-line"></div>
+{%- if blank %}
+{%- if logo %}
+            <img class="check-logo" src="{{ logo }}" alt="{{ company.company_name or 'Company' }} logo">
+{%- endif %}
+{%- if check.bank_name or check.bank_city_state %}
+            <div class="check-bank"><span class="check-bank-name">{{ check.bank_name }}</span>{% if check.bank_name and check.bank_city_state %}<br>{% endif %}{{ check.bank_city_state }}</div>
+{%- endif %}
+{%- if check.fractional_routing %}
+            <div class="check-fraction">{{ check.fractional_routing }}</div>
+{%- endif %}
+{%- if check.micr_svg %}
+            {{ check.micr_svg }}
+{%- endif %}
+{%- endif %}
         </div>
 {%- for _ in range(2) %}
 
@@ -210,7 +252,7 @@
         </div>
 
         <!-- Actual Check -->
-        <div class="check-area"{% if nudge_x or nudge_y %} style="transform: translate({{ nudge_x }}in, {{ nudge_y }}in);"{% endif %}>
+        <div class="check-area{% if blank and logo %} check-has-logo{% endif %}"{% if nudge_x or nudge_y %} style="transform: translate({{ nudge_x }}in, {{ nudge_y }}in);"{% endif %}>
             <div class="check-company">{{ company.company_name or 'Company' }}</div>
             <div class="check-company-addr">
                 {% if company.company_address1 %}{{ company.company_address1 }}<br>{% endif %}
@@ -235,6 +277,20 @@
                 <span class="memo-text">{{ check.memo or '' }}</span>
             </div>
             <div class="signature-line"></div>
+{%- if blank %}
+{%- if logo %}
+            <img class="check-logo" src="{{ logo }}" alt="{{ company.company_name or 'Company' }} logo">
+{%- endif %}
+{%- if check.bank_name or check.bank_city_state %}
+            <div class="check-bank"><span class="check-bank-name">{{ check.bank_name }}</span>{% if check.bank_name and check.bank_city_state %}<br>{% endif %}{{ check.bank_city_state }}</div>
+{%- endif %}
+{%- if check.fractional_routing %}
+            <div class="check-fraction">{{ check.fractional_routing }}</div>
+{%- endif %}
+{%- if check.micr_svg %}
+            {{ check.micr_svg }}
+{%- endif %}
+{%- endif %}
         </div>
 {%- endif %}
     </div>
