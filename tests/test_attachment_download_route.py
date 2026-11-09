@@ -18,18 +18,20 @@ tests go through the URL a user's browser goes through.
 import io
 
 
-def _upload(client):
+def _upload(client, customer_id):
     r = client.post(
-        "/api/attachments/invoice/42",
+        f"/api/attachments/customer/{customer_id}",
         files={"file": ("report.pdf", io.BytesIO(b"%PDF-1.4\n"), "application/pdf")},
     )
     assert r.status_code == 201, r.text
     return r.json()
 
 
-def test_download_route_returns_the_file_not_a_list(client, seed_accounts):
+def test_download_route_returns_the_file_not_a_list(
+    client, seed_accounts, seed_customer
+):
     """The regression. Before the reorder this answered 200 with `[]`."""
-    att = _upload(client)
+    att = _upload(client, seed_customer.id)
     r = client.get(f"/api/attachments/download/{att['id']}")
     assert r.status_code == 200, r.text
     ctype = r.headers.get("content-type", "")
@@ -40,10 +42,10 @@ def test_download_route_returns_the_file_not_a_list(client, seed_accounts):
     assert r.content.startswith(b"%PDF-"), "the response was not the stored file"
 
 
-def test_listing_by_entity_still_works(client, seed_accounts):
+def test_listing_by_entity_still_works(client, seed_accounts, seed_customer):
     """The reorder must not cost the route it was moved above."""
-    att = _upload(client)
-    r = client.get("/api/attachments/invoice/42")
+    att = _upload(client, seed_customer.id)
+    r = client.get(f"/api/attachments/customer/{seed_customer.id}")
     assert r.status_code == 200, r.text
     assert [a["id"] for a in r.json()] == [att["id"]]
 

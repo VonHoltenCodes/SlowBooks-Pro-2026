@@ -85,3 +85,15 @@ def test_a_read_only_sign_in_is_not_offered_attach_or_delete():
     # the file chooser is hidden as every file chooser is.
     app_js = (ROOT / "app/static/js/app.js").read_text(encoding="utf-8")
     assert "'JournalPage.uploadAttachment', 'JournalPage.deleteAttachment'" in app_js
+
+
+def test_a_journal_entrys_id_is_not_an_expenses(client, seed_accounts):
+    """An expense's file goes on an expense: a journal entry's id is refused
+    as one, and taken as the journal entry's."""
+    entry = _entry(client, seed_accounts)
+    file = {"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")}
+    r = client.post(f"/api/attachments/expense/{entry['id']}", files=file)
+    assert (r.status_code, r.json()["detail"]) == (404, "Expense not found")
+    file = {"file": ("r.pdf", io.BytesIO(b"%PDF-1.4"), "application/pdf")}
+    r = client.post(f"/api/attachments/journal_entry/{entry['id']}", files=file)
+    assert r.status_code == 201, r.text

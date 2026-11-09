@@ -487,8 +487,10 @@ def test_the_app_says_where_an_upgraded_file_came_from(client, upgraded):
 
 
 def test_a_file_attached_after_the_upgrade_carries_no_note(client, upgraded):
+    customer = client.post("/api/customers", json={"name": "Harbor Light"})
+    assert customer.status_code == 201, customer.text
     r = client.post(
-        "/api/attachments/invoice/1",
+        f"/api/attachments/customer/{customer.json()['id']}",
         files={"file": ("new.txt", io.BytesIO(b"attached on 2.18"), "text/plain")},
     )
     assert r.status_code == 201, r.text
@@ -521,10 +523,12 @@ def test_the_app_keeps_and_serves_files_on_postgresql(
     monkeypatch.setattr(db_module, "SessionLocal", Session)
     try:
         # two uploads of one name on one record: two files, both kept
+        customer = client.post("/api/customers", json={"name": "Harbor Light"})
+        assert customer.status_code == 201, customer.text
         ids = []
         for text in (b"first receipt", b"second receipt"):
             r = client.post(
-                "/api/attachments/invoice/9",
+                f"/api/attachments/customer/{customer.json()['id']}",
                 files={"file": ("receipt.txt", io.BytesIO(text), "text/plain")},
             )
             assert r.status_code == 201, r.text

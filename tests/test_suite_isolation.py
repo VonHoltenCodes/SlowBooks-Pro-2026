@@ -80,10 +80,10 @@ def test_a_company_on_the_machine_cannot_collide_with_a_tests_company(
 
 
 def test_an_uploaded_attachment_lands_in_the_database_not_on_disk(
-    client, seed_accounts
+    client, seed_accounts, seed_customer
 ):
     r = client.post(
-        "/api/attachments/invoice/4711",
+        f"/api/attachments/customer/{seed_customer.id}",
         files={
             "file": (
                 "isolation-probe.pdf",

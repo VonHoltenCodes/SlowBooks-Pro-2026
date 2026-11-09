@@ -1566,3 +1566,21 @@ def test_listing_tickets_outside_construction_is_a_409(client):
     r = client.get("/api/field-tickets")
     assert r.status_code == 409, r.text
     assert "construction mode" in r.json()["detail"]
+
+
+def test_a_file_for_a_ticket_not_yet_made_is_refused_and_the_next_ticket_has_none(
+    con, seed_customer
+):
+    """A photo sent for a ticket id that has no ticket is refused, so the
+    ticket later given that id does not open showing someone else's paper."""
+    job = _job(con, seed_customer.id)
+    t = _ticket(con, job["id"], [LABOR])
+    r = con.post(
+        f"/api/attachments/field_ticket/{t['id'] + 1}",
+        files={"file": ("ghost.jpg", b"\xff\xd8\xff photo", "image/jpeg")},
+    )
+    assert r.status_code == 404, r.text
+    assert r.json()["detail"] == "Field ticket not found"
+    nxt = _ticket(con, job["id"], [LABOR])
+    assert nxt["id"] == t["id"] + 1
+    assert con.get(f"/api/attachments/field_ticket/{nxt['id']}").json() == []
