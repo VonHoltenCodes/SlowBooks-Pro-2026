@@ -122,36 +122,28 @@ def test_setup_maps_only_the_sections_present(client, seed_accounts):
 
 
 def test_fences_and_gates_ship_as_sections_and_a_package(client, seed_accounts):
-    # a fence sub is a common trade: its sections sit under division 32 and
-    # its own package bids them
+    # a fence sub is a common trade: its section sits under division 32 and
+    # its own package bids it
     client.post("/api/construction/setup")
     codes = {c["code"]: c for c in client.get("/api/cost-codes").json()}
     fence = codes["32 31 00"]
     assert fence["name"] == "Fences and Gates"
     assert fence["level"] == "section" and fence["parent_code"] == "32"
-    assert codes["32 31 29"]["name"] == "Wood Fences and Gates"
     pkgs = {p["name"]: p for p in client.get("/api/trade-packages").json()}
-    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {
-        "32 31 00",
-        "32 31 11",
-        "32 31 13",
-        "32 31 19",
-        "32 31 23",
-        "32 31 29",
-    }
+    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {"32 31 00"}
 
 
 # ── Load standard divisions on a company that already has packages ────────
 
 
 def test_load_adds_fences_and_gates_package_once_and_keeps_edits(client, seed_accounts):
-    """A company set up before Fences and Gates existed gets the 32 31 xx
-    sections and the Fences and Gates package, mapped, from Load standard
+    """A company set up before Fences and Gates existed gets the 32 31 00
+    section and the Fences and Gates package, mapped, from Load standard
     divisions; a second load changes nothing and a package the company edited
     is left as it is."""
     client.post("/api/construction/setup")
     packages = client.get("/api/trade-packages").json()
-    # the company's old state: no Fences and Gates package, no 32 31 sections
+    # the company's old state: no Fences and Gates package, no 32 31 00 section
     fences = next(p for p in packages if p["name"] == "Fences and Gates")
     client.delete(f"/api/trade-packages/{fences['id']}")
     for c in client.get("/api/cost-codes").json():
@@ -166,9 +158,7 @@ def test_load_adds_fences_and_gates_package_once_and_keeps_edits(client, seed_ac
     after = client.get("/api/trade-packages").json()
     fenced = [p for p in after if p["name"] == "Fences and Gates"]
     assert len(fenced) == 1
-    assert sorted(s["code"] for s in fenced[0]["sections"]) == sorted(
-        ("32 31 00", "32 31 11", "32 31 13", "32 31 19", "32 31 23", "32 31 29")
-    )
+    assert [s["code"] for s in fenced[0]["sections"]] == ["32 31 00"]
     kept = next(p for p in after if p["name"] == "Concrete")
     assert kept["notes"] == "mine"
     assert kept["sections"] == before["Concrete"]["sections"]
@@ -190,14 +180,7 @@ def test_load_seeds_the_standard_packages_on_a_construction_company_with_none(cl
     client.post("/api/cost-codes/standard")
     pkgs = {p["name"]: p for p in client.get("/api/trade-packages").json()}
     assert len(pkgs) == len(TRADE_PACKAGES)
-    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {
-        "32 31 00",
-        "32 31 11",
-        "32 31 13",
-        "32 31 19",
-        "32 31 23",
-        "32 31 29",
-    }
+    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {"32 31 00"}
 
     client.post("/api/cost-codes/standard")
     assert len(client.get("/api/trade-packages").json()) == len(TRADE_PACKAGES)
