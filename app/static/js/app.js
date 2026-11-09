@@ -1112,7 +1112,8 @@ const App = {
         'InvoicesPage.void', 'InvoicesPage.markSent', 'InvoicesPage.duplicate', 'InvoicesPage.uploadAttachment',
         'InvoicesPage.deleteAttachment', 'InvoicesPage.showApplyCredit', 'InvoicesPage.showWriteOff',
         'InvoicesPage.emailInvoice', 'InvoicesPage.copyPaymentLink', 'InvoicesPage.checkPaymentStatus',
-        'EstimatesPage.convert', 'EstimatesPage.accept',
+        'EstimatesPage.convert', 'EstimatesPage.accept', 'EstimatesPage.markLost', 'EstimatesPage.emailEstimate',
+        'FieldTickets.del', 'FieldTickets.voidTicket', 'FieldTickets.deleteAttachment', 'FieldTickets.upload',
         'SalesReceiptsPage.void', 'CreditMemosPage.void', 'CreditMemosPage.showApply',
         'CreditMemosPage.doApply', 'PaymentsPage.void', 'PaymentsPage.doVoid', 'PaymentsPage.showApplyCredit', 'DepositsPage.voidDeposit',
         'DepositsPage.makeDeposit', 'DepositsPage.editDeposit', 'DepositsPage.saveEdit', 'JournalPage.editEntry',
@@ -1180,7 +1181,7 @@ const App = {
             }
             const label = (el.textContent || '').trim();
             const headerAction = el.classList.contains('btn-primary') && el.closest('.page-header');
-            const call = /^\s*(\w+Page\.\w+)\(/.exec(el.getAttribute('onclick') || '');
+            const call = /^\s*(\w+Page\.\w+|FieldTickets\.\w+)\(/.exec(el.getAttribute('onclick') || '');
             // Edit beside View (an invoice's row): View shows the record, and
             // Edit would only open it locked
             const editBesideView = label === 'Edit' && !!el.parentElement

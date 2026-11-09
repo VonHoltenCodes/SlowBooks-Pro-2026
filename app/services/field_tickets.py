@@ -154,6 +154,24 @@ def _default_name(employee, equipment, item) -> Optional[str]:
     return None
 
 
+def _check_po_line(db: Session, ticket: FieldTicket, po_line_id) -> None:
+    """A T&M or material line that names a purchase order line names one that
+    exists and is on this ticket's job (delivery lines are checked against the
+    order on the ticket)."""
+    if po_line_id is None or ticket.kind == "delivery":
+        return
+    from app.models.purchase_orders import PurchaseOrderLine
+
+    pol = db.get(PurchaseOrderLine, po_line_id)
+    if pol is None:
+        raise HTTPException(status_code=404, detail="Purchase order line not found")
+    job_id = pol.job_id or (pol.purchase_order.job_id if pol.purchase_order else None)
+    if job_id != ticket.job_id:
+        raise HTTPException(
+            status_code=422, detail="That purchase order line is on another job."
+        )
+
+
 def set_lines(db: Session, ticket: FieldTicket, lines) -> None:
     """Replace a ticket's lines, filling the defaults: the ticket's cost code,
     a cost type from the line type, the cost rate from the employee /
@@ -167,6 +185,7 @@ def set_lines(db: Session, ticket: FieldTicket, lines) -> None:
         employee = _get_or_404(db, Employee, line.employee_id, "Employee")
         equipment = _get_or_404(db, Equipment, line.equipment_id, "Equipment")
         item = _get_or_404(db, Item, line.item_id, "Item")
+        _check_po_line(db, ticket, line.po_line_id)
         code_id = line.cost_code_id or ticket.cost_code_id
         _get_or_404(db, CostCode, code_id, "Cost code")
         ctype = line_cost_type(db, None, line.cost_type) if line.cost_type else None
