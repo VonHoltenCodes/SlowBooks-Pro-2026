@@ -39,11 +39,12 @@ def _columns() -> set:
 def _default_existing_lines_to_income(bind) -> None:
     """Point every line made before this at the default income account
     (4000), where the pay applications before this credited. A company
-    without one leaves them null."""
+    without one leaves them null. account_type is stored as the enum NAME
+    ('INCOME') on every engine; PostgreSQL has no upper() for its enum."""
     income = bind.execute(
         sa.text(
             "SELECT id FROM accounts WHERE account_number = '4000' "
-            "AND upper(account_type) = 'INCOME' LIMIT 1"
+            "AND account_type = 'INCOME' LIMIT 1"
         )
     ).scalar()
     if income is not None:
