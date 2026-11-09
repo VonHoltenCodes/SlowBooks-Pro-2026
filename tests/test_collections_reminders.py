@@ -518,6 +518,9 @@ def test_invoice_list_shape_totals_and_filters(client, db_session, rules, mail):
     assert first["last_reminder"]["label"] == "7 days overdue"
     assert first["last_reminder"]["status"] == "sent"
     assert first["last_reminder"]["rule_id"] == rules[7]["id"]
+    # the time carries its zone, so a page in Central reads an evening send
+    # as today, not tomorrow (W-129, the 2.31.10 gate)
+    assert first["last_reminder"]["sent_at"].endswith("+00:00")
     nxt = first["next_reminder"]
     assert nxt["label"] == "15 days overdue" and nxt["ready"] is False
     assert nxt["due_on"] == (late.due_date + timedelta(days=15)).isoformat()

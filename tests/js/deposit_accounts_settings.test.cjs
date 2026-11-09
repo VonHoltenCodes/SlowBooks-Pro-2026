@@ -110,6 +110,12 @@ test('a default that is no longer a bank account on the list is ignored', async 
     assert.deepEqual(opts.map(o => o[0]), ['1', '2', '3']);
 });
 
+test('a default deactivated after it was chosen never opens Make Deposits (N2, the 2.31.10 gate)', async () => {
+    const inactiveSavings = Object.assign({}, SAVINGS, { is_active: false });
+    const opts = picker(await makeDeposits({ default_deposit_account_id: '2' }, [CHECKING, UF, inactiveSavings, PETTY, CARD]));
+    assert.ok(!opts.some(o => o[2]), 'nothing is marked');
+});
+
 const forms = [
     ['payments.js', 'PaymentsPage', async p => { await p.page.showForm(); return p.modal(); }],
     ['sales_receipts.js', 'SalesReceiptsPage', async p => {

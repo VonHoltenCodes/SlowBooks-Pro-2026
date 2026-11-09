@@ -760,7 +760,9 @@ def invoice_rows(
                         "label": rule_label(
                             last_rule.days_from_due if last_rule else row.days_from_due
                         ),
-                        "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+                        "sent_at": (
+                            _utc(row.sent_at).isoformat() if row.sent_at else None
+                        ),
                         "status": row.status,
                     }
                     if row

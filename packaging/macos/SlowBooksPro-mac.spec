@@ -199,7 +199,7 @@ exe = EXE(
     exclude_binaries=True,
     name="SlowBooksPro",
     console=False,
-    icon=os.path.join(SPECPATH, "slowbookspro.icns"),
+    icon=os.path.join(SPECPATH, "slowbookspro-sbp.icns"),
 )
 
 coll = COLLECT(
@@ -231,7 +231,7 @@ def _bundle_version() -> str:
 app = BUNDLE(
     coll,
     name="SlowBooks Pro.app",
-    icon=os.path.join(SPECPATH, "slowbookspro.icns"),
+    icon=os.path.join(SPECPATH, "slowbookspro-sbp.icns"),
     bundle_identifier="com.vonholtencodes.slowbookspro",
     info_plist={
         "CFBundleShortVersionString": os.environ.get("APP_VERSION", "0.0.0"),
