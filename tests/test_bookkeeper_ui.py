@@ -235,6 +235,13 @@ SETTINGS_TAKEN = {
     ),
     "Company Logo › #logo-upload": ("POST", "/api/uploads/logo", UPLOAD),
     "Company Logo › Remove logo": ("DELETE", "/api/uploads/logo", None),
+    # a bank account's details for blank check stock (#739) sit under
+    # /api/settings: an administrator's, like the rest of check printing's setup
+    "Check Printing › Save bank account details": (
+        "PUT",
+        "/api/settings/check-bank-details/{bank_account}",
+        {"bank_name": "First Prairie Bank", "routing_number": "071000013"},
+    ),
     "Backup / Restore › Create Backup": ("POST", "/api/backups", None),
     "Backup / Restore › Restore…": (
         "POST",
@@ -321,6 +328,14 @@ SETTINGS_TAKEN_FROM_A_SIGN_IN = {
     ),
 }
 SETTINGS_TAKEN_PARTS = {
+    "Check Printing › #check-bank-account": "Check Printing › Save bank account details",
+    "Check Printing › #check-bank-name": "Check Printing › Save bank account details",
+    "Check Printing › #check-bank-city": "Check Printing › Save bank account details",
+    "Check Printing › #check-bank-routing": "Check Printing › Save bank account details",
+    "Check Printing › #check-bank-account-number": (
+        "Check Printing › Save bank account details"
+    ),
+    "Check Printing › #check-bank-fraction": "Check Printing › Save bank account details",
     "AI Insights › #ai-settings-provider": "AI Insights › Save AI settings",
     "AI Insights › #ai-settings-model-select": "AI Insights › Save AI settings",
     "AI Insights › #ai-settings-key": "AI Insights › Save AI settings",
@@ -574,6 +589,11 @@ def made(client, db_session, seed_accounts, seed_customer):
                 "/api/equipment", json={"name": "Skid steer", "hourly_rate": 85}
             )
         )["id"],
+        "bank_account": next(
+            a["id"]
+            for a in ok(client.get("/api/accounts"))
+            if a.get("bank_kind") or a["name"] == "Checking"
+        ),
     }
 
 
