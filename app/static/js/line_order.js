@@ -54,7 +54,7 @@ const LineOrder = {
 
     cellHtml() {
         return `<td class="line-order-cell"><span class="line-order-controls">
-            <span class="line-order-handle" draggable="true" data-line-order="drag" title="Drag to move this line" aria-hidden="true">&#8942;&#8942;</span>
+            <span class="line-order-handle" draggable="true" data-line-order="drag" title="Drag to move this line" aria-hidden="true"></span>
             <button type="button" class="btn btn-sm btn-secondary" data-line-order="up" aria-label="Move line up" title="Move line up">&#9650;</button>
             <button type="button" class="btn btn-sm btn-secondary" data-line-order="down" aria-label="Move line down" title="Move line down">&#9660;</button>
             <button type="button" class="btn btn-sm btn-secondary" data-line-order="insert" aria-label="Insert line below" title="Insert line below">+</button>

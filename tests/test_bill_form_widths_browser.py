@@ -119,15 +119,32 @@ def test_in_a_narrow_window_the_table_scrolls_and_add_line_clears_the_bar(
         page.close()
 
 
+# The move column's room against what one row of its controls takes.
+SLACK = """() => {
+    const c = document.querySelector('#bill-lines tr .line-order-controls');
+    const td = c.closest('td');
+    const cs = getComputedStyle(td);
+    const content = td.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    const kids = [...c.children].map(k => k.getBoundingClientRect().width);
+    const gap = parseFloat(getComputedStyle(c).columnGap) || 0;
+    const need = kids.reduce((a, b) => a + b, 0) + gap * (kids.length - 1);
+    return { content: Math.round(content), need: Math.round(need), kids: kids.map(Math.round) };
+}"""
+
+
 def test_a_construction_bill_shows_every_column_at_the_agents_window(
     browser, company, books, classed, client
 ):
     """2.31.1 gate, NEW-187: a construction company's bill adds Cost Type,
     eleven columns with the move controls, and its line table scrolled at
-    the 1264px window and at the 1280px cap alike. The wide dialog takes the
-    window less a margin, the line cells' sides are 2px, and the move
+    the 1264px window and at the dialog's cap alike. The wide dialog takes
+    the window less a margin, the line cells' sides are 2px, and the move
     controls fold where the table is tight, so every column shows at 1264,
-    the move controls with them; with room, the controls keep one row."""
+    the move controls with them; with room, the controls keep one row. At
+    the cap (1300px, 2.31.11 gate, L-1) the row has slack to spare: the
+    controls' widths are set in CSS, not by the font (one font set's wider
+    handle folded them at the old 1280px cap), and the column has 16px more
+    than a row of them needs."""
     before = client.get("/api/settings").json().get("company_type") or "business"
     r = client.put("/api/settings", json={"company_type": "construction"})
     assert r.status_code == 200, r.text
@@ -149,6 +166,9 @@ def test_a_construction_bill_shows_every_column_at_the_agents_window(
                 )
                 if width == 1440:
                     assert rows == 1, (width, rows)  # room: one row
+                    slack = page.evaluate(SLACK)
+                    assert slack["need"] <= 84, slack  # set in CSS, not by the font
+                    assert slack["content"] - slack["need"] >= 16, slack
                 else:
                     assert rows in (1, 2), (width, rows)
             finally:
@@ -179,7 +199,7 @@ def test_a_construction_bill_keeps_its_use_tax_column_inside_the_window(
     memorized bill alike. The header folds at its space now, "Use" over
     "tax", so the column takes its checkbox's room, not the two words', and
     the table fits again with every column and both words shown; at the
-    1280px cap the move controls still keep one row."""
+    dialog's cap the move controls still keep one row."""
     before = client.get("/api/settings").json().get("company_type") or "business"
     r = client.put("/api/settings", json={"company_type": "construction"})
     assert r.status_code == 200, r.text
