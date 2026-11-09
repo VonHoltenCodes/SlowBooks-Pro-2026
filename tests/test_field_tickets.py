@@ -9,10 +9,13 @@ docs/features/field-tickets/PLAN.md is the design.
 import json
 import shutil
 import subprocess
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 import pytest
 
+from app.models.field_tickets import FieldTicket
+from app.models.jobs import Job
 from app.services import pdf_service
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -244,7 +247,7 @@ def test_the_signed_paper_attaches_to_the_ticket(con, seed_customer):
 # ── M1: Field ticket log ────────────────────────────────────────────────
 
 
-def test_field_ticket_log_unsigned_and_signed_unbilled(con, seed_customer):
+def test_field_ticket_log_unsigned_and_signed_unbilled(con, seed_customer, db_session):
     job = _job(con, seed_customer.id)
     a = _ticket(con, job["id"], [LABOR], date="2026-06-01", description="Trench")
     _ticket(con, job["id"], [{**LABOR, "quantity": 2}], date="2026-06-03")
@@ -252,6 +255,10 @@ def test_field_ticket_log_unsigned_and_signed_unbilled(con, seed_customer):
     _sign(con, a["id"])
     _sign(con, voided["id"])
     con.post(f"/api/field-tickets/{voided['id']}/void")
+    db_session.get(FieldTicket, voided["id"]).voided_at = datetime(
+        2026, 6, 10, 12, tzinfo=timezone.utc
+    )
+    db_session.commit()
     data = con.get("/api/reports/field-ticket-log?as_of=2026-06-30").json()
     assert len(data["jobs"]) == 1
     rows = data["jobs"][0]["rows"]
@@ -260,9 +267,53 @@ def test_field_ticket_log_unsigned_and_signed_unbilled(con, seed_customer):
     assert rows[0]["signed_by"] == "Pat Owner"
     assert rows[1]["unsigned"] == 150.0
     assert data["totals"] == {"unsigned": 150.0, "signed_unbilled": 600.0}
-    # as of a date before the second ticket, only the first counts
+    # as of a date before the second ticket, only the first counts, and the
+    # ticket voided on 06-10 was still live
     early = con.get("/api/reports/field-ticket-log?as_of=2026-06-02").json()
-    assert early["totals"] == {"unsigned": 0.0, "signed_unbilled": 600.0}
+    assert early["totals"] == {"unsigned": 0.0, "signed_unbilled": 1200.0}
+
+
+def test_field_ticket_log_reads_each_ticket_in_its_state_on_the_date(
+    con, seed_customer, db_session
+):
+    """The log lists a ticket as it stood on the date: one signed after the
+    date is still unsigned on it, and one voided after it is still listed."""
+    job = _job(con, seed_customer.id)
+    late = _ticket(con, job["id"], [LABOR], date="2026-06-01")
+    _sign(con, late["id"])  # signed 2026-06-02
+    gone = _ticket(con, job["id"], [LABOR], date="2026-06-01")
+    con.post(f"/api/field-tickets/{gone['id']}/void")
+    db_session.get(FieldTicket, gone["id"]).voided_at = datetime(
+        2026, 6, 10, 12, tzinfo=timezone.utc
+    )
+    db_session.commit()
+
+    def rows(as_of):
+        data = con.get(f"/api/reports/field-ticket-log?as_of={as_of}").json()
+        return [r["status"] for j in data["jobs"] for r in j["rows"]]
+
+    assert rows("2026-06-01") == ["Unsigned", "Unsigned"]
+    assert rows("2026-06-05") == ["Signed", "Unsigned"]
+    assert rows("2026-06-30") == ["Signed"]
+
+
+def test_field_ticket_log_keeps_a_job_closed_after_the_date(
+    con, seed_customer, db_session
+):
+    """A job closed after the as-of date was still open on it, so its tickets
+    stay on the log; and a status filter matches the job's status on the date."""
+    job = _job(con, seed_customer.id)
+    _ticket(con, job["id"], [LABOR], date="2026-06-01")
+    row = db_session.get(Job, job["id"])
+    row.status, row.closed_on = "closed", date(2026, 9, 1)
+    db_session.commit()
+    base = "/api/reports/field-ticket-log?as_of=2026-07-01"
+    assert len(con.get(base).json()["jobs"]) == 1
+    assert len(con.get(base + "&status=in_progress").json()["jobs"]) == 1
+    assert con.get(base + "&status=closed").json()["jobs"] == []
+    late = "/api/reports/field-ticket-log?as_of=2026-10-01"
+    assert con.get(late).json()["jobs"] == []
+    assert len(con.get(late + "&status=closed").json()["jobs"]) == 1
 
 
 def test_field_ticket_log_csv_and_pdf(con, seed_customer, monkeypatch):

@@ -1432,7 +1432,11 @@ the Report Center in construction mode): per job, the T&M tickets dated by
 `as_of` that are still money on the table, **unsigned** ones and **signed
 ones not yet billed**, each at its bill rates, with the change order a signed
 ticket is priced on while that is not yet approved. Totals per job and grand;
-a job with no open ticket is left out. The ticket's status is today's.
+a job with no open ticket is left out. Each ticket is read **as of the date**:
+signed by then (else still unsigned), not billed on an invoice dated by then,
+not voided by then. A ticket a change order closed has no date for that on
+file, so it is not listed. The report keeps a job closed after the date, and
+a `status` filter matches the job's status on that date.
 
 ## Job reports
 
@@ -1442,7 +1446,10 @@ Nonprofit company never sees the ten), each a plain grid with a JSON route, a PD
 like P&L by Job. Each takes an `as_of` date (or
 `start_date`/`end_date` where a period applies) and optional `job_id`,
 `customer_id`, `status` and `include_closed`; by default closed and not-awarded
-jobs are left out.
+jobs are left out. As of a date, a job closed after it was still open and stays
+on Commitment Status, Buyout, Job Cost by Vendor (as of its end date) and the
+Field Ticket Log, as on the WIP schedule; a `status` filter matches the status
+the job had on the date, the one its row shows.
 
 **WIP schedule** (`wip-schedule`). The work-in-progress schedule lists every job
 with a contract — contract sum, approved change orders, revised contract,
@@ -1701,7 +1708,9 @@ with no retainage held, released or on the books is left out. `job_id`,
 the two grids, each ending in its total.
 
 **Sub Compliance** (`compliance`). The subs a GC should chase, one row per
-problem, as of a date: a certificate of insurance **expired**, **expiring
+problem, as of a date (the W-9 and lien-waiver flags and a vendor's active
+state have no history on file, so they read as they stand today; the
+certificate date and the payment dates are read as of the date): a certificate of insurance **expired**, **expiring
 within 30 days** (the thirtieth day counts) or with **no date on file**; **no
 W-9 on file**; and a **paid bill whose lien waiver is missing or still
 pending** (the bill, its job, the day it was first paid and its total; a bill

@@ -1813,3 +1813,76 @@ def test_commitment_billed_in_part_reads_sent_before_its_first_bill(
     row = on["jobs"][0]["rows"][0]
     assert row["status"] == "partial"
     assert row["billed"] == 2500.0 and row["remaining"] == 3500.0
+
+
+# ── as-of: a job closed after the date, and the status filter ──────────────
+
+
+def _closed_later_job(db, name="Tower"):
+    """A job now closed (on 2026-09-01) with a commitment and a cost."""
+    customer = _customer(db)
+    vendor = Vendor(name="Sub Co", is_active=True)
+    db.add(vendor)
+    db.flush()
+    job = Job(
+        customer_id=customer.id,
+        name=name,
+        status="closed",
+        closed_on=date(2026, 9, 1),
+    )
+    db.add(job)
+    db.flush()
+    _commitment(db, job, vendor, "PO-9", "5000")
+    _post_cost(db, job.id, _cogs(db), "1000", date(2026, 3, 1), vendor_id=vendor.id)
+    db.commit()
+    return job
+
+
+_AS_OF_REPORTS = {
+    "buyout": lambda db, **kw: job_reports.buyout_report(
+        db, as_of=kw.pop("as_of"), **kw
+    ),
+    "commitments": lambda db, **kw: job_reports.commitment_status(
+        db, as_of=kw.pop("as_of"), **kw
+    ),
+    "vendor": lambda db, **kw: job_reports.job_cost_by_vendor(
+        db, end_date=kw.pop("as_of"), **kw
+    ),
+}
+
+
+@pytest.mark.parametrize("name", sorted(_AS_OF_REPORTS))
+def test_as_of_reports_keep_a_job_closed_after_the_date(
+    db_session, seed_accounts, name
+):
+    """Buyout, Commitment Status and Job Cost by Vendor keep a job that was
+    closed after the date: it was open on it, as on the WIP schedule."""
+    job = _closed_later_job(db_session)
+    run = _AS_OF_REPORTS[name]
+    assert [j["job_id"] for j in run(db_session, as_of=date(2026, 7, 1))["jobs"]] == [
+        job.id
+    ]
+    # after the close it is gone, as before
+    assert run(db_session, as_of=date(2026, 10, 1))["jobs"] == []
+    wip = job_reports.wip_schedule(db_session, as_of=date(2026, 7, 1))
+    assert job.id in [r["job_id"] for r in wip["rows"]]
+
+
+@pytest.mark.parametrize("name", sorted(_AS_OF_REPORTS))
+def test_as_of_reports_filter_status_on_the_status_of_the_date(
+    db_session, seed_accounts, name
+):
+    """A status filter matches the job's status on the date: a job closed
+    after the date answers to in_progress and not to closed, and the other
+    way round once the date is past the close."""
+    job = _closed_later_job(db_session)
+    run = _AS_OF_REPORTS[name]
+    early, late = date(2026, 7, 1), date(2026, 10, 1)
+
+    def ids(d, st):
+        return [j["job_id"] for j in run(db_session, as_of=d, status=st)["jobs"]]
+
+    assert ids(early, "in_progress") == [job.id]
+    assert ids(early, "closed") == []
+    assert ids(late, "closed") == [job.id]
+    assert ids(late, "in_progress") == []
