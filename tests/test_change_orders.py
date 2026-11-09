@@ -1500,3 +1500,38 @@ def test_only_an_approved_owner_co_locks_the_contract_sum_and_contingency(
     # a void puts it back
     assert client.post(f"/api/change-orders/{owner['id']}/void").status_code == 200
     assert client.put(base, json={"contract_amount": 120000}).status_code == 200
+
+
+def test_approving_a_change_order_that_overflows_the_contract_is_a_422(
+    client, seed_customer
+):
+    """A contract of 9,999,999,999,000.00 plus a 2,000.00 change order would
+    not fit the contract column; the approve is refused and moves nothing."""
+    job = _job(client, seed_customer.id, contract_amount=0)
+    _contract(
+        client,
+        job["id"],
+        contract_type="lump_sum",
+        contract_amount=9_999_999_999_000,
+    )
+    co = _co(
+        client,
+        job["id"],
+        [
+            {
+                "description": "Extra",
+                "cost_type": "material",
+                "quantity": 1,
+                "unit_cost": 2000,
+            }
+        ],
+        funding="contract",
+    )
+    r = _submit_approve(client, co["id"])
+    assert r.status_code == 422, r.text
+    assert "more than a contract can be" in r.text
+    assert client.get(f"/api/jobs/{job['id']}").json()["contract_amount"] in (
+        9_999_999_999_000,
+        "9999999999000.00",
+        9999999999000.0,
+    )

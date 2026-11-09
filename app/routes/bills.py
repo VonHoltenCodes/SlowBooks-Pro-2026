@@ -194,7 +194,7 @@ def _post_bill_lines(
     txn_date,
     existing_transaction=None,
     retainage_held: Decimal = Decimal("0"),
-    booked_use_tax_rates=(),
+    booked_use_tax_rates=None,
 ):
     """Write the bill's lines, post its journal (DR each line's account or
     Inventory, CR Accounts Payable) and record its inventory receipts. Used
@@ -202,10 +202,12 @@ def _post_bill_lines(
     the same journal (#225), so both post exactly the same way.
 
     `booked_use_tax_rates` (an edit's): the use-tax rate each of the bill's
-    lines accrued at before the edit, by its place on the bill. A line keeps
-    the rate of the line it replaces; one that had none accrues at today's
-    setting (L bug 3, M bug 4)."""
+    lines accrued at before the edit, by line id. A line sent with its id
+    keeps its own rate wherever it sits now; a new line, or one that had
+    none, accrues at today's setting (L bug 3, M bug 4)."""
     from app.services.currency import convert_lines
+
+    booked_use_tax_rates = booked_use_tax_rates or {}
 
     # A missing Accounts Payable account is the first thing to say (#119),
     # ahead of anything about one line.
@@ -328,9 +330,7 @@ def _post_bill_lines(
             # Use tax a "contractor pays" job owes on the line (construction).
             if not (item and item.track_inventory):
                 job_id = line_data.job_id or bill.job_id
-                booked = (
-                    booked_use_tax_rates[i] if i < len(booked_use_tax_rates) else None
-                )
+                booked = booked_use_tax_rates.get(getattr(line_data, "id", None))
                 ut_rate = booked if booked is not None else use_tax_rate(db)
                 accrual = use_tax_for(
                     db,
@@ -744,6 +744,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
                 purchase_order_line_id=ln.purchase_order_line_id,
                 is_billable=bool(ln.is_billable),
                 use_tax=ln.use_tax,
+                id=ln.id,
                 description=ln.description,
                 # the stored Decimals, not a float round trip (everything
                 # below reads them through Decimal(str(...)))
@@ -906,12 +907,17 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         from app.routes.invoices.helpers import _reverse_and_delete_journal
         from app.services.inventory_hooks import reverse_receipts_for_bill
 
-        # the rate each line's use tax was booked at, by its place on the
-        # bill, before the lines are deleted: the re-post keeps it
-        booked_use_tax_rates = [
-            ln.use_tax_rate
-            for ln in sorted(bill.lines, key=lambda x: (x.line_order or 0, x.id))
-        ]
+        # the rate each line's use tax was booked at, by line id, before the
+        # lines are deleted: the re-post keeps it for a line sent with its id
+        booked_use_tax_rates = {ln.id: ln.use_tax_rate for ln in bill.lines}
+        if data.lines is not None:
+            for sent in data.lines:
+                if sent.id is not None and sent.id not in booked_use_tax_rates:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Line id {sent.id} is not a line of this bill. "
+                        "Send a line without an id to add it.",
+                    )
 
         # each old line leaves a DELETE event with its amounts (#289)
         audited_bulk_delete(db, db.query(BillLine).filter(BillLine.bill_id == bill.id))

@@ -1410,3 +1410,15 @@ def test_raising_a_closed_commitment_is_refused(
     assert r.status_code == 409, r.text
     assert "new commitment" in r.text
     assert put(10000).status_code == 200  # unchanged amounts still save
+
+
+def test_a_po_line_too_large_for_the_column_is_a_422(client, seed_accounts):
+    """1e15 x 1e15 and 99,999,999,999 x 99,999,999,999 are each a 422 sentence,
+    never a 500 or a stored figure Postgres would reject."""
+    vendor = client.post("/api/vendors", json={"name": "Big Co"}).json()
+    for qty, rate in ((1e15, 1e15), (99_999_999_999, 99_999_999_999)):
+        r = _po(
+            client, vendor["id"], [{"description": "x", "quantity": qty, "rate": rate}]
+        )
+        assert r.status_code == 422, r.text
+        assert "more than a line can be" in r.text

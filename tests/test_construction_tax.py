@@ -552,3 +552,81 @@ def test_the_sales_tax_report_shows_use_tax_accrued_paid_and_owed(
     assert r.status_code in (200, 201), r.text
     u = client.get(f"/api/reports/sales-tax?{q}&basis=cash").json()["use_tax"]
     assert u["accrued"] == 65.0 and u["balance"] == 25.0
+
+
+# ── A bill edit keeps each line's booked use-tax rate by line id ────────────
+
+
+def _rated_bill(client, db_session, seed_customer):
+    """Two $1,000 material lines booked at 6.5% (65.00 each); the use tax
+    rate setting then goes to 8%."""
+    job, vendor, payable = _use_tax_setup(client, db_session, seed_customer)
+
+    def mat(desc):
+        return {
+            "description": desc,
+            "rate": 1000,
+            "cost_type": "material",
+            "job_id": job["id"],
+        }
+
+    bill = _bill(client, vendor["id"], job["id"], [mat("Studs"), mat("Plates")])
+    assert client.put("/api/settings", json={"use_tax_rate": "8"}).status_code == 200
+    return job, bill, payable, mat
+
+
+def _accrued(db_session, payable, bill):
+    txn_id = db_session.get(Bill, bill["id"]).transaction_id
+    db_session.expire_all()
+    return sorted(c.credit for c in _lines_on(db_session, payable.id, txn_id))
+
+
+def _sent(line):
+    keep = ("id", "description", "quantity", "rate", "cost_type", "job_id")
+    return {k: v for k, v in line.items() if k in keep}
+
+
+def test_deleting_the_first_line_keeps_the_other_lines_booked_rate(
+    client, db_session, seed_accounts, seed_customer
+):
+    """With two lines booked at 6.5% and the setting now 8%, deleting the first
+    line re-posts the second at 65.00, not 80.00."""
+    job, bill, payable, mat = _rated_bill(client, db_session, seed_customer)
+    plates = _sent(bill["lines"][1])
+    r = client.put(f"/api/bills/{bill['id']}", json={"lines": [plates]})
+    assert r.status_code == 200, r.text
+    assert _accrued(db_session, payable, bill) == [Decimal("65.00")]
+
+
+def test_inserting_a_line_on_top_does_not_shift_the_booked_rates(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A new line on top accrues at today's 8% (80.00); the two existing lines
+    keep 65.00 each."""
+    job, bill, payable, mat = _rated_bill(client, db_session, seed_customer)
+    lines = [mat("New")] + [_sent(ln) for ln in bill["lines"]]
+    r = client.put(f"/api/bills/{bill['id']}", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    assert _accrued(db_session, payable, bill) == [
+        Decimal("65.00"),
+        Decimal("65.00"),
+        Decimal("80.00"),
+    ]
+
+
+def test_a_bill_edit_refuses_a_line_id_from_another_bill(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A line id that is not one of the bill's own is a 422 that says so."""
+    job, bill, payable, mat = _rated_bill(client, db_session, seed_customer)
+    other = _bill(
+        client,
+        bill["vendor_id"],
+        job["id"],
+        [mat("Other")],
+        number="MS-2",
+    )
+    foreign = {**mat("Studs"), "id": other["lines"][0]["id"]}
+    r = client.put(f"/api/bills/{bill['id']}", json={"lines": [foreign]})
+    assert r.status_code == 422, r.text
+    assert "not a line of this bill" in r.text

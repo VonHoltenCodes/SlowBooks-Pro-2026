@@ -797,6 +797,13 @@ def apply_change_order(
     if co.kind == "owner":
         if co.funding == "contract":
             base = Decimal(str(job.contract_amount or 0))
+            if abs(base + sell_total) > MAX_AMOUNT:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Approving this change order would take the contract "
+                    f"to {base + sell_total:,.2f}, more than a contract can be "
+                    f"({MAX_AMOUNT:,.2f}).",
+                )
             job.contract_amount = _q(base + sell_total)
             if co.allowance_return:
                 _apply_allowance_return(db, co, job, sell_total)

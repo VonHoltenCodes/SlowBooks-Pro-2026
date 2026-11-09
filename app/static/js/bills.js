@@ -546,7 +546,7 @@ const BillsPage = {
         const rate = line && !amountOnly ? Number(l.rate) : '';
         const amount = line ? Number(l.amount).toFixed(2) : '';
         const acctOpts = PurchaseAccounts.options(BillsPage._accounts, stock ? null : (l.account_id || BillsPage._defaultExpenseAccountId));
-        return `<tr data-billline="${idx}" data-po-line="${l.purchase_order_line_id || ''}">
+        return `<tr data-billline="${idx}" data-line-id="${l.id || ''}" data-po-line="${l.purchase_order_line_id || ''}">
                 <td><select class="line-item" onchange="BillsPage.itemSelected(this)">${ItemQuickAdd.options(BillsPage._items, l.item_id)}</select></td>
                 <td>${AccountQuickAdd.picker(`<select class="line-account"${stock ? ' disabled title="Stock items are recorded in Inventory"' : ''}><option value="">Choose...</option>${acctOpts}</select>`, 'bill', { disabled: stock })}</td>
                 <td><input class="line-desc" value="${escapeHtml(l.description || '')}"></td>
@@ -848,6 +848,9 @@ const BillsPage = {
                 ? { quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1, rate: parseFloat(row.querySelector('.line-rate')?.value) || 0 }
                 : { amount: parseFloat(row.querySelector('.line-amt')?.value) || 0 };
             lines.push({
+                // an existing line sends its id, so it keeps the use-tax rate it
+                // was booked at wherever it sits after the edit
+                ...(row.dataset.lineId ? { id: parseInt(row.dataset.lineId) } : {}),
                 // a converted bill's line keeps its commitment link (#553)
                 purchase_order_line_id: row.dataset.poLine ? parseInt(row.dataset.poLine) : null,
                 item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),

@@ -421,9 +421,12 @@ installs:
   line when its use tax first accrues (`bill_lines.use_tax_rate`), and every
   edit of the bill re-posts at it: changing the setting from 6.5 to 7 and then
   changing a line's description, amount or the bill number leaves an 8/20
-  accrual at 6.5%. A line keeps the rate of the line in its place on the bill;
-  only a line that accrues for the first time on the edit (one newly marked
-  Use tax, say) takes today's setting. A void reverses the booked figures.
+  accrual at 6.5%. The edit sends each existing line with its
+  `id`, and a line keeps its own booked rate wherever it sits afterwards
+  (delete the first line, or insert one on top, and the others do not move);
+  a line sent without an id, or one that accrues for the first time on the
+  edit (one newly marked Use tax, say), takes today's setting. An id that is
+  not a line of the bill is refused. A void reverses the booked figures.
   Books from before this have the rate filled in from each bill's entry (the
   rate on the memo, else the accrual over the line's amount).
   **When both are 0 nothing accrues, and the program says so:** saving the
@@ -1850,3 +1853,9 @@ estimate list's `status` takes `lost` for the estimates marked lost (stored as
 - **No full section catalog** (the numbered catalog isn't ours to publish);
   the division titles and a set of common sections ship, and you import the
   rest.
+
+**Amounts that do not fit.** A bill, purchase order or estimate line whose
+quantity × rate (or amount) is past 9,999,999,999,999.99, or whose lines sum
+past it, is refused with a 422 sentence before anything is saved. Approving an
+owner change order is refused the same way when the contract plus its sell
+total would not fit.

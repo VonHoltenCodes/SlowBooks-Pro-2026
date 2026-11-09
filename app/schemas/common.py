@@ -117,6 +117,40 @@ def validate_non_negative_line(quantity, rate) -> None:
         raise ValueError("Quantities are kept to four decimal places.")
 
 
+# Money columns are Numeric(15, 2): a line or a document total past this
+# overflows Postgres (a 500) or, on SQLite, is stored as a float error.
+MAX_LINE_AMOUNT = Decimal("9999999999999.99")
+
+
+def line_total(quantity, rate) -> Decimal:
+    """quantity x rate computed exactly, however large, so a figure past the
+    money column can be named in a sentence instead of raising in a quantize."""
+    q = Decimal(str(quantity if quantity is not None else 0))
+    r = Decimal(str(rate if rate is not None else 0))
+    return q * r if q.is_finite() and r.is_finite() else Decimal("NaN")
+
+
+def check_line_fits(quantity, rate) -> None:
+    """Refuse a line whose quantity x rate would not fit a money column (a
+    sentence, never a 500)."""
+    amount = line_total(quantity, rate)
+    if not amount.is_finite() or abs(amount) > MAX_LINE_AMOUNT:
+        raise ValueError(
+            "This line comes to more than a line can be "
+            f"({MAX_LINE_AMOUNT:,.2f}). Check its quantity and rate."
+        )
+
+
+def check_lines_fit(lines) -> None:
+    """The lines' sum also fits a money column."""
+    total = sum((abs(line_total(ln.quantity, ln.rate)) for ln in lines), Decimal(0))
+    if total > MAX_LINE_AMOUNT:
+        raise ValueError(
+            "The lines come to more than a document can be "
+            f"({MAX_LINE_AMOUNT:,.2f}). Split the work across documents."
+        )
+
+
 # A line's quantity is stored to four decimal places (2.23.0, NEW-94: the
 # imports stored 2.125 and every read gave 2.12); finer is refused above,
 # as a sub-cent amount is.

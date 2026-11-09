@@ -1255,3 +1255,19 @@ def test_business_and_nonprofit_estimates_are_not_frozen_when_accepted(
         r = client.put(url, json={"status": "pending"})
         assert r.status_code == 200, (company_type, r.text)
         assert r.json()["status"] == "pending"
+
+
+def test_an_estimate_line_too_large_for_the_column_is_a_422(client, seed_customer):
+    """1e15 x 1e15 and 99,999,999,999 x 99,999,999,999 are each a 422 sentence,
+    never a 500 or an estimate whose subtotal is a float error."""
+    for qty, rate in ((1e15, 1e15), (99_999_999_999, 99_999_999_999)):
+        r = client.post(
+            "/api/estimates",
+            json={
+                "customer_id": seed_customer.id,
+                "date": "2026-02-01",
+                "lines": [{"description": "x", "quantity": qty, "rate": rate}],
+            },
+        )
+        assert r.status_code == 422, r.text
+        assert "more than a line can be" in r.text

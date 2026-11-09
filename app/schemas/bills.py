@@ -18,6 +18,8 @@ from app.schemas.common import (
     TaxRateOut,
     clean_line_cost_type,
     validate_non_negative_line,
+    check_line_fits,
+    check_lines_fit,
     quantity_text,
 )
 from app.schemas.invoices import DiscountTaken, RateOut
@@ -36,6 +38,9 @@ class BillLineCreate(StrictModel):
     that sends both and means the amount would otherwise be told nothing.
     """
 
+    # An existing line's id, sent on an edit so the line keeps the use-tax
+    # rate it was booked at wherever it moves to. Absent = a new line.
+    id: Optional[int] = None
     item_id: Optional[int] = None
     account_id: Optional[int] = None
     job_id: Optional[int] = None
@@ -58,6 +63,8 @@ class BillLineCreate(StrictModel):
 
     @model_validator(mode="after")
     def _price_the_line(self):
+        check_line_fits(1, self.amount)
+        check_line_fits(1 if self.quantity is None else self.quantity, self.rate or 0)
         sent = None if self.amount is None else _cents(Decimal(str(self.amount)))
         if sent is not None and sent < 0:
             raise ValueError(
@@ -174,6 +181,7 @@ class BillCreate(StrictModel):
     def _require_lines(cls, v):
         if not v:
             raise ValueError("bill must have at least one line")
+        check_lines_fit(v)
         return v
 
 
@@ -201,6 +209,13 @@ class BillUpdate(StrictModel):
     lines: Optional[list[BillLineCreate]] = None
 
     _lien = field_validator("lien_waiver_status")(_check_lien_waiver)
+
+    @field_validator("lines")
+    @classmethod
+    def _lines_fit(cls, v):
+        if v:
+            check_lines_fit(v)
+        return v
 
     @field_validator("retainage_held")
     @classmethod

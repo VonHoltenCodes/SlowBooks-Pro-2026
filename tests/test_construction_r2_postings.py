@@ -352,7 +352,13 @@ def test_a_description_edit_re_posts_use_tax_at_the_booked_rate(
     job, bill, payable = _ut4(client, db_session, seed_customer)
     r = client.put(
         f"/api/bills/{bill['id']}",
-        json={"lines": [_brick(job["id"], desc="Brick (corrected desc)")]},
+        json={
+            "lines": [
+                _brick(
+                    job["id"], desc="Brick (corrected desc)", id=bill["lines"][0]["id"]
+                )
+            ]
+        },
     )
     assert r.status_code == 200, r.text
     assert _accruals(db_session, payable.id, bill["id"]) == [
@@ -386,7 +392,7 @@ def test_an_amount_change_keeps_the_rate_and_a_new_use_tax_line_takes_todays(
         f"/api/bills/{bill['id']}",
         json={
             "lines": [
-                _brick(job["id"], rate=5000),
+                _brick(job["id"], rate=5000, id=bill["lines"][0]["id"]),
                 _brick(
                     job["id"], desc="Sand", rate=1000, cost_type="other", use_tax=True
                 ),

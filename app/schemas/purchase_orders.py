@@ -9,6 +9,8 @@ from app.schemas.common import (
     TaxRateOut,
     clean_line_cost_type,
     validate_non_negative_line,
+    check_line_fits,
+    check_lines_fit,
     quantity_text,
 )
 from app.schemas.invoices import RateOut
@@ -32,6 +34,7 @@ class POLineCreate(StrictModel):
     @model_validator(mode="after")
     def _check_non_negative(self):
         validate_non_negative_line(self.quantity, self.rate)
+        check_line_fits(self.quantity, self.rate)
         return self
 
 
@@ -111,6 +114,7 @@ class POCreate(StrictModel):
     def _require_lines(cls, v):
         if not v:
             raise ValueError("purchase order must have at least one line")
+        check_lines_fit(v)
         return v
 
 
@@ -128,6 +132,13 @@ class POUpdate(StrictModel):
     retainage_pct: Optional[Decimal] = None
     scope_notes: Optional[str] = None
     lines: Optional[list[POLineCreate]] = None
+
+    @field_validator("lines")
+    @classmethod
+    def _lines_fit(cls, v):
+        if v:
+            check_lines_fit(v)
+        return v
 
     _ctype = field_validator("commitment_type")(_check_commitment_type)
     _ret = field_validator("retainage_pct")(_check_retainage_pct)
