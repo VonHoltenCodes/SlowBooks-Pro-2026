@@ -563,7 +563,7 @@ const BillsPage = {
     // a bill with no sales tax, accrues use tax by itself. Ticked, it accrues
     // on this line anyway. A line the API set to never accrue keeps that.
     useTaxHeadHtml() {
-        return CostTypes.any() ? `<th scope="col" title="Accrue use tax on this line even when its job's rule would not">Use tax</th>` : '';
+        return CostTypes.any() ? `<th scope="col" class="col-usetax" title="Accrue use tax on this line even when its job's rule would not">Use tax</th>` : '';
     },
     useTaxCellHtml(l) {
         if (!CostTypes.any()) return '';
