@@ -816,7 +816,8 @@ def check_line_figures(t: FieldTicket) -> None:
     """Each line's amount (quantity × cost rate, and × bill rate on a T&M
     ticket) and the ticket's totals fit a money column, and a bill rate the
     job's markup filled in fits its own: a 422 before the ticket is saved
-    (L bug 1: 1e15 × 1e15 was saved behind a 500 and then failed the list)."""
+    (a quantity and rate that multiply past the column would otherwise fail
+    at the database)."""
     totals = {"cost": _ZERO, "bill": _ZERO}
     for n, ln in enumerate(t.lines, 1):
         if ln.bill_rate is not None and _d(ln.bill_rate) >= RATE_LIMIT:

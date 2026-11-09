@@ -163,7 +163,11 @@ already has packages adds any standard package it lacks (Fences and Gates on a
 company set up before it existed) and maps the new codes into it. It adds a
 package only when no package of that name exists and none of its sections is
 already mapped, so a package you renamed, remapped or edited is left as it is,
-and loading again changes nothing.
+and loading again changes nothing. A standard package you deleted comes back
+on the next load (unless a package of that name, or one holding its sections,
+exists). A construction company with **no** packages at all (switched to
+construction before it had sections) gets the standard set from the load, as
+construction setup gives it; a Business or Nonprofit company gets none.
 
 ### Cost type per line
 

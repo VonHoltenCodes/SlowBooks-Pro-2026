@@ -272,8 +272,8 @@ def refuse_lines_not_in_effect(db: Session, app) -> None:
     """409 when a line carrying an amount is a change order's schedule line
     and the application is dated before that change order takes effect: the
     application's contract sum does not carry the change yet, so it cannot
-    bill it (M bug 2: moving the date to 9/25, billing CO-003's line, and
-    moving it back to 9/01 billed a change effective 9/20). A zero line is
+    bill it (moving the date forward, billing the line, and moving it back
+    must not slip the change in). A zero line is
     left alone (it is hidden, as before)."""
     from app.models.change_orders import ChangeOrder
     from app.models.jobs import SovLine

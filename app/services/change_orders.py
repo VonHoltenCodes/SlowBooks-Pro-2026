@@ -93,8 +93,8 @@ MAX_AMOUNT = Decimal("9999999999999.99")
 def check_line_figures(co: ChangeOrder) -> None:
     """Each line's cost and sell (quantity × unit cost, then the markup) and
     the change order's totals fit a money column: a 422 before the change
-    order is saved (L bug 1: 99,999,999,999 × 99,999,999,999 made a line of
-    9,999,999,999,800,000,000,001.00). Call it after recompute."""
+    order is saved (a quantity and unit cost that multiply past the column
+    would otherwise fail at the database). Call it after recompute."""
     cost_total = sell_total = _ZERO
     for n, line in enumerate(co.lines, 1):
         cost = Decimal(str(line.amount or 0))

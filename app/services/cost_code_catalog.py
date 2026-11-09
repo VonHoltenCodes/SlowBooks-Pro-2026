@@ -311,6 +311,7 @@ def load_standard_catalog(db: Session) -> dict:
     repeat. Seeded codes carry cost_type 'other' — the per-line type is what
     reports read."""
     from app.models.cost_codes import CostCode
+    from app.models.trade_packages import TradePackage
 
     by_code = {c.code.lower(): c for c in db.query(CostCode).all()}
     created = 0
@@ -344,8 +345,15 @@ def load_standard_catalog(db: Session) -> dict:
         created += 1
 
     # A company that already has packages gets any standard package it lacks
-    # (the catalog grows); with none, construction setup seeds them all.
-    add_missing_trade_packages(db)
+    # (the catalog grows). A construction company with none gets the standard
+    # set, as construction setup would, so its new sections are not left
+    # unmapped with no way to seed them.
+    from app.services.terminology import terms_from_db
+
+    if db.query(TradePackage.id).first():
+        add_missing_trade_packages(db)
+    elif terms_from_db(db).is_construction:
+        seed_trade_packages(db)
     db.flush()
     return {"created": created}
 

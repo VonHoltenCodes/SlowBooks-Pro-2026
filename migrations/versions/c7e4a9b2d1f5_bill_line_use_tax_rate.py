@@ -3,8 +3,8 @@
 - bill_lines.use_tax_rate: the rate (a fraction, like a document's
   tax_rate) a line's use tax was booked at, set when it first accrues. An
   edit of the bill re-posts at it instead of today's Use tax rate setting
-  (skeptic round 2, L bug 3 / M bug 4: an 8/20 bill booked at 6.5% read 7%
-  after a description-only edit).
+  (an 8/20 bill booked at 6.5% would otherwise read 7% after a
+  description-only edit).
   Backfill: each bill's 2220 Use Tax Payable credits are matched, in order,
   to the bill lines their memo names ("Use tax - <line description>"). A
   matched line takes the rate its memo ends with ("(6.5%)"), else the

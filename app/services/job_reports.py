@@ -1629,8 +1629,7 @@ def _vendor_bill_figures(
     so a bill split across two jobs lands half on each. A bill carries the job
     on its header or on any of its lines. Open A/P is less the vendor's
     credits on the job not yet applied to a bill (prorated the same way), as
-    A/P Aging nets them, so cost = paid + retainage held + open A/P (M bug 7:
-    a $500 credit read cost 37,500 against paid 38,000 and open A/P 0). Read
+    A/P Aging nets them, so cost = paid + retainage held + open A/P. Read
     as of `as_of` (bills dated by then, payments dated by then, open as A/P
     Aging would age it) and in home currency at each bill's booked rate, so
     the figures tie to A/P Aging and Commitment Status for the same job and

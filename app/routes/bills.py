@@ -204,7 +204,7 @@ def _post_bill_lines(
     `booked_use_tax_rates` (an edit's): the use-tax rate each of the bill's
     lines accrued at before the edit, by line id. A line sent with its id
     keeps its own rate wherever it sits now; a new line, or one that had
-    none, accrues at today's setting (L bug 3, M bug 4)."""
+    none, accrues at today's setting."""
     from app.services.currency import convert_lines
 
     booked_use_tax_rates = booked_use_tax_rates or {}
