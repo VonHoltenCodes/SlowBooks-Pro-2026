@@ -243,3 +243,25 @@ def test_a_split_counts_only_its_expense_and_cogs_lines(
     db_session.add(t)
     db_session.commit()
     assert _nec(client, v["id"])["total_paid"] == 500.00
+
+
+def _register_payee(client, seed_accounts, txn_id):
+    rows = client.get(
+        f"/api/banking/check-register?account_id={seed_accounts['1000'].id}"
+    ).json()
+    rows = rows["entries"] if isinstance(rows, dict) and "entries" in rows else rows
+    row = next(r for r in rows if r["transaction_id"] == txn_id)
+    return row["payee"]
+
+
+def test_the_register_names_the_vendor_of_an_entry_with_no_payee_text(
+    client, seed_accounts
+):
+    """The 2.31.10 gate's Mac (question 3): a vendor-only entry's row showed a
+    blank Payee while its check (#733) named the vendor. The column names the
+    vendor too; a typed payee still wins."""
+    v = _vendor(client, "Brookside Nursery")
+    bare = _post(client, seed_accounts, vendor_id=v["id"])
+    typed = _post(client, seed_accounts, payee="Brookside (typed)", vendor_id=v["id"])
+    assert _register_payee(client, seed_accounts, bare["id"]) == "Brookside Nursery"
+    assert _register_payee(client, seed_accounts, typed["id"]) == "Brookside (typed)"

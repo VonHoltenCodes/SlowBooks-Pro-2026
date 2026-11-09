@@ -165,11 +165,21 @@ const CollectionsPage = {
         CollectionsPage.reload();
     },
 
-    // "3 no email, 1 customer has reminders off" from the skipped reasons
+    // "3 with no email address, 1 customer has reminders off" from the
+    // skipped reasons: each reason in a sentence that counts (the gate's Mac
+    // read "1 reminders are turned off")
     _reasonSummary(list) {
         const counts = {};
         for (const s of list) counts[s.reason] = (counts[s.reason] || 0) + 1;
-        return Object.entries(counts).map(([reason, n]) => `${n} ${reason}`).join(', ');
+        const one = n => n === 1;
+        const who = T('customer').toLowerCase();
+        const phrase = (reason, n) => {
+            if (reason === 'reminders are turned off for this customer') return `${n} ${who}${one(n) ? ' has' : 's have'} reminders off`;
+            if (reason === 'no email address on file') return `${n} with no email address`;
+            if (reason === 'customer is inactive') return `${n} inactive ${who}${one(n) ? '' : 's'}`;
+            return `${n} ${reason}`;
+        };
+        return Object.entries(counts).map(([reason, n]) => phrase(reason, n)).join(', ');
     },
 
     _confirmDialog(title, bodyHtml, yesLabel, onYes) {
