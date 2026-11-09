@@ -56,9 +56,11 @@ from app.services.pay_applications import (
     carried_change_orders,
     deposits_figures,
     effective_tax_rate,
+    history_cache,
     line_computed,
     lines_in_effect,
     previous_by_sov_line,
+    prime_history,
     refuse_lines_not_in_effect,
     retainage_outstanding,
     sov_line_in_effect,
@@ -178,6 +180,12 @@ def _line_obj(prev, ln):
 
 
 def _out(db: Session, app: PayApplication) -> PayApplicationOut:
+    # every figure below reads the same history: walk it once (#731)
+    with history_cache(db):
+        return _out_cached(db, app)
+
+
+def _out_cached(db: Session, app: PayApplication) -> PayApplicationOut:
     prev = previous_by_sov_line(db, app.job_id, app.application_no)
     prior_stored = stored_by_sov_line(db, app.job_id, app.application_no)
     lines = []
@@ -224,6 +232,12 @@ def _validate(db: Session, app: PayApplication) -> None:
     the held-to-date, a deposit past what is unapplied or past the current due;
     and (409) a change order's line billed on an application dated before the
     change order takes effect."""
+    # the guards all read the same history: walk it once (#731)
+    with history_cache(db):
+        _validate_cached(db, app)
+
+
+def _validate_cached(db: Session, app: PayApplication) -> None:
     refuse_lines_not_in_effect(db, app)
     prev = previous_by_sov_line(db, app.job_id, app.application_no)
     for ln in app.lines:
@@ -364,8 +378,9 @@ def _refresh_lines(db: Session, app: PayApplication) -> bool:
     job = db.get(Job, app.job_id)
     changed = _drop_orphan_lines(db, app, job)
     by_sov = {ln.sov_line_id: ln for ln in app.lines if ln.sov_line_id}
-    carried = carried_by_earlier(db, app.job_id, app.application_no)
-    prior_stored = stored_by_sov_line(db, app.job_id, app.application_no)
+    with history_cache(db):
+        carried = carried_by_earlier(db, app.job_id, app.application_no)
+        prior_stored = stored_by_sov_line(db, app.job_id, app.application_no)
     for n, sov in enumerate(job.sov_lines, start=1):
         ln = by_sov.get(sov.id)
         if ln is None:
@@ -467,7 +482,11 @@ def list_pay_applications(job_id: int = Query(...), db: Session = Depends(get_db
         .order_by(PayApplication.application_no)
         .all()
     )
-    return [_out(db, a) for a in apps]
+    # each application's history is a prefix of the next one's; the job-wide
+    # passes (retainage outstanding, deposits) are shared by all of them
+    with history_cache(db):
+        prime_history(db, job_id, [a.application_no for a in apps])
+        return [_out(db, a) for a in apps]
 
 
 @router.get("/{app_id}/payments")
@@ -587,8 +606,9 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
     # left stored materials on stays, even when this one is dated before the
     # change order takes effect. Stored materials carry at the balance the
     # earlier applications left until they are installed.
-    carried = carried_by_earlier(db, job.id, app.application_no)
-    prior_stored = stored_by_sov_line(db, job.id, app.application_no)
+    with history_cache(db):
+        carried = carried_by_earlier(db, job.id, app.application_no)
+        prior_stored = stored_by_sov_line(db, job.id, app.application_no)
     for n, sov in enumerate(job.sov_lines, start=1):
         if sov.id not in carried and not sov_line_in_effect(db, sov, app.date):
             continue
@@ -714,7 +734,12 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     _refuse_orphan_lines(app, job)
     _validate(db, app)
 
-    figures = application_figures(db, app)
+    # the figures, the stored carry and the carried change orders read the
+    # same history: walk it once (#731)
+    with history_cache(db):
+        figures = application_figures(db, app)
+        prior_stored = _prior_stored(db, app)
+        carried_cos = carried_change_orders(db, app)
     retainage_held = figures["retainage_this_period"]
     retainage_released = figures["release_retainage"]
 
@@ -722,7 +747,6 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     # (this application's stored − the prior approved application's stored),
     # so stored materials are billed when stored and reversed when installed.
     # A deduct line may be negative.
-    prior_stored = _prior_stored(db, app)
     invoice_lines = []  # _BilledLine per SOV line with something billed
     for ln in app.lines:
         delta = _q(ln.stored) - prior_stored.get(ln.sov_line_id, _ZERO)
@@ -765,8 +789,7 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     # One whose line the application carries (an earlier application billed
     # it) stays, so the summary foots against the line detail.
     app.contract_sum_to_date = (
-        _q(job.contract_amount)
-        - contract_changes_after(db, job, when, carried_change_orders(db, app))
+        _q(job.contract_amount) - contract_changes_after(db, job, when, carried_cos)
         if job.contract_amount is not None
         else None
     )

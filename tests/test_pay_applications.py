@@ -861,6 +861,147 @@ def test_many_applications_stay_linear(client, seed_accounts, seed_customer):
     assert time.perf_counter() - t0 < 1.0
 
 
+def test_a_later_pay_application_runs_no_more_queries_than_the_second(
+    client, db_engine, seed_accounts, seed_customer
+):
+    """Making, editing and approving the 12th application runs as many
+    statements as the 2nd: the history of earlier applications loads in a
+    fixed number of queries and is walked once per request, not once per
+    figure with a lazy load per earlier application (#731). The list makes
+    one application's worth per application listed."""
+    from sqlalchemy import event
+
+    statements = []
+
+    def _count(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    job = _job(client, seed_customer.id)
+    _contract(
+        client,
+        job["id"],
+        contract_type="lump_sum",
+        contract_amount=1000000,
+        retainage_pct=10,
+    )
+    sov = _sov(
+        client,
+        job["id"],
+        [{"description": "Work", "kind": "work", "scheduled_value": 1000000}],
+    )
+    counts = []
+    event.listen(db_engine, "before_cursor_execute", _count)
+    try:
+        for _ in range(12):
+            per_request = {}
+            statements.clear()
+            r = client.get(f"/api/pay-applications?job_id={job['id']}")
+            assert r.status_code == 200
+            per_request["list"] = len(statements)
+            statements.clear()
+            a = _new_app(client, job["id"])
+            per_request["new"] = len(statements)
+            statements.clear()
+            r = _edit(
+                client,
+                a["id"],
+                lines=[{"sov_line_id": sov[0]["id"], "this_period": 1000, "stored": 0}],
+            )
+            assert r.status_code == 200, r.text
+            per_request["edit"] = len(statements)
+            statements.clear()
+            assert _approve(client, a["id"]).status_code == 200
+            per_request["approve"] = len(statements)
+            counts.append(per_request)
+    finally:
+        event.remove(db_engine, "before_cursor_execute", _count)
+    second, last = counts[1], counts[-1]
+    for request in ("new", "edit", "approve"):
+        assert last[request] <= second[request] + 10, (request, second, last)
+    # the 2nd list shows one application, the 12th shows eleven
+    assert last["list"] <= second["list"] + 6 * 10, (second, last)
+
+
+def test_the_list_shows_each_application_as_opening_it_does(
+    client, seed_accounts, seed_customer
+):
+    """The list reads every application's history from one walk of the job
+    (#731): each row's lines and totals are the ones the application shows
+    opened on its own, stored materials, tax and a release included."""
+    job, sov = _two_line_job(client, seed_customer.id)
+    bills = [
+        ([20000, 0], [5000, 0], 0),
+        ([5000, 10000], [0, 3000], 0),
+        ([15000, 5000], [2000, 0], 1500),
+        ([0, 0], [0, 0], 0),  # left open
+    ]
+    for n, (work, stored, release) in enumerate(bills):
+        a = _new_app(client, job["id"])
+        r = _edit(
+            client,
+            a["id"],
+            tax_rate=0.0725,
+            release_retainage=release,
+            lines=[
+                {"sov_line_id": s["id"], "this_period": w, "stored": st}
+                for s, w, st in zip(sov, work, stored)
+            ],
+        )
+        assert r.status_code == 200, r.text
+        if n < len(bills) - 1:
+            assert _approve(client, a["id"]).status_code == 200
+    listed = client.get(f"/api/pay-applications?job_id={job['id']}").json()
+    assert len(listed) == len(bills)
+    for row in listed:
+        alone = client.get(f"/api/pay-applications/{row['id']}").json()
+        for key in ("lines", "totals", "contract_sums", "retainage_outstanding"):
+            assert row[key] == alone[key], (row["number"], key)
+
+
+def test_a_reused_history_reads_again_after_any_change_to_the_applications(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Inside a request the history of earlier applications is walked once and
+    reused (#731); a changed line, flushed or not, or a bulk UPDATE, makes the
+    next figure read the books again rather than the stale pass."""
+    from sqlalchemy import update
+
+    from app.models.pay_applications import PayApplicationLine
+    from app.services.pay_applications import billed_to_date, history_cache
+
+    job = _job(client, seed_customer.id)
+    _contract(client, job["id"], contract_type="lump_sum", contract_amount=10000)
+    sov = _sov(
+        client,
+        job["id"],
+        [{"description": "Work", "kind": "work", "scheduled_value": 10000}],
+    )
+    a = _new_app(client, job["id"])
+    _edit(
+        client,
+        a["id"],
+        lines=[{"sov_line_id": sov[0]["id"], "this_period": 1000, "stored": 0}],
+    )
+    assert _approve(client, a["id"]).status_code == 200
+    line = (
+        db_session.query(PayApplicationLine)
+        .filter(PayApplicationLine.pay_application_id == a["id"])
+        .one()
+    )
+    with history_cache(db_session):
+        assert billed_to_date(db_session, job["id"]) == Decimal("1000.00")
+        line.this_period = Decimal("1500")  # not flushed yet
+        assert billed_to_date(db_session, job["id"]) == Decimal("1500.00")
+        db_session.execute(
+            update(PayApplicationLine)
+            .where(PayApplicationLine.id == line.id)
+            .values(this_period=Decimal("2000"))
+        )
+        db_session.expire(line)
+        assert billed_to_date(db_session, job["id"]) == Decimal("2000.00")
+    db_session.rollback()
+
+
 def _taxed_estimate_job(client, customer_id, rate="0.08"):
     """A job whose SOV came from an accepted estimate carrying a tax rate."""
     r = client.post(
