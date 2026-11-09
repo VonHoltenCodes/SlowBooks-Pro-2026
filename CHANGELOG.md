@@ -17,7 +17,7 @@ on what the software does, not on what sprint shipped what.
 
 **Checks: a vendor with no payee text** (#733). A register entry or expense saved through the API with a vendor and no payee text printed a check with a blank Pay to the order of line under a filled-in address block. The Pay to line, the stubs and the vouchers now name the vendor; a payee typed by hand still wins, and an entry with neither prints as before.
 
-**The SBP icon** (#736). The app's icon on the Dock, the taskbar and the Start menu, the Linux launcher and the browser tab is the SBP monogram, navy with a gold S and P and a white B, in place of the ledger-page mark. The macOS icon is built from a 1024-pixel source.
+**The SBP icon** (#736). The app's icon on the Dock, the taskbar and the Start menu, the Linux launcher and the browser tab is the SBP monogram, navy with a gold S and P and a white B, in place of the ledger-page mark. The macOS icon is built from a 1024-pixel source. On a Mac updated from an earlier version, the Dock and the ⌘-Tab switcher can keep showing the old icon from their cache: quit SlowBooks Pro, drag it off the Dock, and open it again from Applications.
 
 ### v2.31.9 — Checks on top, the payee's address on a check, and a register that opens at today
 

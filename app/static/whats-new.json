@@ -6,7 +6,7 @@
       "Settings → Connections → Deposits: a Default deposit account that Make Deposits opens on, and Deposit into these accounts, which trims the deposit pickers to the bank accounts you actually use. Nothing is hidden anywhere else.",
       "Checks at the bottom: the two stubs end where stock perforated in thirds tears, as the check-on-top layout already did; the face's fields stay where they were on the face.",
       "A register entry or expense with a vendor and no payee text prints the vendor's name on the Pay to line.",
-      "The app's icon is the SBP monogram."
+      "The app's icon is the SBP monogram. A Mac updated from an earlier version may keep the old icon in the Dock until SlowBooks Pro is dragged off the Dock and opened again."
     ]
   },
   "2.31.9": {
