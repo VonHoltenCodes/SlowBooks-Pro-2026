@@ -24,6 +24,8 @@ Now:
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from decimal import Decimal
 from typing import Iterable, Optional
 
@@ -267,3 +269,47 @@ def refuse_void_if_deposited(db: Session, payment: Payment, money_in=None) -> No
                 "this payment."
             ),
         )
+
+
+# The Deposit To account an edit already has (#741). A payment is edited by
+# voiding it and posting its replacement through the same create, so the
+# create alone can't tell a new payment from an edited one; the replace
+# names the original's account here, and the replacement may keep it even
+# when it was deactivated in the chart since.
+_kept_deposit_account: ContextVar[Optional[int]] = ContextVar(
+    "_kept_deposit_account", default=None
+)
+
+
+@contextmanager
+def keeping_deposit_account(account_id: Optional[int]):
+    """While open, `refuse_inactive_deposit_account` lets `account_id`
+    through: the account of the record being edited."""
+    token = _kept_deposit_account.set(account_id)
+    try:
+        yield
+    finally:
+        _kept_deposit_account.reset(token)
+
+
+def refuse_inactive_deposit_account(db: Session, account_id: Optional[int]) -> None:
+    """A new deposit, payment or sales receipt posted to an account
+    deactivated in the chart is refused with a 422 naming it (#741): the
+    pickers no longer offer one, and the API must not take one either. An
+    edit keeps its own account (see `keeping_deposit_account`); a blank
+    Deposit To (Undeposited Funds) is never refused, nor is Undeposited
+    Funds itself, which is not a bank account."""
+    if account_id is None or account_id == _kept_deposit_account.get():
+        return
+    acct = db.get(Account, account_id)
+    if acct is None or acct.is_active is not False:
+        return
+    if acct.id == uf_account_id(db):
+        return
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"Deposit To: {acct.name} is inactive in the chart of accounts. "
+            "Choose another account, or make it active again. Nothing was saved."
+        ),
+    )

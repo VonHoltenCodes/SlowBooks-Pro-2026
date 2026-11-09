@@ -42,6 +42,7 @@ from app.services.terminology import document_reference, terms_from_db
 from app.services.undeposited_funds import (
     dead_transaction_ids,
     reconciled,
+    refuse_inactive_deposit_account,
     waiting_balance,
     waiting_items,
 )
@@ -295,6 +296,9 @@ def create_deposit(data: DepositCreate, db: Session = Depends(get_db)):
     )
     if not bank_account:
         raise HTTPException(status_code=404, detail="Bank account not found")
+    # an account deactivated in the chart takes no new deposit (#741); an
+    # existing deposit keeps its account, and editing it never changes it
+    refuse_inactive_deposit_account(db, bank_account.id)
 
     uf_id = get_undeposited_funds_id(db)
     if not uf_id:

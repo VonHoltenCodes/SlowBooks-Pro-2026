@@ -29,7 +29,9 @@ const BatchPaymentsPage = {
         // option names it, so the account itself is not listed again (#709).
         const isUndeposited = a => a.is_control && a.account_number === '1200';
         const blankDeposit = accounts.some(isUndeposited) ? 'Undeposited Funds (deposit later)' : '--';
-        const acctOpts = accounts.filter(a => !isUndeposited(a))
+        // a new batch takes no account deactivated in the chart (#741)
+        const usable = typeof DepositAccounts !== 'undefined' ? DepositAccounts.active(accounts) : accounts;
+        const acctOpts = usable.filter(a => !isUndeposited(a))
             .map(a => `<option value="${a.id}">${escapeHtml(a.name)}</option>`).join('');
 
         let html = `

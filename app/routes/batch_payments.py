@@ -22,6 +22,7 @@ from app.services.accounting import (
 )
 from app.services import cash_basis
 from app.services.closing_date import check_closing_date
+from app.services.undeposited_funds import refuse_inactive_deposit_account
 
 router = APIRouter(prefix="/api/batch-payments", tags=["batch_payments"])
 
@@ -63,6 +64,8 @@ def create_batch_payment(data: BatchPaymentCreate, db: Session = Depends(get_db)
 
     if not data.allocations:
         raise HTTPException(status_code=400, detail="No allocations provided")
+    # not into an account deactivated in the chart (#741)
+    refuse_inactive_deposit_account(db, data.deposit_to_account_id)
     if any(Decimal(str(a.amount)) <= 0 for a in data.allocations):
         raise HTTPException(
             status_code=400, detail="Allocation amounts must be positive"

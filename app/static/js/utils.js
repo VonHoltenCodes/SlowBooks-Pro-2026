@@ -1676,7 +1676,9 @@ const ClassWarn = {
 // opens on, and the first bank listed under Undeposited Funds in a
 // payment's or a sales receipt's Deposit To ("" = none: today's order);
 // deposit_account_ids (a JSON list, "[]" = every bank account) narrows the
-// bank accounts those pickers offer. Nothing is hidden anywhere else. Pure
+// bank accounts those pickers offer; an account deactivated in the chart is
+// left off them (#741) unless it is an existing record's own. Nothing is
+// hidden anywhere else. Pure
 // functions of the settings and the bank accounts a page already has; a
 // page loaded alone (the node probes) may not have this object, so pages
 // ask with typeof.
@@ -1701,15 +1703,23 @@ const DepositAccounts = {
         try { ids = JSON.parse(DepositAccounts._settings(s).deposit_account_ids || '[]'); } catch (err) { ids = []; }
         return Array.isArray(ids) ? ids.map(String).filter(v => /^\d+$/.test(v)) : [];
     },
+    // `accounts` less the ones deactivated in the chart (#741), which take
+    // no new deposit (the server refuses one), except `keepId`, an
+    // existing record's own account, so an edit keeps it
+    active(accounts, keepId = null) {
+        const keep = keepId === null || keepId === undefined ? '' : String(keepId);
+        return (accounts || []).filter(a => a.is_active !== false || String(a.id) === keep);
+    },
     // The bank accounts a deposit destination offers, in their own order:
-    // the chosen ones (every one when none is chosen, or none of them is
-    // here), plus `keepId`, an existing record's own account, wherever it
-    // is, so an edit keeps it.
+    // the active chosen ones (every active one when none is chosen, or
+    // none of them is here), plus `keepId`, an existing record's own
+    // account, wherever it is and even when inactive, so an edit keeps it.
     banks(banks, s, keepId = null) {
         const chosen = new Set(DepositAccounts.chosenIds(s));
         const keep = keepId === null || keepId === undefined ? '' : String(keepId);
-        const shown = banks.filter(a => chosen.has(String(a.id)) || String(a.id) === keep);
-        return chosen.size && banks.some(a => chosen.has(String(a.id))) ? shown : banks;
+        const usable = DepositAccounts.active(banks, keepId);
+        const shown = usable.filter(a => chosen.has(String(a.id)) || String(a.id) === keep);
+        return chosen.size && usable.some(a => chosen.has(String(a.id))) ? shown : usable;
     },
     // `banks` with the default first, the rest in their own order
     defaultFirst(banks, s) {
