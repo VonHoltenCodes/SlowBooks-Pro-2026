@@ -18,6 +18,8 @@ from app.schemas.common import (
     TaxRateOut,
     clean_line_cost_type,
     validate_non_negative_line,
+    check_line_fits,
+    check_lines_fit,
     quantity_text,
 )
 from app.schemas.invoices import RateOut
@@ -59,6 +61,10 @@ class EstimateLineCreate(StrictModel):
 
     @model_validator(mode="after")
     def _check_non_negative(self):
+        # a deduct alternate's negative figures must fit the column too
+        check_line_fits(self.quantity, self.rate)
+        if self.unit_cost is not None:
+            check_line_fits(self.quantity, self.unit_cost)
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":
@@ -123,6 +129,7 @@ class EstimateCreate(StrictModel):
     def _require_lines(cls, v):
         if not v:
             raise ValueError("estimate must have at least one line")
+        check_lines_fit(v)
         return v
 
 
@@ -143,6 +150,13 @@ class EstimateUpdate(StrictModel):
     show_markup_rows: Optional[bool] = None
     terms: Optional[str] = None
     lines: Optional[list[EstimateLineCreate]] = None
+
+    @field_validator("lines")
+    @classmethod
+    def _lines_fit(cls, v):
+        if v:
+            check_lines_fit(v)
+        return v
 
 
 class EstimatePackageTotal(BaseModel):

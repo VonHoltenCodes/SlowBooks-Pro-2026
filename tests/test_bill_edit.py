@@ -637,3 +637,42 @@ def test_the_edit_is_in_the_audit_log(client, books):
     ]
     assert edits, [(r.get("action"), r.get("changed_fields")) for r in rows[:5]]
     assert edits[0]["new_values"]["notes"] == "audited"
+
+
+# ── Amounts that do not fit a money column ──────────────────────────────────
+
+
+def test_a_bill_line_too_large_for_the_column_is_a_422(client, seed_accounts):
+    vendor_id = _vendor(client)["id"]
+    """1e15 x 1e15 used to be a 500 (decimal.InvalidOperation) and
+    99,999,999,999 x 99,999,999,999 a 201 Postgres would reject; both are a
+    422 sentence."""
+    for qty, rate in ((1e15, 1e15), (99_999_999_999, 99_999_999_999)):
+        r = client.post(
+            "/api/bills",
+            json={
+                "vendor_id": vendor_id,
+                "bill_number": f"BIG-{qty}",
+                "date": "2026-03-01",
+                "lines": [{"description": "x", "quantity": qty, "rate": rate}],
+            },
+        )
+        assert r.status_code == 422, r.text
+        assert "more than a line can be" in r.text
+
+
+def test_bill_lines_that_together_overflow_are_a_422(client, seed_accounts):
+    vendor_id = _vendor(client)["id"]
+    """Each line fits but their sum does not."""
+    line = {"description": "x", "amount": 9_000_000_000_000}
+    r = client.post(
+        "/api/bills",
+        json={
+            "vendor_id": vendor_id,
+            "bill_number": "SUM-1",
+            "date": "2026-03-01",
+            "lines": [line, line],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.text
