@@ -131,6 +131,7 @@ def list_field_tickets(
 ):
     """Field tickets, newest first: one job's, or every job's. Filter by kind
     (tm, material, delivery) and status (draft, signed, closed, void)."""
+    svc.require_construction(db)
     q = db.query(FieldTicket)
     if job_id is not None:
         q = q.filter(FieldTicket.job_id == job_id)

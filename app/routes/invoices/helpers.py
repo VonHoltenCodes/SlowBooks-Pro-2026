@@ -16,6 +16,7 @@ from app.models.invoices import InvoiceStatus
 from app.models.items import Item
 from app.services.accounting import (
     compute_line_totals,
+    refuse_total_past_column,
     _q,
 )
 from app.services.terminology import document_reference
@@ -436,7 +437,9 @@ def kept_tax(invoice, tax_rate, lines):
 def _compute_totals(lines_data, tax_rate):
     """Tax applies to the lines flagged taxable (QuickBooks-style per-line
     tax); the rate itself stays on the document."""
-    return compute_line_totals(lines_data, tax_rate)
+    totals = compute_line_totals(lines_data, tax_rate)
+    refuse_total_past_column(*totals)
+    return totals
 
 
 def _build_invoice_journal_lines(

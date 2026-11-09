@@ -310,6 +310,8 @@ def _balance_to_finish(client, db_session, job_id):
 
 
 def _return(client, allowance_id, **body):
+    # returning an allowance is construction mode's
+    client.put("/api/settings", json={"company_type": "construction"})
     return client.post(
         "/api/change-orders/allowance-return",
         json={"allowance_sov_line_id": allowance_id, **body},

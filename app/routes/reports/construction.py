@@ -21,6 +21,7 @@ from app.models.users import ROLE_ACCOUNTANT, ROLE_ADMIN
 from app.routes._helpers import refuse_unknown_filters
 from app.routes._roles import current_role
 from app.routes.reports._router import router
+from app.schemas.common import StrictModel
 from app.routes.reports.nonprofit import _cash_words
 from app.routes.reports.financial import (
     _company_name,
@@ -153,10 +154,16 @@ def _may_post_wip(request: Request) -> str:
     return role
 
 
+class _NoBody(StrictModel):
+    """Post and void take their date in the query; a body with any field is
+    refused, naming it."""
+
+
 @router.post("/wip-schedule/post", dependencies=[Depends(refuse_unknown_filters)])
 def wip_schedule_post(
     request: Request,
     as_of: date = Query(...),
+    body: Optional[_NoBody] = None,
     db: Session = Depends(get_db),
 ):
     """Post the WIP schedule's adjusting entry for `as_of` — the whole
@@ -174,6 +181,7 @@ def wip_schedule_post(
 def wip_schedule_void(
     request: Request,
     as_of: date = Query(...),
+    body: Optional[_NoBody] = None,
     db: Session = Depends(get_db),
 ):
     """Void the WIP adjusting entry posted for `as_of` and its reversal, so the
@@ -1765,6 +1773,7 @@ def field_ticket_log_route(
     grand. A job with no open ticket is left out."""
     from app.services.field_tickets import field_ticket_log
 
+    _check_job_status(status)
     return field_ticket_log(db, as_of, job_id, customer_id, status, include_closed)
 
 
@@ -1782,6 +1791,7 @@ def field_ticket_log_pdf(
 ):
     from app.services.field_tickets import field_ticket_log
 
+    _check_job_status(status)
     data = field_ticket_log(db, as_of, job_id, customer_id, status, include_closed)
     return _pdf_response(
         _per_job_grid_sections(data, "Field Ticket Log", f"As of {data['as_of']}"),
@@ -1806,6 +1816,7 @@ def field_ticket_log_csv(
 ):
     from app.services.field_tickets import field_ticket_log
 
+    _check_job_status(status)
     data = field_ticket_log(db, as_of, job_id, customer_id, status, include_closed)
     return _csv_download(
         _per_job_grid_csv(

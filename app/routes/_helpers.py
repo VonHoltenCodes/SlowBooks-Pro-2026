@@ -97,10 +97,10 @@ def refuse_unknown_filters(request: Request) -> None:
     unknown = sorted(set(request.query_params) - accepted)
     if unknown:
         listed = ", ".join(sorted(accepted)) or "none"
+        if len(unknown) == 1:
+            named = f"{unknown[0]} is not a filter here."
+        else:
+            named = f"{', '.join(unknown[:-1])} and {unknown[-1]} are not filters here."
         raise HTTPException(
-            status_code=422,
-            detail=(
-                f"{', '.join(unknown)} is not a filter here. "
-                f"This request accepts: {listed}."
-            ),
+            status_code=422, detail=f"{named} This request accepts: {listed}."
         )

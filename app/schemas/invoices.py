@@ -16,6 +16,8 @@ from app.schemas.common import (
     StrictModel,
     TaxRate,
     TaxRateOut,
+    check_line_fits,
+    check_lines_fit,
     validate_non_negative_line,
     quantity_text,
 )
@@ -66,6 +68,7 @@ class InvoiceLineCreate(StrictModel):
         # depends on its item and on the invoice it is on, which the route
         # decides (routes/invoices/helpers.py, refuse_negative_lines).
         validate_non_negative_line(self.quantity, None)
+        check_line_fits(self.quantity, self.rate)
         return self
 
 
@@ -136,6 +139,7 @@ class InvoiceCreate(StrictModel):
     def _require_lines(cls, v):
         if not v:
             raise ValueError("invoice must have at least one line")
+        check_lines_fit(v)
         return v
 
 
@@ -181,6 +185,13 @@ class InvoiceUpdate(StrictModel):
     # As on create: an edit that leaves the invoice at $0.00 needs this.
     allow_zero_total: bool = False
     allow_over_credit_limit: bool = False
+
+    @field_validator("lines")
+    @classmethod
+    def _lines_fit(cls, v):
+        if v:
+            check_lines_fit(v)
+        return v
 
 
 class ZeroTotalConfirmation(StrictModel):

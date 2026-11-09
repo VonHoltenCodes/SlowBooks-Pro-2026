@@ -305,3 +305,91 @@ def test_budget_update_refuses_unknown_fields():
     assert BudgetUpdate(amount=Decimal("5")).amount == Decimal("5")
     with pytest.raises(ValidationError):
         BudgetUpdate(amount=Decimal("5"), ammount=Decimal("1"))
+
+
+# ── A document total that passes the money column ───────────────────────
+
+
+def _construction(client):
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+
+
+def _estimate_body(customer_id, **extra):
+    return {
+        "customer_id": customer_id,
+        "date": "2026-03-01",
+        "lines": [{"description": "Slab", "quantity": 1, "rate": 9.9e12}],
+        **extra,
+    }
+
+
+def test_an_estimate_total_with_markups_past_the_column_is_a_422(client, seed_customer):
+    """One line of 9.9 trillion fits; with 8%, 1.5%, 5% and 1% compounded
+    the total is 11,508,948,990,000.00 and is refused with a sentence."""
+    _construction(client)
+    body = _estimate_body(
+        seed_customer.id, gc_pct=8, insurance_pct=1.5, fee_pct=5, bond_pct=1
+    )
+    body["lines"][0]["unit_cost"] = 9.9e12
+    r = client.post("/api/estimates", json=body)
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.json()["detail"]
+
+
+def test_an_estimate_total_with_tax_past_the_column_is_a_422(client, seed_customer):
+    """9.9 trillion at 6.5% tax totals 10,543,500,000,000.00: refused, on
+    create and on an edit that raises the rate."""
+    r = client.post(
+        "/api/estimates", json=_estimate_body(seed_customer.id, tax_rate=0.065)
+    )
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.json()["detail"]
+    ok = client.post("/api/estimates", json=_estimate_body(seed_customer.id))
+    assert ok.status_code == 201, ok.text
+    r = client.put(f"/api/estimates/{ok.json()['id']}", json={"tax_rate": 0.065})
+    assert r.status_code == 422, r.text
+
+
+def test_a_purchase_order_total_with_tax_past_the_column_is_a_422(client, db_session):
+    """9.9 trillion at 9% tax totals 10,791,000,000,000.00: refused on create
+    and on an edit that raises the rate."""
+    vendor = _vendor(db_session)
+    body = {
+        "vendor_id": vendor.id,
+        "date": "2026-03-01",
+        "lines": [{"description": "Steel", "quantity": 1, "rate": 9.9e12}],
+    }
+    r = client.post("/api/purchase-orders", json={**body, "tax_rate": 0.09})
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.json()["detail"]
+    ok = client.post("/api/purchase-orders", json=body)
+    assert ok.status_code == 201, ok.text
+    r = client.put(f"/api/purchase-orders/{ok.json()['id']}", json={"tax_rate": 0.09})
+    assert r.status_code == 422, r.text
+
+
+def test_an_invoice_line_too_large_for_the_column_is_a_422(client, seed_customer):
+    """1e15 x 1e15 was an uncaught decimal error (a 500); two lines that
+    each fit but together do not, and a total with tax, are sentences too."""
+    base = {"customer_id": seed_customer.id, "date": "2026-03-01"}
+    r = client.post(
+        "/api/invoices",
+        json={**base, "lines": [{"description": "x", "quantity": 1e15, "rate": 1e15}]},
+    )
+    assert r.status_code == 422, r.text
+    assert "more than a line can be" in r.text
+    line = {"description": "x", "quantity": 1, "rate": 9e12}
+    r = client.post("/api/invoices", json={**base, "lines": [line, line]})
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.text
+    r = client.post(
+        "/api/invoices",
+        json={
+            **base,
+            "tax_rate": 0.09,
+            "lines": [{"description": "x", "quantity": 1, "rate": 9.9e12}],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.json()["detail"]

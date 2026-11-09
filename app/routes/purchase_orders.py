@@ -23,7 +23,7 @@ from app.schemas.purchase_orders import (
     POUpdate,
 )
 from app.schemas.pay_applications import ReleaseRetainageRequest
-from app.services.accounting import _q, compute_line_totals
+from app.services.accounting import _q, compute_line_totals, refuse_total_past_column
 from app.services.field_tickets import (
     delivery_tickets_on,
     receipt_status,
@@ -147,6 +147,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
     vendor_id = vendor.id
     vendor_name = vendor.name
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    refuse_total_past_column(subtotal, tax_amount, total)
 
     po = None
     po_number = None
@@ -387,6 +388,7 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
                 )
         tax_rate = data.tax_rate if data.tax_rate is not None else po.tax_rate
         subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
+        refuse_total_past_column(subtotal, tax_amount, total)
         po.subtotal = subtotal
         po.tax_amount = tax_amount
         po.total = total
@@ -400,6 +402,7 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
         # the rate and kept the old tax and total, and the bill the order
         # became carried that tax.
         subtotal, tax_amount, total = compute_line_totals(po.lines, data.tax_rate)
+        refuse_total_past_column(subtotal, tax_amount, total)
         po.subtotal = subtotal
         po.tax_amount = tax_amount
         po.total = total

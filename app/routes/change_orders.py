@@ -51,6 +51,7 @@ from app.services.job_costing import line_cost_type
 from app.services.numbering import next_change_order_number
 from app.services.pdf_service import generate_change_order_pdf
 from app.services.request_utils import content_disposition
+from app.services.terminology import terms_from_db
 from app.services.settings_service import get_all_settings as get_settings
 from app.routes._helpers import refuse_unknown_filters
 
@@ -366,6 +367,12 @@ def return_unspent_allowance(data: AllowanceReturnIn, db: Session = Depends(get_
     contract and the allowance line, so the line has nothing left to bill.
     `date` (default today) dates the change order: not before the contract
     date, and not in a closed period."""
+    if not terms_from_db(db).is_construction:
+        raise HTTPException(
+            status_code=409,
+            detail="Allowance returns are part of construction mode. Set Company "
+            "Type to Construction under Settings → Company to use them.",
+        )
     line = db.get(SovLine, data.allowance_sov_line_id)
     if line is None:
         raise HTTPException(status_code=404, detail="Allowance line not found")
