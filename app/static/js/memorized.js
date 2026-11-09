@@ -401,7 +401,7 @@ const MemorizedPage = {
                 </div>
                 <h3 style="margin:12px 0 8px;font-size:14px;">Line Items</h3>
                 <div class="table-container table-container--scroll"><table class="line-items-table bill-lines-table">
-                    <thead><tr><th scope="col">Item</th><th scope="col" title="Where the line is recorded">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${Nonprofit.headHtml()}<th scope="col" title="Billable to the job's customer">Bill?</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
+                    <thead><tr><th scope="col">Item</th><th scope="col" title="Where the line is recorded">Account</th><th scope="col">Description</th>${CostCodes.headHtml()}${CostTypes.headHtml()}${BillsPage.useTaxHeadHtml()}${Nonprofit.headHtml()}<th scope="col" title="Billable to the job's customer">Bill?</th><th scope="col" class="col-qty">Qty</th><th scope="col" class="col-rate">Rate</th><th scope="col" class="col-amount">Amount</th></tr></thead>
                     <tbody id="bill-lines"></tbody>
                 </table></div>
                 <button type="button" class="btn btn-sm btn-secondary" style="margin-top:8px;" onclick="BillsPage.addLine()">+ Add Line</button>
@@ -435,8 +435,10 @@ const MemorizedPage = {
         e.preventDefault();
         const form = e.target;
         const { lines, missing } = BillsPage.collectLines();
-        // a commitment link is a converted bill's, never a template's
-        lines.forEach(l => { delete l.purchase_order_line_id; });
+        // a commitment link is a converted bill's, never a template's; nor
+        // is a line id (the grid draws one from a bill's line, or from the
+        // template's own, and a template is saved whole)
+        lines.forEach(l => { delete l.purchase_order_line_id; delete l.id; });
         if (BillsPage.recalc() <= 0) {
             toast('Enter what the vendor charges: an amount, or a quantity and rate, on at least one line.', 'error');
             return;

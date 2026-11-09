@@ -180,3 +180,56 @@ def test_a_read_only_sign_in_sees_no_edit_on_a_bill(
         assert "Edit" not in shown and "View" in shown, shown
     finally:
         page.close()
+
+
+def _toasts(page):
+    return page.evaluate(
+        "() => [...document.querySelectorAll('.toast')].map(t => t.textContent)"
+    )
+
+
+def test_memorize_bill_from_the_screen_saves_the_template(
+    browser, company, books, client
+):
+    """Memorize Bill draws the bill's lines in the bill grid, which keeps
+    each stored line's id for Save Changes; the template is saved without
+    them (a line id is not a template's), so Memorize saves."""
+    bill = client.get(f"/api/bills/{books['bill']}").json()
+    before = len(client.get("/api/memorized").json())
+    page, handled = _open(browser, company)
+    try:
+        _visit(page, handled, "#/bills")
+        page.evaluate(
+            f"async () => {{ await MemorizedPage.memorizeBill({bill['id']}); }}"
+        )
+        page.wait_for_function(OPEN, timeout=5000)
+        settle(page, handled)
+        ids = page.evaluate(
+            "() => BillsPage.collectLines().lines.map(l => l.id ?? null)"
+        )
+        assert ids == [ln["id"] for ln in bill["lines"]]  # the grid has them
+        page.evaluate("() => document.getElementById('mem-form').requestSubmit()")
+        settle(page, handled)
+        after = client.get("/api/memorized").json()
+        assert len(after) == before + 1, _toasts(page)
+        page.wait_for_function(f"() => !({OPEN})()", timeout=5000)
+        mem = max(after, key=lambda m: m["id"])
+        got = client.get(f"/api/memorized/{mem['id']}").json()
+        assert [ln["description"] for ln in got["lines"]] == [
+            ln["description"] for ln in bill["lines"]
+        ]
+
+        # and Save Changes on the template it made, whose own lines the
+        # grid draws with their ids too
+        page.evaluate(
+            f"async () => {{ await MemorizedPage.showBillForm({mem['id']}); }}"
+        )
+        page.wait_for_function(OPEN, timeout=5000)
+        settle(page, handled)
+        page.fill("#mem-form [name=notes]", "Saved again")
+        page.evaluate("() => document.getElementById('mem-form').requestSubmit()")
+        settle(page, handled)
+        got = client.get(f"/api/memorized/{mem['id']}").json()
+        assert got["notes"] == "Saved again", _toasts(page)
+    finally:
+        page.close()

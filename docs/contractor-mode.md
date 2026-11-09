@@ -445,6 +445,9 @@ installs:
   that line whatever the job or cost type: equipment bought untaxed, material
   for a *charge the owner* job used on the company's own work. Through the
   API, `use_tax` is null (follow the rule), true (accrue) or false (never).
+  A memorized bill keeps the box on each line (Memorize Bill carries it from
+  the bill), and every bill entered from it accrues as the box says, at the
+  rate in force when that bill is entered.
 - **The rate** is Settings → Invoice Defaults → **Use tax rate**, a percent
   like the default tax rate; blank (the default) uses the default tax rate.
   **A bill keeps the rate it was booked at.** The rate is stored on each bill

@@ -3028,3 +3028,92 @@ def test_an_occurrence_before_the_start_was_never_one_of_its_dates(
         "2026-01-01."
     )
     assert db_session.query(Invoice).filter_by(recurring_invoice_id=rec_id).count() == 0
+
+
+# ---------------------------------------------------------------------------
+# a bill line's Use tax box (construction) on a memorized bill
+# ---------------------------------------------------------------------------
+
+
+def test_a_memorized_bill_line_keeps_its_use_tax_box_into_each_bill(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Memorize Bill sends each line's Use tax box. The template keeps it
+    (an edit that sends no lines too), and each bill entered from it accrues
+    use tax on the ticked line as the bill it was memorized from did; one
+    the job's rule would not tax."""
+    from tests.test_construction_tax import _balance, _use_tax_setup
+
+    job, vendor, payable = _use_tax_setup(
+        client, db_session, seed_customer, treatment="charge_owner"
+    )
+    line = {"rate": 400, "cost_type": "equipment", "job_id": job["id"]}
+    r = client.post(
+        "/api/memorized",
+        json={
+            "kind": "bill",
+            "name": "Lift rental",
+            "mode": "remind",
+            "frequency": "monthly",
+            "start_date": "2026-07-04",
+            "vendor_id": vendor["id"],
+            "job_id": job["id"],
+            "lines": [
+                {**line, "description": "Lift", "use_tax": True},
+                {**line, "description": "Crane"},
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    mem = r.json()
+    assert [ln["use_tax"] for ln in mem["lines"]] == [True, None]
+    r = client.put(f"/api/memorized/{mem['id']}", json={"name": "Lifts"})
+    assert r.status_code == 200, r.text
+    assert [ln["use_tax"] for ln in r.json()["lines"]] == [True, None]
+
+    r = client.post(f"/api/memorized/{mem['id']}/enter")
+    assert r.status_code == 200, r.text
+    bill = client.get(f"/api/bills/{r.json()['document_id']}").json()
+    assert [ln["use_tax"] for ln in bill["lines"]] == [True, None]
+    # 6.5% of the ticked 400 alone
+    assert _balance(db_session, payable.id) == Decimal("26.00")
+
+
+def test_a_memorized_bill_line_takes_no_line_id(client, seed_accounts):
+    """A template is saved whole, so a line id (a bill's, or the template's
+    own) is refused rather than ignored; the form leaves it out."""
+    vendor_id = _vendor(client)
+    mem = _bill_schedule(client, vendor_id, seed_accounts, mode="remind")
+    line = {**mem["lines"][0], "amount": 400}
+    sent = {k: line[k] for k in ("id", "account_id", "description", "amount")}
+    r = client.put(f"/api/memorized/{mem['id']}", json={"lines": [sent]})
+    assert r.status_code == 422, r.text
+    del sent["id"]
+    r = client.put(f"/api/memorized/{mem['id']}", json={"lines": [sent]})
+    assert r.status_code == 200, r.text
+
+
+def test_the_use_tax_migration_adds_the_column_and_walks_back(tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    db = tmp_path / "memorized_use_tax.db"
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
+
+    def cols():
+        engine = create_engine(f"sqlite:///{db}")
+        try:
+            return {
+                c["name"]
+                for c in inspect(engine).get_columns("memorized_transaction_lines")
+            }
+        finally:
+            engine.dispose()
+
+    command.upgrade(cfg, "e2b6c4d8f0a3")
+    assert "use_tax" in cols()
+    command.downgrade(cfg, "d8f1b3c5e7a9")
+    assert "use_tax" not in cols()
