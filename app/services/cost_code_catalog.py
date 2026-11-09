@@ -7,6 +7,7 @@
 
 import re
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 DIVISIONS = (
@@ -342,6 +343,9 @@ def load_standard_catalog(db: Session) -> dict:
         map_new_section(db, row)
         created += 1
 
+    # A company that already has packages gets any standard package it lacks
+    # (the catalog grows); with none, construction setup seeds them all.
+    add_missing_trade_packages(db)
     db.flush()
     return {"created": created}
 
@@ -370,6 +374,43 @@ def seed_trade_packages(db: Session) -> int:
             code = by_code.get(normalize_code(raw).lower())
             if code is not None:
                 db.add(TradePackageSection(package_id=pkg.id, cost_code_id=code.id))
+        created += 1
+    db.flush()
+    return created
+
+
+def add_missing_trade_packages(db: Session) -> int:
+    """For a company that already has packages, add each standard package it
+    lacks and map the standard sections into it. A package is added only when
+    none carries its name and none of its sections is mapped yet, so one the
+    company renamed, remapped or edited is left alone and a second call adds
+    nothing. Returns the number of packages created."""
+    from app.models.cost_codes import CostCode
+    from app.models.trade_packages import TradePackage, TradePackageSection
+
+    if not db.query(TradePackage.id).first():
+        return 0
+    by_code = {c.code.lower(): c for c in db.query(CostCode).all()}
+    names = {n for (n,) in db.query(TradePackage.name)}
+    mapped = {cid for (cid,) in db.query(TradePackageSection.cost_code_id)}
+    next_order = (db.query(func.max(TradePackage.sort_order)).scalar() or 0) + 1
+    created = 0
+    for name, section_codes in TRADE_PACKAGES:
+        if name in names:
+            continue
+        rows = [
+            by_code[key]
+            for raw in section_codes
+            if (key := normalize_code(raw).lower()) in by_code
+        ]
+        if not rows or any(r.id in mapped for r in rows):
+            continue
+        pkg = TradePackage(name=name, sort_order=next_order)
+        next_order += 1
+        db.add(pkg)
+        db.flush()
+        for r in rows:
+            db.add(TradePackageSection(package_id=pkg.id, cost_code_id=r.id))
         created += 1
     db.flush()
     return created
