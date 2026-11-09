@@ -40,6 +40,7 @@ from app.services.accounting import (
 )
 from app.services.closing_date import check_closing_date
 from app.services.contracts import (
+    application_contract_sums,
     contract_changes_after,
     contractor_pays_tax,
     original_contract_sum,
@@ -51,6 +52,8 @@ from app.services.payment_terms import due_date_for, term_id_for
 from app.services.pay_applications import (
     application_figures,
     application_warnings,
+    carried_by_earlier,
+    carried_change_orders,
     deposits_figures,
     effective_tax_rate,
     line_computed,
@@ -210,6 +213,8 @@ def _out(db: Session, app: PayApplication) -> PayApplicationOut:
     out.retainage_outstanding = float(retainage_outstanding(db, app.job_id))
     out.can_void = _can_void(db, app)
     out.warnings = application_warnings(db, app)
+    sums = application_contract_sums(db, app, app.job)
+    out.contract_sums = {k: float(v) for k, v in sums.items()}
     return out
 
 
@@ -359,13 +364,12 @@ def _refresh_lines(db: Session, app: PayApplication) -> bool:
     job = db.get(Job, app.job_id)
     changed = _drop_orphan_lines(db, app, job)
     by_sov = {ln.sov_line_id: ln for ln in app.lines if ln.sov_line_id}
-    billed = previous_by_sov_line(db, app.job_id, app.application_no)
+    carried = carried_by_earlier(db, app.job_id, app.application_no)
+    prior_stored = stored_by_sov_line(db, app.job_id, app.application_no)
     for n, sov in enumerate(job.sov_lines, start=1):
         ln = by_sov.get(sov.id)
         if ln is None:
-            if billed.get(sov.id, _ZERO) == _ZERO and not sov_line_in_effect(
-                db, sov, app.date
-            ):
+            if sov.id not in carried and not sov_line_in_effect(db, sov, app.date):
                 continue
             db.add(
                 PayApplicationLine(
@@ -376,7 +380,7 @@ def _refresh_lines(db: Session, app: PayApplication) -> bool:
                     description=sov.description,
                     scheduled_value=sov.scheduled_value,
                     this_period=_ZERO,
-                    stored=_ZERO,
+                    stored=prior_stored.get(sov.id, _ZERO),
                 )
             )
             changed = True
@@ -579,13 +583,14 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
         )
     # Pre-fill a line from every SOV line, in order — change_order, allowance
     # and contingency lines bill like work.
-    # A change order's line an earlier approved application billed stays, even
-    # when this one is dated before the change order takes effect.
-    billed = previous_by_sov_line(db, job.id, app.application_no)
+    # A change order's line an earlier approved application billed work on or
+    # left stored materials on stays, even when this one is dated before the
+    # change order takes effect. Stored materials carry at the balance the
+    # earlier applications left until they are installed.
+    carried = carried_by_earlier(db, job.id, app.application_no)
+    prior_stored = stored_by_sov_line(db, job.id, app.application_no)
     for n, sov in enumerate(job.sov_lines, start=1):
-        if billed.get(sov.id, _ZERO) == _ZERO and not sov_line_in_effect(
-            db, sov, app.date
-        ):
+        if sov.id not in carried and not sov_line_in_effect(db, sov, app.date):
             continue
         db.add(
             PayApplicationLine(
@@ -596,7 +601,7 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
                 description=sov.description,
                 scheduled_value=sov.scheduled_value,
                 this_period=_ZERO,
-                stored=_ZERO,
+                stored=prior_stored.get(sov.id, _ZERO),
             )
         )
     db.flush()
@@ -757,8 +762,11 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     app.contract_sum_original = original_contract_sum(db, job)
     # A change order that takes effect after the application's date is not in
     # its contract sum to date, however early it was entered.
+    # One whose line the application carries (an earlier application billed
+    # it) stays, so the summary foots against the line detail.
     app.contract_sum_to_date = (
-        _q(job.contract_amount) - contract_changes_after(db, job, when)
+        _q(job.contract_amount)
+        - contract_changes_after(db, job, when, carried_change_orders(db, app))
         if job.contract_amount is not None
         else None
     )
@@ -767,12 +775,11 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
         # Tax over the billed work on the taxable SOV lines, at the
         # application's rate when tax is on and the owner is taxable — the
         # same figure the application shows.
+        # The figure carries the true-up of an application that completes a
+        # taxable line.
         tax_rate = _q6(effective_tax_rate(app))
         subtotal = _q(sum((bl.amount for bl in invoice_lines), _ZERO))
-        taxable_base = _q(
-            sum((bl.amount for bl in invoice_lines if bl.is_taxable), _ZERO)
-        )
-        tax_amount = _q(taxable_base * tax_rate) if tax_rate else _ZERO
+        tax_amount = figures["tax_amount"] if tax_rate else _ZERO
         total = _q(subtotal + tax_amount)
         invoice = _create_invoice(
             db,

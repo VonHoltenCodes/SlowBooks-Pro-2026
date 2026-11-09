@@ -2043,6 +2043,275 @@ def test_a_back_dated_application_leaves_off_a_line_nobody_billed(
     assert base["id"] in ids and co_line["id"] not in ids
 
 
+def _stored_co_job(client, customer_id):
+    """The dated change-order job with an application dated 2026-09-01
+    approved that bills Base 10,000 and leaves 10,000 of stored materials on
+    the change order's line (nothing installed on it)."""
+    job, base, co_line = _dated_co_job(client, customer_id)
+    a1 = _dated_app(
+        client,
+        job["id"],
+        "2026-09-01",
+        [
+            {"sov_line_id": base["id"], "this_period": 10000, "stored": 0},
+            {"sov_line_id": co_line["id"], "this_period": 0, "stored": 10000},
+        ],
+    )
+    assert _approve(client, a1["id"]).status_code == 200
+    return job, base, co_line
+
+
+def _net_by_account(db_session, transaction_id):
+    by_acct = {}
+    for row in db_session.query(TransactionLine).filter_by(
+        transaction_id=transaction_id
+    ):
+        num = row.account.account_number
+        net = Decimal(str(row.debit)) - Decimal(str(row.credit))
+        by_acct[num] = by_acct.get(num, Decimal("0")) + net
+    return by_acct
+
+
+def test_a_back_dated_application_keeps_a_line_an_earlier_one_left_stored(
+    client, db_session, seed_accounts, seed_customer
+):
+    """An application dated before a change order takes effect still carries
+    the change order's line when an earlier approved application left stored
+    materials on it, at the stored balance: completed to date stays 25,000,
+    approve holds 500 of retainage and releases none, and the approve
+    response agrees with the invoice."""
+    job, base, co_line = _stored_co_job(client, seed_customer.id)
+    a2 = _dated_app(
+        client,
+        job["id"],
+        "2026-08-01",
+        [{"sov_line_id": base["id"], "this_period": 5000, "stored": 0}],
+    )
+    lines = client.get(f"/api/pay-applications/{a2['id']}").json()["lines"]
+    carried = next(ln for ln in lines if ln["sov_line_id"] == co_line["id"])
+    assert float(carried["stored"]) == 10000.0
+    r = _approve(client, a2["id"])
+    assert r.status_code == 200, r.text
+    totals = r.json()["totals"]
+    assert totals["completed_to_date"] == 25000.0
+    assert totals["retainage_this_period"] == 500.0
+    assert totals["billed_this_period"] == 5000.0
+    assert totals["current_due"] == 4500.0
+    inv = db_session.query(Invoice).filter_by(id=r.json()["invoice_id"]).first()
+    assert inv.total == Decimal("5000.00")
+    assert inv.retainage_held == Decimal("500.00")
+    assert inv.balance_due == Decimal("4500.00")
+    by_acct = _net_by_account(db_session, inv.transaction_id)
+    assert by_acct["1100"] == Decimal("4500.00")
+    assert by_acct["1150"] == Decimal("500.00")  # a debit: held, never released
+    assert sum(by_acct.values()) == Decimal("0.00")
+
+
+def test_a_draft_picks_up_a_line_an_earlier_one_left_stored(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A back-dated draft that lost the change order's line gets it back,
+    with its stored balance, when its lines are refreshed."""
+    from app.models.pay_applications import PayApplicationLine
+
+    job, base, co_line = _stored_co_job(client, seed_customer.id)
+    a2 = _dated_app(
+        client,
+        job["id"],
+        "2026-08-01",
+        [{"sov_line_id": base["id"], "this_period": 5000, "stored": 0}],
+    )
+    db_session.query(PayApplicationLine).filter_by(
+        pay_application_id=a2["id"], sov_line_id=co_line["id"]
+    ).delete()
+    db_session.commit()
+    r = client.post(f"/api/pay-applications/{a2['id']}/refresh-lines")
+    assert r.status_code == 200, r.text
+    lines = client.get(f"/api/pay-applications/{a2['id']}").json()["lines"]
+    carried = next(ln for ln in lines if ln["sov_line_id"] == co_line["id"])
+    assert float(carried["stored"]) == 10000.0
+    assert (
+        client.get(f"/api/pay-applications/{a2['id']}").json()["totals"][
+            "completed_to_date"
+        ]
+        == 25000.0
+    )
+
+
+def test_a_back_dated_applications_contract_sum_counts_the_change_it_carries(
+    client, db_session, seed_accounts, seed_customer, monkeypatch
+):
+    """The contract rows of an application dated before a change order takes
+    effect count that change order when the application carries its line, so
+    the summary foots against the line detail: 100,000 + 10,000 = 110,000,
+    the schedule's total, in the JSON and in the PDF, draft and approved."""
+    import app.services.pdf_service as pdf_service
+
+    job, base, co_line = _dated_co_job(client, seed_customer.id)
+    a1 = _dated_app(
+        client,
+        job["id"],
+        "2026-09-01",
+        [
+            {"sov_line_id": base["id"], "this_period": 10000, "stored": 0},
+            {"sov_line_id": co_line["id"], "this_period": 10000, "stored": 0},
+        ],
+    )
+    assert _approve(client, a1["id"]).status_code == 200
+    a2 = _dated_app(
+        client,
+        job["id"],
+        "2026-08-01",
+        [{"sov_line_id": base["id"], "this_period": 5000, "stored": 0}],
+    )
+    seen = []
+    monkeypatch.setattr(
+        pdf_service, "render_pdf", lambda html: seen.append(html) or b"%PDF"
+    )
+    want = {"original": 100000.0, "net_change": 10000.0, "to_date": 110000.0}
+    for approve in (False, True):
+        if approve:
+            assert _approve(client, a2["id"]).status_code == 200
+        out = client.get(f"/api/pay-applications/{a2['id']}").json()
+        assert out["contract_sums"] == want
+        assert out["totals"]["scheduled_total"] == 110000.0
+        assert out["totals"]["balance_to_finish_total"] == 85000.0
+        r = client.get(f"/api/pay-applications/{a2['id']}/pdf")
+        assert r.status_code == 200, r.text
+        html = seen[-1]
+        assert "$10,000.00" in html.split("Net change by change orders")[1][:200]
+        assert "$110,000.00" in html.split("Contract sum to date")[1][:200]
+
+
+def test_a_back_dated_application_leaves_out_a_change_it_does_not_carry(
+    client, seed_accounts, seed_customer
+):
+    """A change order nothing has billed stays out of the contract sum of an
+    application dated before it takes effect."""
+    job, base, _co_line = _dated_co_job(client, seed_customer.id)
+    a = _dated_app(
+        client,
+        job["id"],
+        "2026-08-01",
+        [{"sov_line_id": base["id"], "this_period": 5000, "stored": 0}],
+    )
+    out = client.get(f"/api/pay-applications/{a['id']}").json()
+    assert out["contract_sums"] == {
+        "original": 100000.0,
+        "net_change": 0.0,
+        "to_date": 100000.0,
+    }
+
+
+def test_billing_a_change_before_it_takes_effect_names_the_line(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The refusal to bill a change order's line on an application dated
+    before the change order takes effect names the line by its description
+    when it has no item number, and calls it the change order's line when it
+    has neither or its description is only the change order's number."""
+    from app.models.jobs import SovLine
+    from app.models.pay_applications import PayApplicationLine
+
+    job, base, co_line = _dated_co_job(client, seed_customer.id)
+    db_session.query(SovLine).filter_by(id=co_line["id"]).update(
+        {"item_no": None, "description": "Extra"}
+    )
+    db_session.commit()
+    a = _dated_app(
+        client,
+        job["id"],
+        "2026-08-01",
+        [{"sov_line_id": base["id"], "this_period": 5000, "stored": 0}],
+    )
+    db_session.add(
+        PayApplicationLine(
+            pay_application_id=a["id"],
+            sov_line_id=co_line["id"],
+            line_no=2,
+            description="Extra",
+            scheduled_value=Decimal("10000"),
+            this_period=Decimal("1000"),
+            stored=Decimal("0"),
+        )
+    )
+    db_session.commit()
+    co_id = db_session.get(SovLine, co_line["id"]).change_order_id
+    co_number = db_session.get(ChangeOrder, co_id).number
+    r = client.post(f"/api/pay-applications/{a['id']}/submit")
+    assert r.status_code == 409, r.text
+    assert r.json()["detail"]["message"] == (
+        f"{co_number} takes effect on 2026-08-10, after this application's date "
+        "(2026-08-01), so its line Extra cannot bill on it. Date the application "
+        "2026-08-10 or later, or clear the line's amounts."
+    )
+    db_session.query(SovLine).filter_by(id=co_line["id"]).update({"description": None})
+    db_session.commit()
+    message = client.post(f"/api/pay-applications/{a['id']}/submit").json()["detail"][
+        "message"
+    ]
+    assert "(2026-08-01), so the change order's line cannot bill on it." in message
+    assert "  " not in message
+
+
+def test_tax_billed_over_several_applications_is_the_bids_to_the_cent(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A 60,000 exempt and B 40,000 taxable at 6.5%, markups 8 / 1.5 / 5 / 1:
+    the bid's tax is 3,022.55. Billed 33.33%, 33.33% and the rest, the two
+    partial applications round their own tax (1,007.42 each) and the one
+    that completes the work trues up to the bid: 1,007.71, 3,022.55 in all
+    (rounding each application alone came to 3,022.56)."""
+    from tests.test_sov_mapping import _accepted_build, _construction
+    from tests.test_sov_mapping import _line as _est_line
+
+    _construction(client)
+    job, sov, est_id = _accepted_build(
+        client,
+        seed_customer.id,
+        [
+            _est_line("A", 60000, is_taxable=False),
+            _est_line("B", 40000, is_taxable=True),
+        ],
+        tax_rate="0.065",
+        gc_pct=8,
+        insurance_pct=1.5,
+        fee_pct=5,
+        bond_pct=1,
+    )
+    assert float(client.get(f"/api/estimates/{est_id}").json()["tax_amount"]) == (
+        3022.55
+    )
+    third = Decimal("0.3333")
+    billed = {s["id"]: Decimal("0") for s in sov}
+    taxes = []
+    for day, last in (
+        ("2026-07-31", False),
+        ("2026-08-31", False),
+        ("2026-09-30", True),
+    ):
+        lines = []
+        for s in sov:
+            scheduled = Decimal(str(s["scheduled_value"]))
+            amount = (
+                scheduled - billed[s["id"]]
+                if last
+                else (scheduled * third).quantize(Decimal("0.01"))
+            )
+            billed[s["id"]] += amount
+            lines.append(
+                {"sov_line_id": s["id"], "this_period": str(amount), "stored": 0}
+            )
+        a = _dated_app(client, job["id"], day, lines)
+        r = _approve(client, a["id"])
+        assert r.status_code == 200, r.text
+        inv = db_session.get(Invoice, r.json()["invoice_id"])
+        assert inv.tax_amount == Decimal(str(r.json()["totals"]["tax_amount"]))
+        taxes.append(inv.tax_amount)
+    assert taxes == [Decimal("1007.42"), Decimal("1007.42"), Decimal("1007.71")]
+    assert sum(taxes) == Decimal("3022.55")
+
+
 # ── Companies upgraded from the release before ───────────────────────────
 
 
