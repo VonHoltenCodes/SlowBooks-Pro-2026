@@ -1299,7 +1299,9 @@ approved, posted), and `void`. Only a draft is edited or deleted; a signed
 ticket is what was signed, so a change means voiding it and writing another.
 **Signing** in this version is the signer's typed name and the date (`POST
 /api/field-tickets/{id}/sign`), with a photo of the signed paper attached to
-the ticket (attachments take `field_ticket` as their record type). An
+the ticket (attachments take `field_ticket` as their record type); deleting a draft
+ticket deletes its attachments too. A T&M or material line that names a
+purchase order line must name one that exists on the ticket's own job. An
 on-screen signature pad is a later issue. A ticket is voided while nothing it
 led to is approved: a T&M ticket on a change order that still stands, or on an
 invoice that is not void, is refused until that is rejected or voided. The

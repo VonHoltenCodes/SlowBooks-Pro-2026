@@ -82,9 +82,9 @@ const FieldTickets = {
         const parts = [`<button class="btn btn-sm btn-secondary" onclick="FieldTickets.edit(${t.id})">${t.status === 'draft' ? 'Edit' : 'View'}</button>`];
         if (t.status === 'draft' && t.kind !== 'material') parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="FieldTickets.sign(${t.id})">Sign</button>`);
         if (t.status === 'draft' && t.kind === 'material') parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="FieldTickets.post(${t.id})" title="Put the stock on the job at its average cost">Post</button>`);
-        if (t.status === 'draft') parts.push(`<button data-destructive class="btn btn-sm btn-danger" onclick="FieldTickets.del(${t.id})">Delete</button>`);
+        if (t.status === 'draft') parts.push(`<button data-destructive data-write class="btn btn-sm btn-danger" onclick="FieldTickets.del(${t.id})">Delete</button>`);
         // can_void: the server says whether it would accept the void now
-        if (t.status !== 'void' && t.status !== 'draft' && t.can_void) parts.push(`<button data-destructive class="btn btn-sm btn-danger" onclick="FieldTickets.voidTicket(${t.id})">Void</button>`);
+        if (t.status !== 'void' && t.status !== 'draft' && t.can_void) parts.push(`<button data-destructive data-write class="btn btn-sm btn-danger" onclick="FieldTickets.voidTicket(${t.id})">Void</button>`);
         return parts.join(' ');
     },
 
@@ -371,7 +371,7 @@ const FieldTickets = {
             const list = await API.get(`/attachments/field_ticket/${id}`);
             el.innerHTML = list.length ? list.map(a => `<div style="display:flex; flex-wrap:wrap; align-items:center; gap:0 8px; padding:2px 0;">
                 ${a.missing ? `<span>${escapeHtml(a.filename)}</span>` : `<a href="/api/attachments/download/${a.id}" target="_blank">${escapeHtml(a.filename)}</a>`}
-                <button type="button" data-destructive aria-label="Delete attachment" class="btn btn-sm btn-danger" onclick="FieldTickets.deleteAttachment(${a.id},${id})" style="padding:0 4px; font-size:10px;">X</button>
+                <button type="button" data-destructive data-write aria-label="Delete attachment" class="btn btn-sm btn-danger" onclick="FieldTickets.deleteAttachment(${a.id},${id})" style="padding:0 4px; font-size:10px;">X</button>
             </div>`).join('') : '<span style="color:var(--text-muted);">No attachments</span>';
         } catch (e) { el.innerHTML = ''; }
     },

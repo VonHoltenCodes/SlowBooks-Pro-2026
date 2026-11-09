@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.routes._helpers import refuse_unknown_filters
 from app.database import get_db
+from app.models.attachments import Attachment
 from app.models.cost_codes import CostCode
 from app.models.field_tickets import FT_KINDS, FT_STATUSES, FieldTicket
 from app.models.jobs import Job
@@ -31,6 +32,7 @@ from app.schemas.field_tickets import (
     VoidIn,
 )
 from app.services import field_tickets as svc
+from app.services import file_store
 
 router = APIRouter(prefix="/api/field-tickets", tags=["field-tickets"])
 
@@ -261,6 +263,13 @@ def delete_field_ticket(ticket_id: int, db: Session = Depends(get_db)):
     _refuse_unless_draft(t, "deleted")
     svc.check_delivery_period(db, t)
     svc.unapply_received(db, t)
+    # its attachments go with it, so a reused id never shows another ticket's paper
+    for a in (
+        db.query(Attachment)
+        .filter(Attachment.entity_type == "field_ticket", Attachment.entity_id == t.id)
+        .all()
+    ):
+        file_store.delete_attachment(db, a)
     db.delete(t)
     db.commit()
     return {"deleted": True}

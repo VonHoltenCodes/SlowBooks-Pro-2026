@@ -1177,3 +1177,64 @@ def test_a_sent_order_reads_issued_in_construction_mode():
         "PurchaseOrdersPage.statusBadge(po.status)", "statusBadge(po.status)"
     )
     assert src.count("PurchaseOrdersPage.statusBadge(po.status)") == 2
+
+
+# ── PO line on a T&M or material line; attachments on delete ────────────
+
+
+def test_a_tm_line_keeps_a_po_line_on_its_own_job(con, po):
+    """A T&M line may name a purchase order line of the ticket's own job and
+    it is kept."""
+    job, order = po
+    conduit = order["lines"][0]["id"]
+    t = _ticket(con, job["id"], [{**LABOR, "po_line_id": conduit}])
+    assert t["lines"][0]["po_line_id"] == conduit
+
+
+def test_a_tm_line_refuses_a_po_line_that_does_not_exist(con, po):
+    """A line naming a purchase order line that is not there is refused with a
+    sentence, not stored."""
+    job, _ = po
+    r = _ticket(con, job["id"], [{**LABOR, "po_line_id": 987654}], status=404)
+    assert "Purchase order line not found" in r["detail"]
+
+
+def test_a_tm_line_refuses_another_jobs_po_line(con, po, seed_customer):
+    """A purchase order line on another job's order is refused on a ticket,
+    new or edited."""
+    _, order = po
+    other = _job(con, seed_customer.id, name="Annex")
+    foreign = order["lines"][0]["id"]
+    r = _ticket(con, other["id"], [{**LABOR, "po_line_id": foreign}], status=422)
+    assert "another job" in r["detail"]
+    t = _ticket(con, other["id"], [LABOR])
+    r = con.put(
+        f"/api/field-tickets/{t['id']}",
+        json={"lines": [{**LABOR, "po_line_id": foreign}]},
+    )
+    assert r.status_code == 422, r.text
+
+
+def test_deleting_a_draft_ticket_deletes_its_attachments(
+    con, seed_customer, db_session
+):
+    """The paper attached to a draft ticket goes with it, rows and file, so a
+    new ticket never shows it."""
+    from app.models.attachments import Attachment
+    from app.models.stored_files import StoredFile
+
+    job = _job(con, seed_customer.id)
+    t = _ticket(con, job["id"], [LABOR])
+    r = con.post(
+        f"/api/attachments/field_ticket/{t['id']}",
+        files={"file": ("signed.jpg", b"\xff\xd8\xff photo", "image/jpeg")},
+    )
+    assert r.status_code == 201, r.text
+    assert con.delete(f"/api/field-tickets/{t['id']}").status_code == 200
+    db_session.expire_all()
+    assert (
+        db_session.query(Attachment).filter_by(entity_type="field_ticket").count() == 0
+    )
+    assert db_session.query(StoredFile).count() == 0
+    again = _ticket(con, job["id"], [LABOR])
+    assert con.get(f"/api/attachments/field_ticket/{again['id']}").json() == []
