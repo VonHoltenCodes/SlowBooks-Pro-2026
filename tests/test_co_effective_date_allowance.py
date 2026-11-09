@@ -7,6 +7,8 @@ and "return unspent allowance" leaves the allowance with nothing to bill."""
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
+import pytest
+
 from app.models.cost_codes import CostCode
 from app.models.job_costing import JobBudget
 from app.models.pay_applications import PayApplication
@@ -627,6 +629,69 @@ def test_voiding_an_unlinked_allowance_co_subtracts_only_its_lines(
     assert _budget_total(db_session, job["id"]) == Decimal("25500")
 
 
+def test_voiding_a_partly_linked_allowance_co_from_before_the_upgrade_takes_back_its_lines(
+    client, db_session, seed_customer
+):
+    """A 5,000 allowance CO from before the upgrade, 4,000 on the
+    allowance's code and 1,000 on another. The upgrade links the 1,000 row
+    to it but not the allowance code's shared row, which also holds another
+    change order's 500. The void deletes the linked row and takes the 4,000
+    its lines wrote off the shared row, not a draw it never made."""
+    from app.models.change_orders import ChangeOrder
+
+    job, _sov, allowance_id, code = _allowance_with_budget(
+        client, db_session, seed_customer.id
+    )
+    tile = CostCode(code="09 30 00", name="Tile", cost_type="material")
+    db_session.add(tile)
+    db_session.commit()
+    body = {
+        "job_id": job["id"],
+        "kind": "owner",
+        "funding": "allowance",
+        "allowance_sov_line_id": allowance_id,
+        "lines": [
+            {**LINE, "unit_cost": 4000, "cost_code_id": code.id},
+            {**LINE, "unit_cost": 1000, "cost_code_id": tile.id},
+        ],
+    }
+    co = client.post("/api/change-orders", json=body).json()
+    assert _approve(client, co["id"]).status_code == 200
+    # as the release before left it: no draw, its cost in shared rows
+    db_session.get(ChangeOrder, co["id"]).allowance_draw_written = False
+    db_session.query(JobBudget).filter(JobBudget.change_order_id == co["id"]).delete()
+    for code_id, amount in ((code.id, "4500"), (tile.id, "1000")):
+        db_session.add(
+            JobBudget(
+                job_id=job["id"],
+                cost_code_id=code_id,
+                cost_type="material",
+                amount=Decimal(amount),
+                revenue_amount=Decimal("0"),
+                source="change",
+                locked=True,
+            )
+        )
+    db_session.commit()
+    _migration("b5d2e8f4a6c3")._link_change_budgets(db_session.connection())
+    db_session.commit()
+    db_session.expire_all()
+    rows = {
+        r.cost_code_id: (r.change_order_id, Decimal(str(r.amount)))
+        for r in db_session.query(JobBudget).filter(
+            JobBudget.job_id == job["id"], JobBudget.source == "change"
+        )
+    }
+    assert rows == {
+        code.id: (None, Decimal("4500.00")),
+        tile.id: (co["id"], Decimal("1000.00")),
+    }
+    assert _budget_total(db_session, job["id"]) == Decimal("30500")
+
+    assert client.post(f"/api/change-orders/{co['id']}/void").status_code == 200
+    assert _budget_total(db_session, job["id"]) == Decimal("25500")
+
+
 def test_a_draft_application_billing_a_change_order_stays_saveable_after_the_upgrade(
     client, db_session, seed_accounts, seed_customer
 ):
@@ -667,6 +732,61 @@ def test_a_draft_application_billing_a_change_order_stays_saveable_after_the_upg
     assert (
         client.post(f"/api/pay-applications/{draft['id']}/approve").status_code == 200
     )
+
+
+@pytest.mark.parametrize(
+    "co_date, draft_date",
+    [
+        ("2026-08-20", "2026-08-15"),
+        ("2026-09-05", "2026-08-31"),
+        (None, "2026-08-31"),
+    ],
+)
+def test_a_draft_dated_before_the_change_order_stays_saveable_after_the_upgrade(
+    client, db_session, seed_accounts, seed_customer, co_date, draft_date
+):
+    """A draft that bills a change order's line on a day before the change
+    order's own date, or before the click of one with no date, takes that
+    draft's date: PUT, submit and approve all go through."""
+    from app.models.change_orders import ChangeOrder
+
+    job, sov = _setup(
+        client,
+        seed_customer.id,
+        [{"description": "Base", "scheduled_value": 100000}],
+        100000,
+    )
+    co = _owner_co(client, job["id"], 10000, date="2026-08-01")
+    assert _approve(client, co["id"]).status_code == 200
+    co_line = next(
+        s for s in _contract(client, job["id"])["sov"] if s["kind"] == "change_order"
+    )
+    draft = _app(
+        client,
+        job["id"],
+        draft_date,
+        [{"sov_line_id": co_line["id"], "this_period": 4000, "stored": 0}],
+    )
+    # as the release before left it: its own date, a click on 11-08
+    row = db_session.get(ChangeOrder, co["id"])
+    row.date = date.fromisoformat(co_date) if co_date else None
+    row.approved_at = datetime(2026, 11, 8, 12, 0, tzinfo=timezone.utc)
+    row.approved_on = None
+    db_session.commit()
+    _migration("e2a6c8f4b1d9")._backfill_approved_on(db_session.connection())
+    db_session.commit()
+    db_session.expire_all()
+    assert db_session.get(ChangeOrder, co["id"]).approved_on == date.fromisoformat(
+        draft_date
+    )
+
+    body = {"lines": [{"sov_line_id": co_line["id"], "this_period": 5000, "stored": 0}]}
+    r = client.put(f"/api/pay-applications/{draft['id']}", json=body)
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/pay-applications/{draft['id']}/submit")
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/pay-applications/{draft['id']}/approve")
+    assert r.status_code == 200, r.text
 
 
 def test_a_change_order_billed_only_on_approved_applications_keeps_the_click_day(

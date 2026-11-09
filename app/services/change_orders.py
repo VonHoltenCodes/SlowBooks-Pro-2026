@@ -458,16 +458,17 @@ def _add_budget_rows(db: Session, job_id: int, co: ChangeOrder, deltas: dict) ->
 def _remove_budget_rows(
     db: Session, job_id: int, co: ChangeOrder, deltas: dict
 ) -> None:
-    """Take the CO's figures back off the budget: delete its own rows, or
-    (a CO approved before the link) subtract from the shared row per key,
+    """Take the CO's figures back off the budget: delete its own rows, and
+    for a key it has no row of its own on (a CO approved before the link,
+    where the upgrade could not link that key) subtract from the shared row,
     deleting one that nets to zero."""
     own = db.query(JobBudget).filter(JobBudget.change_order_id == co.id).all()
-    if own:
-        for row in own:
-            db.delete(row)
-        db.flush()
-        return
+    owned = {(row.cost_code_id, row.cost_type) for row in own}
+    for row in own:
+        db.delete(row)
     for (code_id, ctype), (cost, rev) in deltas.items():
+        if (code_id, ctype) in owned or (_q(cost) == _ZERO and _q(rev) == _ZERO):
+            continue
         row = _find_change_budget(db, job_id, code_id, ctype)
         if row is None:
             continue
