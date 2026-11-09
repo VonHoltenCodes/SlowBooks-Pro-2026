@@ -293,6 +293,9 @@ class SovSaveResponse(ContractSummary):
 class ContractResponse(BaseModel):
     contract: ContractSummary
     sov: List[SovLineOut] = []
+    # The revenue account a row added to the grid starts on: the one every
+    # line on the schedule credits, else none (4050 Contract Revenue).
+    new_line_revenue_account_id: Optional[int] = None
     # Set by the terms save only: a sentence for a saved term that will quietly
     # do nothing (the contractor pays the tax with no use tax rate set).
     warnings: List[str] = []

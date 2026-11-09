@@ -801,3 +801,102 @@ def test_a_bookkeeper_on_a_first_page_of_settings(browser, company, books, db_se
         assert (page.evaluate("location.hash"), asked) == ("#/reports", [])
     finally:
         page.close()
+
+
+# --- a construction job's pay applications ------------------------------
+
+
+def _construction_job_with_a_draft(client, customer_id):
+    """A construction company's job with a schedule of values and an open
+    draft pay application on it (the bakery's jobs have no Pay apps tab)."""
+    assert _ok(client.put("/api/settings", json={"company_type": "construction"}))
+    _ok(client.post("/api/construction/setup"))
+    job = _ok(
+        client.post("/api/jobs", json={"customer_id": customer_id, "name": "Tower"})
+    )
+    _ok(
+        client.put(
+            f"/api/jobs/{job['id']}/contract",
+            json={
+                "contract_type": "lump_sum",
+                "contract_amount": 100000,
+                "retainage_pct": 10,
+                "contract_date": "2026-01-02",
+            },
+        )
+    )
+    _ok(
+        client.put(
+            f"/api/jobs/{job['id']}/sov",
+            json={"lines": [{"description": "Base", "scheduled_value": 100000}]},
+        )
+    )
+    draft = _ok(
+        client.post(
+            "/api/pay-applications", json={"job_id": job["id"], "date": "2026-04-30"}
+        )
+    )
+    assert draft["status"] == "draft" and draft["lines"]
+    return job["id"], draft["id"]
+
+
+def _signed_in_as(client, username, role):
+    """A user of the role, made by the admin, signed in on a client of its
+    own."""
+    _ok(
+        client.post(
+            "/api/users",
+            json={"username": username, "password": USER_PW, "role": role},
+        )
+    )
+    signed_in = TestClient(app)
+    r = signed_in.post(
+        "/api/auth/login", json={"username": username, "password": USER_PW}
+    )
+    assert r.status_code == 200, r.text
+    return signed_in
+
+
+def _pay_app_buttons(browser, client, role, job_id, draft_id):
+    """The buttons shown on the job's Pay apps tab, and, for a sign-in that
+    may open it (Edit is hidden from the others: opening a draft refreshes
+    its lines), in the draft's form."""
+    page, handled = _signed_in(browser, client, role)
+    try:
+        _visit(page, handled, f"#/jobs/{job_id}")
+        page.evaluate("async () => { await JobsPage.setTab('payapps'); }")
+        settle(page, handled)
+        # the pay applications' own buttons: their handlers are JobsPage.pa*
+        shown = """() => [...document.querySelectorAll('#page-content button')]
+            .filter(b => b.getClientRects().length && !b.disabled)
+            .filter(b => /JobsPage\\.pa|pay-applications/.test(b.getAttribute('onclick') || '')
+                || b.getAttribute('type') === 'submit')
+            .map(b => b.textContent.trim())"""
+        tab = page.evaluate(shown)
+        form = []
+        if "Edit" in tab:
+            page.evaluate("async (id) => { await JobsPage.paEdit(id); }", draft_id)
+            settle(page, handled)
+            form = page.evaluate(shown)
+    finally:
+        page.close()
+    return tab, form
+
+
+def test_a_pay_application_offers_delete_only_to_a_sign_in_that_can_delete_it(
+    browser, client, seed_accounts, seed_customer
+):
+    """An open pay application's Delete is offered to the administrator, on
+    its row and in its form; a read-only or accountant sign-in, which the
+    server refuses, is not offered it."""
+    job_id, draft_id = _construction_job_with_a_draft(client, seed_customer.id)
+    tab, form = _pay_app_buttons(browser, client, "admin", job_id, draft_id)
+    assert "Delete" in tab and "Delete" in form
+    for role in ("readonly", "accountant"):
+        signed_in = _signed_in_as(client, f"pa-{role}", role)
+        tab, form = _pay_app_buttons(browser, signed_in, role, job_id, draft_id)
+        assert "Edit" not in tab and "PDF" in tab, (role, tab)
+        assert "Delete" not in tab, (role, tab)
+        # and the server refuses it
+        r = signed_in.delete(f"/api/pay-applications/{draft_id}")
+        assert r.status_code == 403, (role, r.text)

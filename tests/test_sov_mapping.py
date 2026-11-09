@@ -566,3 +566,177 @@ def test_a_construction_vendor_credit_line_takes_the_same_account(
     assert r.status_code in (200, 201), r.text
     acct_id = r.json()["lines"][0]["account_id"]
     assert db_session.get(Account, acct_id).account_number == "5400"
+
+
+# ── A new line on a job that bills to one account ────────────────────────
+#
+# An upgraded company's schedule lines were pointed at the default income
+# account (4000), where their earlier pay applications credited. A line
+# added to such a job afterwards (a change order, a grid row, the
+# contingency, a rebuild) takes that account too, so the job keeps billing
+# to one account; a job whose lines credit 4050, or differ, adds on 4050.
+
+
+def _job_on(client, customer_id, account_id, name="Clinic"):
+    """A lump-sum job whose schedule lines all credit `account_id`, as the
+    upgrade leaves a job part-way through."""
+    job = _job(client, customer_id, name=name)
+    r = client.put(
+        f"/api/jobs/{job['id']}/contract",
+        json={"contract_type": "lump_sum", "contract_amount": 30000},
+    )
+    assert r.status_code == 200, r.text
+    lines = [
+        {
+            "description": d,
+            "kind": "work",
+            "scheduled_value": v,
+            "revenue_account_id": account_id,
+        }
+        for d, v in (("Slab", 20000), ("Site", 10000))
+    ]
+    r = client.put(f"/api/jobs/{job['id']}/sov", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    return job
+
+
+def _approved_co(client, job_id, amount=1000):
+    r = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job_id,
+            "kind": "owner",
+            "date": "2026-08-03",
+            "title": "Extra",
+            "lines": [
+                {
+                    "description": "Extra",
+                    "cost_type": "material",
+                    "quantity": 1,
+                    "unit_cost": amount,
+                }
+            ],
+        },
+    )
+    assert r.status_code in (200, 201), r.text
+    co = r.json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(f"/api/change-orders/{co['id']}/approve")
+    assert r.status_code == 200, r.text
+    sov = client.get(f"/api/jobs/{job_id}/contract").json()["sov"]
+    return sov, next(s for s in sov if s["kind"] == "change_order")
+
+
+def test_a_change_order_on_a_job_billing_to_one_account_bills_to_it_too(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A change order approved on a job whose lines all credit 4000 adds its
+    line on 4000, and the next pay application credits 4000 only."""
+    _construction(client)
+    service = _acct(db_session, "4000")
+    job = _job_on(client, seed_customer.id, service.id)
+    sov, co_line = _approved_co(client, job["id"])
+    assert co_line["revenue_account_id"] == service.id
+    approved = _bill_all(client, job["id"], sov, day="2026-08-31")
+    numbers = {n for n, _ in _income_lines(db_session, approved["invoice_id"])}
+    assert numbers == {"4000"}
+
+
+def test_a_change_order_on_a_new_job_still_bills_to_contract_revenue(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A job built from its estimate (every line on 4050) adds a change
+    order's line on 4050, and so does a job whose lines credit different
+    accounts."""
+    _construction(client)
+    contract = _acct(db_session, "4050")
+    job, _, _ = _accepted_build(client, seed_customer.id, [_line("Shell", 50000)])
+    _, co_line = _approved_co(client, job["id"])
+    assert co_line["revenue_account_id"] == contract.id
+
+    mixed = _job(client, seed_customer.id, name="Annex")
+    client.put(
+        f"/api/jobs/{mixed['id']}/contract",
+        json={"contract_type": "lump_sum", "contract_amount": 30000},
+    )
+    r = client.put(
+        f"/api/jobs/{mixed['id']}/sov",
+        json={
+            "lines": [
+                {
+                    "description": "Slab",
+                    "kind": "work",
+                    "scheduled_value": 20000,
+                    "revenue_account_id": _acct(db_session, "4000").id,
+                },
+                {
+                    "description": "Fixtures",
+                    "kind": "work",
+                    "scheduled_value": 10000,
+                    "revenue_account_id": _acct(db_session, "4100").id,
+                },
+            ]
+        },
+    )
+    assert r.status_code == 200, r.text
+    _, co_line = _approved_co(client, mixed["id"])
+    assert co_line["revenue_account_id"] == contract.id
+
+
+def test_a_line_added_to_a_job_billing_to_one_account_takes_it(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A line sent with no revenue account, the contingency line, and a
+    schedule rebuilt from the estimate all keep a job on the one account
+    its lines credit; the contract says which account a new grid row
+    starts on."""
+    _construction(client)
+    service = _acct(db_session, "4000")
+    job = _job_on(client, seed_customer.id, service.id)
+    contract = client.get(f"/api/jobs/{job['id']}/contract").json()
+    assert contract["new_line_revenue_account_id"] == service.id
+    lines = [
+        {
+            "id": s["id"],
+            "description": s["description"],
+            "kind": s["kind"],
+            "scheduled_value": s["scheduled_value"],
+        }
+        for s in contract["sov"]
+    ]
+    lines.append({"description": "Paving", "kind": "work", "scheduled_value": 500})
+    r = client.put(f"/api/jobs/{job['id']}/sov", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    r = client.put(f"/api/jobs/{job['id']}/contract", json={"contingency_amount": 1500})
+    assert r.status_code == 200, r.text
+    sov = r.json()["sov"]
+    assert {s["kind"] for s in sov} == {"work", "contingency"}
+    assert {s["revenue_account_id"] for s in sov} == {service.id}
+
+    # rebuilt from an accepted estimate on the same job
+    r = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-06-01",
+            "lines": [_line("Shell", 30000)],
+        },
+    )
+    assert r.status_code == 201, r.text
+    est_id = r.json()["id"]
+    r = client.post(f"/api/estimates/{est_id}/accept", json={"job_id": job["id"]})
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/jobs/{job['id']}/contract/from-estimate/{est_id}")
+    assert r.status_code == 200, r.text
+    assert {s["revenue_account_id"] for s in r.json()["sov"]} == {service.id}
+
+
+def test_a_new_grid_row_starts_on_contract_revenue_where_the_lines_differ(
+    client, db_session, seed_accounts, seed_customer
+):
+    """With no schedule yet, or lines on different accounts, a new row
+    starts on the default (4050 Contract Revenue)."""
+    _construction(client)
+    job = _job(client, seed_customer.id)
+    contract = client.get(f"/api/jobs/{job['id']}/contract").json()
+    assert contract["new_line_revenue_account_id"] is None

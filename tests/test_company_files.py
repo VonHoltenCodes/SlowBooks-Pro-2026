@@ -172,6 +172,20 @@ def _attach(client, record, content, name="receipt.txt", entity="invoice"):
     return r.json()
 
 
+def _customer(client, name="Acme Signs"):
+    r = client.post("/api/customers", json={"name": name})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def _invoice_one(client):
+    """Invoice 1 of a fresh company: a file is attached only to a record that
+    is there, and each company's first invoice has the same id."""
+    invoice = _invoice(client)
+    assert invoice["id"] == 1
+    return invoice["id"]
+
+
 def _employee(client, first):
     r = client.post("/api/employees", json={"first_name": first, "last_name": "Vance"})
     assert r.status_code == 201, r.text
@@ -222,9 +236,9 @@ def test_two_companies_same_named_file_on_the_same_record_each_read_their_own(
     acme_text = b"Acme Signs: vinyl for invoice 1"
     bravo_text = b"Bravo Bakery: flour for invoice 1"
     companies.open(companies.a)
-    acme = _attach(client, 1, acme_text)
+    acme = _attach(client, _invoice_one(client), acme_text)
     companies.open(companies.b)
-    bravo = _attach(client, 1, bravo_text)
+    bravo = _attach(client, _invoice_one(client), bravo_text)
 
     companies.open(companies.a)
     assert _download(client, acme).content == acme_text
@@ -449,7 +463,7 @@ def test_the_employee_portal_shows_the_companys_own_logo(client, db_session):
 def test_deleting_an_attachment_deletes_its_stored_file(client, db_session):
     from app.models.stored_files import StoredFile
 
-    att = _attach(client, 7, b"a receipt")
+    att = _attach(client, _customer(client), b"a receipt", entity="customer")
     stored_id = int(att["file_path"].rsplit("/", 1)[1])
     assert db_session.get(StoredFile, stored_id) is not None
     assert client.delete(f"/api/attachments/{att['id']}").status_code == 200

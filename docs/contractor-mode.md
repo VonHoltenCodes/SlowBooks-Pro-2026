@@ -56,8 +56,11 @@ Take a backup first.
 
 **Upgrading an existing construction company** changes no posting. Schedule
 lines made before the upgrade are pointed at the default income account
-(4000), where their earlier pay applications credited, so a job part-way
-through keeps billing to one account; only a new line defaults to 4050. A
+(4000), where their earlier pay applications credited, and a line added to
+such a job afterwards (a change order's line, a new row on the grid, the
+contingency line, a rebuilt schedule) takes that same account, so a job
+part-way through keeps billing to one account. A new job's lines default to
+4050. A
 change order approved before the upgrade keeps taking effect on the day of its
 click, except one whose schedule line is billed on a draft or submitted pay
 application, which takes the earliest of the click, its own date and that
@@ -530,7 +533,7 @@ reads as its own text), so the owner's schedule, pay applications and PDF
 never print "Unassigned", and neither does the owner's bid PDF (lines with no
 package print without a heading; with the markup rows off their price stands on
 the one line, or on an unlabelled row under them); the internal reports (Buyout,
-the cost tree) and screens keep that row. Each built line credits **4050 Contract Revenue** and carries:
+the cost tree) and screens keep that row. Each built line credits **4050 Contract Revenue** (or, rebuilding a schedule whose lines all credit one account, that account) and carries:
 
 - **its section** — a work line carries the cost code its estimate lines
   carry, the code Accept budgets them on, so its billing lands on the section
@@ -560,7 +563,8 @@ contingency line is taxable when any line on the schedule
 
 Each of the three is editable per line in the grid. A line saved through the
 API without `revenue_account_id` or `is_taxable` keeps what it had (a new
-line: 4050 and taxable); a revenue account that is not an income account is
+line: taxable, and the account every line on the schedule credits, else
+4050; a row added in the grid starts on that account too); a revenue account that is not an income account is
 refused (422). A schedule built before this has no account on its lines (they
 post to 4050) and is taxable throughout, so it taxes as it always did. You
 can add, remove and reorder rows by hand and edit any value; a value may be
@@ -851,7 +855,8 @@ approve click.
   revenue side. The job-cost tree shows these in its **Changes** column.
   The change order's SOV line takes the cost code its lines share, else the
   lowest of them, and extends the schedule's line for that section: it takes
-  that line's **revenue account** (4050 Contract Revenue when there is none)
+  that line's **revenue account** (when there is none, the account every
+  line on the schedule credits, else 4050 Contract Revenue)
   and the next **item number**, so the pay-application PDF's Item column is
   filled. Its **Tax box** is the section's lines' when they agree; else that
   of the lines of the change order's package; else the schedule's — taxed
@@ -1281,7 +1286,7 @@ carries the cost code.
 | **Estimate accepted** | — | — | No entry. Seeds and locks the job budget (cost per section and cost type, revenue spread pro rata so it foots to the bid). |
 | **Contract built / schedule of values saved** | — | — | No entry. Each SOV line carries its section, its revenue account (4050 Contract Revenue unless changed) and its Tax box. |
 | **Owner deposit received** | the bank account chosen | 2210 Customer Deposits (job) | Held until a pay application applies it. |
-| **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, that section's revenue account else 4050, taxed as that section is; see *Change orders*); every kind writes budget rows of its own, in effect from its approved-on date (void deletes them). |
+| **Owner change order approved** (or voided) | — | — | No entry. A contract-funded one moves the contract sum and appends an SOV line (the change order's section, that section's revenue account, else the one every line on the schedule credits, else 4050, taxed as that section is; see *Change orders*); every kind writes budget rows of its own, in effect from its approved-on date (void deletes them). |
 | **Commitment issued; sub change order approved** | — | — | No entry. Committed cost on the job, by section and cost type. |
 | **Pay application approved** | 1100 Accounts Receivable for the net: total − retainage held + retainage released + sales tax (job; PA 1 of one job posted 102,111.87 − 10,211.19 + 5,410.23 tax = 97,310.91); 1150 Retainage Receivable for the retainage held this period (job) | each SOV line's **revenue account** (its own, else 4050 Contract Revenue) for this period plus the change in stored (job, section); 2200 Sales Tax Payable for the rate × the billing on **taxable** SOV lines (none on a *contractor pays* job) | A deduct line or a dropped retainage percent flips its leg to the other side; the entry still balances. **Stored materials** are revenue the period they are billed (no stored-material asset; the WIP entry adjusts any over-billing) and taxed with their line on a *charge the owner* job. |
 | … with a deposit applied | 2210 Customer Deposits | 1100 Accounts Receivable | A payment from the deposit, applied to the application's invoice. |

@@ -872,7 +872,11 @@ const JobsPage = {
         if (empty) body.innerHTML = '';
         const codes = JobsPage._sovCodes || [];
         const packages = TradePackages._list || [];
-        body.insertAdjacentHTML('beforeend', JobsPage.sovRowHtml({}, body.children.length, packages, codes));
+        // A job whose lines all credit one account (an upgraded job part-way
+        // through) starts the new row on it, so its revenue stays on one
+        // account; otherwise blank, 4050 Contract Revenue (#731).
+        const revenue = (JobsPage._contract || {}).new_line_revenue_account_id || null;
+        body.insertAdjacentHTML('beforeend', JobsPage.sovRowHtml({ revenue_account_id: revenue }, body.children.length, packages, codes));
         JobsPage.retotalSov();
     },
 
@@ -1478,7 +1482,7 @@ const JobsPage = {
         const empty = open && !(a.lines || []).length;
         // A draft or submitted application is deleted whatever its lines;
         // an approved one is voided.
-        if (open) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paDelete(${id}, ${empty})">Delete</button>`);
+        if (open) parts.push(`<button class="btn btn-sm btn-danger" data-write data-destructive onclick="JobsPage.paDelete(${id}, ${empty})">Delete</button>`);
         if (a.status === 'draft' && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paSubmit(${id})">Submit</button>`);
         if (open && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paApprove(${id})">Approve</button>`);
         // Void is for the latest approved application, its invoice unpaid.
@@ -1529,7 +1533,7 @@ const JobsPage = {
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">Pay application ${escapeHtml(a.number)}</h4>
             <p role="note" style="margin:0 0 8px">This pay application has no lines because it was made before the job had a schedule of values, so there is nothing on it to bill. Delete it, then make a new pay application from the schedule of values.</p>
             <div class="form-actions" data-write style="justify-content:flex-start;gap:8px">
-                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id}, true)">Delete this pay application</button>
+                <button type="button" class="btn btn-danger" data-write data-destructive onclick="JobsPage.paDelete(${a.id}, true)">Delete this pay application</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
             </div>
         </div>`;
@@ -1573,7 +1577,7 @@ const JobsPage = {
                 <button type="submit" class="btn btn-primary">Save</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.paSubmit(${a.id})">Submit</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.paApprove(${a.id})">Approve</button>
-                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id}, false)">Delete</button>
+                <button type="button" class="btn btn-danger" data-write data-destructive onclick="JobsPage.paDelete(${a.id}, false)">Delete</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
             </div>`}
         </form>`;

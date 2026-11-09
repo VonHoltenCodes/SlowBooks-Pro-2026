@@ -118,3 +118,19 @@ def test_field_ticket_and_estimate_write_buttons_are_marked_for_hiding():
     ):
         button = next(l for l in ft.splitlines() if handler in l and "<button" in l)
         assert "data-write" in button
+
+
+def test_a_pay_applications_delete_is_marked_for_hiding():
+    """Delete on an open pay application, on its row, in its form and on an
+    empty one, is hidden from a sign-in that cannot use it."""
+    app = (JS / "app.js").read_text(encoding="utf-8")
+    block = app[app.index("WRITE_ACTIONS:") : app.index("hideWriteControls(root)")]
+    assert "'JobsPage.paDelete'" in block
+    jobs = (JS / "jobs.js").read_text(encoding="utf-8")
+    buttons = [
+        line
+        for line in jobs.splitlines()
+        if "JobsPage.paDelete(" in line and "<button" in line
+    ]
+    assert len(buttons) == 3
+    assert all("data-write" in b for b in buttons), buttons

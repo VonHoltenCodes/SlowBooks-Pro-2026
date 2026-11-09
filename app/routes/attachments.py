@@ -17,6 +17,13 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.attachments import Attachment
+from app.models.bills import Bill
+from app.models.contacts import Customer, Vendor
+from app.models.estimates import Estimate
+from app.models.field_tickets import FieldTicket
+from app.models.invoices import Invoice
+from app.models.purchase_orders import PurchaseOrder
+from app.models.vendor_credits import VendorCredit
 from app.models.transactions import Transaction
 from app.schemas.attachments import AttachmentResponse
 from app.services import file_store
@@ -115,10 +122,24 @@ def _entity_type(entity_type: str) -> str:
     return type_dir
 
 
+# The table a record type's id is a row of, and the record's name in the
+# 404. A register entry, an expense and a journal entry are transactions,
+# checked by their source below.
+_RECORD_TABLES = {
+    "invoice": (Invoice, "Invoice"),
+    "bill": (Bill, "Bill"),
+    "estimate": (Estimate, "Estimate"),
+    "purchase_order": (PurchaseOrder, "Purchase order"),
+    "vendor_credit": (VendorCredit, "Vendor credit"),
+    "vendor": (Vendor, "Vendor"),
+    "customer": (Customer, "Customer"),
+    "field_ticket": (FieldTicket, "Field ticket"),
+}
+
+
 def _check_record(db: Session, entity_type: str, entity_id: int) -> None:
     """A register entry's id must be a register entry's: 404 for any other
-    transaction (an invoice's posting, a transfer) or none at all. The other
-    types are not checked, so a void entry still takes a file, as they do."""
+    transaction (an invoice's posting, a transfer) or none at all."""
     if entity_type != "bank_entry":
         return
     found = (
@@ -128,6 +149,28 @@ def _check_record(db: Session, entity_type: str, entity_id: int) -> None:
     )
     if not found:
         raise HTTPException(status_code=404, detail="Bank entry not found")
+
+
+def _check_upload_record(db: Session, entity_type: str, entity_id: int) -> None:
+    """A file is attached only to a record that is there: 404 otherwise. A
+    file accepted for a record not yet made was shown on the next record
+    given that id (a field ticket's, #731). Existence only: a void record
+    still takes a file. An expense or a journal entry is a transaction of
+    its kind."""
+    _check_record(db, entity_type, entity_id)
+    if entity_type in ("expense", "journal_entry"):
+        query = db.query(Transaction.id).filter(Transaction.id == entity_id)
+        if entity_type == "expense":
+            query = query.filter(Transaction.source_type == "expense")
+        if query.first() is None:
+            label = "Expense" if entity_type == "expense" else "Journal entry"
+            raise HTTPException(status_code=404, detail=f"{label} not found")
+        return
+    if entity_type not in _RECORD_TABLES:
+        return
+    table, label = _RECORD_TABLES[entity_type]
+    if db.query(table.id).filter(table.id == entity_id).first() is None:
+        raise HTTPException(status_code=404, detail=f"{label} not found")
 
 
 def _record_attachment(db: Session, attachment_id: int) -> Attachment | None:
@@ -155,7 +198,7 @@ async def upload_attachment(
     db: Session = Depends(get_db),
 ):
     _entity_type(entity_type)
-    _check_record(db, entity_type, entity_id)
+    _check_upload_record(db, entity_type, entity_id)
 
     safe_filename = _sanitize_filename(file.filename or "")
     extension = Path(safe_filename).suffix.lower()

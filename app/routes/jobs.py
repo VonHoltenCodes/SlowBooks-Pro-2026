@@ -48,6 +48,7 @@ from app.services.contracts import (
     contract_is_locked,
     contract_summary,
     settle_contract_type,
+    shared_revenue_account_id,
     sync_contingency_line,
 )
 from app.services.estimating import estimate_totals
@@ -437,6 +438,7 @@ def _contract_response(db: Session, job: Job) -> ContractResponse:
     return ContractResponse(
         contract=ContractSummary(**contract_summary(db, job)),
         sov=_sov_responses(job),
+        new_line_revenue_account_id=shared_revenue_account_id(job.sov_lines),
     )
 
 
@@ -679,10 +681,13 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
     )
 
     billed = billed_completed_by_sov_line(db, job.id)
+    # A new line sent without an account takes the one every line on the
+    # schedule credits, read before the save changes them (#731).
+    shared = shared_revenue_account_id(job.sov_lines)
     if billed:
-        _save_sov_with_billings(db, job, data.lines, kept, billed)
+        _save_sov_with_billings(db, job, data.lines, kept, billed, shared)
     else:
-        _save_sov_replace(db, job, data.lines, kept)
+        _save_sov_replace(db, job, data.lines, kept, shared)
     # A schedule of values makes the sum billable: with no contract type saved
     # it is taken as a lump sum and its original stamped, as building from an
     # estimate does (#723).
@@ -695,15 +700,16 @@ def save_sov(job_id: int, data: SovSave, db: Session = Depends(get_db)):
     )
 
 
-def _sov_mapping(line, row) -> dict:
+def _sov_mapping(line, row, shared=None) -> dict:
     """A saved line's revenue account and taxable flag: what the request
-    sent, else what the existing line `row` had, else no account (4050 at
-    posting) and taxed."""
+    sent, else what the existing line `row` had, else for a new line the
+    account `shared` every line on the schedule credits, else no account
+    (4050 at posting); and taxed."""
     sent = line.model_fields_set
     if "revenue_account_id" in sent:
         revenue = line.revenue_account_id
     else:
-        revenue = row.revenue_account_id if row is not None else None
+        revenue = row.revenue_account_id if row is not None else shared
     if "is_taxable" in sent and line.is_taxable is not None:
         taxable = line.is_taxable
     else:
@@ -711,7 +717,7 @@ def _sov_mapping(line, row) -> dict:
     return {"revenue_account_id": revenue, "is_taxable": taxable}
 
 
-def _save_sov_replace(db: Session, job: Job, lines, kept) -> None:
+def _save_sov_replace(db: Session, job: Job, lines, kept, shared=None) -> None:
     """Full replace of the non change-order lines (no billings to protect)."""
     old = {
         r.id: r
@@ -719,7 +725,7 @@ def _save_sov_replace(db: Session, job: Job, lines, kept) -> None:
             SovLine.job_id == job.id, SovLine.kind != "change_order"
         )
     }
-    mapping = [_sov_mapping(line, old.get(line.id)) for line in lines]
+    mapping = [_sov_mapping(line, old.get(line.id), shared) for line in lines]
     db.query(SovLine).filter(
         SovLine.job_id == job.id, SovLine.kind != "change_order"
     ).delete()
@@ -746,7 +752,9 @@ def _save_sov_replace(db: Session, job: Job, lines, kept) -> None:
         co_line.line_no = n
 
 
-def _save_sov_with_billings(db: Session, job: Job, lines, kept, billed) -> None:
+def _save_sov_with_billings(
+    db: Session, job: Job, lines, kept, billed, shared=None
+) -> None:
     """Save the schedule while a pay application has billed it: update a
     billed line in place by id (never dropping it or shrinking it below its
     billed completed_to_date), add new lines, drop only unbilled ones (#555)."""
@@ -807,7 +815,7 @@ def _save_sov_with_billings(db: Session, job: Job, lines, kept, billed) -> None:
                     cost_code_id=line.cost_code_id,
                     kind=line.kind,
                     scheduled_value=line.scheduled_value,
-                    **_sov_mapping(line, None),
+                    **_sov_mapping(line, None, shared),
                 )
             )
     for line_id, row in existing.items():
