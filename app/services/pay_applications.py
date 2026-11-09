@@ -15,10 +15,12 @@
 # billed to income equals completed_to_date.
 # ============================================================================
 
+from contextlib import contextmanager
 from decimal import Decimal
 
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy import event
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.services.accounting import _q
 
@@ -172,16 +174,25 @@ def application_totals(
 # ── History (earlier APPROVED applications, read live) ──────────────────────
 
 
-def _approved(db: Session, job_id: int, before_no=None, as_of=None):
+def _approved(db: Session, job_id: int, before_no=None, as_of=None, lines=False):
     """This job's approved applications, oldest first; optionally only those
     numbered below `before_no` (an application's own history excludes it) or
-    dated on or before `as_of` (a report reading the books as of a date)."""
+    dated on or before `as_of` (a report reading the books as of a date).
+    `lines` loads each one's lines and invoice with it."""
     from app.models.pay_applications import PayApplication
 
     q = db.query(PayApplication).filter(
         PayApplication.job_id == job_id,
         PayApplication.status == "approved",
     )
+    if lines:
+        # The history walks every application's lines and invoice: lazy, that
+        # was a query per earlier application each time an application's
+        # figures were read (#731).
+        q = q.options(
+            selectinload(PayApplication.lines),
+            joinedload(PayApplication.invoice),
+        )
     if before_no is not None:
         q = q.filter(PayApplication.application_no < before_no)
     if as_of is not None:
@@ -189,7 +200,111 @@ def _approved(db: Session, job_id: int, before_no=None, as_of=None):
     return q.order_by(PayApplication.application_no).all()
 
 
+# ── One history pass per read ───────────────────────────────────────────────
+#
+# Reading one application's figures asks for the same history a dozen times
+# (its previous, its stored, the carried lines, the totals, the retainage
+# held, the warnings, the contract sums), and each pass walks every earlier
+# approved application: the 16th application of a job took three times as
+# long to edit as on 2.31.10 (#731). Inside `history_cache(db)` a pass is
+# kept by (job, before_no, as_of) and reused, and any write drops it: a
+# flush, a commit or rollback, a bulk UPDATE/DELETE or raw SQL, and the
+# session holding unflushed changes all mean the next read walks again.
+
+_HISTORY_CACHE = "pay_application_history"
+_HISTORY_DEPTH = "pay_application_history_depth"
+
+
+@contextmanager
+def history_cache(db: Session):
+    """Reuse history passes for the duration of a read (nests)."""
+    depth = db.info.get(_HISTORY_DEPTH, 0)
+    db.info[_HISTORY_DEPTH] = depth + 1
+    if depth == 0:
+        db.info[_HISTORY_CACHE] = {}
+    try:
+        yield
+    finally:
+        db.info[_HISTORY_DEPTH] = depth
+        if depth == 0:
+            db.info.pop(_HISTORY_CACHE, None)
+
+
+def _drop_history_cache(session, *_args) -> None:
+    cache = session.info.get(_HISTORY_CACHE)
+    if cache:
+        cache.clear()
+
+
+for _event in ("after_flush", "after_commit", "after_rollback", "after_soft_rollback"):
+    event.listen(Session, _event, _drop_history_cache)
+
+
+@event.listens_for(Session, "do_orm_execute")
+def _drop_history_cache_on_write(state) -> None:
+    if not state.is_select:
+        _drop_history_cache(state.session)
+
+
+def _pending_changes(db: Session) -> bool:
+    """Unflushed changes to anything a history pass reads (the applications,
+    their lines and invoices, the SOV lines' tax flags, the job and its
+    customer). Others, such as the audit rows a flush leaves to the next one,
+    do not change a pass."""
+    from app.models.contacts import Customer
+    from app.models.invoices import Invoice
+    from app.models.jobs import Job, SovLine
+    from app.models.pay_applications import PayApplication, PayApplicationLine
+
+    read = (PayApplication, PayApplicationLine, Invoice, SovLine, Job, Customer)
+    return any(
+        isinstance(obj, read) for objs in (db.new, db.deleted, db.dirty) for obj in objs
+    )
+
+
+def _copy_history(h: dict) -> dict:
+    """A caller's own copy: the line maps are dicts a caller may change."""
+    return {k: dict(v) if isinstance(v, dict) else v for k, v in h.items()}
+
+
 def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
+    """`_history_pass`, reused inside `history_cache` while nothing has been
+    written since (see above)."""
+    cache = db.info.get(_HISTORY_CACHE)
+    if cache is None:
+        return _history_pass(db, job_id, before_no, as_of)
+    key = (job_id, before_no, as_of)
+    if key in cache and not _pending_changes(db):
+        return _copy_history(cache[key])
+    h = _history_pass(db, job_id, before_no, as_of)
+    # the pass's query flushed whatever was pending; a session that still
+    # holds changes (autoflush off) keeps nothing
+    if not _pending_changes(db):
+        cache[key] = h
+    return _copy_history(h)
+
+
+def _history_pass(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
+    return _history_walk(db, job_id, before_no, as_of)[0]
+
+
+def prime_history(db: Session, job_id: int, before_nos) -> None:
+    """Inside `history_cache`, fill the cache for every application numbered
+    in `before_nos` (and the whole job) from ONE walk: a list of the job's
+    applications reads each one's history, and each is a prefix of the
+    next's, so walking them one by one was quadratic (#731)."""
+    cache = db.info.get(_HISTORY_CACHE)
+    if cache is None or _pending_changes(db):
+        return
+    final, snapshots = _history_walk(db, job_id, stops=before_nos)
+    if _pending_changes(db):
+        return
+    cache[(job_id, None, None)] = final
+    for no, h in snapshots.items():
+        cache[(job_id, no, None)] = h
+
+
+def _history_walk(db: Session, job_id: int, before_no=None, as_of=None, stops=()):
     """One oldest-first pass over this job's approved applications numbered
     below `before_no` (all of them when None). Accumulates, with the pure
     `application_totals` and no recursion, the state an application reads from
@@ -207,7 +322,10 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
       the tax their invoices charged, for a completing application's true-up.
 
     One pass keeps the list and the next approve linear, not exponential — the
-    old code recursed into application_figures per prior (#555 review)."""
+    old code recursed into application_figures per prior (#555 review).
+
+    Returns that state and, for each application number in `stops`, the
+    state its own history reads (the applications numbered below it)."""
     previous: dict = {}
     stored: dict = {}
     prev_ret = _ZERO
@@ -216,14 +334,35 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
     billed = _ZERO
     tax_exact = _ZERO
     tax_billed = _ZERO
-    for app in _approved(db, job_id, before_no, as_of=as_of):
+    apps = _approved(db, job_id, before_no, as_of=as_of, lines=True)
+    taxable = sov_lines_taxable(
+        db, {ln.sov_line_id for app in apps for ln in app.lines}
+    )
+    pending_stops = sorted(set(stops))
+    snapshots = {}
+
+    def state():
+        return {
+            "previous": dict(previous),
+            "stored": dict(stored),
+            "prev_retainage": prev_ret,
+            "prev_released": prev_released,
+            "prev_applications": prev_cert,
+            "billed": billed,
+            "tax_exact": tax_exact,
+            "tax_billed": tax_billed,
+        }
+
+    for app in apps:
+        while pending_stops and pending_stops[0] <= app.application_no:
+            snapshots[pending_stops.pop(0)] = state()
         rows = [
             _Row(
                 scheduled_value=ln.scheduled_value,
                 previous=previous.get(ln.sov_line_id, _ZERO),
                 this_period=ln.this_period,
                 stored=ln.stored,
-                is_taxable=sov_line_taxable(db, ln.sov_line_id),
+                is_taxable=taxable.get(ln.sov_line_id, True),
                 prior_stored=stored.get(ln.sov_line_id, _ZERO),
             )
             for ln in app.lines
@@ -257,16 +396,9 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
         # nor at a rate of 0)
         if totals["tax_rate"] and app.invoice is not None:
             tax_billed = _q(tax_billed + _q(app.invoice.tax_amount))
-    return {
-        "previous": previous,
-        "stored": stored,
-        "prev_retainage": prev_ret,
-        "prev_released": prev_released,
-        "prev_applications": prev_cert,
-        "billed": billed,
-        "tax_exact": tax_exact,
-        "tax_billed": tax_billed,
-    }
+    for no in pending_stops:
+        snapshots[no] = state()
+    return state(), snapshots
 
 
 def previous_by_sov_line(db: Session, job_id: int, before_no=None) -> dict:
@@ -567,6 +699,23 @@ def sov_line_taxable(db: Session, sov_line_id) -> bool:
 
     sov = db.get(SovLine, sov_line_id) if sov_line_id else None
     return True if sov is None else bool(sov.is_taxable)
+
+
+def sov_lines_taxable(db: Session, sov_line_ids) -> dict:
+    """SOV line id → whether it is taxable, for many lines in one query (what
+    sov_line_taxable answers one line at a time). An id with no SOV line is
+    absent, and reads as taxed through `.get(id, True)`, as there."""
+    from app.models.jobs import SovLine
+
+    ids = {i for i in sov_line_ids if i}
+    if not ids:
+        return {}
+    return {
+        sov_id: bool(flag)
+        for sov_id, flag in db.query(SovLine.id, SovLine.is_taxable).filter(
+            SovLine.id.in_(ids)
+        )
+    }
 
 
 class _Row:
