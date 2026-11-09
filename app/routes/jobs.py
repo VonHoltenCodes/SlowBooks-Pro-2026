@@ -121,7 +121,11 @@ def list_jobs(
     return [_to_response(j) for j in rows]
 
 
-@router.get("/profitability", response_model=list[JobSummary])
+@router.get(
+    "/profitability",
+    response_model=list[JobSummary],
+    dependencies=[Depends(refuse_unknown_filters)],
+)
 def jobs_profitability(
     start_date: Optional[date] = Query(default=None),
     end_date: Optional[date] = Query(default=None),

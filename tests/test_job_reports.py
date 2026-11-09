@@ -1972,6 +1972,7 @@ _ROUTES = (
     "/api/reports/job-profitability/csv",
     "/api/reports/job-profitability/pdf",
     "/api/reports/job-profitability/print",
+    "/api/jobs/profitability",
     "/api/jobs/budget-vs-actual",
     "/api/reports/job-budget-vs-actual/csv",
     "/api/reports/job-budget-vs-actual/pdf",
