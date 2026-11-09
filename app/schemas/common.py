@@ -287,6 +287,31 @@ def _check_discount(value):
 Discount = Annotated[Decimal, AfterValidator(_check_discount)]
 
 
+# A payment's money is kept in cents (#747). A finer amount was rounded per
+# allocation when stored: two 0.005 allocations passed "allocations exceed
+# payment" against a 0.01 payment, were stored as 0.01 each, and a void left
+# the invoice a cent short. Refuse it, as discounts are. A float a browser
+# computed (cents / 100) can carry binary noise far below a cent; that much
+# is a cent, anything coarser is refused.
+_CENT = Decimal("0.01")
+_FLOAT_NOISE = Decimal("0.000000001")
+
+
+def _check_whole_cents(value):
+    if value is None:
+        return value
+    d = value if isinstance(value, Decimal) else Decimal(str(value))
+    if not d.is_finite():
+        raise ValueError("An amount must be a number.")
+    if abs(d - d.quantize(_CENT, rounding=ROUND_HALF_UP)) > _FLOAT_NOISE:
+        raise ValueError(f"An amount is in whole cents; {d.normalize():f} isn't.")
+    return value
+
+
+WholeCents = Annotated[Decimal, AfterValidator(_check_whole_cents)]
+WholeCentsFloat = Annotated[float, AfterValidator(_check_whole_cents)]
+
+
 # A row id a request carries, for a column stored as a signed 64-bit integer.
 # StrictInt refuses a bool (``true`` was read as id 1) and a string; the
 # bounds keep an id out of the range that overflowed SQLite with a 500

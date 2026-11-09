@@ -16,6 +16,7 @@ from app.schemas.common import (
     StrictModel,
     TaxRateFloat,
     TaxRateOut,
+    WholeCentsFloat,
     clean_line_cost_type,
     validate_non_negative_line,
     quantity_text,
@@ -261,7 +262,7 @@ class BillResponse(BaseModel):
 
 class BillPaymentAllocationCreate(StrictModel):
     bill_id: int
-    amount: float
+    amount: WholeCentsFloat
     # An early-payment discount we took on this bill (#664), on top of
     # `amount`: posted to the payment's discount_account_id.
     discount: Discount = Decimal("0")
@@ -270,7 +271,7 @@ class BillPaymentAllocationCreate(StrictModel):
 class BillPaymentCreate(StrictModel):
     vendor_id: int
     date: dt_date
-    amount: float
+    amount: WholeCentsFloat
     method: Optional[str] = None
     check_number: Optional[str] = None
     pay_from_account_id: Optional[int] = None

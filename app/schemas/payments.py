@@ -3,12 +3,12 @@ from decimal import Decimal
 from typing import Optional
 
 from pydantic import BaseModel, Field, StrictBool
-from app.schemas.common import Discount, StrictId, StrictModel
+from app.schemas.common import Discount, StrictId, StrictModel, WholeCents
 
 
 class PaymentAllocationCreate(StrictModel):
     invoice_id: int
-    amount: Decimal
+    amount: WholeCents
     # An early-payment discount the customer took on this invoice (#664),
     # on top of `amount`: posted to the payment's discount_account_id.
     # Taken when the payment is received, not when a remainder is applied.
@@ -34,7 +34,7 @@ class PaymentAllocationResponse(BaseModel):
 class PaymentCreate(StrictModel):
     customer_id: int
     date: dt_date
-    amount: Decimal
+    amount: WholeCents
     method: Optional[str] = None
     check_number: Optional[str] = None
     reference: Optional[str] = None
