@@ -591,8 +591,12 @@ def sov_balance_warnings(job) -> list[str]:
 def application_warnings(db: Session, app) -> list[str]:
     """Sentences for an open or approved pay application that will quietly do
     less than it looks like: a schedule of values that does not foot to the
-    contract sum, and taxable lines billed at a tax rate of 0 on a job where
-    the owner is charged tax."""
+    contract sum, and, while the application can still change, taxable lines
+    billed at a tax rate of 0 on a job where the owner is charged tax. Once
+    approved its tax stands, so the sentence that says where to set the rate
+    is not repeated on it: the upgrade that made every existing line taxable
+    would otherwise flag every approved application a contractor had billed
+    at a rate of 0 (2.31.11 gate, the Mac's question)."""
     if app.status == "void":
         return []
     warnings = sov_balance_warnings(app.job) if app.job is not None else []
@@ -600,7 +604,8 @@ def application_warnings(db: Session, app) -> list[str]:
     from app.services.contracts import contractor_pays_tax
 
     taxed = (
-        app.charge_tax
+        app.status in ("draft", "submitted")
+        and app.charge_tax
         and not (customer is not None and customer.is_taxable is False)
         and not contractor_pays_tax(app.job)
     )

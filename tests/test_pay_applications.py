@@ -2784,6 +2784,35 @@ def test_taxable_lines_at_a_tax_rate_of_0_warn_where_to_set_the_rate(
     assert any("tax rate of 0" in w for w in r.json()["warnings"])
 
 
+def test_an_approved_application_no_longer_says_where_to_set_the_rate(
+    client, seed_accounts, seed_customer
+):
+    """2.31.11 gate, the Mac's question: a job upgraded with approved
+    applications at a tax rate of 0 showed the tax-rate sentence on each of
+    them, though an approved application cannot be changed. The sentence is
+    for an application that can still take a rate; once approved, its tax
+    stands and it says nothing."""
+    job, _saved, sov = _setup(client, seed_customer.id, [TAXABLE], 60000)
+    app = _new_app_2(client, job["id"])
+    assert any("tax rate of 0" in w for w in app["warnings"])
+    r = client.put(
+        f"/api/pay-applications/{app['id']}",
+        json={"lines": [{"sov_line_id": sov[0]["id"], "this_period": 59000}]},
+    )
+    assert r.status_code == 200, r.text
+    assert any("tax rate of 0" in w for w in r.json()["warnings"])
+    r = client.post(f"/api/pay-applications/{app['id']}/approve")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "approved"
+    assert not any("tax rate of 0" in w for w in r.json()["warnings"]), r.json()
+    r = client.get(f"/api/pay-applications/{app['id']}")
+    assert r.status_code == 200
+    assert not any("tax rate of 0" in w for w in r.json()["warnings"]), r.json()
+    # the next application on the job, open, says it again
+    nxt = _new_app_2(client, job["id"])
+    assert any("tax rate of 0" in w for w in nxt["warnings"]), nxt["warnings"]
+
+
 def test_no_tax_warning_when_no_line_is_taxable(client, seed_accounts, seed_customer):
     line = {**TAXABLE, "is_taxable": False}
     job, _saved, _sov = _setup(client, seed_customer.id, [line], 60000)
