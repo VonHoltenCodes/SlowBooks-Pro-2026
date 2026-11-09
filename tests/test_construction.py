@@ -13,8 +13,12 @@ from pathlib import Path
 import pytest
 
 from app.services.accounting import CONSTRUCTION_ACCOUNTS
-from app.services.cost_code_catalog import DIVISIONS, SECTIONS, TRADE_PACKAGES
-from app.services.cost_code_catalog import normalize_code
+from app.services.cost_code_catalog import (
+    DIVISIONS,
+    SECTIONS,
+    TRADE_PACKAGES,
+    normalize_code,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 JS = ROOT / "app/static/js"
@@ -219,3 +223,71 @@ def test_settings_offers_construction_and_runs_setup_on_switch():
     s = (JS / "settings.js").read_text(encoding="utf-8")
     assert '<option value="construction"' in s
     assert "/construction/setup" in s
+
+
+def _job(client, customer_id, name="Tower", **extra):
+    r = client.post(
+        "/api/jobs", json={"customer_id": customer_id, "name": name, **extra}
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def _message(r) -> str:
+    """A 422's sentence, from an HTTPException detail or a schema error."""
+    body = r.json()
+    detail = body.get("detail")
+    if isinstance(detail, list):
+        return " ".join(e.get("message", "") for e in detail)
+    return detail if isinstance(detail, str) else str(detail)
+
+
+def _construction(client):
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+
+
+@pytest.fixture
+def con(client):
+    _construction(client)
+    return client
+
+
+def test_validation_sentences_name_the_field_and_its_choices_by_label(
+    con, seed_customer
+):
+    """ "Sales_tax_treatment must be charge_owner …" and "Line 1:
+    Line_type must be one of labor, equipment, material, ot…"."""
+    job = _job(con, seed_customer.id)
+    r = con.put(
+        f"/api/jobs/{job['id']}/contract", json={"sales_tax_treatment": "owner"}
+    )
+    assert r.status_code == 422, r.text
+    assert _message(r) == (
+        "Sales tax must be Charge sales tax to the owner or Contractor pays tax "
+        "on materials."
+    )
+    assert "sales_tax_treatment is one of" in r.json()["detail"][0]["msg"]
+    r = con.post(
+        "/api/field-tickets",
+        json={"job_id": job["id"], "lines": [{"line_type": "labour", "quantity": 1}]},
+    )
+    assert r.status_code == 422, r.text
+    assert (
+        _message(r) == "Line 1: Line type must be Labor, Equipment, Material or Other."
+    )
+    for url, body, label in (
+        ("/api/field-tickets", {"job_id": job["id"], "kind": "slip"}, "Kind"),
+        ("/api/change-orders", {"job_id": job["id"], "funding": "x"}, "Funding"),
+        (
+            f"/api/jobs/{job['id']}/contract",
+            {"contract_type": "fixed"},
+            "Contract type",
+        ),
+        (f"/api/jobs/{job['id']}/contract", {"retainage_pct": 150}, "Retainage"),
+    ):
+        r = con.request("PUT" if "contract" in url else "POST", url, json=body)
+        assert r.status_code == 422, (url, r.text)
+        message = _message(r)
+        assert message.startswith(label + " must be"), message
+        assert "_" not in message, message

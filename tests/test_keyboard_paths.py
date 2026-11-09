@@ -289,7 +289,7 @@ def test_the_drill_downs_position_is_a_live_status_with_the_account():
     )
 
 
-# ── Review, round 2: Back is inert over a form ───────────────────────────
+# ── Review: Back is inert over a form ───────────────────────────
 
 
 def test_back_is_inert_over_a_dialog_with_no_address_of_its_own():
@@ -333,7 +333,7 @@ def test_back_is_inert_over_a_dialog_with_no_address_of_its_own():
         assert "openModal(" in src[at - 200 : at], name
 
 
-# ── Review, round 2: a replaced address keeps the entry's state ──────────
+# ── Review: a replaced address keeps the entry's state ──────────
 
 
 def test_a_replaced_address_keeps_the_entrys_state_and_the_button_follows():
@@ -357,7 +357,7 @@ def test_a_replaced_address_keeps_the_entrys_state_and_the_button_follows():
     assert "if (location.hash !== '#/settings') App.stayPut();" in _src("settings.js")
 
 
-# ── Review, round 2: the nits ────────────────────────────────────────────
+# ── Review: the nits ────────────────────────────────────────────
 
 
 def test_an_unchecked_radio_group_is_one_stop_its_first_radio():
@@ -383,7 +383,7 @@ def test_the_shortcut_list_follows_the_screen_reader_bullets():
     )
 
 
-# ── Review, round 3: a declined leave goes back to its entry ─────────────
+# ── Review: a declined leave goes back to its entry ─────────────
 
 
 def test_a_declined_leave_goes_back_to_the_entry_it_left():
@@ -403,7 +403,7 @@ def test_a_declined_leave_goes_back_to_the_entry_it_left():
     assert "if (location.hash !== '#/settings') App.stayPut();" in _src("settings.js")
 
 
-# ── Round 3, NEW-42: Back is a bordered gold button that reads "← Back" ──
+# ── NEW-42: Back is a bordered gold button that reads "← Back" ──
 
 
 def test_back_is_a_bordered_gold_button_in_both_themes():
@@ -438,7 +438,7 @@ def test_back_is_a_bordered_gold_button_in_both_themes():
     assert "border-color: transparent;" in off and "color: var(--text-muted);" in off
 
 
-# ── Round 3, NEW-43: focus is visible on every control, by keyboard only ─
+# ── NEW-43: focus is visible on every control, by keyboard only ─
 
 
 def _rule(css, head, last=False):
@@ -497,7 +497,7 @@ def test_focus_is_visible_on_every_control_by_keyboard_only():
     assert "A field keeps its own focus style" in docs
 
 
-# ── Round 3 review: the ring is two colours, and a control's own ring wins ─
+# ── Review: the ring is two colours, and a control's own ring wins ─
 
 
 def test_the_generic_ring_counts_for_nothing_against_a_controls_own():
@@ -680,7 +680,7 @@ def test_a_sidebar_link_draws_the_ring_inside_its_edge():
     assert "--focus-halo: #080c14;" in _rule(dark, '[data-theme="dark"] #sidebar {')
 
 
-# ── Round 3, NEW-44: a page's Notes box saves only a change ──────────────
+# ── NEW-44: a page's Notes box saves only a change ──────────────
 
 
 def test_a_pages_notes_box_saves_only_a_change():
@@ -731,7 +731,7 @@ def test_a_pages_notes_box_saves_only_a_change():
         assert f"{page}._noteTimers[id] = setTimeout(" in status, name
 
 
-# ── Round 3, W-7: Back refocuses the chart's account and the drill-down's line ──
+# ── W-7: Back refocuses the chart's account and the drill-down's line ──
 
 
 def test_back_refocuses_the_charts_account_link_and_the_drill_downs_line():
@@ -775,7 +775,7 @@ def test_back_refocuses_the_charts_account_link_and_the_drill_downs_line():
     )
 
 
-# ── Round 3 review, Q6: every row hop keys on the element clicked ────────
+# ── Review, Q6: every row hop keys on the element clicked ────────
 
 
 def test_every_row_hop_passes_the_element_clicked():
@@ -926,7 +926,7 @@ def test_every_field_takes_a_fields_look_and_focus_style():
     look of its own wins) and a field's focus style over every look (last
     in the sheet), in both themes; with the system's high-contrast colours
     the system's highlight is its ring. The dark theme's focus for a form's
-    own text box outranks the light one again (round 3 had given the light
+    own text box outranks the light one again (the light
     rule two :not()s, and the pale ground showed in the dark theme)."""
     css = (ROOT / "app/static/css/style.css").read_text(encoding="utf-8")
     dark = (ROOT / "app/static/css/dark.css").read_text(encoding="utf-8")
@@ -1211,7 +1211,7 @@ def test_a_wide_table_with_no_control_takes_tab_itself():
 
 
 def test_focus_the_app_moves_for_the_keyboard_says_so_outright():
-    """NEW-43, round 3: WebKit counts focus moved in script as the
+    """NEW-43: WebKit counts focus moved in script as the
     keyboard's — and draws the ring — only when the focus before it was the
     keyboard's, so in a dialog opened with a click Tab moved focus with no
     ring. focusFor says it outright where the keyboard moved it."""

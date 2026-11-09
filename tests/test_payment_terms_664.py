@@ -944,7 +944,7 @@ def test_settings_keeps_the_terms_list():
     assert "API.put(`/payment-terms/${id}`, { is_active: active })" in settings
 
 
-# ── the skeptic passes (#665 review): what they found ───────────────────
+# ── what the #665 review found ───────────────────
 
 
 def _receive_one(

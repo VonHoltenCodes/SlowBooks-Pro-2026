@@ -1,5 +1,4 @@
-"""Construction overhaul, workstream D: estimates, commitments, buyout and job
-status.
+"""Estimates, commitments, buyout and job status.
 
 Convert refuses a contract job; Mark lost; Accept awards a pending job and the
 first approved pay application starts it; an unknown PO status is a 422;
@@ -10,9 +9,18 @@ their lowest section code; insurance and bond budget as cost; the seeded
 sections and a new section's default package.
 """
 
+from datetime import date
 from decimal import Decimal
 
+import pytest
+
+from app.models.bills import Bill, BillStatus
+from app.models.contacts import Vendor
 from app.models.job_costing import JobBudget
+from app.models.jobs import Job
+from app.models.purchase_orders import POStatus, PurchaseOrder
+from app.services import job_reports
+from tests.test_wip_schedule_post import _job as _wip_job
 
 
 def _set_construction(client):
@@ -648,3 +656,215 @@ def test_mark_lost_validates_its_body(client, seed_customer):
         assert client.post(url, json=bad).status_code == 422, bad
     assert client.get(f"/api/estimates/{est['id']}").json()["status"] == "pending"
     assert client.post(url, json={"reason": "x" * 500}).status_code == 200
+
+
+def test_buyout_leaves_retainage_release_bills_out_of_billed(db_session, seed_accounts):
+    from app.models.contacts import Customer
+
+    customer = Customer(name="Owner Co")
+    db_session.add(customer)
+    db_session.flush()
+    job = Job(customer_id=customer.id, name="Releases", status="in_progress")
+    vendor = Vendor(name="Sub Co")
+    db_session.add_all([job, vendor])
+    db_session.flush()
+    po = PurchaseOrder(
+        po_number="SC-1",
+        vendor_id=vendor.id,
+        status=POStatus.SENT,
+        date=date(2026, 2, 1),
+        job_id=job.id,
+        subtotal=Decimal("20000"),
+        commitment_type="subcontract",
+    )
+    db_session.add(po)
+    db_session.flush()
+
+    def bill(number, subtotal, when, released="0"):
+        db_session.add(
+            Bill(
+                bill_number=number,
+                vendor_id=vendor.id,
+                status=BillStatus.UNPAID,
+                po_id=po.id,
+                job_id=job.id,
+                date=when,
+                subtotal=Decimal(subtotal),
+                total=Decimal(subtotal),
+                balance_due=Decimal(subtotal),
+                retainage_held=Decimal("0"),
+                retainage_released=Decimal(released),
+            )
+        )
+
+    bill("S-1", "9000", date(2026, 3, 1))
+    bill("S-2", "9000", date(2026, 4, 1))
+    # the release pays retainage already inside the two bills above
+    bill("REL-1", "1800", date(2026, 5, 1), released="1800")
+    db_session.commit()
+
+    for day in (date(2026, 4, 15), date(2026, 6, 1)):
+        buy = job_reports.buyout_report(db_session, as_of=day)["totals"]
+        status = job_reports.commitment_status(db_session, as_of=day)["totals"]
+        assert buy["billed_to_date"] == status["billed"] == 18000.0
+        assert buy["committed_remaining"] == status["remaining"] == 2000.0
+
+
+def _allowance_job(client, customer_id):
+    """Concrete 40,000 (package Concrete), a 25,000 Finishes allowance on code
+    09 60 00 (mapped to package Flooring, line has no package) and an accepted
+    -6,000 deduct alternate on 09 30 00 (in no package). The SOV is built."""
+    c = _section(client, "03 30 00", "Concrete")
+    f = _section(client, "09 60 00", "Flooring")
+    d = _section(client, "09 30 00", "Tile")
+    pc = _package(client, "Concrete", [c["id"]])
+    pf = _package(client, "Flooring", [f["id"]])
+    job = _job(client, customer_id)
+    est = _estimate(
+        client,
+        customer_id,
+        [
+            {
+                "description": "Slab",
+                "quantity": 1,
+                "rate": 0,
+                "unit_cost": 40000,
+                "cost_code_id": c["id"],
+                "trade_package_id": pc["id"],
+            },
+            {
+                "description": "Finishes allowance",
+                "quantity": 1,
+                "rate": 25000,
+                "line_kind": "allowance",
+                "cost_code_id": f["id"],
+            },
+            {
+                "description": "Deduct tile",
+                "quantity": 1,
+                "rate": -6000,
+                "unit_cost": -6000,
+                "line_kind": "alternate",
+                "alternate_accepted": True,
+                "cost_code_id": d["id"],
+            },
+        ],
+        job_id=job["id"],
+    )
+    r = client.post(f"/api/estimates/{est['id']}/accept", json={})
+    assert r.status_code == 200, r.text
+    r = client.post(f"/api/jobs/{job['id']}/contract/from-estimate/{est['id']}")
+    assert r.status_code == 200, r.text
+    allowance = next(s for s in r.json()["sov"] if s["kind"] == "allowance")
+    return job, allowance["id"], f, pf
+
+
+def _approve(client, co_id, **body):
+    assert client.post(f"/api/change-orders/{co_id}/submit").status_code == 200
+    return client.post(f"/api/change-orders/{co_id}/approve", json=body)
+
+
+def test_buyout_places_an_allowance_by_its_code_and_draws_it_down(
+    client, db_session, seed_accounts, seed_customer
+):
+    _set_construction(client)
+    job, allowance_id, f, pf = _allowance_job(client, seed_customer.id)
+    v = client.post(
+        "/api/vendors",
+        json={
+            "name": "Tile Co",
+            "default_expense_account_id": seed_accounts["5100"].id,
+        },
+    ).json()
+    po = client.post(
+        "/api/purchase-orders",
+        json={
+            "vendor_id": v["id"],
+            "date": "2026-09-01",
+            "job_id": job["id"],
+            "trade_package_id": pf["id"],
+            "lines": [{"description": "Tile", "quantity": 1, "rate": 9000}],
+        },
+    ).json()
+    assert (
+        client.put(
+            f"/api/purchase-orders/{po['id']}", json={"status": "sent"}
+        ).status_code
+        == 200
+    )
+    # the allowance pays for 9,000 of flooring (a draw, not new scope) ...
+    co = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job["id"],
+            "kind": "owner",
+            "funding": "allowance",
+            "allowance_sov_line_id": allowance_id,
+            "date": "2026-09-10",
+            "lines": [
+                {
+                    "description": "Flooring",
+                    "cost_type": "material",
+                    "quantity": 1,
+                    "unit_cost": 9000,
+                    "cost_code_id": f["id"],
+                }
+            ],
+        },
+    ).json()
+    assert _approve(client, co["id"], approved_on="2026-09-10").status_code == 200
+    # ... and the unspent 16,000 goes back to the owner on 10/15
+    ret = client.post(
+        "/api/change-orders/allowance-return",
+        json={"allowance_sov_line_id": allowance_id},
+    )
+    assert ret.status_code == 201, ret.text
+    # the draft is dated the day it was made; a change order cannot take
+    # effect before its own date
+    r = client.put(
+        f"/api/change-orders/{ret.json()['id']}", json={"date": "2026-10-15"}
+    )
+    assert r.status_code == 200, r.text
+    assert (
+        _approve(client, ret.json()["id"], approved_on="2026-10-15").status_code == 200
+    )
+
+    j = db_session.get(Job, job["id"])
+
+    def rows(as_of):
+        from app.services.buyout import job_buyout
+
+        return {r["package_name"]: r for r in job_buyout(db_session, j, as_of)["rows"]}
+
+    after = rows(date(2026, 11, 7))
+    flooring = after["Flooring"]
+    assert flooring["bid_cost"] == 25000.0  # the allowance, placed by its code
+    assert flooring["bought"] == 9000.0
+    # bid + changes - bought reconciles: the draw and the return empty it
+    assert flooring["variance"] == 0.0
+    # the deduct stays by itself (its code is in no package)
+    assert after["Unassigned"]["bid_cost"] == -6000.0
+    assert after["Unassigned"]["changes"] == 0.0
+
+    # as of 9/30 the return is not in effect yet: 16,000 of the allowance
+    # is unspent, shown on the allowance's own row and nowhere else
+    mid = rows(date(2026, 9, 30))
+    assert mid["Flooring"]["bid_cost"] == 25000.0
+    assert mid["Flooring"]["variance"] == 16000.0
+    assert mid["Unassigned"]["bid_cost"] == -6000.0
+
+
+@pytest.mark.parametrize("mode", ("business", "nonprofit"))
+def test_the_jobs_buyout_is_construction_modes(client, db_session, seed_accounts, mode):
+    """GET /api/jobs/{id}/buyout answered in Business and
+    Nonprofit while the Report Center's Buyout Report is gated."""
+    job = _wip_job(db_session)
+    db_session.commit()
+    assert client.put("/api/settings", json={"company_type": mode}).status_code == 200
+    r = client.get(f"/api/jobs/{job.id}/buyout")
+    assert r.status_code == 409
+    assert "part of construction mode" in r.json()["detail"]
+    # the cost tree (job costing) stays open
+    assert client.get(f"/api/jobs/{job.id}/cost-tree").status_code == 200
+    client.put("/api/settings", json={"company_type": "construction"})
+    assert client.get(f"/api/jobs/{job.id}/buyout").status_code == 200

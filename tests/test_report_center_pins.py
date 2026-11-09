@@ -10,8 +10,13 @@
   the link, and the list's rows reach the on-screen report and the PDF.
 """
 
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from tests.test_reconciliation_report import (  # noqa: F401  (the fixture)
     _start,
@@ -157,3 +162,90 @@ def test_each_card_has_a_pin_outside_its_link():
     # the nonprofit's cards are arranged with the rest
     assert "...(Terms.isNonprofit() ? ReportsPage._nonprofitCards() : [" in JS
     assert '.card-pin[aria-pressed="true"]' in CSS
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+_CONSTRUCTION_REPORTS = (
+    "wip-schedule",
+    "retainage",
+    "compliance",
+    "field-ticket-log",
+)
+
+
+needs_node = pytest.mark.skipif(
+    shutil.which("node") is None, reason="node is not installed"
+)
+
+
+@needs_node
+def test_a_construction_report_by_address_opens_the_report_center_elsewhere(tmp_path):
+    probe = tmp_path / "deeplink.cjs"
+    probe.write_text(
+        """
+const fs=require('fs'),vm=require('vm');
+const src=fs.readFileSync(process.argv[2],'utf8');
+async function run(isCon, name){
+  const log={opened:[],toasts:[],center:0};
+  const ctx={console,URLSearchParams,JSON,Object,
+    T:s=>s, Terms:{text:s=>s,isNonprofit:()=>false,isConstruction:()=>isCon},
+    escapeHtml:s=>String(s==null?'':s), document:{}, window:{}, location:{hash:'#/'},
+    toast:(m,k)=>log.toasts.push([m,k]), $:()=>({classList:{contains:()=>false}}),
+    App:{}};
+  vm.createContext(ctx);
+  vm.runInContext(src+'\\nthis.ReportsPage=ReportsPage;',ctx);
+  const R=ctx.ReportsPage;
+  R._addressReportCenter=()=>{log.center++;};
+  for (const fn of ['wipSchedule','retainage','subCompliance','fieldTicketLog'])
+    R[fn]=async()=>{log.opened.push(fn);};
+  await R.openView(name,{});
+  return log;
+}
+(async()=>{
+  const out={};
+  for (const name of ['wip-schedule','retainage','compliance','field-ticket-log']) {
+    out[name]={con:await run(true,name), biz:await run(false,name)};
+  }
+  console.log(JSON.stringify(out));
+})();
+""",
+        encoding="utf-8",
+    )
+    out = subprocess.run(
+        ["node", str(probe), str(ROOT / "app/static/js/reports.js")],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert out.returncode == 0, out.stderr
+    res = json.loads(out.stdout)
+    assert set(res) == set(_CONSTRUCTION_REPORTS)
+    for name, got in res.items():
+        assert len(got["con"]["opened"]) == 1, name
+        assert got["con"]["toasts"] == [], name
+        assert got["biz"]["opened"] == [], name
+        assert got["biz"]["center"] == 1, name
+        assert "construction-mode report" in got["biz"]["toasts"][0][0], name
+
+
+_GATED = (
+    "cost-to-complete",
+    "cost-to-complete-forecast",
+    "commitment-status",
+    "change-order-log",
+    "buyout",
+)
+
+
+def test_the_report_center_routes_the_gated_reports_by_mode():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "app/static/js/reports.js"
+    js = path.read_text(encoding="utf-8")
+    for name in _GATED:
+        line = next(ln for ln in js.splitlines() if f"'{name}':" in ln)
+        assert "construction: true" in line, name
+    line = next(ln for ln in js.splitlines() if "'job-cost-by-vendor':" in ln)
+    assert "construction: true" not in line

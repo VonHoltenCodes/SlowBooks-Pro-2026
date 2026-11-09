@@ -1,4 +1,4 @@
-"""Pay applications, the PM's and owner's second-round findings: the invoice
+"""Pay application billing: the invoice
 is due by the customer's terms (not the day it is issued), the application
 date is a field of its own, the printed application foots, a draft can be
 thrown away and picks up new schedule-of-values lines, and the list shows a

@@ -13,7 +13,7 @@ leaves those seams.
 import os
 import subprocess
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 
@@ -21,8 +21,14 @@ import pytest
 
 from app.models.accounts import Account
 from app.models.bills import Bill, BillLine
+from app.models.change_orders import ChangeOrder
 from app.models.purchase_orders import PurchaseOrder, PurchaseOrderLine
 from app.models.transactions import TransactionLine
+from app.services import job_reports
+from app.services.job_costing import commitment_lines
+from tests.test_change_orders import _co, _sent_commitment, _sub_line, _submit_approve
+from tests.test_change_orders import _job as _change_job
+from tests.test_change_orders import _vendor as _change_vendor
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -1422,3 +1428,184 @@ def test_a_po_line_too_large_for_the_column_is_a_422(client, seed_accounts):
         )
         assert r.status_code == 422, r.text
         assert "more than a line can be" in r.text
+
+
+def _construction(client):
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+
+
+@pytest.fixture
+def con(client):
+    _construction(client)
+    return client
+
+
+@pytest.fixture
+def po(con, seed_customer, seed_accounts):
+    """A sent PO on a job: 100 sticks of conduit at $3."""
+    job = _job(con, seed_customer.id)
+    v = con.post(
+        "/api/vendors",
+        json={
+            "name": "City Supply",
+            "default_expense_account_id": seed_accounts["5100"].id,
+        },
+    ).json()
+    r = con.post(
+        "/api/purchase-orders",
+        json={
+            "vendor_id": v["id"],
+            "date": "2026-06-01",
+            "job_id": job["id"],
+            "lines": [{"description": "Conduit", "quantity": 100, "rate": 3}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    up = con.put(f"/api/purchase-orders/{r.json()['id']}", json={"status": "sent"})
+    assert up.status_code == 200, up.text
+    return job, up.json()
+
+
+def test_a_po_with_receipts_does_not_go_back_to_draft(con, po):
+    """PUT status draft on a PO with a delivery received on it
+    was accepted."""
+    job, order = po
+    t = con.post(
+        "/api/field-tickets",
+        json={
+            "job_id": job["id"],
+            "kind": "delivery",
+            "purchase_order_id": order["id"],
+            "lines": [{"po_line_id": order["lines"][0]["id"], "quantity": 10}],
+        },
+    ).json()
+    url = f"/api/purchase-orders/{order['id']}"
+    r = con.put(url, json={"status": "draft"})
+    assert r.status_code == 409, r.text
+    assert "cannot go back to draft" in r.json()["detail"]["message"]
+    assert t["number"] in r.json()["detail"]["message"]
+    assert con.get(url).json()["status"] == "partial"
+    # with the ticket void, it can
+    assert con.post(f"/api/field-tickets/{t['id']}/void").status_code == 200
+    assert con.put(url, json={"status": "draft"}).status_code == 200
+
+
+def test_a_billed_supplier_po_says_to_void_the_bill_not_a_sub_change_order(con, po):
+    """A billed supplier PO refused a cut with "change it with a
+    sub change order", which is for subcontracts."""
+    job, order = po
+    r = con.post(f"/api/purchase-orders/{order['id']}/convert-to-bill", json={})
+    assert r.status_code in (200, 201), r.text
+    line = con.get(f"/api/purchase-orders/{order['id']}").json()["lines"][0]
+    r = con.put(
+        f"/api/purchase-orders/{order['id']}",
+        json={
+            "lines": [
+                {
+                    "id": line["id"],
+                    "description": "Conduit",
+                    "quantity": 10,
+                    "rate": 3,
+                }
+            ]
+        },
+    )
+    assert r.status_code == 409, r.text
+    message = r.json()["detail"]["message"]
+    assert "void the bill" in message and "sub change order" not in message
+
+
+TODAY = date.today()
+
+
+def _void_later(db, co_id, on):
+    """Mark a CO voided on `on` (the void route stamps now)."""
+    co = db.get(ChangeOrder, co_id)
+    co.voided_at = datetime(on.year, on.month, on.day, 12, tzinfo=timezone.utc)
+    db.commit()
+
+
+def _commitment_with_voided_sub(client, db, seed_accounts, customer_id):
+    job = _change_job(client, customer_id)
+    vendor = _change_vendor(client, default_expense_account_id=seed_accounts["5100"].id)
+    po = _sent_commitment(
+        client,
+        vendor["id"],
+        job["id"],
+        [{"description": "Base", "quantity": 1, "rate": 5000}],
+        commitment_type="subcontract",
+    )
+    owner = _co(client, job["id"], [_sub_line("Added", 2500)])
+    sub = client.post(
+        f"/api/change-orders/{owner['id']}/sub-order", json={"commitment_id": po["id"]}
+    ).json()
+    assert _submit_approve(client, owner["id"]).status_code == 200
+    assert _submit_approve(client, sub["id"]).status_code == 200
+    assert client.post(f"/api/change-orders/{sub['id']}/void").status_code == 200
+    _void_later(db, sub["id"], TODAY + timedelta(days=5))
+    db.expire_all()
+    return job, po
+
+
+def test_a_sub_co_voided_later_still_counts_on_an_earlier_date(
+    client, db_session, seed_accounts, seed_customer
+):
+    job, po = _commitment_with_voided_sub(
+        client, db_session, seed_accounts, seed_customer.id
+    )
+
+    report = job_reports.commitment_status(db_session, as_of=TODAY, job_id=job["id"])
+    row = report["jobs"][0]["rows"][0]
+    assert row["committed"] == 7500.0
+    assert row["remaining"] == 7500.0
+    lines = commitment_lines(db_session, [job["id"]], TODAY)
+    assert sorted(float(ln["remaining"]) for ln in lines) == [2500.0, 5000.0]
+
+    # after the void it is gone from both
+    after = TODAY + timedelta(days=10)
+    report = job_reports.commitment_status(db_session, as_of=after, job_id=job["id"])
+    assert report["jobs"][0]["rows"][0]["committed"] == 5000.0
+    assert [
+        float(ln["amount"]) for ln in commitment_lines(db_session, [job["id"]], after)
+    ] == [5000.0]
+
+
+def _closed_commitment(client, seed_accounts, customer_id):
+    job = _change_job(client, customer_id)
+    vendor = _change_vendor(client, default_expense_account_id=seed_accounts["5100"].id)
+    po = _sent_commitment(
+        client,
+        vendor["id"],
+        job["id"],
+        [{"description": "Base", "quantity": 1, "rate": 5000}],
+        commitment_type="subcontract",
+    )
+    line_id = po["lines"][0]["id"]
+    r = client.post(
+        f"/api/purchase-orders/{po['id']}/convert-to-bill",
+        json={"lines": [{"line_id": line_id, "amount": 5000}]},
+    )
+    assert r.status_code == 200, r.text
+    po = client.get(f"/api/purchase-orders/{po['id']}").json()
+    assert po["status"] == "closed"
+    return po, line_id
+
+
+def test_a_closed_commitment_does_not_send_the_user_to_a_sub_co(
+    client, seed_accounts, seed_customer
+):
+    po, line_id = _closed_commitment(client, seed_accounts, seed_customer.id)
+    for rate, says in ((6000, "new commitment"), (4000, "void the bill")):
+        r = client.put(
+            f"/api/purchase-orders/{po['id']}",
+            json={
+                "lines": [
+                    {"id": line_id, "description": "Base", "quantity": 1, "rate": rate}
+                ]
+            },
+        )
+        assert r.status_code == 409, r.text
+        message = r.json()["detail"]["message"]
+        assert says in message, message
+        assert "sub change order" not in message.replace("no sub change order", "")

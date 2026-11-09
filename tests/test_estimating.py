@@ -908,7 +908,7 @@ def test_migration_upgrades_and_downgrades(tmp_path):
     assert again.returncode == 0, again.stderr
 
 
-# ── Review round 2: status lock, allowance markup, GC cost, manual rows ─────
+# ── status lock, allowance markup, GC cost, manual rows ─────
 
 
 def _budget_snapshot(client, job_id):
@@ -1271,3 +1271,23 @@ def test_an_estimate_line_too_large_for_the_column_is_a_422(client, seed_custome
         )
         assert r.status_code == 422, r.text
         assert "more than a line can be" in r.text
+
+
+def test_the_estimate_list_finds_lost_bids_by_the_uis_word(
+    client, seed_accounts, seed_customer
+):
+    _set_construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [{"description": "Shell", "quantity": 1, "rate": 100, "unit_cost": 100}],
+    )
+    r = client.post(f"/api/estimates/{est['id']}/lost", json={"reason": "price"})
+    assert r.status_code == 200, r.text
+    lost = client.get("/api/estimates?status=lost").json()
+    assert [e["id"] for e in lost] == [est["id"]]
+    assert [e["id"] for e in client.get("/api/estimates?status=rejected").json()] == [
+        est["id"]
+    ]
+    assert client.get("/api/estimates?status=pending").json() == []
+    assert client.get("/api/estimates?status=bogus").status_code == 422

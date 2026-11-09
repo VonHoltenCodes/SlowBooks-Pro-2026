@@ -1,5 +1,5 @@
 """A/R and A/P Aging read what was open on the report's date, not what is
-open today (persona acct B3): an invoice or bill paid after the date still
+open today: an invoice or bill paid after the date still
 counts, one paid before it does not, and the total equals account 1100 / 2000
 on the Balance Sheet for the same date."""
 

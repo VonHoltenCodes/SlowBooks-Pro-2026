@@ -5,7 +5,7 @@ held document's own accounts, jobs and cost codes, not on 6990 / 4950; an
 owner deposit is income when applied, not when received; and the start-up
 backfill gives an existing book the same cash lines as fresh postings.
 
-The owner figures are the accountant persona's (2026-11-07 run): pay
+The owner figures: pay
 applications billing 157,711.89 / 140,002.49 / 103,631.89 at 10% retainage
 and 6.5% tax, a 20,000 deposit applied on the first, a release of 40,134.63.
 Cash net income at 2026-09-30 read 29,771.44 too high (the retainage held on
@@ -93,7 +93,7 @@ def _approved_app(client, job_id, day, sov, amounts=(0, 0), **extra):
 
 
 def _owner_side(client, db_session, customer_id):
-    """The persona's owner side through 2026-11-05; returns (job, invoices)."""
+    """The owner side through 2026-11-05; returns (job, invoices)."""
     job, sov = _job(client, customer_id)
     bank = client.get("/api/accounts").json()
     bank_id = next(a["id"] for a in bank if a["account_number"] == "1000")

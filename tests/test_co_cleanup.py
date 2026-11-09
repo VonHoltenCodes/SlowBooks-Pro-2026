@@ -1,4 +1,4 @@
-"""Construction-overhaul leftovers (workstream L): each small fix, pinned."""
+"""Small construction-mode fixes, each pinned."""
 
 import json
 import shutil

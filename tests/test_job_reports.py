@@ -8,6 +8,8 @@ expected header row. The Report Center cards are driven in node — they show in
 construction mode only, and the pins still work.
 """
 
+import csv
+import io
 import json
 import shutil
 import subprocess
@@ -33,9 +35,11 @@ from app.models.job_costing import JobBudget, JobCostToComplete
 from app.models.jobs import Job, SovLine
 from app.models.pay_applications import PayApplication, PayApplicationLine
 from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
+from app.models.settings import Settings
 from app.services import job_reports
 from app.services.accounting import create_journal_entry
 from app.services.job_costing import ensure_default_cost_types
+from tests.test_wip_schedule_post import _bill_owner, _budget, _cost, _job
 
 ROOT = Path(__file__).resolve().parents[1]
 needs_node = pytest.mark.skipif(
@@ -1886,3 +1890,433 @@ def test_as_of_reports_filter_status_on_the_status_of_the_date(
     assert ids(early, "closed") == []
     assert ids(late, "closed") == [job.id]
     assert ids(late, "in_progress") == []
+
+
+def _set_construction(client):
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+
+
+def test_wip_post_and_void_refuse_an_unknown_parameter(
+    client, seed_accounts, seed_customer
+):
+    _set_construction(client)
+    for verb in ("post", "void"):
+        r = client.post(f"/api/reports/wip-schedule/{verb}?as_of=2026-07-31&job_id=9")
+        assert r.status_code == 422, (verb, r.text)
+        assert "job_id is not a filter here" in r.json()["detail"]
+        assert "as_of" in r.json()["detail"]
+
+
+def test_retainage_refuses_a_job_status_that_does_not_exist(
+    client, seed_accounts, seed_customer
+):
+    _set_construction(client)
+    r = client.get("/api/reports/retainage?status=bogus")
+    assert r.status_code == 422
+    assert "pending, awarded, in_progress, closed, not_awarded" in r.json()["detail"]
+
+
+_CONSTRUCTION_REPORTS = (
+    "wip-schedule",
+    "retainage",
+    "compliance",
+    "field-ticket-log",
+    "cost-to-complete",
+    "cost-to-complete-forecast",
+    "commitment-status",
+    "change-order-log",
+    "buyout",
+)
+
+
+@pytest.mark.parametrize("mode", ["business", "nonprofit"])
+def test_the_construction_report_apis_answer_409_outside_construction(
+    client, seed_accounts, seed_customer, mode
+):
+    assert client.put("/api/settings", json={"company_type": mode}).status_code == 200
+    for name in _CONSTRUCTION_REPORTS:
+        for suffix in ("", "/csv", "/pdf", "/print"):
+            r = client.get(f"/api/reports/{name}{suffix}")
+            assert r.status_code == 409, (name, suffix, r.status_code)
+            assert "construction mode" in r.json()["detail"]
+    _set_construction(client)
+    for name in _CONSTRUCTION_REPORTS:
+        assert client.get(f"/api/reports/{name}").status_code == 200, name
+
+
+def _mode(client, company_type):
+    r = client.put("/api/settings", json={"company_type": company_type})
+    assert r.status_code == 200, r.text
+
+
+def test_job_cost_by_vendor_stays_open_to_a_business_company(client, seed_accounts):
+    _mode(client, "business")
+    r = client.get("/api/reports/job-cost-by-vendor?start_date=2026-01-01")
+    assert r.status_code == 200, r.text
+
+
+_ROUTES = (
+    "/api/reports/wip-schedule",
+    "/api/reports/wip-schedule/csv",
+    "/api/reports/wip-schedule/pdf",
+    "/api/reports/wip-schedule/print",
+    "/api/jobs/1/cost-tree",
+    "/api/jobs/1/cost-tree/csv",
+    "/api/jobs/1/cost-tree/pdf",
+    "/api/reports/profit-loss-by-job",
+    "/api/reports/profit-loss-by-job/csv",
+    "/api/reports/profit-loss-by-job/pdf",
+    "/api/reports/profit-loss-by-job/print",
+    "/api/reports/job-profitability",
+    "/api/reports/job-profitability/csv",
+    "/api/reports/job-profitability/pdf",
+    "/api/reports/job-profitability/print",
+    "/api/jobs/budget-vs-actual",
+    "/api/reports/job-budget-vs-actual/csv",
+    "/api/reports/job-budget-vs-actual/pdf",
+    "/api/reports/job-budget-vs-actual/print",
+    "/api/reports/ar-aging",
+    "/api/reports/ar-aging/csv",
+    "/api/reports/ap-aging",
+    "/api/reports/ap-aging/csv",
+    "/api/field-tickets",
+    "/api/estimates",
+    "/api/reports/retainage",
+    "/api/reports/retainage/csv",
+    "/api/reports/retainage/pdf",
+    "/api/reports/compliance",
+    "/api/reports/compliance/csv",
+    "/api/reports/field-ticket-log",
+    "/api/reports/field-ticket-log/csv",
+    "/api/reports/cost-to-complete",
+    "/api/reports/cost-to-complete/csv",
+    "/api/reports/cost-to-complete-forecast",
+    "/api/reports/cost-to-complete-forecast/csv",
+    "/api/reports/commitment-status",
+    "/api/reports/commitment-status/csv",
+    "/api/reports/change-order-log",
+    "/api/reports/change-order-log/csv",
+    "/api/reports/buyout",
+    "/api/reports/buyout/csv",
+    "/api/reports/job-cost-by-vendor",
+    "/api/reports/job-cost-by-vendor/csv",
+    "/api/field-tickets/purchase-orders",
+    "/api/change-orders",
+    "/api/pay-applications",
+)
+
+
+@pytest.mark.parametrize("route", _ROUTES)
+def test_a_misspelled_filter_is_refused(client, seed_accounts, route):
+    """`asof` on the WIP gave today's schedule. Each of
+    these refuses it (and `jobid`) with the filters it does read; the
+    agings in every mode."""
+    for mode in ("construction", "business"):
+        assert (
+            client.put("/api/settings", json={"company_type": mode}).status_code == 200
+        )
+        for bad in ("asof=2026-09-30", "jobid=1"):
+            r = client.get(f"{route}?{bad}")
+            assert r.status_code == 422, (mode, route, bad, r.status_code)
+            name = bad.split("=")[0]
+            assert r.json()["detail"].startswith(f"{name} is not a filter here."), (
+                route,
+                r.json(),
+            )
+
+
+_FRONTEND_QUERIES = (
+    "/api/reports/wip-schedule?as_of=2026-09-30",
+    "/api/reports/wip-schedule/csv?as_of=2026-09-30",
+    "/api/jobs/{job}/cost-tree?start_date=2026-01-01&end_date=2026-09-30",
+    "/api/jobs/{job}/cost-tree/csv?start_date=2026-01-01&end_date=2026-09-30",
+    "/api/reports/profit-loss-by-job?start_date=2026-01-01&end_date=2026-09-30"
+    "&job_ids={job}&basis=accrual&customer_id={customer}&show=all"
+    "&include_empty=true",
+    "/api/reports/profit-loss-by-job/csv?start_date=2026-01-01"
+    "&end_date=2026-09-30&layout=long",
+    "/api/reports/job-profitability?start_date=2026-01-01&end_date=2026-09-30"
+    "&customer_id={customer}&basis=cash",
+    "/api/reports/job-profitability/csv?start_date=2026-01-01"
+    "&end_date=2026-09-30&customer_id={customer}",
+    "/api/jobs/budget-vs-actual?start_date=2026-01-01&end_date=2026-09-30"
+    "&include_inactive=true&customer_id={customer}",
+    "/api/reports/job-budget-vs-actual/csv?start_date=2026-01-01"
+    "&end_date=2026-09-30&include_inactive=true",
+    "/api/reports/ar-aging?as_of_date=2026-09-30",
+    "/api/reports/ar-aging/csv?as_of_date=2026-09-30",
+    "/api/reports/ap-aging?as_of_date=2026-09-30",
+    "/api/reports/ap-aging/csv?as_of_date=2026-09-30",
+    "/api/field-tickets/purchase-orders?job_id={job}",
+    "/api/change-orders?job_id={job}&history=true",
+    "/api/pay-applications?job_id={job}",
+    "/api/field-tickets?job_id={job}&kind=tm&status=draft",
+    "/api/estimates?status=pending&customer_id={customer}&skip=0&limit=10",
+    "/api/reports/retainage?as_of=2026-09-30&job_id={job}&customer_id={customer}"
+    "&status=in_progress",
+    "/api/reports/compliance?as_of=2026-09-30",
+    "/api/reports/field-ticket-log?as_of=2026-09-30&include_closed=true",
+    "/api/reports/cost-to-complete?as_of=2026-09-30&job_id={job}&include_closed=true",
+    "/api/reports/cost-to-complete-forecast?as_of=2026-09-30&job_id={job}"
+    "&include_closed=true",
+    "/api/reports/commitment-status?as_of=2026-09-30&job_id={job}&include_closed=true",
+    "/api/reports/change-order-log?as_of=2026-09-30&job_id={job}&include_closed=true",
+    "/api/reports/buyout?as_of=2026-09-30&job_id={job}&include_closed=true",
+)
+
+
+def _over_billed_job(db, name="Clinic"):
+    """Contract 100,000, budget 80,000 (material), cost 40,000 by 3/1,
+    billed 60,000 by 4/1: earned 50,000, over-billed 10,000."""
+    job = _job(db, name=name)
+    _budget(db, job, None, "material", "80000", source="manual")
+    _cost(db, job, None, "material", "40000")
+    _bill_owner(db, job, "60000")
+    db.commit()
+    return job
+
+
+def _construction_2(db):
+    db.add(Settings(key="company_type", value="construction"))
+    db.commit()
+
+
+def _setup(client, db):
+    assert client.post("/api/construction/setup").status_code == 200
+    _construction_2(db)
+
+
+@pytest.mark.parametrize("query", _FRONTEND_QUERIES)
+def test_the_filters_the_screens_send_still_work(
+    client, db_session, seed_accounts, query
+):
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    r = client.get(query.format(job=job.id, customer=job.customer_id))
+    assert r.status_code == 200, (query, r.text)
+
+
+def test_the_agings_still_read_their_as_of_date(client, seed_accounts):
+    r = client.get("/api/reports/ar-aging?as_of_date=2026-09-30")
+    assert r.status_code == 200 and r.json()["as_of_date"] == "2026-09-30"
+    r = client.get("/api/reports/ap-aging?as_of_date=2026-09-30")
+    assert r.status_code == 200 and r.json()["as_of_date"] == "2026-09-30"
+
+
+SEP30 = date(2026, 9, 30)
+
+
+def _approve(client, co_id, on=None):
+    body = {"approved_on": on.isoformat()} if on else {}
+    r = client.post(f"/api/change-orders/{co_id}/approve", json=body)
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def _co_2(client, job_id, unit_cost, when=None):
+    """A pending owner change order (contract-funded, material, no markup)."""
+    body = {
+        "job_id": job_id,
+        "kind": "owner",
+        "funding": "contract",
+        "lines": [
+            {
+                "description": "Added scope",
+                "cost_type": "material",
+                "quantity": 1,
+                "unit_cost": unit_cost,
+                "markup_pct": 0,
+            }
+        ],
+    }
+    if when is not None:
+        body["date"] = when.isoformat()
+    r = client.post("/api/change-orders", json=body)
+    assert r.status_code == 201, r.text
+    co = r.json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    return co
+
+
+def _void_later(db, co_id, on):
+    """Mark a CO voided on `on` (the void route stamps today)."""
+    from datetime import datetime, timezone
+
+    co = db.get(ChangeOrder, co_id)
+    co.voided_at = datetime(on.year, on.month, on.day, 12, tzinfo=timezone.utc)
+    db.commit()
+
+
+def _wip_row(db, job_id, as_of, **kw):
+    data = job_reports.wip_schedule(db, as_of=as_of, **kw)
+    return next((r for r in data["rows"] if r["job_id"] == job_id), None), data
+
+
+def test_the_log_and_the_wip_read_a_change_order_as_it_stood(
+    client, db_session, seed_accounts
+):
+    """As of 9/30 a CO approved 8/12 and voided 11/08 counted as
+    approved but its sell was left out of approved changes, and the log
+    listed COs dated after 9/30. The WIP at 9/30 now includes it too."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    kept = _co_2(client, job.id, 1000, when=date(2026, 8, 1))
+    _approve(client, kept["id"], date(2026, 8, 1))
+    gone = _co_2(client, job.id, 5000, when=date(2026, 8, 12))
+    _approve(client, gone["id"], date(2026, 8, 12))
+    db_session.expire_all()
+    before_void, _ = _wip_row(db_session, job.id, SEP30)
+    assert client.post(f"/api/change-orders/{gone['id']}/void").status_code == 200
+    _void_later(db_session, gone["id"], date(2026, 11, 8))
+    _co_2(client, job.id, 700, when=date(2026, 10, 5))  # pending, dated after
+    db_session.expire_all()
+
+    log = job_reports.change_order_log(db_session, SEP30)
+    j = log["jobs"][0]
+    assert [r["number"] for r in j["rows"]] == [kept["number"], gone["number"]]
+    assert [r["status"] for r in j["rows"]] == ["approved", "approved"]
+    assert j["rows"][1]["status_today"] == "void"
+    assert j["counts"] == {"approved": 2}
+    assert j["contract"]["approved_changes"] == 6000.0
+    assert j["contract"]["revised"] == 106000.0
+    assert j["rows"][-1]["running_approved"] == 6000.0
+
+    row, _ = _wip_row(db_session, job.id, SEP30)
+    assert row["revised_contract"] == 106000.0
+    assert row["approved_change_orders"] == 6000.0
+    # its budget stood on the day too: the 9/30 schedule reads as before the void
+    assert row["estimated_total_cost"] == before_void["estimated_total_cost"]
+    assert row["over_billing"] == before_void["over_billing"]
+
+    # after the void it is gone from both
+    log = job_reports.change_order_log(db_session, date(2026, 11, 30))
+    j = log["jobs"][0]
+    assert j["counts"] == {"approved": 1, "void": 1, "pending": 1}
+    assert j["contract"]["approved_changes"] == 1000.0
+    row, _ = _wip_row(db_session, job.id, date(2026, 11, 30))
+    assert row["revised_contract"] == 101000.0
+
+
+def test_job_profitability_and_bva_read_the_contract_as_of_their_end_date(
+    client, db_session, seed_accounts
+):
+    """At end_date 9/30 both reported today's contract while the
+    WIP's revised contract on that day was higher."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    a = _co_2(client, job.id, 4000, when=date(2026, 8, 1))
+    _approve(client, a["id"], date(2026, 8, 1))
+    b = _co_2(client, job.id, 3000, when=date(2026, 10, 15))
+    _approve(client, b["id"], date(2026, 10, 15))
+    db_session.expire_all()
+    assert db_session.get(Job, job.id).contract_amount == Decimal("107000.00")
+
+    q = "start_date=2026-01-01&end_date=2026-09-30"
+    prof = client.get(f"/api/reports/job-profitability?{q}").json()
+    assert {r["job_id"]: r["contract_amount"] for r in prof["jobs"]}[job.id] == (
+        104000.0
+    )
+    bva = client.get(f"/api/jobs/budget-vs-actual?{q}").json()
+    assert {r["job_id"]: r["contract_amount"] for r in bva}[job.id] == 104000.0
+    row, _ = _wip_row(db_session, job.id, SEP30)
+    assert row["revised_contract"] == 104000.0
+    # no end date: today's
+    bva = client.get("/api/jobs/budget-vs-actual").json()
+    assert {r["job_id"]: r["contract_amount"] for r in bva}[job.id] == 107000.0
+
+
+def test_a_job_contracted_after_the_date_is_not_on_that_wip(
+    client, db_session, seed_accounts
+):
+    """WIP as of 7/01 listed a job whose contract is dated 7/15
+    with its contract and backlog."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    job.contract_date = date(2026, 7, 15)
+    db_session.commit()
+    row, data = _wip_row(db_session, job.id, date(2026, 7, 1))
+    assert row is None
+    assert data["totals"]["revised_contract"] == 0.0
+    row, _ = _wip_row(db_session, job.id, date(2026, 7, 15))
+    assert row is not None and row["revised_contract"] == 100000.0
+
+
+def test_an_earlier_wip_shows_the_status_the_job_had_then(
+    client, db_session, seed_accounts
+):
+    """A job closed 11/08 read "closed" on the 9/30 WIP."""
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    job.status = "closed"
+    job.closed_on = date(2026, 11, 8)
+    db_session.commit()
+    row, _ = _wip_row(db_session, job.id, SEP30, include_closed=True)
+    assert row["status"] == "in_progress"
+    row, _ = _wip_row(
+        db_session, job.id, date(2026, 11, 8) + timedelta(days=1), include_closed=True
+    )
+    assert row["status"] == "closed"
+
+
+OCT15 = date(2026, 10, 15)
+
+
+SEP30_2 = date(2026, 9, 30)
+
+
+def _approve_co(client, job_id, unit_cost, approved_on, cost_type="material"):
+    r = client.post(
+        "/api/change-orders",
+        json={
+            "job_id": job_id,
+            "kind": "owner",
+            "funding": "contract",
+            "lines": [
+                {
+                    "description": "Added scope",
+                    "cost_type": cost_type,
+                    "quantity": 1,
+                    "unit_cost": unit_cost,
+                    "markup_pct": 0,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    co = r.json()
+    assert client.post(f"/api/change-orders/{co['id']}/submit").status_code == 200
+    r = client.post(
+        f"/api/change-orders/{co['id']}/approve",
+        json={"approved_on": approved_on.isoformat()},
+    )
+    assert r.status_code == 200, r.text
+    return co
+
+
+def test_the_change_order_log_export_and_counts(client, db_session, seed_accounts):
+    _setup(client, db_session)
+    job = _over_billed_job(db_session)
+    _approve_co(client, job.id, 1000, date(2026, 8, 10))
+    _approve_co(client, job.id, 500, OCT15)
+
+    data = client.get(f"/api/reports/change-order-log?as_of={SEP30_2}").json()
+    rows = data["jobs"][0]["rows"]
+    assert [r["approved_on"] for r in rows] == ["2026-08-10", "2026-10-15"]
+    # counts as of the day: the 10/15 CO was still pending on 9/30
+    assert data["totals"]["counts"] == {"approved": 1, "pending": 1}
+
+    text = client.get(f"/api/reports/change-order-log/csv?as_of={SEP30_2}").text
+    table = list(csv.reader(io.StringIO(text)))
+    header = next(r for r in table if r and r[0] == "Job" and "Number" in r)
+    for label in ("Approved on", "Voided on", "Source PCO", "Commitment"):
+        assert label in header, label
+    first = table[table.index(header) + 1]
+    assert first[header.index("Approved on")] == "2026-08-10"
+    assert first[header.index("Sell")] == "1000.00"
+    contract_head = next(
+        r for r in table if r and r[:2] == ["Job", "Original contract"]
+    )
+    contract = table[table.index(contract_head) + 1]
+    assert contract[contract_head.index("Approved changes")] == "1000.00"
+    assert contract[contract_head.index("Revised contract")] == "101000.00"
