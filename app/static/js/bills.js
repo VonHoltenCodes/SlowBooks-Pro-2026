@@ -800,9 +800,12 @@ const BillsPage = {
     splitApply(row, res) {
         const baseDesc = row.querySelector('.line-desc')?.value || '';
         let anchor = row;
-        res.lines.forEach(ln => {
+        res.lines.forEach((ln, n) => {
             const clone = row.cloneNode(true);
             clone.dataset.billline = BillsPage.lineCount++;
+            // the stored line is the first share; the others are new lines,
+            // so only it keeps the line's id (an id sent twice is refused)
+            if (n > 0) clone.dataset.lineId = '';
             row.querySelectorAll('select').forEach((sel, k) => { clone.querySelectorAll('select')[k].value = sel.value; });
             clone.querySelector('.line-desc').value = `${baseDesc} (${res.rule_name}: ${Nonprofit.label(ln.function) || ln.class_name || 'share'})`;
             clone.querySelector('.line-qty').value = 1;

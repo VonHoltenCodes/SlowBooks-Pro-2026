@@ -678,6 +678,52 @@ def test_bill_lines_that_together_overflow_are_a_422(client, seed_accounts):
     assert "more than a document can be" in r.text
 
 
+def test_a_bill_edit_whose_tax_takes_it_past_the_column_is_a_422(
+    client, db_session, seed_accounts
+):
+    """The line fits, but 8% tax on it does not: an edit is refused as a new
+    bill is, and the bill keeps the total it had."""
+    acct = seed_accounts["6000"].id
+    bill = _bill(
+        client,
+        _vendor(client)["id"],
+        [{"description": "x", "amount": 100, "account_id": acct}],
+    )
+    r = client.put(
+        f"/api/bills/{bill['id']}",
+        json={
+            "tax_rate": 0.08,
+            "lines": [
+                {
+                    "description": "x",
+                    "quantity": 1,
+                    "rate": 9_999_999_999_999.99,
+                    "account_id": acct,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.text
+    db_session.expire_all()
+    assert db_session.get(Bill, bill["id"]).total == D("100.00")
+
+
+def test_bill_edit_lines_that_together_overflow_are_a_422(client, seed_accounts):
+    """Each line of the edit fits but their sum does not."""
+    acct = seed_accounts["6000"].id
+    bill = _bill(
+        client,
+        _vendor(client)["id"],
+        [{"description": "x", "amount": 100, "account_id": acct}],
+    )
+    line = {"description": "x", "amount": 9_000_000_000_000, "account_id": acct}
+    r = client.put(f"/api/bills/{bill['id']}", json={"lines": [line, line]})
+    assert r.status_code == 422, r.text
+    assert "more than a document can be" in r.text
+    assert D(client.get(f"/api/bills/{bill['id']}").json()["total"]) == 100
+
+
 # ── Line ids on a bill ──────────────────────────────────────────────────────
 
 

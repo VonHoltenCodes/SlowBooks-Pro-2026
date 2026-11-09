@@ -1012,6 +1012,20 @@ def void_pay_application(app_id: int, db: Session = Depends(get_db)):
                 "message": f"{later.number} is approved after this one; void it first.",
             },
         )
+    # An open application after this one was filled from it (each line's
+    # stored materials carry forward from the last approved balance): voided
+    # under it, the draft would bill stored materials nobody typed, or a
+    # back-dated one would be told to clear amounts it never entered. So it
+    # goes first (#731).
+    open_one = _later_open(db, app)
+    if open_one is not None:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "later_application",
+                "message": f"{open_one.number} is still open after this one; delete it first, then void this one.",
+            },
+        )
     invoice = db.get(Invoice, app.invoice_id) if app.invoice_id else None
     # The deposit payment, the invoice and the application are voided in one
     # transaction: a refusal anywhere (a payment still applied, the closing
@@ -1115,11 +1129,27 @@ def _later_approved(db, app):
     )
 
 
+def _later_open(db, app):
+    """The draft or submitted application on the job after this one, or None."""
+    return (
+        db.query(PayApplication)
+        .filter(
+            PayApplication.job_id == app.job_id,
+            PayApplication.status.in_(_OPEN),
+            PayApplication.application_no > app.application_no,
+        )
+        .order_by(PayApplication.application_no)
+        .first()
+    )
+
+
 def _can_void(db, app) -> bool:
     """Whether Void would be accepted now: approved, the latest approved
-    application, and its invoice carries no real payment. The Pay apps tab
-    offers Void only on that one."""
+    application with no open one after it, and its invoice carries no real
+    payment. The Pay apps tab offers Void only on that one."""
     if app.status != "approved" or _later_approved(db, app) is not None:
+        return False
+    if _later_open(db, app) is not None:
         return False
     invoice = db.get(Invoice, app.invoice_id) if app.invoice_id else None
     return invoice is None or _other_payment(db, app, invoice) is None

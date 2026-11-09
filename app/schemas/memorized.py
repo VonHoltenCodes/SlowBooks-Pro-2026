@@ -49,6 +49,9 @@ class MemorizedLineIn(StrictModel):
     quantity: Optional[float] = None
     rate: Optional[float] = None
     amount: Optional[float] = None
+    # Use tax (construction), as on Enter Bill's line: null follows the
+    # job's rule, true accrues it anyway, false never. A bill line only.
+    use_tax: Optional[bool] = None
     # a journal line
     debit: Decimal = Decimal("0")
     credit: Decimal = Decimal("0")
@@ -71,6 +74,7 @@ class MemorizedLineIn(StrictModel):
             rate=self.rate,
             amount=self.amount,
             line_order=self.line_order,
+            use_tax=self.use_tax,
             **self._dimensions(),
         )
 
@@ -280,6 +284,7 @@ class MemorizedLineResponse(BaseModel):
     quantity: Optional[Decimal] = None
     rate: Optional[RateOut] = None
     amount: Optional[Decimal] = None
+    use_tax: Optional[bool] = None
     debit: Optional[Decimal] = None
     credit: Optional[Decimal] = None
     model_config = {"from_attributes": True}

@@ -138,6 +138,7 @@ def bill_line_of(line) -> BillLineCreate:
         "rate": float(line.rate) if line.rate is not None else None,
         "is_billable": bool(line.is_billable),
         "line_order": line.line_order or 0,
+        "use_tax": getattr(line, "use_tax", None),
     }
     for key in _DIMENSIONS:
         value = getattr(line, key, None)

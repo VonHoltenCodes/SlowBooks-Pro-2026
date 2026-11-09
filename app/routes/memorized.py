@@ -131,6 +131,7 @@ def _write_lines(db: Session, mem: MemorizedTransaction, lines) -> None:
                 item_id=line.item_id if mem.kind == KIND_BILL else None,
                 quantity=line.quantity if mem.kind == KIND_BILL else None,
                 rate=line.rate if mem.kind == KIND_BILL else None,
+                use_tax=line.use_tax if mem.kind == KIND_BILL else None,
                 debit=line.debit if mem.kind == KIND_JOURNAL else None,
                 credit=line.credit if mem.kind == KIND_JOURNAL else None,
             )
@@ -281,6 +282,7 @@ def update_memorized(mem_id: int, data: MemorizedUpdate, db: Session = Depends(g
                 "item_id": ln.item_id,
                 "quantity": None if ln.quantity is None else float(ln.quantity),
                 "rate": None if ln.rate is None else float(ln.rate),
+                "use_tax": ln.use_tax,
                 "debit": ln.debit or 0,
                 "credit": ln.credit or 0,
             }

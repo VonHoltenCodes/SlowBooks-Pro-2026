@@ -128,6 +128,10 @@ class MemorizedTransactionLine(Base):
     item_id = Column(Integer, ForeignKey("items.id"), nullable=True)
     quantity = Column(Numeric(12, 4), nullable=True)
     rate = Column(Numeric(17, 4), nullable=True)
+    # Use tax (construction), as BillLine.use_tax: None follows the job's
+    # sales tax rule, True accrues it anyway, False never; each bill entered
+    # from the template carries it.
+    use_tax = Column(Boolean, nullable=True)
 
     # A journal line: one side or the other
     debit = Column(Numeric(15, 2), nullable=True)
