@@ -143,6 +143,18 @@ payers (#606).
 Attribution rule for reports: `coalesce(line.job_id, transaction.job_id)`.
 Migration `e9f0a1b2c3d4_add_jobs`.
 
+Deleting a job: refused (400) while it has posted activity or a memorized
+transaction uses it, and refused (409, naming the counts) while any record
+was made for it: an estimate, invoice, purchase order, bill, credit, time
+entry, change order, pay application, field ticket, deposit, bank rule and
+so on. The app runs SQLite without `PRAGMA foreign_keys`, so a `CASCADE` on
+a child's `job_id` never runs there, and a reused job id would take the
+children over. Only the job's own setup goes with it: its SOV lines, budget
+rows and cost-to-complete entries; a lien waiver's `job_id` (SET NULL) is
+cleared. A deleted record's attachments go with it
+(`file_store.delete_record_attachments`); a voided or inactive record keeps
+its files.
+
 ## cost_codes (job-costing chart)
 
 | column | notes |
