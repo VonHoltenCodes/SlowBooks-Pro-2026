@@ -1998,7 +1998,7 @@ const JobsPage = {
     },
 
     async remove(id) {
-        if (!confirm(Terms.text('Delete this job? Jobs with posted activity cannot be deleted — mark them inactive instead.'))) return;
+        if (!confirm(Terms.text('Delete this job? A job with posted activity, or with anything made for it (an estimate, a purchase order, a change order, a field ticket), cannot be deleted — mark it inactive instead.'))) return;
         try {
             await API.del(`/jobs/${id}`);
             toast(`${T('Job')} deleted`);

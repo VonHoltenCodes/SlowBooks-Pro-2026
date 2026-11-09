@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import case, or_
+from sqlalchemy import case, delete, or_, select, update
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
@@ -661,3 +661,122 @@ def commitment_figures(
         int(j): {"committed_total": float(total), "billed_to_date": float(billed)}
         for j, total, billed in q.group_by("job").all()
     }
+
+
+# --- Deleting a job ----------------------------------------------------------
+
+# The job's own setup, not records made for it: it goes with the job. The
+# schedule of values goes by the Job.sov_lines relationship's cascade.
+_JOB_SETUP_TABLES = ("job_budgets", "job_cost_to_complete")
+# Refused before this is asked: posted activity and memorized transactions.
+_CHECKED_FIRST = {
+    "transactions",
+    "transaction_lines",
+    "memorized_transactions",
+    "memorized_transaction_lines",
+    "sov_lines",
+}
+# What a record made for a job is called in the refusal, by its table. A
+# line table is counted as its record (a bill with one line on the job is
+# one bill).
+_RECORD_NAMES = {
+    "change_orders": ("change order", "change orders"),
+    "pay_applications": ("pay application", "pay applications"),
+    "field_tickets": ("field ticket", "field tickets"),
+    "job_deposits": ("deposit", "deposits"),
+    "job_costs": ("job cost entry", "job cost entries"),
+    "estimates": ("estimate", "estimates"),
+    "invoices": ("invoice", "invoices"),
+    "recurring_invoices": ("recurring invoice", "recurring invoices"),
+    "credit_memos": ("credit memo", "credit memos"),
+    "purchase_orders": ("purchase order", "purchase orders"),
+    "bills": ("bill", "bills"),
+    "vendor_credits": ("vendor credit", "vendor credits"),
+    "time_entries": ("time entry", "time entries"),
+    "in_kind_gifts": ("in-kind gift", "in-kind gifts"),
+    "bank_rules": ("bank rule", "bank rules"),
+    "allocation_rules": ("allocation rule", "allocation rules"),
+}
+
+
+def _job_keys():
+    """Every column in the schema that holds a job's id, with its table."""
+    from app.database import Base
+
+    for table in Base.metadata.tables.values():
+        for fk in table.foreign_keys:
+            if fk.column.table.name == "jobs":
+                yield table, fk
+
+
+def _record_of(table):
+    """The record a row of ``table`` belongs to: the table itself when it
+    is one, else the parent its lines cascade from."""
+    if table.name in _RECORD_NAMES:
+        return table.name, table.c.id
+    for fk in table.foreign_keys:
+        if fk.ondelete == "CASCADE" and fk.column.table.name in _RECORD_NAMES:
+            return fk.column.table.name, fk.parent
+    return table.name, table.c.id
+
+
+def records_on_job(db: Session, job_id: int) -> dict[str, int]:
+    """How many of each kind of record were made for the job, by name."""
+    found: dict[str, set] = {}
+    for table, fk in _job_keys():
+        if (
+            table.name in _CHECKED_FIRST
+            or table.name in _JOB_SETUP_TABLES
+            or fk.ondelete == "SET NULL"
+        ):
+            continue
+        record, id_col = _record_of(table)
+        ids = db.execute(select(id_col).where(fk.parent == job_id)).scalars().all()
+        if ids:
+            found.setdefault(record, set()).update(ids)
+    return {record: len(ids) for record, ids in found.items()}
+
+
+def _counted(record: str, n: int) -> str:
+    one, many = _RECORD_NAMES.get(record, ("other record", "other records"))
+    return f"{n} {one if n == 1 else many}"
+
+
+def refuse_deleting_job_with_records(db: Session, job_id: int) -> None:
+    """A job is deleted only when nothing was made for it (409 otherwise),
+    the way a class or cost code with posted lines is refused. The keys
+    from a change order, pay application or field ticket to its job say
+    CASCADE, but SQLite runs no cascade here: they stayed under the deleted
+    job's id, and the next job given that id took them over. On PostgreSQL
+    the cascade ran and left their attached files behind."""
+    counts = records_on_job(db, job_id)
+    if not counts:
+        return
+    order = list(_RECORD_NAMES)
+    parts = [
+        _counted(r, counts[r])
+        for r in sorted(counts, key=lambda r: order.index(r) if r in order else 99)
+    ]
+    listed = (
+        parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    )
+    raise HTTPException(
+        status_code=409,
+        detail=(
+            f"This job still has {listed}. Delete those first, or mark the "
+            "job inactive instead."
+        ),
+    )
+
+
+def delete_job_setup(db: Session, job_id: int) -> None:
+    """The job's own setup goes with it, and a record whose key to the job
+    says SET NULL lets go of it: SQLite runs neither rule itself. Caller
+    deletes the job and commits."""
+    for table, fk in _job_keys():
+        if table.name in _JOB_SETUP_TABLES:
+            db.execute(delete(table).where(fk.parent == job_id))
+        elif fk.ondelete == "SET NULL":
+            db.execute(
+                update(table).where(fk.parent == job_id).values({fk.parent.name: None})
+            )

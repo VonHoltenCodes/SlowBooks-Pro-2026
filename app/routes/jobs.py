@@ -64,9 +64,11 @@ from app.services.job_costing import (
 from app.services.jobs_service import (
     commitment_figures,
     committed_cost,
+    delete_job_setup,
     find_job,
     job_profitability,
     job_transactions,
+    refuse_deleting_job_with_records,
     refuse_moving_a_carried_job,
 )
 
@@ -1071,6 +1073,8 @@ def delete_job(job_id: int, db: Session = Depends(get_db)):
     from app.services.memorized_service import refuse_if_memorized
 
     refuse_if_memorized(db, "Job", "job_id", job_id)
+    refuse_deleting_job_with_records(db, job_id)
+    delete_job_setup(db, job_id)
     db.delete(job)
     db.commit()
     return {"message": "Job deleted"}
