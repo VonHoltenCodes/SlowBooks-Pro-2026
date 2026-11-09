@@ -1475,7 +1475,7 @@ like P&L by Job. Each takes an `as_of` date (or
 jobs are left out. As of a date, a job closed after it was still open and stays
 on Commitment Status, Buyout, Job Cost by Vendor (as of its end date) and the
 Field Ticket Log, as on the WIP schedule; a `status` filter matches the status
-the job had on the date, the one its row shows.
+the job had on the date, the one its row shows (on the Retainage report too).
 
 **WIP schedule** (`wip-schedule`). The work-in-progress schedule lists every job
 with a contract — contract sum, approved change orders, revised contract,
@@ -1730,7 +1730,8 @@ reversed on a later day, a bill with no job) is shown as its own row,
 in view. Closed jobs are included, since retainage outlives the job; a job
 with no retainage held, released or on the books is left out. `job_id`,
 `customer_id` and `status` narrow it (then the jobless row is left out, and
-`filtered` is true). The report reads the accrual ledger. PDF and CSV carry
+`filtered` is true); `status` matches the status the job had on the date, so
+a job closed after it is in progress there. The report reads the accrual ledger. PDF and CSV carry
 the two grids, each ending in its total.
 
 **Sub Compliance** (`compliance`). The subs a GC should chase, one row per
@@ -1748,7 +1749,9 @@ The existing **Job Profitability** and **Job Budget vs Actual** reports gained
 PDF and CSV routes, so every contractor report exports the same way. In
 construction mode both read each job's **contract as of their end date** (the
 WIP schedule's revised contract on that day: a change order approved later is
-out, one voided since is back in); with no end date, today's.
+out, one voided since is back in); with no end date, today's. Job
+Profitability's PDF, print page and CSV say *(cash basis)* after the dates on
+a cash run, as the other cash-basis reports do.
 
 ## The dashboard
 

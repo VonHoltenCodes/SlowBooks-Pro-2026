@@ -1886,3 +1886,51 @@ def test_as_of_reports_filter_status_on_the_status_of_the_date(
     assert ids(early, "closed") == []
     assert ids(late, "closed") == [job.id]
     assert ids(late, "in_progress") == []
+
+
+def test_retainage_status_filter_reads_the_status_of_the_date(
+    db_session, seed_accounts
+):
+    """The Retainage report's status filter matches the job's status on the
+    as-of date: a job closed after the date is listed under in_progress and
+    not under closed. Unfiltered, the job is listed either way and the payable
+    total ties to 2050."""
+    from app.services.retainage_report import PAYABLE_ACCOUNT, retainage_report
+
+    job = _closed_later_job(db_session)
+    payable = Account(
+        account_number="2050",
+        name=PAYABLE_ACCOUNT,
+        account_type=AccountType.LIABILITY,
+        balance=Decimal("0"),
+    )
+    db_session.add(payable)
+    db_session.flush()
+    po = db_session.query(PurchaseOrder).filter_by(job_id=job.id).one()
+    _po_bill(db_session, po, "B-9", "1000", held="100", when=date(2026, 3, 1))
+    create_journal_entry(
+        db_session,
+        date(2026, 3, 1),
+        "retainage held",
+        [
+            {"account_id": _cogs(db_session).id, "debit": Decimal("100")},
+            {"account_id": payable.id, "credit": Decimal("100"), "job_id": job.id},
+        ],
+    )
+    db_session.commit()
+    early = date(2026, 7, 1)
+
+    def ids(st=None):
+        return [
+            j["job_id"] for j in retainage_report(db_session, early, status=st)["jobs"]
+        ]
+
+    assert ids("in_progress") == [job.id]
+    assert ids("closed") == []
+    late = retainage_report(db_session, date(2026, 10, 1), status="closed")
+    assert [j["job_id"] for j in late["jobs"]] == [job.id]
+
+    whole = retainage_report(db_session, early)
+    assert [j["job_id"] for j in whole["jobs"]] == [job.id]
+    assert whole["totals"]["payable"] == 100.0 == whole["books"]["payable"]
+    assert whole["filtered"] is False
