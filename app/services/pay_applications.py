@@ -301,12 +301,18 @@ def refuse_lines_not_in_effect(db: Session, app) -> None:
 
 def lines_in_effect(db: Session, app) -> list:
     """The application's lines less a change order's line that takes effect
-    after the application's date (one already billed on stays: it is money)."""
+    after the application's date (one already billed on stays: it is money,
+    whether this application bills it or an earlier approved one did)."""
     from app.models.jobs import SovLine
 
+    previous = previous_by_sov_line(db, app.job_id, app.application_no)
     kept = []
     for ln in app.lines:
-        billed = _q(ln.this_period) != _ZERO or _q(ln.stored) != _ZERO
+        billed = (
+            _q(ln.this_period) != _ZERO
+            or _q(ln.stored) != _ZERO
+            or previous.get(ln.sov_line_id, _ZERO) != _ZERO
+        )
         sov = db.get(SovLine, ln.sov_line_id) if ln.sov_line_id else None
         if billed or sov_line_in_effect(db, sov, app.date):
             kept.append(ln)

@@ -357,10 +357,13 @@ def _refresh_lines(db: Session, app: PayApplication) -> bool:
     job = db.get(Job, app.job_id)
     changed = _drop_orphan_lines(db, app, job)
     by_sov = {ln.sov_line_id: ln for ln in app.lines if ln.sov_line_id}
+    billed = previous_by_sov_line(db, app.job_id, app.application_no)
     for n, sov in enumerate(job.sov_lines, start=1):
         ln = by_sov.get(sov.id)
         if ln is None:
-            if not sov_line_in_effect(db, sov, app.date):
+            if billed.get(sov.id, _ZERO) == _ZERO and not sov_line_in_effect(
+                db, sov, app.date
+            ):
                 continue
             db.add(
                 PayApplicationLine(
@@ -574,8 +577,13 @@ def create_pay_application(data: PayApplicationCreate, db: Session = Depends(get
         )
     # Pre-fill a line from every SOV line, in order — change_order, allowance
     # and contingency lines bill like work.
+    # A change order's line an earlier approved application billed stays, even
+    # when this one is dated before the change order takes effect.
+    billed = previous_by_sov_line(db, job.id, app.application_no)
     for n, sov in enumerate(job.sov_lines, start=1):
-        if not sov_line_in_effect(db, sov, app.date):
+        if billed.get(sov.id, _ZERO) == _ZERO and not sov_line_in_effect(
+            db, sov, app.date
+        ):
             continue
         db.add(
             PayApplicationLine(
