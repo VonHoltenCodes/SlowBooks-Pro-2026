@@ -409,11 +409,18 @@ def _budget_deltas(db: Session, job_id: int, co: ChangeOrder, with_revenue: bool
     """What this CO adds to the change budget rows: {(code, type): [cost,
     revenue]}. An allowance-funded CO spends money the budget already holds,
     so besides its own cost it takes the same cost back out of the
-    allowance's cell, and the job's total budgeted cost stays put."""
+    allowance's cell, and the job's total budgeted cost stays put. A CO
+    approved before Approve wrote that draw (allowance_draw_written false)
+    has only its lines to take back."""
     deltas: dict[tuple, list] = {}
     for key, (cost, sell) in _budget_groups(co).items():
         deltas[key] = [cost, sell if with_revenue else _ZERO]
-    if co.kind == "owner" and co.funding == "allowance" and not co.allowance_return:
+    if (
+        co.kind == "owner"
+        and co.funding == "allowance"
+        and not co.allowance_return
+        and co.allowance_draw_written
+    ):
         sov_line = (
             db.get(SovLine, co.allowance_sov_line_id)
             if co.allowance_sov_line_id
@@ -852,6 +859,7 @@ def apply_change_order(
                         "message": "This change order would spend more than the allowance holds.",
                     },
                 )
+            co.allowance_draw_written = True
             _write_change_budgets(db, job.id, co, with_revenue=False)
     elif co.kind == "sub":
         if co.commitment_id is None:

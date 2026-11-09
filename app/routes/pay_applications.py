@@ -32,6 +32,7 @@ from app.schemas.pay_applications import (
 from app.services.accounting import (
     _q,
     create_journal_entry,
+    ensure_construction_account,
     ensure_construction_accounts,
     get_ar_account_id,
     get_contract_revenue_account_id,
@@ -104,13 +105,14 @@ class _BilledLine:
         "is_taxable",
     )
 
-    def __init__(self, description, amount, sov, default_revenue_id):
+    def __init__(self, description, amount, sov, db):
         self.description = description
         self.amount = amount
         self.cost_code_id = sov.cost_code_id if sov else None
+        # 4050 is looked up (and created) only for a line that names none
         self.revenue_account_id = (
             sov.revenue_account_id if sov and sov.revenue_account_id else None
-        ) or default_revenue_id
+        ) or get_contract_revenue_account_id(db)
         self.is_taxable = bool(sov.is_taxable) if sov else True
 
 
@@ -716,7 +718,6 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
     # so stored materials are billed when stored and reversed when installed.
     # A deduct line may be negative.
     prior_stored = _prior_stored(db, app)
-    contract_revenue_id = get_contract_revenue_account_id(db)
     invoice_lines = []  # _BilledLine per SOV line with something billed
     for ln in app.lines:
         delta = _q(ln.stored) - prior_stored.get(ln.sov_line_id, _ZERO)
@@ -727,7 +728,7 @@ def approve_pay_application(app_id: int, db: Session = Depends(get_db)):
         desc = (
             f"{ln.item_no or ''} {ln.description or ''}".strip() or "Progress billing"
         )
-        invoice_lines.append(_BilledLine(desc, amount, sov, contract_revenue_id))
+        invoice_lines.append(_BilledLine(desc, amount, sov, db))
 
     deposit = _q(app.deposit_applied)
     moved = any(
@@ -836,7 +837,7 @@ def _create_invoice(
     4050 Contract Revenue) with the job and the line's cost code, CR sales
     tax."""
     ar_id = get_ar_account_id(db)
-    retainage_recv = ensure_construction_accounts(db)["1150"].id
+    retainage_recv = ensure_construction_account(db, "1150").id
     balance_due = _q(total - retainage_held + retainage_released)
     # The payer's whole Bill To as of now and the customer's own Ship To,
     # through the helper every other new invoice uses (a pay application's

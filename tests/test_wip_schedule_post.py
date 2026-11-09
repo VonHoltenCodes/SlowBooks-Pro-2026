@@ -539,3 +539,51 @@ def test_an_accountant_posts_and_voids(client, db_session, seed_accounts):
     assert (
         client.post(f"/api/reports/wip-schedule/void?as_of={AS_OF}").status_code == 200
     )
+
+
+# ── Companies upgraded from the release before ───────────────────────────
+
+
+def test_a_job_closed_before_the_upgrade_stays_off_a_back_dated_wip(
+    db_session, seed_accounts
+):
+    """The upgrade leaves the closing day empty, which reads as closed on
+    every date: the job is off a WIP dated before today, as it always was,
+    and in it under Include closed."""
+    job = _job(db_session, status="closed")
+    _budget(db_session, job, None, "material", "80000", source="manual")
+    _cost(db_session, job, None, "material", "40000")
+    db_session.commit()
+    assert job.closed_on is None
+    plain = job_reports.wip_schedule(db_session, as_of=date(2026, 3, 31))
+    assert job.id not in [r["job_id"] for r in plain["rows"]]
+    shown = job_reports.wip_schedule(
+        db_session, as_of=date(2026, 3, 31), include_closed=True
+    )
+    assert job.id in [r["job_id"] for r in shown["rows"]]
+
+
+def test_the_upgrade_does_not_date_a_closed_job(tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, text
+
+    db = tmp_path / "closed.db"
+    cfg = Config(str(ROOT / "alembic.ini"))
+    cfg.set_main_option("script_location", str(ROOT / "migrations"))
+    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
+    command.upgrade(cfg, "c7e3a1f5d9b2")
+    engine = create_engine(f"sqlite:///{db}")
+    with engine.begin() as conn:
+        conn.execute(
+            text("INSERT INTO customers (id, name, is_active) VALUES (1, 'C', 1)")
+        )
+        conn.execute(
+            text(
+                "INSERT INTO jobs (id, customer_id, name, status, is_active, updated_at) "
+                "VALUES (1, 1, 'J', 'closed', 1, '2026-11-05 14:00:00')"
+            )
+        )
+    command.upgrade(cfg, "head")
+    with engine.connect() as conn:
+        assert conn.execute(text("SELECT closed_on FROM jobs")).scalar() is None

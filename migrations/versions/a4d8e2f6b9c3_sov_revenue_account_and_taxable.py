@@ -36,12 +36,33 @@ def _columns() -> set:
     return {c["name"] for c in insp.get_columns("sov_lines")}
 
 
+def _default_existing_lines_to_income(bind) -> None:
+    """Point every line made before this at the default income account
+    (4000), where the pay applications before this credited. A company
+    without one leaves them null."""
+    income = bind.execute(
+        sa.text(
+            "SELECT id FROM accounts WHERE account_number = '4000' "
+            "AND upper(account_type) = 'INCOME' LIMIT 1"
+        )
+    ).scalar()
+    if income is not None:
+        bind.execute(
+            sa.text(
+                "UPDATE sov_lines SET revenue_account_id = :a "
+                "WHERE revenue_account_id IS NULL"
+            ),
+            {"a": income},
+        )
+
+
 def upgrade() -> None:
     # Books built by create_all (or stamped back over the columns) already
     # have them: each is added only when missing, so a re-run is a no-op.
     have = _columns()
     if "revenue_account_id" in have and "is_taxable" in have:
         return
+    backfill = "revenue_account_id" not in have
     with op.batch_alter_table("sov_lines") as batch:
         if "revenue_account_id" not in have:
             batch.add_column(
@@ -60,6 +81,8 @@ def upgrade() -> None:
                     "is_taxable", sa.Boolean(), nullable=False, server_default=sa.true()
                 )
             )
+    if backfill:
+        _default_existing_lines_to_income(op.get_bind())
 
 
 def downgrade() -> None:

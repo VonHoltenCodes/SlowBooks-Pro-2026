@@ -534,3 +534,157 @@ def test_the_migration_gives_existing_approved_rows_their_day(tmp_path):
     assert rows["J1-CO-001"] == "2026-08-03"
     assert rows["J1-CO-002"] is None
     assert all(not r[0] for r in returns)
+
+
+# ── Companies upgraded from the release before ───────────────────────────
+
+
+def _migration(stem):
+    import importlib.util
+    from pathlib import Path
+
+    path = next(
+        (Path(__file__).resolve().parents[1] / "migrations" / "versions").glob(
+            f"{stem}_*.py"
+        )
+    )
+    spec = importlib.util.spec_from_file_location(f"mig_{stem}", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _legacy_allowance_co(client, db_session, customer_id, shared_amount="4000"):
+    """A 4,000 allowance CO on the allowance's own code as the release before
+    left it: no draw out of the allowance's cell, its cost in the one shared
+    change row, and no rows of its own."""
+    from app.models.change_orders import ChangeOrder
+
+    job, _sov, allowance_id, code = _allowance_with_budget(
+        client, db_session, customer_id
+    )
+    body = {
+        "job_id": job["id"],
+        "kind": "owner",
+        "funding": "allowance",
+        "allowance_sov_line_id": allowance_id,
+        "lines": [{**LINE, "unit_cost": 4000, "cost_code_id": code.id}],
+    }
+    co = client.post("/api/change-orders", json=body).json()
+    assert _approve(client, co["id"]).status_code == 200
+    db_session.get(ChangeOrder, co["id"]).allowance_draw_written = False
+    db_session.add(
+        JobBudget(
+            job_id=job["id"],
+            cost_code_id=code.id,
+            cost_type="material",
+            amount=Decimal(shared_amount),
+            revenue_amount=Decimal("0"),
+            source="change",
+            locked=True,
+        )
+    )
+    db_session.commit()
+    assert _budget_total(db_session, job["id"]) == Decimal(25000) + Decimal(
+        shared_amount
+    )
+    return job, co
+
+
+def test_voiding_an_allowance_co_approved_before_the_upgrade_takes_its_cost_back(
+    client, db_session, seed_customer
+):
+    job, co = _legacy_allowance_co(client, db_session, seed_customer.id)
+    _migration("b5d2e8f4a6c3")._link_change_budgets(db_session.connection())
+    db_session.commit()
+    db_session.expire_all()
+    own = (
+        db_session.query(JobBudget)
+        .filter(JobBudget.job_id == job["id"], JobBudget.source == "change")
+        .all()
+    )
+    assert [(r.change_order_id, Decimal(str(r.amount))) for r in own] == [
+        (co["id"], Decimal("4000.00"))
+    ]
+    assert client.post(f"/api/change-orders/{co['id']}/void").status_code == 200
+    assert _budget_total(db_session, job["id"]) == Decimal("25000")
+
+
+def test_voiding_an_unlinked_allowance_co_subtracts_only_its_lines(
+    client, db_session, seed_customer
+):
+    """The shared row also holds another change order's 500, so the backfill
+    leaves it alone; the void takes back the 4,000 the lines wrote and not a
+    draw the release before never made."""
+    job, co = _legacy_allowance_co(
+        client, db_session, seed_customer.id, shared_amount="4500"
+    )
+    _migration("b5d2e8f4a6c3")._link_change_budgets(db_session.connection())
+    db_session.commit()
+    assert client.post(f"/api/change-orders/{co['id']}/void").status_code == 200
+    assert _budget_total(db_session, job["id"]) == Decimal("25500")
+
+
+def test_a_draft_application_billing_a_change_order_stays_saveable_after_the_upgrade(
+    client, db_session, seed_accounts, seed_customer
+):
+    from app.models.change_orders import ChangeOrder
+
+    job, sov = _setup(
+        client,
+        seed_customer.id,
+        [{"description": "Base", "scheduled_value": 100000}],
+        100000,
+    )
+    co = _owner_co(client, job["id"], 10000, date="2026-08-20")
+    assert _approve(client, co["id"]).status_code == 200
+    co_line = next(
+        s for s in _contract(client, job["id"])["sov"] if s["kind"] == "change_order"
+    )
+    draft = _app(
+        client,
+        job["id"],
+        "2026-08-31",
+        [{"sov_line_id": co_line["id"], "this_period": 5000, "stored": 0}],
+    )
+    # the upgrade stamps approved_on from a click made on 09-02
+    row = db_session.get(ChangeOrder, co["id"])
+    row.approved_at = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+    row.approved_on = None
+    db_session.commit()
+    _migration("e2a6c8f4b1d9")._backfill_approved_on(db_session.connection())
+    db_session.commit()
+    db_session.expire_all()
+    assert db_session.get(ChangeOrder, co["id"]).approved_on == date(2026, 8, 20)
+
+    body = {"lines": [{"sov_line_id": co_line["id"], "this_period": 6000, "stored": 0}]}
+    assert (
+        client.put(f"/api/pay-applications/{draft['id']}", json=body).status_code == 200
+    )
+    assert client.post(f"/api/pay-applications/{draft['id']}/submit").status_code == 200
+    assert (
+        client.post(f"/api/pay-applications/{draft['id']}/approve").status_code == 200
+    )
+
+
+def test_a_change_order_billed_only_on_approved_applications_keeps_the_click_day(
+    client, db_session, seed_accounts, seed_customer
+):
+    from app.models.change_orders import ChangeOrder
+
+    job, sov = _setup(
+        client,
+        seed_customer.id,
+        [{"description": "Base", "scheduled_value": 100000}],
+        100000,
+    )
+    co = _owner_co(client, job["id"], 10000, date="2026-08-20")
+    assert _approve(client, co["id"]).status_code == 200
+    row = db_session.get(ChangeOrder, co["id"])
+    row.approved_at = datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc)
+    row.approved_on = None
+    db_session.commit()
+    _migration("e2a6c8f4b1d9")._backfill_approved_on(db_session.connection())
+    db_session.commit()
+    db_session.expire_all()
+    assert db_session.get(ChangeOrder, co["id"]).approved_on == date(2026, 9, 2)

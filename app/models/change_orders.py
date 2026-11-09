@@ -121,6 +121,12 @@ class ChangeOrder(Base):
     allowance_return = Column(
         Boolean, nullable=False, default=False, server_default=false()
     )
+    # True once Approve has written an allowance-funded CO's draw out of its
+    # allowance's budget cell. A CO approved before that was written has it
+    # false, and its void reverses its lines alone.
+    allowance_draw_written = Column(
+        Boolean, nullable=False, default=False, server_default=false()
+    )
     voided_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
