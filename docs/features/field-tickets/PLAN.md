@@ -1,6 +1,6 @@
 # Field tickets: plan
 
-Status: built (construction overhaul, 2026-11-07). The design as drafted for
+Status: built (2026-11-07). The design as drafted for
 Keith, the PM persona's additions, and the decisions taken while building it
 at the end. `docs/contractor-mode.md` "Field tickets" is the user-facing spec.
 
