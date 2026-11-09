@@ -321,19 +321,55 @@ def test_the_pdf_prints_every_new_element_on_and_none_off(position):
     )
     off = _pages(_pdf(check_position=position))
     assert _micr_cells(off, 0) == []
-    assert not _NEW_WORDS & {w for w, _x, _y in _words(off, 0)}
+    assert not any(_is_new(w) for w, _x, _y in _words(off, 0))
+
+
+def _is_new(text):
+    """A word of the blank-stock face's new elements: whole, or the piece
+    pypdf hands back where a font set splits one at a space ("First" /
+    "Prairie Bank")."""
+    return len(text) > 1 and any(text in phrase for phrase in _NEW_WORDS)
+
+
+def _lines(words):
+    """Each line's words joined in reading order, so a field one font set
+    splits ("Oct" / "24, 2026") reads whole again."""
+    rows = {}
+    for text, x, y in words:
+        rows.setdefault(y, []).append((x, text))
+    return [" ".join(t for _x, t in sorted(row)) for row in rows.values()]
+
+
+def _only_the_new_words_differ(off, on):
+    """Every word the plain face prints is on blank stock at the same place,
+    and what blank stock adds is the new elements and nothing else. Matched
+    by place: a word's text is whatever pypdf makes of it on the font set at
+    hand. Returns the added words."""
+    assert [w for w in off if w not in on] == []
+    added = [w for w in on if w not in off]
+    assert all(_is_new(w[0]) for w in added), added
+    return added
 
 
 @pytest.mark.parametrize("position", ["bottom", "top"])
 def test_every_field_prints_at_the_same_place_on_and_off(position):
     off = _words(_pages(_pdf(check_position=position)), 0)
     on = _words(_pages(_pdf(check_position=position, **_ON)), 0)
-    assert [w for w in on if w[0] not in _NEW_WORDS] == off
-    # the fields the face carries are among them
-    texts = {w[0] for w in off}
-    for field in ("#1072", "DATE", "Oct 24, 2026", "Gulf Supply", "$1,234.56"):
-        assert field in texts
-    assert "Invoice 55" in texts and "MEMO" in texts
+    added = _only_the_new_words_differ(off, on)
+    for phrase in _NEW_WORDS:
+        assert any(phrase in line for line in _lines(added)), (phrase, added)
+    # the fields the face carries are among the plain face's words
+    lines = _lines(off)
+    for field in (
+        "#1072",
+        "DATE",
+        "Oct 24, 2026",
+        "Gulf Supply",
+        "$1,234.56",
+        "MEMO",
+        "Invoice 55",
+    ):
+        assert any(field in line for line in lines), (field, lines)
 
 
 @pytest.mark.parametrize("position", ["bottom", "top"])
@@ -343,20 +379,28 @@ def test_with_a_logo_only_the_company_block_moves(monkeypatch, position):
     reader = _pages(_pdf(check_position=position, **_ON))
     on = _words(reader, 0)
     assert len(reader.pages[0].images) == 1
-    moved = {"Acme Builders", "1 Main St", "Tampa, FL 33601"}
 
     def face_block(words):
-        # the name and address on the face, not the stubs' name: the face is
-        # the sheet's bottom third, or its top third
-        on_face = (lambda y: y < 252) if position == "bottom" else (lambda y: y > 528)
-        return [w for w in words if w[0] in moved and on_face(w[2])]
+        # the company block: the top inch of the face's left side, the face
+        # being the sheet's bottom third or its top third. The stubs' name
+        # sits outside the face, the date and the number to the right. Picked
+        # by place, not by text: one font set hands pypdf "Tampa," and
+        # "FL 33601" as two words, and the block's words are what moved.
+        top = (11 / 3 if position == "bottom" else 11) * 72
+        return sorted(
+            (w for w in words if w[1] < 200 and top - 72 < w[2] < top),
+            key=lambda w: (-w[2], w[1]),
+        )
 
-    kept_on = [w for w in on if w[0] not in _NEW_WORDS and w not in face_block(on)]
-    kept_off = [w for w in off if w not in face_block(off)]
-    assert kept_on == kept_off
-    # the face's company block sits 1.25 in right of where it was, same height
-    assert len(face_block(off)) == len(face_block(on)) == 3
-    for (t0, x0, y0), (t1, x1, y1) in zip(face_block(off), face_block(on)):
+    block_off, block_on = face_block(off), face_block(on)
+    kept_on = [w for w in on if w not in block_on]
+    kept_off = [w for w in off if w not in block_off]
+    _only_the_new_words_differ(kept_off, kept_on)
+    # the face's company block, name, street and city line, sits 1.25 in
+    # right of where it was, each word at its height
+    assert " ".join(_lines(block_off)) == "Acme Builders 1 Main St Tampa, FL 33601"
+    assert len(block_on) == len(block_off) >= 3
+    for (t0, x0, y0), (t1, x1, y1) in zip(block_off, block_on):
         assert t0 == t1 and y0 == y1
         assert x1 - x0 == pytest.approx(1.25 * 72, abs=0.5)
 
