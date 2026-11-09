@@ -266,5 +266,7 @@ def test_an_amount_that_rounds_to_nothing_is_refused(
     pay = _payment(client, salt, 50)
     before = _snapshot(TestSession)
     r = _apply(client, pay["id"], (inv["id"], 0.001))
-    assert r.status_code == 400, r.text
+    # Refused at the schema since #747: payment money is in whole cents.
+    assert r.status_code == 422, r.text
+    assert "whole cents" in r.text
     assert _snapshot(TestSession) == before
