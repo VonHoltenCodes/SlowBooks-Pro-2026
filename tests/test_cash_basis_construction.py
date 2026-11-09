@@ -117,7 +117,9 @@ def _owner_side(client, db_session, customer_id):
     )
     _payment(client, customer_id, "2026-08-20", "132191.97", [(inv1, "132191.97")])
     _payment(client, customer_id, "2026-09-25", "135102.40", [(inv2, "135102.40")])
-    _payment(client, customer_id, "2026-11-05", "100004.77", [(inv3, "100004.77")])
+    # application 3 completes the work, so its tax trues the job's up to
+    # 6.5% of 401,346.27 (26,087.51): 6,736.08, not 6,736.07
+    _payment(client, customer_id, "2026-11-05", "100004.78", [(inv3, "100004.78")])
     _payment(client, customer_id, "2026-11-05", "40134.63", [(inv4, "40134.63")])
     return job, (inv1, inv2, inv3, inv4)
 

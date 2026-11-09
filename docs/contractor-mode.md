@@ -538,7 +538,13 @@ the cost tree) and screens keep that row. Each built line credits **4050 Contrac
   the taxable lines and "General conditions (8%) (not taxable)" for the rest.
   The taxable parts sum to the estimate's taxable share to the cent (the last
   markup takes the rounding), so the A/B example above bills exactly 3,022.55
-  of tax at 100%. A contingency line is taxable when any line on the schedule
+  of tax at 100%, in one application or several. An application that brings a
+taxable line to 100% complete trues the tax up: it charges the unrounded tax of
+every application so far, rounded once, less the tax already billed, so a
+rounding cent left by the earlier applications comes out there. Billed at
+33.33%, 33.33% and the rest, the A/B example charges 1,007.42, 1,007.42 and
+1,007.71: 3,022.55, not 3,022.56. A partial application rounds its own tax. A
+contingency line is taxable when any line on the schedule
   is. **Convert to invoice** splits its markup lines the same way, so the
   converted invoice charges the bid's tax.
 
@@ -789,16 +795,23 @@ screen, in the totals and on the PDF), so the schedule total equals the contract
 sum to date; a draft picks the line up when its date moves past the change
 order's effective date. The application cannot bill that line before then:
 saving it with a date before the change order takes effect while the line
-carries an amount (this period or stored) is refused, 409 code
-`change_order_not_in_effect`, naming the change order and its date ("CO-003
-takes effect on 2026-09-20, after this application's date (2026-09-01) …");
-clear the line or keep the later date. Submit and approve check the same. A
-line with nothing on it just drops off the application, as before.
-The exception is a line an earlier approved application already billed: it
-stays on a later-numbered application dated before the change order takes
-effect, so completed-to-date never falls below what was billed and approve
-never posts a retainage release for the difference. (The application's
-contract sum to date still reads the change orders in effect by its date.)
+bills something on it (work this period, or a stored balance other than the
+one the earlier applications left) is refused, 409 code
+`change_order_not_in_effect`, naming the change order, its date and the line
+(its item number, else its description, else "the change order's line": "CO-003
+takes effect on 2026-09-20, after this application's date (2026-09-01), so its
+line 05 cannot bill on it …"); clear the line or keep the later date. Submit
+and approve check the same. A line with nothing on it just drops off the
+application, as before.
+The exception is a line an earlier approved application already billed work
+on **or left stored materials on**: it stays on a later-numbered application
+dated before the change order takes effect, at the stored balance it was left
+with, so completed-to-date never falls below what was billed and approve never
+posts a retainage release for the difference. Such an application's **contract
+sum to date** and **net change by change orders** count every change order
+whose line it carries, so the summary foots against the line detail: 100,000
+plus a 10,000 change order its schedule carries is 110,000, the schedule's
+total, and the balance to finish is figured off the same 110,000.
 Approve refuses a date that cannot be right, each with a sentence (422): an
 `approved_on` **earlier than the change order's own date**, and any effective
 date (given or defaulted) **earlier than the job's contract date**, since a WIP,
@@ -1013,7 +1026,9 @@ and change-order lines all bill the same way) carries, per period:
   applications for the line.
 - **This period** — the work completed this period.
 - **Stored** — materials presently stored, not yet in the work (not
-  cumulative).
+  cumulative). A new application starts each line at the stored balance the
+  earlier approved applications left on it; lower it as the materials go into
+  the work.
 - **Completed to date** = previous + this period + stored.
 - **% complete** = completed ÷ scheduled.
 - **Balance to finish** = scheduled − completed.
@@ -1151,8 +1166,10 @@ credit's share. A lien waiver is for one payment and one
 job, and its amount is the part of the payment applied to that job's invoices. At approval the application keeps the contract sums as they
 stood (original, and to date with change orders), and its PDF prints those, not
 today's job. The PDF's **net change by change orders** is the owner change
-orders that take effect on or before the application's **date** (see *A change
-order takes effect on the day you say*), and the original plus the net change
+orders that take effect on or before the application's **date**, plus any whose
+line the application carries (see *A change order takes effect on the day you
+say*; the application's JSON carries the same three rows as `contract_sums`),
+and the original plus the net change
 is the contract sum to date; an application approved before 2.31.8 with no
 original kept reads it as the sum less the change orders approved by its
 approval, so it prints right with no repair (#723). An invoice made from a payment application can't be edited on the

@@ -101,7 +101,7 @@ def approved_contract_changes(db: Session, job: Job, through=None) -> Decimal:
     return _q(total)
 
 
-def contract_changes_after(db: Session, job: Job, on) -> Decimal:
+def contract_changes_after(db: Session, job: Job, on, carried=()) -> Decimal:
     """Σ sell of the approved, contract-funded owner change orders that take
     effect after `on` — what to back out of the job's contract sum to read it
     as it stood that day. A pay application dated before a change order's
@@ -110,11 +110,14 @@ def contract_changes_after(db: Session, job: Job, on) -> Decimal:
     A change order voided since `on` is left out too, unlike contract_on for
     reports: the void removed its schedule lines (and refuses one that was
     billed), so a pay application's header must leave it out to foot with
-    its schedule."""
+    its schedule. A change order in `carried` (its line is on the pay
+    application anyway, billed by an earlier one) stays in."""
     from app.services.change_orders import co_effective_date, co_totals
 
     total = Decimal("0")
     for co in _contract_cos(db, job):
+        if co.id in carried:
+            continue
         effective = co_effective_date(co)
         if effective is not None and effective > on:
             total += co_totals(co, job)["sell_total"]
@@ -144,7 +147,8 @@ def application_contract_sums(db: Session, app, job: Optional[Job]) -> dict:
     original (approved while the job had no original stamped) reads the net
     change as the change orders approved on or before the application's
     approval, and the original as the sum less them. A draft reads the job as
-    it stands, less the change orders that take effect after its date."""
+    it stands, less the change orders that take effect after its date and
+    whose lines it does not carry."""
     zero = Decimal("0")
     if app.contract_sum_to_date is not None:
         to_date = _q(app.contract_sum_to_date)
@@ -162,10 +166,14 @@ def application_contract_sums(db: Session, app, job: Optional[Job]) -> dict:
     if job is None or job.contract_amount is None:
         return {"original": zero, "net_change": zero, "to_date": zero}
     # A draft reads the job as it stands, less the change orders that take
-    # effect after the application's own date.
+    # effect after the application's own date (unless it carries their lines).
+    from app.services.pay_applications import carried_change_orders
+
     to_date = _q(
         _q(job.contract_amount)
-        - contract_changes_after(db, job, app.date or date.today())
+        - contract_changes_after(
+            db, job, app.date or date.today(), carried_change_orders(db, app)
+        )
     )
     original = original_contract_sum(db, job)
     return {

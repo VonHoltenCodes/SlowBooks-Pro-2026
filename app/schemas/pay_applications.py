@@ -124,6 +124,9 @@ class PayApplicationOut(BaseModel):
     # Sentences for what the application will quietly not do: a schedule that
     # does not foot to the contract sum, taxable lines at a tax rate of 0.
     warnings: List[str] = []
+    # The G702 contract rows (original, net change by change orders, to
+    # date), the same figures the PDF prints.
+    contract_sums: dict = {}
 
     model_config = {"from_attributes": True}
 
