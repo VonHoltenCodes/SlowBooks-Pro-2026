@@ -10,7 +10,7 @@
 downgrade drops the column.
 
 Revision ID: e2b6c4d8f0a3
-Revises: d8f1b3c5e7a9
+Revises: b4d2e7a9c6f1
 Create Date: 2026-11-09
 """
 
@@ -20,7 +20,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "e2b6c4d8f0a3"
-down_revision: Union[str, None] = "d8f1b3c5e7a9"
+down_revision: Union[str, None] = "b4d2e7a9c6f1"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

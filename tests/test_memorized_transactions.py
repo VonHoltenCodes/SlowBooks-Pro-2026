@@ -3115,5 +3115,5 @@ def test_the_use_tax_migration_adds_the_column_and_walks_back(tmp_path):
 
     command.upgrade(cfg, "e2b6c4d8f0a3")
     assert "use_tax" in cols()
-    command.downgrade(cfg, "d8f1b3c5e7a9")
+    command.downgrade(cfg, "b4d2e7a9c6f1")
     assert "use_tax" not in cols()
