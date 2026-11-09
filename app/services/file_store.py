@@ -168,6 +168,26 @@ def delete_attachment(db: Session, attachment: Attachment) -> None:
     delete_stored(db, stored)
 
 
+def delete_record_attachments(db: Session, entity_type: str, entity_id: int) -> int:
+    """Every file attached to one record, rows and bytes, for a route that
+    deletes the record. SQLite hands a deleted record's id to the next
+    one of its type, so files left behind would show on that record. A
+    record that is voided or made inactive keeps its files: they are its
+    history. Employee documents are never touched here. Caller commits."""
+    rows = (
+        db.query(Attachment)
+        .filter(
+            Attachment.entity_type == entity_type,
+            Attachment.entity_id == entity_id,
+            Attachment.employee_id.is_(None),
+        )
+        .all()
+    )
+    for attachment in rows:
+        delete_attachment(db, attachment)
+    return len(rows)
+
+
 def attachment_response(
     db: Session, attachment: Attachment, missing_message: str = MISSING_ATTACHMENT
 ) -> Response:
