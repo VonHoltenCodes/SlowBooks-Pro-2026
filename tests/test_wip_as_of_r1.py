@@ -527,16 +527,6 @@ def test_closing_a_job_stamps_the_day_and_reopening_clears_it(
     assert db_session.get(Job, job_id).closed_on is None
 
 
-def test_the_backfill_dates_a_closed_job(db_session, seed_accounts):
-    job = _job(db_session, status="closed")
-    db_session.commit()
-    _migration()._backfill_closed_on(db_session.connection())
-    db_session.commit()
-    db_session.expire_all()
-    stamped = db_session.get(Job, job.id).closed_on
-    assert stamped is not None and stamped <= date.today()
-
-
 # ── 5. a bad date ───────────────────────────────────────────────────────
 
 
@@ -822,7 +812,7 @@ def test_the_migration_up_down_and_up(tmp_path):
             )
         ).fetchall()
         assert [(r[0], float(r[1])) for r in rows] == [(1, 1000.0), (2, -400.0)]
-        assert conn.execute(text("SELECT closed_on FROM jobs")).scalar() == "2026-11-05"
+        assert conn.execute(text("SELECT closed_on FROM jobs")).scalar() is None
         assert conn.execute(
             text("SELECT as_of, transaction_id FROM wip_entry_locks")
         ).fetchall() == [("2026-09-30", 7)]

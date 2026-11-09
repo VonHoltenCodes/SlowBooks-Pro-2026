@@ -697,6 +697,15 @@ def ensure_construction_accounts(db: Session) -> dict[str, Account]:
     }
 
 
+def ensure_construction_account(db: Session, number: str) -> Account:
+    """One construction account by its suggested number, created if missing,
+    without creating the rest."""
+    for num, name, atype, detail in CONSTRUCTION_ACCOUNTS:
+        if num == number:
+            return ensure_account(db, num, name, atype, detail)
+    raise KeyError(number)
+
+
 def get_contract_revenue_account_id(db: Session) -> int:
     """4050 Contract Revenue, created on demand: what a schedule-of-values
     line with no revenue account of its own credits."""

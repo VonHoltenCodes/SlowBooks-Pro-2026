@@ -14,9 +14,9 @@ order, the day a job closed, and one WIP entry per date
   to the cent in cost and revenue. A row that does not add up (a budget
   cell edited since, an allowance cell that is no longer the largest row on
   its code) is left unlinked and counts on every date, as before.
-- jobs.closed_on: the day the job went to Closed. Backfilled for every
-  closed job from the date its row was last updated (the latest the close
-  can have been), else its last posting, else today.
+- jobs.closed_on: the day the job went to Closed. Not backfilled: a job
+  closed before the upgrade keeps a null day, which reads as it always did,
+  instead of a guessed day later than the real close.
 - wip_entry_locks: one row per date a WIP adjusting entry stands for, so
   two posts of the same date at once cannot both land. Backfilled from the
   entries standing now (the earliest, if a date has more than one).
@@ -29,7 +29,7 @@ Create Date: 2026-11-07
 """
 
 from collections import defaultdict
-from datetime import date, datetime, timezone
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Sequence, Union
 
@@ -79,43 +79,27 @@ def _day(value):
     return date.fromisoformat(str(value)[:10])
 
 
-def _local_day(stamp):
-    """The local calendar day a stored UTC timestamp falls on (naive is
-    UTC here, as job_reports._local_date reads it), never after today."""
-    if stamp is None:
-        return None
-    if not isinstance(stamp, datetime):
-        text = str(stamp).replace(" ", "T")
-        try:
-            stamp = datetime.fromisoformat(text)
-        except ValueError:
-            return _day(text)
-    if stamp.tzinfo is None:
-        stamp = stamp.replace(tzinfo=timezone.utc)
-    return min(stamp.astimezone().date(), date.today())
-
-
 # ── backfills ────────────────────────────────────────────────────────────
 
 
 def _co_contributions(conn, job_id: int) -> dict:
     """What each approved change order on the job wrote into the change
-    rows, as change_orders._budget_deltas computes it from the frozen
-    figures: {(code, type): {co_id: [cost, revenue]}}."""
+    rows, as the release that wrote them did, from the frozen figures:
+    {(code, type): {co_id: [cost, revenue]}}. An allowance-funded change
+    order's draw on its allowance's cell is not in them: that release never
+    wrote it, so the shared row holds the lines alone."""
     out: dict = defaultdict(dict)
     cos = conn.execute(
         sa.text(
-            "SELECT id, kind, funding, allowance_sov_line_id, allowance_return, "
-            "owner_change_order_id FROM change_orders "
+            "SELECT id, kind, funding, owner_change_order_id FROM change_orders "
             "WHERE job_id = :j AND status = 'approved'"
         ),
         {"j": job_id},
     ).fetchall()
-    for co_id, kind, funding, allowance_line, is_return, owner_id in cos:
+    for co_id, kind, funding, owner_id in cos:
         if kind == "pco" or (kind == "sub" and owner_id is not None):
             continue  # a PCO and a sub CO under an owner CO write no budget
         with_revenue = kind == "owner" and funding == "contract"
-        drawn = Decimal("0")
         for code_id, ctype, amount, sell in conn.execute(
             sa.text(
                 "SELECT cost_code_id, cost_type, amount, sell_amount "
@@ -126,30 +110,6 @@ def _co_contributions(conn, job_id: int) -> dict:
             cell = out[(code_id, ctype)].setdefault(co_id, [Decimal("0")] * 2)
             cell[0] += _q(amount)
             cell[1] += _q(sell) if with_revenue else Decimal("0")
-            drawn += _q(amount)
-        if kind == "owner" and funding == "allowance" and not is_return:
-            if allowance_line is None:
-                continue
-            line_code = conn.execute(
-                sa.text("SELECT cost_code_id FROM sov_lines WHERE id = :s"),
-                {"s": allowance_line},
-            ).scalar()
-            cond = (
-                "cost_code_id = :k" if line_code is not None else "cost_code_id IS NULL"
-            )
-            cell_row = conn.execute(
-                sa.text(
-                    "SELECT cost_code_id, cost_type FROM job_budgets "
-                    f"WHERE job_id = :j AND source != 'change' AND {cond} "
-                    "ORDER BY amount DESC, id LIMIT 1"
-                ),
-                {"j": job_id, "k": line_code},
-            ).first()
-            if cell_row is not None:
-                cell = out[(cell_row[0], cell_row[1])].setdefault(
-                    co_id, [Decimal("0")] * 2
-                )
-                cell[0] -= drawn
     return out
 
 
@@ -216,34 +176,6 @@ def _link_change_budgets(conn) -> None:
                         "n": notes,
                     },
                 )
-
-
-def _backfill_closed_on(conn) -> None:
-    today = date.today()
-    for job_id, updated in conn.execute(
-        sa.text(
-            "SELECT id, updated_at FROM jobs "
-            "WHERE status = 'closed' AND closed_on IS NULL"
-        )
-    ).fetchall():
-        day = _local_day(updated)
-        if day is None:
-            day = _day(
-                conn.execute(
-                    sa.text(
-                        "SELECT MAX(t.date) FROM transactions t "
-                        "LEFT JOIN transaction_lines l ON l.transaction_id = t.id "
-                        "WHERE t.job_id = :j OR l.job_id = :j"
-                    ),
-                    {"j": job_id},
-                ).scalar()
-            )
-        conn.execute(
-            sa.text("UPDATE jobs SET closed_on = :d WHERE id = :j").bindparams(
-                sa.bindparam("d", type_=sa.Date())
-            ),
-            {"d": day or today, "j": job_id},
-        )
 
 
 def _backfill_wip_locks(conn) -> None:
@@ -348,8 +280,6 @@ def upgrade() -> None:
 
     if budgets:
         _link_change_budgets(conn)
-    if jobs:
-        _backfill_closed_on(conn)
     if "transactions" in _insp().get_table_names():
         _backfill_wip_locks(conn)
 

@@ -1921,3 +1921,47 @@ def test_an_application_dated_at_the_calendars_end_is_refused_not_a_500(
     assert r.status_code == 422, r.text
     assert "runs past the calendar" in r.json()["detail"]
     assert db_session.query(Invoice).count() == 0
+
+
+# ── Companies upgraded from the release before ───────────────────────────
+
+
+def test_an_existing_schedule_line_keeps_crediting_the_default_income_account(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Lines made before a revenue account existed are pointed at the default
+    income account (4000), so a job part-way through bills every application
+    to one account and the first approve creates no Contract Revenue."""
+    import importlib.util
+
+    from app.models.jobs import SovLine
+
+    job, _lines = _two_line_job(client, seed_customer.id)
+    path = next((ROOT / "migrations" / "versions").glob("a4d8e2f6b9c3_*.py"))
+    spec = importlib.util.spec_from_file_location("sov_revenue_migration", path)
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    db_session.query(SovLine).update({SovLine.revenue_account_id: None})
+    db_session.commit()
+    migration._default_existing_lines_to_income(db_session.connection())
+    db_session.commit()
+    income = _acct(db_session, "4000")
+    assert {s.revenue_account_id for s in db_session.query(SovLine).all()} == {
+        income.id
+    }
+
+    sov = client.get(f"/api/jobs/{job['id']}/contract").json()["sov"]
+    for day, amount in (("2026-06-01", 10000), ("2026-07-01", 5000)):
+        r = client.post(
+            "/api/pay-applications", json={"job_id": job["id"], "date": day}
+        )
+        assert r.status_code == 201, r.text
+        app_id = r.json()["id"]
+        _edit(
+            client,
+            app_id,
+            lines=[{"sov_line_id": sov[0]["id"], "this_period": amount, "stored": 0}],
+        )
+        assert _approve(client, app_id).status_code == 200
+    assert _gl(db_session, "4000") == Decimal("-15000")
+    assert _acct(db_session, "4050") is None

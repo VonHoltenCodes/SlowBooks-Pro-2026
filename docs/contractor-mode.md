@@ -54,6 +54,18 @@ posts to 4050 again; and the received quantity a delivery ticket wrote on a
 purchase order line **stays** on the line, with no ticket left to void it.
 Take a backup first.
 
+**Upgrading an existing construction company** changes no posting. Schedule
+lines made before the upgrade are pointed at the default income account
+(4000), where their earlier pay applications credited, so a job part-way
+through keeps billing to one account; only a new line defaults to 4050. A
+change order approved before the upgrade keeps taking effect on the day of its
+click, except one whose schedule line is billed on a draft or submitted pay
+application, which takes the earlier of its own date and the click so the
+draft stays saveable. An allowance-funded change order approved before the
+upgrade never wrote its draw out of the allowance's budget cell, so voiding it
+takes back its lines and nothing more. A job closed before the upgrade has no
+closing day on file (see *A closed job is finished*).
+
 ## The accounts
 
 Each is created only if an account of that name does not already exist, and
