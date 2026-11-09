@@ -2719,3 +2719,71 @@ def test_a_draft_pay_app_leaves_out_a_change_order_voided_since(
 
     row = db_session.get(Job, job["id"])
     assert contract_changes_after(db_session, row, TODAY) == 0
+
+
+def _stored_job_with_a_draft(client, seed_customer):
+    """PA-1 approved leaves 10,000 stored on the job; PA-2, a draft, is
+    filled from it with that 10,000 stored."""
+    job = _job(client, seed_customer.id)
+    _contract(
+        client,
+        job["id"],
+        contract_type="lump_sum",
+        contract_amount=100000,
+        retainage_pct=10,
+    )
+    base = _sov(
+        client,
+        job["id"],
+        [{"description": "Base", "kind": "work", "scheduled_value": 100000}],
+    )[0]
+    a1 = _dated_app(
+        client,
+        job["id"],
+        "2026-09-01",
+        [{"sov_line_id": base["id"], "this_period": 10000, "stored": 10000}],
+    )
+    assert _approve(client, a1["id"]).status_code == 200
+    a2 = client.post(
+        "/api/pay-applications", json={"job_id": job["id"], "date": "2026-09-30"}
+    ).json()
+    got = client.get(f"/api/pay-applications/{a2['id']}").json()
+    assert float(got["lines"][0]["stored"]) == 10000.0
+    return a1, a2
+
+
+def test_void_is_refused_while_a_later_application_is_open_and_names_it(
+    client, db_session, seed_accounts, seed_customer
+):
+    """Voided under the open draft, the draft would go on billing the 10,000
+    of stored materials it was filled with, which nobody typed."""
+    a1, a2 = _stored_job_with_a_draft(client, seed_customer)
+    got = client.get(f"/api/pay-applications/{a1['id']}").json()
+    assert got["can_void"] is False  # the Pay apps tab offers no Void
+    r = client.post(f"/api/pay-applications/{a1['id']}/void")
+    assert r.status_code == 409, r.text
+    detail = r.json()["detail"]
+    assert detail["code"] == "later_application"
+    assert detail["message"] == (
+        f"{a2['number']} is still open after this one; delete it first, "
+        "then void this one."
+    )
+    got = client.get(f"/api/pay-applications/{a1['id']}").json()
+    assert got["status"] == "approved"
+    # a submitted one is open too
+    assert client.post(f"/api/pay-applications/{a2['id']}/submit").status_code == 200
+    r = client.post(f"/api/pay-applications/{a1['id']}/void")
+    assert r.status_code == 409, r.text
+    assert a2["number"] in r.json()["detail"]["message"]
+
+
+def test_void_goes_through_once_the_later_open_application_is_deleted(
+    client, db_session, seed_accounts, seed_customer
+):
+    a1, a2 = _stored_job_with_a_draft(client, seed_customer)
+    assert client.delete(f"/api/pay-applications/{a2['id']}").status_code == 200
+    assert client.get(f"/api/pay-applications/{a1['id']}").json()["can_void"] is True
+    r = client.post(f"/api/pay-applications/{a1['id']}/void")
+    assert r.status_code == 200, r.text
+    assert r.json()["status"] == "void"
+    assert _gl(db_session, "1150") == Decimal("0.00")

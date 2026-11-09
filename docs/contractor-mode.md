@@ -1131,12 +1131,16 @@ the 1150 leg a credit; the entry still balances. **Void** reverses the
 invoice (and the 1150 entries), and later applications stay correct because
 each reads its *previous* and *retainage to date* from the approved history
 live. The Pay apps tab offers Void only on the application that can be voided:
-the latest approved one, whose invoice has no payment on it other than its own
-deposit (`can_void` on the application). An application's invoice is voided
+the latest approved one, with no draft or submitted application after it,
+whose invoice has no payment on it other than its own deposit (`can_void` on
+the application). An application's invoice is voided
 with the application: voiding it from
 the Invoices screen is refused (409 `invoice_belongs_to_pay_application`). Only
 the **latest approved** application can be voided (409 `later_application`
-otherwise); void the later ones first. Only one application
+otherwise); void the later ones first. Nor is it voided while a later
+application is still open (409 `later_application`, naming it): that one was
+filled from it, its stored materials carried forward from the approved
+balance, so delete it first and make it again after the void. Only one application
 may be open (draft or submitted) per job at a time.
 
 **The Pay apps list and the printed application foot.** The list shows, per
