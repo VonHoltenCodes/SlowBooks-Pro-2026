@@ -1,4 +1,15 @@
 {
+  "2.31.11": {
+    "title": "Construction, gone through; checks on blank stock",
+    "items": [
+      "Construction, gone through: every schedule-of-values line carries its section, a revenue account and a taxable flag, so revenue by section sits beside cost by section; pay applications are due by the customer's terms, foot on the PDF, charge tax only on taxable lines and true it up to the bid's cent; change orders take the date they take effect; a job's Field tickets tab holds T&M tickets, material slips and delivery tickets; the WIP schedule posts an as-of entry with its reversal; a contractor's dashboard, a Retainage report and Sub Compliance. A company that already keeps construction books upgrades with every figure where it was.",
+      "In every company mode, a misspelled filter on the aging and job reports and the estimate, change-order, pay-application and field-ticket lists is refused with a sentence naming the filters accepted, instead of being dropped.",
+      "Checks on blank stock: Settings → Check Printing → Print on blank check stock puts the company logo, name and address, the bank's name and city, the check number and a MICR line on the face, drawn by the app with no MICR font; each bank account keeps its own bank details, the account number encrypted. Off, checks print exactly as before.",
+      "Every check of a batch prints at the first check's height, so each one tears cleanly on stock perforated in thirds.",
+      "A bank account made inactive in the chart leaves Make Deposits and every Deposit To, and a new deposit, payment or sales receipt into one is refused; a record already on it keeps its account.",
+      "Memorize Bill saves again, and a memorized bill keeps each line's Use tax box; every answer from the API names UTF-8 as its encoding."
+    ]
+  },
   "2.31.10": {
     "title": "Collections reminders and statements, where deposits go, and the SBP icon",
     "items": [
