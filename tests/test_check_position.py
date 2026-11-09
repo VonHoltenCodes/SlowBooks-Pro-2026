@@ -13,6 +13,7 @@ without WeasyPrint's native stack.
 """
 
 import datetime
+import io
 import re
 from types import SimpleNamespace
 
@@ -24,7 +25,11 @@ from app.routes.checks import (
     register_check_data,
     vendor_address_fields,
 )
-from app.services.pdf_service import check_position, render_checks_html
+from app.services.pdf_service import (
+    check_position,
+    generate_checks_pdf,
+    render_checks_html,
+)
 
 _COMPANY = {
     "company_name": "Acme",
@@ -577,3 +582,90 @@ def test_an_expense_check_with_a_vendor_and_no_payee_pays_the_vendor(
     data = register_check_data(db_session, r.json()["id"])
     assert data["payee"] == "Sweet Forest Cafe"
     assert data["memo"] == ""
+
+
+# ----- every page of a batch starts where the first does (#740) ---------
+
+
+def _page_runs(pdf):
+    """Each page's text runs as (text, x, y) in points from the page's
+    top-left corner, read from the PDF's word boxes."""
+    pypdf = pytest.importorskip("pypdf")
+    pages = []
+    for page in pypdf.PdfReader(io.BytesIO(pdf)).pages:
+        runs = []
+
+        def visit(text, cm, tm, font, size, runs=runs):
+            if not text.strip():
+                return
+            # text space -> page space: tm then the page's cm
+            x = tm[4] * cm[0] + tm[5] * cm[2] + cm[4]
+            y = tm[4] * cm[1] + tm[5] * cm[3] + cm[5]
+            runs.append((text.strip(), round(x, 2), round(792.0 - y, 2)))
+
+        page.extract_text(visitor_text=visit)
+        pages.append(runs)
+    return pages
+
+
+def _batch(position, count=2):
+    # the same check under consecutive numbers, so every page carries the
+    # same text in the same widths and only a shift could move a field
+    return [
+        _check(check_number=str(1072 + n), payee_address=_ADDRESS) for n in range(count)
+    ]
+
+
+@pytest.mark.parametrize("position", ["bottom", "top"])
+def test_a_two_check_batch_prints_both_pages_at_the_same_height(position):
+    """#740: page 2 of a batch printed 0.08 in higher than page 1, because
+    only the first page got the body's top margin. Every stub, voucher and
+    face field sits at the same place on both pages."""
+    pytest.importorskip("weasyprint")
+    pdf = generate_checks_pdf(
+        _batch(position), {**_COMPANY, "check_position": position}
+    )
+    first, second = _page_runs(pdf)
+    assert len(first) == len(second) > 10
+    for a, b in zip(first, second):
+        assert a[0].replace("1072", "1073") == b[0], (a, b)
+        assert (a[1], a[2]) == (b[1], b[2]), (a, b)
+
+
+def _check_page_tops(html):
+    """Where each page's check-page box starts, in CSS px from the top of
+    the sheet (WeasyPrint's layout, before the PDF)."""
+    weasyprint = pytest.importorskip("weasyprint")
+    tops = []
+    for page in weasyprint.HTML(string=html).render().pages:
+        for box in page._page_box.descendants():
+            element = getattr(box, "element", None)
+            if (
+                element is not None
+                and "check-page" in (element.get("class") or "").split()
+            ):
+                tops.append(box.content_box_y())
+                break
+    return tops
+
+
+@pytest.mark.parametrize("position", ["bottom", "top"])
+def test_every_page_of_a_batch_starts_where_a_single_check_does(position):
+    """The panels are measured from 0.25 in of page margin and 8 px (#732,
+    #727): 32 px from the top of the sheet. A single check keeps that, and
+    so does every page of a batch, so the tears land at 3.67 in and 7.33 in
+    on each of them."""
+    settings = {**_COMPANY, "check_position": position}
+    single = _check_page_tops(render_checks_html(_batch(position, 1), settings))
+    assert single == [pytest.approx(32.0)]
+    batch = _check_page_tops(render_checks_html(_batch(position, 3), settings))
+    assert batch == [pytest.approx(32.0)] * 3
+
+
+@pytest.mark.parametrize("position", ["bottom", "top"])
+def test_a_single_check_prints_where_a_batch_prints_its_first_page(position):
+    pytest.importorskip("weasyprint")
+    settings = {**_COMPANY, "check_position": position}
+    (single,) = _page_runs(generate_checks_pdf(_batch(position, 1), settings))
+    first = _page_runs(generate_checks_pdf(_batch(position), settings))[0]
+    assert single == first

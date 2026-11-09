@@ -5,7 +5,13 @@
 <style>
     @page { size: letter; margin: 0.25in 0.5in; }
     body { font-family: 'Courier New', Courier, monospace; font-size: 10pt; color: #000; }
-    .check-page { height: 10in; display: flex; flex-direction: column; }
+    /* The 8 px the panels are measured with (#732, #727) is the browser's
+       default top margin on the body, which only the first page gets: a
+       batch's later pages start right at the page margin and printed 8 px
+       (0.08 in) higher (#740). Each page carries the 8 px itself instead,
+       so every page of a batch starts where the first one does. */
+    body { margin-top: 0; }
+    .check-page { height: 10in; padding-top: 8px; display: flex; flex-direction: column; }
     .check-page + .check-page { break-before: page; }
     .stub { height: 3.33in; border-bottom: 1px dashed #999; padding: 0.25in 0.25in; box-sizing: border-box; }
     .check-area { height: 3.33in; padding: 0.25in 0.25in; box-sizing: border-box; position: relative; }
