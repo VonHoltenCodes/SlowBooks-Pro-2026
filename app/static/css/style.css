@@ -2815,6 +2815,14 @@ td > select[class$="-fund"] { min-width: 124px; }
    ninth/tenth column doesn't push the line table into a scrollbar at the
    agent's window width. It truncates a long type name rather than widen. */
 .line-items-table .line-cost-type { width: 84px; min-width: 84px; max-width: 84px; }
+/* The per-line Use tax box (#731) is a construction company's twelfth column
+   and put its bill's line table 11px past the 1264px window: a header that
+   stays on one line made the column 53px wide for a 13px checkbox. Its
+   header may fold at its space, "Use" over "tax", so the column's least
+   width is its longer word, every word still shown and read. Its sides are
+   3px, not 6: at the 1280px cap the move controls need 86px to keep one
+   row, and the twelve columns leave them that only with these 6px. */
+.line-items-table th.col-usetax { white-space: normal; text-align: center; padding-left: 3px; padding-right: 3px; }
 .bill-lines-table .line-desc { min-width: 140px; }
 .bill-lines-table .line-qty { min-width: 64px; }
 .bill-lines-table .line-rate { min-width: 84px; }

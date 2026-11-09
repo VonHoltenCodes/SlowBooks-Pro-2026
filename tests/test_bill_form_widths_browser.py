@@ -155,3 +155,60 @@ def test_a_construction_bill_shows_every_column_at_the_agents_window(
                 page.close()
     finally:
         client.put("/api/settings", json={"company_type": before})
+
+
+USE_TAX = """() => {
+    const row = document.querySelector('#bill-lines tr');
+    const box = row.querySelector('.line-usetax');
+    const head = [...row.closest('table').querySelectorAll('thead th')].find(h => h.textContent.trim() === 'Use tax');
+    if (!box || !head) return null;
+    const b = box.getBoundingClientRect();
+    const c = row.querySelector('.line-order-controls');
+    const mid = (e) => { const r = e.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2); };
+    return { head: head.textContent.trim(), boxW: Math.round(b.width), boxH: Math.round(b.height),
+             rows: new Set([...c.children].map(mid)).size };
+}"""
+
+
+def test_a_construction_bill_keeps_its_use_tax_column_inside_the_window(
+    browser, company, books, classed, client
+):
+    """The per-line Use tax box (#731) added a twelfth column to a
+    construction company's bill, and with its header kept on one line the
+    line table ran 11px past the 1264px window, on Enter Bill and on a
+    memorized bill alike. The header folds at its space now, "Use" over
+    "tax", so the column takes its checkbox's room, not the two words', and
+    the table fits again with every column and both words shown; at the
+    1280px cap the move controls still keep one row."""
+    before = client.get("/api/settings").json().get("company_type") or "business"
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
+    try:
+        for form in ("BillsPage.showForm()", "MemorizedPage.showBillForm()"):
+            for width in (1264, 1440):
+                r = client.post(
+                    "/api/cost-codes",
+                    json={"code": "01-100", "name": "Site Prep", "cost_type": "labor"},
+                )
+                assert r.status_code in (200, 201, 400, 409), r.text
+                page, handled = _open(browser, company)
+                page.set_viewport_size({"width": width, "height": 821})
+                _visit(page, handled, "#/bills")
+                page.evaluate(f"async () => {{ await {form}; }}")
+                page.wait_for_function(OPEN, timeout=5000)
+                page.wait_for_selector("#bill-lines tr .cbx--line-account")
+                settle(page, handled)
+                try:
+                    m = page.evaluate(MEASURE)
+                    _boxes_hold(m)
+                    u = page.evaluate(USE_TAX)
+                    assert u and u["head"] == "Use tax", (form, width, u)
+                    assert u["boxW"] >= 13 and u["boxH"] >= 13, (form, width, u)
+                    assert not m["scrollable"], (form, width, m)
+                    assert m["lastCellRight"] <= m["boxRight"], (form, width, m)
+                    if width == 1440:  # at the cap the move controls keep one row
+                        assert u["rows"] == 1, (form, width, u)
+                finally:
+                    page.close()
+    finally:
+        client.put("/api/settings", json={"company_type": before})
