@@ -436,13 +436,22 @@ def test_only_the_latest_unpaid_approved_application_can_be_voided(
     job, sov = _two_line_job(client, seed_customer.id)
     first = _approved(client, job, sov, [10000, 0], day="2026-06-30")
     second = _approved(client, job, sov, [10000, 0], day="2026-07-31")
-    draft = client.post("/api/pay-applications", json={"job_id": job["id"]}).json()
 
     def flags():
         listed = client.get(f"/api/pay-applications?job_id={job['id']}").json()
         return [a["can_void"] for a in listed]
 
-    assert flags() == [False, True, False]
+    assert flags() == [False, True]
+    # an open application after it takes its Void away while the draft lasts:
+    # the draft was filled from the latest application's balances
+    draft = client.post("/api/pay-applications", json={"job_id": job["id"]}).json()
+    assert draft["status"] == "draft"
+    assert flags() == [False, False, False]
+    refused = client.post(f"/api/pay-applications/{second['id']}/void")
+    assert refused.status_code == 409, refused.text
+    assert refused.json()["detail"]["code"] == "later_application"
+    assert client.delete(f"/api/pay-applications/{draft['id']}").status_code == 200
+    assert flags() == [False, True]
     # a real payment on the latest invoice takes its Void away too
     pay = client.post(
         "/api/payments",
@@ -455,7 +464,6 @@ def test_only_the_latest_unpaid_approved_application_can_be_voided(
         },
     )
     assert pay.status_code == 201, pay.text
-    assert flags() == [False, False, False]
+    assert flags() == [False, False]
     # and Void on the earlier one is refused as it always was
     assert client.post(f"/api/pay-applications/{first['id']}/void").status_code == 409
-    assert draft["status"] == "draft"

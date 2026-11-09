@@ -1152,20 +1152,21 @@ const SettingsPage = {
                             <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Each bank account you write checks on keeps its own details. They are saved with their own button, apart from the settings above.</div>
                             <div class="form-grid">
                                 <div class="form-group full-width"><label for="check-bank-account">Bank account</label>
-                                    <select id="check-bank-account" onchange="SettingsPage.loadCheckBankDetails()">${SettingsPage._checkBankOptions(accounts)}</select></div>
+                                    <select id="check-bank-account" data-admin onchange="SettingsPage.loadCheckBankDetails()">${SettingsPage._checkBankOptions(accounts)}</select></div>
                                 <div class="form-group"><label for="check-bank-name">Bank name</label>
-                                    <input id="check-bank-name" maxlength="100" placeholder="First Prairie Bank"></div>
+                                    <input id="check-bank-name" data-admin maxlength="100" placeholder="First Prairie Bank"></div>
                                 <div class="form-group"><label for="check-bank-city">Bank city and state</label>
-                                    <input id="check-bank-city" maxlength="100" placeholder="Joliet, IL"></div>
+                                    <input id="check-bank-city" data-admin maxlength="100" placeholder="Joliet, IL"></div>
                                 <div class="form-group"><label for="check-bank-routing">Routing number</label>
-                                    <input id="check-bank-routing" maxlength="9" inputmode="numeric" placeholder="9 digits"></div>
+                                    <input id="check-bank-routing" data-admin maxlength="9" inputmode="numeric" placeholder="9 digits"></div>
                                 <div class="form-group"><label for="check-bank-account-number">Account number</label>
-                                    <input id="check-bank-account-number" maxlength="17" inputmode="numeric" autocomplete="off" aria-describedby="check-bank-account-number-help">
+                                    <input id="check-bank-account-number" data-admin maxlength="17" inputmode="numeric" autocomplete="off" aria-describedby="check-bank-account-number-help">
                                     <div id="check-bank-account-number-help" style="font-size:10px; color:var(--text-muted); margin-top:2px;"></div></div>
                                 <div class="form-group"><label for="check-bank-fraction">Fractional routing number (optional)</label>
-                                    <input id="check-bank-fraction" maxlength="30" placeholder="70-1234/719"></div>
+                                    <input id="check-bank-fraction" data-admin maxlength="30" placeholder="70-1234/719"></div>
                                 <div class="form-group full-width" data-write>
-                                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.saveCheckBankDetails()">Save bank account details</button>
+                                    <!-- an administrator's save (the route sits under /api/settings): hidden from everyone else, like Remove logo -->
+                                    <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.saveCheckBankDetails()">Save bank account details</button>
                                 </div>
                             </div>
                         </div>
