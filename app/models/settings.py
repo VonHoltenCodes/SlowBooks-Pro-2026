@@ -155,6 +155,14 @@ DEFAULT_SETTINGS = {
     "check_position": "bottom",
     "check_nudge_x_in": "0",
     "check_nudge_y_in": "0",
+    # Blank check stock (#739): "true" prints what pre-printed stock would
+    # carry — the logo, the bank's name and city, the fractional routing
+    # number and the MICR line from the bank account's check details — on
+    # the plain layout, with every field where it already prints. The MICR
+    # amount field is left for the bank of first deposit unless
+    # check_micr_amount is "true".
+    "check_blank_stock": "false",
+    "check_micr_amount": "false",
     # Opening-balance wizard readiness metadata
     "chart_setup_source": "",
     "chart_setup_ready_at": "",

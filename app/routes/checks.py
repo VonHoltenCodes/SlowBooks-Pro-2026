@@ -24,7 +24,12 @@ from app.services.check_numbers import (
     unprinted_payments,
 )
 from app.services.closing_date import check_closing_date
-from app.services.pdf_service import generate_check_pdf, generate_checks_pdf
+from app.services import bank_check_details
+from app.services.pdf_service import (
+    blank_stock,
+    generate_check_pdf,
+    generate_checks_pdf,
+)
 from app.services.request_utils import content_disposition
 from app.routes.settings import ENUM_SETTINGS, _get_all as get_settings
 from app.services.settings_service import SettingValueError, clean_setting_value
@@ -146,6 +151,7 @@ def register_check_data(db: Session, txn_id: int) -> dict:
         "memo": "" if memo == payee else memo,
         "details": details,
         "bank_account": bank_line.account.name,
+        "bank_account_id": bank_line.account.id,
         **vendor_address_fields(vendor),
     }
 
@@ -162,6 +168,7 @@ def bill_payment_check_data(db: Session, bp: BillPayment) -> dict:
         "memo": (bp.notes or "").strip(),
         "details": [],
         "bank_account": "",
+        "bank_account_id": bp.pay_from_account_id,
         **vendor_address_fields(vendor),
     }
     if bp.pay_from_account_id:
@@ -190,12 +197,55 @@ def bill_payment_check_data(db: Session, bp: BillPayment) -> dict:
     return check_data
 
 
+def attach_bank_details(db: Session, checks: list, company: dict) -> None:
+    """On blank stock (#739), each check carries its bank account's check
+    details for the face and the MICR line. A check whose account has no
+    routing or account number is refused before anything prints or is
+    numbered: a check on blank stock without its MICR line is not one a
+    bank can process."""
+    if not blank_stock(company)["on"]:
+        return
+    for check in checks:
+        details = bank_check_details.for_check(db, check.get("bank_account_id"))
+        if (
+            not details
+            or not details["routing_number"]
+            or not details["account_number"]
+        ):
+            name = check.get("bank_account") or "this check's bank account"
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Checks print on blank stock, and {name} has no routing "
+                    "and account number for the MICR line. Enter them under "
+                    "Settings, Check Printing, Bank account details, or turn "
+                    "off Print on blank check stock."
+                ),
+            )
+        check["bank_details"] = details
+
+
+# The test print's bank details on blank stock: a routing number that passes
+# the ABA check digit but starts with 13, a prefix no bank is given (real
+# ones start 00-12, 21-32, 61-72 or 80), so a sample can never be a check a
+# bank would take.
+_SAMPLE_BANK = {
+    "bank_name": "Sample Bank",
+    "bank_city_state": "Anytown, ST",
+    "fractional_routing": "00-0000/0000",
+    "routing_number": "130000006",
+    "account_number": "000123456789",
+}
+
+
 @router.get("/test-print")
 def test_print_check(
     check_stock: str = Query(default=None),
     check_position: str = Query(default=None),
     check_nudge_x_in: str = Query(default=None),
     check_nudge_y_in: str = Query(default=None),
+    check_blank_stock: str = Query(default=None),
+    check_micr_amount: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """A sample check with placeholder values (#440), printed through the
@@ -206,7 +256,9 @@ def test_print_check(
     position (#727) and nudge, so a nudge can be tried before it is saved;
     each is checked the way saving it would be. Any left out reads the saved
     setting. Nothing is stored. The sample carries a fictional payee address
-    (#726) so the address block can be lined up too."""
+    (#726) so the address block can be lined up too. On blank stock (#739)
+    it prints sample bank details and a sample MICR line, never a saved
+    account's, so a test print is never a check a bank would take."""
     check_data = {
         "payee": "Sample Payee",
         "date": date.today(),
@@ -233,6 +285,16 @@ def test_print_check(
             )
         company["check_position"] = check_position
     for key, value in (
+        ("check_blank_stock", check_blank_stock),
+        ("check_micr_amount", check_micr_amount),
+    ):
+        if value is not None:
+            if value not in ENUM_SETTINGS[key]:
+                raise HTTPException(
+                    status_code=422, detail=f"{key} must be one of: false, true"
+                )
+            company[key] = value
+    for key, value in (
         ("check_nudge_x_in", check_nudge_x_in),
         ("check_nudge_y_in", check_nudge_y_in),
     ):
@@ -241,6 +303,8 @@ def test_print_check(
                 company[key] = clean_setting_value(key, value)
             except SettingValueError as exc:
                 raise HTTPException(status_code=422, detail=str(exc))
+    if blank_stock(company)["on"]:
+        check_data["bank_details"] = dict(_SAMPLE_BANK)
     pdf_bytes = generate_check_pdf(check_data, company)
     return Response(
         content=pdf_bytes,
@@ -287,6 +351,7 @@ def print_check(
         )
 
     company = get_settings(db)
+    attach_bank_details(db, [check_data], company)
     pdf_bytes = generate_check_pdf(check_data, company)
     return Response(
         content=pdf_bytes,
@@ -403,7 +468,9 @@ def print_check_batch(
         check = bill_payment_check_data(db, bp)
         check["check_number"] = number
         checks.append(check)
-    pdf_bytes = generate_checks_pdf(checks, get_settings(db))
+    company = get_settings(db)
+    attach_bank_details(db, checks, company)
+    pdf_bytes = generate_checks_pdf(checks, company)
     for bp, number in zip(payments, numbers):
         bp.check_number = number
     db.commit()

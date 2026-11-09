@@ -7,12 +7,17 @@ import logging
 
 from datetime import date
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.settings import DEFAULT_SETTINGS
+from app.schemas.common import StrictModel
+from app.services import bank_check_details
+from app.services.nacha_export import validate_routing_number
 from app.services.settings_service import (
     ENCRYPTED_SETTINGS_KEYS,
     SECRET_PLACEHOLDER,
@@ -80,6 +85,8 @@ ENUM_SETTINGS = {
     # Where the check face prints (#727): bottom = stub / stub / check,
     # top = check / voucher / voucher (QuickBooks' standard voucher stock).
     "check_position": frozenset({"bottom", "top"}),
+    "check_blank_stock": frozenset({"true", "false"}),
+    "check_micr_amount": frozenset({"true", "false"}),
     "warn_date_past": frozenset({"true", "false"}),
     "warn_date_future": frozenset({"true", "false"}),
     "warn_duplicate_check_number": frozenset({"true", "false"}),
@@ -549,3 +556,79 @@ def test_email(db: Session = Depends(get_db)):
                 "for the reason."
             ),
         )
+
+
+# ----- a bank account's check details (#739) --------------------------------
+
+_FRACTIONAL = re.compile(r"[0-9][0-9 /-]*")
+_ON_US = re.compile(r"[0-9][0-9-]*")
+
+
+class BankCheckDetailsIn(StrictModel):
+    """What blank check stock prints for a bank account. Each field left out
+    keeps what is saved; `account_number` "" clears it."""
+
+    bank_name: str = Field(default="", max_length=100)
+    bank_city_state: str = Field(default="", max_length=100)
+    fractional_routing: str = Field(default="", max_length=30)
+    routing_number: str = Field(default="", max_length=9)
+    account_number: str = Field(default="", max_length=17)
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _strip(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("routing_number")
+    @classmethod
+    def _aba(cls, value):
+        if value and not validate_routing_number(value):
+            raise ValueError(
+                "The routing number is the bank's 9-digit ABA routing number, "
+                "as printed at the left of the MICR line of a check."
+            )
+        return value
+
+    @field_validator("account_number")
+    @classmethod
+    def _on_us(cls, value):
+        if value and not _ON_US.fullmatch(value):
+            raise ValueError(
+                "The account number is digits, with dashes where the bank "
+                "prints them, up to 17 characters."
+            )
+        return value
+
+    @field_validator("fractional_routing")
+    @classmethod
+    def _fraction(cls, value):
+        if value and not _FRACTIONAL.fullmatch(value):
+            raise ValueError(
+                "The fractional routing number is digits, dashes and a "
+                "slash, like 70-1234/719."
+            )
+        return value
+
+
+def _check_bank_account(db: Session, account_id: int):
+    from app.routes.checks import _bank_account
+
+    return _bank_account(db, account_id)
+
+
+@router.get("/check-bank-details/{account_id}")
+def get_bank_check_details(account_id: int, db: Session = Depends(get_db)):
+    """A bank account's details for blank check stock (#739); the account
+    number reads as its last four. Under /api/settings so writing them is
+    an administrator's, as the rest of check printing's setup is."""
+    _check_bank_account(db, account_id)
+    return bank_check_details.describe(db, account_id)
+
+
+@router.put("/check-bank-details/{account_id}")
+def put_bank_check_details(
+    account_id: int, data: BankCheckDetailsIn, db: Session = Depends(get_db)
+):
+    """Save a bank account's details for blank check stock (#739)."""
+    _check_bank_account(db, account_id)
+    return bank_check_details.save(db, account_id, data.model_dump(exclude_unset=True))

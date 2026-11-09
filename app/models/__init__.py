@@ -231,3 +231,4 @@ from app.models.collections import (  # noqa: F401 — registers the tables
     InvoiceReminder,
     InvoiceReminderRule,
 )
+from app.models.bank_check_details import BankCheckDetails  # noqa: E402,F401

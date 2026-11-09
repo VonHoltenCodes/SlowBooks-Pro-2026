@@ -436,6 +436,7 @@ const SettingsPage = {
             if (Terms.isNonprofit()) SettingsPage.loadInvoiceMessages('giving_statement');
             SettingsPage.loadPaymentTerms();
             SettingsPage.loadAiConfig();
+            SettingsPage.loadCheckBankDetails();
             SettingsPage.loadClasses();
             SettingsPage.loadCostCodes();
             SettingsPage.loadCostTypes();
@@ -1135,8 +1136,42 @@ const SettingsPage = {
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
                                 value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
                         <div class="form-group full-width">
+                            <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
+                                <input type="checkbox" id="settings-check-blank-stock" name="check_blank_stock" value="true" data-bool aria-describedby="settings-check-blank-stock-help" style="width:auto; margin:0;" ${s.check_blank_stock === 'true' ? 'checked' : ''}>
+                                <label for="settings-check-blank-stock" style="font-weight:normal; margin:0;">Print on blank check stock</label>
+                            </div>
+                            <div id="settings-check-blank-stock-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints everything a pre-printed check carries: the company logo, name and address, the bank's name and city, the check number and the MICR line with the routing, account and check numbers, taken from the bank account's details below. The labels, lines and borders print as on plain stock, and every field stays where it prints today. A bank reads the MICR line only when it is printed with MICR toner.</div>
+                            <div style="display:flex; align-items:center; gap:6px; font-size:12px; margin-top:6px;">
+                                <input type="checkbox" id="settings-check-micr-amount" name="check_micr_amount" value="true" data-bool aria-describedby="settings-check-micr-amount-help" style="width:auto; margin:0;" ${s.check_micr_amount === 'true' ? 'checked' : ''}>
+                                <label for="settings-check-micr-amount" style="font-weight:normal; margin:0;">Encode the amount in the MICR line</label>
+                            </div>
+                            <div id="settings-check-micr-amount-help" style="font-size:10px; color:var(--text-muted); margin-top:4px;">The amount field at the right end of the MICR line is normally encoded by the bank where the check is deposited. Turn this on to print it yourself, so the amount cannot be changed without it showing.</div>
+                        </div>
+                        <div class="form-group full-width" id="settings-check-bank-details" role="group" aria-labelledby="settings-check-bank-details-h">
+                            <div id="settings-check-bank-details-h" style="font-weight:bold; font-size:12px; margin-bottom:4px;">Bank account details for blank stock</div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Each bank account you write checks on keeps its own details. They are saved with their own button, apart from the settings above.</div>
+                            <div class="form-grid">
+                                <div class="form-group full-width"><label for="check-bank-account">Bank account</label>
+                                    <select id="check-bank-account" onchange="SettingsPage.loadCheckBankDetails()">${SettingsPage._checkBankOptions(accounts)}</select></div>
+                                <div class="form-group"><label for="check-bank-name">Bank name</label>
+                                    <input id="check-bank-name" maxlength="100" placeholder="First Prairie Bank"></div>
+                                <div class="form-group"><label for="check-bank-city">Bank city and state</label>
+                                    <input id="check-bank-city" maxlength="100" placeholder="Joliet, IL"></div>
+                                <div class="form-group"><label for="check-bank-routing">Routing number</label>
+                                    <input id="check-bank-routing" maxlength="9" inputmode="numeric" placeholder="9 digits"></div>
+                                <div class="form-group"><label for="check-bank-account-number">Account number</label>
+                                    <input id="check-bank-account-number" maxlength="17" inputmode="numeric" autocomplete="off" aria-describedby="check-bank-account-number-help">
+                                    <div id="check-bank-account-number-help" style="font-size:10px; color:var(--text-muted); margin-top:2px;"></div></div>
+                                <div class="form-group"><label for="check-bank-fraction">Fractional routing number (optional)</label>
+                                    <input id="check-bank-fraction" maxlength="30" placeholder="70-1234/719"></div>
+                                <div class="form-group full-width" data-write>
+                                    <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.saveCheckBankDetails()">Save bank account details</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group full-width">
                             <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position and nudges as set here, saved or not.</div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account's.</div>
                         </div>
                     </div>
                 </div>
@@ -3091,12 +3126,60 @@ const SettingsPage = {
     testPrintCheck() {
         const form = document.getElementById('settings-form');
         const params = new URLSearchParams();
-        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in']) {
+        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount']) {
             const el = form && form.querySelector(`[name="${name}"]`);
-            if (el) params.set(name, el.value);
+            if (el) params.set(name, el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value);
         }
         const qs = params.toString();
         window.open('/api/checks/test-print' + (qs ? `?${qs}` : ''), '_blank');
+    },
+
+    // ----- a bank account's details for blank check stock (#739) --------
+    // Saved on their own (PUT /api/settings/check-bank-details/<id>), not with the
+    // settings form: the fields carry no name, so the form leaves them out.
+
+    _checkBankOptions(accounts) {
+        const banks = (Array.isArray(accounts) ? accounts : [])
+            .filter(a => a.bank_kind === 'bank' && a.is_active !== false);
+        if (!banks.length) return '<option value="">No bank accounts yet</option>';
+        return banks.map(a => `<option value="${a.id}">${escapeHtml(accountLabel(a))}</option>`).join('');
+    },
+
+    async loadCheckBankDetails() {
+        const pick = document.getElementById('check-bank-account');
+        if (!pick || !pick.value) return;
+        try {
+            const d = await API.get(`/settings/check-bank-details/${pick.value}`);
+            document.getElementById('check-bank-name').value = d.bank_name || '';
+            document.getElementById('check-bank-city').value = d.bank_city_state || '';
+            document.getElementById('check-bank-routing').value = d.routing_number || '';
+            document.getElementById('check-bank-fraction').value = d.fractional_routing || '';
+            const number = document.getElementById('check-bank-account-number');
+            number.value = '';
+            number.placeholder = d.has_account_number ? `Ends in ${d.account_number_last_four}` : 'Digits and dashes';
+            document.getElementById('check-bank-account-number-help').textContent = d.has_account_number
+                ? 'Saved. Leave it empty to keep it, or type a new one to replace it.'
+                : 'Not entered yet.';
+        } catch (err) { toast(err.message, 'error'); }
+    },
+
+    async saveCheckBankDetails() {
+        const pick = document.getElementById('check-bank-account');
+        if (!pick || !pick.value) { toast('Add a bank account first', 'error'); return; }
+        const body = {
+            bank_name: document.getElementById('check-bank-name').value,
+            bank_city_state: document.getElementById('check-bank-city').value,
+            routing_number: document.getElementById('check-bank-routing').value,
+            fractional_routing: document.getElementById('check-bank-fraction').value,
+        };
+        // an empty box keeps the saved number
+        const number = document.getElementById('check-bank-account-number').value.trim();
+        if (number) body.account_number = number;
+        try {
+            await API.put(`/settings/check-bank-details/${pick.value}`, body);
+            toast('Bank account details saved');
+            SettingsPage.loadCheckBankDetails();
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     // ----- AI Insights config (provider/model/key/etc.) ------------------

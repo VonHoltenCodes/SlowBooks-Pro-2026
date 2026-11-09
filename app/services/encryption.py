@@ -168,6 +168,26 @@ def rewrap_all(db, dry_run: bool = False) -> dict:
                 if not dry_run:
                     row.value = rewrapped
                 summary["rewrapped"] += 1
+        # a bank account's check account number (#739), under the same key
+        from app.models.bank_check_details import BankCheckDetails
+
+        for row in db.query(BankCheckDetails).filter(
+            BankCheckDetails.account_number_enc.like("fernet:%")
+        ):
+            summary["checked"] += 1
+            rewrapped = crypto.rewrap_value(row.account_number_enc)
+            if rewrapped is None:
+                summary["failed"] += 1
+                logger.error(
+                    "rewrap: check details of account #%s did not decrypt",
+                    row.account_id,
+                )
+            elif rewrapped == row.account_number_enc:
+                summary["already_current"] += 1
+            else:
+                if not dry_run:
+                    row.account_number_enc = rewrapped
+                summary["rewrapped"] += 1
 
     if not dry_run:
         db.commit()

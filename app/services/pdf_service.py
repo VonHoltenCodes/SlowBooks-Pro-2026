@@ -605,10 +605,47 @@ def check_position(company_settings: dict) -> str:
     return "top" if company_settings.get("check_position") == "top" else "bottom"
 
 
+def blank_stock(company_settings: dict) -> dict:
+    """The blank-stock options (#739): `on` prints the logo, the bank's name
+    and city, the fractional routing number and the MICR line from each
+    check's `bank_details`; `micr_amount` also encodes the amount in the
+    MICR line. Read apart from check_print_options() so its shape holds."""
+    return {
+        "on": company_settings.get("check_blank_stock") == "true",
+        "micr_amount": company_settings.get("check_micr_amount") == "true",
+    }
+
+
+def _blank_stock_fields(check_data: dict, micr_amount: bool) -> None:
+    """The bank's lines and the MICR line of one check on blank stock, from
+    its `bank_details`; a check without routing and account numbers prints
+    no MICR line (the print routes refuse it before it gets here)."""
+    from decimal import Decimal
+
+    from app.services.micr import micr_line, micr_svg
+
+    bank = check_data.get("bank_details") or {}
+    check_data["bank_name"] = bank.get("bank_name", "")
+    check_data["bank_city_state"] = bank.get("bank_city_state", "")
+    check_data["fractional_routing"] = bank.get("fractional_routing", "")
+    check_data["micr_svg"] = ""
+    if bank.get("routing_number") and bank.get("account_number"):
+        line = micr_line(
+            bank["routing_number"],
+            bank["account_number"],
+            check_data.get("check_number", ""),
+            check_data.get("amount") if micr_amount else None,
+        )
+        check_data["micr_line"] = line
+        # the sheet's width; its height takes in the clear band
+        check_data["micr_svg"] = micr_svg(line, Decimal("8.5"), Decimal("0.625"))
+
+
 def render_check_html(check_data: dict, company_settings: dict, options=None) -> str:
     """The check face as HTML. Checks print on stock that already carries the
     bank's and the company's marks, so this is the one document that
-    deliberately bypasses _render() and gets no logo. The stock choice and
+    deliberately bypasses _render() and gets no logo, unless it prints on
+    blank stock (#739, blank_stock()), which carries nothing. The stock choice and
     alignment nudge come from check_print_options(); pass ``options={}`` to
     render with none of that context (the pre-#440 face, for a byte-for-byte
     comparison)."""
@@ -623,11 +660,21 @@ def render_checks_html(checks: list, company_settings: dict, options=None) -> st
     for check_data in checks:
         check_data["amount_words"] = _amount_to_words(check_data.get("amount", 0))
     opts = check_print_options(company_settings) if options is None else options
+    blank = blank_stock(company_settings)
+    extra = {}
+    if blank["on"]:
+        # blank stock carries nothing, so the face prints its labels and
+        # lines whatever the stock setting says
+        opts = {**opts, "stock": "plain"}
+        for check_data in checks:
+            _blank_stock_fields(check_data, blank["micr_amount"])
+        extra = {"blank": True, "logo": _company_logo_data_uri(company_settings)}
     return template.render(
         checks=checks,
         company=company_settings,
         position=check_position(company_settings),
         **opts,
+        **extra,
     )
 
 
