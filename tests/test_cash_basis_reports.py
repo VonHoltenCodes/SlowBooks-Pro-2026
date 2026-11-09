@@ -320,6 +320,25 @@ def test_job_profitability_follows_the_basis(client, scene):
     assert _get(client, "job-profitability", **qs).json()["total_income"] == 200.0
 
 
+@pytest.mark.parametrize("basis,income", [("accrual", "1600.00"), ("cash", "200.00")])
+def test_job_profitability_print_pdf_and_csv_follow_the_basis_in_construction(
+    client, scene, pdf_sections, basis, income
+):
+    """In a construction company the Job Profitability PDF and CSV accept a
+    basis and print that basis's figures: with an invoice unpaid, accrual
+    income is 1,600.00 and cash income 200.00."""
+    client.put("/api/settings", json={"company_type": "construction"})
+    qs = dict(start_date="2026-03-01", end_date="2026-04-30", basis=basis)
+
+    _pdf(client, "job-profitability", pdf_sections, **qs)
+    total_row = pdf_sections[0]["rows"][-1]["cells"]
+    assert D(total_row[3].replace(",", "").replace("$", "")) == D(income)
+
+    csv = _get(client, "job-profitability/csv", **qs).text
+    total_line = [ln for ln in csv.splitlines() if ln.startswith("Total")][0]
+    assert income in total_line.replace(",", "").replace('"', "")
+
+
 # ---------------------------------------------------------------------------
 # Nonprofit statements
 # ---------------------------------------------------------------------------
@@ -504,3 +523,31 @@ def test_the_package_ledger_and_trial_balance_follow_the_company_basis(client, s
     readme = cash.read("README.txt").decode()
     assert "Trial Balance and General Ledger are on a cash basis" in readme
     assert "as posted (accrual)" in readme  # the agings only
+
+
+@pytest.mark.parametrize("basis", ["accrual", "cash"])
+def test_job_profitability_pdf_and_csv_say_their_basis(
+    client, scene, pdf_sections, basis
+):
+    """The Job Profitability PDF and CSV say "(cash basis)" on a cash run,
+    as the other cash-basis reports do; an accrual run says nothing about
+    its basis."""
+    client.put("/api/settings", json={"company_type": "construction"})
+    qs = dict(start_date="2026-03-01", end_date="2026-04-30", basis=basis)
+    cash = basis == "cash"
+
+    period = _pdf(client, "job-profitability", pdf_sections, **qs)
+    assert ("(cash basis)" in period) is cash
+    csv = _get(client, "job-profitability/csv", **qs).text
+    assert ("(cash basis)" in csv) is cash
+
+
+@pytest.mark.parametrize("basis", ["accrual", "cash"])
+def test_job_profitability_print_page_says_its_basis(client, scene, basis):
+    """The Job Profitability print page (the HTML its PDF is drawn from)
+    says "(cash basis)" on a cash run and nothing on an accrual one."""
+    client.put("/api/settings", json={"company_type": "construction"})
+    qs = dict(start_date="2026-03-01", end_date="2026-04-30", basis=basis)
+    page = _get(client, "job-profitability/print", **qs).text
+    assert "Job Profitability" in page
+    assert ("(cash basis)" in page) is (basis == "cash")

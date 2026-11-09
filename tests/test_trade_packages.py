@@ -119,3 +119,107 @@ def test_setup_maps_only_the_sections_present(client, seed_accounts):
     assert {s["code"] for s in pkgs["Concrete"]["sections"]} == {"03 30 00"}
     # a package whose sections the chart lacks seeds empty, not errored
     assert pkgs["HVAC"]["sections"] == []
+
+
+def test_fences_and_gates_ship_as_sections_and_a_package(client, seed_accounts):
+    # a fence sub is a common trade: its sections sit under division 32 and
+    # its own package bids them
+    client.post("/api/construction/setup")
+    codes = {c["code"]: c for c in client.get("/api/cost-codes").json()}
+    fence = codes["32 31 00"]
+    assert fence["name"] == "Fences and Gates"
+    assert fence["level"] == "section" and fence["parent_code"] == "32"
+    assert codes["32 31 29"]["name"] == "Wood Fences and Gates"
+    pkgs = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {
+        "32 31 00",
+        "32 31 11",
+        "32 31 13",
+        "32 31 19",
+        "32 31 23",
+        "32 31 29",
+    }
+
+
+# ── Load standard divisions on a company that already has packages ────────
+
+
+def test_load_adds_fences_and_gates_package_once_and_keeps_edits(client, seed_accounts):
+    """A company set up before Fences and Gates existed gets the 32 31 xx
+    sections and the Fences and Gates package, mapped, from Load standard
+    divisions; a second load changes nothing and a package the company edited
+    is left as it is."""
+    client.post("/api/construction/setup")
+    packages = client.get("/api/trade-packages").json()
+    # the company's old state: no Fences and Gates package, no 32 31 sections
+    fences = next(p for p in packages if p["name"] == "Fences and Gates")
+    client.delete(f"/api/trade-packages/{fences['id']}")
+    for c in client.get("/api/cost-codes").json():
+        if c["code"].startswith("32 31"):
+            assert client.delete(f"/api/cost-codes/{c['id']}").status_code == 200
+    # the company edited Concrete
+    concrete = next(p for p in packages if p["name"] == "Concrete")
+    client.put(f"/api/trade-packages/{concrete['id']}", json={"notes": "mine"})
+    before = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+
+    client.post("/api/cost-codes/standard")
+    after = client.get("/api/trade-packages").json()
+    fenced = [p for p in after if p["name"] == "Fences and Gates"]
+    assert len(fenced) == 1
+    assert sorted(s["code"] for s in fenced[0]["sections"]) == sorted(
+        ("32 31 00", "32 31 11", "32 31 13", "32 31 19", "32 31 23", "32 31 29")
+    )
+    kept = next(p for p in after if p["name"] == "Concrete")
+    assert kept["notes"] == "mine"
+    assert kept["sections"] == before["Concrete"]["sections"]
+
+    client.post("/api/cost-codes/standard")
+    again = client.get("/api/trade-packages").json()
+    assert [(p["name"], p["section_ids"]) for p in again] == [
+        (p["name"], p["section_ids"]) for p in after
+    ]
+
+
+def test_load_seeds_the_standard_packages_on_a_construction_company_with_none(client):
+    """Loading standard divisions on a construction company that has sections
+    but no trade packages seeds the standard set and maps the sections, and a
+    second load adds nothing."""
+    client.put("/api/settings", json={"company_type": "construction"})
+    assert client.get("/api/trade-packages").json() == []
+
+    client.post("/api/cost-codes/standard")
+    pkgs = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+    assert len(pkgs) == len(TRADE_PACKAGES)
+    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {
+        "32 31 00",
+        "32 31 11",
+        "32 31 13",
+        "32 31 19",
+        "32 31 23",
+        "32 31 29",
+    }
+
+    client.post("/api/cost-codes/standard")
+    assert len(client.get("/api/trade-packages").json()) == len(TRADE_PACKAGES)
+
+
+def test_load_with_packages_present_keeps_the_existing_rule(client, seed_accounts):
+    """A construction company that already has packages is not re-seeded by the
+    load: a deleted standard package returns once, an edited one is untouched,
+    and a company that is not construction gets no packages from the load."""
+    client.put("/api/settings", json={"company_type": "business"})
+    client.post("/api/cost-codes/standard")
+    assert client.get("/api/trade-packages").json() == []
+
+    client.put("/api/settings", json={"company_type": "construction"})
+    client.post("/api/construction/setup")
+    pkgs = client.get("/api/trade-packages").json()
+    concrete = next(p for p in pkgs if p["name"] == "Concrete")
+    client.put(f"/api/trade-packages/{concrete['id']}", json={"notes": "mine"})
+    fences = next(p for p in pkgs if p["name"] == "Fences and Gates")
+    client.delete(f"/api/trade-packages/{fences['id']}")
+
+    client.post("/api/cost-codes/standard")
+    after = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+    assert len(after) == len(TRADE_PACKAGES)
+    assert after["Concrete"]["notes"] == "mine"

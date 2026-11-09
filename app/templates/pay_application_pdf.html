@@ -18,7 +18,8 @@
     .cert { float: right; width: 300px; margin-bottom: 16px; }
     .cert table { width: 100%; }
     .cert td { padding: 3px 8px; font-size: 9pt; }
-    .cert td.r { text-align: right; font-variant-numeric: tabular-nums; }
+    /* nowrap: a negative amount breaks after its minus sign otherwise, leaving "-" alone on a line. */
+    .cert td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .cert .label { font-weight: 700; color: #4a4a6a; }
     .cert .grand { font-size: 12pt; font-weight: 700; color: #003366; border-top: 2px solid #003366; padding-top: 4px; }
     h2.sheet { clear: both; font-size: 11pt; color: #003366; margin: 22px 0 8px 0; text-transform: uppercase; letter-spacing: 0.03em; }
@@ -26,8 +27,10 @@
     table.cont th { background: #003366; color: white; padding: 5px 6px; font-size: 7.5pt; text-transform: uppercase; text-align: left; letter-spacing: 0.02em; }
     table.cont th.r { text-align: right; }
     table.cont td { padding: 4px 6px; font-size: 8.5pt; border-bottom: 1px solid #e0e0e0; }
-    table.cont td.r { text-align: right; font-variant-numeric: tabular-nums; }
-    table.cont tfoot td { font-weight: 700; border-top: 2px solid #003366; }
+    table.cont td.r { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    table.cont tr.totals td { font-weight: 700; border-top: 2px solid #003366; }
+    table.cont tr { page-break-inside: avoid; }
+    .note { font-size: 8pt; color: #4a4a6a; margin: 6px 0 0 0; }
     .footer { position: fixed; bottom: 0; left: 0; right: 0; text-align: center; font-size: 7pt; color: #999; padding: 8px 0; }
 </style>
 </head>
@@ -67,10 +70,15 @@
         <tr><td class="label">Net change by change orders</td><td class="r">{{ header.net_change | currency }}</td></tr>
         <tr><td class="label">Contract sum to date</td><td class="r">{{ header.contract_sum_to_date | currency }}</td></tr>
         <tr><td class="label">Completed and stored to date</td><td class="r">{{ totals.completed_to_date | currency }}</td></tr>
+        {# Retainage foots on its own: previous + this period - released = to date. #}
+        <tr><td class="label">Retainage held, previous applications</td><td class="r">{{ totals.previous_retainage | currency }}</td></tr>
+        <tr><td class="label">Retainage this period</td><td class="r">{{ totals.retainage_this_period | currency }}</td></tr>
+        {% if totals.release_retainage %}<tr><td class="label">Less retainage released</td><td class="r">{{ totals.release_retainage | currency }}</td></tr>{% endif %}
         <tr><td class="label">Retainage to date</td><td class="r">{{ totals.retainage_to_date | currency }}</td></tr>
+        {# Earned less retainage - previous + tax = current payment due. A release is inside the retainage figure above, never an extra row. #}
         <tr><td class="label">Total earned less retainage</td><td class="r">{{ totals.total_earned_less_retainage | currency }}</td></tr>
         <tr><td class="label">Less previous payment applications</td><td class="r">{{ totals.previous_applications | currency }}</td></tr>
-        {% if totals.release_retainage %}<tr><td class="label">Retainage released</td><td class="r">{{ totals.release_retainage | currency }}</td></tr>{% endif %}
+        {% if totals.tax_amount %}<tr><td class="label">Sales tax</td><td class="r">{{ totals.tax_amount | currency }}</td></tr>{% endif %}
         <tr><td class="label grand">Current payment due</td><td class="r grand">{{ totals.current_due | currency }}</td></tr>
         {% if totals.deposit_applied %}<tr><td class="label">Less deposit applied</td><td class="r">{{ totals.deposit_applied | currency }}</td></tr>
         <tr><td class="label grand">Net due</td><td class="r grand">{{ totals.net_due | currency }}</td></tr>{% endif %}
@@ -101,13 +109,15 @@
                 <td class="r">{{ line.this_period | currency }}</td>
                 <td class="r">{{ line.stored | currency }}</td>
                 <td class="r">{{ line.completed_to_date | currency }}</td>
-                <td class="r">{{ '%.1f' | format(line.pct_complete) }}%</td>
+                {# A deduct line with nothing billed rounds to -0.0: print 0.0. #}
+                {% set pct = '%.1f' | format(line.pct_complete) %}
+                <td class="r">{{ '0.0' if pct == '-0.0' else pct }}%</td>
                 <td class="r">{{ line.balance_to_finish | currency }}</td>
                 <td class="r">{{ line.retainage | currency }}</td>
             </tr>
         {% endfor %}
-        </tbody>
-        <tfoot><tr>
+            {# A body row, not a tfoot: a footer repeats on every printed page. #}
+            <tr class="totals">
             <td></td><td>Totals</td>
             <td class="r">{{ totals.scheduled_total | currency }}</td>
             <td class="r">{{ totals.previous_total | currency }}</td>
@@ -116,9 +126,14 @@
             <td class="r">{{ totals.completed_to_date | currency }}</td>
             <td class="r"></td>
             <td class="r">{{ totals.balance_to_finish_total | currency }}</td>
-            <td class="r">{{ totals.retainage_to_date | currency }}</td>
-        </tr></tfoot>
+            {% set retainage_column = pa.lines | sum(attribute='retainage') %}
+            <td class="r">{{ retainage_column | currency }}</td>
+        </tr>
+        </tbody>
     </table>
+    {# The whole equation: column total, less released, equals retainage to date. #}
+    {% set released_to_date = totals.previous_released + totals.release_retainage %}
+    {% if released_to_date %}<p class="note">The retainage column is before releases: its total of {{ retainage_column | currency }}, less retainage released to date of {{ released_to_date | currency }}, equals retainage to date of {{ totals.retainage_to_date | currency }}.</p>{% endif %}
 
     <div class="footer">{{ app.number }} · {{ header.job_name }}</div>
 </body>

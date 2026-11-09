@@ -55,7 +55,7 @@ test('the SOV grid carries its columns and every write is guarded', () => {
         true,
     );
     // the schedule-of-values columns the spec names
-    for (const col of ['Item #', 'Description', 'Package', 'Section', 'Kind', 'Scheduled value']) {
+    for (const col of ['Item #', 'Description', 'Package', 'Section', 'Revenue account', 'Tax', 'Kind', 'Scheduled value']) {
         assert.match(grid, new RegExp(col));
     }
     // the grid's inputs and buttons are write-guarded
@@ -122,4 +122,45 @@ test('contractHtml loads the trade packages when the cache is empty', async () =
     assert.ok(paths.includes('/trade-packages'), 'TradePackages.load() was called');
     assert.deepEqual(ctx.TradePackages._list, []);
     assert.match(html, /Schedule of values/);
+});
+
+test('each SOV row edits its revenue account and taxable flag', () => {
+    const ctx = jobsContext(true);
+    const page = ctx.JobsPage;
+    page._sovAccounts = [{ id: 40, account_number: '4050', name: 'Contract Revenue' }, { id: 41, account_number: '4100', name: 'Product Sales' }];
+    const row = page.sovRowHtml(
+        { id: 3, description: 'Slab', kind: 'work', scheduled_value: 100, revenue_account_id: 41, is_taxable: false },
+        0, [], [],
+    );
+    assert.match(row, /class="sov-acct" data-write/);
+    assert.match(row, /<option value="41" selected>4100 Product Sales<\/option>/);
+    assert.match(row, /<option value="">Contract Revenue \(default\)<\/option>/);
+    assert.match(row, /class="sov-tax" data-write type="checkbox" aria-label="Taxable" >/);
+    // a new row is taxed by default
+    assert.match(page.sovRowHtml({}, 0, [], []), /class="sov-tax" data-write type="checkbox" aria-label="Taxable" checked/);
+    // a change-order row shows its section, account and tax read-only
+    const co = page.sovRowHtml({ kind: 'change_order', cost_code_label: '26 05 00 Electrical', is_taxable: false, scheduled_value: 5 }, 0, [], []);
+    assert.match(co, /26 05 00 Electrical/);
+    assert.match(co, /Contract Revenue/);
+    assert.match(co, /<td>No<\/td>/);
+});
+
+test('saving the SOV sends each row\'s revenue account and taxable flag', () => {
+    const ctx = jobsContext(true);
+    const field = (value, extra = {}) => ({ value, ...extra });
+    const tr = {
+        dataset: { id: '3' },
+        querySelector(sel) {
+            return {
+                '.sov-item': field('01'), '.sov-desc': field('Slab'), '.sov-pkg': field(''),
+                '.sov-code': field('9'), '.sov-acct': field('41'), '.sov-tax': field('', { checked: false }),
+                '.sov-kind': field('work'), '.sov-value': field('100'),
+            }[sel];
+        },
+    };
+    ctx.$$ = () => [tr];
+    const [line] = ctx.JobsPage._readSov();
+    assert.equal(line.revenue_account_id, 41);
+    assert.equal(line.is_taxable, false);
+    assert.equal(line.cost_code_id, 9);
 });

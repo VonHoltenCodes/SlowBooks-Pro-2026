@@ -85,6 +85,7 @@ from app.routes import nonprofit as nonprofit_routes
 from app.routes import construction as construction_routes
 from app.routes import trade_packages as trade_packages_routes
 from app.routes import change_orders as change_orders_routes
+from app.routes import field_tickets as field_tickets_routes
 from app.routes import pay_applications as pay_applications_routes
 from app.routes import lien_waivers as lien_waivers_routes
 from app.routes import donors as donors_routes
@@ -1095,8 +1096,11 @@ _READ_METHODS = ("GET", "HEAD", "OPTIONS")
 # ... and moves lines between accounts with the reclassify tool (#337),
 # the accountant's own job: nothing new is posted, and the audit log
 # names every line.
+# ... and posts or voids the WIP schedule's adjusting entry, a journal entry
+# the report computes.
 _ACCOUNTANT_WRITE_RE = _re.compile(
-    r"^/api/(journal(/\d+/void)?|attachments/journal_entry/\d+|reclassify)$"
+    r"^/api/(journal(/\d+/void)?|attachments/journal_entry/\d+|reclassify"
+    r"|reports/wip-schedule/(post|void))$"
 )
 ACCOUNTANT_REFUSAL = (
     "An accountant's sign-in posts journal entries and reads everything "
@@ -1538,6 +1542,7 @@ app.include_router(nonprofit_routes.router)
 app.include_router(construction_routes.router)
 app.include_router(trade_packages_routes.router)
 app.include_router(change_orders_routes.router)
+app.include_router(field_tickets_routes.router)
 app.include_router(pay_applications_routes.router)
 app.include_router(lien_waivers_routes.router)
 app.include_router(donors_routes.router)

@@ -13,7 +13,8 @@
  * Column vocabulary matches what contractors read weekly (Procore's
  * standard budget view, QuickBooks' Estimates vs Actuals):
  *   Budget = original + changes · Committed = open POs · Actual = posted
- *   JTD cost · Projected = actual + committed · Variance = budget −
+ *   JTD cost · Projected = actual + committed (a contractor's also adds
+ *   the budget no cost or commitment has taken up) · Variance = budget −
  *   projected (positive = under) · % Used = projected / budget.
  * All figures come from posted ledger lines, so the page always agrees
  * with the Job Profitability report and reconciles to the P&L.
@@ -47,7 +48,8 @@ const JobsPage = {
         const { overview, costs, budget, ...rest } = JobsPage.TAB_LABELS;
         // Contract (the owner's side), Buyout (the sub/supplier side, #553),
         // then Change orders (#554).
-        return { overview, costs, budget, contract: 'Contract', buyout: 'Buyout', changeorders: 'Change orders', payapps: 'Pay apps', ...rest };
+        // Field tickets (T&M, material slips, deliveries) follow Pay apps.
+        return { overview, costs, budget, contract: 'Contract', buyout: 'Buyout', changeorders: 'Change orders', payapps: 'Pay apps', fieldtickets: 'Field tickets', ...rest };
     },
 
     // =====================================================================
@@ -295,6 +297,7 @@ const JobsPage = {
                 case 'buyout': return await JobsPage.buyoutHtml();
                 case 'changeorders': return await JobsPage.changeOrdersHtml();
                 case 'payapps': return await JobsPage.payAppsHtml();
+                case 'fieldtickets': return await FieldTickets.html(JobsPage._job);
                 case 'transactions': return await JobsPage.transactionsHtml();
                 case 'time': return await JobsPage.timeHtml();
                 default: return await JobsPage.overviewHtml();
@@ -314,12 +317,27 @@ const JobsPage = {
         const job = JobsPage._job;
         const tree = await JobsPage.loadTree();
         const t = tree.totals;
+        const construction = Terms.isConstruction();
+        // retainage on this job: owed to us (1150) and owed by us (2050)
+        let ret = null;
+        if (construction) {
+            const r = await API.get(`/reports/retainage?as_of=${todayISO()}&job_id=${job.id}`).catch(() => null);
+            ret = ((r && r.jobs) || []).find(j => j.job_id === job.id) || { receivable: { outstanding: 0 }, payable: { outstanding: 0 } };
+        }
         const stat = (label, value, color, title) => `<div style="min-width:130px;" title="${title || ''}">
             <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em">${label}</div>
             <div style="font-size:18px;font-weight:700;${color ? `color:${color}` : ''}">${value}</div></div>`;
         const contract = job.contract_amount ? parseFloat(job.contract_amount) : null;
         const billedPct = contract ? (t.act_revenue / contract * 100) : null;
         const margin = t.act_revenue ? ((t.act_revenue - t.actual) / t.act_revenue * 100) : null;
+        const uncommittedRow = construction && t.uncommitted_budget ? `<tr title="Budget no cost or commitment has taken up yet, code by code: trades not yet bought">
+            <td><em>Budget not yet committed</em></td><td></td><td></td><td></td>
+            <td class="amount">${JobsPage.money(t.uncommitted_budget)}</td>
+            <td class="amount" style="${JobsPage.varColor({ revised: t.revised, variance: -t.uncommitted_budget })}">${JobsPage.money(-t.uncommitted_budget)}</td><td></td></tr>` : '';
+        const beforeRow = construction && t.cost_before_period ? `<tr title="Cost posted before the period: projected final cost is the whole job's">
+            <td><em>Cost before ${escapeHtml(tree.start_date || '')}</em></td><td></td><td></td><td></td>
+            <td class="amount">${JobsPage.money(t.cost_before_period)}</td>
+            <td class="amount">${JobsPage.money(-t.cost_before_period)}</td><td></td></tr>` : '';
         const typeRows = tree.types.map(ty => `<tr class="clickable" onclick="JobsPage.jumpTo('type:${ty.cost_type}')">
             <td>${escapeHtml(ty.name)}</td>
             <td class="amount">${JobsPage.money(ty.figures.revised)}</td>
@@ -329,26 +347,35 @@ const JobsPage = {
             <td class="amount" style="${JobsPage.varColor(ty.figures)}">${JobsPage.money(ty.figures.variance)}</td>
             <td class="amount">${JobsPage.pct(ty.figures.pct_used)}</td>
         </tr>`).join('');
+        // A contractor's projected carries the budget nothing has taken up
+        // yet (an unbought trade is cost to come, not a saving); its revenue
+        // is billed revenue, gross of the retainage owners hold back.
+        const projectedTitle = construction ? 'Actual + committed + budget not yet committed' : 'Actual + committed';
+        const retainageLink = `#/reports/retainage?as_of_date=${todayISO()}`;
+        const tile = (label, value, title) => `<a href="${retainageLink}" style="color:inherit;text-decoration:none">${stat(label, value, null, title)}</a>`;
         return `
             <div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:16px">
                 ${stat('Contract', contract !== null ? formatCurrency(contract) : '—')}
                 ${stat('Budget', JobsPage.money(t.revised), null, 'Original + changes')}
                 ${stat('Committed', JobsPage.money(t.committed), null, 'Open POs not yet billed')}
                 ${stat('Actual cost', JobsPage.money(t.actual))}
-                ${stat('Projected', JobsPage.money(t.projected), null, 'Actual + committed')}
+                ${stat('Projected', JobsPage.money(t.projected), null, projectedTitle)}
+                ${construction ? stat('Budget not yet committed', JobsPage.money(t.uncommitted_budget), null, 'Budget, code by code, that no cost or commitment has taken up: trades not yet bought. Counted in Projected.') : ''}
                 ${stat('Variance', JobsPage.money(t.variance), t.revised ? (t.variance < 0 ? 'var(--text-danger)' : 'var(--text-success)') : null, 'Budget − projected')}
-                ${stat('Revenue', JobsPage.money(t.act_revenue))}
-                ${stat('Margin', JobsPage.pct(margin), margin !== null && margin < 0 ? 'var(--text-danger)' : null, '(revenue − cost) / revenue')}
+                ${stat(construction ? 'Revenue billed (gross of retainage)' : 'Revenue', JobsPage.money(t.act_revenue), null, construction ? 'Posted revenue: everything billed, including the retainage the owner holds back' : '')}
+                ${stat(construction ? 'Billed margin' : 'Margin', JobsPage.pct(margin), margin !== null && margin < 0 ? 'var(--text-danger)' : null, construction ? '(revenue billed − cost) / revenue billed: not the job margin, which is on the WIP schedule' : '(revenue − cost) / revenue')}
                 ${stat('Billed vs contract', JobsPage.pct(billedPct))}
-                ${Terms.isConstruction() ? stat('Committed total', JobsPage.money(t.committed_total), null, 'Every subcontract and PO issued on this job (not period-scoped)') : ''}
-                ${Terms.isConstruction() ? stat('Billed to date (subs)', JobsPage.money(t.billed_to_date), null, 'Billed against commitments so far — the sub/supplier side, not the owner billing on the Contract tab') : ''}
+                ${construction ? stat('Committed total', JobsPage.money(t.committed_total), null, 'Every subcontract and PO issued on this job (not period-scoped)') : ''}
+                ${construction ? stat('Billed to date (subs)', JobsPage.money(t.billed_to_date), null, 'Billed against commitments so far — the sub/supplier side, not the owner billing on the Contract tab') : ''}
+                ${construction ? tile('Retainage owed to me', formatCurrency(ret.receivable.outstanding), 'Held by the owner on this job (account 1150), not yet released. Opens the Retainage report.') : ''}
+                ${construction ? tile('Retainage I owe', formatCurrency(ret.payable.outstanding), 'Held from subs on this job (account 2050), not yet released. Opens the Retainage report.') : ''}
             </div>
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:16px;align-items:start;">
                 <div>
                     <h4 style="font-size:11px;text-transform:uppercase;color:var(--text-muted);margin:0 0 4px 0">By cost type — click a row to drill down</h4>
                     <div class="table-container"><table class="data-table" style="font-size:12px">
                         <thead><tr><th scope="col">Type</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Committed</th><th scope="col" class="amount">Actual</th><th scope="col" class="amount">Projected</th><th scope="col" class="amount">Variance</th><th scope="col" class="amount">% Used</th></tr></thead>
-                        <tbody>${typeRows || '<tr><td colspan="7" style="color:var(--text-muted)">Nothing budgeted or posted yet.</td></tr>'}</tbody>
+                        <tbody>${typeRows || '<tr><td colspan="7" style="color:var(--text-muted)">Nothing budgeted or posted yet.</td></tr>'}${uncommittedRow}${beforeRow}</tbody>
                     </table></div>
                 </div>
                 <div style="font-size:13px">
@@ -404,6 +431,22 @@ const JobsPage = {
                 }
             }
         }
+        // a contractor's projected carries the budget nothing has taken up; a
+        // row of its own keeps the Projected column footing to the total
+        const unc = tree.totals.uncommitted_budget;
+        if (unc) {
+            body += `<tr title="Budget no cost or commitment has taken up yet, code by code: trades not yet bought"><td style="padding-left:8px"><em>Budget not yet committed</em></td>
+                <td></td><td></td><td></td><td></td><td></td><td class="amount">${JobsPage.money(unc)}</td>
+                <td class="amount" style="${JobsPage.varColor({ revised: tree.totals.revised, variance: -unc })}">${JobsPage.money(-unc)}</td><td></td><td></td><td></td></tr>`;
+        }
+        // on a dated tab, projected is the whole job's: the cost before the
+        // period is counted in it
+        const before = tree.totals.cost_before_period;
+        if (before) {
+            body += `<tr title="Cost posted before the period: projected final cost is the whole job's"><td style="padding-left:8px"><em>Cost before ${escapeHtml(tree.start_date || '')}</em></td>
+                <td></td><td></td><td></td><td></td><td></td><td class="amount">${JobsPage.money(before)}</td>
+                <td class="amount">${JobsPage.money(-before)}</td><td></td><td></td><td></td></tr>`;
+        }
         const jl = tree.job_level_budget;
         if (jl.original || jl.changes || jl.est_revenue) {
             body += JobsPage.rowHtml('joblevel', 0, '<em>Whole-job budget (not by code)</em>', jl, false, false, 'joblevel');
@@ -428,7 +471,27 @@ const JobsPage = {
                     <button class="btn btn-sm btn-secondary" onclick="JobsPage.saveCostTree('csv')" title="Every type and cost code, for this period">Save CSV</button>
                 </span>
             </div>
-            <div class="table-container"><table class="data-table job-tree" style="font-size:12px">${head}<tbody>${body}</tbody>${foot}</table></div>`;
+            <div class="table-container"><table class="data-table job-tree" style="font-size:12px">${head}<tbody>${body}</tbody>${foot}</table></div>
+            ${JobsPage.revenueSectionsHtml(tree.revenue_sections)}`;
+    },
+
+    // A contractor's revenue by section, beside the section's cost: a pay
+    // application's revenue has no cost type, so the tree above is cost only.
+    revenueSectionsHtml(rows) {
+        if (!rows || !rows.length) return '';
+        const m = JobsPage.money;
+        const body = rows.map(r => `<tr>
+            <td>${r.code ? `<code>${escapeHtml(r.code)}</code> ` : ''}${escapeHtml(r.name)}</td>
+            <td class="amount">${m(r.budget)}</td><td class="amount">${m(r.actual)}</td>
+            <td class="amount">${m(r.est_revenue)}</td><td class="amount">${m(r.act_revenue)}</td>
+            <td class="amount">${m(r.revenue_diff)}</td><td class="amount">${m(r.gross_profit)}</td></tr>`).join('');
+        return `<h4 style="font-size:12px;margin:14px 0 6px 0">Revenue by section</h4>
+            <div class="table-container"><table class="data-table" style="font-size:12px">
+                <thead><tr><th scope="col">Section</th><th scope="col" class="amount">Budget</th><th scope="col" class="amount">Actual cost</th>
+                <th scope="col" class="amount">Est. revenue</th><th scope="col" class="amount">Act. revenue</th>
+                <th scope="col" class="amount" title="Actual revenue less estimated">Revenue diff</th>
+                <th scope="col" class="amount" title="Actual revenue less actual cost">Act. revenue − cost</th></tr></thead>
+                <tbody>${body}</tbody></table></div>`;
     },
 
     nodeHtml(node, depth) {
@@ -615,13 +678,16 @@ const JobsPage = {
     async contractHtml() {
         const job = JobsPage._job;
         if (!TradePackages._list) await TradePackages.load();
-        const [data, estimates, codes] = await Promise.all([
+        const [data, estimates, codes, accounts] = await Promise.all([
             API.get(`/jobs/${job.id}/contract`),
             API.get(`/estimates?customer_id=${job.customer_id}`).catch(() => []),
             API.get('/cost-codes').catch(() => []),
+            API.get('/accounts?active_only=true').catch(() => []),
         ]);
         JobsPage._contract = data;
         JobsPage._sovCodes = codes;
+        // a line's revenue account is an income account
+        JobsPage._sovAccounts = (accounts || []).filter(a => a.account_type === 'income');
         // the accepted estimates on this job, kept so Build reuses them
         JobsPage._acceptedEstimates = (estimates || []).filter(e => e.job_id === job.id && e.status === 'accepted');
         const packages = (TradePackages._list || []);
@@ -657,6 +723,11 @@ const JobsPage = {
                     <input id="c-ret" name="retainage_pct" type="number" step="0.01" min="0" max="100" value="${v(c.retainage_pct)}"></div>
                 <div class="form-group"><label for="c-comarkup">Markup on change orders (%)</label>
                     <input id="c-comarkup" name="co_markup_pct" type="number" step="0.0001" min="-99.9999" max="1000" value="${v(c.co_markup_pct)}" placeholder="default markup on owner COs"></div>
+                <div class="form-group"><label for="c-salestax">Sales tax</label>
+                    <select id="c-salestax" name="sales_tax_treatment" title="Contractor pays: the lump-sum real-property rule. Pay applications bill no sales tax, and material bills on the job accrue use tax.">
+                        <option value="charge_owner" ${c.sales_tax_treatment !== 'contractor_pays' ? 'selected' : ''}>Charge sales tax to the owner</option>
+                        <option value="contractor_pays" ${c.sales_tax_treatment === 'contractor_pays' ? 'selected' : ''}>Contractor pays tax on materials (no sales tax to the owner)</option>
+                    </select></div>
                 ${src}
             </div>
             <div class="form-actions"><button type="submit" class="btn btn-primary">Save contract terms</button></div>
@@ -699,14 +770,16 @@ const JobsPage = {
                     <th scope="col">Description</th>
                     <th scope="col">Package</th>
                     <th scope="col">Section</th>
+                    <th scope="col" title="The income account this line's billing credits">Revenue account</th>
+                    <th scope="col" title="Sales tax is charged on this line's billing">Tax</th>
                     <th scope="col">Kind</th>
                     <th scope="col" class="amount">Scheduled value</th>
                     <th scope="col" style="width:70px"></th>
                 </tr></thead>
-                <tbody id="sov-body">${rows || '<tr><td colspan="7" style="color:var(--text-muted)">No schedule of values yet. Add rows, or build one from an accepted estimate.</td></tr>'}</tbody>
+                <tbody id="sov-body">${rows || '<tr><td colspan="9" style="color:var(--text-muted)">No schedule of values yet. Add rows, or build one from an accepted estimate.</td></tr>'}</tbody>
                 <tfoot>
-                    <tr><td colspan="5" style="text-align:right;font-weight:600">Total</td><td class="amount" id="sov-total" style="font-weight:600">${formatCurrency(total)}</td><td></td></tr>
-                    <tr><td colspan="5" style="text-align:right">Balance vs contract sum</td><td class="amount" id="sov-balance" style="color:${balColor};font-weight:600">${formatCurrency(balance)}</td><td></td></tr>
+                    <tr><td colspan="7" style="text-align:right;font-weight:600">Total</td><td class="amount" id="sov-total" style="font-weight:600">${formatCurrency(total)}</td><td></td></tr>
+                    <tr><td colspan="7" style="text-align:right">Balance vs contract sum</td><td class="amount" id="sov-balance" style="color:${balColor};font-weight:600">${formatCurrency(balance)}</td><td></td></tr>
                 </tfoot>
             </table></div>
             <div class="form-actions" data-write style="justify-content:flex-start;gap:8px">
@@ -725,7 +798,10 @@ const JobsPage = {
             return `<tr class="sov-row sov-co-row" data-co="1">
                 <td>${escapeHtml(line.item_no || '')}</td>
                 <td>${escapeHtml(line.description || '')}</td>
-                <td colspan="2" style="color:var(--text-muted)">Change order</td>
+                <td style="color:var(--text-muted)">Change order</td>
+                <td>${escapeHtml(line.cost_code_label || '—')}</td>
+                <td>${escapeHtml(line.revenue_account_name || 'Contract Revenue')}</td>
+                <td>${line.is_taxable === false ? 'No' : 'Yes'}</td>
                 <td>Change order</td>
                 <td class="amount sov-covalue" data-value="${line.scheduled_value ?? 0}">${formatCurrency(parseFloat(line.scheduled_value) || 0)}</td>
                 <td style="color:var(--text-muted);font-size:11px">read-only</td></tr>`;
@@ -734,16 +810,21 @@ const JobsPage = {
             `<option value="${p.id}" ${String(line.trade_package_id) === String(p.id) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)).join('');
         const codeOpts = ['<option value="">—</option>'].concat((codes || []).map(c =>
             `<option value="${c.id}" ${String(line.cost_code_id) === String(c.id) ? 'selected' : ''}>${escapeHtml(c.code)}</option>`)).join('');
+        // Blank posts to 4050 Contract Revenue, which construction setup made.
+        const acctOpts = ['<option value="">Contract Revenue (default)</option>'].concat((JobsPage._sovAccounts || []).map(a =>
+            `<option value="${a.id}" ${String(line.revenue_account_id) === String(a.id) ? 'selected' : ''}>${escapeHtml(a.account_number ? a.account_number + ' ' + a.name : a.name)}</option>`)).join('');
         const kindOpts = Object.entries(JobsPage.SOV_KINDS).filter(([k]) => k !== 'change_order').map(([k, v]) =>
             `<option value="${k}" ${(line.kind || 'work') === k ? 'selected' : ''}>${v}</option>`).join('');
         // An allowance line shows its change-order draw-down (used / remaining).
         const allowanceNote = (line.kind === 'allowance' && usage)
-            ? `<div style="font-size:11px;color:var(--text-muted)">Used ${formatCurrency(usage.used)} · ${formatCurrency(usage.remaining)} left</div>` : '';
+            ? `<div style="font-size:11px;color:var(--text-muted)">Used ${formatCurrency(usage.used)} · ${formatCurrency(usage.remaining)} left${(line.id && usage.remaining > 0) ? ` <button type="button" class="btn btn-sm btn-secondary" data-write onclick="JobsPage.coReturnAllowance(${line.id}, ${usage.remaining})" title="Make a change order that gives the unspent amount back to the owner">Return unspent</button>` : ''}</div>` : '';
         return `<tr class="sov-row" data-id="${line.id || ''}">
             <td><input class="sov-item" data-write maxlength="10" value="${escapeHtml(line.item_no || '')}" style="width:46px"></td>
             <td><input class="sov-desc" data-write maxlength="200" value="${escapeHtml(line.description || '')}" style="width:100%">${allowanceNote}</td>
             <td><select class="sov-pkg" data-write>${pkgOpts}</select></td>
             <td><select class="sov-code" data-write>${codeOpts}</select></td>
+            <td><select class="sov-acct" data-write aria-label="Revenue account">${acctOpts}</select></td>
+            <td><input class="sov-tax" data-write type="checkbox" aria-label="Taxable" ${line.is_taxable === false ? '' : 'checked'}></td>
             <td><select class="sov-kind" data-write>${kindOpts}</select></td>
             <td><input class="sov-value money" data-write type="number" step="0.01" value="${line.scheduled_value ?? ''}" style="width:110px;text-align:right" oninput="JobsPage.retotalSov()" title="A deduct alternate may be negative"></td>
             <td style="white-space:nowrap">
@@ -761,6 +842,8 @@ const JobsPage = {
             description: tr.querySelector('.sov-desc').value.trim() || null,
             trade_package_id: tr.querySelector('.sov-pkg').value ? parseInt(tr.querySelector('.sov-pkg').value) : null,
             cost_code_id: tr.querySelector('.sov-code').value ? parseInt(tr.querySelector('.sov-code').value) : null,
+            revenue_account_id: tr.querySelector('.sov-acct').value ? parseInt(tr.querySelector('.sov-acct').value) : null,
+            is_taxable: tr.querySelector('.sov-tax').checked,
             kind: tr.querySelector('.sov-kind').value,
             scheduled_value: parseFloat(tr.querySelector('.sov-value').value) || 0,
         }));
@@ -820,18 +903,21 @@ const JobsPage = {
             contingency_amount: num('contingency_amount'),
             retainage_pct: num('retainage_pct'),
             co_markup_pct: num('co_markup_pct'),
+            sales_tax_treatment: form.sales_tax_treatment ? form.sales_tax_treatment.value : undefined,
         };
         try {
-            await API.put(`/jobs/${JobsPage._job.id}/contract`, data);
+            const saved = await API.put(`/jobs/${JobsPage._job.id}/contract`, data);
             toast('Contract terms saved');
+            for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('contract');
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async saveSov() {
         try {
-            await API.put(`/jobs/${JobsPage._job.id}/sov`, { lines: JobsPage._readSov() });
+            const saved = await API.put(`/jobs/${JobsPage._job.id}/sov`, { lines: JobsPage._readSov() });
             toast('Schedule of values saved');
+            for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('contract');
         } catch (err) { toast(err.message, 'error'); }
     },
@@ -899,8 +985,10 @@ const JobsPage = {
             return `<tr>
                 <td>${escapeHtml(r.package_name)}${commits ? `<div style="margin-top:4px">${commits}</div>` : ''}</td>
                 <td class="amount">${m(r.bid_cost)}</td>
+                <td class="amount">${m(r.changes)}</td>
                 <td class="amount">${m(r.bought)}</td>
                 <td class="amount" style="${r.variance < 0 ? 'color:var(--text-danger)' : ''}">${m(r.variance)}</td>
+                <td class="amount">${m(r.spent_no_commitment)}</td>
                 <td class="amount">${m(r.committed_remaining)}</td>
                 <td class="amount">${m(r.billed_to_date)}</td>
             </tr>`;
@@ -909,9 +997,11 @@ const JobsPage = {
         return `<div class="table-container"><table class="data-table" id="buyout-table" style="font-size:12px">
             <thead><tr>
                 <th scope="col">Package</th>
-                <th scope="col" class="amount">Bid</th>
+                <th scope="col" class="amount" title="The accepted estimate's cost, allowances at their amount">Bid</th>
+                <th scope="col" class="amount" title="Approved change-order budget">Changes</th>
                 <th scope="col" class="amount">Bought</th>
-                <th scope="col" class="amount">Variance</th>
+                <th scope="col" class="amount" title="Bid + changes - bought">Variance</th>
+                <th scope="col" class="amount" title="Bills with a cost code and no commitment">Spent, no commitment</th>
                 <th scope="col" class="amount">Committed left</th>
                 <th scope="col" class="amount">Billed to date</th>
             </tr></thead>
@@ -919,8 +1009,10 @@ const JobsPage = {
             <tfoot><tr style="font-weight:700">
                 <td>Total</td>
                 <td class="amount">${m(t.bid_cost)}</td>
+                <td class="amount">${m(t.changes)}</td>
                 <td class="amount">${m(t.bought)}</td>
                 <td class="amount" style="${t.variance < 0 ? 'color:var(--text-danger)' : ''}">${m(t.variance)}</td>
+                <td class="amount">${m(t.spent_no_commitment)}</td>
                 <td class="amount">${m(t.committed_remaining)}</td>
                 <td class="amount">${m(t.billed_to_date)}</td>
             </tr></tfoot>
@@ -1024,6 +1116,7 @@ const JobsPage = {
         const lineRows = (co.lines || []).map((l, i) => JobsPage.coLineRowHtml(l, i)).join('');
         return `<form id="co-form" data-write onsubmit="JobsPage.coSave(event, ${co.id || 'null'})">
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">${co.id ? `Change order ${escapeHtml(co.number || '')}` : 'New change order'}</h4>
+            ${co.allowance_return ? '<p style="font-size:12px;color:var(--text-muted)">This change order returns an allowance\'s unspent amount to the owner: it takes the amount off the contract with no markup. Change its amount, title or date; funding and markup are fixed.</p>' : ''}
             <div class="form-grid">
                 <div class="form-group"><label>Title</label><input id="co-title" ${d} maxlength="200" value="${escapeHtml(co.title || '')}"></div>
                 <div class="form-group"><label>Kind</label><select id="co-kind" ${d || (co.id ? 'disabled' : '')}>${kindOpts}</select></div>
@@ -1199,7 +1292,68 @@ const JobsPage = {
         } catch (err) { toast(err.message, 'error'); }
     },
     coSubmit(id) { JobsPage._coAction(id, 'submit'); },
-    coApprove(id) { JobsPage._coAction(id, 'approve', 'Approve this change order? It updates the contract, budget and commitment.'); },
+    // Approve asks for the day the change order takes effect (its own date by
+    // default): the contract, WIP and pay-application sums read that day, not
+    // the click.
+    coApprove(id) {
+        const co = (JobsPage._coList || []).find(c => c.id === id) || {};
+        const today = new Date();
+        const iso = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+        const ageDays = co.date ? Math.floor((new Date(iso) - new Date(co.date)) / 86400000) : 0;
+        const oldNote = ageDays > 30
+            ? `<div style="font-size:11px;color:var(--text-danger)">${escapeHtml(co.number || 'This change order')} is dated ${ageDays} days ago, so it takes effect then unless you choose the day the owner signed.</div>` : '';
+        openModal('Approve change order', `<form id="co-approve-form" onsubmit="JobsPage.coApproveSubmit(event, ${id})">
+            <p>Approving ${escapeHtml(co.number || 'this change order')} updates the contract, budget and commitment.</p>
+            <div class="form-group"><label for="co-approved-on">Takes effect on</label>
+                <input id="co-approved-on" type="date" required value="${escapeHtml(co.date || iso)}"${co.date ? ` min="${escapeHtml(co.date)}"` : ''}>
+                <div style="font-size:11px;color:var(--text-muted)">The date the owner signed. Reports, WIP and pay applications read the change order from this day. It cannot be before the change order's own date or the contract date.</div>${oldNote}</div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Approve</button></div>
+        </form>`);
+    },
+    async coApproveSubmit(e, id) {
+        if (e) e.preventDefault();
+        const approved_on = $('#co-approved-on').value;
+        try {
+            const approved = await API.post(`/change-orders/${id}/approve`, { approved_on });
+            toast('Change order approved');
+            const warnings = (approved && approved.warnings) || [];
+            await JobsPage.setTab('changeorders');
+            // What the approval moved (a posted WIP month, a far-back date)
+            // stays on screen in the dialog until it is read, not a toast.
+            if (warnings.length) {
+                openModal('Change order approved', `<div id="co-approve-warnings">
+                    ${warnings.map(w => `<p class="report-warning" style="margin:0 0 8px;color:var(--text-danger)">${escapeHtml(w)}</p>`).join('')}
+                    <div class="form-actions"><button type="button" class="btn btn-primary" onclick="closeModal()">OK</button></div></div>`);
+            } else {
+                closeModal();
+            }
+        } catch (err) { toast(err.message, 'error'); }
+    },
+    // Make a draft owner change order for the allowance's unspent amount
+    // (the Contract tab's allowance row offers it).
+    coReturnAllowance(sovLineId, remaining) {
+        const iso = new Date().toISOString().slice(0, 10);
+        const contractDate = ((JobsPage._contract && JobsPage._contract.contract) || {}).contract_date || '';
+        openModal('Return unspent allowance', `<form id="co-return-form" onsubmit="JobsPage.coReturnAllowanceSubmit(event, ${sovLineId})">
+            <p>Return the ${formatCurrency(remaining)} left on this allowance to the owner. This makes a draft change order for minus that amount, with no markup.</p>
+            <div class="form-group"><label for="co-return-date">Change order date</label>
+                <input id="co-return-date" type="date" required value="${iso}"${contractDate ? ` min="${escapeHtml(contractDate)}"` : ''}>
+                <div style="font-size:11px;color:var(--text-muted)">Approving it cannot take effect before this date, so use the day the allowance closed out (for a month-end return, a date in that month). It cannot be before the contract date or in a closed period.</div></div>
+            <div class="form-actions"><button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button type="submit" class="btn btn-primary">Make change order</button></div>
+        </form>`);
+    },
+    async coReturnAllowanceSubmit(e, sovLineId) {
+        if (e) e.preventDefault();
+        const date = $('#co-return-date').value;
+        try {
+            await API.post('/change-orders/allowance-return', { allowance_sov_line_id: sovLineId, date });
+            toast('Draft change order made: submit and approve it to take effect');
+            closeModal();
+            await JobsPage.setTab('changeorders');
+        } catch (err) { toast(err.message, 'error'); }
+    },
     coReject(id) { JobsPage._coAction(id, 'reject', 'Reject this change order?'); },
     coVoid(id) { JobsPage._coAction(id, 'void', 'Void this change order? Every effect is reversed.'); },
     coPromote(id) { JobsPage._coAction(id, 'promote', 'Promote this potential change order to an owner change order?'); },
@@ -1287,8 +1441,10 @@ const JobsPage = {
                 <td>${escapeHtml(a.number)}${a.job_number ? `<br><span style="font-size:11px;color:var(--text-muted)">${escapeHtml(a.job_number)}</span>` : ''}</td>
                 <td>${escapeHtml(a.period_to || '')}</td>
                 <td><span class="badge">${escapeHtml(JobsPage.PA_STATUS_LABELS[a.status] || a.status)}</span></td>
-                <td class="amount">${m(t.this_period_total)}</td>
+                <td class="amount">${m(t.billed_this_period)}</td>
                 <td class="amount">${m(t.retainage_this_period)}</td>
+                <td class="amount">${m(t.release_retainage)}</td>
+                <td class="amount">${m(t.tax_amount)}</td>
                 <td class="amount">${m(t.current_due)}</td>
                 <td class="amount">${m(t.net_due)}</td>
                 <td>${inv}</td>
@@ -1301,11 +1457,14 @@ const JobsPage = {
             <div class="table-container"><table class="data-table" id="pa-log" style="font-size:12px">
                 <thead><tr>
                     <th scope="col">No</th><th scope="col">Period</th><th scope="col">Status</th>
-                    <th scope="col" class="amount">This period</th><th scope="col" class="amount">Retainage</th>
-                    <th scope="col" class="amount">Current due</th><th scope="col" class="amount">Net due</th>
+                    <th scope="col" class="amount" title="Work this period plus the change in stored materials">Billed</th>
+                    <th scope="col" class="amount" title="Retainage withheld this period">Retainage</th>
+                    <th scope="col" class="amount" title="Retainage released this period">Released</th>
+                    <th scope="col" class="amount">Tax</th>
+                    <th scope="col" class="amount" title="Billed less retainage, plus released, plus tax">Current due</th><th scope="col" class="amount">Net due</th>
                     <th scope="col">${T('Invoice')}</th><th scope="col"></th>
                 </tr></thead>
-                <tbody>${body || '<tr><td colspan="9" style="color:var(--text-muted)">No pay applications yet.</td></tr>'}</tbody>
+                <tbody>${body || '<tr><td colspan="12" style="color:var(--text-muted)">No pay applications yet.</td></tr>'}</tbody>
             </table></div>`;
     },
 
@@ -1317,10 +1476,13 @@ const JobsPage = {
         // schedule of values) has nothing to submit or approve: it is
         // deleted, so the job can be billed again (#723).
         const empty = open && !(a.lines || []).length;
-        if (empty) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paDelete(${id})">Delete</button>`);
+        // A draft or submitted application is deleted whatever its lines;
+        // an approved one is voided.
+        if (open) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paDelete(${id}, ${empty})">Delete</button>`);
         if (a.status === 'draft' && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paSubmit(${id})">Submit</button>`);
         if (open && !empty) parts.push(`<button class="btn btn-sm btn-secondary" data-write onclick="JobsPage.paApprove(${id})">Approve</button>`);
-        if (a.status === 'approved') parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paVoid(${id})">Void</button>`);
+        // Void is for the latest approved application, its invoice unpaid.
+        if (a.status === 'approved' && a.can_void) parts.push(`<button class="btn btn-sm btn-danger" data-destructive onclick="JobsPage.paVoid(${id})">Void</button>`);
         parts.push(`<button class="btn btn-sm btn-secondary" onclick="window.open('/api/pay-applications/${id}/pdf','_blank')">PDF</button>`);
         if (a.status === 'approved' && a.invoice_id) parts.push(`<button class="btn btn-sm btn-secondary" onclick="JobsPage.paWaivers(${id})">Waivers</button>`);
         return parts.join(' ');
@@ -1328,14 +1490,18 @@ const JobsPage = {
 
     async paNew() {
         try {
-            const a = await API.post('/pay-applications', { job_id: JobsPage._job.id, date: todayISO() });
+            const a = await API.post('/pay-applications', { job_id: JobsPage._job.id });
+            for (const w of (a && a.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('payapps');
             JobsPage.paEdit(a.id);
         } catch (err) { toast(err.message, 'error'); }
     },
 
     async paEdit(id) {
-        const a = await API.get(`/pay-applications/${id}`);
+        // A draft picks up the schedule of values' changes (a change order
+        // approved since it was made) as it opens.
+        let a = await API.get(`/pay-applications/${id}`);
+        if (a.status === 'draft') a = await API.post(`/pay-applications/${id}/refresh-lines`, {});
         JobsPage._paEditing = a;
         const area = $('#pa-form-area');
         if (area) { area.innerHTML = JobsPage.paFormHtml(a); JobsPage.paRecalc(); }
@@ -1363,14 +1529,16 @@ const JobsPage = {
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">Pay application ${escapeHtml(a.number)}</h4>
             <p role="note" style="margin:0 0 8px">This pay application has no lines because it was made before the job had a schedule of values, so there is nothing on it to bill. Delete it, then make a new pay application from the schedule of values.</p>
             <div class="form-actions" data-write style="justify-content:flex-start;gap:8px">
-                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id})">Delete this pay application</button>
+                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id}, true)">Delete this pay application</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
             </div>
         </div>`;
     },
 
-    async paDelete(id) {
-        if (!confirm('Delete this pay application? It has no lines, so nothing has been billed on it.')) return;
+    async paDelete(id, empty) {
+        if (!confirm(empty
+            ? 'Delete this pay application? It has no lines, so nothing has been billed on it.'
+            : 'Delete this pay application? Nothing has been billed on it yet; the amounts entered on it are lost.')) return;
         try {
             await API.del(`/pay-applications/${id}`);
             toast('Pay application deleted');
@@ -1386,10 +1554,11 @@ const JobsPage = {
             <h4 style="font-size:12px;text-transform:uppercase;color:var(--text-muted);margin:4px 0 6px 0">Pay application ${escapeHtml(a.number)}</h4>
             ${JobsPage.paGridHtml(a.lines, a.totals, { pct: a.retainage_pct, disabled: ro })}
             <div class="form-grid" style="margin-top:10px">
-                <div class="form-group"><label>Period to</label><input id="pa-period" ${d} type="date" value="${a.period_to || ''}"></div>
+                <div class="form-group"><label>Period to</label><input id="pa-period" ${d} type="date" value="${a.period_to || ''}" onchange="JobsPage.paPeriodChanged()"></div>
+                <div class="form-group"><label>Application date</label><input id="pa-date" ${d} type="date" value="${a.date || ''}" title="The invoice date and the date it posts" oninput="this.dataset.touched = '1'"></div>
                 <div class="form-group"><label>Retainage %</label><input id="pa-pct" ${d} type="number" step="0.01" min="0" max="100" value="${a.retainage_pct ?? ''}" oninput="JobsPage.paRecalc()"></div>
                 <div class="form-group"><label>Sales tax</label>
-                    <label style="font-weight:normal"><input id="pa-tax-on" ${d} type="checkbox" ${a.charge_tax !== false ? 'checked' : ''} ${a.tax_exempt ? 'disabled' : ''} onchange="JobsPage.paRecalc()"> Charge tax${a.tax_exempt ? ' (owner is tax-exempt)' : ''}</label></div>
+                    <label style="font-weight:normal"><input id="pa-tax-on" ${d} type="checkbox" ${a.charge_tax !== false && !a.contractor_pays_tax ? 'checked' : ''} ${a.tax_exempt || a.contractor_pays_tax ? 'disabled' : ''} onchange="JobsPage.paRecalc()"> Charge tax${a.tax_exempt ? ' (owner is tax-exempt)' : (a.contractor_pays_tax ? ' (off: the contractor pays tax on materials on this job)' : '')}</label></div>
                 <div class="form-group"><label>Tax rate %</label><input id="pa-tax-rate" ${d} type="number" step="0.0001" min="0" value="${Math.round(Number(a.tax_rate || 0) * 1000000) / 10000}" oninput="JobsPage.paRecalc()"></div>
                 <div class="form-group"><label>Release retainage</label><input id="pa-release" ${d} type="number" step="0.01" min="0" value="${a.release_retainage ?? 0}" oninput="JobsPage.paRecalc()"></div>
                 <div class="form-group"><label>Deposit applied <span style="color:var(--text-muted)">(${formatCurrency(a.unapplied_deposits)} unapplied)</span></label>
@@ -1404,6 +1573,7 @@ const JobsPage = {
                 <button type="submit" class="btn btn-primary">Save</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.paSubmit(${a.id})">Submit</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.paApprove(${a.id})">Approve</button>
+                <button type="button" class="btn btn-danger" data-destructive onclick="JobsPage.paDelete(${a.id}, false)">Delete</button>
                 <button type="button" class="btn btn-secondary" onclick="JobsPage.setTab('payapps')">Cancel</button>
             </div>`}
         </form>`;
@@ -1419,7 +1589,7 @@ const JobsPage = {
         const pct = opts.pct || 0;
         const rows = lines.map(l => {
             const r = JobsPage.paLineMath(l.scheduled_value, l.previous, l.this_period, l.stored, pct);
-            return `<tr class="pa-line" data-sov="${l.sov_line_id}" data-scheduled="${l.scheduled_value}" data-previous="${l.previous}">
+            return `<tr class="pa-line" data-sov="${l.sov_line_id}" data-scheduled="${l.scheduled_value}" data-previous="${l.previous}" data-taxable="${l.is_taxable === false ? '0' : '1'}" data-prior-stored="${l.prior_stored ?? 0}">
                 <td>${escapeHtml(l.item_no || '')}</td>
                 <td>${escapeHtml(l.description || '')}</td>
                 <td class="amount">${formatCurrency(l.scheduled_value)}</td>
@@ -1468,7 +1638,7 @@ const JobsPage = {
 
     paRecalc() {
         const pct = Number(($('#pa-pct') ? $('#pa-pct').value : 0) || 0);
-        let completed = 0, retainage = 0;
+        let completed = 0, retainage = 0, exemptBilled = 0;
         $$('#pa-body .pa-line').forEach(tr => {
             const scheduled = tr.dataset.scheduled, previous = tr.dataset.previous;
             const tp = tr.querySelector('.pa-tp').value, st = tr.querySelector('.pa-st').value;
@@ -1478,6 +1648,11 @@ const JobsPage = {
             tr.querySelector('.pa-balance').textContent = formatCurrency(r.balance);
             tr.querySelector('.pa-retainage').textContent = formatCurrency(r.retainage);
             completed += r.completed; retainage += r.retainage;
+            // A line that is not taxed bills this period plus the change in
+            // its stored materials, none of it taxed (as the server figures).
+            if (tr.dataset.taxable === '0') {
+                exemptBilled += (Number(tp) || 0) + (Number(st) || 0) - (Number(tr.dataset.priorStored) || 0);
+            }
         });
         const prevRet = (JobsPage._paEditing && JobsPage._paEditing.totals && JobsPage._paEditing.totals.previous_retainage) || 0;
         const prevCert = (JobsPage._paEditing && JobsPage._paEditing.totals && JobsPage._paEditing.totals.previous_applications) || 0;
@@ -1493,8 +1668,8 @@ const JobsPage = {
         const priorBilled = (prior.completed_to_date || 0) - (prior.billed_this_period || 0);
         const taxOn = $('#pa-tax-on') ? $('#pa-tax-on').checked : false;
         const taxRate = Number(($('#pa-tax-rate') ? $('#pa-tax-rate').value : 0) || 0) / 100;
-        const exempt = !!(JobsPage._paEditing && JobsPage._paEditing.tax_exempt);
-        const tax = (taxOn && !exempt) ? Math.round((completed - priorBilled) * taxRate * 100) / 100 : 0;
+        const exempt = !!(JobsPage._paEditing && (JobsPage._paEditing.tax_exempt || JobsPage._paEditing.contractor_pays_tax));
+        const tax = (taxOn && !exempt) ? Math.round((completed - priorBilled - exemptBilled) * taxRate * 100) / 100 : 0;
         const currentDue = Math.round((earnedLess - prevCert + tax) * 100) / 100;
         const totals = {
             tax_amount: tax,
@@ -1509,10 +1684,17 @@ const JobsPage = {
         if (el) el.innerHTML = JobsPage.paTotalsHtml(totals);
     },
 
+    // The application date follows Period to until the date is set by hand.
+    paPeriodChanged() {
+        const period = $('#pa-period'), date = $('#pa-date');
+        if (period && date && period.value && !date.dataset.touched) date.value = period.value;
+    },
+
     paReadForm() {
         const num = sel => { const el = $(sel); const v = el && el.value !== '' ? parseFloat(el.value) : null; return (v === null || isNaN(v)) ? null : v; };
         return {
             period_to: ($('#pa-period') && $('#pa-period').value) || null,
+            date: ($('#pa-date') && $('#pa-date').value) || null,
             retainage_pct: num('#pa-pct'),
             release_retainage: num('#pa-release') || 0,
             deposit_applied: num('#pa-deposit') || 0,
@@ -1530,8 +1712,9 @@ const JobsPage = {
     async paSave(e, id) {
         if (e) e.preventDefault();
         try {
-            await API.put(`/pay-applications/${id}`, JobsPage.paReadForm());
+            const saved = await API.put(`/pay-applications/${id}`, JobsPage.paReadForm());
             toast('Pay application saved');
+            for (const w of (saved && saved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('payapps');
             JobsPage.paEdit(id);
         } catch (err) { toast(err.message, 'error'); }
@@ -1550,8 +1733,9 @@ const JobsPage = {
         if (!confirm('Approve this pay application? Creates the invoice for the job\'s customer.')) return;
         try {
             if ($('#pa-form')) await API.put(`/pay-applications/${id}`, JobsPage.paReadForm());
-            await API.post(`/pay-applications/${id}/approve`, {});
+            const approved = await API.post(`/pay-applications/${id}/approve`, {});
             toast('Pay application approved — invoice created');
+            for (const w of (approved && approved.warnings) || []) toast(w, 'warning');
             await JobsPage.setTab('payapps');
         } catch (err) { toast(err.message, 'error'); }
     },

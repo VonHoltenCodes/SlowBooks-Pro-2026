@@ -199,19 +199,26 @@ test('bidTotals and toggleAlternate ride the stable data-eline, not the row posi
     assert.equal(rows[0].querySelector('.line-alt-accepted').checked, false); // base row untouched
 });
 
-test('bidTotals taxes the markups when any included line is taxable (server rule)', () => {
+test('bidTotals taxes only the markups on taxable lines (server rule, est B3)', () => {
     const ctx = estimatesContext(true);
-    // a non-taxable cost line makes the markups; a taxable priced-direct line
-    // with a $0 amount has no taxable subtotal but makes the bid taxable
+    // A $60,000 exempt, B $40,000 taxable, both at cost: the markups split
+    // 60/40 by markup base and only B's share is taxed
     const rows = [
-        makeRow(0, { kind: 'base', qty: 1, uc: 100000, rate: 100000, taxable: false }),
-        makeRow(1, { kind: 'base', qty: 1, uc: null, rate: 0, taxable: true }),
+        makeRow(0, { kind: 'base', qty: 1, uc: 60000, rate: 60000, taxable: false }),
+        makeRow(1, { kind: 'base', qty: 1, uc: 40000, rate: 40000, taxable: true }),
     ];
     withFakeDom(ctx, rows); // form tax_rate 10%, gc 10%
     const t = ctx.EstimatesPage.bidTotals();
     assert.equal(t.markupTotal, 10000);
-    // tax = 10% × (0 taxable subtotal + 10,000 markups) = 1,000 — not 0
-    assert.equal(t.tax, 1000);
+    // tax = 10% × (40,000 + 40% of 10,000) = 4,400, not 10% × 50,000
+    assert.equal(t.tax, 4400);
+    // a taxable line priced direct carries no markup base, so no markup tax
+    const ctx2 = estimatesContext(true);
+    withFakeDom(ctx2, [
+        makeRow(0, { kind: 'base', qty: 1, uc: 100000, rate: 100000, taxable: false }),
+        makeRow(1, { kind: 'base', qty: 1, uc: null, rate: 0, taxable: true }),
+    ]);
+    assert.equal(ctx2.EstimatesPage.bidTotals().tax, 0);
 });
 
 test('the markups block carries the allowance-markup checkbox, off unless set', () => {

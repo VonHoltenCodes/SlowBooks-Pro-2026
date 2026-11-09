@@ -151,7 +151,7 @@ def test_the_row_delete_button_does_the_same(
     assert db_session.query(PayApplication).count() == 0
 
 
-def test_an_application_with_lines_offers_no_delete(
+def test_an_application_with_lines_offers_delete_beside_approve(
     client, db_session, seed_accounts, seed_customer
 ):
     client.put("/api/settings", json={"company_type": "construction"})
@@ -163,10 +163,13 @@ def test_an_application_with_lines_offers_no_delete(
 
     def test(page):
         row = _row(page, f"PA-{job['id']}-01")
-        assert row.get_by_role("button", name="Delete").count() == 0
         assert row.get_by_role("button", name="Approve").count() == 1
+        row.get_by_role("button", name="Delete").click()
+        page.locator("#pa-log", has_text="No pay applications yet.").wait_for()
 
     _pay_apps_tab(client, job["id"], test)
+    db_session.expire_all()
+    assert db_session.query(PayApplication).count() == 0
 
 
 def test_an_empty_approved_application_is_voided_and_new_works(

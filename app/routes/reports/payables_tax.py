@@ -1,3 +1,4 @@
+import re
 from datetime import date
 from datetime import date as dt_date
 from decimal import Decimal
@@ -16,6 +17,7 @@ from app.models.contacts import Vendor
 from app.routes.reports._router import router
 from app.services.payment_terms import document_due_date
 from app.services import cash_basis
+from app.routes._helpers import refuse_unknown_filters
 
 # accrual, cash, or the company default (#483), as the statements take it
 _BASIS_QUERY = Query(
@@ -136,6 +138,7 @@ def sales_tax_report(
         "tax_credited": float(tax_credited),
         "total_tax": float(total_tax),
         "ledger": _sales_tax_ledger(db, start_date, end_date, total_tax),
+        "use_tax": _use_tax_section(db, start_date, end_date),
         "basis": "accrual",
         "basis_note": None,
     }
@@ -251,6 +254,7 @@ def _sales_tax_cash(db: Session, start_date, end_date):
         "tax_credited": 0.0,
         "total_tax": float(total_tax),
         "ledger": _sales_tax_ledger(db, start_date, end_date, total_tax, "cash"),
+        "use_tax": _use_tax_section(db, start_date, end_date, "cash"),
         "basis": "cash",
         "basis_note": cash_basis.receivable_note(db, end_date, "cash"),
     }
@@ -305,6 +309,119 @@ def _sales_tax_ledger(
         "difference": float(_q(total_tax - posted)),
         "purchase_tax": float(-owed(*in_period, purchase)),
         "purchase_tax_to_date": float(-owed(Transaction.date <= end_date, purchase)),
+    }
+
+
+# The entries that accrue use tax on 2220 Use Tax Payable: the bills that
+# post it, their voids and edits, and (on the cash basis) the bill payments
+# that recognize it. Any other debit to 2220 is the tax paid to the agency.
+_USE_TAX_ACCRUING = (
+    "bill",
+    "bill_void",
+    "bill_edit",
+    "bill_payment",
+    "bill_payment_void",
+)
+
+
+def _use_tax_section(db: Session, start_date, end_date, basis: str = "accrual"):
+    """The Use tax section (construction): the use tax material bills accrued
+    on 2220 Use Tax Payable in the dates, line by line, what was paid, and
+    the balance owed at the end date. None for a company that is not
+    construction and whose 2220 never moved (a report read creates nothing)."""
+    from sqlalchemy import and_, or_
+
+    from app.models.bills import Bill
+    from app.models.jobs import Job
+    from app.models.transactions import Transaction, TransactionLine
+    from app.services.purchase_posting import use_tax_rate
+    from app.services.terminology import terms_from_db
+
+    account = db.query(Account).filter(Account.name == "Use Tax Payable").first()
+    construction = terms_from_db(db).is_construction
+    if account is None:
+        return None if not construction else _empty_use_tax(db, use_tax_rate)
+
+    def lines(*conds):
+        return (
+            db.query(TransactionLine, Transaction)
+            .join(Transaction, TransactionLine.transaction_id == Transaction.id)
+            .filter(TransactionLine.account_id == account.id, *conds)
+            .execution_options(**cash_basis.reading(basis))
+        )
+
+    accruing = Transaction.source_type.in_(_USE_TAX_ACCRUING)
+    paying = or_(Transaction.source_type.is_(None), ~accruing)
+    in_period = and_(Transaction.date >= start_date, Transaction.date <= end_date)
+
+    def net(query) -> Decimal:
+        return _q(
+            sum(
+                (
+                    Decimal(str(tl.credit or 0)) - Decimal(str(tl.debit or 0))
+                    for tl, _t in query
+                ),
+                Decimal("0"),
+            )
+        )
+
+    if not construction and not lines().first():
+        return None
+    items = []
+    for tl, txn in lines(in_period, accruing).order_by(
+        Transaction.date, TransactionLine.id
+    ):
+        # a bill's own entries carry its id; a payment's carry the payment's
+        on_bill = txn.source_type in ("bill", "bill_void", "bill_edit")
+        bill = db.get(Bill, txn.source_id) if on_bill and txn.source_id else None
+        job = db.get(Job, tl.job_id) if tl.job_id else None
+        items.append(
+            {
+                "date": txn.date.isoformat(),
+                "type": txn.source_type,
+                "bill_id": bill.id if bill else None,
+                "bill_number": bill.bill_number if bill else None,
+                "vendor_name": bill.vendor.name if bill and bill.vendor else "",
+                "job_name": job.name if job else "",
+                "description": re.sub(r" \([\d.]+%\)$", "", tl.description or ""),
+                "rate": _booked_use_tax_rate(tl.description),
+                "amount": float(
+                    _q(Decimal(str(tl.credit or 0)) - Decimal(str(tl.debit or 0)))
+                ),
+            }
+        )
+    return {
+        "account_id": account.id,
+        "account_number": account.account_number,
+        "account_name": account.name,
+        "rate": float(use_tax_rate(db)),
+        "items": items,
+        "accrued": float(net(lines(in_period, accruing))),
+        "paid": float(-net(lines(in_period, paying))),
+        "balance": float(net(lines(Transaction.date <= end_date))),
+    }
+
+
+def _booked_use_tax_rate(memo: Optional[str]):
+    """The rate (a fraction) an accrual was booked at, read from the "(6.5%)"
+    its memo ends with; None for an entry that does not carry one."""
+    match = re.search(r"\(([\d.]+)%\)$", memo or "")
+    if match is None:
+        return None
+    return float(Decimal(match.group(1)) / Decimal("100"))
+
+
+def _empty_use_tax(db: Session, use_tax_rate):
+    """A construction company whose 2220 does not exist yet: nothing accrued."""
+    return {
+        "account_id": None,
+        "account_number": None,
+        "account_name": "Use Tax Payable",
+        "rate": float(use_tax_rate(db)),
+        "items": [],
+        "accrued": 0.0,
+        "paid": 0.0,
+        "balance": 0.0,
     }
 
 
@@ -381,14 +498,12 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
     assistant read these too, so no two views of payables disagree (found
     integrating the 2.17.3 exploratory fixes: the A/R side had been made to
     tie; this side still summed raw document-currency balances)."""
-    from app.models.bills import (
-        Bill,
-        BillPayment,
-        BillPaymentAllocation,
-        BillStatus,
-    )
-    from app.models.vendor_credits import VendorCredit, VendorCreditStatus
     from app.services.contact_balances import home_amount
+    from app.services.open_balances import (
+        open_bills_as_of,
+        unapplied_bill_payments_as_of,
+        unapplied_vendor_credits_as_of,
+    )
 
     vendor_names = {v.id: v.name for v in db.query(Vendor.id, Vendor.name).all()}
     aging: dict = {}
@@ -407,18 +522,11 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
             }
         return aging[vid]
 
-    # Today's open bills dated on or before the report's date, aged against
-    # it, as the A/R side does (#285: a bill dated after the date was in
-    # the report). A bill paid since the date is not rebuilt as owed on it:
-    # this is the current ledger aged, not a reconstruction.
-    bills = (
-        db.query(Bill)
-        .filter(Bill.status.in_([BillStatus.UNPAID, BillStatus.PARTIAL]))
-        .filter(Bill.balance_due > 0)
-        .filter(Bill.date <= as_of_date)
-        .all()
-    )
-    for bill in bills:
+    # What was open on the date, not what is open today: a bill paid since
+    # still counts, so the total is account 2000 on that date, as the A/R
+    # side does. Only bills dated on or before it (#285).
+    bills = open_bills_as_of(db, as_of_date)
+    for bill, open_amount in bills:
         r = row(bill.vendor_id)
         # A bill with no due date (bills made from a PO before 2.18
         # never got one) ages from its date and terms, not as current.
@@ -426,7 +534,7 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
         # else the old reading of its text, never a term added since
         due = bill.due_date or document_due_date(db, bill)
         days = (as_of_date - due).days
-        bal = home_amount(bill.balance_due, bill.exchange_rate)
+        bal = home_amount(open_amount, bill.exchange_rate)
         if days <= 0:
             r["current"] += bal
         elif days <= 30:
@@ -447,32 +555,11 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
         r["current"] -= amount
         r["total"] -= amount
 
-    for vc in (
-        db.query(VendorCredit)
-        .filter(VendorCredit.status != VendorCreditStatus.VOID)
-        .filter(VendorCredit.date <= as_of_date)
-        .filter(VendorCredit.balance_remaining > 0)
-        .all()
-    ):
-        credit(vc.vendor_id, Decimal(str(vc.balance_remaining)))
+    for vc, left in unapplied_vendor_credits_as_of(db, as_of_date):
+        credit(vc.vendor_id, _q(left))
 
-    applied = dict(
-        db.query(
-            BillPaymentAllocation.bill_payment_id,
-            sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
-        )
-        .group_by(BillPaymentAllocation.bill_payment_id)
-        .all()
-    )
-    for bp in (
-        db.query(BillPayment)
-        .filter(BillPayment.date <= as_of_date)
-        .filter(BillPayment.is_voided.isnot(True))
-        .all()
-    ):
-        left = _q(Decimal(str(bp.amount or 0)) - Decimal(str(applied.get(bp.id, 0))))
-        if left > 0:
-            credit(bp.vendor_id, home_amount(left, bp.exchange_rate))
+    for bp, left in unapplied_bill_payments_as_of(db, as_of_date):
+        credit(bp.vendor_id, home_amount(left, bp.exchange_rate))
 
     _COLS = ("current", "over_30", "over_60", "over_90", "total", "unapplied_credits")
     items = sorted(aging.values(), key=lambda i: (i["vendor_name"] or "").lower())
@@ -485,13 +572,13 @@ def ap_aging_report(db: Session, as_of_date: date) -> dict:
     return {"as_of_date": as_of_date.isoformat(), "items": items, "totals": totals}
 
 
-@router.get("/ap-aging")
+@router.get("/ap-aging", dependencies=[Depends(refuse_unknown_filters)])
 def ap_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
     """AP Aging report — mirrors AR aging but for bills."""
     return ap_aging_report(db, as_of_date or date.today())
 
 
-@router.get("/ap-aging/csv")
+@router.get("/ap-aging/csv", dependencies=[Depends(refuse_unknown_filters)])
 def ap_aging_csv_route(
     request: Request,
     as_of_date: date = Query(default=None),

@@ -648,6 +648,15 @@ def assert_voidable_kind(txn: Transaction) -> None:
     (_DOCUMENTS_WITH_A_VOID, #661), in the order the route always asked."""
     if txn.source_type and txn.source_type.endswith("_void"):
         raise HTTPException(status_code=400, detail="Cannot void a reversal entry")
+    if txn.source_type in ("wip_adjustment", "wip_reversal"):
+        # the entry and its next-day reversal go together; voiding one here
+        # would leave the other on the books
+        raise HTTPException(
+            status_code=400,
+            detail="This is the WIP schedule's adjusting entry or its reversal. "
+            "Void it on the WIP schedule (Void posted entry), which voids the "
+            "entry and its reversal together.",
+        )
     if txn.source_type == "payroll":
         # A pay run's posting is reversed by voiding the run (#432), which
         # also frees its time entries, backs out YTD and marks the stubs.

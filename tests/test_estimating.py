@@ -908,7 +908,7 @@ def test_migration_upgrades_and_downgrades(tmp_path):
     assert again.returncode == 0, again.stderr
 
 
-# ── Review round 2: status lock, allowance markup, GC cost, manual rows ─────
+# ── status lock, allowance markup, GC cost, manual rows ─────
 
 
 def _budget_snapshot(client, job_id):
@@ -1089,8 +1089,12 @@ def test_accept_budgets_general_conditions_as_a_cost(client, seed_customer):
     assert client.post(f"/api/estimates/{est['id']}/accept", json={}).status_code == 200
     rows = client.get(f"/api/jobs/{job['id']}/budgets").json()
     gc_rows = [r for r in rows if r["cost_code_id"] != a["id"]]
-    assert len(gc_rows) == 1
-    gc = gc_rows[0]
+    # the GC and, now, the insurance premium are costs on codes of their own
+    assert len(gc_rows) == 2
+    gc = next(r for r in gc_rows if r["cost_code_label"].startswith("GC "))
+    ins = next(r for r in gc_rows if r["cost_code_label"].startswith("INS "))
+    assert float(ins["amount"]) == 216.0  # 2% of 10,000 + 800
+    assert float(ins["revenue_amount"]) == 0.0
     assert float(gc["amount"]) == 800.0  # the GC amount, as cost
     assert float(gc["revenue_amount"]) == 0.0  # its revenue rides the code rows
     assert gc["locked"] is True
@@ -1251,3 +1255,39 @@ def test_business_and_nonprofit_estimates_are_not_frozen_when_accepted(
         r = client.put(url, json={"status": "pending"})
         assert r.status_code == 200, (company_type, r.text)
         assert r.json()["status"] == "pending"
+
+
+def test_an_estimate_line_too_large_for_the_column_is_a_422(client, seed_customer):
+    """1e15 x 1e15 and 99,999,999,999 x 99,999,999,999 are each a 422 sentence,
+    never a 500 or an estimate whose subtotal is a float error."""
+    for qty, rate in ((1e15, 1e15), (99_999_999_999, 99_999_999_999)):
+        r = client.post(
+            "/api/estimates",
+            json={
+                "customer_id": seed_customer.id,
+                "date": "2026-02-01",
+                "lines": [{"description": "x", "quantity": qty, "rate": rate}],
+            },
+        )
+        assert r.status_code == 422, r.text
+        assert "more than a line can be" in r.text
+
+
+def test_the_estimate_list_finds_lost_bids_by_the_uis_word(
+    client, seed_accounts, seed_customer
+):
+    _set_construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [{"description": "Shell", "quantity": 1, "rate": 100, "unit_cost": 100}],
+    )
+    r = client.post(f"/api/estimates/{est['id']}/lost", json={"reason": "price"})
+    assert r.status_code == 200, r.text
+    lost = client.get("/api/estimates?status=lost").json()
+    assert [e["id"] for e in lost] == [est["id"]]
+    assert [e["id"] for e in client.get("/api/estimates?status=rejected").json()] == [
+        est["id"]
+    ]
+    assert client.get("/api/estimates?status=pending").json() == []
+    assert client.get("/api/estimates?status=bogus").status_code == 422

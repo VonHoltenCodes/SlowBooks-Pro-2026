@@ -32,6 +32,7 @@ from app.services.terminology import Terms, terms_from_db
 # For the rest (liability, equity, income), natural balance = credit - debit.
 from app.services.bank_register import DEBIT_NORMAL as _DEBIT_NORMAL  # noqa: E402
 from app.services.entry_text import header_text
+from app.routes._helpers import refuse_unknown_filters
 
 
 def _in_class(db, class_id):
@@ -1973,7 +1974,7 @@ def profit_loss_by_class(
     return out
 
 
-@router.get("/profit-loss-by-job")
+@router.get("/profit-loss-by-job", dependencies=[Depends(refuse_unknown_filters)])
 def profit_loss_by_job(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -2101,7 +2102,7 @@ def _by_job_data(
     return data, title, columns, t
 
 
-@router.get("/profit-loss-by-job/pdf")
+@router.get("/profit-loss-by-job/pdf", dependencies=[Depends(refuse_unknown_filters)])
 def profit_loss_by_job_pdf(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -2123,7 +2124,7 @@ def profit_loss_by_job_pdf(
     )
 
 
-@router.get("/profit-loss-by-job/csv")
+@router.get("/profit-loss-by-job/csv", dependencies=[Depends(refuse_unknown_filters)])
 def profit_loss_by_job_csv_route(
     request: Request,
     start_date: date = Query(default=None),
@@ -2148,7 +2149,21 @@ def profit_loss_by_job_csv_route(
     )
 
 
-@router.get("/job-profitability")
+def _contracts_as_of(db: Session, rows: list[dict], end_date: date) -> None:
+    """A contractor's Job Profitability reads each contract as it stood on the
+    end date, as the WIP schedule does; other companies keep today's."""
+    from app.models.jobs import Job
+    from app.services.job_costing import _contract_float, _is_construction
+
+    if not _is_construction(db):
+        return
+    for r in rows:
+        job = db.get(Job, r["job_id"]) if r.get("job_id") else None
+        if job is not None:
+            r["contract_amount"] = _contract_float(db, job, end_date, True)
+
+
+@router.get("/job-profitability", dependencies=[Depends(refuse_unknown_filters)])
 def job_profitability_report(
     start_date: date = Query(default=None),
     end_date: date = Query(default=None),
@@ -2173,6 +2188,7 @@ def job_profitability_report(
     rows = job_profitability(
         db, start_date, end_date, customer_id=customer_id, basis=basis
     )
+    _contracts_as_of(db, rows, end_date)
     return {
         "start_date": start_date.isoformat(),
         "end_date": end_date.isoformat(),

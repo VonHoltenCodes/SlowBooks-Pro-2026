@@ -3,9 +3,14 @@ from decimal import Decimal
 from typing import Annotated, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
-from app.schemas.common import StrictModel
+from app.schemas.common import StrictModel, choice_error
 
-from app.models.jobs import CONTRACT_TYPES, JOB_STATUSES, SOV_KINDS
+from app.models.jobs import (
+    CONTRACT_TYPES,
+    JOB_STATUSES,
+    SALES_TAX_TREATMENTS,
+    SOV_KINDS,
+)
 
 # Money columns are Numeric(15, 2): anything larger overflows Postgres (a 500).
 _MAX_MONEY = Decimal("9999999999999.99")
@@ -117,18 +122,38 @@ class JobSummary(BaseModel):
     billed_to_date: float = 0.0  # Σ billed against commitments (#553)
 
 
+# The choices as the contract form labels them (app/static/js/jobs.js).
+_CONTRACT_TYPE_LABELS = dict(
+    lump_sum="Lump sum", gmp="GMP (guaranteed max)", cost_plus="Cost-plus"
+)
+_TAX_TREATMENT_LABELS = dict(
+    charge_owner="Charge sales tax to the owner",
+    contractor_pays="Contractor pays tax on materials",
+)
+_SOV_KIND_LABELS = dict(
+    work="Work",
+    allowance="Allowance",
+    contingency="Contingency",
+    general_conditions="General conditions",
+    insurance="Insurance",
+    fee="Fee",
+    bond="Bond",
+    change_order="Change order",
+)
+
+
 def _check_contract_type(v):
     if v is None:
         return v
     v = v.strip().lower().replace(" ", "_").replace("-", "_")
     if v not in CONTRACT_TYPES:
-        raise ValueError(f"contract_type must be one of {', '.join(CONTRACT_TYPES)}")
+        raise choice_error("Contract type", _CONTRACT_TYPE_LABELS, "contract_type")
     return v
 
 
 def _bounded_markup(v):
     if v is not None and not (-100 < v <= 1000):
-        raise ValueError("co_markup_pct must be above -100 and at most 1000")
+        raise ValueError("Change-order markup must be above -100% and at most 1000%.")
     return v
 
 
@@ -145,22 +170,33 @@ class ContractTerms(StrictModel):
     retainage_pct: Optional[Decimal] = None
     co_markup_pct: Optional[Decimal] = None
     contract_date: Optional[dt_date] = None
+    # "charge_owner" (null) or "contractor_pays" (models.jobs)
+    sales_tax_treatment: Optional[str] = None
 
     _type = field_validator("contract_type")(_check_contract_type)
     _comarkup = field_validator("co_markup_pct")(_bounded_markup)
+
+    @field_validator("sales_tax_treatment")
+    @classmethod
+    def _tax_treatment(cls, v):
+        if v is not None and v not in SALES_TAX_TREATMENTS:
+            raise choice_error(
+                "Sales tax", _TAX_TREATMENT_LABELS, "sales_tax_treatment"
+            )
+        return v
 
     @field_validator("fee_pct")
     @classmethod
     def _fee_pct(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("fee_pct must be between 0 and 100")
+            raise ValueError("Fee must be between 0 and 100%.")
         return v
 
     @field_validator("retainage_pct")
     @classmethod
     def _retainage(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("retainage_pct must be between 0 and 100")
+            raise ValueError("Retainage must be between 0 and 100%.")
         return v
 
 
@@ -172,6 +208,11 @@ class SovLineIn(StrictModel):
     description: Optional[str] = Field(default=None, max_length=200)
     trade_package_id: Optional[int] = None
     cost_code_id: Optional[int] = None
+    # The income account the line's billing credits (null: 4050 Contract
+    # Revenue) and whether its billing is taxed. Left out on a line that
+    # round-trips by id, each keeps what the line had; a new line is taxed.
+    revenue_account_id: Optional[int] = None
+    is_taxable: Optional[bool] = None
     kind: str = "work"
     # A scheduled value may be negative — a deduct alternate carried onto the
     # schedule reduces the contract sum (#551 allows a deduct alternate).
@@ -182,7 +223,7 @@ class SovLineIn(StrictModel):
     def _kind(cls, v):
         v = (v or "work").strip().lower()
         if v not in SOV_KINDS:
-            raise ValueError(f"kind must be one of {', '.join(SOV_KINDS)}")
+            raise choice_error("Kind", _SOV_KIND_LABELS, "kind")
         return v
 
 
@@ -199,6 +240,9 @@ class SovLineOut(BaseModel):
     trade_package_name: Optional[str] = None
     cost_code_id: Optional[int] = None
     cost_code_label: Optional[str] = None
+    revenue_account_id: Optional[int] = None
+    revenue_account_name: Optional[str] = None
+    is_taxable: bool = True
     kind: str
     scheduled_value: Decimal
     source_estimate_id: Optional[int] = None
@@ -227,6 +271,7 @@ class ContractSummary(BaseModel):
     retainage_pct: Optional[float] = None
     co_markup_pct: Optional[float] = None
     contract_date: Optional[dt_date] = None
+    sales_tax_treatment: str = "charge_owner"
     contract_estimate_id: Optional[int] = None
     sov_total: float = 0.0
     sov_balance: float = 0.0
@@ -240,9 +285,17 @@ class ContractSummary(BaseModel):
     retainage: dict = {}
 
 
+class SovSaveResponse(ContractSummary):
+    # A sentence when the saved schedule does not add up to the contract sum.
+    warnings: List[str] = []
+
+
 class ContractResponse(BaseModel):
     contract: ContractSummary
     sov: List[SovLineOut] = []
+    # Set by the terms save only: a sentence for a saved term that will quietly
+    # do nothing (the contractor pays the tax with no use tax rate set).
+    warnings: List[str] = []
 
 
 class JobDetailResponse(JobResponse):

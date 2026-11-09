@@ -41,13 +41,16 @@ const ReportsPage = {
         'cash-flow':            { label: 'Cash Flow Statement', open: (p) => ReportsPage.cashFlow(p) },
         'job-profitability':    { label: () => T('Job Profitability'),  open: (p) => ReportsPage.jobProfitability(p) },
         'job-budget-vs-actual': { label: () => T('Job Budget vs Actual'), open: (p) => ReportsPage.jobBudgetVsActual(p) },
-        'wip-schedule':         { label: 'WIP Schedule',       open: (p) => ReportsPage.wipSchedule(p), asOf: true },
-        'cost-to-complete':     { label: 'Cost to Complete',   open: (p) => ReportsPage.costToComplete(p), asOf: true },
-        'change-order-log':     { label: 'Change Order Log',   open: (p) => ReportsPage.changeOrderLog(p), asOf: true },
-        'buyout':               { label: 'Buyout Report',      open: (p) => ReportsPage.buyoutReport(p), asOf: true },
+        'wip-schedule':         { label: 'WIP Schedule',       open: (p) => ReportsPage.wipSchedule(p), asOf: true, construction: true },
+        'cost-to-complete':     { label: 'Cost to Complete',   open: (p) => ReportsPage.costToComplete(p), asOf: true, construction: true },
+        'change-order-log':     { label: 'Change Order Log',   open: (p) => ReportsPage.changeOrderLog(p), asOf: true, construction: true },
+        'buyout':               { label: 'Buyout Report',      open: (p) => ReportsPage.buyoutReport(p), asOf: true, construction: true },
         'job-cost-by-vendor':   { label: () => `${T('Job')} Cost by Vendor`, open: (p) => ReportsPage.jobCostByVendor(p) },
-        'cost-to-complete-forecast': { label: 'Cost-to-Complete Forecast', open: (p) => ReportsPage.costToCompleteForecast(p), asOf: true },
-        'commitment-status':    { label: 'Commitment Status',  open: (p) => ReportsPage.commitmentStatus(p), asOf: true },
+        'cost-to-complete-forecast': { label: 'Cost-to-Complete Forecast', open: (p) => ReportsPage.costToCompleteForecast(p), asOf: true, construction: true },
+        'commitment-status':    { label: 'Commitment Status',  open: (p) => ReportsPage.commitmentStatus(p), asOf: true, construction: true },
+        'field-ticket-log':     { label: 'Field Ticket Log',   open: (p) => ReportsPage.fieldTicketLog(p), asOf: true, construction: true },
+        'retainage':            { label: 'Retainage',          open: (p) => ReportsPage.retainage(p), asOf: true, construction: true },
+        'compliance':           { label: 'Sub Compliance',     open: (p) => ReportsPage.subCompliance(p), asOf: true, construction: true },
         'budget-vs-actual':     { label: 'Budget vs Actual',   open: (p) => { if (/^\d{4}$/.test(p.year || '')) BudgetsPage._year = parseInt(p.year, 10); return BudgetsPage.showVariance(p); } },
         'financial-statements': { label: 'Financial Statements Pack', open: (p) => ReportsPage.financialStatementsPdf(p) },
         'fixed-asset-reconciliation': { label: 'Fixed Asset Reconciliation', open: () => ReportsPage.fixedAssetReconciliation() },
@@ -288,6 +291,13 @@ const ReportsPage = {
             toast(`There is no report called "${name}"`, 'error');
             return;
         }
+        // A construction report by address in a Business or Nonprofit company:
+        // the Report Center, with a sentence (the server answers 409 too).
+        if (view.construction && !Terms.isConstruction()) {
+            ReportsPage._addressReportCenter();
+            toast(`${typeof view.label === 'function' ? view.label() : view.label} is a construction-mode report. Set Company Type to Construction under Settings → Company to use it.`, 'error');
+            return;
+        }
         try {
             await view.open(params || {});
         } catch (err) {
@@ -422,10 +432,13 @@ const ReportsPage = {
                 card('job-cost-by-vendor', `${T('Job')} Cost by Vendor`, Terms.text('Posted job cost grouped by vendor, with bills, paid to date, retainage held and open A/P')),
                 card('cost-to-complete-forecast', 'Cost-to-Complete Forecast', Terms.text('Enter the cost still to come per section and cost type; the WIP schedule uses it for estimated cost')),
                 card('commitment-status', 'Commitment Status', Terms.text('Each PO and subcontract: committed, billed to date, retainage held and remaining')),
+                card('field-ticket-log', 'Field Ticket Log', Terms.text('T&M tickets not yet billed, per job: unsigned and signed, at their bill rates')),
+                card('retainage', 'Retainage', Terms.text('Per job: retainage owners hold from you and you hold from each sub, held, released and outstanding, tied to the Balance Sheet')),
+                card('compliance', 'Sub Compliance', Terms.text('Subs with an expired or expiring certificate of insurance, no W-9 on file, or a paid bill with no lien waiver')),
             );
             const lead = ['job-profitability', 'job-budget-vs-actual', 'profit-loss-by-job',
                 'wip-schedule', 'cost-to-complete', 'change-order-log', 'buyout', 'job-cost-by-vendor',
-                'cost-to-complete-forecast', 'commitment-status'];
+                'cost-to-complete-forecast', 'commitment-status', 'field-ticket-log', 'retainage', 'compliance'];
             const front = lead.map(v => cards.find(c => c.view === v)).filter(Boolean);
             return [...front, ...cards.filter(c => !lead.includes(c.view))];
         }
@@ -2044,8 +2057,35 @@ const ReportsPage = {
                     <div style="font-size:12px;">Tax on sales ${formatCurrency(data.tax_on_sales)} less tax on credit memos ${formatCurrency(data.tax_credited)}</div>
                     <div style="font-size:14px; font-weight:700; color:var(--qb-navy);">Tax Collected: ${formatCurrency(data.total_tax)}</div>
                     ${reconcile}
-                </div>`;
+                </div>${ReportsPage.useTaxHtml(data.use_tax, data.end_date)}`;
         }, "Dates", false, { reportType: 'sales_tax', view: 'sales-tax', prefill, ...basisOpts });
+    },
+
+    // The Use tax section of the Sales Tax report (construction): the use tax
+    // material bills accrued on Use Tax Payable, what was paid, what is owed.
+    // Paying it is a check or bill to the tax agency on that account.
+    useTaxHtml(u, endDate) {
+        if (!u) return '';
+        const rows = (u.items || []).map(i => `<tr>
+                <td>${formatDate(i.date)}</td>
+                <td>${escapeHtml(i.bill_number || '')}${i.type === 'bill_void' ? ' <span class="badge" style="font-size:9px">Void</span>' : ''}</td>
+                <td>${escapeHtml(i.vendor_name || '')}</td>
+                <td>${escapeHtml(i.job_name || '')}</td>
+                <td>${escapeHtml(i.description || '')}</td>
+                <td class="amount">${i.rate === null || i.rate === undefined ? '' : SalesLines.taxPercent(i.rate) + '%'}</td>
+                <td class="amount">${formatCurrency(i.amount)}</td>
+            </tr>`).join('');
+        const name = u.account_number ? `${escapeHtml(u.account_number)} ${escapeHtml(u.account_name)}` : escapeHtml(u.account_name);
+        return `
+            <h3 style="margin:18px 0 6px; font-size:14px;">Use tax</h3>
+            <p style="font-size:12px; color:var(--gray-500); margin-bottom:6px;">Tax the company owes on materials bought untaxed for a job whose contractor pays the tax, each at the rate it was booked at (the setting today is ${SalesLines.taxPercent(u.rate)}%). Pay it as a check or bill to the tax agency on ${name}.</p>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Date</th><th scope="col">Bill</th><th scope="col">Vendor</th><th scope="col">${T('Job')}</th><th scope="col">Line</th><th scope="col" class="amount">Rate</th><th scope="col" class="amount">Use tax</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="7" style="text-align:center; color:var(--gray-400);">No use tax accrued</td></tr>'}</tbody>
+            </table></div>
+            <div style="margin-top:8px; padding:8px; background:var(--gray-50); border:1px solid var(--gray-200); font-size:12px;">
+                Accrued ${formatCurrency(u.accrued)} · Paid ${formatCurrency(u.paid)} · Owed at ${formatDate(endDate)}: <strong>${formatCurrency(u.balance)}</strong>
+            </div>`;
     },
 
     // The General Ledger's filters (#236): one account, one class, or both,
@@ -3898,61 +3938,101 @@ ReportsPage.wipSchedule = async function (prefill) {
             <td>${escapeHtml(r.job_name)}</td>
             <td class="amount">${m(r.revised_contract)}</td>
             <td class="amount">${m(r.estimated_total_cost)}</td>
+            <td class="amount">${m(r.estimated_gross_profit)}</td>
             <td class="amount">${pct(r.margin_pct)}</td>
             <td class="amount">${m(r.cost_to_date)}</td>
             <td class="amount">${pct(r.percent_complete)}</td>
             <td class="amount">${m(r.earned_revenue)}</td>
+            <td class="amount">${m(r.gross_profit_to_date)}</td>
             <td class="amount">${m(r.billed_to_date)}</td>
             <td style="font-size:10px; color:var(--gray-500);">${escapeHtml(basis(r.billed_basis))}</td>
             <td class="amount">${m(r.over_billing)}</td>
             <td class="amount">${m(r.under_billing)}</td>
             <td class="amount">${m(r.retainage_outstanding)}</td>
+            <td class="amount">${m(r.backlog)}</td>
             <td class="amount">${m(r.cost_to_complete)}</td>
             <td class="amount">${m(r.projected_loss)}</td>
             <td class="amount">${m(r.loss_provision)}</td>
         </tr>`).join('');
         const t = data.totals;
-        // The adjusting entry with amounts: each job's lines, then the net entry.
-        // Computed only — nothing here posts it.
+        // The adjusting entry with amounts: each job's lines, then the net
+        // entry, accounts by number and name. Post books it (accountant or
+        // administrator) with its reversal the next day.
         const entry = data.adjusting_entry;
+        const acct = (ln) => ln.account_number ? `${ln.account_number} ${ln.account}` : ln.account;
         const lineRows = (lines, label, bold) => lines.map((ln, i) => `<tr style="${bold ? 'font-weight:600;' : ''}">
-            <td>${i === 0 ? escapeHtml(label) : ''}</td><td>${escapeHtml(ln.account)}</td>
+            <td>${i === 0 ? escapeHtml(label) : ''}</td><td>${escapeHtml(acct(ln))}</td>
             <td class="amount">${ln.debit ? m(ln.debit) : ''}</td><td class="amount">${ln.credit ? m(ln.credit) : ''}</td></tr>`).join('');
         const entryBody = entry.jobs.map(j => lineRows(j.lines, j.job_name, false)).join('')
             + lineRows(entry.lines, 'Net entry', true);
-        const entryHtml = entry.lines.length ? `
+        const posted = entry.posted_entry;
+        const mayPost = App.role === 'admin' || App.role === 'accountant';
+        const asOf = escapeHtml(data.as_of);
+        // Posted, the lines below are the posted entry's; when the schedule
+        // no longer reads the same, say so beside Void with both figures.
+        const c = entry.computed && entry.computed.totals;
+        const differsHtml = posted && entry.posted_differs && c
+            ? `<div class="report-warning" data-posted-differs style="font-size:12px; margin:4px 0; color:var(--text-danger);">The schedule no longer matches this posted entry: it now reads over-billings ${m(c.over_billing)}, under-billings ${m(c.under_billing)}, loss provision ${m(c.loss_provision)} (posted ${m(entry.totals.over_billing)}, ${m(entry.totals.under_billing)}, ${m(entry.totals.loss_provision)}). Void the posted entry and post again to book the schedule's figures.</div>`
+            : '';
+        const postHtml = posted
+            ? `<div style="font-size:12px; margin:8px 0;">Posted as journal entry ${posted.transaction_id} on ${escapeHtml(posted.date)}${posted.posted_by ? ` by ${escapeHtml(posted.posted_by)}` : ''}, reversed ${escapeHtml(posted.reversal_date || '')}. The lines below are what was posted.
+                ${mayPost ? `<button type="button" class="btn btn-sm btn-danger" data-write data-accountant-ok data-destructive onclick="ReportsPage._voidWip('${asOf}')">Void posted entry</button>` : ''}${differsHtml}</div>`
+            : (mayPost && entry.lines.length ? `<div style="margin:8px 0;"><button type="button" class="btn btn-sm btn-primary" data-write data-accountant-ok onclick="ReportsPage._postWip('${asOf}')">Post adjusting entry</button>
+                <span style="font-size:11px; color:var(--gray-500);">Posts an adjusting journal dated ${asOf}, reversed the next day.</span></div>` : '');
+        const entryHtml = entry.lines.length || posted ? `
             <h4 style="margin:16px 0 4px;">Adjusting entry as of ${escapeHtml(entry.as_of)}</h4>
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
                 Under-billings ${m(entry.totals.under_billing)}, over-billings ${m(entry.totals.over_billing)}, net ${m(entry.totals.net_under_over)}, loss provision ${m(entry.totals.loss_provision)}.
-                These are the balances to carry as of this date; if an earlier entry was posted, reverse it or post the difference. Nothing here posts.
-            </div>
+                These are the balances to carry as of this date. Posted, the entry reverses the next day, so each month's entry stands alone.
+            </div>${postHtml}
             <div class="table-container"><table>
                 <thead><tr><th scope="col">${T('Job')}</th><th scope="col">Account</th><th scope="col" class="amount">Debit</th><th scope="col" class="amount">Credit</th></tr></thead>
                 <tbody>${entryBody}</tbody>
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td></td><td>Total</td><td class="amount">${m(entry.total_debits)}</td><td class="amount">${m(entry.total_credits)}</td></tr></tfoot>
             </table></div>` : '<div style="font-size:11px; color:var(--gray-500); margin-top:12px;">No WIP adjustment to book as of this date.</div>';
-        // Warnings (jobs left out, forecast dating) sit under the table.
-        const warningsHtml = (data.warnings || []).map(w => `<p class="report-warning" style="margin:8px 0 0; font-size:12px; color:var(--gray-600);">${escapeHtml(w)}</p>`).join('');
+        // Warnings (jobs left out, budgets that never burn down, finished
+        // jobs still showing cost to come, forecast dating) sit under the table.
+        const warningsHtml = (data.warnings || []).filter(w => w !== entry.posted_warning).map(w => `<p class="report-warning" style="margin:8px 0 0; font-size:12px; color:var(--gray-600);">${escapeHtml(w)}</p>`).join('');
         return `${ReportsPage._exportButtons('wip-schedule', `as_of=${params.as_of_date}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">
-                As of ${escapeHtml(data.as_of)} · cost-to-cost (percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. Basis shows whether billing is from approved pay applications or posted revenue. This report posts nothing.
+                As of ${escapeHtml(data.as_of)} · cost-to-cost (percent complete = cost ÷ estimated cost). Estimated cost is actual plus the cost-to-complete forecast. A projected loss is booked in full. Billings over earned are a liability; under earned are an asset. GP to date is earned less cost; backlog is the revised contract less earned. Basis shows whether billing is from approved pay applications or posted revenue.
             </div>
             <div class="table-container table-container--sticky"><table>
                 <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th>
-                <th scope="col" class="amount">Revised</th><th scope="col" class="amount">Est. cost</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Cost to date</th>
-                <th scope="col" class="amount">% complete</th><th scope="col" class="amount">Earned</th><th scope="col" class="amount">Billed</th><th scope="col">Basis</th>
-                <th scope="col" class="amount">Over billed</th><th scope="col" class="amount">Under billed</th><th scope="col" class="amount">Retainage</th><th scope="col" class="amount">To complete</th>
+                <th scope="col" class="amount">Revised</th><th scope="col" class="amount">Est. cost</th><th scope="col" class="amount">Est. GP</th><th scope="col" class="amount">Margin</th><th scope="col" class="amount">Cost to date</th>
+                <th scope="col" class="amount">% complete</th><th scope="col" class="amount">Earned</th><th scope="col" class="amount">GP to date</th><th scope="col" class="amount">Billed</th><th scope="col">Basis</th>
+                <th scope="col" class="amount">Over billed</th><th scope="col" class="amount">Under billed</th><th scope="col" class="amount">Retainage</th><th scope="col" class="amount">Backlog</th><th scope="col" class="amount">To complete</th>
                 <th scope="col" class="amount">Proj. loss</th><th scope="col" class="amount">Loss provision</th></tr></thead>
-                <tbody>${rows || '<tr><td colspan="16">No jobs</td></tr>'}</tbody>
+                <tbody>${rows || '<tr><td colspan="19">No jobs</td></tr>'}</tbody>
                 <tfoot><tr style="font-weight:700; background:var(--gray-50);">
                     <td colspan="2">Total</td>
-                    <td class="amount">${m(t.revised_contract)}</td><td class="amount">${m(t.estimated_total_cost)}</td><td class="amount">${pct(t.margin_pct)}</td><td class="amount">${m(t.cost_to_date)}</td>
-                    <td></td><td class="amount">${m(t.earned_revenue)}</td><td class="amount">${m(t.billed_to_date)}</td><td></td>
-                    <td class="amount">${m(t.over_billing)}</td><td class="amount">${m(t.under_billing)}</td><td class="amount">${m(t.retainage_outstanding)}</td><td class="amount">${m(t.cost_to_complete)}</td>
+                    <td class="amount">${m(t.revised_contract)}</td><td class="amount">${m(t.estimated_total_cost)}</td><td class="amount">${m(t.estimated_gross_profit)}</td><td class="amount">${pct(t.margin_pct)}</td><td class="amount">${m(t.cost_to_date)}</td>
+                    <td></td><td class="amount">${m(t.earned_revenue)}</td><td class="amount">${m(t.gross_profit_to_date)}</td><td class="amount">${m(t.billed_to_date)}</td><td></td>
+                    <td class="amount">${m(t.over_billing)}</td><td class="amount">${m(t.under_billing)}</td><td class="amount">${m(t.retainage_outstanding)}</td><td class="amount">${m(t.backlog)}</td><td class="amount">${m(t.cost_to_complete)}</td>
                     <td class="amount">${m(t.projected_loss)}</td><td class="amount">${m(t.loss_provision)}</td>
                 </tr></tfoot>
             </table></div>${warningsHtml}${entryHtml}`;
-    }, "As Of", true, { view: 'wip-schedule', prefill, spotlight: false });
+    }, "As Of", true, { view: 'wip-schedule', prefill, spotlight: false, wide: true });
+};
+
+// Post the WIP adjusting entry for the date (and its next-day reversal), or
+// void what was posted so the date can be posted again; the report redraws.
+ReportsPage._postWip = async function (asOf) {
+    if (!confirm(`Post the WIP adjusting entry as of ${asOf}? It is reversed on the next day.`)) return;
+    try {
+        await API.post(`/reports/wip-schedule/post?as_of=${encodeURIComponent(asOf)}`);
+        toast('WIP adjusting entry posted', 'success');
+        ReportsPage.refresh();
+    } catch (err) { toast(err.message, 'error'); }
+};
+
+ReportsPage._voidWip = async function (asOf) {
+    if (!confirm(`Void the WIP adjusting entry posted as of ${asOf} and its reversal?`)) return;
+    try {
+        await API.post(`/reports/wip-schedule/void?as_of=${encodeURIComponent(asOf)}`);
+        toast('WIP adjusting entry voided', 'success');
+        ReportsPage.refresh();
+    } catch (err) { toast(err.message, 'error'); }
 };
 
 ReportsPage.costToComplete = async function (prefill) {
@@ -4018,24 +4098,24 @@ ReportsPage.buyoutReport = async function (prefill) {
         const data = await API.get(`/reports/buyout?as_of=${params.as_of_date}`);
         const m = ReportsPage._money;
         const body = data.jobs.map(job => {
-            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="6">${escapeHtml(job.job_name)}</td></tr>`;
+            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="8">${escapeHtml(job.job_name)}</td></tr>`;
             const pkgs = job.rows.map(r => `<tr>
-                <td>${escapeHtml(r.package_name)}</td><td class="amount">${m(r.bid_cost)}</td><td class="amount">${m(r.bought)}</td>
-                <td class="amount">${m(r.variance)}</td><td class="amount">${m(r.committed_remaining)}</td><td class="amount">${m(r.billed_to_date)}</td></tr>`).join('');
+                <td>${escapeHtml(r.package_name)}</td><td class="amount">${m(r.bid_cost)}</td><td class="amount">${m(r.changes)}</td><td class="amount">${m(r.bought)}</td>
+                <td class="amount">${m(r.variance)}</td><td class="amount">${m(r.spent_no_commitment)}</td><td class="amount">${m(r.committed_remaining)}</td><td class="amount">${m(r.billed_to_date)}</td></tr>`).join('');
             const t = job.totals;
-            const total = `<tr style="font-weight:600;"><td>Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.bought)}</td>
-                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr>`;
+            const total = `<tr style="font-weight:600;"><td>Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.changes)}</td><td class="amount">${m(t.bought)}</td>
+                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.spent_no_commitment)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr>`;
             return head + pkgs + total;
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('buyout', `as_of=${params.as_of_date}`)}
             <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}</div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Package</th><th scope="col" class="amount">Bid</th><th scope="col" class="amount">Bought</th>
-                <th scope="col" class="amount">Variance</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">Billed</th></tr></thead>
-                <tbody>${body || '<tr><td colspan="6">No jobs</td></tr>'}</tbody>
-                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td>Grand total</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.bought)}</td>
-                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr></tfoot>
+                <thead><tr><th scope="col">Package</th><th scope="col" class="amount">Bid</th><th scope="col" class="amount">Changes</th><th scope="col" class="amount">Bought</th>
+                <th scope="col" class="amount">Variance</th><th scope="col" class="amount">Spent, no commitment</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">Billed</th></tr></thead>
+                <tbody>${body || '<tr><td colspan="8">No jobs</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td>Grand total</td><td class="amount">${m(t.bid_cost)}</td><td class="amount">${m(t.changes)}</td><td class="amount">${m(t.bought)}</td>
+                <td class="amount">${m(t.variance)}</td><td class="amount">${m(t.spent_no_commitment)}</td><td class="amount">${m(t.committed_remaining)}</td><td class="amount">${m(t.billed_to_date)}</td></tr></tfoot>
             </table></div>`;
     }, "As Of", true, { view: 'buyout', prefill, spotlight: false });
 };
@@ -4118,30 +4198,109 @@ ReportsPage.commitmentStatus = async function (prefill) {
         const data = await API.get(`/reports/commitment-status?as_of=${params.as_of_date}`);
         const m = ReportsPage._money;
         const body = data.jobs.map(job => {
-            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="8">${escapeHtml(job.job_name)}</td></tr>`;
+            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="9">${escapeHtml(job.job_name)}</td></tr>`;
             const rows = job.rows.map(r => `<tr>
                 <td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.vendor_name)}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.status)}</td>
-                <td class="amount">${m(r.committed)}</td><td class="amount">${m(r.billed)}</td>
+                <td class="amount">${m(r.committed)}</td><td class="amount">${m(r.received)}</td><td class="amount">${m(r.billed)}</td>
                 <td class="amount">${m(r.retainage_held)}</td><td class="amount">${m(r.remaining)}</td></tr>`).join('');
             const t = job.totals;
-            const total = `<tr style="font-weight:600;"><td colspan="4">Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.billed)}</td>
+            const total = `<tr style="font-weight:600;"><td colspan="4">Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.received)}</td><td class="amount">${m(t.billed)}</td>
                 <td class="amount">${m(t.retainage_held)}</td><td class="amount">${m(t.remaining)}</td></tr>`;
-            return head + (rows || '<tr><td colspan="8" style="color:var(--gray-400);">No commitments</td></tr>') + total;
+            return head + (rows || '<tr><td colspan="9" style="color:var(--gray-400);">No commitments</td></tr>') + total;
         }).join('');
         const t = data.totals;
         return `${ReportsPage._exportButtons('commitment-status', `as_of=${params.as_of_date}`)}
-            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Committed is the pre-tax value; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.</div>
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Committed is the pre-tax value; received is what delivery tickets dated by then brought in, at the line rates; retainage held is held less released; remaining counts open commitments only; a closed commitment shows nothing remaining unless a bill is dated after this date.</div>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Commitment</th><th scope="col">Vendor</th><th scope="col">Type</th><th scope="col">Status</th>
-                <th scope="col" class="amount">Committed</th><th scope="col" class="amount">Billed to date</th><th scope="col" class="amount">Retainage held</th><th scope="col" class="amount">Remaining</th></tr></thead>
-                <tbody>${body || '<tr><td colspan="8">No jobs</td></tr>'}</tbody>
-                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="4">Grand total</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.billed)}</td>
+                <th scope="col" class="amount">Committed</th><th scope="col" class="amount">Received</th><th scope="col" class="amount">Billed to date</th><th scope="col" class="amount">Retainage held</th><th scope="col" class="amount">Remaining</th></tr></thead>
+                <tbody>${body || '<tr><td colspan="9">No jobs</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="4">Grand total</td><td class="amount">${m(t.committed)}</td><td class="amount">${m(t.received)}</td><td class="amount">${m(t.billed)}</td>
                 <td class="amount">${m(t.retainage_held)}</td><td class="amount">${m(t.remaining)}</td></tr></tfoot>
             </table></div>`;
     }, "As Of", true, { view: 'commitment-status', prefill, spotlight: false });
 };
 
 
+// Field ticket log: per job, the T&M tickets not yet billed — unsigned and
+// signed — at their bill rates. A row opens the job's Field tickets tab.
+ReportsPage.fieldTicketLog = async function (prefill) {
+    await ReportsPage.openPeriodModal('Field Ticket Log', ReportsPage.defaultPeriod(), async (_period, params) => {
+        const data = await API.get(`/reports/field-ticket-log?as_of=${params.as_of_date}`);
+        const m = (v) => (v === null || v === undefined ? '' : ReportsPage._money(v));
+        const body = data.jobs.map(job => {
+            const head = `<tr ${ReportsPage._jobRowOpen(job.job_id)} style="font-weight:600; background:var(--gray-50); cursor:pointer;"><td colspan="8">${escapeHtml(job.job_name)}</td></tr>`;
+            const rows = job.rows.map(r => `<tr>
+                <td>${escapeHtml(r.number)}</td><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.status)}</td><td>${escapeHtml(r.description)}</td>
+                <td>${escapeHtml(r.signed_by)}</td><td>${escapeHtml(r.priced_on)}</td>
+                <td class="amount">${m(r.unsigned)}</td><td class="amount">${m(r.signed_unbilled)}</td></tr>`).join('');
+            const t = job.totals;
+            const total = `<tr style="font-weight:600;"><td colspan="6">Total ${escapeHtml(job.job_name)}</td><td class="amount">${m(t.unsigned)}</td><td class="amount">${m(t.signed_unbilled)}</td></tr>`;
+            return head + rows + total;
+        }).join('');
+        const t = data.totals;
+        return `${ReportsPage._exportButtons('field-ticket-log', `as_of=${params.as_of_date}`)}
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">T&amp;M tickets dated by ${escapeHtml(data.as_of)} that are not yet billed, at their bill rates. A signed ticket on a change order that is not yet approved counts as not billed; the change order is named. Status is today's.</div>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Ticket</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col">Description</th>
+                <th scope="col">Signed by</th><th scope="col">Priced on</th><th scope="col" class="amount">Unsigned</th><th scope="col" class="amount">Signed, not billed</th></tr></thead>
+                <tbody>${body || '<tr><td colspan="8">No open T&amp;M tickets</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="6">Grand total</td><td class="amount">${m(t.unsigned)}</td><td class="amount">${m(t.signed_unbilled)}</td></tr></tfoot>
+            </table></div>`;
+    }, "As Of", true, { view: 'field-ticket-log', prefill, spotlight: false });
+};
+
+// Retainage: owed to me (1150) and owed by me (2050) per job, tied to the
+// Balance Sheet lines for the date.
+ReportsPage.retainage = async function (prefill) {
+    await ReportsPage.openPeriodModal('Retainage', ReportsPage.defaultPeriod(), async (_period, params) => {
+        const data = await API.get(`/reports/retainage?as_of=${params.as_of_date}`);
+        const m = ReportsPage._money;
+        const strong = 'font-weight:700; background:var(--gray-50);';
+        const recv = data.receivable, pay = data.payable;
+        const recvRows = recv.rows.map(r => `<tr ${r.job_id ? ReportsPage._jobRowOpen(r.job_id) : ''}>
+            <td>${escapeHtml(r.customer_name || '')}</td><td>${escapeHtml(r.job_name)}</td>
+            <td class="amount">${m(r.held)}</td><td class="amount">${m(r.released)}</td><td class="amount">${m(r.outstanding)}</td></tr>`).join('');
+        const payRows = pay.rows.map(r => `<tr ${r.job_id ? ReportsPage._jobRowOpen(r.job_id) : ''}>
+            <td>${escapeHtml(r.job_name)}</td><td>${escapeHtml(r.vendor_name || '')}</td><td>${escapeHtml(r.document)}</td>
+            <td class="amount">${m(r.held)}</td><td class="amount">${m(r.released)}</td><td class="amount">${m(r.outstanding)}</td></tr>`).join('');
+        const tie = data.filtered ? '' : `Balance Sheet 1150 ${m(data.books.receivable)}, 2050 ${m(data.books.payable)}.`;
+        return `${ReportsPage._exportButtons('retainage', `as_of=${params.as_of_date}`)}
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Held less released is what is outstanding; the totals are the Balance Sheet's Retainage Receivable and Retainage Payable. ${tie}
+                A row named “Journal entries and other” is ledger balance no pay application or bill explains. Closed jobs are included.</div>
+            <h4 style="margin:0 0 4px 0;">Owed to me (1150)</h4>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">${T('Customer')}</th><th scope="col">${T('Job')}</th><th scope="col" class="amount">Held by owner</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
+                <tbody>${recvRows || '<tr><td colspan="5" style="color:var(--gray-400);">No retainage held by owners</td></tr>'}</tbody>
+                <tfoot><tr style="${strong}"><td colspan="2">Total owed to me</td><td class="amount">${m(recv.totals.held)}</td><td class="amount">${m(recv.totals.released)}</td><td class="amount">${m(recv.totals.outstanding)}</td></tr></tfoot>
+            </table></div>
+            <h4 style="margin:14px 0 4px 0;">I owe (2050)</h4>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">${T('Job')}</th><th scope="col">Vendor</th><th scope="col">Commitment / bill</th><th scope="col" class="amount">Held from sub</th><th scope="col" class="amount">Released</th><th scope="col" class="amount">Outstanding</th></tr></thead>
+                <tbody>${payRows || '<tr><td colspan="6" style="color:var(--gray-400);">No retainage held from subs</td></tr>'}</tbody>
+                <tfoot><tr style="${strong}"><td colspan="3">Total I owe</td><td class="amount">${m(pay.totals.held)}</td><td class="amount">${m(pay.totals.released)}</td><td class="amount">${m(pay.totals.outstanding)}</td></tr></tfoot>
+            </table></div>`;
+    }, "As Of", true, { view: 'retainage', prefill, spotlight: false });
+};
+
+// Sub compliance: the subs to chase, one row per problem.
+ReportsPage.subCompliance = async function (prefill) {
+    await ReportsPage.openPeriodModal('Sub Compliance', ReportsPage.defaultPeriod(), async (_period, params) => {
+        const data = await API.get(`/reports/compliance?as_of=${params.as_of_date}`);
+        const hot = { coi_expired: 'var(--text-danger)', coi_missing: 'var(--text-danger)', coi_expiring: '#b26a00' };
+        const rows = data.rows.map(r => `<tr class="clickable" onclick="App.navigate('#/vendors')">
+            <td>${escapeHtml(r.vendor_name)}</td><td style="color:${hot[r.issue_key] || 'inherit'}">${escapeHtml(r.issue)}</td>
+            <td>${escapeHtml(r.detail)}</td><td>${escapeHtml(r.date)}</td><td class="amount">${r.amount === null ? '' : ReportsPage._money(r.amount)}</td></tr>`).join('');
+        const t = data.totals;
+        return `${ReportsPage._exportButtons('compliance', `as_of=${params.as_of_date}`)}
+            <div style="font-size:11px; color:var(--gray-500); margin-bottom:8px;">As of ${escapeHtml(data.as_of)}. Certificates that expire within ${data.window_days} days, subs with no W-9 on file, and paid bills whose lien waiver is missing or still pending. Nothing here blocks a payment.</div>
+            <div class="table-container"><table>
+                <thead><tr><th scope="col">Sub</th><th scope="col">Issue</th><th scope="col">Detail</th><th scope="col">Date</th><th scope="col" class="amount">Amount</th></tr></thead>
+                <tbody>${rows || '<tr><td colspan="5" style="color:var(--gray-400);">Every sub is in order.</td></tr>'}</tbody>
+                <tfoot><tr style="font-weight:700; background:var(--gray-50);"><td colspan="5">${t.rows} to chase across ${t.subs} sub${t.subs === 1 ? '' : 's'}</td></tr></tfoot>
+            </table></div>`;
+    }, "As Of", true, { view: 'compliance', prefill, spotlight: false });
+};
 
 // ---------------------------------------------------------------------------
 // Nonprofit statements — shown in place of the P&L and Balance Sheet cards

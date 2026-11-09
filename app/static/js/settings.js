@@ -496,6 +496,12 @@ const SettingsPage = {
                             <input name="company_website" value="${escapeHtml(s.company_website || '')}"></div>
                         <div class="form-group"><label>Tax ID / EIN</label>
                             <input name="company_tax_id" value="${escapeHtml(s.company_tax_id || '')}"></div>
+                        ${s.company_type === 'construction' ? `<div class="form-group"><label for="company-license">Contractor license #</label>
+                            <input id="company-license" name="company_license" value="${escapeHtml(s.company_license || '')}">
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Printed in the header of the estimate PDF.</div></div>
+                        <div class="form-group full-width"><label for="estimate-terms">Default estimate terms, inclusions and exclusions</label>
+                            <textarea id="estimate-terms" name="estimate_terms" rows="5">${escapeHtml(s.estimate_terms || '')}</textarea>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate starts with this text; edit it on any estimate. It prints above the acceptance block on the owner's PDF.</div></div>` : ''}
                         <div class="form-group full-width"><label for="company-type">Company Type</label>
                             <select id="company-type" name="company_type" data-prev="${s.company_type === 'nonprofit' ? 'nonprofit' : (s.company_type === 'construction' ? 'construction' : 'business')}" onchange="SettingsPage.changeCompanyType(this)">
                                 <option value="business" ${(s.company_type !== 'nonprofit' && s.company_type !== 'construction') ? 'selected' : ''}>Business</option>
@@ -571,6 +577,11 @@ const SettingsPage = {
                             <input name="default_tax_rate" type="number" min="0" max="100" step="0.0001"
                                 title="A percent from 0 to 100, up to four decimal places: 8.875 means 8.875%"
                                 value="${escapeHtml(SettingsPage._ratePercent(s.default_tax_rate))}"></div>
+                        ${s.company_type === 'construction' ? `<div class="form-group"><label for="use-tax-rate">Use tax rate (%)</label>
+                            <input id="use-tax-rate" name="use_tax_rate" type="number" min="0" max="100" step="0.0001"
+                                title="What material bills on a job whose contractor pays the tax accrue to Use Tax Payable. Blank: the default tax rate."
+                                placeholder="the default tax rate"
+                                value="${escapeHtml(s.use_tax_rate ? SettingsPage._ratePercent(s.use_tax_rate) : '')}"></div>` : ''}
                         <div class="form-group full-width"><label for="new-lines-taxable">New lines and items are taxable</label>
                             <select id="new-lines-taxable" name="new_lines_taxable" aria-describedby="new-lines-taxable-help">
                                 <option value="true" ${s.new_lines_taxable !== 'false' ? 'selected' : ''}>Yes: a new line's Tax box starts ticked, and a new item is taxable</option>

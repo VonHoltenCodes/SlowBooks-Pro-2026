@@ -124,6 +124,7 @@ against the terms still exists.
 | id, customer_id (FK customers) | a job belongs to exactly one customer |
 | name, job_number | name unique per customer, case-insensitive (API-enforced) |
 | status | pending · awarded · in_progress · closed · not_awarded |
+| closed_on | Date, nullable: the day the job went to Closed (cleared when it reopens), so a back-dated WIP reads it open before then (migration `b5d2e8f4a6c3`) |
 | job_type, description, site_address, notes | free text |
 | start_date, projected_end_date, end_date | |
 | contract_amount | Numeric(15,2), drives billed-vs-contract |
@@ -218,7 +219,9 @@ New table `sov_lines` — the owner's schedule of values:
 | id, job_id (FK jobs, CASCADE) | the job this schedule belongs to |
 | line_no (Integer), item_no (String(10)) | 1-based order; printed number ("01"…), editable |
 | description (String(200)) | |
-| trade_package_id (FK, SET NULL), cost_code_id (FK, SET NULL) | optional links |
+| trade_package_id (FK, SET NULL), cost_code_id (FK, SET NULL) | optional links; the cost code (section) is what the line's billing posts with |
+| revenue_account_id (FK accounts, SET NULL) | the income account the line's billing credits; null posts to 4050 Contract Revenue |
+| is_taxable (Boolean, NOT NULL default true) | sales tax is charged on the line's billing; every line made before it is taxable |
 | kind (String(16), NOT NULL default `work`) | `work` · `allowance` · `contingency` · `general_conditions` · `insurance` · `fee` · `bond` |
 | scheduled_value (Numeric(15,2), NOT NULL default 0) | |
 | source_estimate_id (FK estimates, SET NULL) | set when built from an estimate |
@@ -257,8 +260,11 @@ A commitment is a purchase order — no new table. Additive columns:
 commitment lines (the remaining open value); `commitment_figures` adds
 `committed_total` (Σ amount of non-draft commitments) and `billed_to_date` (Σ
 billed) — `app/services/jobs_service.py`. Those two are whole-commitment
-figures, so in a date-ranged `job_cost_tree` they are all-time; the totals
-carry `commitments_all_time: true` to say so. Retainage is computed on the
+figures, so in a Business or Nonprofit company's date-ranged `job_cost_tree`
+they are all-time; the totals carry `commitments_all_time: true` to say so. A
+contractor's tree reads them, and committed, as of its end date
+(`job_costing.commitment_lines`, as Commitment Status does), with the flag
+false. Retainage is computed on the
 pre-tax subtotal (tax is payable in full); the shared `vendor_compliance`
 helper (`app/services/compliance.py`) feeds both the bills responses and the
 buyout rows. The buyout table (bid vs bought per
@@ -286,7 +292,10 @@ How a locked budget, its contract and its commitments move. Two new tables:
   the API defaults it off for allowance/contingency funding), `revision`
   Integer (default 1) and `supersedes_id` (FK self, SET NULL — the PCO revision
   this one replaced), `promoted_to_id` (FK self, SET NULL — the owner CO a PCO
-  was rolled into; several PCOs may share one), `approved_at`, `voided_at`.
+  was rolled into; several PCOs may share one), `approved_at` (the click),
+  `approved_on` (Date — the day it takes effect; every as-of reader uses it),
+  `allowance_return` (Boolean — the CO that returns an allowance's unspent
+  amount), `voided_at`.
 - `change_order_lines` — `change_order_id` (FK, CASCADE), `line_order`,
   `description`, `cost_type` String(20) NOT NULL (validated against
   `cost_types`), `cost_code_id`, `trade_package_id`, `quantity`, `unit`,
@@ -301,7 +310,10 @@ is added to `SOV_KINDS`). The math and the apply/reverse effects live in
 `app/services/change_orders.py`; the append-only commitment helper is in
 `app/routes/purchase_orders.py`. On approve an owner CO writes `job_budgets`
 rows with `source = change`, `locked = True` (the one path that may move a
-locked budget), which the job-cost tree reads into its Changes column.
+locked budget), which the job-cost tree reads into its Changes column. Each
+change order's rows are its own (`job_budgets.change_order_id`, one per code
+and type), and a report as of a date takes only those of the change orders in
+effect by then (`job_costing.budget_rows`).
 Migrations `a7c9e1f3b5d6_construction_change_orders` and
 `b8d0f2a4c6e8_change_order_revisions_markup_flag` (additive; downgrade
 reverses). A billed `change_order` SOV line can no longer be voided (409
@@ -365,7 +377,8 @@ cost-to-complete and the other job reports are #556.
 | equipment | code, name, hourly_rate, cost_code_id, recovery_account_id |
 | job_costs | number (JC-000001), date, job_id (NULL for allocations), memo, source manual/time_entry/allocation, status posted/void, transaction_id, total |
 | job_cost_lines | job_id, cost_code_id, cost_type, qty/rate/amount, debit_account_id, credit_account_id, employee_id, equipment_id, time_entry_id, is_burden, is_billable |
-| job_budgets | job_id × (cost_code_id and/or cost_type, or neither), amount, revenue_amount, source manual/estimate/change, estimate_id — the unique key is (job, code, type, source) (#554), so a change row coexists with an estimate/manual row on the same code and type |
+| job_budgets | job_id × (cost_code_id and/or cost_type, or neither), amount, revenue_amount, source manual/estimate/change, estimate_id, change_order_id (the change order that wrote a change row; null on the rest) — the unique key (job, code, type, source) (#554) is a partial index over the rows no change order owns, and a change order's rows are unique on (change_order_id, code, type) (migration `b5d2e8f4a6c3`) |
+| wip_entry_locks | as_of (Date, primary key), transaction_id: one row per date a WIP adjusting entry stands for, written before the entry and deleted by its void, so two posts of one date cannot both land (migration `b5d2e8f4a6c3`) |
 | job_cost_to_complete | job_id (CASCADE), cost_code_id (the section; NULL = Unassigned), cost_type ('' for Unassigned), amount — the typed cost to complete the WIP schedule reads (#556); unique (job, code, type), migration `c6e8f0a2d4b6` |
 | employees.cost_rate, burden_pct · estimate_lines.unit_cost · time_entries.job_cost_id · transaction_lines.cost_type | |
 

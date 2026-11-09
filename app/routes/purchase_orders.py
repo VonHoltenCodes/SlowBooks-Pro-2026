@@ -23,7 +23,12 @@ from app.schemas.purchase_orders import (
     POUpdate,
 )
 from app.schemas.pay_applications import ReleaseRetainageRequest
-from app.services.accounting import _q, compute_line_totals
+from app.services.accounting import _q, compute_line_totals, refuse_total_past_column
+from app.services.field_tickets import (
+    delivery_tickets_on,
+    receipt_status,
+    received_line_refusal,
+)
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_po_number
 from app.services.payment_terms import term_id_for
@@ -32,6 +37,10 @@ from app.services.purchase_posting import (
     expense_account_for,
     spread,
     unit_cost_with_tax,
+    use_tax_for,
+    use_tax_lines,
+    use_tax_rate,
+    use_tax_rate_warnings,
 )
 
 router = APIRouter(prefix="/api/purchase-orders", tags=["purchase_orders"])
@@ -138,6 +147,7 @@ def create_po(data: POCreate, db: Session = Depends(get_db)):
     vendor_id = vendor.id
     vendor_name = vendor.name
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    refuse_total_past_column(subtotal, tax_amount, total)
 
     po = None
     po_number = None
@@ -214,6 +224,27 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
     update_data = reject_null_updates(
         PurchaseOrder, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
+    # An order with deliveries received on it was issued: it does not go back
+    # to draft (a draft is not received against) until the tickets are void.
+    if (
+        "status" in update_data
+        and POStatus(update_data["status"]) == POStatus.DRAFT
+        and po.status != POStatus.DRAFT
+    ):
+        for ln in po.lines:
+            refusal = received_line_refusal(db, ln)
+            if refusal:
+                tickets = delivery_tickets_on(db, ln.id)
+                on = f" ({', '.join(tickets)})" if tickets else ""
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "commitment_received",
+                        "message": "This order has deliveries received on it"
+                        f"{on}, so it cannot go back to draft. Void the "
+                        "delivery tickets first.",
+                    },
+                )
     for key, val in update_data.items():
         if key == "status":
             setattr(po, key, POStatus(val))
@@ -231,13 +262,48 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
         line_amounts = [
             _q(Decimal(str(ld.quantity)) * Decimal(str(ld.rate))) for ld in data.lines
         ]
-        _billed = "This commitment has been billed; change it with a sub change order."
+        # A supplier PO has no sub change order: what was billed on a line
+        # comes off by voiding the bill.
+        _billed = (
+            "This purchase order has been billed on that line; void the bill to "
+            "remove the line or cut it below what was billed."
+            if po.commitment_type == "po"
+            # A closed commitment takes no sub change order (it is fully
+            # billed), so that advice would send the user to a refusal.
+            else (
+                "This commitment is fully billed and closed; void the bill to "
+                "change what was billed on it."
+                if was_closed
+                else "This commitment has been billed; change it with a sub change order."
+            )
+        )
         for ln in po.lines:
             if float(ln.billed_amount or 0) > 0 and ln.id not in incoming_ids:
                 raise HTTPException(
                     status_code=409,
                     detail={"code": "commitment_billed", "message": _billed},
                 )
+        # A line a delivery ticket received on stays, and does not shrink below
+        # what arrived: void the ticket first (the way out for a billed line
+        # is a sub change order, for a delivered one the ticket).
+        for ln in po.lines:
+            if ln.id not in incoming_ids:
+                refusal = received_line_refusal(db, ln)
+                if refusal:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "commitment_received", "message": refusal},
+                    )
+        for ld in data.lines:
+            if ld.id and ld.id in existing:
+                refusal = received_line_refusal(
+                    db, existing[ld.id], Decimal(str(ld.quantity))
+                )
+                if refusal:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "commitment_received", "message": refusal},
+                    )
         # Lines a sub change order added belong to it: a plain edit can
         # neither drop them nor change their amount, job, cost code or type (void the sub CO).
         _co_owned = "A sub change order added a line on this commitment; void that change order to change it."
@@ -282,8 +348,8 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
                 detail={
                     "code": "commitment_closed",
                     "message": (
-                        "This commitment is fully billed; raise it with a "
-                        "sub change order."
+                        "This commitment is fully billed and closed; write the "
+                        "added work on a new commitment."
                     ),
                 },
             )
@@ -322,14 +388,21 @@ def update_po(po_id: int, data: POUpdate, db: Session = Depends(get_db)):
                 )
         tax_rate = data.tax_rate if data.tax_rate is not None else po.tax_rate
         subtotal, tax_amount, total = compute_line_totals(data.lines, tax_rate)
+        refuse_total_past_column(subtotal, tax_amount, total)
         po.subtotal = subtotal
         po.tax_amount = tax_amount
         po.total = total
+        # A line that grew (or a new one) puts a fully received order back to
+        # partly received; one that shrank to what arrived completes it.
+        db.flush()
+        db.expire(po, ["lines"])
+        receipt_status(po)
     elif data.tax_rate is not None:
         # A new rate without the lines re-totals the stored lines. It changed
         # the rate and kept the old tax and total, and the bill the order
         # became carried that tax.
         subtotal, tax_amount, total = compute_line_totals(po.lines, data.tax_rate)
+        refuse_total_past_column(subtotal, tax_amount, total)
         po.subtotal = subtotal
         po.tax_amount = tax_amount
         po.total = total
@@ -758,6 +831,8 @@ def convert_to_bill(
                 item=item,
                 vendor=vendor,
                 fix_hint="Choose an account for it when you turn the order into a bill",
+                cost_code_id=poline.cost_code_id,
+                cost_type=poline.cost_type,
             )
         plan.append((poline, item, amt, tax_shares[i], posting_acct))
 
@@ -824,22 +899,21 @@ def convert_to_bill(
         rate = Decimal(str(poline.rate)) if is_whole else amt
         if item and item.track_inventory and qty and qty > 0:
             inv_receipts.append((item, qty, unit_cost_with_tax(amt, share, qty, rate)))
-        db.add(
-            BillLine(
-                bill_id=bill.id,
-                job_id=poline.job_id or po.job_id,
-                cost_code_id=poline.cost_code_id,
-                cost_type=poline.cost_type,
-                purchase_order_line_id=poline.id,
-                item_id=poline.item_id,
-                account_id=posting_acct,
-                description=poline.description,
-                quantity=qty,
-                rate=rate,
-                amount=amt,
-                line_order=poline.line_order,
-            )
+        bill_line = BillLine(
+            bill_id=bill.id,
+            job_id=poline.job_id or po.job_id,
+            cost_code_id=poline.cost_code_id,
+            cost_type=poline.cost_type,
+            purchase_order_line_id=poline.id,
+            item_id=poline.item_id,
+            account_id=posting_acct,
+            description=poline.description,
+            quantity=qty,
+            rate=rate,
+            amount=amt,
+            line_order=poline.line_order,
         )
+        db.add(bill_line)
         if amt > 0 and posting_acct:
             journal_lines.append(
                 {
@@ -852,6 +926,23 @@ def convert_to_bill(
                     "cost_type": poline.cost_type,
                 }
             )
+            # Use tax a "contractor pays" job owes on the line (construction).
+            if not (item and item.track_inventory):
+                job_id = poline.job_id or po.job_id
+                ut_rate = use_tax_rate(db)
+                accrual = use_tax_for(
+                    db,
+                    amount=amt,
+                    job_id=job_id,
+                    cost_type=line_cost_type(db, poline.cost_code_id, poline.cost_type),
+                    bill_taxed=tax_amount > 0,
+                    rate=ut_rate,
+                )
+                if accrual:
+                    bill_line.use_tax_rate = ut_rate  # an edit re-posts at it
+                journal_lines.extend(
+                    use_tax_lines(db, journal_lines[-1], accrual, job_id, ut_rate)
+                )
 
     if journal_lines:
         # A/P takes the net; retainage held rides on 2050 (#553).
@@ -900,6 +991,12 @@ def convert_to_bill(
             txn_date=bill_date,
         )
 
+    # A line billed past what its delivery tickets received is warned, not
+    # refused (field tickets, construction). Before the tally below.
+    from app.services.field_tickets import over_received_warnings
+
+    warnings = over_received_warnings(po, this_period)
+
     # Tally what each line has now billed, and close the commitment when every
     # line is fully billed; while anything remains it is partial.
     for poline in billable:
@@ -917,4 +1014,10 @@ def convert_to_bill(
         # parts doesn't walk it back.
         po.status = POStatus.PARTIAL
     db.commit()
-    return {"bill_id": bill.id, "message": f"Bill created from {po.po_number}"}
+    db.refresh(bill)
+    warnings = warnings + use_tax_rate_warnings(db, bill)
+    return {
+        "bill_id": bill.id,
+        "message": f"Bill created from {po.po_number}",
+        "warnings": warnings,
+    }

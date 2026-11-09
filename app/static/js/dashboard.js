@@ -285,6 +285,34 @@ const DashboardPage = {
                 <ul style="font-size:12px;margin:6px 0 0 0;padding-left:16px">${d.items.map(r => `<li>${escapeHtml(r.filename || r.intake_id)} <span style="color:var(--gray-500)">(${r.expires_in_hours} h left)</span></li>`).join('')}</ul>
                 <div style="font-size:11px;margin-top:4px"><a href="#/expenses">Enter Expenses →</a></div>`;
         },
+        // The contractor's tiles: the figure, a note, and the report behind
+        // it as a link. The jobs that make the figure up show on hover.
+        retainage_receivable(d) {
+            return DashboardPage._tile('retainage', d.total, 'held by owners (1150)', DashboardPage._byJob(d.jobs));
+        },
+        retainage_payable(d) {
+            return DashboardPage._tile('retainage', d.total, 'held from subs (2050)', DashboardPage._byJob(d.jobs));
+        },
+        billing_position(d) {
+            const hover = [
+                d.over_jobs.length ? 'Over-billed' + DashboardPage._byJob(d.over_jobs, true) : '',
+                d.under_jobs.length ? 'Under-billed' + DashboardPage._byJob(d.under_jobs, true) : '',
+            ].filter(Boolean).join('\n');
+            const line = (label, v, color) => `<div style="display:flex;justify-content:space-between;gap:8px"><span>${label}</span><strong style="color:${v ? color : 'inherit'}">${formatCurrency(v)}</strong></div>`;
+            return `<a class="dash-tile" href="${DashboardPage._tileLink('wip-schedule')}" onclick="ReportsPage._leaveFrom(this)" title="${escapeHtml(hover || 'Billing matches the work done')}"
+                style="display:block;color:inherit;text-decoration:none">
+                <div style="font-size:12px;line-height:1.7">
+                    ${line('Over-billed', d.over, 'var(--text-danger)')}
+                    ${line('Under-billed', d.under, 'var(--text-success)')}
+                </div>
+                <div style="font-size:10px;color:var(--gray-500);margin-top:2px">billing vs earned, WIP schedule today</div></a>`;
+        },
+        backlog(d) {
+            return DashboardPage._tile('wip-schedule', d.total, 'contract left to earn, open jobs', DashboardPage._byJob(d.jobs));
+        },
+        committed_unbilled(d) {
+            return DashboardPage._tile('commitment-status', d.total, 'subs and suppliers still to bill', DashboardPage._byJob(d.jobs));
+        },
         job_budget_vs_actual(d) {
             if (!d.count) return '<div style="color:var(--gray-500);font-size:12px">' + Terms.text('No jobs with a budget or activity yet.') + ' <a href="#/jobs">' + T('Jobs') + ' →</a></div>';
             const pct = v => v === null || v === undefined ? '—' : `${v.toFixed(0)}%`;
@@ -308,6 +336,23 @@ const DashboardPage = {
                 <div style="position:relative;height:200px"><canvas id="chart-bs-trend"></canvas></div>
                 <div style="font-size:10px;color:var(--gray-500);margin-top:2px">Month-end balances, last 12 months (this month to date) · <a href="${DashboardPage._reportLink('bs')}">Full ${T('Balance Sheet')}</a></div>`;
         },
+    },
+
+    // A contractor tile's report, as of today
+    _tileLink(view) { return ReportsPage.viewUrl(view, { as_of_date: todayISO() }); },
+
+    // A stat tile that opens its report; `hover` is the by-job breakdown.
+    _tile(view, value, note, hover) {
+        return `<a class="dash-tile" href="${DashboardPage._tileLink(view)}" onclick="ReportsPage._leaveFrom(this)" title="${escapeHtml(hover || 'Open the report')}"
+            style="display:block;color:inherit;text-decoration:none">
+            <div class="card-value">${formatCurrency(value)}</div>
+            <div style="font-size:11px;color:var(--gray-500)">${escapeHtml(note)}</div></a>`;
+    },
+
+    // "Job: amount" per line, for a tile's hover text
+    _byJob(jobs, indent) {
+        if (!jobs || !jobs.length) return indent ? '' : 'No jobs';
+        return jobs.map(j => `${indent ? '\n  ' : ''}${j.job}: ${formatCurrency(j.amount)}`).join(indent ? '' : '\n');
     },
 
     // The card's report, dated as the card is (R7): this month's or the

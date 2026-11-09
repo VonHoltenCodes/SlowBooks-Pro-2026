@@ -106,6 +106,7 @@
             <tr><td class="label">Total Payments</td><td class="r">{{ activity.total_payments | currency }}</td></tr>
             {% if activity.total_credits %}<tr><td class="label">Total Credits</td><td class="r">{{ activity.total_credits | currency }}</td></tr>{% endif %}
             <tr><td class="label grand">Balance Due</td><td class="r grand">{{ money(activity.balance_due) }}</td></tr>
+            {% if activity.retainage_held %}<tr><td class="label">Retainage held, not yet due</td><td class="r">{{ money(activity.retainage_held) }}</td></tr>{% endif %}
         </table>
     </div>
 

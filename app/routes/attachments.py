@@ -46,6 +46,9 @@ _ENTITY_TYPE_DIRS = {
     # receipt too, keyed by the entry's id, so it need not be re-entered as
     # an Expense just to hold the file (#600).
     "bank_entry": "bank_entry",
+    # A field ticket's photo of the signed paper (construction mode): v1's
+    # signature is the typed name and date plus this.
+    "field_ticket": "field_ticket",
 }
 
 # Whitelist of MIME types we accept for attachments. An attachment is served

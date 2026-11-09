@@ -2,20 +2,32 @@ from datetime import date as dt_date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from pydantic import BaseModel, field_validator, model_validator, field_serializer
+from pydantic import (
+    BaseModel,
+    Field,
+    field_validator,
+    model_validator,
+    field_serializer,
+)
 
 from app.models.estimates import EstimateStatus
 from app.schemas.common import (
     StrictModel,
     TaxRate,
+    choice_error,
     TaxRateOut,
     clean_line_cost_type,
     validate_non_negative_line,
+    check_line_fits,
+    check_lines_fit,
     quantity_text,
 )
 from app.schemas.invoices import RateOut
 
 LINE_KINDS = ("base", "allowance", "alternate", "unit_price")
+_LINE_KIND_LABELS = dict(
+    base="Base", allowance="Allowance", alternate="Alternate", unit_price="Unit price"
+)
 
 
 class EstimateLineCreate(StrictModel):
@@ -44,11 +56,15 @@ class EstimateLineCreate(StrictModel):
     def _kind(cls, v):
         v = (v or "base").strip() or "base"
         if v not in LINE_KINDS:
-            raise ValueError(f"line_kind must be one of {', '.join(LINE_KINDS)}")
+            raise choice_error("Line kind", _LINE_KIND_LABELS, "line_kind")
         return v
 
     @model_validator(mode="after")
     def _check_non_negative(self):
+        # a deduct alternate's negative figures must fit the column too
+        check_line_fits(self.quantity, self.rate)
+        if self.unit_cost is not None:
+            check_line_fits(self.quantity, self.unit_cost)
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":
@@ -101,6 +117,11 @@ class EstimateCreate(StrictModel):
     fee_pct: Decimal = Decimal("0")
     bond_pct: Decimal = Decimal("0")
     markup_allowances: bool = False
+    # Owner-PDF presentation (construction only): show the markup rows, or
+    # spread them into each package's price. `terms` None starts from the
+    # company's default terms text.
+    show_markup_rows: bool = True
+    terms: Optional[str] = None
     lines: list[EstimateLineCreate] = []
 
     @field_validator("lines")
@@ -108,6 +129,7 @@ class EstimateCreate(StrictModel):
     def _require_lines(cls, v):
         if not v:
             raise ValueError("estimate must have at least one line")
+        check_lines_fit(v)
         return v
 
 
@@ -125,7 +147,16 @@ class EstimateUpdate(StrictModel):
     fee_pct: Optional[Decimal] = None
     bond_pct: Optional[Decimal] = None
     markup_allowances: Optional[bool] = None
+    show_markup_rows: Optional[bool] = None
+    terms: Optional[str] = None
     lines: Optional[list[EstimateLineCreate]] = None
+
+    @field_validator("lines")
+    @classmethod
+    def _lines_fit(cls, v):
+        if v:
+            check_lines_fit(v)
+        return v
 
 
 class EstimatePackageTotal(BaseModel):
@@ -171,6 +202,9 @@ class EstimateTotals(BaseModel):
     allowance_total: Decimal
     subtotal: Decimal
     bid_total: Decimal
+    # The cost budget accepting locks: package costs, allowances at their
+    # amount, and the general-conditions, insurance and bond costs.
+    budget_cost: Decimal = Decimal("0")
     bid_tax: Decimal
     bid_total_with_tax: Decimal
     by_package: list[EstimatePackageTotal] = []
@@ -180,6 +214,10 @@ class EstimateTotals(BaseModel):
 
 class EstimateAccept(StrictModel):
     job_id: Optional[int] = None
+
+
+class EstimateLost(StrictModel):
+    reason: Optional[str] = Field(default=None, max_length=500)
 
 
 def totals_from_dict(data: dict) -> EstimateTotals:
@@ -205,14 +243,25 @@ class EstimateResponse(BaseModel):
     fee_pct: Decimal = Decimal("0")
     bond_pct: Decimal = Decimal("0")
     markup_allowances: bool = False
+    show_markup_rows: bool = True
+    terms: Optional[str] = None
     accepted_at: Optional[datetime] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None
+    job_name: Optional[str] = None
+    job_site_address: Optional[str] = None
     converted_invoice_id: Optional[int]
     lines: list[EstimateLineResponse] = []
     customer_name: Optional[str] = None
     totals: Optional[EstimateTotals] = None
+    # True when the estimate's job bills by pay application (a contract type, a
+    # schedule of values or a pay application), so Convert is refused.
+    bills_by_pay_app: bool = False
+    # Bought-scope lines with a price but no cost code (the Accept confirm
+    # says how many), and the sentences Accept answers with.
+    uncoded_lines: int = 0
+    warnings: list[str] = []
     created_at: datetime
     updated_at: datetime
 

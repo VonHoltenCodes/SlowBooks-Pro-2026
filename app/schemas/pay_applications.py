@@ -22,7 +22,7 @@ class PayApplicationCreate(StrictModel):
     @classmethod
     def _ret(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("retainage_pct must be between 0 and 100")
+            raise ValueError("Retainage must be between 0 and 100%.")
         return v
 
 
@@ -56,7 +56,7 @@ class PayApplicationUpdate(StrictModel):
     @classmethod
     def _ret(cls, v):
         if v is not None and not (0 <= v <= 100):
-            raise ValueError("retainage_pct must be between 0 and 100")
+            raise ValueError("Retainage must be between 0 and 100%.")
         return v
 
     @field_validator("tax_rate", "release_retainage", "deposit_applied")
@@ -81,6 +81,10 @@ class PayApplicationLineOut(BaseModel):
     pct_complete: float = 0.0
     balance_to_finish: Decimal = Decimal("0")
     retainage: Decimal = Decimal("0")
+    # For the form's live tax: whether the SOV line is taxed, and the stored
+    # materials the earlier applications left on it.
+    is_taxable: bool = True
+    prior_stored: Decimal = Decimal("0")
 
     model_config = {"from_attributes": True}
 
@@ -99,6 +103,8 @@ class PayApplicationOut(BaseModel):
     charge_tax: bool = True
     # The owner is tax-exempt, so no tax however the toggle stands.
     tax_exempt: bool = False
+    # The job's contractor pays tax on materials: no sales tax is billed.
+    contractor_pays_tax: bool = False
     release_retainage: Decimal = Decimal("0")
     deposit_applied: Decimal = Decimal("0")
     lien_waiver_status: Optional[str] = None
@@ -112,6 +118,15 @@ class PayApplicationOut(BaseModel):
     sub_waivers: dict = {}
     unapplied_deposits: float = 0.0
     retainage_outstanding: float = 0.0
+    # Void would be accepted now: the latest approved application, its
+    # invoice unpaid. The Pay apps tab offers Void only then.
+    can_void: bool = False
+    # Sentences for what the application will quietly not do: a schedule that
+    # does not foot to the contract sum, taxable lines at a tax rate of 0.
+    warnings: List[str] = []
+    # The G702 contract rows (original, net change by change orders, to
+    # date), the same figures the PDF prints.
+    contract_sums: dict = {}
 
     model_config = {"from_attributes": True}
 

@@ -155,14 +155,78 @@ test('an approved application offers its waivers', () => {
     assert.doesNotMatch(page.paRowActions({ id: 3, status: 'draft' }), /paWaivers/);
 });
 
-test('an open application with no lines offers Delete in place of Submit and Approve (#723)', () => {
+test('an open application offers Delete, empty or not; an approved one does not (#723)', () => {
     const page = jobsContext(true).JobsPage;
     const empty = page.paRowActions({ id: 3, status: 'draft', lines: [] });
-    assert.match(empty, /paDelete\(3\)/);
+    assert.match(empty, /paDelete\(3, true\)/);
     assert.doesNotMatch(empty, /paSubmit|paApprove/);
+    // a draft with lines is thrown away too, and still submitted or approved
     const full = page.paRowActions({ id: 3, status: 'draft', lines: [{ sov_line_id: 1 }] });
-    assert.doesNotMatch(full, /paDelete/);
+    assert.match(full, /paDelete\(3, false\)/);
     assert.match(full, /paSubmit\(3\)/);
+    assert.match(page.paRowActions({ id: 3, status: 'submitted', lines: [{ sov_line_id: 1 }] }), /paDelete\(3, false\)/);
     assert.doesNotMatch(page.paRowActions({ id: 3, status: 'approved', lines: [] }), /paDelete/);
     assert.match(page.paFormHtml({ id: 3, number: 'PA-1-01', status: 'draft', lines: [], totals: {} }), /id="pa-empty"/);
+});
+
+test('Void shows only on the application the server says can be voided', () => {
+    const page = jobsContext(true).JobsPage;
+    assert.match(page.paRowActions({ id: 3, status: 'approved', can_void: true }), /paVoid\(3\)/);
+    assert.doesNotMatch(page.paRowActions({ id: 2, status: 'approved', can_void: false }), /paVoid/);
+    assert.doesNotMatch(page.paRowActions({ id: 2, status: 'approved' }), /paVoid/);
+});
+
+test('the pay apps list shows a billed column that foots with retainage, release, tax and current due', () => {
+    const page = jobsContext(true).JobsPage;
+    page.money = (v) => '$' + Number(v || 0).toFixed(2);
+    const html = page.paLogHtml([{
+        id: 3, number: 'PA-1-03', status: 'approved', can_void: true, lines: [{}],
+        totals: { billed_this_period: 1000, retainage_this_period: 100, release_retainage: 50, tax_amount: 10, current_due: 960, net_due: 960 },
+    }]);
+    assert.match(html, /<th[^>]*>Billed<\/th>/);
+    assert.match(html, /\$1000\.00<\/td>\s*<td class="amount">\$100\.00<\/td>\s*<td class="amount">\$50\.00<\/td>\s*<td class="amount">\$10\.00<\/td>\s*<td class="amount">\$960\.00/);
+});
+
+test('the form has an application date that follows Period to until it is set by hand', () => {
+    const page = jobsContext(true).JobsPage;
+    const form = page.paFormHtml({ id: 3, number: 'PA-1-01', status: 'draft', date: '2026-06-01', period_to: '2026-05-31', lines: [{ sov_line_id: 1, scheduled_value: 10 }], totals: {} });
+    assert.match(form, /id="pa-date"[^>]*value="2026-06-01"/);
+    const els = { '#pa-period': { value: '2026-07-31' }, '#pa-date': { value: '2026-06-01', dataset: {} } };
+    const ctx = jobsContext(true);
+    ctx.$ = (sel) => els[sel] || null;
+    vm.runInContext('JobsPage.paPeriodChanged()', ctx);
+    assert.equal(els['#pa-date'].value, '2026-07-31');
+    els['#pa-date'].dataset.touched = '1';
+    els['#pa-period'].value = '2026-08-31';
+    vm.runInContext('JobsPage.paPeriodChanged()', ctx);
+    assert.equal(els['#pa-date'].value, '2026-07-31');
+});
+
+test('the form previews tax only on taxable lines, as the server bills it', () => {
+    const ctx = jobsContext(true);
+    const page = ctx.JobsPage;
+    const cell = () => ({ textContent: '' });
+    const line = (taxable, tp, st, priorStored) => {
+        const parts = {
+            '.pa-tp': { value: String(tp) }, '.pa-st': { value: String(st) },
+            '.pa-completed': cell(), '.pa-pct': cell(), '.pa-balance': cell(), '.pa-retainage': cell(),
+        };
+        return {
+            dataset: { scheduled: '100000', previous: '0', taxable: taxable ? '1' : '0', priorStored: String(priorStored) },
+            querySelector: (sel) => parts[sel],
+        };
+    };
+    const totalsEl = { innerHTML: '' };
+    const fields = {
+        '#pa-pct': { value: '0' }, '#pa-release': { value: '0' }, '#pa-deposit': { value: '0' },
+        '#pa-tax-on': { checked: true }, '#pa-tax-rate': { value: '10' }, '#pa-totals': totalsEl,
+    };
+    ctx.$ = (sel) => fields[sel] || null;
+    ctx.$$ = () => [line(true, 1000, 0, 0), line(false, 2000, 500, 0)];
+    let seen = null;
+    page.paTotalsHtml = (t) => { seen = t; return ''; };
+    page._paEditing = { totals: {} };
+    vm.runInContext('JobsPage.paRecalc()', ctx);
+    // 10% of the taxable line's 1,000 only; the 2,500 on the exempt line is untaxed
+    assert.equal(seen.tax_amount, 100);
 });

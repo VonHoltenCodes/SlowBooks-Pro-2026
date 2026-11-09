@@ -324,6 +324,9 @@ def test_cost_type_reads_seed_nothing(client, db_session, db_engine, seed_accoun
         },
     )
     assert job.status_code == 201, job.text
+    # the WIP schedule below is construction mode's (a Business company: 409)
+    r = client.put("/api/settings", json={"company_type": "construction"})
+    assert r.status_code == 200, r.text
     db_session.query(CostType).delete()
     db_session.commit()
     jid = job.json()["id"]
@@ -468,8 +471,8 @@ def test_books_from_before_2_9_get_the_default_asset_type_at_the_upgrade(tmp_pat
     script = ScriptDirectory.from_config(cfg)
     assert script.get_revision("407d52f22d78").down_revision == "d7b3f9a1c5e2"
     assert script.get_heads() == [
-        "c8e1a4d7f305"
-    ]  # Collections (#653) is the head above it
+        "d8f1b3c5e7a9"
+    ]  # the bill line use-tax rate is the head above it
     command.upgrade(cfg, "407d52f22d78")
     types, accounts = _after_upgrade(db)
     expense = accounts["Depreciation Expense"]

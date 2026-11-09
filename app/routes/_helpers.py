@@ -1,6 +1,6 @@
 from typing import Iterable, Type, TypeVar
 
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.database import Base
@@ -75,3 +75,32 @@ def reject_null_updates(
             ]
         )
     return update_data
+
+
+def _declared_query_names(dependant) -> set:
+    """Every query parameter a route (and the dependencies it pulls in) reads."""
+    names = {p.alias for p in dependant.query_params}
+    for sub in dependant.dependencies:
+        names |= _declared_query_names(sub)
+    return names
+
+
+def refuse_unknown_filters(request: Request) -> None:
+    """A route dependency: answer 422 with the accepted names when the request
+    carries a query parameter the route does not read, so a misspelled filter
+    (`jobid=3`, `asof=...`) is not dropped silently and the whole list
+    returned. Add it with `dependencies=[Depends(refuse_unknown_filters)]`."""
+    route = request.scope.get("route")
+    if route is None:
+        return
+    accepted = _declared_query_names(route.dependant)
+    unknown = sorted(set(request.query_params) - accepted)
+    if unknown:
+        listed = ", ".join(sorted(accepted)) or "none"
+        if len(unknown) == 1:
+            named = f"{unknown[0]} is not a filter here."
+        else:
+            named = f"{', '.join(unknown[:-1])} and {unknown[-1]} are not filters here."
+        raise HTTPException(
+            status_code=422, detail=f"{named} This request accepts: {listed}."
+        )

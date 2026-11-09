@@ -7,6 +7,7 @@
 from datetime import date
 from decimal import Decimal, ROUND_HALF_UP
 
+from fastapi import HTTPException
 from sqlalchemy import func, update
 from sqlalchemy.orm import Session
 from sqlalchemy.orm.util import identity_key
@@ -49,6 +50,25 @@ def _q(value) -> Decimal:
 
 # Public alias — reads more clearly at call sites that prefer a descriptive name.
 quantize_cents = _q
+
+
+# Money columns are Numeric(15, 2); app.schemas.common.MAX_LINE_AMOUNT is the
+# same figure for a single line.
+MAX_DOCUMENT_AMOUNT = Decimal("9999999999999.99")
+
+
+def refuse_total_past_column(*figures) -> None:
+    """422 when a document's subtotal, tax or total (after markups and tax)
+    would not fit a money column, so it is a sentence, never a 500."""
+    if any(abs(Decimal(str(f))) > MAX_DOCUMENT_AMOUNT for f in figures):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "This document comes to more than a document can be "
+                f"({MAX_DOCUMENT_AMOUNT:,.2f}) once markups and tax are added. "
+                "Split the work across documents."
+            ),
+        )
 
 
 def compute_line_totals(lines, tax_rate) -> tuple[Decimal, Decimal, Decimal]:
@@ -642,20 +662,49 @@ def get_bad_debt_account_id(db: Session) -> int:
 # Construction accounts, created on demand (Settings -> Company Type, or the
 # /api/construction/setup route). Retainage and customer-deposit balances
 # and the use-tax a contractor self-assesses sit beside the seed chart's
-# own blocks; Construction in Progress holds costs on an unbilled job.
+# own blocks; Construction in Progress holds costs on an unbilled job;
+# Contract Revenue is where a pay application's billing posts unless its
+# schedule-of-values line names another income account.
 # Each carries an explicit detail type: the number-and-name rule would call
 # a 1xxx asset or 2xxx liability Other Current anyway, but pinning it keeps
 # these on the right balance-sheet line whatever the rule does later, and a
 # yielded number (the chart already owns 1150) leaves the rule nothing to
-# read.
+# read. The 1360 / 2060 / 2070 / 4060 / 5600 accounts take the WIP schedule's
+# posted adjusting entry (over and under billing, the loss provision).
 CONSTRUCTION_ACCOUNTS = (
     ("1150", "Retainage Receivable", AccountType.ASSET, "other_current_asset"),
     ("1350", "Construction in Progress", AccountType.ASSET, "other_current_asset"),
+    (
+        "1360",
+        "Costs and Estimated Earnings in Excess of Billings",
+        AccountType.ASSET,
+        "other_current_asset",
+    ),
     ("2050", "Retainage Payable", AccountType.LIABILITY, "other_current_liability"),
+    (
+        "2060",
+        "Billings in Excess of Costs and Estimated Earnings",
+        AccountType.LIABILITY,
+        "other_current_liability",
+    ),
+    (
+        "2070",
+        "Provision for Loss on Uncompleted Contracts",
+        AccountType.LIABILITY,
+        "other_current_liability",
+    ),
     ("2210", "Customer Deposits", AccountType.LIABILITY, "other_current_liability"),
     ("2220", "Use Tax Payable", AccountType.LIABILITY, "other_current_liability"),
+    ("4050", "Contract Revenue", AccountType.INCOME, "income"),
+    ("4060", "Contract Revenue – WIP Adjustment", AccountType.INCOME, "income"),
     ("5400", "Equipment Cost", AccountType.COGS, "cost_of_goods_sold"),
     ("5500", "Other Job Costs", AccountType.COGS, "cost_of_goods_sold"),
+    (
+        "5600",
+        "Loss on Uncompleted Contracts",
+        AccountType.COGS,
+        "cost_of_goods_sold",
+    ),
 )
 
 
@@ -666,3 +715,18 @@ def ensure_construction_accounts(db: Session) -> dict[str, Account]:
         number: ensure_account(db, number, name, atype, detail)
         for number, name, atype, detail in CONSTRUCTION_ACCOUNTS
     }
+
+
+def ensure_construction_account(db: Session, number: str) -> Account:
+    """One construction account by its suggested number, created if missing,
+    without creating the rest."""
+    for num, name, atype, detail in CONSTRUCTION_ACCOUNTS:
+        if num == number:
+            return ensure_account(db, num, name, atype, detail)
+    raise KeyError(number)
+
+
+def get_contract_revenue_account_id(db: Session) -> int:
+    """4050 Contract Revenue, created on demand: what a schedule-of-values
+    line with no revenue account of its own credits."""
+    return ensure_construction_accounts(db)["4050"].id

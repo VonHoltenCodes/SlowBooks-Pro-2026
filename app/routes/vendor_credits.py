@@ -226,6 +226,8 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
                 account_id=line_data.account_id,
                 item=item,
                 vendor=vendor,
+                cost_code_id=line_data.cost_code_id,
+                cost_type=eff_cost_type,
             )
         else:
             posting_acct = (item.expense_account_id if item else None) or (

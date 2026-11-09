@@ -25,6 +25,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    true,
 )
 from sqlalchemy.orm import relationship
 
@@ -37,6 +38,13 @@ JOB_STATUSES = ("pending", "awarded", "in_progress", "closed", "not_awarded")
 # contingency and retainage. NULL contract_type is today's behaviour: a job
 # with a plain contract amount and no construction terms.
 CONTRACT_TYPES = ("lump_sum", "gmp", "cost_plus")
+
+# Who pays the sales tax on a construction job. "charge_owner" (and NULL) is
+# sales tax on the owner's pay applications; "contractor_pays" is the
+# lump-sum real-property rule (Florida and many states): the contractor is
+# the consumer of the materials, so the pay applications bill no sales tax
+# and material bills on the job accrue use tax (purchase_posting.use_tax_for).
+SALES_TAX_TREATMENTS = ("charge_owner", "contractor_pays")
 
 # A schedule-of-values line kind. "work" is the ordinary scope line (one per
 # trade package); allowance / contingency and the four estimate markups —
@@ -91,9 +99,13 @@ class Job(Base):
     # means no default; a CO or a CO line can still carry its own.
     co_markup_pct = Column(Numeric(7, 4), nullable=True)
     contract_date = Column(Date, nullable=True)
+    sales_tax_treatment = Column(String(20), nullable=True)  # SALES_TAX_TREATMENTS
     contract_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )
+    # The day the job went to Closed (cleared when it reopens), so a report
+    # run back-dated to before it reads the job as it was then: still open.
+    closed_on = Column(Date, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(
@@ -137,8 +149,14 @@ class SovLine(Base):
     cost_code_id = Column(
         Integer, ForeignKey("cost_codes.id", ondelete="SET NULL"), nullable=True
     )
-    kind = Column(String(16), nullable=False, default="work")
+    kind = Column(String(24), nullable=False, default="work")
     scheduled_value = Column(Numeric(15, 2), nullable=False, default=0)
+    # The income account the line's billing credits; null posts to 4050
+    # Contract Revenue. is_taxable: sales tax is charged on its billing.
+    revenue_account_id = Column(
+        Integer, ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    is_taxable = Column(Boolean, nullable=False, default=True, server_default=true())
     source_estimate_id = Column(
         Integer, ForeignKey("estimates.id", ondelete="SET NULL"), nullable=True
     )
@@ -157,3 +175,4 @@ class SovLine(Base):
     job = relationship("Job", back_populates="sov_lines")
     trade_package = relationship("TradePackage")
     cost_code = relationship("CostCode")
+    revenue_account = relationship("Account")

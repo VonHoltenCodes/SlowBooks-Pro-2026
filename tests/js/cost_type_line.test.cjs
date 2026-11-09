@@ -98,3 +98,22 @@ test('the Trade Packages block renders in the Settings HTML for a contractor', (
     assert.match(html, /SettingsPage\.addTradePackage\(\)/);
     assert.match(html, /id="trade-packages-list"/);
 });
+
+test('CostTypes.accountFor resolves a construction line the way the server does', () => {
+    const ctx = utilsContext();
+    ctx.CostCodes._list = [
+        { id: 1, code: '26 05 00', cost_type: 'subcontract', account_id: null },
+        { id: 2, code: '03 30 00', cost_type: 'material', account_id: 77 },
+    ];
+    ctx.CostTypes._list = [
+        { code: 'subcontract', default_account_id: 53 },
+        { code: 'equipment', default_account_id: 54 },
+    ];
+    // business mode never resolves one (the line still needs its account)
+    assert.equal(ctx.CostTypes.accountFor(1, null), null);
+    ctx.Terms.mode = 'construction';
+    assert.equal(ctx.CostTypes.accountFor(2, 'equipment'), 77); // the code's account first
+    assert.equal(ctx.CostTypes.accountFor(1, null), 53); // else the code's type
+    assert.equal(ctx.CostTypes.accountFor(1, 'equipment'), 54); // the line's own type wins
+    assert.equal(ctx.CostTypes.accountFor(null, null), null);
+});

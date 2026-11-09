@@ -463,6 +463,13 @@ def allocate(data: AllocationCreate, db: Session = Depends(get_db)):
 @job_costs_router.post("/{jc_id}/void", response_model=JobCostResponse)
 def void(jc_id: int, db: Session = Depends(get_db)):
     jc = _jc_get(db, jc_id)
+    if jc.source == "material_slip":
+        # The slip moved stock as well; its own void puts both back.
+        raise HTTPException(
+            status_code=409,
+            detail=f"{jc.memo or 'A material slip'} posted this entry. Void the "
+            "slip on the job's Field tickets tab, which puts the stock back too.",
+        )
     check_closing_date(db, jc.date)
     try:
         void_job_cost(db, jc)

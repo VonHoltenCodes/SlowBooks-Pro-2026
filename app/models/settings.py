@@ -77,6 +77,11 @@ DEFAULT_SETTINGS = {
     "company_email": "",
     "company_website": "",
     "company_tax_id": "",
+    # Construction mode: the contractor's license number, printed in the
+    # estimate PDF's header, and the default terms / inclusions / exclusions
+    # text a new construction estimate starts with (editable on each one).
+    "company_license": "",
+    "estimate_terms": "",
     "operator_name": "",
     "operator_email": "",
     # Desktop: "true" signs the company out whenever the app is quit, so the
@@ -84,6 +89,10 @@ DEFAULT_SETTINGS = {
     "ask_password_on_start": "false",
     "default_terms": "Net 30",
     "default_tax_rate": "0.0",
+    # Construction: the use tax a contractor self-assesses on materials it
+    # buys untaxed for a "contractor pays" job, a PERCENT like
+    # default_tax_rate. Empty is the default tax rate.
+    "use_tax_rate": "",
     # "false" starts every new sales line (invoice, estimate, sales receipt,
     # credit memo, recurring, Quick Entry) and every new item untaxed (#486):
     # a service company that charges no sales tax stops unticking the Tax box

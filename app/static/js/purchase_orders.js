@@ -3,6 +3,13 @@
  * Feature 6: CRUD + convert to bill
  */
 const PurchaseOrdersPage = {
+    // The status badge. A commitment that is sent reads "Issued" in
+    // construction mode, as the form and the Issue button say.
+    statusBadge(status) {
+        const label = Terms.isConstruction() && status === 'sent' ? 'Issued' : status;
+        return `<span class="badge badge-${status}">${label}</span>`;
+    },
+
     showAll() { PurchaseOrdersPage._showAll = true; App.navigate(location.hash); },
 
     async render() {
@@ -26,11 +33,12 @@ const PurchaseOrdersPage = {
                     ${con ? `<td>${po.commitment_type === 'subcontract' ? 'Subcontract' : 'Purchase order'}</td>` : ''}
                     ${con ? `<td>${escapeHtml(po.trade_package_name || '—')}</td>` : ''}
                     <td>${formatDate(po.date)}</td>
-                    <td>${statusBadge(po.status)}</td>
+                    <td>${PurchaseOrdersPage.statusBadge(po.status)}</td>
                     <td class="amount">${formatCurrency(po.total)}</td>
                     <td class="actions">
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.view(${po.id})">View</button>
                         <button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.showForm(${po.id})">Edit</button>
+                        ${con && po.status === 'draft' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.issue(${po.id})" title="Issue it to the vendor; it then counts as bought and committed">Issue</button>` : ''}
                         ${con && po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.subPayApp(${po.id})">Sub pay app</button>` : (po.status !== 'closed' ? `<button class="btn btn-sm btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : '')}
                         ${con && (po.retainage_pct || Number(po.retainage_released)) ? `<button class="btn btn-sm btn-secondary" onclick="PurchaseOrdersPage.releaseRetainage(${po.id})">Release retainage</button>` : ''}
                     </td>
@@ -66,7 +74,7 @@ const PurchaseOrdersPage = {
                 <strong>Vendor:</strong> ${escapeHtml(po.vendor_name || '')}<br>
                 <strong>Date:</strong> ${formatDate(po.date)}<br>
                 ${po.expected_date ? `<strong>Expected:</strong> ${formatDate(po.expected_date)}<br>` : ''}
-                <strong>Status:</strong> ${statusBadge(po.status)}${conMeta}
+                <strong>Status:</strong> ${PurchaseOrdersPage.statusBadge(po.status)}${conMeta}
             </div>
             <div class="table-container"><table>
                 <thead>${head}</thead>
@@ -81,10 +89,22 @@ const PurchaseOrdersPage = {
             <div class="form-actions">
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/pdf','_blank')">Save PDF</button>
                 <button class="btn btn-secondary" onclick="window.open('/api/purchase-orders/${po.id}/print-preview','_blank')">Print</button>
+                ${con && po.status === 'draft' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.issue(${po.id})">Issue</button>` : ''}
                 ${con && po.status !== 'closed' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.subPayApp(${po.id})">Sub pay app</button>` : (po.status !== 'closed' ? `<button class="btn btn-primary" onclick="PurchaseOrdersPage.convertToBill(${po.id})">To Bill</button>` : '')}
                 ${con && (po.retainage_pct || Number(po.retainage_released)) ? `<button class="btn btn-secondary" onclick="PurchaseOrdersPage.releaseRetainage(${po.id})">Release retainage</button>` : ''}
                 <button class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
+    },
+
+    // Issue a draft commitment (draft -> sent): until it is issued it is in no
+    // Buyout, committed or commitment-status figure.
+    async issue(id) {
+        try {
+            await API.put(`/purchase-orders/${id}`, { status: 'sent' });
+            toast('Commitment issued');
+            closeModal();
+            App.navigate('#/purchase-orders');
+        } catch (err) { toast(err.message, 'error'); }
     },
 
     _items: [],
@@ -189,7 +209,14 @@ const PurchaseOrdersPage = {
             (TradePackages._list || []).map(p =>
                 `<option value="${p.id}" ${String(po.trade_package_id) === String(p.id) ? 'selected' : ''}>${escapeHtml(p.name)}</option>`)).join('');
         const ret = (po.retainage_pct === null || po.retainage_pct === undefined) ? '' : po.retainage_pct;
-        return `
+        // A saved commitment's status: Issued (sent) is what puts it in the Buyout.
+        const st = po.status || 'draft';
+        const statusGroup = po.id ? `<div class="form-group"><label>Status</label>
+                <select name="status" title="A draft counts nowhere; issue it to count it as bought and committed.">
+                    ${[['draft', 'Draft'], ['sent', 'Issued'], ['partial', 'Partially billed'], ['received', 'Received'], ['closed', 'Closed']]
+                        .map(([v, label]) => `<option value="${v}" ${sel(st, v)}>${label}</option>`).join('')}
+                </select></div>` : '';
+        return statusGroup + `
             <div class="form-group"><label>Type</label>
                 <select name="commitment_type" onchange="PurchaseOrdersPage.refreshVendorNote()">
                     <option value="po" ${sel(t, 'po')}>Purchase order</option>
@@ -296,6 +323,7 @@ const PurchaseOrdersPage = {
             data.trade_package_id = form.trade_package_id && form.trade_package_id.value ? parseInt(form.trade_package_id.value) : null;
             data.retainage_pct = form.retainage_pct && form.retainage_pct.value !== '' ? parseFloat(form.retainage_pct.value) : null;
             data.scope_notes = form.scope_notes ? (form.scope_notes.value || null) : null;
+            if (id && form.status) data.status = form.status.value;
         }
         if (!(await TxnWarn.ok(form, { editing: !!id }))) return;
         try {
@@ -337,7 +365,9 @@ const PurchaseOrdersPage = {
     },
 
     // To Bill asks where each line goes before anything posts: an item's
-    // expense account or the vendor's default fills the choice in, and a
+    // expense account, a construction line's cost code or cost type account
+    // (material 5100, subcontract 5300 …), or the vendor's default fills the
+    // choice in, and a
     // line neither names waits for one — it used to land on account 6000,
     // Advertising & Marketing (W-H5, F8). Stock items post to Inventory.
     async convertToBill(id) {
@@ -350,6 +380,8 @@ const PurchaseOrdersPage = {
                 API.get('/items?active_only=false'),
                 API.get('/accounts?active_only=true'),
             ]);
+            // a construction line's cost code or type names its account
+            if (Terms.isConstruction()) await Promise.all([CostCodes.load(), CostTypes.load()]);
         } catch (err) { toast(err.message, 'error'); return; }
         const itemById = Object.fromEntries(items.map(i => [i.id, i]));
         const posting = PurchaseAccounts.filter(accounts);
@@ -357,6 +389,13 @@ const PurchaseOrdersPage = {
         // Construction bills in parts: an amount-this-period column, prefilled
         // with the line's remaining. A business company keeps today's dialog.
         const partial = Terms.isConstruction();
+        // Delivery tickets (field tickets): an order being received shows what
+        // has arrived per line and warns when a line bills past it.
+        const receiving = partial && po.lines.some(l => Number(l.received_qty) > 0);
+        PurchaseOrdersPage._convReceived = Object.fromEntries(po.lines.map(l => [l.id, {
+            value: (Number(l.received_qty) || 0) * (Number(l.rate) || 0), billed: Number(l.billed_amount) || 0,
+        }]));
+        PurchaseOrdersPage._convReceiving = receiving;
         const rows = po.lines.map((l, n) => {
             const item = l.item_id ? itemById[l.item_id] : null;
             const remaining = (Number(l.amount) || 0) - (Number(l.billed_amount) || 0);
@@ -366,7 +405,9 @@ const PurchaseOrdersPage = {
             } else if (!Number(l.amount)) {
                 cell = '<span style="color:var(--text-muted);">Nothing to record</span>';
             } else {
-                const pick = (item && item.expense_account_id) || vendor.default_expense_account_id || '';
+                const pick = (item && item.expense_account_id)
+                    || CostTypes.accountFor(l.cost_code_id, l.cost_type)
+                    || vendor.default_expense_account_id || '';
                 cell = AccountQuickAdd.picker(`<select class="po-conv-account" data-line="${l.id}" aria-label="Account for line ${n + 1}">
                         <option value="">Choose an account...</option>${PurchaseAccounts.options(posting, pick)}</select>`, 'po-convert');
             }
@@ -375,10 +416,12 @@ const PurchaseOrdersPage = {
             const retThis = remaining * (Number(po.retainage_pct) || 0) / 100;
             const amtCols = partial
                 ? `<td class="amount">${formatCurrency(remaining)}</td>`
-                + `<td class="amount"><input type="number" step="0.01" min="0" class="po-conv-amount" data-line="${l.id}" value="${remaining.toFixed(2)}" style="width:90px" aria-label="Amount this period for line ${n + 1}"></td>`
+                + `<td class="amount"><input type="number" step="0.01" min="0" class="po-conv-amount" data-line="${l.id}" value="${remaining.toFixed(2)}" style="width:90px" aria-label="Amount this period for line ${n + 1}" oninput="PurchaseOrdersPage.convReceivedWarn()">`
+                + `<div class="po-conv-warn form-hint" data-line="${l.id}" style="color:var(--text-danger)"></div></td>`
                 + `<td class="amount">${formatCurrency(retThis)}</td>`
                 : '';
-            return `<tr><td>${escapeHtml(l.description || (item ? item.name : ''))}</td>
+            const qtyCols = receiving ? `<td class="amount">${Number(l.quantity) || 0}</td><td class="amount">${Number(l.received_qty) || 0}</td>` : '';
+            return `<tr><td>${escapeHtml(l.description || (item ? item.name : ''))}</td>${qtyCols}
                 <td class="amount">${formatCurrency(l.amount)}</td>${partial ? `<td class="amount">${formatCurrency(l.billed_amount)}</td>` : ''}${amtCols}<td>${cell}</td></tr>`;
         }).join('');
         const taxNote = Number(po.tax_amount)
@@ -392,7 +435,7 @@ const PurchaseOrdersPage = {
             <div class="form-group" style="max-width:200px;"><label for="po-conv-date">Bill date</label>
                 <input type="date" id="po-conv-date" value="${todayISO()}"></div>
             <div class="table-container"><table>
-                <thead><tr><th scope="col">Line</th><th scope="col" class="amount">Scheduled</th>${partial ? '<th scope="col" class="amount">Previous</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">This period</th><th scope="col" class="amount">Retainage</th>' : ''}<th scope="col">Account</th></tr></thead>
+                <thead><tr><th scope="col">Line</th>${receiving ? '<th scope="col" class="amount">Ordered</th><th scope="col" class="amount">Received</th>' : ''}<th scope="col" class="amount">Scheduled</th>${partial ? '<th scope="col" class="amount">Previous</th><th scope="col" class="amount">Remaining</th><th scope="col" class="amount">This period</th><th scope="col" class="amount">Retainage</th>' : ''}<th scope="col">Account</th></tr></thead>
                 <tbody>${rows}</tbody>
             </table></div>
             ${taxNote}
@@ -401,6 +444,24 @@ const PurchaseOrdersPage = {
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
                 <button type="button" class="btn btn-primary" onclick="PurchaseOrdersPage.doConvert(${po.id})">Create Bill</button>
             </div>`);
+        PurchaseOrdersPage.convReceivedWarn();
+    },
+
+    // Per line: previous billing plus this period past the value received on
+    // the order's delivery tickets is a warning, never a refusal. Returns how
+    // many lines it warned on.
+    convReceivedWarn() {
+        if (!PurchaseOrdersPage._convReceiving) return 0;
+        let n = 0;
+        for (const inp of $$('.po-conv-amount')) {
+            const r = PurchaseOrdersPage._convReceived[inp.dataset.line] || { value: 0, billed: 0 };
+            const total = r.billed + (parseFloat(inp.value) || 0);
+            const over = (parseFloat(inp.value) || 0) > 0 && total > r.value + 0.005;
+            const el = $(`.po-conv-warn[data-line="${inp.dataset.line}"]`);
+            if (el) el.textContent = over ? `Bills ${formatCurrency(total)} against ${formatCurrency(r.value)} received` : '';
+            if (over) n += 1;
+        }
+        return n;
     },
 
     async doConvert(id) {
@@ -427,6 +488,8 @@ const PurchaseOrdersPage = {
                 if (row && sel.value) row.account_id = parseInt(sel.value);
             }
             lines = Object.values(byLine);
+            const over = PurchaseOrdersPage.convReceivedWarn();
+            if (over && !confirm(`${over} line${over > 1 ? 's bill' : ' bills'} more than the delivery tickets received. Create the bill anyway?`)) return;
         } else {
             // Business dialog: an account per line, billed in full as today.
             lines = [];
@@ -443,6 +506,7 @@ const PurchaseOrdersPage = {
             const date = $('#po-conv-date')?.value || null;
             const result = await API.post(`/purchase-orders/${id}/convert-to-bill`, { lines, date });
             toast(result.message);
+            for (const w of result.warnings || []) toast(w, 'warning');
             closeModal();
             // Through the hash, so the address (and a refresh) shows Bills.
             if (location.hash === '#/bills') App.navigate('#/bills');

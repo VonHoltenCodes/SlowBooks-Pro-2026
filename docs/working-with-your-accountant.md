@@ -27,7 +27,8 @@ What the role can do:
   lines between accounts with Reports → **Reclassify Transactions** (the
   lines parked on an account for a period, ticked and moved to the account
   they belong on, and a class, as one audited change naming every line),
-  and nothing else: an invoice, a bill, a payment, a bank entry, a setting
+  and, for a construction company, post or void the WIP schedule's
+  adjusting entry (see contractor-mode.md), and nothing else: an invoice, a bill, a payment, a bank entry, a setting
   or a user is refused to them with a sentence that says so;
 - payroll and HR stay the administrator's, reads included, as they are for
   every role but admin.
@@ -71,7 +72,8 @@ If they would rather not sign in, send:
   and Trial Balance in one PDF;
 - Reports → **General Ledger** → Save CSV: every line, by account;
 - Reports → **A/R Aging** and **A/P Aging** → Save CSV: who owes, and who
-  is owed, by age;
+  is owed, by age, as of the date you pick (an invoice or bill paid since still
+  counts on a past date, so the total matches the Balance Sheet for that date);
 - the bank reconciliation reports, as needed;
 - or all of it at once: Reports → **Accountant's Package**, one zip for the
   period with the Financial Statements Pack, the General Ledger and Trial

@@ -6,8 +6,9 @@
 # Pure functions over the figures the other services already compute — the
 # contract summary (#552), the cost tree and budgets (M3), buyout (#553), change
 # orders (#554) and pay applications (#555). Nothing here posts: the WIP
-# adjusting entry is computed with its amounts for the accountant to post, never
-# written. The one thing stored is the cost-to-complete forecast the user types.
+# adjusting entry is computed with its amounts, and posting it is the WIP
+# schedule's Post (app/services/wip_posting.py). The one thing stored is the
+# cost-to-complete forecast the user types.
 # Money is Decimal, quantized to cents half-up through accounting._q.
 # ============================================================================
 
@@ -24,7 +25,7 @@ from app.models.job_costing import JobBudget, JobCostToComplete
 from app.models.jobs import Job
 from app.models.transactions import Transaction, TransactionLine
 from app.services.accounting import _q
-from app.services.jobs_service import job_attribution
+from app.services.jobs_service import job_attribution, not_wip_entry
 
 _ZERO = Decimal("0")
 _ONE = Decimal("1")
@@ -50,31 +51,132 @@ def _local_date(ts: datetime) -> date:
     return ts.astimezone(_LOCAL_TZ).date()
 
 
+def job_closed_by(job: Job, as_of: Optional[date] = None) -> bool:
+    """Whether the job was closed on `as_of`: its status is Closed and it
+    went to Closed by then (a job closed with no date on file counts as
+    closed on every date). None: closed today."""
+    if job.status not in _CLOSED:
+        return False
+    return as_of is None or job.closed_on is None or job.closed_on <= as_of
+
+
+def status_on(job: Job, as_of: Optional[date] = None) -> str:
+    """The job's status as it read on `as_of`: a job closed after the day was
+    still in progress on it."""
+    if job.status in _CLOSED and not job_closed_by(job, as_of):
+        return "in_progress"
+    return job.status
+
+
+def co_stood_on(co, on: date) -> bool:
+    """Whether a change order stood approved on `on`: it had taken effect by
+    then and was not voided until after it. A change order counts as of a
+    day in the state it had that day, in every report."""
+    from app.services.change_orders import co_effective_date
+
+    effective = co_effective_date(co)
+    if effective is None or effective > on:
+        return False
+    if co.status == "approved":
+        return True
+    return (
+        co.status == "void"
+        and co.voided_at is not None
+        and _local_date(co.voided_at) > on
+    )
+
+
+def voided_since(db: Session, job_ids: list[int], on: date) -> list:
+    """The jobs' change orders voided after `on` that stood approved on it:
+    their effects are gone from the books today, but not from that day."""
+    from app.models.change_orders import ChangeOrder
+
+    if not job_ids:
+        return []
+    cos = (
+        db.query(ChangeOrder)
+        .filter(
+            ChangeOrder.job_id.in_(job_ids),
+            ChangeOrder.status == "void",
+            ChangeOrder.voided_at.isnot(None),
+        )
+        .all()
+    )
+    return [co for co in cos if co_stood_on(co, on)]
+
+
+def sub_lines_voided_since(db: Session, po_ids, on: date) -> dict:
+    """The commitment lines sub change orders added that stood on `on` and
+    were voided since, per commitment id: the void removed them from the
+    commitment, but on that day they were part of it. Each is the change
+    order's own line (the void refuses a billed one, so none was billed)."""
+    from app.models.change_orders import ChangeOrder
+
+    if not po_ids:
+        return {}
+    out: dict = {}
+    for co in db.query(ChangeOrder).filter(
+        ChangeOrder.kind == "sub",
+        ChangeOrder.status == "void",
+        ChangeOrder.commitment_id.in_(list(po_ids)),
+    ):
+        if co_stood_on(co, on):
+            out.setdefault(co.commitment_id, []).extend(co.lines)
+    return out
+
+
+def contract_on(db: Session, job: Job, on: date) -> Optional[Decimal]:
+    """The job's contract sum as it stood on `on`: today's, less the
+    contract-funded owner change orders that take effect after the day, plus
+    those that stood on it and have been voided since."""
+    from app.services.change_orders import co_totals
+    from app.services.contracts import contract_changes_after
+
+    if job.contract_amount is None:
+        return None
+    restored = sum(
+        (
+            co_totals(co, job)["sell_total"]
+            for co in voided_since(db, [job.id], on)
+            if co.kind == "owner" and co.funding == "contract"
+        ),
+        _ZERO,
+    )
+    return _q(_q(job.contract_amount) - contract_changes_after(db, job, on) + restored)
+
+
 def select_jobs(
     db: Session,
     job_id: Optional[int] = None,
     customer_id: Optional[int] = None,
     status: Optional[str] = None,
     include_closed: bool = False,
+    as_of: Optional[date] = None,
 ) -> list[Job]:
     """The jobs a construction report runs over, customer then job name.
 
     `status` names one job status and wins; otherwise not-awarded jobs are
-    always left out and closed ones too unless `include_closed`."""
+    always left out and closed ones too unless `include_closed`. With
+    `as_of`, a job closed after that day was still open on it, so it stays
+    in."""
     q = db.query(Job).options(joinedload(Job.customer))
     if job_id is not None:
         q = q.filter(Job.id == job_id)
     if customer_id is not None:
         q = q.filter(Job.customer_id == customer_id)
-    if status:
+    # with `as_of` a named status is matched below, on the status the day had
+    if status and as_of is None:
         q = q.filter(Job.status == status)
-    else:
-        excluded = list(_NEVER_DEFAULT)
+    elif not status:
+        q = q.filter(~Job.status.in_(_NEVER_DEFAULT))
         if not include_closed:
-            excluded += list(_CLOSED)
-        if excluded:
-            q = q.filter(~Job.status.in_(excluded))
+            closed = Job.status.in_(_CLOSED)
+            if as_of is not None:
+                closed = closed & (Job.closed_on.is_(None) | (Job.closed_on <= as_of))
+            q = q.filter(~closed)
     jobs = q.all()
+    if status and as_of is not None:
+        jobs = [j for j in jobs if status_on(j, as_of) == status]
     return sorted(
         jobs,
         key=lambda j: (
@@ -103,11 +205,39 @@ def _customer_name(job: Job) -> str:
 # the rows into the entry with amounts — per job and net. It computes the entry;
 # it does not post it.
 
+# The accounts are construction setup's (CONSTRUCTION_ACCOUNTS), by name.
 WIP_OVERBILLING_ACCOUNT = "Billings in Excess of Costs and Estimated Earnings"
 WIP_UNDERBILLING_ACCOUNT = "Costs and Estimated Earnings in Excess of Billings"
-WIP_REVENUE_ACCOUNT = "Contract Revenue (WIP adjustment)"
+WIP_REVENUE_ACCOUNT = "Contract Revenue – WIP Adjustment"
 WIP_LOSS_EXPENSE_ACCOUNT = "Loss on Uncompleted Contracts"
 WIP_LOSS_ACCOUNT = "Provision for Loss on Uncompleted Contracts"
+WIP_ACCOUNTS = (
+    WIP_UNDERBILLING_ACCOUNT,
+    WIP_OVERBILLING_ACCOUNT,
+    WIP_REVENUE_ACCOUNT,
+    WIP_LOSS_EXPENSE_ACCOUNT,
+    WIP_LOSS_ACCOUNT,
+)
+
+
+def wip_account_numbers(db: Session) -> dict:
+    """The number each WIP account carries: its number in the chart, else the
+    one construction setup (or Post) would give it — the suggested number
+    when no account holds it yet, else none. A read: nothing is created."""
+    from app.services.accounting import CONSTRUCTION_ACCOUNTS
+
+    suggested = {name: number for number, name, _t, _d in CONSTRUCTION_ACCOUNTS}
+    out = {}
+    for name in WIP_ACCOUNTS:
+        acct = db.query(Account).filter(Account.name == name).first()
+        if acct is not None:
+            out[name] = acct.account_number
+            continue
+        number = suggested[name]
+        taken = db.query(Account.id).filter(Account.account_number == number).first()
+        out[name] = None if taken else number
+    return out
+
 
 WIP_COLUMNS = [
     {"key": "customer_name", "label": "Customer", "kind": "text"},
@@ -121,10 +251,12 @@ WIP_COLUMNS = [
     {"key": "cost_to_date", "label": "Cost to date", "kind": "money"},
     {"key": "percent_complete", "label": "% complete", "kind": "pct"},
     {"key": "earned_revenue", "label": "Earned", "kind": "money"},
+    {"key": "gross_profit_to_date", "label": "GP to date", "kind": "money"},
     {"key": "billed_to_date", "label": "Billed", "kind": "money"},
     {"key": "over_billing", "label": "Over billed", "kind": "money"},
     {"key": "under_billing", "label": "Under billed", "kind": "money"},
     {"key": "retainage_outstanding", "label": "Retainage", "kind": "money"},
+    {"key": "backlog", "label": "Backlog", "kind": "money"},
     {"key": "cost_to_complete", "label": "Cost to complete", "kind": "money"},
     {"key": "projected_gross_profit", "label": "Proj. GP", "kind": "money"},
     {"key": "projected_loss", "label": "Proj. loss", "kind": "money"},
@@ -140,10 +272,12 @@ _WIP_SUMMED = (
     "estimated_gross_profit",
     "cost_to_date",
     "earned_revenue",
+    "gross_profit_to_date",
     "billed_to_date",
     "over_billing",
     "under_billing",
     "retainage_outstanding",
+    "backlog",
     "cost_to_complete",
     "projected_gross_profit",
     "projected_loss",
@@ -209,31 +343,6 @@ def _unmeasured_wip_row(
     return row
 
 
-def _contract_changes_after(db: Session, job: Job, as_of: date) -> Decimal:
-    """Σ sell of this job's approved, contract-funded owner change orders whose
-    approve landed after `as_of` — what to back out of the current contract to
-    read the sum as it stood on that day."""
-    from app.models.change_orders import ChangeOrder
-    from app.services.change_orders import co_totals
-
-    total = _ZERO
-    cos = (
-        db.query(ChangeOrder)
-        .filter(
-            ChangeOrder.job_id == job.id,
-            ChangeOrder.kind == "owner",
-            ChangeOrder.status == "approved",
-            ChangeOrder.funding == "contract",
-        )
-        .all()
-    )
-    for co in cos:
-        approved = _local_date(co.approved_at) if co.approved_at else None
-        if approved is not None and approved > as_of:
-            total += co_totals(co, job)["sell_total"]
-    return _q(total)
-
-
 def wip_row(db: Session, job: Job, as_of: date) -> dict:
     """One WIP line for a job. A job with no contract amount is listed with
     blank figures (the schedule still shows it). Every money figure reads the
@@ -253,36 +362,39 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
     # no budget and no forecast has nothing to measure against: it counts as
     # 100% complete only once its cost has reached the contract (a loss,
     # recognised once); before that it is listed and left out of the figures.
+    # A closed job is finished: 100% complete, nothing still to spend.
     forecast = ctc_forecast(db, job, as_of)
-    cost_to_complete = _q(forecast["totals"]["cost_to_complete"])
-    if forecast["has_basis"]:
-        est_total_cost = _q(cost_to_date + cost_to_complete)
+    closed = forecast["closed"]
+    if forecast["has_basis"] or closed:
+        cost_to_complete = _q(forecast["totals"]["cost_to_complete"])
     else:
-        est_total_cost = cost_to_date
+        cost_to_complete = _ZERO
+    est_total_cost = _q(cost_to_date + cost_to_complete)
     posted_revenue = _q(totals["act_revenue"])
 
     summary = contract_summary(
         db, job, cost=cost_to_date, billed=posted_revenue, as_of=as_of
     )
-    current_revised = _q(summary["contract_amount"])
     # The original as the pay application prints it (#723): the stamped one,
     # else the sum less the approved change orders (a sum from the job form
     # with no contract type saved was never stamped).
     original = original_contract_sum(db, job)
     # The contract as of the date: back out the contract-funded COs approved
-    # after it, so original + approved-as-of = revised-as-of.
-    changes_after = _contract_changes_after(db, job, as_of)
-    revised = _q(current_revised - changes_after)
+    # after it and put back those voided since that stood on it, so original
+    # + approved-as-of = revised-as-of (the Change Order Log's rule).
+    revised = contract_on(db, job, as_of)
     approved_cos = _q(revised - original)
     billed = _q(summary["billed_to_date"])
     retainage_out = _q(summary["retainage"]["outstanding"])
 
-    if not forecast["has_basis"] and cost_to_date < revised:
+    if not forecast["has_basis"] and not closed and cost_to_date < revised:
         return _unmeasured_wip_row(
             job, original, approved_cos, revised, cost_to_date, billed, retainage_out
         )
 
-    if est_total_cost > _ZERO:
+    if closed:
+        pct = _ONE
+    elif est_total_cost > _ZERO:
         pct = cost_to_date / est_total_cost
         if pct > _ONE:
             pct = _ONE  # capped at 100% — a cost overrun does not earn past the sum
@@ -309,6 +421,9 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
         if has_approved_application(db, job.id, as_of)
         else "posted_revenue"
     )
+    warnings = _wip_row_warnings(
+        db, job, forecast, revised, billed, retainage_out, cost_to_complete
+    )
     return {
         "job_id": job.id,
         "job_name": job.name,
@@ -326,15 +441,93 @@ def wip_row(db: Session, job: Job, as_of: date) -> dict:
         "cost_to_date": float(cost_to_date),
         "percent_complete": float(_q(pct * 100)),
         "earned_revenue": float(earned),
+        "gross_profit_to_date": float(_q(earned - cost_to_date)),
         "billed_to_date": float(billed),
         "over_billing": float(over),
         "under_billing": float(under),
         "retainage_outstanding": float(retainage_out),
+        "backlog": float(_q(revised - earned)),
         "cost_to_complete": float(cost_to_complete),
         "projected_gross_profit": float(projected_gp),
         "projected_loss": float(projected_loss),
         "loss_provision": float(loss_provision),
+        "warnings": warnings,
     }
+
+
+# A job billed at least this share of its revised contract is near its end:
+# a budget cell that has had no cost and no forecast is then named in the
+# warnings, since its whole budget still counts as cost to come.
+_NEARLY_BILLED = Decimal("0.90")
+
+
+def _money_text(value: Decimal) -> str:
+    return f"${_q(value):,.2f}"
+
+
+def _open_commitments(db: Session, job: Job) -> int:
+    """How many issued, not closed commitments (PO or subcontract) the job
+    has, on the header or on a line."""
+    from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
+
+    on_line = (
+        db.query(PurchaseOrderLine.purchase_order_id)
+        .filter(PurchaseOrderLine.job_id == job.id)
+        .subquery()
+    )
+    return (
+        db.query(PurchaseOrder.id)
+        .filter(
+            (PurchaseOrder.job_id == job.id) | PurchaseOrder.id.in_(on_line),
+            PurchaseOrder.status.in_(
+                (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
+            ),
+        )
+        .count()
+    )
+
+
+def _wip_row_warnings(
+    db: Session, job: Job, forecast: dict, revised, billed, retainage_out, ctc
+) -> list[str]:
+    """What a measured row should say about its cost to complete: a section
+    that never burns down on a job billed near its end (budget, no cost, no
+    forecast entered), and a job billed in full, its retainage collected and
+    every commitment closed that still shows cost to come."""
+    out = []
+    if ctc <= _ZERO or forecast["closed"] or revised <= _ZERO:
+        return out
+    billed_share = billed / revised
+    if billed_share >= _NEARLY_BILLED:
+        sections: dict = {}
+        for r in forecast["rows"]:
+            s = sections.setdefault(
+                r["cost_code_id"],
+                {"label": r["section"], "budget": _ZERO, "actual": _ZERO},
+            )
+            s["budget"] += Decimal(str(r["budget"]))
+            s["actual"] += Decimal(str(r["actual"]))
+            s["entered"] = s.get("entered") or r["entered"] is not None
+            s["ctc"] = s.get("ctc", _ZERO) + Decimal(str(r["cost_to_complete"]))
+        for s in sections.values():
+            if s["budget"] > _ZERO and s["actual"] == _ZERO and not s["entered"]:
+                out.append(
+                    f"{job.name}: {s['label']} has a budget of "
+                    f"{_money_text(s['budget'])} with no cost posted and no "
+                    f"forecast entered, so {_money_text(s['ctc'])} counts as "
+                    f"cost still to come on a job billed "
+                    f"{billed_share * 100:.1f}% of its contract. If that work "
+                    "is done or was never going to post there, enter 0 for "
+                    "it in the Cost-to-Complete Forecast."
+                )
+    if billed >= revised and retainage_out <= _ZERO and not _open_commitments(db, job):
+        out.append(
+            f"{job.name}: billed in full, retainage collected and every "
+            f"commitment closed, yet {_money_text(ctc)} of cost to complete "
+            "remains. If the job is finished, close it (a closed job reads "
+            "100% complete) or enter 0 in the Cost-to-Complete Forecast."
+        )
+    return out
 
 
 def _forecast_dating_warnings(db: Session, jobs: list, rows: list, as_of: date):
@@ -373,11 +566,19 @@ def wip_schedule(
     and under billing. Every money figure reads as of `as_of` — actuals and
     posted revenue to that date, billing and retainage from the applications
     approved by then, the revised contract with the change orders approved by
-    then. Budgets have no date, so the estimated total cost is job-to-date."""
+    then. The estimated total cost takes the budget with the change orders
+    in effect by then, and a job closed after the date reads as it did: open.
+    The WIP adjusting entry itself is in none of these figures."""
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
+    # A job whose contract is dated after the day had no contract on it.
+    jobs = [j for j in jobs if j.contract_date is None or j.contract_date <= as_of]
     rows = [wip_row(db, job, as_of) for job in jobs]
+    for job, r in zip(jobs, rows):
+        r["status"] = status_on(job, as_of)
     warnings = [r["warning"] for r in rows if r.get("excluded")]
+    for r in rows:
+        warnings += r.get("warnings") or []
     warnings += _forecast_dating_warnings(db, jobs, rows, as_of)
 
     totals = {key: _ZERO for key in _WIP_SUMMED}
@@ -398,6 +599,27 @@ def wip_schedule(
         if measured_revised
         else None
     )
+    from app.services.wip_posting import posted_entry_info
+
+    numbers = wip_account_numbers(db)
+    entry = wip_adjusting_entry(rows, as_of, numbers)
+    # Post books the company's whole schedule for the date; whether that is
+    # done is said whatever filter this run has.
+    posted_info = posted_entry_info(db, as_of)
+    if posted_info is not None:
+        # What is on the books is the posted entry: show its lines, and say
+        # when the schedule no longer reads the same (a change order approved
+        # back-dated, a late bill on or before the date).
+        keep = (
+            {r["job_id"] for r in rows}
+            if job_id is not None or customer_id is not None or status
+            else None
+        )
+        entry, warning = _posted_view(db, posted_info, entry, rows, keep, as_of)
+        if warning:
+            warnings.append(warning)
+    entry["posted_entry"] = posted_info
+    entry["posted"] = posted_info is not None
     return {
         "as_of": as_of.isoformat(),
         "method": "cost_to_cost",
@@ -412,42 +634,52 @@ def wip_schedule(
             "loss_expense": WIP_LOSS_EXPENSE_ACCOUNT,
             "loss_provision": WIP_LOSS_ACCOUNT,
         },
-        "adjusting_entry": wip_adjusting_entry(rows, as_of),
+        "adjusting_entry": entry,
     }
 
 
 # ── WIP adjusting entry ───────────────────────────────────────────────────
 
 
-def _entry_line(account: str, debit: Decimal, credit: Decimal) -> dict:
-    return {"account": account, "debit": float(debit), "credit": float(credit)}
+def _entry_line(account: str, debit: Decimal, credit: Decimal, numbers: dict) -> dict:
+    return {
+        "account": account,
+        "account_number": numbers.get(account),
+        "debit": float(debit),
+        "credit": float(credit),
+    }
 
 
-def _job_entry_lines(under: Decimal, over: Decimal, provision: Decimal) -> list:
+def _job_entry_lines(
+    under: Decimal, over: Decimal, provision: Decimal, numbers: dict
+) -> list:
     """The lines for one job's balances: an under-billing is an asset against
     revenue, an over-billing is revenue deferred to a liability, and the loss
     provision is an expense against its liability."""
     lines = []
     if under > _ZERO:
-        lines.append(_entry_line(WIP_UNDERBILLING_ACCOUNT, under, _ZERO))
+        lines.append(_entry_line(WIP_UNDERBILLING_ACCOUNT, under, _ZERO, numbers))
     if over > _ZERO:
-        lines.append(_entry_line(WIP_OVERBILLING_ACCOUNT, _ZERO, over))
+        lines.append(_entry_line(WIP_OVERBILLING_ACCOUNT, _ZERO, over, numbers))
     net_revenue = under - over  # credit when under-billed, debit when over
     if net_revenue > _ZERO:
-        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, _ZERO, net_revenue))
+        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, _ZERO, net_revenue, numbers))
     elif net_revenue < _ZERO:
-        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, -net_revenue, _ZERO))
+        lines.append(_entry_line(WIP_REVENUE_ACCOUNT, -net_revenue, _ZERO, numbers))
     if provision > _ZERO:
-        lines.append(_entry_line(WIP_LOSS_EXPENSE_ACCOUNT, provision, _ZERO))
-        lines.append(_entry_line(WIP_LOSS_ACCOUNT, _ZERO, provision))
+        lines.append(_entry_line(WIP_LOSS_EXPENSE_ACCOUNT, provision, _ZERO, numbers))
+        lines.append(_entry_line(WIP_LOSS_ACCOUNT, _ZERO, provision, numbers))
     return lines
 
 
-def wip_adjusting_entry(rows: list[dict], as_of: date) -> dict:
+def wip_adjusting_entry(
+    rows: list[dict], as_of: date, numbers: Optional[dict] = None
+) -> dict:
     """The WIP adjusting entry with amounts, per job and net, from the schedule
-    rows. The balances are carried to `as_of` in full — if an earlier entry was
-    posted, the accountant reverses it first or posts the difference. Computed
-    only: nothing is written to the books."""
+    rows. The balances are carried to `as_of` in full; Post (wip_posting)
+    books them with a reversal the next day, so each period's entry stands
+    alone. Computed here: nothing is written to the books."""
+    numbers = numbers or {}
     jobs = []
     t_under = t_over = t_prov = _ZERO
     for r in rows:
@@ -471,10 +703,10 @@ def wip_adjusting_entry(rows: list[dict], as_of: date) -> dict:
                 "net_under_over": float(_q(under - over)),
                 "projected_loss": r["projected_loss"],
                 "loss_provision": float(prov),
-                "lines": _job_entry_lines(under, over, prov),
+                "lines": _job_entry_lines(under, over, prov, numbers),
             }
         )
-    net = _job_entry_lines(_q(t_under), _q(t_over), _q(t_prov))
+    net = _job_entry_lines(_q(t_under), _q(t_over), _q(t_prov), numbers)
     debits = sum((Decimal(str(ln["debit"])) for ln in net), _ZERO)
     credits = sum((Decimal(str(ln["credit"])) for ln in net), _ZERO)
     return {
@@ -493,12 +725,103 @@ def wip_adjusting_entry(rows: list[dict], as_of: date) -> dict:
     }
 
 
+def _posted_rows(db: Session, transaction_id: int, rows: list[dict]) -> list[dict]:
+    """The posted WIP entry's figures per job, in the shape wip_adjusting_entry
+    reads: each job's under- and over-billing and loss provision from the
+    lines on its accounts."""
+    by_job: dict = {}
+    for ln, name in (
+        db.query(TransactionLine, Account.name)
+        .join(Account, TransactionLine.account_id == Account.id)
+        .filter(TransactionLine.transaction_id == transaction_id)
+    ):
+        f = by_job.setdefault(ln.job_id, {"under": _ZERO, "over": _ZERO, "prov": _ZERO})
+        net = Decimal(str(ln.debit or 0)) - Decimal(str(ln.credit or 0))
+        if name == WIP_UNDERBILLING_ACCOUNT:
+            f["under"] += net
+        elif name == WIP_OVERBILLING_ACCOUNT:
+            f["over"] -= net
+        elif name == WIP_LOSS_ACCOUNT:
+            f["prov"] -= net
+    computed = {r["job_id"]: r for r in rows}
+    out = []
+    for jid, f in by_job.items():
+        job = db.get(Job, jid) if jid is not None else None
+        r = computed.get(jid, {})
+        out.append(
+            {
+                "job_id": jid,
+                "job_name": job.name if job else "No job",
+                "customer_name": _customer_name(job) if job else "",
+                "has_contract": True,
+                "under_billing": float(_q(f["under"])),
+                "over_billing": float(_q(f["over"])),
+                "loss_provision": float(_q(f["prov"])),
+                "projected_loss": r.get("projected_loss") or 0.0,
+            }
+        )
+    out.sort(key=lambda r: (r["customer_name"].lower(), r["job_name"].lower()))
+    return out
+
+
+def _entry_figures(entry: dict) -> dict:
+    """Each job's (under, over, provision) in an entry, for comparing two."""
+    return {
+        j["job_id"]: (j["under_billing"], j["over_billing"], j["loss_provision"])
+        for j in entry["jobs"]
+    }
+
+
+def _posted_view(
+    db: Session, info: dict, computed: dict, rows: list, keep, as_of: date
+) -> tuple[dict, Optional[str]]:
+    """The adjusting entry as posted for the date (only the jobs in `keep`
+    when the run is filtered), with `posted_differs`, the schedule's own
+    figures under `computed` and, when they differ, a sentence to say so."""
+    posted_rows = [
+        r
+        for r in _posted_rows(db, info["transaction_id"], rows)
+        if keep is None or r["job_id"] in keep
+    ]
+    entry = wip_adjusting_entry(posted_rows, as_of, wip_account_numbers(db))
+    differs = _entry_figures(entry) != _entry_figures(computed)
+    entry["posted_differs"] = differs
+    entry["posted_warning"] = None
+    entry["computed"] = {
+        k: computed[k]
+        for k in ("jobs", "totals", "lines", "total_debits", "total_credits")
+    }
+    if not differs:
+        return entry, None
+    p, c = entry["totals"], computed["totals"]
+    warning = (
+        f"The WIP entry posted for {as_of.isoformat()} (journal entry "
+        f"{info['transaction_id']}) books over-billings "
+        f"{_money_text(Decimal(str(p['over_billing'])))}, under-billings "
+        f"{_money_text(Decimal(str(p['under_billing'])))} and a loss provision "
+        f"of {_money_text(Decimal(str(p['loss_provision'])))}; the schedule now "
+        f"reads {_money_text(Decimal(str(c['over_billing'])))}, "
+        f"{_money_text(Decimal(str(c['under_billing'])))} and "
+        f"{_money_text(Decimal(str(c['loss_provision'])))}, because something "
+        f"dated on or before {as_of.isoformat()} changed after it was posted "
+        "(a change order approved back-dated, a late bill). Void the posted "
+        "entry and post it again to book the schedule's figures."
+    )
+    entry["posted_warning"] = warning
+    return entry, warning
+
+
 # ── Cost-to-complete forecast (per job, section and cost type) ───────────────
 #
-# A cell is a section × cost type. Its default cost to complete is the budget
-# less the actual cost, floored at zero; a typed amount (job_cost_to_complete)
-# replaces the default. Budget and cost with no code share one Unassigned cell,
-# so an uncoded budget is measured against uncoded cost.
+# A cell is a section × cost type. The default cost to complete nets the cost
+# types within a section — the section's budget less its actual, floored at
+# zero — and shows it against the cells with budget left; a typed amount
+# (job_cost_to_complete) replaces its cell's share. A section whose budget is
+# below zero (an accepted deduct alternate with nothing in its section to
+# deduct from) keeps that budget as a negative cost to complete, which takes
+# it off the cost still to come elsewhere, never past zero for the job.
+# Budget and cost with no code share one Unassigned cell, so an uncoded budget
+# is measured against uncoded cost. A closed job has no cost to complete.
 
 
 def _section_id(code: CostCode, code_by_id: dict) -> int:
@@ -519,7 +842,7 @@ def ctc_forecast(db: Session, job: Job, as_of: Optional[date] = None) -> dict:
     amount (or None) and the cost to complete that counts. `has_basis` is False
     when the job has no budget and no typed amounts — nothing to measure
     percent complete against."""
-    from app.services.job_costing import read_cost_type_map
+    from app.services.job_costing import budget_rows, read_cost_type_map
 
     types = read_cost_type_map(db)
     code_by_id = {c.id: c for c in db.query(CostCode).all()}
@@ -543,7 +866,7 @@ def ctc_forecast(db: Session, job: Job, as_of: Optional[date] = None) -> dict:
     def cell(key):
         return cells.setdefault(key, {"budget": _ZERO, "actual": _ZERO, "typed": None})
 
-    for b in db.query(JobBudget).filter(JobBudget.job_id == job.id):
+    for b in budget_rows(db, [job.id], as_of):
         cell(key_for(b.cost_code_id, b.cost_type))["budget"] += Decimal(str(b.amount))
 
     q = (
@@ -559,6 +882,7 @@ def ctc_forecast(db: Session, job: Job, as_of: Optional[date] = None) -> dict:
         .filter(
             job_attribution() == job.id,
             Account.account_type.in_((AccountType.COGS, AccountType.EXPENSE)),
+            not_wip_entry(),
         )
     )
     if as_of is not None:
@@ -574,11 +898,22 @@ def ctc_forecast(db: Session, job: Job, as_of: Optional[date] = None) -> dict:
     for row in saved:
         cell((row.cost_code_id, row.cost_type or ""))["typed"] = _q(row.amount)
 
+    defaults = _netted_defaults(cells)
+    counted = _cap_deducts(
+        {
+            k: (c["typed"] if c["typed"] is not None else defaults[k])
+            for k, c in cells.items()
+        }
+    )
+    closed = job_closed_by(job, as_of)
     rows = []
     for (section_id, cost_type), c in cells.items():
         budget, actual = _q(c["budget"]), _q(c["actual"])
-        default = max(_q(budget - actual), _ZERO)
-        ctc = c["typed"] if c["typed"] is not None else default
+        default = defaults[(section_id, cost_type)]
+        ctc = counted[(section_id, cost_type)]
+        if closed:
+            # a closed job has nothing left to spend, whatever the budget
+            default = ctc = _ZERO
         section = code_by_id.get(section_id)
         rows.append(
             {
@@ -602,16 +937,88 @@ def ctc_forecast(db: Session, job: Job, as_of: Optional[date] = None) -> dict:
     totals = {
         k: total(k) for k in ("budget", "actual", "cost_to_complete", "projected_final")
     }
+    # A budget written by a change order alone is no estimate of the job: a
+    # job whose only budget rows came from change orders (a hand-typed SOV
+    # and one owner CO) has nothing to measure against, as one with none.
+    contract_budget = (
+        db.query(sqlfunc.coalesce(sqlfunc.sum(JobBudget.amount), 0))
+        .filter(JobBudget.job_id == job.id, JobBudget.source != "change")
+        .scalar()
+    )
     return {
         "job_id": job.id,
         "job_name": job.name,
         "customer_id": job.customer_id,
         "customer_name": _customer_name(job),
         "as_of": as_of.isoformat() if as_of else None,
-        "has_basis": bool(saved) or totals["budget"] > 0,
+        "has_basis": bool(saved) or Decimal(str(contract_budget)) > _ZERO,
+        "closed": closed,
         "rows": rows,
         "totals": totals,
     }
+
+
+def _netted_defaults(cells: dict) -> dict:
+    """The default cost to complete of each section × cost type cell. Cost
+    types net within a section: its default is the section's budget less its
+    actual, floored at zero, so a trade bid as subcontract and bought as
+    material does not keep its whole subcontract budget still to spend. The
+    section's default is shown against the cells that still have budget left,
+    in proportion to what each has left, the last taking the rounding.
+
+    A section whose budget nets below zero is a deduct with nothing in its
+    section to deduct from: its default is that budget (cost posted there is
+    cost beyond the plan, so it does not deepen the deduct), shown against
+    its negative cells."""
+    by_section: dict = {}
+    for key in cells:
+        by_section.setdefault(key[0], []).append(key)
+    out = {}
+    for keys in by_section.values():
+        budget = sum((cells[k]["budget"] for k in keys), _ZERO)
+        actual = sum((cells[k]["actual"] for k in keys), _ZERO)
+        if budget < _ZERO:
+            pool = _q(budget)
+            left = {k: -min(cells[k]["budget"], _ZERO) for k in keys}
+        else:
+            pool = max(_q(budget - actual), _ZERO)
+            left = {
+                k: max(_q(cells[k]["budget"] - cells[k]["actual"]), _ZERO) for k in keys
+            }
+        weight = sum(left.values(), _ZERO)
+        shared = [k for k in keys if left[k] > _ZERO]
+        given = _ZERO
+        for k in keys:
+            out[k] = _ZERO
+        for i, k in enumerate(shared):
+            if i == len(shared) - 1:
+                out[k] = _q(pool - given)
+            else:
+                out[k] = _q(pool * left[k] / weight)
+                given += out[k]
+    return out
+
+
+def _cap_deducts(ctc: dict) -> dict:
+    """The cost to complete that counts per cell: a deduct's negative amount
+    comes off the cost still to come in the other cells, but the job's total
+    never goes below zero (a deduct cannot un-spend cost already posted).
+    When the deducts are more than what is still to come, each is scaled
+    back in proportion, the last taking the rounding."""
+    to_come = sum((v for v in ctc.values() if v > _ZERO), _ZERO)
+    deducts = [k for k, v in ctc.items() if v < _ZERO]
+    owed = -sum((ctc[k] for k in deducts), _ZERO)
+    if not deducts or owed <= to_come:
+        return dict(ctc)
+    out = dict(ctc)
+    given = _ZERO
+    for i, k in enumerate(deducts):
+        if i == len(deducts) - 1:
+            out[k] = _q(-to_come - given)
+        else:
+            out[k] = _q(ctc[k] * to_come / owed)
+            given += out[k]
+    return out
 
 
 def set_ctc_entries(db: Session, job: Job, entries: list[dict]) -> dict:
@@ -700,7 +1107,7 @@ def ctc_forecast_report(
     """The forecast table for every selected job, with totals per job and a
     grand total — the table WIP reads its estimated total cost from."""
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     rows = [ctc_forecast(db, job, as_of) for job in jobs]
     grand = {
         k: float(_q(sum((Decimal(str(j["totals"][k])) for j in rows), _ZERO)))
@@ -735,7 +1142,11 @@ def _ctc_figures(raw: dict) -> dict:
     committed = _q(raw["committed"])
     actual = _q(raw["actual"])
     remaining_to_budget = revised - actual - committed
-    if remaining_to_budget < _ZERO:
+    if revised < _ZERO:
+        # a deduct alternate: its budget is cost the job will not spend, so
+        # it reads no variance until cost posts against it
+        remaining_to_budget = revised
+    elif remaining_to_budget < _ZERO:
         remaining_to_budget = _ZERO
     cost_to_complete = _q(remaining_to_budget + committed)
     projected_final = _q(actual + cost_to_complete)
@@ -780,15 +1191,17 @@ def _ctc_totals(budget: Decimal, committed: Decimal, actual: Decimal, parts) -> 
 def _ctc_job(db: Session, job: Job, as_of: date, tree: list) -> dict:
     """Cost-to-complete for one job: the cost-code tree (division › section)
     with budget / committed / actual rolled up, plus an Uncoded row and totals.
-    `tree` is the shared code_tree, built once by the caller."""
-    from app.models.purchase_orders import POStatus, PurchaseOrder, PurchaseOrderLine
+    `tree` is the shared code_tree, built once by the caller. Budgets take
+    the change orders in effect by `as_of`, and committed is Commitment
+    Status's remaining that day."""
+    from app.services.job_costing import budget_rows, commitment_lines
 
     raw: dict = {}  # cost_code_id (or None) -> raw figures
 
     def bucket(code_id):
         return raw.setdefault(code_id, _blank_raw())
 
-    for b in db.query(JobBudget).filter(JobBudget.job_id == job.id):
+    for b in budget_rows(db, [job.id], as_of):
         d = bucket(b.cost_code_id)
         if b.source == "change":
             d["chg"] += Decimal(str(b.amount))
@@ -806,7 +1219,11 @@ def _ctc_job(db: Session, job: Job, as_of: date, tree: list) -> dict:
         .select_from(TransactionLine)
         .join(Transaction, TransactionLine.transaction_id == Transaction.id)
         .join(Account, TransactionLine.account_id == Account.id)
-        .filter(job_attribution() == job.id, Account.account_type.in_(cost_types))
+        .filter(
+            job_attribution() == job.id,
+            Account.account_type.in_(cost_types),
+            not_wip_entry(),
+        )
     )
     if as_of is not None:
         q = q.filter(Transaction.date <= as_of)
@@ -814,26 +1231,8 @@ def _ctc_job(db: Session, job: Job, as_of: date, tree: list) -> dict:
         bucket(code_id)["actual"] += Decimal(str(dr)) - Decimal(str(cr))
 
     # committed: the remaining (unbilled) part of each open commitment line
-    line_job = sqlfunc.coalesce(PurchaseOrderLine.job_id, PurchaseOrder.job_id)
-    cq = (
-        db.query(
-            PurchaseOrderLine.cost_code_id,
-            sqlfunc.coalesce(
-                sqlfunc.sum(PurchaseOrderLine.amount - PurchaseOrderLine.billed_amount),
-                0,
-            ),
-        )
-        .select_from(PurchaseOrderLine)
-        .join(PurchaseOrder, PurchaseOrderLine.purchase_order_id == PurchaseOrder.id)
-        .filter(
-            line_job == job.id,
-            PurchaseOrder.status.in_(
-                (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED)
-            ),
-        )
-    )
-    for code_id, amt in cq.group_by(PurchaseOrderLine.cost_code_id).all():
-        bucket(code_id)["committed"] += Decimal(str(amt))
+    for ln in commitment_lines(db, [job.id], as_of):
+        bucket(ln["cost_code_id"])["committed"] += ln["remaining"]
 
     raw_grand = _blank_raw()
 
@@ -920,7 +1319,7 @@ def cost_to_complete(
     from app.services.job_costing import code_tree
 
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     tree = code_tree(db.query(CostCode).all())
     rows = [_ctc_job(db, job, as_of, tree) for job in jobs]
 
@@ -951,10 +1350,20 @@ CO_COLUMNS = [
     {"key": "running_approved", "label": "Approved to date", "kind": "money"},
 ]
 
+# The change order log's export carries these too: the day each change
+# order took effect and was voided, the PCO it came from and a sub CO's
+# commitment (the export's columns are CO_COLUMNS then these).
+CO_EXPORT_EXTRA = [
+    {"key": "approved_on", "label": "Approved on", "kind": "text"},
+    {"key": "voided_on", "label": "Voided on", "kind": "text"},
+    {"key": "source_pco", "label": "Source PCO", "kind": "text"},
+    {"key": "commitment_number", "label": "Commitment", "kind": "text"},
+]
+
 
 def _co_job(db: Session, job: Job, as_of: date) -> dict:
     from app.models.change_orders import ChangeOrder
-    from app.services.change_orders import co_totals
+    from app.services.change_orders import co_effective_date, co_totals
 
     cos = (
         db.query(ChangeOrder)
@@ -962,24 +1371,32 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
         .order_by(ChangeOrder.number)
         .all()
     )
+    pco_ids = {co.source_pco_id for co in cos} - {None}
+    pco_numbers = {
+        c_id: number
+        for c_id, number in db.query(ChangeOrder.id, ChangeOrder.number).filter(
+            ChangeOrder.id.in_(pco_ids)
+        )
+    }
     counts: dict[str, int] = {}
     pending_total = _ZERO
     running = _ZERO
     approved_changes = _ZERO  # owner, contract-funded, approved by as_of
     out_rows = []
     for co in cos:
-        counts[co.status] = counts.get(co.status, 0) + 1
+        st = _co_status_on(co, as_of)
+        if st is None:
+            continue  # dated after the day: not on its log
+        counts[st] = counts.get(st, 0) + 1
         figs = co_totals(co, job)
         cost = figs["cost_total"]
         sell = figs["sell_total"]
         markup = figs["markup_total"]
-        approved_on = _local_date(co.approved_at) if co.approved_at else None
-        approved_by_as_of = (
-            co.status == "approved" and approved_on is not None and approved_on <= as_of
-        )
-        # The running approved total follows the contract as of the date: an
-        # approved, contract-funded owner CO approved by then adds its sell.
-        if approved_by_as_of and co.kind == "owner" and co.funding == "contract":
+        approved_on = co_effective_date(co)
+        # The running approved total follows the contract as of the date: a
+        # contract-funded owner CO that stood approved then adds its sell,
+        # the same rule the counts and the WIP schedule read.
+        if st == "approved" and co.kind == "owner" and co.funding == "contract":
             running = _q(running + sell)
             approved_changes = running
         # Pending is read as of today (a live figure, not dated).
@@ -999,7 +1416,8 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
                 "id": co.id,
                 "number": co.number,
                 "kind": co.kind,
-                "status": co.status,
+                "status": st,
+                "status_today": co.status,
                 "title": co.title or "",
                 "date": co.date.isoformat() if co.date else None,
                 "funding": co.funding,
@@ -1007,9 +1425,15 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
                 "markup": float(markup),
                 "sell": float(sell),
                 "approved_at": co.approved_at.isoformat() if co.approved_at else None,
+                "approved_on": approved_on.isoformat() if approved_on else None,
                 "voided_at": co.voided_at.isoformat() if co.voided_at else None,
+                "voided_on": (
+                    _local_date(co.voided_at).isoformat() if co.voided_at else None
+                ),
                 "source_pco_id": co.source_pco_id,
+                "source_pco": pco_numbers.get(co.source_pco_id, ""),
                 "commitment": commitment,
+                "commitment_number": commitment["number"] if commitment else "",
                 "running_approved": float(running),
             }
         )
@@ -1039,6 +1463,27 @@ def _co_job(db: Session, job: Job, as_of: date) -> dict:
     }
 
 
+def _co_status_on(co, as_of: date) -> Optional[str]:
+    """The status a change order had on `as_of`: approved when it stood
+    approved that day (co_stood_on), pending when it was approved or voided
+    after it; a draft, pending or rejected one reads as it is today (those
+    carry no date of their own). None for one dated after the day: it is not
+    on that day's log."""
+    from app.services.change_orders import co_effective_date
+
+    if co_stood_on(co, as_of):
+        return "approved"
+    if co.date is not None and co.date > as_of:
+        return None
+    effective = co_effective_date(co)
+    voided = _local_date(co.voided_at) if co.voided_at else None
+    if co.status == "void" and voided is not None and voided > as_of:
+        return "pending"
+    if co.status == "approved" and effective is not None and effective > as_of:
+        return "pending"
+    return co.status
+
+
 def change_order_log(
     db: Session,
     as_of: Optional[date] = None,
@@ -1049,9 +1494,11 @@ def change_order_log(
 ) -> dict:
     """Every change order per job, with the running approved total (as of
     `as_of` — the change orders approved by then) and the contract it builds
-    (original + approved changes = revised). Pending is read as of today."""
+    (original + approved changes = revised). Counts by status are as of the
+    date (a change order approved or voided after it counts as it stood);
+    the pending total is read as of today."""
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     rows = [_co_job(db, job, as_of) for job in jobs]
     counts: dict[str, int] = {}
     pending_total = _ZERO
@@ -1064,6 +1511,7 @@ def change_order_log(
         "jobs": rows,
         "totals": {"counts": counts, "pending_total": float(_q(pending_total))},
         "columns": CO_COLUMNS,
+        "export_columns": CO_COLUMNS + CO_EXPORT_EXTRA,
     }
 
 
@@ -1072,16 +1520,20 @@ def change_order_log(
 BUYOUT_COLUMNS = [
     {"key": "package_name", "label": "Package", "kind": "text"},
     {"key": "bid_cost", "label": "Bid", "kind": "money"},
+    {"key": "changes", "label": "Changes", "kind": "money"},
     {"key": "bought", "label": "Bought", "kind": "money"},
     {"key": "variance", "label": "Variance", "kind": "money"},
+    {"key": "spent_no_commitment", "label": "Spent, no commitment", "kind": "money"},
     {"key": "committed_remaining", "label": "Remaining", "kind": "money"},
     {"key": "billed_to_date", "label": "Billed", "kind": "money"},
 ]
 
 _BUYOUT_SUMMED = (
     "bid_cost",
+    "changes",
     "bought",
     "variance",
+    "spent_no_commitment",
     "committed_remaining",
     "billed_to_date",
 )
@@ -1101,7 +1553,7 @@ def buyout_report(
     from app.services.buyout import job_buyout
 
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     rows = []
     grand = {k: _ZERO for k in _BUYOUT_SUMMED}
     for job in jobs:
@@ -1168,12 +1620,20 @@ def _bill_job_share(bill, job_id: int) -> Decimal:
     return job_amt / total
 
 
-def _vendor_bill_figures(db: Session, job_id: int, vendor_id: int) -> dict:
-    """For one vendor on one job: the bills carrying the job and the payments,
+def _vendor_bill_figures(
+    db: Session, job_id: int, as_of: Optional[date]
+) -> dict[int, dict]:
+    """Per vendor on one job: the bills carrying the job and the payments,
     retainage held-less-released and open A/P on them — each prorated by the
     job's share of the bill's line amounts (a header-only bill is a whole 1),
     so a bill split across two jobs lands half on each. A bill carries the job
-    on its header or on any of its lines."""
+    on its header or on any of its lines. Open A/P is less the vendor's
+    credits on the job not yet applied to a bill (prorated the same way), as
+    A/P Aging nets them, so cost = paid + retainage held + open A/P. Read
+    as of `as_of` (bills dated by then, payments dated by then, open as A/P
+    Aging would age it) and in home currency at each bill's booked rate, so
+    the figures tie to A/P Aging and Commitment Status for the same job and
+    date; with no date, everything."""
     from sqlalchemy import or_
 
     from app.models.bills import (
@@ -1181,61 +1641,166 @@ def _vendor_bill_figures(db: Session, job_id: int, vendor_id: int) -> dict:
         BillLine,
         BillPayment,
         BillPaymentAllocation,
+        BillStatus,
     )
+    from app.services.contact_balances import home_amount
+    from app.services.open_balances import (
+        open_bills_as_of,
+        unapplied_vendor_credits_as_of,
+    )
+
+    out: dict[int, dict] = {}
+
+    def figures(vendor_id) -> dict:
+        return out.setdefault(
+            vendor_id,
+            {
+                "bills_count": _ZERO,
+                "paid_to_date": _ZERO,
+                "retainage_outstanding": _ZERO,
+                "open_ap": _ZERO,
+            },
+        )
+
+    for vc, left in unapplied_vendor_credits_as_of(db, as_of or date.max):
+        share = _bill_job_share(vc, job_id)
+        if share != _ZERO:
+            figures(vc.vendor_id)["open_ap"] -= share * left
 
     on_line = db.query(BillLine.bill_id).filter(BillLine.job_id == job_id)
-    bills = (
+    q = (
         db.query(Bill)
-        .filter(
-            Bill.vendor_id == vendor_id,
-            or_(Bill.job_id == job_id, Bill.id.in_(on_line)),
-        )
-        .all()
+        .filter(or_(Bill.job_id == job_id, Bill.id.in_(on_line)))
+        .filter(Bill.status.notin_([BillStatus.VOID, BillStatus.DRAFT]))
     )
-    # payments allocated to each bill (non-void), by bill id
-    paid_by_bill: dict[int, Decimal] = {}
-    bill_ids = [b.id for b in bills]
-    if bill_ids:
-        rows = (
-            db.query(
-                BillPaymentAllocation.bill_id,
-                sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
-            )
-            .select_from(BillPaymentAllocation)
-            .join(
-                BillPayment,
-                BillPaymentAllocation.bill_payment_id == BillPayment.id,
-            )
-            .filter(
-                BillPaymentAllocation.bill_id.in_(bill_ids),
-                BillPayment.is_voided.is_(False),
-            )
-            .group_by(BillPaymentAllocation.bill_id)
-            .all()
+    if as_of is not None:
+        q = q.filter(Bill.date <= as_of)
+    bills = q.all()
+    bill_ids = {b.id for b in bills}
+    open_by_bill = {
+        b.id: amt for b, amt in open_bills_as_of(db, as_of or date.max, bill_ids)
+    }
+    # payments allocated to each bill (non-void, dated by as_of), by bill id
+    paid_q = (
+        db.query(
+            BillPaymentAllocation.bill_id,
+            sqlfunc.coalesce(sqlfunc.sum(BillPaymentAllocation.amount), 0),
         )
-        paid_by_bill = {bid: Decimal(str(amt)) for bid, amt in rows}
+        .select_from(BillPaymentAllocation)
+        .join(BillPayment, BillPaymentAllocation.bill_payment_id == BillPayment.id)
+        .filter(
+            BillPaymentAllocation.bill_id.in_(bill_ids),
+            BillPayment.is_voided.is_(False),
+        )
+    )
+    if as_of is not None:
+        paid_q = paid_q.filter(BillPayment.date <= as_of)
+    paid_by_bill = {
+        bid: Decimal(str(amt))
+        for bid, amt in paid_q.group_by(BillPaymentAllocation.bill_id)
+    }
 
-    count = _ZERO
-    retainage = _ZERO
-    open_ap = _ZERO
-    paid = _ZERO
     for b in bills:
         share = _bill_job_share(b, job_id)
         if share == _ZERO:
             continue
-        count += share
-        retainage += share * (
+        f = figures(b.vendor_id)
+        rate = b.exchange_rate
+
+        def home(amount):
+            return share * home_amount(amount, rate)
+
+        f["bills_count"] += share
+        f["retainage_outstanding"] += home(
             Decimal(str(b.retainage_held or 0))
             - Decimal(str(b.retainage_released or 0))
         )
-        open_ap += share * Decimal(str(b.balance_due or 0))
-        paid += share * paid_by_bill.get(b.id, _ZERO)
+        f["open_ap"] += home(open_by_bill.get(b.id, _ZERO))
+        f["paid_to_date"] += home(paid_by_bill.get(b.id, _ZERO))
     return {
-        "bills_count": float(_q(count)),
-        "paid_to_date": _q(paid),
-        "retainage_outstanding": _q(retainage),
-        "open_ap": _q(open_ap),
+        vid: {
+            "bills_count": float(_q(f["bills_count"])),
+            "paid_to_date": _q(f["paid_to_date"]),
+            "retainage_outstanding": _q(f["retainage_outstanding"]),
+            "open_ap": _q(f["open_ap"]),
+        }
+        for vid, f in out.items()
     }
+
+
+# The documents whose postings name their vendor: a bill (and its edit and
+# void), a bill payment, a vendor credit.
+_BILL_SOURCES = ("bill", "bill_edit", "bill_void")
+_PAYMENT_SOURCES = ("bill_payment", "bill_payment_void")
+_CREDIT_SOURCES = ("vendor_credit", "vendor_credit_void")
+
+
+def _transaction_vendors(db: Session, txns: list) -> dict[int, Optional[int]]:
+    """The vendor of each posted transaction, read from the document behind
+    it, so books posted before any vendor was stamped read right. `txns` are
+    (id, vendor_id, source_type, source_id) rows. The header's own vendor wins
+    (bank matching sets it); else the bill's, the bill payment's or the vendor
+    credit's; an expense keeps its payee vendor as its source id. A journal or
+    a job cost entry has none."""
+    from app.models.bills import Bill, BillPayment
+    from app.models.vendor_credits import VendorCredit
+
+    def ids_of(kinds):
+        return {sid for _t, _v, st, sid in txns if st in kinds and sid is not None}
+
+    bill_vendor = {}
+    if ids_of(_BILL_SOURCES):
+        bill_vendor = dict(
+            db.query(Bill.id, Bill.vendor_id).filter(Bill.id.in_(ids_of(_BILL_SOURCES)))
+        )
+    payment_vendor = {}
+    if ids_of(_PAYMENT_SOURCES):
+        payment_vendor = dict(
+            db.query(BillPayment.id, BillPayment.vendor_id).filter(
+                BillPayment.id.in_(ids_of(_PAYMENT_SOURCES))
+            )
+        )
+    credit_vendor = {}
+    if ids_of(_CREDIT_SOURCES):
+        credit_vendor = dict(
+            db.query(VendorCredit.id, VendorCredit.vendor_id).filter(
+                VendorCredit.id.in_(ids_of(_CREDIT_SOURCES))
+            )
+        )
+    # a voided expense names the expense it reverses, which names the payee
+    expense_ids = ids_of(("expense",))
+    voided_expense = ids_of(("expense_void",))
+    original_payee = {}
+    if voided_expense:
+        original_payee = dict(
+            db.query(Transaction.id, Transaction.source_id).filter(
+                Transaction.id.in_(voided_expense)
+            )
+        )
+    payees = expense_ids | {v for v in original_payee.values() if v is not None}
+    from app.models.contacts import Vendor
+
+    real_payees = (
+        {r[0] for r in db.query(Vendor.id).filter(Vendor.id.in_(payees))}
+        if payees
+        else set()
+    )
+
+    out: dict[int, Optional[int]] = {}
+    for tid, vendor_id, st, sid in txns:
+        if vendor_id is None:
+            if st in _BILL_SOURCES:
+                vendor_id = bill_vendor.get(sid)
+            elif st in _PAYMENT_SOURCES:
+                vendor_id = payment_vendor.get(sid)
+            elif st in _CREDIT_SOURCES:
+                vendor_id = credit_vendor.get(sid)
+            elif st == "expense" and sid in real_payees:
+                vendor_id = sid
+            elif st == "expense_void" and original_payee.get(sid) in real_payees:
+                vendor_id = original_payee[sid]
+        out[tid] = vendor_id
+    return out
 
 
 def _vendor_job(
@@ -1249,48 +1814,73 @@ def _vendor_job(
     cost_types = (AccountType.COGS, AccountType.EXPENSE)
     q = (
         db.query(
+            Transaction.id,
             Transaction.vendor_id,
+            Transaction.source_type,
+            Transaction.source_id,
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.debit), 0),
             sqlfunc.coalesce(sqlfunc.sum(TransactionLine.credit), 0),
         )
         .select_from(TransactionLine)
         .join(Transaction, TransactionLine.transaction_id == Transaction.id)
         .join(Account, TransactionLine.account_id == Account.id)
-        .filter(job_attribution() == job.id, Account.account_type.in_(cost_types))
+        .filter(
+            job_attribution() == job.id,
+            Account.account_type.in_(cost_types),
+            not_wip_entry(),
+        )
     )
     if start_date:
         q = q.filter(Transaction.date >= start_date)
     if end_date:
         q = q.filter(Transaction.date <= end_date)
-    by_vendor = q.group_by(Transaction.vendor_id).all()
+    posted = q.group_by(
+        Transaction.id,
+        Transaction.vendor_id,
+        Transaction.source_type,
+        Transaction.source_id,
+    ).all()
 
-    vendor_ids = [v for v, _dr, _cr in by_vendor if v is not None]
+    # the vendor of each entry comes from its document, then totals per vendor
+    vendor_of = _transaction_vendors(db, [p[:4] for p in posted])
+    cost_by_vendor: dict[Optional[int], Decimal] = {}
+    for tid, _v, _st, _sid, dr, cr in posted:
+        vid = vendor_of[tid]
+        cost_by_vendor[vid] = cost_by_vendor.get(vid, _ZERO) + (
+            Decimal(str(dr)) - Decimal(str(cr))
+        )
+
+    bill_figures = _vendor_bill_figures(db, job.id, end_date)
+    vendor_ids = {v for v in cost_by_vendor if v is not None} | set(bill_figures)
     names = {
         v.id: v.name for v in db.query(Vendor).filter(Vendor.id.in_(vendor_ids)).all()
     }
 
     rows = []
-    for vendor_id, dr, cr in by_vendor:
-        cost = Decimal(str(dr)) - Decimal(str(cr))
-        if vendor_id is None:
-            rows.append(
-                {
-                    "vendor_id": None,
-                    "vendor_name": _NO_VENDOR,
-                    "cost": float(_q(cost)),
-                    "bills_count": 0,
-                    "paid_to_date": 0.0,
-                    "retainage_outstanding": 0.0,
-                    "open_ap": 0.0,
-                }
-            )
-            continue
-        bf = _vendor_bill_figures(db, job.id, vendor_id)
+    if None in cost_by_vendor:
+        rows.append(
+            {
+                "vendor_id": None,
+                "vendor_name": _NO_VENDOR,
+                "cost": float(_q(cost_by_vendor[None])),
+                "bills_count": 0,
+                "paid_to_date": 0.0,
+                "retainage_outstanding": 0.0,
+                "open_ap": 0.0,
+            }
+        )
+    for vendor_id in vendor_ids:
+        bf = bill_figures.get(vendor_id) or {
+            "bills_count": 0,
+            "paid_to_date": _ZERO,
+            "retainage_outstanding": _ZERO,
+            "open_ap": _ZERO,
+        }
         rows.append(
             {
                 "vendor_id": vendor_id,
                 "vendor_name": names.get(vendor_id, ""),
-                "cost": float(_q(cost)),
+                "cost": float(_q(cost_by_vendor.get(vendor_id, _ZERO))),
                 "bills_count": bf["bills_count"],
                 "paid_to_date": float(bf["paid_to_date"]),
                 "retainage_outstanding": float(bf["retainage_outstanding"]),
@@ -1323,17 +1913,19 @@ def job_cost_by_vendor(
     status: Optional[str] = None,
     include_closed: bool = False,
 ) -> dict:
-    """Posted job cost grouped job → vendor (the transaction header's vendor; a
-    No vendor bucket holds the rest), with the vendor's bills, paid to date,
-    retainage held outstanding and open A/P on the job. Cost is period-filtered
-    by transaction date; the bill figures are job-to-date and **prorated by the
-    job's share of each bill's line amounts** (a header-only bill counts whole,
-    a bill split across jobs splits), so bills can read fractional."""
+    """Posted job cost grouped job → vendor (each entry's vendor read from the
+    bill, bill payment, vendor credit or expense behind it; a No vendor bucket
+    holds journals and job cost entries), with the vendor's bills, paid to
+    date, retainage held outstanding and open A/P on the job. Cost is
+    period-filtered by transaction date; the bill figures are job-to-date as of
+    `end_date` and **prorated by the job's share of each bill's line amounts**
+    (a header-only bill counts whole, a bill split across jobs splits), so
+    bills can read fractional."""
     from fastapi import HTTPException
 
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date is after end_date")
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, end_date)
     rows = [_vendor_job(db, job, start_date, end_date) for job in jobs]
     grand = {k: _ZERO for k in _VENDOR_SUMMED}
     for job_data in rows:
@@ -1356,22 +1948,30 @@ COMMITMENT_COLUMNS = [
     {"key": "type", "label": "Type", "kind": "text"},
     {"key": "status", "label": "Status", "kind": "text"},
     {"key": "committed", "label": "Committed", "kind": "money"},
+    # What has arrived on the field's delivery tickets, at the PO line rates
+    {"key": "received", "label": "Received", "kind": "money"},
     {"key": "billed", "label": "Billed to date", "kind": "money"},
     {"key": "retainage_held", "label": "Retainage held", "kind": "money"},
     {"key": "remaining", "label": "Remaining", "kind": "money"},
 ]
 
-_COMMITMENT_SUMMED = ("committed", "billed", "retainage_held", "remaining")
+_COMMITMENT_SUMMED = ("committed", "received", "billed", "retainage_held", "remaining")
 
 
 def _commitment_row(
-    po, bills: list, as_of: date, co_by_id: dict, billed_later: bool = False
+    po,
+    bills: list,
+    as_of: date,
+    co_by_id: dict,
+    billed_later: bool = False,
+    voided_lines: list = (),
 ) -> dict:
     """One commitment as of a date. Committed is the pre-tax value; billed is
     the work billed on it by then (a retainage-release bill pays money already
     billed, so it is not counted); retainage held is held less released on those
     bills; remaining is committed less billed while the commitment is open."""
     from app.models.purchase_orders import POStatus
+    from app.services.change_orders import co_effective_date
 
     billed = held = released = _ZERO
     for b in bills:
@@ -1386,11 +1986,15 @@ def _commitment_row(
     later = _ZERO
     for ln in po.lines:
         co = ln.change_order_id and co_by_id.get(ln.change_order_id)
-        if co is not None and co.approved_at and _local_date(co.approved_at) > as_of:
+        if co is not None and (co_effective_date(co) or as_of) > as_of:
             later += Decimal(str(ln.amount or 0))
-    committed = _q(Decimal(str(po.subtotal or 0)) - later)
+    # ...and lines a sub change order voided since were part of it then.
+    restored = sum((Decimal(str(ln.amount or 0)) for ln in voided_lines), _ZERO)
+    committed = _q(Decimal(str(po.subtotal or 0)) - later + restored)
     # A closed commitment counts closed on every date, unless a bill against it
-    # is dated after `as_of`: then it was still taking bills, so still open.
+    # is dated after `as_of`, or a voided sub change order's unbilled lines
+    # were still on it: then it was still open.
+    billed_later = billed_later or bool(voided_lines)
     is_open = po.status in (POStatus.SENT, POStatus.PARTIAL, POStatus.RECEIVED) or (
         po.status == POStatus.CLOSED and billed_later
     )
@@ -1423,14 +2027,15 @@ def commitment_status(
     include_closed: bool = False,
 ) -> dict:
     """Every non-draft commitment (PO or subcontract) on each job dated by
-    `as_of`: committed, billed to date, retainage held and remaining, with
-    totals per job and grand. Only bills dated by `as_of` count."""
+    `as_of`: committed, received (delivery tickets dated by then, at the line
+    rates), billed to date, retainage held and remaining, with totals per job
+    and grand. Only bills dated by `as_of` count."""
     from app.models.bills import Bill, BillStatus
     from app.models.change_orders import ChangeOrder
     from app.models.purchase_orders import POStatus, PurchaseOrder
 
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed)
+    jobs = select_jobs(db, job_id, customer_id, status, include_closed, as_of)
     out = []
     grand = {k: _ZERO for k in _COMMITMENT_SUMMED}
     for job in jobs:
@@ -1449,6 +2054,7 @@ def commitment_status(
             co.id: co
             for co in db.query(ChangeOrder).filter(ChangeOrder.id.in_(co_ids)).all()
         }
+        voided = sub_lines_voided_since(db, {po.id for po in pos}, as_of)
         rows = []
         totals = {k: _ZERO for k in _COMMITMENT_SUMMED}
         for po in pos:
@@ -1473,7 +2079,12 @@ def commitment_status(
                 .first()
                 is not None
             )
-            row = _commitment_row(po, bills, as_of, co_by_id, billed_later)
+            row = _commitment_row(
+                po, bills, as_of, co_by_id, billed_later, voided.get(po.id, [])
+            )
+            from app.services.field_tickets import received_by
+
+            row["received"] = float(received_by(db, po.id, as_of))
             rows.append(row)
             for k in _COMMITMENT_SUMMED:
                 totals[k] += Decimal(str(row[k]))

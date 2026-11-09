@@ -11,6 +11,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.database import get_db
+from app.services.accounting import _q
 from app.services.fiscal_year import fiscal_year_start
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment
@@ -24,6 +25,7 @@ from app.services.request_utils import content_disposition
 from app.routes.reports._router import router
 from app.routes._roles import is_admin
 from app.services.email_errors import where_to_see_why
+from app.routes._helpers import refuse_unknown_filters
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ def _customer_labels(db: Session) -> dict[int, str]:
     }
 
 
-@router.get("/ar-aging")
+@router.get("/ar-aging", dependencies=[Depends(refuse_unknown_filters)])
 def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_db)):
     """What each customer owes, by age, in home currency — and net of the
     credits they hold, so the total is what account 1100 says.
@@ -74,7 +76,7 @@ def ar_aging(as_of_date: date = Query(default=None), db: Session = Depends(get_d
     return ar_aging_report(db, as_of_date or date.today())
 
 
-@router.get("/ar-aging/csv")
+@router.get("/ar-aging/csv", dependencies=[Depends(refuse_unknown_filters)])
 def ar_aging_csv_route(
     request: Request,
     as_of_date: date = Query(default=None),
@@ -97,19 +99,12 @@ def ar_aging_csv_route(
 def ar_aging_report(db: Session, as_of_date: date) -> dict:
     """The A/R Aging report's figures (see ar_aging). The analytics page's
     aging chart reads these too, so the two cannot disagree."""
-    from app.services.contact_balances import home_amount, unapplied_payments
+    from app.services.contact_balances import home_amount
+    from app.services.open_balances import open_invoices_as_of
 
-    invoices = (
-        db.query(Invoice)
-        .filter(
-            Invoice.status.in_(
-                [InvoiceStatus.DRAFT, InvoiceStatus.SENT, InvoiceStatus.PARTIAL]
-            )
-        )
-        .filter(Invoice.date <= as_of_date)
-        .filter(Invoice.balance_due > 0)
-        .all()
-    )
+    # What was open on the date, not what is open today: an invoice paid
+    # since still counts, so the total is account 1100 on that date.
+    invoices = open_invoices_as_of(db, as_of_date)
 
     customer_names = _customer_labels(db)
     # A sub-customer billed with its parent (#638) is on the parent's A/R:
@@ -138,10 +133,10 @@ def ar_aging_report(db: Session, as_of_date: date) -> dict:
             out.append(sub_rows[cid])
         return out
 
-    for inv in invoices:
+    for inv, open_amount in invoices:
         days = (as_of_date - inv.due_date).days if inv.due_date else 0
         # At the rate it was booked at, as the ledger carries it.
-        bal = home_amount(inv.balance_due, inv.exchange_rate)
+        bal = home_amount(open_amount, inv.exchange_rate)
         for row in rows_for(inv.customer_id):
             if days <= 0:
                 row["current"] += bal
@@ -159,21 +154,20 @@ def ar_aging_report(db: Session, as_of_date: date) -> dict:
     # account disagree, and the report overstates what customers owe. Found
     # while building the payable-side twin (issue #129); fixed on both sides
     # together so they cannot drift apart again.
-    from app.models.credit_memos import CreditMemo, CreditMemoStatus
-
-    credits = (
-        db.query(CreditMemo)
-        .filter(CreditMemo.status != CreditMemoStatus.VOID)
-        .filter(CreditMemo.date <= as_of_date)
-        .filter(CreditMemo.balance_remaining > 0)
-        .all()
+    from app.services.open_balances import (
+        unapplied_credit_memos_as_of,
+        unapplied_payments_as_of,
     )
-    held = [(cm.customer_id, Decimal(str(cm.balance_remaining))) for cm in credits]
+
+    held = [
+        (cm.customer_id, _q(left))
+        for cm, left in unapplied_credit_memos_as_of(db, as_of_date)
+    ]
     # ...and payments, or the part of one, not applied to any invoice: they
     # credited A/R in full when received, at the payment's rate.
     held += [
-        (p.customer_id, p.unapplied_home)
-        for p in unapplied_payments(db, end=as_of_date)
+        (p.customer_id, home_amount(left, p.exchange_rate))
+        for p, left in unapplied_payments_as_of(db, as_of_date)
     ]
     for cid, amt in held:
         for row in rows_for(cid):
@@ -462,8 +456,17 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
 
     events = []
     invoiced = Decimal(0)
+    # Retainage the customer's invoices hold back (a pay application's, #555),
+    # less what later invoices released: owed, but not yet due, so it sits
+    # apart from the amount due and the amount due is what A/R Aging says.
+    retainage = Decimal(0)
     for inv in invoices:
-        amount = home_amount(inv.total, inv.exchange_rate)
+        held = home_amount(inv.retainage_held, inv.exchange_rate)
+        released = home_amount(inv.retainage_released, inv.exchange_rate)
+        retainage += held - released
+        # billed now: the invoice's total less the retainage it holds back,
+        # plus any it releases (what its journal entry put on A/R)
+        amount = home_amount(inv.total, inv.exchange_rate) - held + released
         outside = outside_relief.get(inv.id, Decimal(0))
         if outside:
             amount -= outside
@@ -477,6 +480,10 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
             parts.append(f"PO {inv.po_number}")
         if inv.due_date:
             parts.append(f"Due {inv.due_date.strftime('%b %d, %Y')}")
+        if held:
+            parts.append(f"${held:,.2f} retainage held")
+        if released:
+            parts.append(f"${released:,.2f} retainage released")
         invoiced += amount
         events.append(
             (
@@ -614,6 +621,7 @@ def statement_activity(db: Session, customer: Customer, as_of_date: date) -> dic
         "total_payments": received,
         "total_credits": credited,
         "balance_due": running,
+        "retainage_held": retainage,
         "home_currency": home,
         "has_foreign": any(line["currency"] for line in lines),
     }

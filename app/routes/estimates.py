@@ -8,10 +8,11 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import Field
 from sqlalchemy.exc import IntegrityError
 from fastapi.responses import Response
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload, object_session, selectinload
 
 from app.database import get_db
 from app.routes.invoices.helpers import (
@@ -22,7 +23,11 @@ from app.routes.invoices.helpers import (
     opening_status,
     resolve_line_taxable,
 )
-from app.routes._helpers import clamp_pagination, reject_null_updates
+from app.routes._helpers import (
+    clamp_pagination,
+    refuse_unknown_filters,
+    reject_null_updates,
+)
 from app.routes.invoice_messages import default_message_body
 from app.services.audit import audited_bulk_delete
 from app.services.payment_terms import DocumentTerms, term_id_for
@@ -30,8 +35,10 @@ from app.services.job_costing import line_cost_type, budgets_from_estimate
 from app.services.estimating import (
     estimate_totals,
     estimate_document_totals,
-    fmt_pct,
     is_included_line,
+    uncoded_lines,
+    uncoded_warning,
+    markup_parts,
 )
 from app.services.sub_customers import invoice_addresses
 from app.services.terminology import terms_from_db
@@ -39,14 +46,17 @@ from app.models.estimates import Estimate, EstimateLine, EstimateStatus
 from app.models.invoices import Invoice, InvoiceLine
 from app.models.contacts import Customer
 from app.models.job_costing import JobBudget
-from app.models.jobs import Job
+from app.models.jobs import Job, SovLine
+from app.models.pay_applications import PayApplication
 from app.schemas.estimates import (
     EstimateCreate,
     EstimateUpdate,
     EstimateResponse,
     EstimateAccept,
+    EstimateLost,
     totals_from_dict,
 )
+from app.schemas.common import StrictModel
 from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.numbering import next_estimate_number, next_invoice_number
@@ -178,18 +188,50 @@ def _lines_changed(db: Session, estimate: Estimate, sent_lines) -> bool:
     return [_line_key(ln) for ln in sent] != [_line_key(ln) for ln in stored]
 
 
+def _pay_app_job_ids(db: Session, job_ids) -> set:
+    """Of these jobs, the ones that bill by pay application: a contract type, a
+    schedule of values, or any pay application (#552, #555). Converting an
+    estimate on one would post the whole contract a second time."""
+    ids = {j for j in job_ids if j is not None}
+    if not ids:
+        return set()
+    found = {
+        row[0]
+        for row in db.query(Job.id)
+        .filter(Job.id.in_(ids), Job.contract_type.isnot(None))
+        .all()
+    }
+    for model in (SovLine, PayApplication):
+        found |= {
+            row[0]
+            for row in db.query(model.job_id).filter(model.job_id.in_(ids)).distinct()
+        }
+    return found
+
+
 def _estimate_response(est: Estimate) -> EstimateResponse:
     """A single estimate's response: the customer name, each line's package
     name, and the bid math (#551). The list endpoint skips the totals."""
     resp = EstimateResponse.model_validate(est)
     if est.customer:
         resp.customer_name = est.customer.name
+    if est.job is not None:
+        resp.job_name = est.job.name
+        resp.job_site_address = est.job.site_address
     by_line = {ln.id: ln for ln in est.lines}
     for line_resp in resp.lines:
         line = by_line.get(line_resp.id)
         if line is not None and line.trade_package is not None:
             line_resp.trade_package_name = line.trade_package.name
     resp.totals = totals_from_dict(estimate_totals(est))
+    resp.uncoded_lines = uncoded_lines(est)
+    db = object_session(est)
+    resp.bills_by_pay_app = bool(
+        db is not None
+        and est.job_id is not None
+        and terms_from_db(db).is_construction
+        and _pay_app_job_ids(db, [est.job_id])
+    )
     return resp
 
 
@@ -237,6 +279,10 @@ def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     estimate.job_id = job.id
     estimate.status = EstimateStatus.ACCEPTED
     estimate.accepted_at = datetime.now(timezone.utc)
+    # The job is won: a pending job is awarded (the first approved pay
+    # application moves it on to in progress).
+    if job.status == "pending":
+        job.status = "awarded"
     budgets_from_estimate(db, job, estimate)
     # Lock exactly the rows this acceptance seeded; manual rows stay editable.
     db.query(JobBudget).filter(
@@ -246,7 +292,11 @@ def _accept_estimate(db: Session, estimate: Estimate, job_id: Optional[int]):
     ).update({JobBudget.locked: True}, synchronize_session=False)
 
 
-@router.get("", response_model=list[EstimateResponse])
+@router.get(
+    "",
+    response_model=list[EstimateResponse],
+    dependencies=[Depends(refuse_unknown_filters)],
+)
 def list_estimates(
     status: str = None,
     customer_id: int = None,
@@ -261,7 +311,14 @@ def list_estimates(
         selectinload(Estimate.lines),
     )
     if status:
-        q = q.filter(Estimate.status == status)
+        # "lost" is the bid log's word for a rejected estimate
+        word = "rejected" if status == "lost" else status
+        if word not in [s.value for s in EstimateStatus]:
+            raise HTTPException(
+                status_code=422,
+                detail="status must be one of pending, accepted, lost, converted.",
+            )
+        q = q.filter(Estimate.status == word)
     if customer_id:
         q = q.filter(Estimate.customer_id == customer_id)
     estimates = (
@@ -270,11 +327,17 @@ def list_estimates(
         .limit(limit)
         .all()
     )
+    pay_app_jobs = (
+        _pay_app_job_ids(db, [e.job_id for e in estimates])
+        if terms_from_db(db).is_construction
+        else set()
+    )
     results = []
     for est in estimates:
         resp = EstimateResponse.model_validate(est)
         if est.customer:
             resp.customer_name = est.customer.name
+        resp.bills_by_pay_app = est.job_id in pay_app_jobs
         results.append(resp)
     return results
 
@@ -318,6 +381,11 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
         for name in _MARKUP_PCTS:
             setattr(data, name, Decimal("0"))
         data.markup_allowances = False
+        data.show_markup_rows = True
+        data.terms = None
+    elif data.terms is None:
+        # a new construction estimate starts with the company's default terms
+        data.terms = get_settings(db).get("estimate_terms") or None
     # Construction lines stay at cost before anything is totalled (#551).
     _enforce_at_cost(data.lines, is_construction)
     # The document totals cover the bought scope and the four markups: lines
@@ -359,6 +427,8 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
             fee_pct=data.fee_pct,
             bond_pct=data.bond_pct,
             markup_allowances=data.markup_allowances,
+            show_markup_rows=data.show_markup_rows,
+            terms=data.terms,
             **bill_to,
         )
         db.add(estimate)
@@ -468,6 +538,8 @@ def update_estimate(
         for name in _MARKUP_PCTS:
             setattr(estimate, name, Decimal("0"))
         estimate.markup_allowances = False
+        estimate.show_markup_rows = True
+        estimate.terms = None
 
     if data.lines is not None:
         # Each line's tax is settled before it is stored, the way create does
@@ -584,6 +656,37 @@ def accept_estimate(
     _accept_estimate(db, estimate, data.job_id if data else None)
     db.commit()
     db.refresh(estimate)
+    resp = _estimate_response(estimate)
+    # Accept goes ahead; lines with no code budget on none, and it says so.
+    resp.warnings = [w for w in (uncoded_warning(resp.uncoded_lines),) if w]
+    return resp
+
+
+@router.post("/{estimate_id}/lost", response_model=EstimateResponse)
+def mark_estimate_lost(
+    estimate_id: int,
+    data: Optional[EstimateLost] = None,
+    db: Session = Depends(get_db),
+):
+    """Mark a bid lost: status rejected, with an optional reason kept in the
+    notes. An accepted or converted estimate won the job and can't be lost."""
+    estimate = db.query(Estimate).filter(Estimate.id == estimate_id).first()
+    if not estimate:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    if estimate.status in (EstimateStatus.ACCEPTED, EstimateStatus.CONVERTED):
+        raise HTTPException(
+            status_code=409,
+            detail="An accepted or converted estimate won the job; it can't be marked lost.",
+        )
+    if estimate.status == EstimateStatus.REJECTED:
+        raise HTTPException(status_code=409, detail="Estimate is already marked lost")
+    estimate.status = EstimateStatus.REJECTED
+    reason = (data.reason or "").strip() if data else ""
+    if reason:
+        line = f"Lost {date.today().isoformat()}: {reason}"
+        estimate.notes = f"{estimate.notes}\n{line}" if estimate.notes else line
+    db.commit()
+    db.refresh(estimate)
     return _estimate_response(estimate)
 
 
@@ -623,6 +726,93 @@ def estimate_print_preview(estimate_id: int, db: Session = Depends(get_db)):
     return HTMLResponse(content=html_str)
 
 
+class _EmailEstimateRequest(StrictModel):
+    recipient: Optional[str] = None
+    subject: Optional[str] = None
+    message: Optional[str] = None
+    cc: Optional[str] = Field(default=None, max_length=2000)
+    bcc: Optional[str] = Field(default=None, max_length=2000)
+
+
+@router.post("/{estimate_id}/email")
+def email_estimate(
+    estimate_id: int,
+    data: _EmailEstimateRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Email the estimate PDF as an attachment, by the path an invoice uses:
+    the same address checks, the same send_email (EmailLog row, always-copy
+    settings) and the same 502 when SMTP is not set up."""
+    import html as _html
+
+    from app.routes._roles import is_admin
+    from app.services.email_errors import where_to_see_why
+    from app.services.email_service import (
+        _get_smtp_settings,
+        bad_addresses,
+        copy_lists,
+        send_email,
+    )
+
+    est = db.query(Estimate).filter(Estimate.id == estimate_id).first()
+    if not est:
+        raise HTTPException(status_code=404, detail="Estimate not found")
+    recipient = (data.recipient or "").strip() or (
+        (est.customer.email or "").strip() if est.customer else ""
+    )
+    if not recipient:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This estimate has no email address to send to. Add one to the "
+                "customer or type one here."
+            ),
+        )
+    rejected = bad_addresses(data.cc) + bad_addresses(data.bcc)
+    if rejected:
+        raise HTTPException(
+            status_code=400,
+            detail="Not an email address: " + ", ".join(rejected[:5]) + ".",
+        )
+    try:
+        copy_lists(_get_smtp_settings(db), data.cc, data.bcc)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    company = get_settings(db)
+    name = (company.get("display_name") or company.get("company_name") or "").strip()
+    subject = (data.subject or "").strip() or (
+        f"Estimate #{est.estimate_number}" + (f" from {name}" if name else "")
+    )
+    note = (data.message or "").strip()
+    body = (f"<p>{_html.escape(note)}</p>\n" if note else "") + (
+        f"<p>Please find estimate #{_html.escape(est.estimate_number)} attached.</p>"
+        + (f"<p>{_html.escape(name)}</p>" if name else "")
+    )
+    sent = send_email(
+        db=db,
+        to_email=recipient,
+        subject=subject,
+        html_body=body,
+        attachment_bytes=generate_estimate_pdf(est, company),
+        attachment_name=f"Estimate_{est.estimate_number}.pdf",
+        entity_type="estimate",
+        entity_id=est.id,
+        cc=data.cc,
+        bcc=data.bcc,
+    )
+    # send_email() returns False (and logs why) when SMTP is not set up or the
+    # send fails; reporting "sent" regardless would be a lie.
+    if not sent:
+        admin = is_admin(request)
+        detail = "Email could not be sent. " + (
+            "Check the SMTP settings under Settings → Email (SMTP). " if admin else ""
+        )
+        raise HTTPException(status_code=502, detail=detail + where_to_see_why(admin))
+    return {"status": "sent"}
+
+
 @router.post("/{estimate_id}/convert", response_model=InvoiceResponse)
 def convert_to_invoice(
     estimate_id: int,
@@ -637,6 +827,24 @@ def convert_to_invoice(
         raise HTTPException(status_code=404, detail="Estimate not found")
     if estimate.status == EstimateStatus.CONVERTED:
         raise HTTPException(status_code=400, detail="Estimate already converted")
+    # A contract job bills by pay application, with retainage; the whole bid
+    # as an invoice would post the contract's income a second time.
+    if (
+        estimate.job_id is not None
+        and terms_from_db(db).is_construction
+        and _pay_app_job_ids(db, [estimate.job_id])
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "job_bills_by_pay_application",
+                "message": (
+                    "This job bills by pay application; converting the "
+                    "estimate would bill the contract a second time. Bill it "
+                    "from the job's Pay apps tab."
+                ),
+            },
+        )
     # The invoice is dated the day it is made, as QuickBooks does: keeping
     # the estimate's date back-dated the sale and its due date (2.17.3
     # exploratory W-L10). Its journal posts on that date, so that is the
@@ -656,23 +864,17 @@ def convert_to_invoice(
     copied = taxed_copy_lines(kept, estimate.customer)
     # The four markups ride the invoice as their own lines under the copied
     # scope, so the invoice foots to the bid (#551): one line per non-zero
-    # markup, taxed with the lines (taxable when any copied line is taxable).
-    mt = estimate_totals(estimate)
-    markups_taxable = any(cline.is_taxable for cline in copied)
-    markup_specs = (
-        ("General conditions", mt["gc_pct"], mt["gc"]),
-        ("Insurance", mt["insurance_pct"], mt["insurance"]),
-        ("Fee", mt["fee_pct"], mt["fee"]),
-        ("Bond", mt["bond_pct"], mt["bond"]),
-    )
+    # markup, split into the part on taxable lines and the rest as the
+    # estimate taxes them (estimating.markup_parts); none is taxed when no
+    # copied line is (an exempt customer).
+    any_taxed = any(cline.is_taxable for cline in copied)
     markup_lines = [
         SimpleNamespace(
-            description=f"{label} ({fmt_pct(pct)}%)",
-            amount=amt,
-            is_taxable=markups_taxable,
+            description=part["description"],
+            amount=part["amount"],
+            is_taxable=part["is_taxable"] and any_taxed,
         )
-        for label, pct, amt in markup_specs
-        if amt and amt != 0
+        for part in markup_parts(estimate)
     ]
     for ml in markup_lines:
         ml.quantity = Decimal("1")

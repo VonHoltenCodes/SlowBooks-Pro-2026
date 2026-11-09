@@ -17,10 +17,12 @@ from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models.change_orders import ChangeOrder, ChangeOrderLine
 from app.models.cost_codes import CostCode
-from app.models.jobs import Job
+from app.models.jobs import Job, SovLine
 from app.models.purchase_orders import PurchaseOrder
 from app.models.trade_packages import TradePackage
 from app.schemas.change_orders import (
+    AllowanceReturnIn,
+    ApproveIn,
     ChangeOrderCreate,
     ChangeOrderOut,
     ChangeOrderUpdate,
@@ -30,18 +32,28 @@ from app.schemas.change_orders import (
 from app.services.change_orders import (
     _check_commitment,
     apply_change_order,
+    check_line_figures,
     check_allowance_line,
     check_owner_link,
+    co_effective_date,
     co_totals,
+    create_allowance_return,
     recompute,
     refuse_with_approved_sub,
+    back_dating_warnings,
+    posted_wip_warnings,
+    check_approved_on,
+    resolve_approved_on,
     reverse_change_order,
 )
+from app.services.closing_date import check_closing_date
 from app.services.job_costing import line_cost_type
 from app.services.numbering import next_change_order_number
 from app.services.pdf_service import generate_change_order_pdf
 from app.services.request_utils import content_disposition
+from app.services.terminology import terms_from_db
 from app.services.settings_service import get_all_settings as get_settings
+from app.routes._helpers import refuse_unknown_filters
 
 router = APIRouter(prefix="/api/change-orders", tags=["change-orders"])
 
@@ -198,7 +210,11 @@ def _copy_lines(
 # ── CRUD ─────────────────────────────────────────────────────────────────────
 
 
-@router.get("", response_model=list[ChangeOrderOut])
+@router.get(
+    "",
+    response_model=list[ChangeOrderOut],
+    dependencies=[Depends(refuse_unknown_filters)],
+)
 def list_change_orders(
     job_id: int = Query(...),
     history: bool = Query(False),
@@ -254,6 +270,7 @@ def create_change_order(data: ChangeOrderCreate, db: Session = Depends(get_db)):
         owner_change_order_id=data.owner_change_order_id,
     )
     _set_lines(db, co, data.lines)
+    check_line_figures(co)
     db.commit()
     db.refresh(co)
     return _co_out(db, co)
@@ -273,6 +290,17 @@ def update_change_order(
             },
         )
     fields = data.model_dump(exclude_unset=True, exclude={"lines"})
+    fixed = ("funding", "allowance_sov_line_id", "markup_pct", "apply_markup")
+    if co.allowance_return and any(
+        k in fields and fields[k] != getattr(co, k) for k in fixed
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "allowance_return_fixed",
+                "message": "A return of unspent allowance is contract-funded with no markup; change its amount, title or date, or reject it and make another.",
+            },
+        )
     if fields.get("funding") not in (None, co.funding) and "apply_markup" not in fields:
         # Changing what pays for the change resets markup to that funding's default.
         fields["apply_markup"] = _default_apply_markup(fields["funding"])
@@ -287,6 +315,9 @@ def update_change_order(
     )
     if data.lines is not None:
         _set_lines(db, co, data.lines)
+    # a markup change alone moves the sell too
+    recompute(co, co.job)
+    check_line_figures(co)
     db.commit()
     db.refresh(co)
     return _co_out(db, co)
@@ -328,8 +359,49 @@ def submit_change_order(co_id: int, db: Session = Depends(get_db)):
     return _co_out(db, co)
 
 
+@router.post("/allowance-return", response_model=ChangeOrderOut, status_code=201)
+def return_unspent_allowance(data: AllowanceReturnIn, db: Session = Depends(get_db)):
+    """Make a draft owner change order that returns an allowance's unspent
+    amount to the owner (all of it, or `amount`): minus the amount, no markup,
+    funded against that allowance. Approving it takes the amount off the
+    contract and the allowance line, so the line has nothing left to bill.
+    `date` (default today) dates the change order: not before the contract
+    date, and not in a closed period."""
+    if not terms_from_db(db).is_construction:
+        raise HTTPException(
+            status_code=409,
+            detail="Allowance returns are part of construction mode. Set Company "
+            "Type to Construction under Settings → Company to use them.",
+        )
+    line = db.get(SovLine, data.allowance_sov_line_id)
+    if line is None:
+        raise HTTPException(status_code=404, detail="Allowance line not found")
+    job = db.get(Job, line.job_id)
+    if data.date is not None:
+        contract_date = job.contract_date
+        if contract_date is not None and data.date < contract_date:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"The return is dated {data.date.isoformat()}, before the "
+                    f"contract is dated ({contract_date.isoformat()}). Choose "
+                    f"{contract_date.isoformat()} or a later day."
+                ),
+            )
+        check_closing_date(db, data.date)
+    co = create_allowance_return(db, job, line.id, amount=data.amount, on=data.date)
+    db.commit()
+    db.refresh(co)
+    return _co_out(db, co)
+
+
 @router.post("/{co_id}/approve", response_model=ChangeOrderOut)
-def approve_change_order(co_id: int, db: Session = Depends(get_db)):
+def approve_change_order(
+    co_id: int, data: ApproveIn | None = None, db: Session = Depends(get_db)
+):
+    """Approve a pending change order. It takes effect on `approved_on` (the
+    change order's own date by default, else today); a date in a closed
+    period is refused like a bill or a pay application there."""
     co = _get(db, co_id)
     if co.kind == "pco":
         raise HTTPException(
@@ -347,10 +419,16 @@ def approve_change_order(co_id: int, db: Session = Depends(get_db)):
                 "message": f"A {co.status} change order cannot be approved.",
             },
         )
-    apply_change_order(db, co)  # may 409 contingency/allowance_exceeded
+    given = data.approved_on if data else None
+    on = resolve_approved_on(co, given)
+    check_approved_on(co, given, on)
+    check_closing_date(db, on)
+    apply_change_order(db, co, on)  # may 409 contingency/allowance_exceeded
     db.commit()
     db.refresh(co)
-    return _co_out(db, co)
+    out = _co_out(db, co)
+    out.warnings = back_dating_warnings(co, given, on) + posted_wip_warnings(db, co, on)
+    return out
 
 
 @router.post("/{co_id}/reject", response_model=ChangeOrderOut)
@@ -382,6 +460,11 @@ def void_change_order(co_id: int, db: Session = Depends(get_db)):
                 "message": "Only an approved change order can be voided.",
             },
         )
+    # Voiding takes the change order out as of the day it took effect, so a
+    # closed period refuses it as approving it there would.
+    effective = co_effective_date(co)
+    if effective is not None:
+        check_closing_date(db, effective)
     reverse_change_order(db, co)  # may 409 co_billed
     db.commit()
     db.refresh(co)
@@ -466,6 +549,9 @@ def promote_change_order(
     for pco in pcos:
         pco.status = "promoted"
         pco.promoted_to_id = owner.id
+    db.refresh(owner)
+    recompute(owner, owner.job)
+    check_line_figures(owner)  # several PCOs can sum past what one CO holds
     db.commit()
     db.refresh(owner)
     return _co_out(db, owner)

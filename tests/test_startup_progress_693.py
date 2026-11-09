@@ -50,7 +50,8 @@ def test_a_file_built_by_migrations_has_both_indexes(tmp_path):
     db = tmp_path / "fresh.db"
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
-    assert script.get_heads() == ["c8e1a4d7f305"]  # Collections (#653) follows it
+    # later migrations sit above this one; it stays in the chain under head
+    assert REVISION in {r.revision for r in script.walk_revisions()}
     assert script.get_revision(REVISION).down_revision == BEFORE
     command.upgrade(cfg, "head")
     indexes = _indexes(db)

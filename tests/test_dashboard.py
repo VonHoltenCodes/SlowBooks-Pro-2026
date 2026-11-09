@@ -4,13 +4,14 @@ per-user layout preference (operator session vs named users)."""
 from datetime import date, timedelta
 
 from app.models.accounts import Account, AccountType
-from app.services.dashboard_widgets import DEFAULT_LAYOUT, WIDGETS
+from app.services.dashboard_widgets import CONSTRUCTION_ONLY, DEFAULT_LAYOUT, WIDGETS
 
 
 def test_catalog_lists_every_widget_and_the_classic_default(client):
     body = client.get("/api/dashboard/widgets").json()
     ids = {w["id"] for w in body["widgets"]}
-    assert ids == set(WIDGETS)
+    # the contractor's tiles are offered to a construction company only
+    assert ids == set(WIDGETS) - set(CONSTRUCTION_ONLY)
     assert body["default_order"] == list(DEFAULT_LAYOUT)
     assert {
         "job_budget_vs_actual",
@@ -27,7 +28,7 @@ def test_every_widget_builds_on_an_empty_company(client, seed_accounts):
     resp = client.get("/api/dashboard/data?ids=" + ",".join(WIDGETS))
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert set(data) == set(WIDGETS)
+    assert set(data) == set(WIDGETS) - set(CONSTRUCTION_ONLY)
     for wid, payload in data.items():
         assert "error" not in payload, f"{wid}: {payload.get('error')}"
     assert data["receivables"] == {"total": 0.0, "overdue_count": 0}

@@ -307,26 +307,33 @@ expense, cost and inventory lines (`applied / sum of those lines`), so the
 cash lines balance on A/P as before and, once the net is paid, each line is
 recognized in the proportion `net / total`; the held part is not yet an
 expense and 2050 reads zero on the cash Balance Sheet (the accrual view shows
-it as a liability). When the held amount is released,
-`retainage_release_cash_lines` gives the cash lines for the release's own
-entry: Dr the bill's expense shares for the released amount / Cr 2050 (cash),
-beside the release's Dr 2050 / Cr bank (`both`), which then nets 2050 to zero
-in the cash view. The app has no release path on `main` yet (#555 / #576: the
-buyout flow only holds retainage; a plain check or journal entry against 2050
-cannot be linked to a bill), so nothing calls that function in the product
-today; the release test writes the entry the way a release route will. A
-release route must call it, and a void of the release reverses the cash
-lines with the rest (the void copies every line with its basis, as a bill
-payment's does). The backfill handles retainage bills with no change: it
-writes the cash lines of each bill payment by the rule above, idempotently.
+it as a liability). A release is a bill of its own (`release-retainage` on
+the commitment, #555: Dr 2050 / Cr A/P, accrual), paid through Pay Bills.
+Its payment's cash lines recognize the held part of the commitment's bills:
+`recognition_pool` gives a release bill the bills held before it, each
+prorated to its share of the release, and the payment prorates that pool by
+`applied / release total`, Cr A/P as any bill payment. Each release takes
+from the bills held before it in proportion to what each still holds
+(`_release_shares`), worked from the documents alone, so a payment posted
+today and the backfill of an older book write the same lines, and releases
+that add up to all that was held recognize each bill's held part once. An
+edit of a held bill rewrites its releases' payments too. A plain check or
+journal entry against 2050 still has nothing to recognize (*Known limits*).
 
-*Invoices (follows #576).* Pay applications and invoice retainage are not on
-`main`. When they land, the invoice's A/R debit splits between 1100 and 1150
-Retainage Receivable, and the same rule applies mirrored: a customer payment
-prorates the income lines over the invoice total less the retainage held
-(1150 left out, so the cash lines still balance on A/R), and a release
-writes Dr 1150 (cash) / Cr the income shares for the released amount on the
-release's entry.
+*Invoices (pay applications, #555).* The invoice's A/R debit splits between
+1100 and 1150 Retainage Receivable, and the same rule applies mirrored, with
+one difference: an owner's retainage is held on the work, before tax, so a
+payment collects the tax whole. `recognition_pool` gives a pay application's
+invoice its sales tax (its liability lines) whole and its income lines less
+the retainage held, 1150 left out, so the pool totals the amount due and a
+payment prorates it by `applied / amount due` (the Sales Tax report's cash
+reading prorates the tax on the same base, so the two agree). A release
+application adds the held income of the job's earlier applications, as a
+release bill does. A negative retainage this period (a dropped percent) is a
+release. A deposit applied to the invoice is a payment like any other: the
+deposit itself (Dr bank / Cr 2210, `both`) is a liability on both bases until
+it is applied (QuickBooks' reading; the invariant above lists customer
+deposits among the liabilities).
 
 **Inventory and cost of goods.** The stock movement an invoice posts (Dr
 cost of goods / Cr inventory, under the invoice's own source) is among
@@ -474,6 +481,12 @@ the journal form's basis choice (see the step 3 PR).
     The ledger block (tax posted, paid, balance) reads 2200 on the basis, so
     the two are checked against each other; a cent can differ from the
     ledger (each payment's own lines are rounded to the largest share).
+16. **Retainage releases are recognized on their payment** (construction
+    overhaul, 2026-11-07): a paid release bill or release pay application
+    recognizes the held documents' own lines, not 6990 / 4950, and an
+    owner payment collects its tax whole with the net, so held owner
+    retainage is neither cash income nor a cash 1150 asset. A deposit stays
+    a liability until applied.
 
 ## Known limits of step 1
 
@@ -501,10 +514,10 @@ the journal form's basis choice (see the step 3 PR).
   names it). The report has no PDF or CSV, so there is no period line to
   mark; the screen says "cash basis".
 - **A release of bill retainage with no link to the bill** (a plain check
-  or journal entry against 2050) leaves a debit on 2050 and no expense on
-  the cash basis until a release route exists; the cash Balance Sheet then
-  shows 2050 as an asset-like debit. Record the release through the bill's
-  release flow (#555 / #576) once it lands.
+  or journal entry against 2050, or a bill entered by hand with retainage
+  and no commitment, which has no release route) leaves a debit on 2050 and
+  no expense on the cash basis; the cash Balance Sheet then shows 2050 as an
+  asset-like debit. Release through the commitment's **Release retainage**.
 
 ## Open items (not settled; conservative choice taken)
 

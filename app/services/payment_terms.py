@@ -356,7 +356,21 @@ def terms_dates(
 
 
 def due_date_for(db: Session, on: date, text: Optional[str]) -> date:
-    return terms_dates(db, on, text).due_date
+    """The due date for a document dated `on` with these terms. A date so near
+    the calendar's end that the terms run past it is a 422, not an overflow;
+    that takes a date stored by an import, since request dates stop at 2199.
+    Nothing is clamped to the last day: text of more than MAX_TEXT_DAYS days
+    reads as no terms (the 30-day default, with a note)."""
+    from fastapi import HTTPException
+
+    try:
+        return terms_dates(db, on, text).due_date
+    except OverflowError:
+        raise HTTPException(
+            status_code=422,
+            detail=f'"{(text or "").strip()}" from {on.isoformat()} runs past '
+            "the calendar; date the document earlier.",
+        )
 
 
 def describe(rule: Rule) -> str:
@@ -611,7 +625,10 @@ def term_id_for(db: Session, text: Optional[str]) -> Optional[int]:
     """The list entry the terms of a document made now name, picked by the
     person (a form, the API) or given by its customer or vendor: what a new
     invoice or bill is tied to. A copy (duplicate, a template's next
-    document) takes its source's tie instead; an import takes none."""
+    document) takes its source's tie instead; an import takes none. A company
+    whose list is still empty gets the standard terms first, so a new document
+    links to its term instead of none."""
+    ensure_seeded(db)
     with db.no_autoflush:
         term = find_term(db, text)
     return term.id if term is not None else None

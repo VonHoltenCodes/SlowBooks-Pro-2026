@@ -536,6 +536,127 @@ def job_budget_vs_actual(db: Session) -> dict:
     }
 
 
+# ── construction tiles ───────────────────────────────────────────────────
+# A contractor's overview: what owners hold, what is held from subs, where
+# billing stands against the work done, what is left to earn and what is
+# committed to subs and suppliers. Each reads the report behind it as of
+# today (one run per page load, shared by the tiles that use it).
+
+
+def _cached(db: Session, key: str, build: Callable[[], dict]) -> dict:
+    """One run of a report per request: the session lives as long as the
+    request, so the tiles that read the same report share it."""
+    cache = db.info.setdefault("_dashboard_reports", {})
+    if key not in cache:
+        cache[key] = build()
+    return cache[key]
+
+
+def _retainage(db: Session) -> dict:
+    from app.services.retainage_report import retainage_report
+
+    return _cached(db, "retainage", lambda: retainage_report(db, date.today()))
+
+
+def _wip(db: Session) -> dict:
+    from app.services.job_reports import wip_schedule
+
+    return _cached(db, "wip", lambda: wip_schedule(db, date.today()))
+
+
+def _commitments(db: Session) -> dict:
+    from app.services.job_reports import commitment_status
+
+    return _cached(db, "commitments", lambda: commitment_status(db, date.today()))
+
+
+def _job_amounts(rows: list[dict], key: str) -> list[dict]:
+    """The jobs behind a tile's total, largest first: what the tile shows on
+    hover. A job at zero is left out."""
+    out = [
+        {"job_id": r["job_id"], "job": r["job_name"], "amount": _f(r[key])}
+        for r in rows
+        if r.get(key)
+    ]
+    out.sort(key=lambda r: -abs(r["amount"]))
+    return out
+
+
+def retainage_receivable(db: Session) -> dict:
+    """Retainage owners hold from us: account 1150 as of today, by job."""
+    data = _retainage(db)
+    jobs = [
+        {
+            "job_id": j["job_id"],
+            "job": j["job_name"],
+            "amount": j["receivable"]["outstanding"],
+        }
+        for j in data["jobs"]
+        if j["receivable"]["outstanding"]
+    ]
+    jobs.sort(key=lambda r: -abs(r["amount"]))
+    return {"total": data["totals"]["receivable"], "jobs": jobs, "as_of": data["as_of"]}
+
+
+def retainage_payable(db: Session) -> dict:
+    """Retainage we hold from subs: account 2050 as of today, by job."""
+    data = _retainage(db)
+    jobs = [
+        {
+            "job_id": j["job_id"],
+            "job": j["job_name"],
+            "amount": j["payable"]["outstanding"],
+        }
+        for j in data["jobs"]
+        if j["payable"]["outstanding"]
+    ]
+    jobs.sort(key=lambda r: -abs(r["amount"]))
+    return {"total": data["totals"]["payable"], "jobs": jobs, "as_of": data["as_of"]}
+
+
+def billing_position(db: Session) -> dict:
+    """Over- and under-billing from the WIP schedule as of today: billed
+    ahead of the work (a liability) and work done not yet billed (an asset)."""
+    wip = _wip(db)
+    over = _job_amounts(wip["rows"], "over_billing")
+    under = _job_amounts(wip["rows"], "under_billing")
+    return {
+        "over": wip["totals"]["over_billing"],
+        "under": wip["totals"]["under_billing"],
+        "over_jobs": over,
+        "under_jobs": under,
+        "as_of": wip["as_of"],
+    }
+
+
+def backlog(db: Session) -> dict:
+    """Revised contract less earned revenue on open jobs: the work still to
+    earn, from the WIP schedule as of today."""
+    wip = _wip(db)
+    return {
+        "total": wip["totals"]["backlog"],
+        "jobs": _job_amounts(wip["rows"], "backlog"),
+        "as_of": wip["as_of"],
+    }
+
+
+def committed_unbilled(db: Session) -> dict:
+    """What open commitments (subcontracts and POs) still have to bill, on
+    open jobs, from Commitment Status as of today."""
+    data = _commitments(db)
+    jobs = [
+        {
+            "job_id": j["job_id"],
+            "job": j["job_name"],
+            "amount": j["totals"]["remaining"],
+        }
+        for j in data["jobs"]
+        if j["totals"]["remaining"]
+    ]
+    jobs.sort(key=lambda r: -abs(r["amount"]))
+    return {"total": data["totals"]["remaining"], "jobs": jobs, "as_of": data["as_of"]}
+
+
 # ── registry ─────────────────────────────────────────────────────────────
 
 # id → (title, size, description, builder). Size is a layout hint the page
@@ -633,6 +754,52 @@ WIDGETS: dict[str, tuple[str, str, str, Callable[[Session], dict]]] = {
         "Active jobs ranked by projected variance",
         job_budget_vs_actual,
     ),
+    "retainage_receivable": (
+        "Retainage Owed to Me",
+        "stat",
+        "Retainage owners hold from you (1150), by job",
+        retainage_receivable,
+    ),
+    "retainage_payable": (
+        "Retainage I Owe",
+        "stat",
+        "Retainage you hold from subs (2050), by job",
+        retainage_payable,
+    ),
+    "billing_position": (
+        "Over / Under Billed",
+        "stat",
+        "Billed ahead of the work, and work done not yet billed, from the WIP schedule",
+        billing_position,
+    ),
+    "backlog": (
+        "Backlog",
+        "stat",
+        "Revised contract less earned revenue on open jobs",
+        backlog,
+    ),
+    "committed_unbilled": (
+        "Committed, Not Yet Billed",
+        "stat",
+        "What open subcontracts and purchase orders still have to bill",
+        committed_unbilled,
+    ),
+}
+
+# Cards only a construction company is offered.
+CONSTRUCTION_ONLY = (
+    "retainage_receivable",
+    "retainage_payable",
+    "billing_position",
+    "backlog",
+    "committed_unbilled",
+)
+
+# A contractor's receivables and payables leave retainage out (it sits on 1150
+# and 2050, which the next tiles show), so the titles say so.
+CONSTRUCTION_TITLES = {
+    "Total Receivables": "Total Receivables (excl. retainage)",
+    "Total Payables": "Total Payables (excl. retainage)",
 }
 
 # The order and set a company gets before anyone customises anything —
@@ -665,9 +832,31 @@ NONPROFIT_DEFAULT_LAYOUT = [
 ]
 
 
+# What a contractor sees first: the money in and out, the retainage on both
+# sides, where billing stands against the work, the backlog and what is
+# committed to subs, then the classic overview.
+CONSTRUCTION_DEFAULT_LAYOUT = [
+    "receivables",
+    "payables",
+    "retainage_receivable",
+    "retainage_payable",
+    "billing_position",
+    "backlog",
+    "committed_unbilled",
+    "overdue_invoices",
+    "bank_balances",
+    "ar_aging",
+    "monthly_revenue",
+    "recent_invoices",
+    "recent_payments",
+]
+
+
 def default_layout(t=None) -> list[str]:
     if t is not None and t.is_nonprofit:
         return list(NONPROFIT_DEFAULT_LAYOUT)
+    if t is not None and t.is_construction:
+        return list(CONSTRUCTION_DEFAULT_LAYOUT)
     return list(DEFAULT_LAYOUT)
 
 
@@ -677,9 +866,18 @@ def catalog(t=None) -> list[dict]:
         from app.services.terminology import Terms
 
         t = Terms()
+    construction = t.is_construction
     return [
-        {"id": wid, "title": t(title), "size": size, "description": t.text(desc)}
+        {
+            "id": wid,
+            "title": t(
+                CONSTRUCTION_TITLES.get(title, title) if construction else title
+            ),
+            "size": size,
+            "description": t.text(desc),
+        }
         for wid, (title, size, desc, _) in WIDGETS.items()
+        if construction or wid not in CONSTRUCTION_ONLY
     ]
 
 

@@ -30,6 +30,7 @@ from app.services.accounting import (
     _q,
     create_journal_entry,
     compute_line_totals,
+    refuse_total_past_column,
     get_ap_account_id,
     reversing_lines,
 )
@@ -49,6 +50,10 @@ from app.services.purchase_posting import (
     expense_account_for,
     spread,
     unit_cost_with_tax,
+    use_tax_for,
+    use_tax_lines,
+    use_tax_rate,
+    use_tax_rate_warnings,
 )
 
 router = APIRouter(prefix="/api/bills", tags=["bills"])
@@ -190,12 +195,20 @@ def _post_bill_lines(
     txn_date,
     existing_transaction=None,
     retainage_held: Decimal = Decimal("0"),
+    booked_use_tax_rates=None,
 ):
     """Write the bill's lines, post its journal (DR each line's account or
     Inventory, CR Accounts Payable) and record its inventory receipts. Used
     by create and, with `existing_transaction`, by an edit that re-posts
-    the same journal (#225), so both post exactly the same way."""
+    the same journal (#225), so both post exactly the same way.
+
+    `booked_use_tax_rates` (an edit's): the use-tax rate each of the bill's
+    lines accrued at before the edit, by line id. A line sent with its id
+    keeps its own rate wherever it sits now; a new line, or one that had
+    none, accrues at today's setting."""
     from app.services.currency import convert_lines
+
+    booked_use_tax_rates = booked_use_tax_rates or {}
 
     # A missing Accounts Payable account is the first thing to say (#119),
     # ahead of anything about one line.
@@ -265,6 +278,8 @@ def _post_bill_lines(
                 account_id=line_data.account_id,
                 item=item,
                 vendor=vendor,
+                cost_code_id=line_data.cost_code_id,
+                cost_type=eff_cost_type,
             )
         else:
             # A description-only line (no amount) posts nothing; keep the
@@ -273,27 +288,25 @@ def _post_bill_lines(
                 vendor.default_expense_account_id
             )
 
-        db.add(
-            BillLine(
-                bill_id=bill.id,
-                item_id=line_data.item_id,
-                account_id=posting_acct,
-                description=line_data.description,
-                quantity=line_data.quantity,
-                rate=line_data.rate,
-                amount=amt,
-                job_id=line_data.job_id,
-                class_id=line_data.class_id,
-                cost_code_id=line_data.cost_code_id,
-                cost_type=eff_cost_type,
-                purchase_order_line_id=getattr(
-                    line_data, "purchase_order_line_id", None
-                ),
-                function=line_data.function,
-                is_billable=line_data.is_billable,
-                line_order=i,
-            )
+        bill_line = BillLine(
+            bill_id=bill.id,
+            item_id=line_data.item_id,
+            account_id=posting_acct,
+            description=line_data.description,
+            quantity=line_data.quantity,
+            rate=line_data.rate,
+            amount=amt,
+            job_id=line_data.job_id,
+            class_id=line_data.class_id,
+            cost_code_id=line_data.cost_code_id,
+            cost_type=eff_cost_type,
+            purchase_order_line_id=getattr(line_data, "purchase_order_line_id", None),
+            function=line_data.function,
+            is_billable=line_data.is_billable,
+            use_tax=getattr(line_data, "use_tax", None),
+            line_order=i,
         )
+        db.add(bill_line)
 
         if amt > 0 and posting_acct:
             journal_lines.append(
@@ -315,6 +328,25 @@ def _post_bill_lines(
                     ),
                 }
             )
+            # Use tax a "contractor pays" job owes on the line (construction).
+            if not (item and item.track_inventory):
+                job_id = line_data.job_id or bill.job_id
+                booked = booked_use_tax_rates.get(getattr(line_data, "id", None))
+                ut_rate = booked if booked is not None else use_tax_rate(db)
+                accrual = use_tax_for(
+                    db,
+                    amount=amt,
+                    job_id=job_id,
+                    cost_type=eff_cost_type,
+                    bill_taxed=tax_amount > 0,
+                    use_tax=getattr(line_data, "use_tax", None),
+                    rate=ut_rate,
+                )
+                if accrual:
+                    bill_line.use_tax_rate = ut_rate
+                journal_lines.extend(
+                    use_tax_lines(db, journal_lines[-1], accrual, job_id, ut_rate)
+                )
 
     # Credit AP for the net; any retainage held rides on Retainage Payable
     # (2050) instead, so Pay Bills pays only the net (#553). #555 releases it
@@ -498,7 +530,14 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     term_id = picked_term_id(db, terms, data.payment_term_id)
     due_date = data.due_date or _due_date_from_terms(db, data.date, terms)
 
+    # A new bill has no lines yet for an id to point at.
+    if any(ln.id is not None for ln in data.lines):
+        raise HTTPException(
+            status_code=422,
+            detail="A new bill has no lines yet; send its lines without an id.",
+        )
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    refuse_total_past_column(subtotal, tax_amount, total)
     if total <= 0:
         raise HTTPException(
             status_code=400,
@@ -567,6 +606,7 @@ def create_bill(data: BillCreate, db: Session = Depends(get_db)):
     DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
+    resp.warnings = use_tax_rate_warnings(db, bill)
     return resp
 
 
@@ -680,6 +720,14 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         key in update_data and update_data[key] != getattr(bill, key)
         for key in repost_fields
     )
+    # A retainage release bill (#555) debits 2050, not an expense account; a
+    # re-post would put its line on the vendor's default expense instead.
+    if needs_repost and (bill.retainage_released or 0) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail="A retainage release bill can't be re-lined; void it and "
+            "release again.",
+        )
 
     # The lines to post: the ones sent, else the bill's own. A header-only
     # edit that re-posts (a class, a job, a new vendor or number, the tax
@@ -703,6 +751,8 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
                 # later void still restores the PO line's billed_amount.
                 purchase_order_line_id=ln.purchase_order_line_id,
                 is_billable=bool(ln.is_billable),
+                use_tax=ln.use_tax,
+                id=ln.id,
                 description=ln.description,
                 # the stored Decimals, not a float round trip (everything
                 # below reads them through Decimal(str(...)))
@@ -865,6 +915,25 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
         from app.routes.invoices.helpers import _reverse_and_delete_journal
         from app.services.inventory_hooks import reverse_receipts_for_bill
 
+        # the rate each line's use tax was booked at, by line id, before the
+        # lines are deleted: the re-post keeps it for a line sent with its id
+        booked_use_tax_rates = {ln.id: ln.use_tax_rate for ln in bill.lines}
+        if data.lines is not None:
+            sent_ids = set()
+            for sent in data.lines:
+                if sent.id is not None and sent.id in sent_ids:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Line id {sent.id} is sent twice.",
+                    )
+                sent_ids.add(sent.id)
+                if sent.id is not None and sent.id not in booked_use_tax_rates:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Line id {sent.id} is not a line of this bill. "
+                        "Send a line without an id to add it.",
+                    )
+
         # each old line leaves a DELETE event with its amounts (#289)
         audited_bulk_delete(db, db.query(BillLine).filter(BillLine.bill_id == bill.id))
         db.flush()
@@ -904,6 +973,7 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
             bill.date,
             existing_transaction=txn,
             retainage_held=retainage_held,
+            booked_use_tax_rates=booked_use_tax_rates,
         )
         db.flush()
         db.refresh(bill)
@@ -939,7 +1009,9 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
     DocumentTerms(db, "bill").fill(resp, bill)
     resp.vendor_name = vendor.name
     resp.vendor_compliance = VendorCompliance(**vendor_compliance(vendor))
-    resp.warnings = stock_warnings
+    resp.warnings = stock_warnings + (
+        use_tax_rate_warnings(db, bill) if needs_repost else []
+    )
     return resp
 
 

@@ -13,6 +13,10 @@ from app.models.change_orders import (  # noqa: F401 — registers the tables
     ChangeOrder,
     ChangeOrderLine,
 )
+from app.models.field_tickets import (  # noqa: F401 — registers the tables
+    FieldTicket,
+    FieldTicketLine,
+)
 from app.models.preferences import UserPreference  # noqa: F401 — registers the table
 from app.models.cost_codes import CostCode  # noqa: F401 — registers the table
 from app.models.job_costing import (  # noqa: F401 — registers the tables

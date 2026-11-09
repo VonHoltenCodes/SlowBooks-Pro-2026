@@ -17,6 +17,7 @@
 
 from decimal import Decimal
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.services.accounting import _q
@@ -59,6 +60,8 @@ def application_totals(
     tax_rate=0,
     release_retainage=0,
     deposit_applied=0,
+    prior_tax_exact=0,
+    prior_tax=0,
 ) -> dict:
     """The application's totals. `lines` is any iterable of objects carrying
     scheduled_value / previous / this_period / stored. The scalars come from
@@ -72,11 +75,22 @@ def application_totals(
     current-due figures line up with the invoices and account 1150 (#576).
 
     Sales tax rides on top: `tax_rate` (0 when tax is off for the application
-    or the customer is exempt) taxes what this application bills, which is
-    completed to date less `previous_billed` (the prior approved application's
-    completed to date). The earned/previous figures stay before tax, so the
-    cumulative arithmetic never counts an earlier application's tax again;
-    `current_due` adds this application's tax and matches its invoice."""
+    or the customer is exempt) taxes what this application bills on its
+    taxable lines. What it bills is completed to date less `previous_billed`
+    (the prior approved application's completed to date); a line whose
+    `is_taxable` is False takes its own billing (this period plus the change
+    in stored since `prior_stored`) out of the taxed figure. The
+    earned/previous figures stay before tax, so the cumulative arithmetic
+    never counts an earlier application's tax again; `current_due` adds this
+    application's tax and matches its invoice.
+
+    An application that brings a taxable line to 100% complete trues the tax
+    up: it charges the unrounded tax of every application so far
+    (`prior_tax_exact`, plus its own) rounded once, less the tax already
+    billed (`prior_tax`). Rounding each application's tax on its own drifts a
+    cent from the bid's over several applications; billed to 100%, the total
+    tax is the bid's to the cent. A partial application rounds its own."""
+    lines = list(lines)
     rows = [line_computed(ln, retainage_pct) for ln in lines]
     scheduled_total = _q(sum((r["scheduled_value"] for r in rows), _ZERO))
     previous_total = _q(sum((r["previous"] for r in rows), _ZERO))
@@ -99,7 +113,33 @@ def application_totals(
     total_earned_less_retainage = _q(completed - retainage_to_date)
     due_before_tax = _q(total_earned_less_retainage - prev_cert)
     billed_this_period = _q(completed - _q(previous_billed))
-    tax_amount = _q(billed_this_period * Decimal(str(tax_rate or 0)))
+    # A line not taxable (its SOV line's flag) bills this period plus the
+    # change in its stored materials, none of it taxed.
+    exempt_billed = _q(
+        sum(
+            (
+                _q(r["this_period"] + r["stored"] - _q(getattr(ln, "prior_stored", 0)))
+                for ln, r in zip(lines, rows)
+                if getattr(ln, "is_taxable", True) is False
+            ),
+            _ZERO,
+        )
+    )
+    taxable_billed = _q(billed_this_period - exempt_billed)
+    rate = Decimal(str(tax_rate or 0))
+    tax_exact = taxable_billed * rate
+    completes_taxable_line = any(
+        getattr(ln, "is_taxable", True) is not False
+        and r["scheduled_value"] != _ZERO
+        and r["completed_to_date"] == r["scheduled_value"]
+        and _q(r["previous"] + _q(getattr(ln, "prior_stored", 0)))
+        != r["scheduled_value"]
+        for ln, r in zip(lines, rows)
+    )
+    if rate and completes_taxable_line:
+        tax_amount = _q(_q(Decimal(str(prior_tax_exact)) + tax_exact) - _q(prior_tax))
+    else:
+        tax_amount = _q(tax_exact)
     current_due = _q(due_before_tax + tax_amount)
     net_due = _q(current_due - deposit)
     return {
@@ -115,9 +155,12 @@ def application_totals(
         "total_earned_less_retainage": total_earned_less_retainage,
         "previous_applications": prev_cert,
         "billed_this_period": billed_this_period,
+        "taxable_billed": taxable_billed,
         "due_before_tax": due_before_tax,
         "tax_rate": Decimal(str(tax_rate or 0)),
         "tax_amount": tax_amount,
+        # unrounded, for the next application's true-up
+        "tax_exact": tax_exact,
         "current_due": current_due,
         "balance_to_finish_total": balance_total,
         "release_retainage": release,
@@ -159,7 +202,9 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
     - `prev_applications` — Σ of the approved applications' due before tax;
     - `billed`    — the latest approved application's completed_to_date
       (each application's figure is already cumulative; summing them would
-      count every earlier period again).
+      count every earlier period again);
+    - `tax_exact` — Σ the applications' unrounded tax, and `tax_billed` Σ
+      the tax their invoices charged, for a completing application's true-up.
 
     One pass keeps the list and the next approve linear, not exponential — the
     old code recursed into application_figures per prior (#555 review)."""
@@ -169,6 +214,8 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
     prev_released = _ZERO
     prev_cert = _ZERO
     billed = _ZERO
+    tax_exact = _ZERO
+    tax_billed = _ZERO
     for app in _approved(db, job_id, before_no, as_of=as_of):
         rows = [
             _Row(
@@ -176,6 +223,8 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
                 previous=previous.get(ln.sov_line_id, _ZERO),
                 this_period=ln.this_period,
                 stored=ln.stored,
+                is_taxable=sov_line_taxable(db, ln.sov_line_id),
+                prior_stored=stored.get(ln.sov_line_id, _ZERO),
             )
             for ln in app.lines
         ]
@@ -186,8 +235,11 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
             previous_applications=prev_cert,
             previous_released=prev_released,
             previous_billed=billed,
+            tax_rate=effective_tax_rate(app),
             release_retainage=app.release_retainage,
             deposit_applied=app.deposit_applied,
+            prior_tax_exact=tax_exact,
+            prior_tax=tax_billed,
         )
         prev_released = _q(prev_released + _q(app.release_retainage))
         for ln in app.lines:
@@ -200,6 +252,11 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
         prev_ret = totals["retainage_to_date"]
         prev_cert = _q(prev_cert + totals["due_before_tax"])
         billed = _q(totals["completed_to_date"])  # cumulative already; the latest wins
+        tax_exact += totals["tax_exact"]
+        # the tax its invoice charged (none when it only moved stored work,
+        # nor at a rate of 0)
+        if totals["tax_rate"] and app.invoice is not None:
+            tax_billed = _q(tax_billed + _q(app.invoice.tax_amount))
     return {
         "previous": previous,
         "stored": stored,
@@ -207,6 +264,8 @@ def _history(db: Session, job_id: int, before_no=None, as_of=None) -> dict:
         "prev_released": prev_released,
         "prev_applications": prev_cert,
         "billed": billed,
+        "tax_exact": tax_exact,
+        "tax_billed": tax_billed,
     }
 
 
@@ -220,13 +279,124 @@ def stored_by_sov_line(db: Session, job_id: int, before_no=None) -> dict:
     return _history(db, job_id, before_no)["stored"]
 
 
+def carried_by_earlier(db: Session, job_id: int, before_no=None) -> set:
+    """SOV line ids an earlier approved application billed work on or left a
+    stored balance on: money already on the schedule, so a later application
+    carries the line whatever its date."""
+    h = _history(db, job_id, before_no)
+    return {
+        sov_id
+        for sov_id in set(h["previous"]) | set(h["stored"])
+        if h["previous"].get(sov_id, _ZERO) != _ZERO
+        or h["stored"].get(sov_id, _ZERO) != _ZERO
+    }
+
+
 def effective_tax_rate(app) -> Decimal:
     """The rate this application taxes with: its own rate when tax is on and
-    the owner is taxable, else 0 (the invoice routes tax the same way)."""
+    the owner is taxable, else 0 (the invoice routes tax the same way). A job
+    whose contractor pays the tax on materials bills no sales tax at all,
+    stored materials included, whatever the SOV's Tax boxes say."""
+    from app.services.contracts import contractor_pays_tax
+
+    if not app.tax_rate:
+        return _ZERO
     customer = app.job.customer if app.job is not None else None
     if not app.charge_tax or (customer is not None and customer.is_taxable is False):
         return _ZERO
+    if contractor_pays_tax(app.job):
+        return _ZERO
     return Decimal(str(app.tax_rate or 0))
+
+
+def sov_line_in_effect(db: Session, sov, on) -> bool:
+    """False for a change order's schedule line on an application dated before
+    the change order takes effect: the application's contract sum does not
+    carry that change yet, so its schedule must not either."""
+    if sov is None or sov.change_order_id is None or on is None:
+        return True
+    from app.models.change_orders import ChangeOrder
+    from app.services.change_orders import co_effective_date
+
+    co = db.get(ChangeOrder, sov.change_order_id)
+    effective = co_effective_date(co) if co is not None else None
+    return effective is None or effective <= on
+
+
+def refuse_lines_not_in_effect(db: Session, app) -> None:
+    """409 when a line bills something on a change order's schedule line and
+    the application is dated before that change order takes effect: the
+    application's contract sum does not carry the change yet, so it cannot
+    bill it (moving the date past the change order, billing its line and
+    moving the date back would bill a change not yet in effect). A line that
+    bills nothing new (no work this period, its stored balance as the
+    earlier applications left it) is left alone."""
+    from app.models.change_orders import ChangeOrder
+    from app.models.jobs import SovLine
+    from app.services.change_orders import co_effective_date
+
+    prior_stored = stored_by_sov_line(db, app.job_id, app.application_no)
+    for ln in app.lines:
+        if _q(ln.this_period) == _ZERO and _q(ln.stored) == prior_stored.get(
+            ln.sov_line_id, _ZERO
+        ):
+            continue
+        sov = db.get(SovLine, ln.sov_line_id) if ln.sov_line_id else None
+        if sov_line_in_effect(db, sov, app.date):
+            continue
+        co = db.get(ChangeOrder, sov.change_order_id)
+        effective = co_effective_date(co)
+        # A change order's line is often described by its number alone,
+        # which the sentence already names.
+        name = sov.item_no or (
+            sov.description if sov.description != co.number else None
+        )
+        line = f"its line {name}" if name else "the change order's line"
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "change_order_not_in_effect",
+                "message": f"{co.number} takes effect on {effective.isoformat()}, "
+                f"after this application's date ({app.date.isoformat()}), so "
+                f"{line} cannot bill on it. Date the application "
+                f"{effective.isoformat()} or later, or clear the line's amounts.",
+            },
+        )
+
+
+def lines_in_effect(db: Session, app) -> list:
+    """The application's lines less a change order's line that takes effect
+    after the application's date. One already on the schedule stays: it is
+    money, whether this application bills it or an earlier approved one billed
+    work or left stored materials on it."""
+    from app.models.jobs import SovLine
+
+    carried = carried_by_earlier(db, app.job_id, app.application_no)
+    kept = []
+    for ln in app.lines:
+        billed = (
+            _q(ln.this_period) != _ZERO
+            or _q(ln.stored) != _ZERO
+            or ln.sov_line_id in carried
+        )
+        sov = db.get(SovLine, ln.sov_line_id) if ln.sov_line_id else None
+        if billed or sov_line_in_effect(db, sov, app.date):
+            kept.append(ln)
+    return kept
+
+
+def carried_change_orders(db: Session, app) -> set:
+    """Ids of the change orders whose schedule lines the application carries:
+    its contract sum to date counts each, so the summary foots against the
+    line detail even when the application is dated before one takes effect."""
+    from app.models.jobs import SovLine
+
+    ids = set()
+    for ln in lines_in_effect(db, app):
+        sov = db.get(SovLine, ln.sov_line_id) if ln.sov_line_id else None
+        if sov is not None and sov.change_order_id is not None:
+            ids.add(sov.change_order_id)
+    return ids
 
 
 def application_figures(db: Session, app) -> dict:
@@ -239,10 +409,12 @@ def application_figures(db: Session, app) -> dict:
             previous=h["previous"].get(ln.sov_line_id, _ZERO),
             this_period=ln.this_period,
             stored=ln.stored,
+            is_taxable=sov_line_taxable(db, ln.sov_line_id),
+            prior_stored=h["stored"].get(ln.sov_line_id, _ZERO),
         )
-        for ln in app.lines
+        for ln in lines_in_effect(db, app)
     ]
-    return application_totals(
+    figures = application_totals(
         rows,
         retainage_pct=app.retainage_pct,
         previous_retainage=h["prev_retainage"],
@@ -252,7 +424,66 @@ def application_figures(db: Session, app) -> dict:
         tax_rate=effective_tax_rate(app),
         release_retainage=app.release_retainage,
         deposit_applied=app.deposit_applied,
+        prior_tax_exact=h["tax_exact"],
+        prior_tax=h["tax_billed"],
     )
+    # The contractor pays the tax on this job's materials: nothing billed is
+    # taxed, so "taxable billed" reads 0 beside the 0 tax.
+    from app.services.contracts import contractor_pays_tax
+
+    if contractor_pays_tax(app.job):
+        figures["taxable_billed"] = _ZERO
+    return figures
+
+
+def sov_balance_warnings(job) -> list[str]:
+    """A sentence when the schedule of values does not add up to the contract
+    sum to date: a pay application prints the sum above line detail that
+    totals something else. Not a refusal (a job may be mid-setup). Nothing for
+    a job with no sum or no lines yet."""
+    if job.contract_amount is None or not job.sov_lines:
+        return []
+    sov_total = _q(sum((Decimal(str(r.scheduled_value)) for r in job.sov_lines), _ZERO))
+    gap = _q(Decimal(str(job.contract_amount)) - sov_total)
+    if gap == 0:
+        return []
+    way = "short of" if gap > 0 else "over"
+    return [
+        f"The schedule of values totals ${sov_total:,.2f}, ${abs(gap):,.2f} {way} "
+        f"the contract sum to date of ${_q(Decimal(str(job.contract_amount))):,.2f}. "
+        "Pay applications print the contract sum above lines that do not add up "
+        "to it: add the difference to the schedule or correct the contract sum."
+    ]
+
+
+def application_warnings(db: Session, app) -> list[str]:
+    """Sentences for an open or approved pay application that will quietly do
+    less than it looks like: a schedule of values that does not foot to the
+    contract sum, and taxable lines billed at a tax rate of 0 on a job where
+    the owner is charged tax."""
+    if app.status == "void":
+        return []
+    warnings = sov_balance_warnings(app.job) if app.job is not None else []
+    customer = app.job.customer if app.job is not None else None
+    from app.services.contracts import contractor_pays_tax
+
+    taxed = (
+        app.charge_tax
+        and not (customer is not None and customer.is_taxable is False)
+        and not contractor_pays_tax(app.job)
+    )
+    if (
+        taxed
+        and not Decimal(str(app.tax_rate or 0))
+        and any(sov_line_taxable(db, ln.sov_line_id) for ln in lines_in_effect(db, app))
+    ):
+        warnings.append(
+            f"{app.number} has taxable lines but a tax rate of 0, so it bills no "
+            "sales tax. A job takes its pay application tax rate from its accepted "
+            "estimate, and this one has none: set the Tax rate on the application, "
+            "or untick Charge tax if none is due."
+        )
+    return warnings
 
 
 def retainage_outstanding(db: Session, job_id: int, as_of=None) -> Decimal:
@@ -329,14 +560,41 @@ def has_approved_application(db: Session, job_id: int, as_of=None) -> bool:
     return bool(_approved(db, job_id, as_of=as_of))
 
 
+def sov_line_taxable(db: Session, sov_line_id) -> bool:
+    """Whether an application line's SOV line is taxable; a line with no SOV
+    line (or one since removed) is taxed, as every line was before the flag."""
+    from app.models.jobs import SovLine
+
+    sov = db.get(SovLine, sov_line_id) if sov_line_id else None
+    return True if sov is None else bool(sov.is_taxable)
+
+
 class _Row:
     """A lightweight line for the pure math, so history-filled `previous`
-    rides beside the stored this_period / stored."""
+    (and, for the tax, the line's taxable flag and prior stored) rides
+    beside the stored this_period / stored."""
 
-    __slots__ = ("scheduled_value", "previous", "this_period", "stored")
+    __slots__ = (
+        "scheduled_value",
+        "previous",
+        "this_period",
+        "stored",
+        "is_taxable",
+        "prior_stored",
+    )
 
-    def __init__(self, scheduled_value, previous, this_period, stored):
+    def __init__(
+        self,
+        scheduled_value,
+        previous,
+        this_period,
+        stored,
+        is_taxable=True,
+        prior_stored=_ZERO,
+    ):
         self.scheduled_value = scheduled_value
         self.previous = previous
         self.this_period = this_period
         self.stored = stored
+        self.is_taxable = is_taxable
+        self.prior_stored = prior_stored

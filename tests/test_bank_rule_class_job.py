@@ -257,8 +257,8 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     cfg = _cfg(db)
     script = ScriptDirectory.from_config(cfg)
     assert script.get_heads() == [
-        "c8e1a4d7f305"
-    ]  # Collections (#653) is the head above it
+        "d8f1b3c5e7a9"
+    ]  # the bill line use-tax rate is the head above it
     assert script.get_revision(REVISION).down_revision == "4810bd59e481"
     command.upgrade(cfg, "head")
     engine = create_engine(f"sqlite:///{db}")

@@ -182,6 +182,11 @@ def void_invoice_unchecked(invoice_id: int, db: Session, commit: bool = True):
                 reference=invoice.invoice_number,
             )
 
+    # T&M tickets billed on this invoice are free to bill again (construction).
+    from app.services.field_tickets import release_invoice
+
+    release_invoice(db, invoice)
+
     # ---- Phase 11: reverse inventory movements ----
     # Pass the ORIGINAL (invoice, id) so reverse_sale looks up the sale's
     # historical unit_cost — this keeps the reversal balanced even if

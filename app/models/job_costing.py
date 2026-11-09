@@ -14,6 +14,8 @@
 #              one amount across many jobs in one entry).
 # JobBudget    budget per job × cost code (or cost type, or whole job) for
 #              the budget / actual / committed / variance drill-down.
+# WipEntryLock one row per date a WIP adjusting entry stands for, so two
+#              posts of the same date cannot both land.
 # ============================================================================
 
 from sqlalchemy import (
@@ -22,18 +24,21 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import relationship
 
 from app.database import Base
 
-JOB_COST_SOURCES = ("manual", "time_entry", "allocation")
+# material_slip: posted by a field ticket's material slip (construction)
+JOB_COST_SOURCES = ("manual", "time_entry", "allocation", "material_slip")
 JOB_COST_STATUSES = ("posted", "void")
 ALLOCATION_METHODS = ("percent", "hours", "revenue", "costs", "equal")
 
@@ -176,10 +181,29 @@ class JobBudget(Base):
     __tablename__ = "job_budgets"
     # The unique key includes source (#554): a change-order row may share a
     # (job, code, type) with an estimate-locked or manual row — the tree shows
-    # one under "original" and the other under "changes".
+    # one under "original" and the other under "changes". Each change order
+    # writes rows of its own (change_order_id), one per code and type, so the
+    # (job, code, type, source) key holds only for the rows no change order
+    # owns; partial indexes, which SQLite and PostgreSQL both enforce.
     __table_args__ = (
-        UniqueConstraint(
-            "job_id", "cost_code_id", "cost_type", "source", name="uq_job_budget"
+        Index(
+            "uq_job_budget",
+            "job_id",
+            "cost_code_id",
+            "cost_type",
+            "source",
+            unique=True,
+            sqlite_where=text("change_order_id IS NULL"),
+            postgresql_where=text("change_order_id IS NULL"),
+        ),
+        Index(
+            "uq_job_budget_change_order",
+            "change_order_id",
+            "cost_code_id",
+            "cost_type",
+            unique=True,
+            sqlite_where=text("change_order_id IS NOT NULL"),
+            postgresql_where=text("change_order_id IS NOT NULL"),
         ),
     )
 
@@ -198,6 +222,13 @@ class JobBudget(Base):
     # contract budget and only a change order moves them. Manual rows stay
     # editable.
     locked = Column(Boolean, nullable=False, default=False)
+    # The change order that wrote this row (source "change"): the row is in
+    # effect from the day the change order is (co_effective_date), so a
+    # report as of an earlier date leaves it out. Null on a change row from
+    # before the link, which counts on every date.
+    change_order_id = Column(
+        Integer, ForeignKey("change_orders.id"), nullable=True, index=True
+    )
     notes = Column(Text, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -237,3 +268,16 @@ class JobCostToComplete(Base):
     updated_at = Column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+class WipEntryLock(Base):
+    """The date a WIP adjusting entry stands for (wip_posting). Post writes
+    the row before the entry, so of two posts of one date the second meets
+    the unique key and is refused; Void deletes it so the date can be posted
+    again."""
+
+    __tablename__ = "wip_entry_locks"
+
+    as_of = Column(Date, primary_key=True)
+    transaction_id = Column(Integer, ForeignKey("transactions.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
