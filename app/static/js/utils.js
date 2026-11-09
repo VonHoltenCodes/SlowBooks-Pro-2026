@@ -1183,8 +1183,13 @@ document.addEventListener('keydown', QuickMath.handle, true);
 // opts.wide: a form whose rows are wider than a dialog — the line-item
 // tables with ten or eleven columns (job cost entry). The default 700px
 // dialog clipped the last columns of that table with no scrollbar (#174).
+let _modalOnClose = null;
 function openModal(title, html, opts) {
     _modalOpener = document.activeElement;
+    // opts.onClose runs once, however the dialog closes: a button, ×, Escape
+    // or a page change. A dialog that asks a question treats every way out
+    // but its yes as no (the first-run reminder preview, W-131).
+    _modalOnClose = opts && typeof opts.onClose === 'function' ? opts.onClose : null;
     const wasOpen = !$('#modal-overlay').classList.contains('hidden');
     $('#modal-title').textContent = title;
     $('#modal-body').innerHTML = html;
@@ -1246,8 +1251,11 @@ function closeModal(opts) {
     if (window.App && typeof window.App.syncBack === 'function') window.App.syncBack();
     const opener = _modalOpener;
     _modalOpener = null;
+    const onClose = _modalOnClose;
+    _modalOnClose = null;
     if (opener && document.contains(opener)) focusFor(opener, _byKeyboard());
     if (wasOpen && !(opts && opts.keepAddress) && window.App && typeof App.dialogClosed === 'function') App.dialogClosed();
+    if (wasOpen && onClose) onClose(!!(opts && opts.chosen === true));
 }
 
 // Keys inside an open dialog. Escape closes it. Tab and Shift+Tab are
@@ -1681,10 +1689,11 @@ const DepositAccounts = {
         const v = String(DepositAccounts._settings(s).default_deposit_account_id || '').trim();
         return /^\d+$/.test(v) ? v : '';
     },
-    // the default, when it is one of `banks`; '' otherwise
+    // the default, when it is one of `banks` and still active; '' otherwise
+    // (a default deactivated after it was chosen never opens a deposit)
     startId(banks, s) {
         const d = DepositAccounts.defaultId(s);
-        return d && (banks || []).some(a => String(a.id) === d) ? d : '';
+        return d && (banks || []).some(a => String(a.id) === d && a.is_active !== false) ? d : '';
     },
     // the chosen ids as strings; [] for every bank account
     chosenIds(s) {

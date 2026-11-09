@@ -247,3 +247,12 @@ def test_no_line_begins_with_a_hash_character_constant():
         if re.match(r"\s*#", line) and not line.strip().lower().startswith(known)
     ]
     assert bad == [], "\n".join(bad)
+
+
+def test_setup_and_the_uninstaller_carry_the_app_icon():
+    """W-130 (the 2.31.10 gate): Setup and unins000.exe showed Inno's stock
+    icon. SetupIconFile gives both the app's .ico, which the CI build writes
+    beside the script from assets/icon-256.png."""
+    assert _directives().get("SetupIconFile") == "slowbookspro.ico", _directives().get(
+        "SetupIconFile"
+    )

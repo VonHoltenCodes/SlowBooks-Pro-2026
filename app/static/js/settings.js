@@ -154,7 +154,7 @@ const SettingsPage = {
         const sel = String(s.default_deposit_account_id || '');
         let h = '<div class="form-grid">';
         h += '<div class="form-group full-width"><label for="settings-default-deposit-account">Default deposit account</label>';
-        h += '<select name="default_deposit_account_id" id="settings-default-deposit-account" aria-describedby="settings-default-deposit-account-help">';
+        h += '<select name="default_deposit_account_id" id="settings-default-deposit-account" data-no-search aria-describedby="settings-default-deposit-account-help">';
         h += '<option value=""' + (sel ? '' : ' selected') + '>None: the first bank account on the list</option>';
         let matched = false;
         for (const a of banks) {
@@ -918,14 +918,14 @@ const SettingsPage = {
                     </div>
                     <div class="form-grid">
                         <div class="form-group"><label for="invoice-reminders-auto">Send reminders automatically</label>
-                            <select name="invoice_reminders_auto" id="invoice-reminders-auto" onchange="SettingsPage.previewAutoReminders(this)">
+                            <select name="invoice_reminders_auto" id="invoice-reminders-auto" data-no-search onchange="SettingsPage.previewAutoReminders(this)">
                                 <option value="false" ${s.invoice_reminders_auto !== 'true' ? 'selected' : ''}>Off</option>
                                 <option value="true" ${s.invoice_reminders_auto === 'true' ? 'selected' : ''}>On</option>
                             </select>
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Once a day, when SlowBooks Pro is opened. Needs email set up.
                                 ${s.invoice_reminders_last_run ? `Last ran ${escapeHtml(formatDate(s.invoice_reminders_last_run))}.` : ''}</div></div>
                         <div class="form-group"><label for="invoice-reminders-billed-sub-to">Remind about a sub-${T('customer').toLowerCase()} billed with its parent</label>
-                            <select name="invoice_reminders_billed_sub_to" id="invoice-reminders-billed-sub-to">
+                            <select name="invoice_reminders_billed_sub_to" id="invoice-reminders-billed-sub-to" data-no-search>
                                 <option value="property" ${(s.invoice_reminders_billed_sub_to || 'property') === 'property' ? 'selected' : ''}>The parent (whose account it is billed to)</option>
                                 <option value="tenant" ${s.invoice_reminders_billed_sub_to === 'tenant' ? 'selected' : ''}>The sub-${T('customer').toLowerCase()} itself</option>
                                 <option value="both" ${s.invoice_reminders_billed_sub_to === 'both' ? 'selected' : ''}>Both</option>
@@ -2780,9 +2780,13 @@ const SettingsPage = {
             ${summary.html}
             <p style="font-size:11px; color:var(--text-muted);">To hold any of them back, turn reminders off on that ${T('customer').toLowerCase()} first, or send them yourself from Collections and review the result.</p>
             <div class="form-actions">
-                <button type="button" class="btn btn-secondary" onclick="closeModal(); SettingsPage._autoPreviewCancel()">Leave it off</button>
-                <button type="button" class="btn btn-primary" onclick="closeModal()">Keep it on</button>
-            </div>`);
+                <button type="button" class="btn btn-secondary" onclick="closeModal()">Leave it off</button>
+                <button type="button" class="btn btn-primary" onclick="closeModal({ chosen: true })">Keep it on</button>
+            </div>`, {
+            // Only "Keep it on" keeps it on: ×, Escape, Leave it off and a page
+            // change all put the switch back (W-131, the 2.31.10 gate).
+            onClose: (kept) => { if (!kept) back(); },
+        });
         SettingsPage._autoPreviewCancel = back;
     },
     _autoPreviewCancel() {},

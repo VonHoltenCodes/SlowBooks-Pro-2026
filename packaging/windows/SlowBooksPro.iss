@@ -19,6 +19,8 @@ AppPublisherURL=https://github.com/VonHoltenCodes/SlowBooks-Pro-2026
 DefaultDirName={autopf}\SlowBooks Pro 2026
 DefaultGroupName=SlowBooks Pro 2026
 UninstallDisplayIcon={app}\SlowBooksPro.exe
+; The installer and the uninstaller show the app icon (the .ico the CI build writes beside this file).
+SetupIconFile=slowbookspro.ico
 OutputDir=.
 OutputBaseFilename=SlowBooksPro-Setup-x64
 Compression=lzma2
