@@ -178,3 +178,48 @@ def test_load_adds_fences_and_gates_package_once_and_keeps_edits(client, seed_ac
     assert [(p["name"], p["section_ids"]) for p in again] == [
         (p["name"], p["section_ids"]) for p in after
     ]
+
+
+def test_load_seeds_the_standard_packages_on_a_construction_company_with_none(client):
+    """Loading standard divisions on a construction company that has sections
+    but no trade packages seeds the standard set and maps the sections, and a
+    second load adds nothing."""
+    client.put("/api/settings", json={"company_type": "construction"})
+    assert client.get("/api/trade-packages").json() == []
+
+    client.post("/api/cost-codes/standard")
+    pkgs = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+    assert len(pkgs) == len(TRADE_PACKAGES)
+    assert {s["code"] for s in pkgs["Fences and Gates"]["sections"]} == {
+        "32 31 00",
+        "32 31 11",
+        "32 31 13",
+        "32 31 19",
+        "32 31 23",
+        "32 31 29",
+    }
+
+    client.post("/api/cost-codes/standard")
+    assert len(client.get("/api/trade-packages").json()) == len(TRADE_PACKAGES)
+
+
+def test_load_with_packages_present_keeps_the_existing_rule(client, seed_accounts):
+    """A construction company that already has packages is not re-seeded by the
+    load: a deleted standard package returns once, an edited one is untouched,
+    and a company that is not construction gets no packages from the load."""
+    client.put("/api/settings", json={"company_type": "business"})
+    client.post("/api/cost-codes/standard")
+    assert client.get("/api/trade-packages").json() == []
+
+    client.put("/api/settings", json={"company_type": "construction"})
+    client.post("/api/construction/setup")
+    pkgs = client.get("/api/trade-packages").json()
+    concrete = next(p for p in pkgs if p["name"] == "Concrete")
+    client.put(f"/api/trade-packages/{concrete['id']}", json={"notes": "mine"})
+    fences = next(p for p in pkgs if p["name"] == "Fences and Gates")
+    client.delete(f"/api/trade-packages/{fences['id']}")
+
+    client.post("/api/cost-codes/standard")
+    after = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+    assert len(after) == len(TRADE_PACKAGES)
+    assert after["Concrete"]["notes"] == "mine"
