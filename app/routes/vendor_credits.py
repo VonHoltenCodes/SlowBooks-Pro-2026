@@ -42,6 +42,7 @@ from app.services.accounting import (
     compute_line_totals,
     create_journal_entry,
     get_ap_account_id,
+    refuse_total_past_column,
     reversing_lines,
 )
 from app.services.inventory_service import get_inventory_asset_account_id
@@ -117,6 +118,8 @@ def create_vendor_credit(data: VendorCreditCreate, db: Session = Depends(get_db)
             )
 
     subtotal, tax_amount, total = compute_line_totals(data.lines, data.tax_rate)
+    # lines that fit can still come past the column once tax is added
+    refuse_total_past_column(subtotal, tax_amount, total)
     if total <= 0:
         raise HTTPException(
             status_code=400,

@@ -1350,7 +1350,7 @@ def test_a_line_amount_past_the_money_column_is_refused(con, seed_customer, db_s
     assert r.status_code == 422, r.text
     assert "Cost rate must be less than 100,000,000,000" in _message(r)
     # a bill rate the job's markup fills in is held to its column too
-    r = con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 1000})
+    r = con.put(f"/api/jobs/{job['id']}/contract", json={"co_markup_pct": 999.9999})
     assert r.status_code == 200, r.text
     r = con.post(
         "/api/field-tickets",

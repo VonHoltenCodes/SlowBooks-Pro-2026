@@ -5,7 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel, field_validator
 
 from app.models.change_orders import CO_FUNDING, CO_KINDS
-from app.schemas.common import StrictModel, choice_error
+from app.schemas.common import MAX_PERCENT, StrictModel, choice_error
 
 _KIND_LABELS = dict(
     pco="Potential change order", owner="Owner change order", sub="Sub change order"
@@ -17,9 +17,10 @@ _FUNDING_LABELS = dict(
 
 def _bounded_markup(v):
     """A markup percent must keep the sell above zero (more than -100%) and
-    stay sane (up to 1000%)."""
-    if v is not None and not (Decimal("-100") < v <= Decimal("1000")):
-        raise ValueError("Markup must be above -100% and at most 1000%.")
+    fit its Numeric(7, 4) column (at most 999.9999%; 1000 overflowed
+    Postgres)."""
+    if v is not None and not (Decimal("-100") < v <= MAX_PERCENT):
+        raise ValueError(f"Markup must be above -100% and at most {MAX_PERCENT}%.")
     return v
 
 

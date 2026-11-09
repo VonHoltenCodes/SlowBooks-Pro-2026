@@ -7,6 +7,8 @@ from app.schemas.common import (
     StrictModel,
     TaxRateFloat,
     TaxRateOut,
+    check_line_fits,
+    check_lines_fit,
     validate_non_negative_line,
     quantity_text,
 )
@@ -31,6 +33,8 @@ class CreditMemoLineCreate(StrictModel):
     @model_validator(mode="after")
     def _check_non_negative(self):
         validate_non_negative_line(self.quantity, self.rate)
+        # quantity x rate past the money column raised in the rounding (a 500)
+        check_line_fits(self.quantity, self.rate)
         return self
 
 
@@ -76,6 +80,7 @@ class CreditMemoCreate(StrictModel):
     def _require_lines(cls, v):
         if not v:
             raise ValueError("credit memo must have at least one line")
+        check_lines_fit(v)
         return v
 
 

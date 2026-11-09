@@ -255,6 +255,9 @@ allowances, at 8 / 1.5 / 5 / 1 percent:
 | Bond (1%) | 115,101 | 1,151.01 |
 | **Bid total** | subtotal + the four | **116,252.01** |
 
+Each markup is 0 to 999.9999 percent; a negative markup, which would price
+the bid below its cost, is refused.
+
 The **bid total** is the subtotal plus the markups, and it is **pre-tax**: the
 owner's contract sum and schedule of values (#552) are pre-tax,
 and tax is added on each invoice. Tax covers the taxable lines and **their
@@ -774,7 +777,7 @@ change order draws its **sell** price from the allowance (as contingency does),
 and the approve limit checks that figure: $2,000 of cost at 15% draws $2,300.
 Contract-funded work is always marked up; the flag only governs allowance and
 contingency work. A markup
-percent must be above -100% and at most 1000%.
+percent must be above -100% and at most 999.9999%.
 
 **Commitment and budget stay together.** A sub change order made from an owner
 change order writes no budget of its own, so it approves only once that owner

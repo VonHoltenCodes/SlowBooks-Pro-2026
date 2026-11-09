@@ -8,6 +8,8 @@ from app.schemas.common import (
     TaxRateFloat,
     TaxRateOut,
     clean_line_cost_type,
+    check_line_fits,
+    check_lines_fit,
     validate_non_negative_line,
     quantity_text,
 )
@@ -33,6 +35,8 @@ class VendorCreditLineCreate(StrictModel):
         # A credit is entered as a positive amount, the same way a bill is.
         # The direction is the document's job, not the operator's.
         validate_non_negative_line(self.quantity, self.rate)
+        # quantity x rate past the money column raised in the rounding (a 500)
+        check_line_fits(self.quantity, self.rate)
         return self
 
 
@@ -77,6 +81,7 @@ class VendorCreditCreate(StrictModel):
     def _require_lines(cls, v):
         if not v:
             raise ValueError("vendor credit must have at least one line")
+        check_lines_fit(v)
         return v
 
 
