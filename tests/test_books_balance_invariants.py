@@ -26,7 +26,7 @@ between modules — that's exactly the class of bug operators report as
 "the report doesn't match the dashboard."
 """
 
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 # ---------------------------------------------------------------------------
 # Scenario builder — creates a realistic mix of activity across modules
@@ -141,7 +141,13 @@ def _build_scenario(client, customer_id, vendor_id):
     assert r.status_code == 201, r.text
 
     # Partial payment on inv_partial — half down
-    partial_amt = float(Decimal(str(inv_partial["total"])) / 2)
+    # Payment money is in whole cents (#747): half of an odd-cent total is
+    # rounded here, as a person typing it would, not sent as 407.815.
+    partial_amt = float(
+        (Decimal(str(inv_partial["total"])) / 2).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+    )
     r = client.post(
         "/api/payments",
         json={
