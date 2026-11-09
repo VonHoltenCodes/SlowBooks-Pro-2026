@@ -7,7 +7,9 @@ on what the software does, not on what sprint shipped what.
 
 ### Unreleased — Construction, gone through
 
-Four role-played users (an estimator, a project manager, a project accountant and an owner) ran one tenant-improvement job through construction mode end to end. This is what they found, fixed, and the field tickets the maintainer asked for.
+<!-- Other round-3 workers' lines go in the "Also" paragraph below. -->
+
+**Also, in every company mode.** A misspelled or unsupported query parameter on a list or report is now refused with a 422 naming the filters the request accepts, where it used to be dropped and the whole list returned. It reaches Business and Nonprofit companies on A/R Aging and A/P Aging and their CSVs, P&L by Job, Job Profitability, Job Budget vs Actual, a job's cost tree (and its PDF and CSV), and the estimate, change-order and pay-application lists; `customer_id` on the aging CSV used to be ignored and is now refused, since the aging is always the whole company. **Job Cost by Vendor** puts vendor credits under their vendor with the bills they reduce. A delivery ticket that runs past what a PO line ordered is a 409 `over_receipt` until it is saved with `over_receipt: true`. Each bill line keeps the use-tax rate it was booked at when the bill is edited. Accept on an estimate warns when lines have no cost code (their budget lands on no code). The vendor list flags subs and colours the certificate-of-insurance date.
 
 **Construction maps to the books.** A schedule-of-values line carries its section, a revenue account (new **4050 Contract Revenue** unless changed) and a taxable flag, and each pay-application line credits that account with the job and section, so revenue by section now sits beside cost by section in the job cost tree, Job Budget vs Actual and P&L by Job (it all used to land in one income account with no code). Construction setup points the five starting cost types at Materials, Labor, Subcontractor Costs, 5400 and 5500, so a costed bill line with no account posts to the cost type's account. `docs/contractor-mode.md` has a new table of every construction document's entry, account by account.
 

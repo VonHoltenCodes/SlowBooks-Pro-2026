@@ -118,7 +118,11 @@ rewrites it. Everything sorts by code — list, tree, pickers, import result.
 The seeded set is the division titles plus a **modest set of common
 sections**, including the ones a GC bids by: `02 41 19` Selective Demolition,
 `09 21 16` Gypsum Board Assemblies and `23 00 00` HVAC, each already on its
-default package (Demolition, Drywall and Ceilings, HVAC). The full numbered section catalog isn't ours to publish, so it is
+default package (Demolition, Drywall and Ceilings, HVAC), and **Fences and
+Gates** (`32 31 00`, with `32 31 11` Gate Operators, `32 31 13` Chain Link
+Fences and Gates, `32 31 19` Decorative Metal Fences and Gates, `32 31 23`
+Plastic Fences and Gates and `32 31 29` Wood Fences and Gates under it), which
+make up the **Fences and Gates** trade package. The full numbered section catalog isn't ours to publish, so it is
 not shipped; import your own full list through **Import CSV** on the Cost
 Codes page — a CSV of just `code,name` is enough (a few hundred sections land
 normalized and auto-parented in one call, each section's division created
@@ -142,7 +146,12 @@ here). Packages **list in bid-book order** everywhere they appear (the
 estimate and its PDF, the schedule of values, the Buyout): by their lowest
 mapped section code, then name, so Demolition (02) precedes Concrete (03);
 a package with no mapped section follows those that have one, and Unassigned
-is last.
+is last. **Load standard divisions and common sections** on a company that
+already has packages adds any standard package it lacks (Fences and Gates on a
+company set up before it existed) and maps the new codes into it. It adds a
+package only when no package of that name exists and none of its sections is
+already mapped, so a package you renamed, remapped or edited is left as it is,
+and loading again changes nothing.
 
 ### Cost type per line
 

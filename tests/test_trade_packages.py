@@ -139,3 +139,42 @@ def test_fences_and_gates_ship_as_sections_and_a_package(client, seed_accounts):
         "32 31 23",
         "32 31 29",
     }
+
+
+# ── Load standard divisions on a company that already has packages ────────
+
+
+def test_load_adds_fences_and_gates_package_once_and_keeps_edits(client, seed_accounts):
+    """A company set up before Fences and Gates existed gets the 32 31 xx
+    sections and the Fences and Gates package, mapped, from Load standard
+    divisions; a second load changes nothing and a package the company edited
+    is left as it is."""
+    client.post("/api/construction/setup")
+    packages = client.get("/api/trade-packages").json()
+    # the company's old state: no Fences and Gates package, no 32 31 sections
+    fences = next(p for p in packages if p["name"] == "Fences and Gates")
+    client.delete(f"/api/trade-packages/{fences['id']}")
+    for c in client.get("/api/cost-codes").json():
+        if c["code"].startswith("32 31"):
+            assert client.delete(f"/api/cost-codes/{c['id']}").status_code == 200
+    # the company edited Concrete
+    concrete = next(p for p in packages if p["name"] == "Concrete")
+    client.put(f"/api/trade-packages/{concrete['id']}", json={"notes": "mine"})
+    before = {p["name"]: p for p in client.get("/api/trade-packages").json()}
+
+    client.post("/api/cost-codes/standard")
+    after = client.get("/api/trade-packages").json()
+    fenced = [p for p in after if p["name"] == "Fences and Gates"]
+    assert len(fenced) == 1
+    assert sorted(s["code"] for s in fenced[0]["sections"]) == sorted(
+        ("32 31 00", "32 31 11", "32 31 13", "32 31 19", "32 31 23", "32 31 29")
+    )
+    kept = next(p for p in after if p["name"] == "Concrete")
+    assert kept["notes"] == "mine"
+    assert kept["sections"] == before["Concrete"]["sections"]
+
+    client.post("/api/cost-codes/standard")
+    again = client.get("/api/trade-packages").json()
+    assert [(p["name"], p["section_ids"]) for p in again] == [
+        (p["name"], p["section_ids"]) for p in after
+    ]
