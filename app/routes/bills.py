@@ -771,6 +771,9 @@ def update_bill(bill_id: int, data: BillUpdate, db: Session = Depends(get_db)):
     if needs_repost:
         tax_rate = data.tax_rate if data.tax_rate is not None else bill.tax_rate
         subtotal, tax_amount, total = compute_line_totals(effective_lines, tax_rate)
+        # the same refusal create gives, before anything is torn down: a
+        # figure past the money column would otherwise be stored as it came
+        refuse_total_past_column(subtotal, tax_amount, total)
         if total <= 0:
             raise HTTPException(
                 status_code=400,
