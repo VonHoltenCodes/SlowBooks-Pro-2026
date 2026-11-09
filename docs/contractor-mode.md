@@ -60,11 +60,16 @@ lines made before the upgrade are pointed at the default income account
 through keeps billing to one account; only a new line defaults to 4050. A
 change order approved before the upgrade keeps taking effect on the day of its
 click, except one whose schedule line is billed on a draft or submitted pay
-application, which takes the earlier of its own date and the click so the
-draft stays saveable. An allowance-funded change order approved before the
-upgrade never wrote its draw out of the allowance's budget cell, so voiding it
-takes back its lines and nothing more. A job closed before the upgrade has no
-closing day on file (see *A closed job is finished*).
+application, which takes the earliest of the click, its own date and that
+application's date, so the draft stays saveable (a change order with no date
+takes the draft's date when that is before the click). An allowance-funded
+change order approved before the upgrade never wrote its draw out of the
+allowance's budget cell, so voiding it takes back its lines and nothing more,
+including from a shared budget row the upgrade could not tie to it. A job
+closed before the upgrade has no closing day on file (see *A closed job is
+finished*). A downgrade past these migrations loses the schedule lines' revenue
+accounts, the allowance-draw flags and the change orders' effective dates; an
+upgrade after it fills them in again from the rules above, not as they were.
 
 ## The accounts
 

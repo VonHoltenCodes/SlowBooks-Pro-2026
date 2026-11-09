@@ -9,7 +9,8 @@ Two additive columns on change_orders:
   stamp of the click. Existing approved rows take the local day of their
   approved_at, which is what every report read before; a change order whose
   schedule line is billed on an application not yet approved takes the
-  earlier of its own date and that day, so the draft stays saveable.
+  earliest of that day, its own date and that application's date, so the
+  draft stays saveable.
 - allowance_return (bool, default false): the change order that returns an
   allowance's unspent amount to the owner.
 - allowance_draw_written (bool, default false): the approve of an
@@ -55,32 +56,34 @@ def _plain_day(value):
     return date.fromisoformat(str(value)[:10])
 
 
-def _on_open_application(bind, co_id: int) -> bool:
-    """True when a line of the change order's schedule line carries an
-    amount on a pay application that is not approved yet."""
+def _open_applications(bind, co_id: int) -> tuple[bool, date | None]:
+    """(billed, earliest date) of the pay applications not approved yet that
+    carry an amount on the change order's schedule line. An undated one
+    counts as billed with no date."""
     tables = sa.inspect(bind).get_table_names()
     if "pay_application_lines" not in tables or "sov_lines" not in tables:
-        return False
-    return (
-        bind.execute(
-            sa.text(
-                "SELECT 1 FROM pay_application_lines l "
-                "JOIN sov_lines s ON s.id = l.sov_line_id "
-                "JOIN pay_applications a ON a.id = l.pay_application_id "
-                "WHERE s.change_order_id = :c "
-                "AND a.status IN ('draft', 'submitted') "
-                "AND (l.this_period <> 0 OR l.stored <> 0) LIMIT 1"
-            ),
-            {"c": co_id},
-        ).first()
-        is not None
-    )
+        return False, None
+    count, day = bind.execute(
+        sa.text(
+            "SELECT COUNT(*), MIN(a.date) FROM pay_application_lines l "
+            "JOIN sov_lines s ON s.id = l.sov_line_id "
+            "JOIN pay_applications a ON a.id = l.pay_application_id "
+            "WHERE s.change_order_id = :c "
+            "AND a.status IN ('draft', 'submitted') "
+            "AND (l.this_period <> 0 OR l.stored <> 0)"
+        ),
+        {"c": co_id},
+    ).one()
+    return count > 0, None if day is None else _plain_day(day)
 
 
 def _backfill_approved_on(bind) -> None:
-    """Every approved change order takes the local day of its approved_at,
-    or the earlier of that and its own date when its schedule line is
-    billed on an application not yet approved."""
+    """Every approved change order takes the local day of its approved_at.
+    One whose schedule line is billed on an application not yet approved
+    takes the earliest of that day, its own date and that application's
+    date, so the draft stays saveable. Nothing re-checks approved_on against
+    the change order's own date after the approve, so a day before it
+    stands."""
     rows = bind.execute(
         sa.text(
             "SELECT id, approved_at, date FROM change_orders "
@@ -88,14 +91,15 @@ def _backfill_approved_on(bind) -> None:
         )
     ).fetchall()
     for co_id, approved_at, co_date in rows:
-        day = _local_day(approved_at)
-        if co_date is not None and _on_open_application(bind, co_id):
-            day = min(day, _plain_day(co_date))
+        days = [_local_day(approved_at)]
+        billed, earliest = _open_applications(bind, co_id)
+        if billed:
+            days += [d for d in (earliest, co_date) if d is not None]
         bind.execute(
             sa.text(
                 "UPDATE change_orders SET approved_on = :d WHERE id = :i"
             ).bindparams(
-                sa.bindparam("d", day, type_=sa.Date()),
+                sa.bindparam("d", min(_plain_day(d) for d in days), type_=sa.Date()),
                 sa.bindparam("i", co_id),
             )
         )
