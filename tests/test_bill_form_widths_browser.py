@@ -189,7 +189,9 @@ def test_a_construction_bill_shows_every_column_at_the_agents_window(
                     # flex box with no justify-content put them at the left
                     # (2.31.11 gate, NEW-214)
                     offsets = page.evaluate(GLYPH_OFFSETS)
-                    assert len(offsets) == 3 and all(abs(o) <= 1.5 for o in offsets), offsets
+                    assert len(offsets) == 3 and all(
+                        abs(o) <= 1.5 for o in offsets
+                    ), offsets
                 else:
                     assert rows in (1, 2), (width, rows)
             finally:
