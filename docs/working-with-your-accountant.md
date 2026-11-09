@@ -81,6 +81,9 @@ If they would rather not sign in, send:
   Adjusting Journal Entries and Closing Date Exceptions reports, and the audit
   log since the closing date.
 
+Every CSV is UTF-8 and starts with a byte-order mark, so Excel opens
+accented names, dashes and other non-English characters as written.
+
 Then enter their adjustments yourself under **Journal Entries**, with the
 **Adjusting entry** box ticked, so they show on the Adjusting Journal Entries
 report like anyone else's.

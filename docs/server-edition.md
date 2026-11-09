@@ -171,6 +171,11 @@ program sends it on every request as `Authorization: Bearer sbp_…`; no
 session cookie and no CSRF token are involved. Every change it makes is in
 the audit log as `token:<label>`.
 
+Every JSON answer is UTF-8 and says so (`Content-Type: application/json;
+charset=utf-8`), so a client that would otherwise guess the encoding, such
+as Windows PowerShell 5.1's `Invoke-RestMethod`, reads a dash or an accented
+name as stored. CSV downloads are UTF-8 with a byte-order mark.
+
 What a token can do:
 
 - Whatever its role allows: **bookkeeper** (daily books), **accountant**
