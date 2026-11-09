@@ -7,7 +7,8 @@
       "Checks on blank stock: Settings → Check Printing → Print on blank check stock puts the company logo, name and address, the bank's name and city, the check number and a MICR line on the face, drawn by the app with no MICR font; each bank account keeps its own bank details, the account number encrypted. Off, checks print exactly as before.",
       "Every check of a batch prints at the first check's height, so each one tears cleanly on stock perforated in thirds.",
       "A bank account made inactive in the chart leaves Make Deposits and every Deposit To, and a new deposit, payment or sales receipt into one is refused; a record already on it keeps its account.",
-      "Memorize Bill saves again, and a memorized bill keeps each line's Use tax box; every answer from the API names UTF-8 as its encoding."
+      "Memorize Bill saves again, and a memorized bill keeps each line's Use tax box; every answer from the API names UTF-8 as its encoding.",
+      "The Expenses list and an expense's View have Edit beside View and Void: Void and Replace, as a report drill-down's Edit, not on a void expense. Edit keeps every saved line's account in the picker, a liability, bank or equity split or an inactive account included, so a memo-only edit leaves the postings as they were."
     ]
   },
   "2.31.10": {
