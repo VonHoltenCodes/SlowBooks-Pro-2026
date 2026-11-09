@@ -872,7 +872,11 @@ const JobsPage = {
         if (empty) body.innerHTML = '';
         const codes = JobsPage._sovCodes || [];
         const packages = TradePackages._list || [];
-        body.insertAdjacentHTML('beforeend', JobsPage.sovRowHtml({}, body.children.length, packages, codes));
+        // A job whose lines all credit one account (an upgraded job part-way
+        // through) starts the new row on it, so its revenue stays on one
+        // account; otherwise blank, 4050 Contract Revenue (#731).
+        const revenue = (JobsPage._contract || {}).new_line_revenue_account_id || null;
+        body.insertAdjacentHTML('beforeend', JobsPage.sovRowHtml({ revenue_account_id: revenue }, body.children.length, packages, codes));
         JobsPage.retotalSov();
     },
 

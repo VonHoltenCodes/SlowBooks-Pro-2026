@@ -429,14 +429,19 @@ def build_sov(db: Session, job: Job, estimate: Estimate, replace: bool = True) -
             }
         )
     _numbered(lines)
+    # Read before a replace drops them: a job whose lines all credit one
+    # account keeps it.
+    shared = shared_revenue_account_id(job.sov_lines)
     if replace:
         # TODO (#555): refuse 409 sov_has_billings once a pay application has
         # billed these lines — replacing a billed schedule would orphan the
         # pay history. Nothing bills the SOV yet, so a plain replace is safe.
         db.query(SovLine).filter(SovLine.job_id == job.id).delete()
         db.flush()
-    # Every built line credits 4050 Contract Revenue until it is changed.
-    revenue_id = get_contract_revenue_account_id(db)
+    # Every built line credits 4050 Contract Revenue until it is changed,
+    # unless the job's lines all credit one account already (an upgraded
+    # job part-way through, #731).
+    revenue_id = shared or get_contract_revenue_account_id(db)
     rows = []
     for line in lines:
         row = SovLine(job_id=job.id, revenue_account_id=revenue_id, **line)
@@ -444,6 +449,17 @@ def build_sov(db: Session, job: Job, estimate: Estimate, replace: bool = True) -
         rows.append(row)
     db.flush()
     return rows
+
+
+def shared_revenue_account_id(lines) -> int | None:
+    """The revenue account every one of `lines` names, else None (none, or
+    they differ; a line naming none credits 4050 Contract Revenue). A line
+    added to a job whose lines all credit one account takes that account:
+    the upgrade pointed a job part-way through at the default income
+    account, where its earlier pay applications credited, and a new line on
+    4050 would split the job's revenue across two accounts (#731)."""
+    accounts = {ln.revenue_account_id for ln in lines}
+    return accounts.pop() if len(accounts) == 1 else None
 
 
 def schedule_is_taxed(job: Job) -> bool:
@@ -475,7 +491,8 @@ def change_order_sov_fields(db: Session, job: Job, co) -> dict:
 
     The code is the one its lines share, else the lowest of them (none when
     no line has one). The line extends the schedule's line for that section,
-    so it takes that line's revenue account (else 4050 Contract Revenue) and
+    so it takes that line's revenue account (else the one account every
+    line on the schedule credits, else 4050 Contract Revenue) and
     its Tax box: the section's lines' flag when they agree, else the flag of
     the lines of the change order's package, else the schedule's — taxed
     when every line on it is (or it is empty), not taxed when it is mixed or
@@ -493,9 +510,11 @@ def change_order_sov_fields(db: Session, job: Job, co) -> dict:
     if taxable is None:
         lines = list(job.sov_lines)
         taxable = all(ln.is_taxable for ln in lines)
-    revenue = next(
-        (ln.revenue_account_id for ln in section if ln.revenue_account_id), None
-    ) or get_contract_revenue_account_id(db)
+    revenue = (
+        next((ln.revenue_account_id for ln in section if ln.revenue_account_id), None)
+        or shared_revenue_account_id(job.sov_lines)
+        or get_contract_revenue_account_id(db)
+    )
     line_no = max((ln.line_no for ln in job.sov_lines), default=0) + 1
     return {
         "cost_code_id": code.id if code is not None else None,
@@ -532,6 +551,7 @@ def sync_contingency_line(db: Session, job: Job) -> None:
                 kind="contingency",
                 scheduled_value=value,
                 is_taxable=schedule_is_taxed(job),
+                revenue_account_id=shared_revenue_account_id(job.sov_lines),
             )
             db.add(row)
             remaining = list(job.sov_lines) + [row]

@@ -164,3 +164,21 @@ test('saving the SOV sends each row\'s revenue account and taxable flag', () => 
     assert.equal(line.is_taxable, false);
     assert.equal(line.cost_code_id, 9);
 });
+
+test('a row added to a job whose lines share a revenue account starts on it', () => {
+    const ctx = jobsContext(true);
+    const page = ctx.JobsPage;
+    page._sovAccounts = [{ id: 40, account_number: '4050', name: 'Contract Revenue' }, { id: 39, account_number: '4000', name: 'Service Income' }];
+    const added = [];
+    const body = { children: [], querySelector: () => null, insertAdjacentHTML: (_, html) => added.push(html) };
+    ctx.$ = (sel) => (sel === '#sov-body' ? body : null);
+    page.retotalSov = () => {};
+    // the contract says every line credits 4000 (an upgraded job)
+    page._contract = { new_line_revenue_account_id: 39 };
+    page.addSovRow();
+    assert.match(added[0], /<option value="39" selected>4000 Service Income<\/option>/);
+    // otherwise the new row starts on the default
+    page._contract = { new_line_revenue_account_id: null };
+    page.addSovRow();
+    assert.doesNotMatch(added[1], /<option value="(39|40)" selected>/);
+});
