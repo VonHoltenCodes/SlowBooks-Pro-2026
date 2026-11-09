@@ -167,12 +167,15 @@ def retainage_report(
     """Retainage per job as of a date: what owners hold from the contractor
     (`receivable`, 1150) and what the contractor holds from each sub
     (`payable`, 2050, per commitment and per hand-entered bill), with job and
-    grand totals. Closed jobs are included: retainage outlives the job. A job
+    grand totals. Closed jobs are included: retainage outlives the job, and
+    `status` matches the status the job had on `as_of`. A job
     with no retainage held, released or on the books is left out. The grand
     totals equal the Balance Sheet's 1150 and 2050 for the date; a ledger
     amount no document explains is its own "Journal entries and other" row."""
     as_of = as_of or date.today()
-    jobs = select_jobs(db, job_id, customer_id, status, include_closed=True)
+    jobs = select_jobs(
+        db, job_id, customer_id, status, include_closed=True, as_of=as_of
+    )
     # The jobless bucket (a journal posted to 1150/2050 with no job) is only
     # part of an unfiltered run, so a run for one job or customer ties to the
     # ledger for that job alone.

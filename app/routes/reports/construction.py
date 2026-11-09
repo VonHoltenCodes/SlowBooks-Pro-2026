@@ -21,6 +21,7 @@ from app.models.users import ROLE_ACCOUNTANT, ROLE_ADMIN
 from app.routes._helpers import refuse_unknown_filters
 from app.routes._roles import current_role
 from app.routes.reports._router import router
+from app.routes.reports.nonprofit import _cash_words
 from app.routes.reports.financial import (
     _company_name,
     _csv_download,
@@ -1320,7 +1321,7 @@ def job_profitability_pdf(
     sections = [
         {
             "title": "Job Profitability",
-            "period": f"{data['start_date']} — {data['end_date']}",
+            "period": f"{data['start_date']} — {data['end_date']}" + _cash_words(data),
             "columns": [c["label"] for c in cols],
             "text_columns": 2,
             "rows": rows,
@@ -1352,7 +1353,7 @@ def job_profitability_csv(
         w,
         _company_name(db),
         "Job Profitability",
-        f"{data['start_date']} to {data['end_date']}",
+        f"{data['start_date']} to {data['end_date']}" + _cash_words(data),
     )
     w.writerow([c["label"] for c in cols])
     for r in grid["rows"]:
