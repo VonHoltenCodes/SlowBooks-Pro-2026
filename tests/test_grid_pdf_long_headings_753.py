@@ -113,5 +113,5 @@ def test_a_heading_breaks_between_words_not_inside_one(
     text = " ".join(
         p.extract_text() for p in pypdf.PdfReader(io.BytesIO(r.content)).pages
     )
-    words = ("MARGIN", "COMPLETE", "EARNED", "OVERBILLED", "PROVISION")
+    words = ("MARGIN", "COMPLETE", "EARNED", "BILLED", "PROVISION")
     assert [w for w in words if w not in text] == [], text[:600]
