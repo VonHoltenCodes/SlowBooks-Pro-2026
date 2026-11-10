@@ -356,3 +356,52 @@ Discount = Annotated[Decimal, AfterValidator(_check_discount)]
 BIGINT_MAX = 9223372036854775807
 
 StrictId = Annotated[StrictInt, Field(ge=1, le=BIGINT_MAX)]
+
+
+# Money is kept in whole cents (#747). A payment or an allocation finer
+# than a cent was rounded on its own when stored: two allocations of 0.005
+# passed the "allocations exceed payment" check as 0.01 and were stored as
+# 0.01 each, two cents applied from a one-cent payment. Such an amount is
+# refused, not rounded, so what passes the checks is what is stored.
+def _finer_than_cents(value: Decimal) -> bool:
+    """Whether a finite Decimal has a nonzero digit past the cents, judged
+    on its digits (a quantize would round, or raise past 28 digits)."""
+    if not value.is_finite():
+        return False
+    _sign, digits, exponent = value.as_tuple()
+    if exponent >= -2:
+        return False
+    return any(digits[exponent + 2 :])
+
+
+def _plain(value: Decimal) -> str:
+    """The amount as sent, without an exponent or trailing zeros."""
+    text = format(value, "f")
+    return text.rstrip("0").rstrip(".") if "." in text else text
+
+
+def whole_cents(label: str):
+    """A validator refusing an amount finer than a cent, in a sentence that
+    names the field by `label` ("A payment amount is in whole cents; 0.005
+    isn't."). It judges the decimal the client sent, a JSON number or a
+    string alike, so it runs before a float field converts the value; a
+    value that isn't a number is left to the field's own validation."""
+
+    def check(value):
+        if value is None or isinstance(value, bool):
+            return value
+        try:
+            exact = value if isinstance(value, Decimal) else Decimal(str(value).strip())
+        except (ArithmeticError, ValueError, TypeError):
+            return value
+        if _finer_than_cents(exact):
+            raise ValueError(f"{label} is in whole cents; {_plain(exact)} isn't.")
+        return value
+
+    return check
+
+
+def WholeCents(label: str, kind=Decimal):
+    """A money field of `kind` (Decimal, or float where a route still does
+    float arithmetic) that refuses anything finer than a cent (#747)."""
+    return Annotated[kind, BeforeValidator(whole_cents(label))]
