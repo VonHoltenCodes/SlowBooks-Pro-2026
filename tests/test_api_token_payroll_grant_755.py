@@ -171,3 +171,46 @@ def test_a_signed_in_bookkeeper_is_unchanged(client, db_session):
     assert r.status_code == 200, r.text
     assert person.get("/api/payroll").status_code == 403
     assert person.post("/api/employees", json=EMPLOYEE).status_code == 403
+
+
+def test_a_grant_stored_on_another_role_gives_nothing(client, db_session):
+    """Settings refuses the grants on any role but bookkeeper; a row that
+    carries one anyway (edited in the database, an older build) gets nothing
+    from it at the gate."""
+    from app.models.api_tokens import ApiToken
+
+    for role in ("readonly", "accountant"):
+        made = _mint(client, f"forced-{role}", role)
+        row = db_session.get(ApiToken, made["id"])
+        row.allow_payroll = True
+        row.allow_imports = True
+        db_session.commit()
+        api = _bearer(made["token"])
+        assert api.get("/api/payroll").status_code == 403, role
+        assert api.post("/api/employees", json=EMPLOYEE).status_code == 403, role
+        r = api.post("/api/migration/qbo/dry-run", json={})
+        assert r.status_code == 403, (role, r.text)
+
+
+def test_the_pay_run_is_audited_as_the_token(
+    client, seed_accounts, payroll_token, db_session
+):
+    emp = payroll_token.post("/api/employees", json=EMPLOYEE).json()
+    run = payroll_token.post(
+        "/api/payroll",
+        json={
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-14",
+            "pay_date": "2026-07-17",
+            "stubs": [{"employee_id": emp["id"]}],
+        },
+    ).json()
+    assert payroll_token.post(f"/api/payroll/{run['id']}/process").status_code == 200
+    by_table = {}
+    for r in db_session.query(AuditLog).filter(
+        AuditLog.table_name.in_(("pay_runs", "pay_stubs", "transactions"))
+    ):
+        by_table.setdefault(r.table_name, set()).add(r.username)
+    assert by_table and all(
+        names == {"token:books-agent"} for names in by_table.values()
+    ), by_table
