@@ -11,9 +11,28 @@ clinic or a law office, turn it on the first day.
 
 ## Turning it on
 
-**Settings → Users and security → Company File Encryption → Turn on…**, or the *Encrypt this
-company file* box on first-run setup. An administrator types the company's
-name to confirm, and their own password. SlowBooks Pro then:
+There is no encryption password to choose. SlowBooks Pro makes the key;
+you prove who you are and confirm the company. How depends on where the
+company runs:
+
+- **At the SlowBooks Pro window** (the desktop app on Windows or a Mac):
+  **Settings → Users and security → Company File Encryption → Turn on…**, or
+  the *Encrypt this company file* box on first-run setup. The dialog asks
+  two things and nothing else: the **company's name, typed exactly as
+  Settings shows it** (the button stays grey, and the line under the box
+  says so, until it matches), and **the password you sign in with**, not
+  a new one. Then it does the work below.
+- **On a server** (Docker, a cloud host, or Windows started with
+  `--serve-lan`), nobody is at a window to unlock the file when the server
+  starts, so the button stays grey until an operator sets
+  `COMPANY_FILE_ENCRYPTION_SECRET` in the server's `.env`
+  (`C:\ProgramData\SlowBooksPro\.env` on a Windows server; the Docker
+  `.env` otherwise) and stops and starts the server. *Turn on…* then asks
+  the company's name only, keys the file from the secret, and makes no
+  recovery key. The *Server Edition* section below has the detail.
+
+An administrator at the window types the company's name to confirm, and
+their own password. SlowBooks Pro then:
 
 1. makes a **recovery key**: eight groups of four letters and digits, shown
    once, with *Copy* and *Save as a text file*;
@@ -39,7 +58,8 @@ encrypted backup exists.
 
 The company picker asks for an **administrator's sign-in** when it opens
 an encrypted company, or takes the **recovery key** instead (*Use the
-recovery key instead*). The administrator who turned encryption on unlocks
+recovery key instead*). Both belong to a file that is already encrypted:
+a plain company has no recovery key yet, and the picker never asks for one. The administrator who turned encryption on unlocks
 it at once. Every other administrator unlocks it after their next sign-in
 inside the books, which wraps the key for their password too; Settings
 lists who can unlock. Other roles never hold the key: a bookkeeper or an

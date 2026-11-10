@@ -1546,7 +1546,9 @@ const SettingsPage = {
                     ? (st.desktop_key
                         ? 'Turning it on makes a recovery key, shown once, and your sign-in unlocks the books from then on.'
                         : 'A key is set, so encryption can be turned on.')
-                    : 'To turn it on, set COMPANY_FILE_ENCRYPTION_SECRET where SlowBooks Pro starts, then start it again.');
+                    : 'This is a server, so there is nobody at the window to unlock the file: to turn it on, set COMPANY_FILE_ENCRYPTION_SECRET '
+                      + 'in the server\'s .env file (C:\\ProgramData\\SlowBooksPro\\.env on a Windows server started with --serve-lan; the Docker .env otherwise), '
+                      + 'stop and start SlowBooks Pro, and come back here. The Encrypting the company file guide has the steps.');
             actions.innerHTML = `<button type="button" class="btn btn-primary" ${st.can_turn_on ? '' : 'disabled'} onclick="SettingsPage.confirmEncryption(true)">Turn on…</button>`;
         }
         SettingsPage._showSection(section, true);
@@ -1566,25 +1568,47 @@ const SettingsPage = {
     },
 
     _nameConfirmField(company) {
+        // The name to type sits under the box as text, not only as a
+        // placeholder that disappears, and the check below says when what
+        // was typed is not it yet (Discussion #750: a user saw a grey button
+        // and a field that "did nothing").
         return `<div class="form-group">
                     <label for="encryption-company-name">Company name</label>
                     <input type="text" id="encryption-company-name" name="company_name" autocomplete="off" required
-                        placeholder="${escapeHtml(company)}"
+                        placeholder="${escapeHtml(company)}" aria-describedby="encryption-name-help"
                         oninput="SettingsPage._encryptionFormCheck(this.form)">
+                    <div id="encryption-name-help" style="font-size:11px; color:var(--text-muted); margin-top:2px;">Exactly as Settings shows it: <strong>${escapeHtml(company)}</strong>.</div>
                 </div>`;
     },
 
     // Submit opens once the name matches and, where the form asks for it,
-    // the password is typed.
+    // the password is typed; the help line under the name says where it
+    // stands.
     _encryptionFormCheck(form) {
-        const named = form.company_name.value.trim().toLowerCase() === SettingsPage._encryptionName;
+        const typed = form.company_name.value.trim();
+        const named = typed.toLowerCase() === SettingsPage._encryptionName;
         const pw = form.querySelector('[name=password]');
+        const help = form.querySelector('#encryption-name-help');
+        if (help) {
+            const shown = `<strong>${escapeHtml(SettingsPage._encryptionCompany || '')}</strong>`;
+            if (!typed) {
+                help.style.color = 'var(--text-muted)';
+                help.innerHTML = `Exactly as Settings shows it: ${shown}.`;
+            } else if (named) {
+                help.style.color = 'var(--text-muted)';
+                help.innerHTML = 'Matches.';
+            } else {
+                help.style.color = 'var(--text-danger)';
+                help.innerHTML = `Not the same yet. Type it exactly as Settings shows it: ${shown}.`;
+            }
+        }
         form.querySelector('button[type=submit]').disabled = !(named && (!pw || pw.value.length > 0));
     },
 
     async confirmEncryption(enable) {
         const company = await SettingsPage._companyNameNow();
         SettingsPage._encryptionName = company.trim().toLowerCase();
+        SettingsPage._encryptionCompany = company.trim();
         const st = SettingsPage._companyFile || {};
         const desktopKey = enable && st.desktop_key;
         // Turn off proves the administrator the way Turn on does (the
@@ -1611,10 +1635,13 @@ const SettingsPage = {
                 <p style="margin:0 0 8px;">Nobody else should be using the company while this runs. Type the company's name to confirm.</p>
                 ${SettingsPage._nameConfirmField(company)}
                 ${asksPassword ? `<div class="form-group">
-                    <label for="encryption-password">Your password</label>
+                    <label for="encryption-password">Your sign-in password</label>
                     <input type="password" id="encryption-password" name="password" autocomplete="current-password" required
+                        aria-describedby="encryption-password-help"
                         oninput="SettingsPage._encryptionFormCheck(this.form)">
-                    ${desktopKey ? '<div style="font-size:11px; color:var(--text-muted); margin-top:2px;">The key is wrapped for it, so your sign-in unlocks the books.</div>' : ''}
+                    <div id="encryption-password-help" style="font-size:11px; color:var(--text-muted); margin-top:2px;">${desktopKey
+                        ? 'The password you signed in with, not a new one: SlowBooks Pro makes the recovery key for you and shows it once. Your sign-in unlocks the books from then on.'
+                        : 'The password you signed in with.'}</div>
                 </div>` : ''}
                 <div class="form-actions">
                     <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>

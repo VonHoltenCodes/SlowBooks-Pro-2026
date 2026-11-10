@@ -53,6 +53,8 @@ A retainage-release bill can't be re-lined (it re-posted to an expense account).
 
 **Payments in whole cents.** A payment, bill payment or batch payment amount, and each of its allocations, must be in whole cents, and a finer amount is refused with a sentence naming it (#747); it used to be rounded allocation by allocation, so two allocations of 0.005 applied two cents from a one-cent payment, and voiding it left the invoice a cent off.
 
+**Turning on company file encryption says what it asks.** The Turn on dialog names the company exactly as Settings shows it under the box, says when what was typed is not it yet, and asks for *your sign-in password*, saying it is not a new one (SlowBooks Pro makes the recovery key and shows it once). On a server, where the button is grey until an operator sets the secret, the page says which `.env` file it goes in and that the server is stopped and started. The guide leads with the two setups and says the picker's recovery key belongs to a file that is already encrypted.
+
 **Migrations:** eleven, revising 2.31.10's head `c8e1a4d7f305` in one chain: nine for construction (`e2a6c8f4b1d9`, `e1b7c4a92d68`, `a4d8e2f6b9c3`, `e4b7c2a9f1d3`, `c7e3a1f5d9b2`, `a3d8f1c6b9e4`, `b5d2e8f4a6c3`, `c7e4a9b2d1f5`, `d8f1b3c5e7a9`), then `b4d2e7a9c6f1` (bank check details for blank stock) and `e2b6c4d8f0a3` (memorized line use tax). Each is idempotent and walks back; a downgrade past the construction migrations loses the revenue accounts, the allowance-draw flags and the effective dates, as `docs/contractor-mode.md` says.
 
 ### v2.31.10 — Collections reminders and statements, where deposits go, and the SBP icon
