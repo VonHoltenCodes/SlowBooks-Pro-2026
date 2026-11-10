@@ -189,7 +189,17 @@ jobs:
           done
 
           unzip -tq "$artifact_dir/${BUILD_BASENAME}-unsigned-app.zip"
-          hdiutil verify "$artifact_dir/${BUILD_BASENAME}-unsigned.dmg"
+          # hdiutil verify blips the same way ("Resource temporarily
+          # unavailable" right after the image was written, run 42697156611;
+          # #758), so it gets the same tries.
+          for attempt in 1 2 3 4 5; do
+            if hdiutil verify "$artifact_dir/${BUILD_BASENAME}-unsigned.dmg"; then
+              break
+            fi
+            if [ "$attempt" = 5 ]; then echo "hdiutil verify failed 5 times"; exit 1; fi
+            echo "hdiutil verify failed (attempt $attempt of 5); retrying in $((attempt * 5))s"
+            sleep $((attempt * 5))
+          done
           cp "$RUNNER_TEMP/native-linkage.txt" "$artifact_dir/native-linkage.txt"
           python -m pip freeze --all > "$artifact_dir/pip-freeze.txt"
           brew list --versions pango fontconfig gobject-introspection \

@@ -113,19 +113,29 @@ def _run_signing(*args: str) -> subprocess.CompletedProcess[str]:
 # hdiutil create fails with "Resource busy" now and then on GitHub's macOS
 # runners right after a large copy (the build job's unsigned DMG, run
 # 40800371868, 2026-10-28; a known runner flake). The candidate DMG here is
-# made the same way, straight after ditto, so it gets a few tries too.
+# made the same way, straight after ditto, so it gets a few tries too. hdiutil
+# verify failed once the same way, "Resource temporarily unavailable", right
+# after codesign wrote the candidate DMG (run 42697156611, 2.31.11; #758), so
+# every hdiutil call retries on those two errors alone; anything else fails
+# on the first try, as before.
 HDIUTIL_BUSY = "Resource busy"
+HDIUTIL_UNAVAILABLE = "Resource temporarily unavailable"
+HDIUTIL_TRANSIENT = (HDIUTIL_BUSY, HDIUTIL_UNAVAILABLE)
 HDIUTIL_ATTEMPTS = 5
 HDIUTIL_BACKOFF_SECONDS = (5, 10, 15, 20)
 
 
 def _is_hdiutil_busy(exc: subprocess.CalledProcessError) -> bool:
     said = f"{getattr(exc, 'stdout', '') or ''}{getattr(exc, 'stderr', '') or ''}"
-    return HDIUTIL_BUSY in said
+    return any(text in said for text in HDIUTIL_TRANSIENT)
+
+
+def _hdiutil_delay(attempt: int) -> int:
+    return HDIUTIL_BACKOFF_SECONDS[min(attempt, len(HDIUTIL_BACKOFF_SECONDS)) - 1]
 
 
 def _run_hdiutil_create(*args: str) -> subprocess.CompletedProcess[str]:
-    """hdiutil create with bounded retries on "Resource busy" only; any
+    """hdiutil create with bounded retries on a transient error only; any
     other failure raises on the first try, as before."""
     for attempt in range(1, HDIUTIL_ATTEMPTS + 1):
         try:
@@ -133,15 +143,39 @@ def _run_hdiutil_create(*args: str) -> subprocess.CompletedProcess[str]:
         except subprocess.CalledProcessError as exc:
             if not _is_hdiutil_busy(exc) or attempt == HDIUTIL_ATTEMPTS:
                 raise
-            delay = HDIUTIL_BACKOFF_SECONDS[
-                min(attempt, len(HDIUTIL_BACKOFF_SECONDS)) - 1
-            ]
+            delay = _hdiutil_delay(attempt)
             print(
                 f"! hdiutil create: resource busy (attempt {attempt} of "
                 f"{HDIUTIL_ATTEMPTS}); retrying in {delay}s",
                 flush=True,
             )
             _sleep(delay)
+    raise AssertionError("unreachable")
+
+
+def _record_hdiutil(
+    report_path: Path, subcommand: str, *args: str
+) -> subprocess.CompletedProcess[str]:
+    """hdiutil <subcommand> kept as release evidence, with the same bounded
+    retries as _run_hdiutil_create on a transient error. Every attempt is
+    written to the report, so the evidence shows the retry, not just the
+    pass."""
+    for attempt in range(1, HDIUTIL_ATTEMPTS + 1):
+        result = _record_run(report_path, "hdiutil", subcommand, *args, check=False)
+        if result.returncode == 0:
+            return result
+        failure = subprocess.CalledProcessError(
+            result.returncode, result.args, output=result.stdout, stderr=result.stderr
+        )
+        if not _is_hdiutil_busy(failure) or attempt == HDIUTIL_ATTEMPTS:
+            raise failure
+        delay = _hdiutil_delay(attempt)
+        print(
+            f"! hdiutil {subcommand}: resource busy (attempt {attempt} of "
+            f"{HDIUTIL_ATTEMPTS}); retrying in {delay}s",
+            flush=True,
+        )
+        _sleep(delay)
     raise AssertionError("unreachable")
 
 
@@ -672,7 +706,7 @@ def build_release(
     )
     transport_evidence = report_dir / "transport-verification.txt"
     _record_run(transport_evidence, "unzip", "-tq", str(app_zip))
-    _record_run(transport_evidence, "hdiutil", "verify", str(transport_dmg))
+    _record_hdiutil(transport_evidence, "verify", str(transport_dmg))
     selected_identity = _select_identity(identity)
 
     with tempfile.TemporaryDirectory(prefix="slowbooks-release-") as temporary:
@@ -743,7 +777,7 @@ def build_release(
             str(candidate_dmg),
         )
         candidate_evidence = report_dir / "candidate-dmg-verification.txt"
-        _record_run(candidate_evidence, "hdiutil", "verify", str(candidate_dmg))
+        _record_hdiutil(candidate_evidence, "verify", str(candidate_dmg))
         _record_run(
             candidate_evidence,
             "codesign",
@@ -767,7 +801,7 @@ def build_release(
         final_dmg = report_dir / f"{basename}.dmg"
         candidate_dmg.rename(final_dmg)
         final_evidence = report_dir / "final-dmg-verification.txt"
-        _record_run(final_evidence, "hdiutil", "verify", str(final_dmg))
+        _record_hdiutil(final_evidence, "verify", str(final_dmg))
         _record_run(
             final_evidence,
             "codesign",
