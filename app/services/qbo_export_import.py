@@ -12,7 +12,13 @@
 # This dialect feeds the shared migration engine (migration_common):
 #   coa  the Balance Sheet and the P&L, one text — every leaf with a figure
 #        is an account, typed by the section it sits under, a sub-account
-#        named Parent:Child as QuickBooks writes it elsewhere
+#        named Parent:Child as QuickBooks writes it elsewhere; with account
+#        numbers on, the number is the account's and the Journal's "1010
+#        Parent:Child" spelling is the path (#767); the Account List report
+#        beside the zip, when given, is the chart first (coa_list)
+#   gl_order  the General Ledger's account headings, in chart order: they
+#        place the zero-balance accounts the statements and the Trial
+#        Balance leave off (#767)
 #   gl   the Journal — one block per transaction: a dated first line, its
 #        split lines, a totals row, a blank row
 #   tb   the Trial Balance — and the basis its footer names
@@ -59,7 +65,7 @@ from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
 
-from app.models.accounts import AccountType, DetailType
+from app.models.accounts import Account, AccountType, DetailType
 from app.models.contacts import Customer, Vendor
 from app.services.account_label import label_for
 from app.services.migration_common import (
@@ -93,11 +99,20 @@ _KINDS = (
     ("profit_and_loss", "coa"),
     ("profit and loss", "coa"),
     ("profitandloss", "coa"),
+    # the Account List report (Reports → Account List → Export to Excel),
+    # a download of its own beside the zip: the chart with every account's
+    # number, type and description (#767)
+    ("account_list", "coa_list"),
+    ("account list", "coa_list"),
+    ("accountlist", "coa_list"),
     ("chart", "coa"),
     ("journal", "gl"),
-    ("general_ledger", "skip"),
-    ("general ledger", "skip"),
-    ("generalledger", "skip"),
+    # the General Ledger repeats the Journal by account; its account
+    # headings, in chart order, place the accounts the statements and the
+    # Trial Balance leave off (#767)
+    ("general_ledger", "gl_order"),
+    ("general ledger", "gl_order"),
+    ("generalledger", "gl_order"),
     ("trial", "tb"),
     ("customer", "customers"),
     ("vendor", "vendors"),
@@ -187,6 +202,115 @@ _ARITHMETIC = {
     "net other revenue",
 }
 _BASIS = re.compile(r"\b(cash|accrual)\s+basis\b", re.I)
+# A label that carries QuickBooks Online's account number (Settings →
+# Advanced → Chart of accounts → Enable account numbers): the number, a
+# space, the name — "1010 Operating Checking", or "1012.001 Reserve" for an
+# account numbered under its parent's number (#767).
+_NUMBERED = re.compile(r"^(\d+(?:\.\d+)*)\s+(\S.*)$")
+# What QuickBooks Online appends to a deleted account's name: "(deleted)",
+# or "(deleted-1)" when more than one carried the name.
+_DELETED = re.compile(r"\(deleted(?:-\d+)?\)$", re.I)
+# A statement's title in its preamble, for the one sentence about a report
+# exported without indentation.
+_TITLES = re.compile(
+    r"balance sheet|statement of financial position|profit and loss|"
+    r"statement of activit|income statement",
+    re.I,
+)
+
+
+def uses_numbers(labels, names_in_books=()) -> bool:
+    """Whether the export's accounts carry QuickBooks Online's account
+    numbers: three or more of the statements' labels start with one, or one
+    does and the books write a number in front of a Parent:Child path
+    ("1010 Operating:Operating Checking"), which only numbering produces. A
+    company with one account named for a year ("2024 Gala") keeps it as a
+    name, as every company did before #767."""
+    numbered = sum(1 for label in labels if _NUMBERED.match(label.strip()))
+    if numbered >= 3:
+        return True
+    return numbered >= 1 and any(
+        ":" in name and _NUMBERED.match(name.strip()) for name in names_in_books
+    )
+
+
+def _split_code(label: str, numbered: bool) -> tuple[str | None, str]:
+    """(account number, name) for a label when the company numbers its
+    accounts; else (None, the label)."""
+    if numbered:
+        m = _NUMBERED.match(label.strip())
+        if m:
+            return m.group(1), m.group(2).strip()
+    return None, label.strip()
+
+
+def _book_name(code: str | None, path: str) -> str:
+    """The name the Journal, the Trial Balance and the General Ledger write
+    for an account: its own number in front of the whole Parent:Child path,
+    the parents' numbers left off ("2201 Long-term loans:Bank loan")."""
+    return f"{code} {path}" if code else path
+
+
+# The Account List report's Type column → (account type, the detail type
+# the statements' sections give, bank kind). Accounts Receivable / Payable,
+# equity, income, cost of goods sold and expenses take the model's default
+# detail type, as they do from the statements (#390).
+_LIST_TYPES = {
+    "bank": (AccountType.ASSET, DetailType.BANK, "bank"),
+    "accounts receivable (a/r)": (AccountType.ASSET, None, None),
+    "accounts receivable": (AccountType.ASSET, None, None),
+    "other current assets": (AccountType.ASSET, DetailType.OTHER_CURRENT_ASSET, None),
+    "other current asset": (AccountType.ASSET, DetailType.OTHER_CURRENT_ASSET, None),
+    "fixed assets": (AccountType.ASSET, DetailType.FIXED_ASSET, None),
+    "fixed asset": (AccountType.ASSET, DetailType.FIXED_ASSET, None),
+    "other assets": (AccountType.ASSET, DetailType.OTHER_ASSET, None),
+    "other asset": (AccountType.ASSET, DetailType.OTHER_ASSET, None),
+    "accounts payable (a/p)": (AccountType.LIABILITY, None, None),
+    "accounts payable": (AccountType.LIABILITY, None, None),
+    "credit card": (AccountType.LIABILITY, DetailType.CREDIT_CARD, "credit_card"),
+    "other current liabilities": (
+        AccountType.LIABILITY,
+        DetailType.OTHER_CURRENT_LIABILITY,
+        None,
+    ),
+    "other current liability": (
+        AccountType.LIABILITY,
+        DetailType.OTHER_CURRENT_LIABILITY,
+        None,
+    ),
+    "long term liabilities": (
+        AccountType.LIABILITY,
+        DetailType.LONG_TERM_LIABILITY,
+        None,
+    ),
+    "long-term liabilities": (
+        AccountType.LIABILITY,
+        DetailType.LONG_TERM_LIABILITY,
+        None,
+    ),
+    "long term liability": (
+        AccountType.LIABILITY,
+        DetailType.LONG_TERM_LIABILITY,
+        None,
+    ),
+    "long-term liability": (
+        AccountType.LIABILITY,
+        DetailType.LONG_TERM_LIABILITY,
+        None,
+    ),
+    "equity": (AccountType.EQUITY, None, None),
+    "income": (AccountType.INCOME, None, None),
+    "revenue": (AccountType.INCOME, None, None),
+    "other income": (AccountType.INCOME, DetailType.OTHER_INCOME, None),
+    "other revenue": (AccountType.INCOME, DetailType.OTHER_INCOME, None),
+    "cost of goods sold": (AccountType.COGS, None, None),
+    "expenses": (AccountType.EXPENSE, None, None),
+    "expense": (AccountType.EXPENSE, None, None),
+    "expenditures": (AccountType.EXPENSE, None, None),
+    "other expense": (AccountType.EXPENSE, DetailType.OTHER_EXPENSE, None),
+    "other expenses": (AccountType.EXPENSE, DetailType.OTHER_EXPENSE, None),
+    "other expenditures": (AccountType.EXPENSE, DetailType.OTHER_EXPENSE, None),
+}
 # What parse_coa inferred about accounts the reports hide, for the dry run
 # to say (the engine's parser contract returns accounts and errors only).
 _COA_NOTES: list[str] = []
@@ -226,11 +350,117 @@ def _cell(row: list[str], i: int) -> str:
 # ── the chart: the balance sheet and the P&L ───────────────────────────────
 
 
+def _statement_reports(rows: list[list[str]]) -> list[dict]:
+    """The statements in the chart text, each as its rows after the header
+    row (label, figure, indentation), with the title its preamble names and
+    whether any row is indented. The Account List's rows are not a
+    statement's: its header ends one, and its rows (a number or nothing in
+    the first cell, a TOTAL row) are read by _account_list."""
+    reports: list[dict] = []
+    current: dict | None = None
+    title = ""
+    for row in rows:
+        raw = _cell(row, 0)
+        value = _cell(row, 1).strip()
+        name = raw.strip()
+        cells = [c.strip().lower() for c in row]
+        if "account name" in cells and "type" in cells:
+            if current is not None:
+                reports.append(current)
+                current = None
+            continue
+        if not name:
+            if value.lower() == "total":  # the header row; a report starts here
+                if current is not None:
+                    reports.append(current)
+                current = {"title": title or "statement", "rows": [], "indented": False}
+                title = ""
+            continue
+        if current is None:
+            if _TITLES.search(name):
+                title = name  # the preamble: company, title, date range
+            continue
+        if _BASIS.search(name) and value == "":
+            reports.append(current)  # the footer: "… - Cash Basis"
+            current = None
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        if indent:
+            current["indented"] = True
+        current["rows"].append((name, value, indent))
+    if current is not None:
+        reports.append(current)
+    return reports
+
+
+def _account_list(rows: list[list[str]]) -> tuple[list[dict], list[str], list[str]]:
+    """The Account List report's accounts, when the chart text carries it
+    (Reports → Account List → Export to Excel, #767): Account #, Account
+    Name as the full Parent:Child path, Type, Detail type, Description and
+    the balance. Returns (specs, their paths with no numbers, errors); a
+    spec's parent is left for parse_coa to resolve, since the list may put
+    a parent after its children."""
+    specs: list[dict] = []
+    bares: list[str] = []
+    errors: list[str] = []
+    header: list[str] | None = None
+    for row in rows:
+        cells = [c.strip().lower() for c in row]
+        if header is None:
+            if "account name" in cells and "type" in cells:
+                header = cells
+            continue
+        first = _cell(row, 0).strip()
+        if first.lower() == "total" or _BASIS.search(first):
+            header = None  # the list ends at its TOTAL row
+            continue
+        path = _cell(row, header.index("account name")).strip()
+        if not path:
+            continue
+        kind = _cell(row, header.index("type")).strip()
+        typed = _LIST_TYPES.get(kind.lower())
+        if typed is None:
+            errors.append(
+                f"Account List: {path!r} is of a type the import does not know, "
+                f"{kind!r}; give it one of QuickBooks' account types"
+            )
+            continue
+        acct_type, detail, bank_kind = typed
+        code = (
+            _cell(row, header.index("account #")).strip()
+            if "account #" in header
+            else ""
+        )
+        description = (
+            _cell(row, header.index("description")).strip()
+            if "description" in header
+            else ""
+        )
+        leaf = path.rsplit(":", 1)[1].strip() if ":" in path else path
+        specs.append(
+            {
+                "code": code or None,
+                "name": leaf,
+                "path": _book_name(code or None, path),
+                "type": acct_type,
+                "description": description or None,
+                "bank_kind": bank_kind,
+                "detail_type": detail,
+                "parent": path.rsplit(":", 1)[0].strip() if ":" in path else None,
+                "receivable": kind.lower().startswith("accounts receivable"),
+                "payable": kind.lower().startswith("accounts payable"),
+            }
+        )
+        bares.append(path)
+    return specs, bares, errors
+
+
 def parse_coa(
     csv_text: str,
     also: tuple[str, ...] = (),
     ordered: tuple[str, ...] = (),
     amounts: dict | None = None,
+    ledger: tuple[str, ...] = (),
 ) -> tuple[list[dict], list[str]]:
     """Accounts from one or both reports (the route joins them). A row with
     a label and a figure is an account; a labelled row with no figure is a
@@ -243,76 +473,105 @@ def parse_coa(
     sub-account of one the reports do show is planned under it with its
     parent's type, and a Trial Balance account so planned is noted in the
     engine's words (#690). Any other is placed by the type of its neighbour
-    in ``ordered`` (the Trial Balance's names, in the chart's order) when
-    the accrual Trial Balance's ``amounts`` give it no balance (a
-    zero-balance row the reports leave off); one with a balance is not
-    placed, and the import refuses it by name (W-108). With neither it is
-    named, for the person to add first.
+    in ``ledger`` (the General Ledger's account headings, in the chart's
+    order, which list the zero-balance accounts the Trial Balance leaves off
+    too, #767) or else in ``ordered`` (the Trial Balance's names) when the
+    accrual Trial Balance's ``amounts`` give it no balance; one with a
+    balance is not placed, and the import refuses it by name (W-108). With
+    none of these it is named, for the person to add first.
 
     A sub-account is named by its leaf ("Federal Unemployment (940)"), its
     parent set, and carries its full "Parent:Child" ``path``, the name the
     Journal and the Trial Balance write and the import matches it by: the
-    statements join the parents' names to it (NEW-203)."""
+    statements join the parents' names to it (NEW-203). A company with
+    account numbers switched on has them on every statement row ("1010
+    Operating Checking" under "Operating"), while the books write the
+    account's own number in front of the whole path and leave the parents'
+    off ("1010 Operating:Operating Checking", "Memberships:Family
+    Memberships" under "4000 Memberships"); the number is the spec's
+    ``code``, the rest its name, and the path is the books' spelling (#767).
+    The Account List report, when the text carries it, is the chart first:
+    every account's type, number and description; the statements add the
+    deleted accounts it leaves out."""
     accounts: list[dict] = []
     errors: list[str] = []
     notes = _COA_NOTES
     notes.clear()
     unplaced = _COA_UNPLACED
     unplaced.clear()
+    rows = _rows(csv_text)
+    reports = _statement_reports(rows)
+    listed, list_bares, list_errors = _account_list(rows)
+    errors.extend(list_errors)
+    labels = [name for report in reports for name, _, _ in report["rows"]]
+    numbered = uses_numbers(labels, also) or any(spec["code"] for spec in listed)
     seen: set[str] = set()
-    stack: list[tuple[int, str, bool]] = []  # (indent, name, is_account)
-    in_report = False
-    for row in _rows(csv_text):
-        raw = _cell(row, 0)
-        value = _cell(row, 1).strip()
-        name = raw.strip()
-        if not name:
-            if value.lower() == "total":
-                in_report = True  # the header row; a new report starts here
-                stack = []
+    # the Parent:Child path with no numbers in it → the spec: what a
+    # sub-account's parent, and the books' spellings, are found by
+    by_bare: dict[str, dict] = {}
+
+    def add(spec: dict, bare: str) -> None:
+        key = spec_path(spec).lower()
+        if key in seen:
+            return
+        seen.add(key)
+        accounts.append(spec)
+        by_bare.setdefault(bare.lower(), spec)
+        by_bare.setdefault(strip_code_suffix(bare), spec)
+
+    for spec, bare in zip(listed, list_bares):
+        add(spec, bare)
+    for spec in listed:
+        parent = spec.get("parent")
+        if parent:
+            found = by_bare.get(parent.lower()) or by_bare.get(
+                strip_code_suffix(parent)
+            )
+            if found is not None:
+                spec["parent"] = spec_path(found)
+
+    for report in reports:
+        if report["rows"] and not report["indented"] and len(report["rows"]) >= 5:
+            errors.append(
+                f"The {report['title']} has no indentation, as a report exported "
+                f"from the Reports page has: upload the Balance Sheet and the "
+                f"Profit and Loss from Export data (the gear → Export data), "
+                f"which the import reads"
+            )
             continue
-        if not in_report:
-            continue  # the preamble: company, title, date range
-        low = name.lower()
-        if _BASIS.search(name) and value == "":
-            in_report = False  # the footer: "… - Cash Basis"
-            stack = []
-            continue
-        if (
-            low.startswith("total ")
-            or low in _ARITHMETIC
-            or low in ("total", "total assets", "total liabilities and equity")
-        ):
-            continue
-        if low.startswith("total"):  # "TOTAL ASSETS"
-            continue
-        indent = len(raw) - len(raw.lstrip(" "))
-        while stack and stack[-1][0] >= indent:
-            stack.pop()
-        is_account = value != "" or low not in _SECTIONS
-        if is_account:
-            sections = [n.lower() for _, n, acct in stack if not acct]
-            parents = [n for _, n, acct in stack if acct]
-            acct_type = None
-            for section in sections:
-                if section in _SECTION_TYPES:
-                    acct_type = _SECTION_TYPES[section]
-            if acct_type is None:
-                errors.append(
-                    f"Chart: {name!r} sits under no section that names its type"
-                )
-            else:
-                full = ":".join(parents + [name])
-                if full.lower() not in seen:
-                    seen.add(full.lower())
+        # (indentation, label, is it an account, the books' name, the bare path)
+        stack: list[tuple[int, str, bool, str, str]] = []
+        for name, value, indent in report["rows"]:
+            low = name.lower()
+            if low.startswith("total") or low in _ARITHMETIC:
+                continue
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            is_account = value != "" or low not in _SECTIONS
+            book, bare = name, name
+            if is_account:
+                sections = [n.lower() for _, n, acct, _, _ in stack if not acct]
+                parent = next((entry for entry in reversed(stack) if entry[2]), None)
+                acct_type = None
+                for section in sections:
+                    if section in _SECTION_TYPES:
+                        acct_type = _SECTION_TYPES[section]
+                code, leaf = _split_code(name, numbered)
+                bare = f"{parent[4]}:{leaf}" if parent else leaf
+                book = _book_name(code, bare)
+                if acct_type is None:
+                    errors.append(
+                        f"Chart: {name!r} sits under no section that names its type"
+                    )
+                else:
                     kind = next(
                         (k for s, k in _KIND_SECTIONS.items() if s in sections), None
                     )
-                    accounts.append(
+                    add(
                         {
-                            "code": None,
-                            "name": name,
-                            "path": full,
+                            "code": code,
+                            "name": leaf,
+                            "path": book,
                             "type": acct_type,
                             "description": None,
                             "bank_kind": kind,
@@ -324,7 +583,7 @@ def parse_coa(
                                 ),
                                 None,
                             ),
-                            "parent": ":".join(parents) if parents else None,
+                            "parent": parent[3] if parent else None,
                             # the account the Journal's invoices and
                             # payments post to (QuickBooks names it
                             # "Accounts Receivable (A/R)")
@@ -332,50 +591,61 @@ def parse_coa(
                             # the account its bills post to ("Accounts
                             # Payable (A/P)"): it lands on 2000 (#704)
                             "payable": "accounts payable" in sections,
-                        }
+                        },
+                        bare,
                     )
-        stack.append((indent, name, is_account))
+            stack.append((indent, name, is_account, book, bare))
     by_name = {spec_path(a).lower(): a for a in accounts}
     # an account the books name another way ("Parent:Child (940)" beside the
     # report's indented child) is the same account, not a new one (#690)
     by_key = {strip_code_suffix(spec_path(a)): a for a in accounts}
     on_tb = {n.strip().lower() for n in ordered}
+    on_ledger = {n.strip().lower() for n in ledger}
     for name in also:
         key = name.strip().lower()
         if not key or key in by_name or key in _ARITHMETIC:
             continue
         if strip_code_suffix(name) in by_key:
             continue
-        parent = name.rsplit(":", 1)[0] if ":" in name else ""
+        code, bare = _split_code(name, numbered)
+        parent = bare.rsplit(":", 1)[0] if ":" in bare else ""
+        leaf = bare.rsplit(":", 1)[1].strip() if ":" in bare else bare
         parent_spec = (
-            by_name.get(parent.lower()) or by_key.get(strip_code_suffix(parent))
+            by_bare.get(parent.lower())
+            or by_bare.get(strip_code_suffix(parent))
+            or by_name.get(parent.lower())
+            or by_key.get(strip_code_suffix(parent))
             if parent
             else None
         )
+        path = name.strip()
         if parent_spec is not None:
             acct_type, parent_path = parent_spec["type"], spec_path(parent_spec)
-            leaf = name.rsplit(":", 1)[1].strip()
-            path = f"{parent_path}:{leaf}"
             if key in on_tb:
                 # the engine's own words (#690): one note, and the engine
                 # finds the account planned here and plans no second one
-                notes.append(
-                    planned_sub_account_note(name.strip(), parent_path, acct_type)
-                )
+                notes.append(planned_sub_account_note(path, parent_path, acct_type))
         else:
-            balance = (amounts or {}).get(name.strip(), Decimal("0"))
+            balance = (amounts or {}).get(path, Decimal("0"))
             if amounts is not None and key in on_tb and balance != 0:
                 # A balance on an account with no parent the chart has: not
                 # a zero row the reports left off. Guessing its type would
                 # put the balance on a made-up top-level account; it is
                 # named and the import refuses (W-108, #690).
-                unplaced.append(name.strip())
+                unplaced.append(path)
                 continue
             # The Trial Balance lists accounts in the chart's order, assets
             # through expenses: the nearest listed neighbour the reports do
-            # show says what kind this one is.
+            # show says what kind this one is; the General Ledger's headings,
+            # in the same order, place one the Trial Balance leaves off too
+            # (a zero-balance account QuickBooks deleted, #767).
             acct_type = _type_from_neighbours(name, ordered, by_name, by_key)
-            parent_path, leaf, path = None, name.strip(), name.strip()
+            if acct_type is None and ledger:
+                acct_type = _type_from_neighbours(name, ledger, by_name, by_key)
+            # with no parent, the books' whole spelling is its name, so the
+            # person sees where it came from
+            leaf = bare
+            parent_path = None
             if acct_type is None:
                 errors.append(
                     f"Account {name!r} is in the books but not on the Balance Sheet "
@@ -384,13 +654,18 @@ def parse_coa(
                     f"again"
                 )
                 continue
+            where = (
+                "General Ledger"
+                if key in on_ledger and key not in on_tb
+                else "Trial Balance"
+            )
             notes.append(
                 f"Account {name!r} is not on the Balance Sheet or the Profit and Loss; "
-                f"from its place in the Trial Balance it is a{'n' if acct_type.value[0] in 'aeiou' else ''} "
+                f"from its place in the {where} it is a{'n' if acct_type.value[0] in 'aeiou' else ''} "
                 f"{acct_type.value} account. Correct it in Chart of Accounts if that is wrong."
             )
         spec = {
-            "code": None,
+            "code": code,
             "name": leaf,
             "path": path,
             "type": acct_type,
@@ -405,6 +680,40 @@ def parse_coa(
         by_name[key] = spec
         by_name.setdefault(path.lower(), spec)
         by_key.setdefault(strip_code_suffix(name), spec)
+        by_bare.setdefault(bare.lower(), spec)
+    # A QuickBooks number SlowBooks keeps for a control account (2000
+    # Accounts Payable, 2200 Sales Tax Payable …) would make the account
+    # the one the posting codes find by that number: it is left off, and
+    # the account comes across unnumbered, named in one note. The
+    # receivable and the payable land on the controls themselves (#704).
+    from app.services import control_accounts
+
+    kept_off: list[str] = []
+    for spec in accounts:
+        code = spec.get("code")
+        if (
+            code
+            and control_accounts.is_control_number(code)
+            and not (spec.get("receivable") or spec.get("payable"))
+        ):
+            control, _purpose = control_accounts.describe(code)
+            kept_off.append(f"{code} ({spec['name']}; {control} here)")
+            spec["code"] = None
+    if kept_off:
+        one = len(kept_off) == 1
+        notes.append(
+            f"{'A number' if one else 'Numbers'} SlowBooks keeps for its control "
+            f"accounts {'is' if one else 'are'} left off, so {'that account comes' if one else 'those accounts come'} "
+            f"across without one: {', '.join(kept_off)}. Number them in Chart of "
+            f"Accounts if you like."
+        )
+    deleted = sum(1 for spec in accounts if _DELETED.search(spec["name"]))
+    if deleted:
+        notes.append(
+            f"{deleted} account{'s' if deleted != 1 else ''} QuickBooks Online had "
+            f"deleted ('(deleted)' in the name) {'come' if deleted != 1 else 'comes'} "
+            f"across inactive, with {'their' if deleted != 1 else 'its'} history posted"
+        )
     return accounts, errors
 
 
@@ -1702,6 +2011,54 @@ def _tb_names(csv_text: str) -> list[str]:
     return names
 
 
+def ledger_order(csv_text: str) -> tuple[str, ...]:
+    """The General Ledger's accounts in its order, the chart's: every
+    account with history, the zero-balance ones the statements and the Trial
+    Balance leave off among them, spelled the way the Journal writes them
+    (#767). A heading is a row with nothing in it but a label (a
+    sub-account's indented under its parent's); the lines under it and its
+    "Total for" row are not."""
+    rows = _rows(csv_text)
+    header_at = None
+    for i, row in enumerate(rows):
+        cells = [c.strip().lower() for c in row]
+        if (
+            "date" in cells
+            and "account" in cells
+            and ("debit" in cells or "credit" in cells)
+        ):
+            header_at = i
+            break
+    if header_at is None:
+        return ()
+    labels: list[tuple[int, str]] = []
+    for row in rows[header_at + 1 :]:
+        filled = [cell for cell in row if cell.strip()]
+        if len(filled) != 1:
+            continue
+        raw = filled[0]
+        name = raw.strip()
+        low = name.lower()
+        if _BASIS.search(name):
+            break  # the footer
+        if low.startswith("total") or low in _ARITHMETIC or low.startswith("="):
+            continue
+        if re.fullmatch(r"[-\d.,$()\s]+", name):
+            continue  # a figure alone (a beginning balance)
+        labels.append((len(raw) - len(raw.lstrip(" ")), name))
+    numbered = uses_numbers([name for _, name in labels])
+    order: list[str] = []
+    stack: list[tuple[int, str]] = []  # (indentation, the bare path)
+    for indent, name in labels:
+        while stack and stack[-1][0] >= indent:
+            stack.pop()
+        code, leaf = _split_code(name, numbered)
+        bare = f"{stack[-1][1]}:{leaf}" if stack else leaf
+        order.append(_book_name(code, bare))
+        stack.append((indent, bare))
+    return tuple(order)
+
+
 def _onto_controls(db: Session, accounts: list[dict], plan: dict | None) -> None:
     """Map the export's control accounts onto the books' (#704): its
     payable account ("Accounts Payable (A/P)", the one under the Balance
@@ -1742,6 +2099,55 @@ def _onto_controls(db: Session, accounts: list[dict], plan: dict | None) -> None
             )
 
 
+def _onto_unnumbered(db: Session, accounts: list[dict]) -> None:
+    """A spec spelled with a number whose account the books hold under the
+    same path with no number — an earlier upload made it and left off a
+    number the books already used, or a control number, or it is the seeded
+    chart's account of that name — is that account (#767): not created
+    again, and the Journal's "1000 Cash Box" resolves to it, as "Cash Box"
+    would."""
+    in_books = books_by_name(db)
+    for spec in accounts:
+        if spec.get("onto") is not None:
+            continue
+        path = spec_path(spec)
+        # the books' spelling carries the number whether or not the
+        # account keeps it (a control number is left off before this)
+        numbered = _NUMBERED.match(path)
+        if path.lower() in in_books or numbered is None:
+            continue
+        acct = in_books.get(numbered.group(2).strip().lower())
+        if acct is not None and acct.account_type == spec["type"]:
+            spec["onto"] = acct.id
+
+
+def _used_numbers_note(db: Session, accounts: list[dict]) -> None:
+    """One note naming the QuickBooks numbers the books already use on other
+    accounts: the engine leaves such a number off when it creates the
+    account (the name stays), which it does without a word (#767). An
+    account the books already hold is not created, so its number is not
+    in question."""
+    used = {n for (n,) in db.query(Account.account_number).all() if n is not None}
+    in_books = books_by_name(db)
+    taken: list[str] = []
+    for spec in accounts:
+        code = spec.get("code")
+        if spec.get("onto") is not None or spec_path(spec).lower() in in_books:
+            continue
+        if code and code in used:
+            taken.append(f"{code} ({spec['name']})")
+            used.discard(code)  # named once
+    if taken:
+        one = len(taken) == 1
+        _COA_NOTES.append(
+            f"{'A number' if one else 'Numbers'} the books already use on another "
+            f"account {'is' if one else 'are'} left off, so "
+            f"{'that account comes' if one else 'those accounts come'} across "
+            f"without one: {', '.join(taken)}. Renumber in Chart of Accounts if "
+            f"you like."
+        )
+
+
 def _parsers(bundle: dict, db: Session | None = None, plan: dict | None = None):
     also = _names_in_use(bundle)
     tb_text = bundle.get("tb") or bundle.get("tb_names_only")
@@ -1749,11 +2155,16 @@ def _parsers(bundle: dict, db: Session | None = None, plan: dict | None = None):
     # the accrual Trial Balance's figures, the ones the opening balances
     # come from: a cash-basis one is set aside and gives none
     amounts = parse_tb(bundle["tb"])[0] if "tb" in bundle else None
+    # the General Ledger's headings, for the accounts the statements and
+    # the Trial Balance leave off (#767)
+    ledger = ledger_order(bundle["gl_order"]) if bundle.get("gl_order") else ()
 
     def coa(text):
-        accounts, errors = parse_coa(text, also, ordered, amounts)
+        accounts, errors = parse_coa(text, also, ordered, amounts, ledger)
         if db is not None:
             _onto_controls(db, accounts, plan)
+            _onto_unnumbered(db, accounts)
+            _used_numbers_note(db, accounts)
         return accounts, errors
 
     return {
@@ -1764,6 +2175,30 @@ def _parsers(bundle: dict, db: Session | None = None, plan: dict | None = None):
 
 
 PARSERS = {"coa": parse_coa, "gl": parse_gl, "tb": parse_tb}
+
+
+def _fold_list(bundle: dict) -> dict:
+    """The Account List report, when the upload has it, read with the
+    statements as the chart (#767): one chart text, the list first."""
+    if "coa_list" not in bundle:
+        return bundle
+    bundle = dict(bundle)
+    listed = bundle.pop("coa_list")
+    bundle["coa"] = "\n".join(t for t in (listed, bundle.get("coa", "")) if t)
+    return bundle
+
+
+def _retire_deleted(db: Session) -> int:
+    """QuickBooks Online's "(deleted)" accounts are inactive accounts whose
+    history still posts; they come across the same way, retired once their
+    journals are in (every account is made active, so a deleted parent
+    takes its deleted children while the chart is made, #416)."""
+    retired = 0
+    for acct in db.query(Account).filter(Account.is_active.is_(True)).all():
+        if _DELETED.search(acct.name or ""):
+            acct.is_active = False
+            retired += 1
+    return retired
 
 
 def _prepare(bundle: dict) -> tuple[dict, list[str]]:
@@ -1859,6 +2294,7 @@ def _payable_note(prepared: dict) -> list[str]:
 
 
 def dry_run(db: Session, bundle: dict) -> dict:
+    bundle = _fold_list(bundle)
     plan = _carry_plan(db, bundle)
     prepared, notes = _prepare(bundle)
     _COA_PAYABLE.clear()
@@ -1883,6 +2319,7 @@ def dry_run(db: Session, bundle: dict) -> dict:
 
 
 def run_import(db: Session, bundle: dict) -> dict:
+    bundle = _fold_list(bundle)
     plan = _carry_plan(db, bundle)  # checked before anything is written
     if plan["errors"]:
         refused = dry_run(db, bundle)
@@ -1916,6 +2353,7 @@ def run_import(db: Session, bundle: dict) -> dict:
     result.update(_counts(db, bundle))
     invoices = payments = 0
     if result["ok"]:
+        _retire_deleted(db)
         customers, vendors = _import_contacts(db, bundle)
         employees = _import_employees(db, bundle)
         invoices, payments = _import_carried(db, plan)

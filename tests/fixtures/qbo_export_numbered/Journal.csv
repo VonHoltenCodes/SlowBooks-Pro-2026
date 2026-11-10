@@ -1,0 +1,50 @@
+,Pinecrest Studio Rentals,,,,,,,
+,Journal,,,,,,,
+,All Dates,,,,,,,
+,,,,,,,,
+,Date,Transaction Type,Num,Name,Memo/Description,Account,Debit,Credit
+,01/05/2026,Journal Entry,1,,Opening deposit,1010 Operating:Operating Checking,=1000.00,
+,,,,,Opening deposit,3050 Opening Balance Equity,,=1000.00
+,,,,,,,=1000.00,=1000.00
+,,,,,,,,
+,01/06/2026,Deposit,,Reyes Family,Family dues,1010 Operating:Operating Checking,=300.00,
+,,,,,Family dues,Memberships:Family Memberships,,=300.00
+,,,,,,,=300.00,=300.00
+,,,,,,,,
+,01/07/2026,Deposit,,Ana Reyes,Student dues,1011 Operating:Operating Savings,=200.00,
+,,,,,Student dues,Memberships:Student Memberships,,=200.00
+,,,,,,,=200.00,=200.00
+,,,,,,,,
+,01/08/2026,Sales Receipt,1001,Walk-in,Store sale,1000 Cash Box,=45.00,
+,,,,,Member discount,4351 Store Sales:Discounts Given,=5.00,
+,,,,,Store sale,4350 Store Sales,,=50.00
+,,,,,,,=50.00,=50.00
+,,,,,,,,
+,01/09/2026,Deposit,,,Guild dues,1011 Operating:Operating Savings,=100.00,
+,,,,,Guild dues,4050 Memberships,,=100.00
+,,,,,,,=100.00,=100.00
+,,,,,,,,
+,01/15/2026,Journal Entry,2,,Bank loan received,1010 Operating:Operating Checking,=500.00,
+,,,,,Bank loan received,2201 Long-term loans:Bank loan,,=500.00
+,,,,,,,=500.00,=500.00
+,,,,,,,,
+,01/20/2026,Journal Entry,3,,Cash advance,1011 Operating:Operating Savings,=40.00,
+,,,,,Cash advance,2101 Old Store Card (deleted),,=40.00
+,,,,,,,=40.00,=40.00
+,,,,,,,,
+,01/25/2026,Journal Entry,4,,Advance paid back,2101 Old Store Card (deleted),=40.00,
+,,,,,Advance paid back,1011 Operating:Operating Savings,,=40.00
+,,,,,,,=40.00,=40.00
+,,,,,,,,
+,02/01/2026,Expense,,Pinecrest Plaza LLC,February rent,Office expenses:Rent,=700.00,
+,,,,,February rent,2150 Company Visa,,=700.00
+,,,,,,,=700.00,=700.00
+,,,,,,,,
+,02/15/2026,Expense,,Company Visa,Card payment,2150 Company Visa,=580.00,
+,,,,,Card payment,1010 Operating:Operating Checking,,=580.00
+,,,,,,,=580.00,=580.00
+,,,,,,,,
+,02/20/2026,Expense,,First Ridge Bank,Loan interest,Office expenses:Interest paid,=20.00,
+,,,,,Loan interest,1010 Operating:Operating Checking,,=20.00
+,,,,,,,=20.00,=20.00
+,,,,,,,,

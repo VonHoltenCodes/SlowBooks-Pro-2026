@@ -133,15 +133,32 @@ def account_paths(db: Session) -> list[tuple[Account, str]]:
     return out
 
 
+def numbered_aliases(pairs) -> list[tuple[Account, str, str]]:
+    """(account, its path, the name QuickBooks Online writes for a numbered
+    account): the number in front of the whole path, the parents' numbers
+    left off ("1010 Operating:Operating Checking", #767). What a second
+    upload of the same export, and its Trial Balance, call the account the
+    first one made. Every caller registers these after each path and name,
+    so an alias never stands in for either."""
+    return [
+        (acct, path, f"{acct.account_number} {path}")
+        for acct, path in pairs
+        if acct.account_number
+    ]
+
+
 def books_by_name(db: Session) -> dict:
     """{lowercased path or name → Account}: paths first, so a leaf name
-    never stands in for a top-level account the path names."""
+    never stands in for a top-level account the path names; a numbered
+    account's QuickBooks Online spelling last (#767)."""
     pairs = account_paths(db)
     found: dict = {}
     for acct, path in pairs:
         found.setdefault(path.lower(), acct)
     for acct, _ in pairs:
         found.setdefault(acct.name.lower(), acct)
+    for acct, _, alias in numbered_aliases(pairs):
+        found.setdefault(alias.lower(), acct)
     return found
 
 
@@ -186,6 +203,8 @@ def _account_keys(db: Session, accounts: list[dict]) -> dict:
         keys.setdefault(strip_code_suffix(path), (path, acct.account_type))
     for acct, _ in pairs:
         keys.setdefault(strip_code_suffix(acct.name), (acct.name, acct.account_type))
+    for acct, path, alias in numbered_aliases(pairs):
+        keys.setdefault(strip_code_suffix(alias), (path, acct.account_type))
     for spec in accounts:
         path = spec_path(spec)
         keys.setdefault(strip_code_suffix(path), (path, spec["type"]))
@@ -505,6 +524,8 @@ def dry_run_bundle(
     for acct, path in account_paths(db):
         known |= {acct.name.lower(), strip_code_suffix(acct.name)}
         known |= {path.lower(), strip_code_suffix(path)}
+    for _, _, alias in numbered_aliases(account_paths(db)):
+        known |= {alias.lower(), strip_code_suffix(alias)}
 
     # A journal whose every line is 0.00 "balances" — and then posts nothing.
     # That is what an unrecognised amount column looks like from here: the
@@ -737,6 +758,8 @@ def run_import_bundle(
         by_key.setdefault(strip_code_suffix(path), acct)
     for acct in by_name.values():
         by_key.setdefault(strip_code_suffix(acct.name), acct)
+    for acct, _, alias in numbered_aliases(account_paths(db)):
+        by_key.setdefault(strip_code_suffix(alias), acct)
 
     journals, _ = parsers["gl"](bundle["gl"])
 

@@ -80,8 +80,13 @@ def test_the_bundles_files_are_told_apart_by_name():
     assert qbo.classify_filename("Vendors.xlsx") == "vendors"
     # the employee list's names and contact details come in (#711)
     assert qbo.classify_filename("Employees.xlsx") == "employees"
-    # read nothing from: the ledger repeats the journal by account
-    assert qbo.classify_filename("General_ledger.xlsx") == "skip"
+    # the ledger repeats the journal by account; its account headings, in
+    # chart order, place the accounts the statements and the Trial Balance
+    # leave off (#767)
+    assert qbo.classify_filename("General_ledger.xlsx") == "gl_order"
+    # the Account List report beside the zip is the chart (#767)
+    assert qbo.classify_filename("Pinecrest_Account_List.xlsx") == "coa_list"
+    assert qbo.classify_filename("Account List.xlsx") == "coa_list"
     assert qbo.classify_filename("holiday_photos.jpg") is None
 
 

@@ -1,0 +1,38 @@
+Pinecrest Studio Rentals,
+Balance Sheet,
+All Dates,
+,
+,Total
+ASSETS,
+   Current Assets,
+      Bank Accounts,
+         1000 Cash Box,=45.00
+         Operating,
+            1010 Operating Checking,=1200.00
+            1011 Operating Savings,=300.00
+         Total Operating,=1500.00
+      Total Bank Accounts,=1545.00
+   Total Current Assets,=1545.00
+TOTAL ASSETS,=1545.00
+LIABILITIES AND EQUITY,
+   Liabilities,
+      Current Liabilities,
+         Credit Cards,
+            2150 Company Visa,=120.00
+         Total Credit Cards,=120.00
+      Total Current Liabilities,=120.00
+      Long-Term Liabilities,
+         2200 Long-term loans,
+            2201 Bank loan,=500.00
+         Total 2200 Long-term loans,=500.00
+      Total Long-Term Liabilities,=500.00
+   Total Liabilities,=620.00
+   Equity,
+      3050 Opening Balance Equity,=1000.00
+      Net Income,=-75.00
+   Total Equity,=925.00
+TOTAL LIABILITIES AND EQUITY,=1545.00
+,
+,
+,
+"Monday, Nov 9, 2026 06:00:00 AM GMT-8 - Accrual Basis",

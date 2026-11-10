@@ -1,0 +1,25 @@
+Pinecrest Studio Rentals,,,,,
+Account List,,,,,
+,,,,,
+Account #,Account Name,Type,Detail type,Description,Total balance
+1000,Cash Box,Bank,Cash on hand,Petty cash in the studio,=45.00
+1010,Operating:Operating Checking,Bank,Checking,,=1200.00
+1011,Operating:Operating Savings,Bank,Savings,,=300.00
+,Operating,Bank,Checking,,=1500.00
+,Prepaid rent,Other Current Assets,Prepaid Expenses,Rent paid ahead,=0.00
+2150,Company Visa,Credit Card,Credit Card,,=-120.00
+2200,Long-term loans,Long Term Liabilities,Other Long Term Liabilities,,=-500.00
+2201,Long-term loans:Bank loan,Long Term Liabilities,Other Long Term Liabilities,Five-year note,=-500.00
+3050,Opening Balance Equity,Equity,Opening Balance Equity,Opening balances of bank accounts,=-1000.00
+4050,Memberships,Income,Service/Fee Income,,
+,Memberships:Family Memberships,Income,Service/Fee Income,,
+,Memberships:Student Memberships,Income,Service/Fee Income,,
+4350,Store Sales,Income,Sales of Product Income,,
+4351,Store Sales:Discounts Given,Income,Discounts/Refunds Given,,
+,Office expenses,Expenses,Office/General Administrative Expenses,,
+,Office expenses:Interest paid,Expenses,Interest Paid,Interest on the note,
+,Office expenses:Rent,Expenses,Rent or Lease of Buildings,,
+TOTAL,,,,,=2270.00
+,,,,,
+,,,,,
+"Monday, November 9, 2026 06:01 AM GMT-08:00",,,,,
