@@ -249,25 +249,9 @@ jobs:
           # is not installed here; every browser test skips the same way).
           # 221 with the Settings accessibility-tree browser test (#725,
           # test_browser_settings_ax_tree.py).
-          # 222 with the estimate PDF page-break sweep (v2.31.11 construction,
-          # test_estimate_bid_presentation.py::test_total_is_never_alone_on_a_page,
-          # WeasyPrint). 223 with the multi-page pay application PDF
-          # (test_pay_app_billing_flow.py::test_a_long_application_prints_totals_once_at_the_end,
-          # WeasyPrint). 224 with the retainage and compliance report PDFs
-          # (test_co_dashboard.py::test_retainage_and_compliance_pdf_and_print,
-          # WeasyPrint). 238 with the check PDFs read back through pypdf
-          # (v2.31.11, WeasyPrint): the six batch-height tests in
-          # test_check_position.py (#740: same_height, starts_where,
-          # first_page, each at top and bottom) and the eight blank-stock
-          # face tests in test_check_blank_stock.py (#739: every_new_element,
-          # same_place, logo_moves at top and bottom; without_any_bank_details;
-          # micr_line_on_every_page). 240 with two more browser modules that
-          # skip as one where playwright is absent (v2.31.11:
-          # test_browser_expense_edit.py for #745/#746 and
-          # test_browser_encryption_dialog.py for Discussion #750).
-          # 242 with the retainage-release invoice PDF tests (#751,
-          # test_retainage_release_invoice_751.py, two WeasyPrint renders).
-          MAX_SKIPS: "242"
+          # 243 with the retainage-release invoice PDF tests (#751,
+          # test_retainage_release_invoice_751.py, three WeasyPrint renders).
+          MAX_SKIPS: "243"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

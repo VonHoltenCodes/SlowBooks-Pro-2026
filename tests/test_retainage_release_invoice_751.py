@@ -96,3 +96,50 @@ def test_an_invoice_with_work_still_shows_its_total(
     pdf = client.get(f"/api/invoices/{r.json()['invoice_id']}/pdf")
     text = pypdf.PdfReader(io.BytesIO(pdf.content)).pages[0].extract_text()
     assert "Subtotal" in text and "Retainage release" not in text
+
+
+def test_only_a_pure_release_reads_as_one(db_session, seed_accounts, seed_customer):
+    """Held retainage, tax or a negative release on a line-less $0 invoice is
+    not a release-only invoice; a voided release still is, as a voided
+    invoice keeps its lines."""
+    from decimal import Decimal
+
+    from app.models.invoices import Invoice, InvoiceStatus
+    from app.services.pdf_service import invoice_is_release_only
+
+    def inv(**kw):
+        base = dict(
+            total=Decimal("0"),
+            tax_amount=Decimal("0"),
+            retainage_held=Decimal("0"),
+            retainage_released=Decimal("3000"),
+        )
+        base.update(kw)
+        row = Invoice(
+            invoice_number=f"T-{len(kw)}-{sorted(kw)}",
+            customer_id=seed_customer.id,
+            **base,
+        )
+        row.lines = []
+        return row
+
+    assert invoice_is_release_only(inv())
+    assert invoice_is_release_only(inv(status=InvoiceStatus.VOID))
+    assert not invoice_is_release_only(inv(retainage_held=Decimal("100")))
+    assert not invoice_is_release_only(inv(tax_amount=Decimal("100")))
+    assert not invoice_is_release_only(inv(retainage_released=Decimal("-100")))
+    assert not invoice_is_release_only(inv(retainage_released=Decimal("0")))
+
+
+def test_a_voided_release_invoice_still_names_the_release(
+    client, db_session, seed_accounts, seed_customer
+):
+    pypdf = pytest.importorskip("pypdf")
+    inv_id, number = _release_only_invoice(client, seed_customer.id)
+    app_id = client.get(f"/api/invoices/{inv_id}").json()["pay_application_id"]
+    assert client.post(f"/api/pay-applications/{app_id}/void").status_code == 200
+    got = client.get(f"/api/invoices/{inv_id}").json()
+    assert got["status"] == "void"
+    r = client.get(f"/api/invoices/{inv_id}/pdf")
+    text = pypdf.PdfReader(io.BytesIO(r.content)).pages[0].extract_text()
+    assert f"Retainage release, {number}" in text

@@ -305,7 +305,8 @@ const InvoicesPage = {
         ).join('');
         // A pay application that only releases retainage posts no lines (#751):
         // name the release, and drop the $0.00 subtotal, tax and total rows.
-        const releaseOnly = !inv.lines.length && !Number(inv.total) && Number(inv.retainage_released);
+        const releaseOnly = !inv.lines.length && !Number(inv.total) && !Number(inv.tax_amount)
+            && !Number(inv.retainage_held) && Number(inv.retainage_released) > 0;
         if (releaseOnly) {
             linesHtml = `<tr><td>Retainage release${inv.pay_application_number ? `, ${escapeHtml(inv.pay_application_number)}` : ''}</td><td class="amount">1</td>
              <td class="amount">${money(inv.retainage_released)}</td><td class="amount">${money(inv.retainage_released)}</td></tr>`;

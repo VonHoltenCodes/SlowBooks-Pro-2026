@@ -263,11 +263,15 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
 
 def invoice_is_release_only(invoice) -> bool:
     """A pay application's invoice that bills only released retainage: no
-    lines, a zero total and a nonzero release (#751)."""
+    lines, a zero total, no tax and no retainage held, and a positive release
+    (#751). A voided one still qualifies, as a voided invoice keeps printing
+    its lines."""
     return (
         not invoice.lines
         and not (invoice.total or 0)
-        and bool(invoice.retainage_released or 0)
+        and not (invoice.tax_amount or 0)
+        and not (invoice.retainage_held or 0)
+        and (invoice.retainage_released or 0) > 0
     )
 
 
