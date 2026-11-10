@@ -2412,6 +2412,86 @@ def _connected_screens(webview) -> list[tuple[int, int, int, int]]:
         return []
 
 
+def _mac_top_left_screens(screens) -> list[tuple]:
+    """macOS: pywebview lists each screen with its Cocoa origin -- measured
+    up from the bottom of the primary (menu-bar) screen, which comes first --
+    but places a window by its top-left corner measured down from the top of
+    that primary screen. Turn each (x, y, width, height) into the second
+    convention so the saved position is checked against the screens in the
+    same coordinates it is restored in. A screen above or below the primary
+    one then lands where the window really goes (#763)."""
+    screens = list(screens or ())
+    if not screens:
+        return []
+    primary_height = screens[0][3]
+    return [(x, primary_height - y - h, w, h) for x, y, w, h in screens]
+
+
+def _mac_moved_position(origin_x, origin_y, height, primary_height) -> tuple:
+    """macOS: a window frame's bottom-left Cocoa origin as the top-left corner
+    measured down from the top of the primary screen -- what pywebview's
+    move() takes, so a saved position opens exactly where it was."""
+    return origin_x, primary_height - height - origin_y
+
+
+def install_mac_window_move_guard() -> bool:
+    """On a Mac, replace pywebview's window-moved callback with one that
+    cannot fail (#763).
+
+    pywebview 6.2.1's ``windowDidMove_`` reads ``window.screen().frame()``.
+    AppKit's ``screen`` is nil whenever the window is on no screen -- ordered
+    out, or with its frame in a gap between two displays -- and the
+    AttributeError from ``None.frame`` comes out of webview.start(): at
+    startup for a frame on no screen, and in the field on every quit after
+    the window opened at a saved position. Its y also mixed the window's own screen height with a
+    global origin, so on a secondary display of a different height the saved
+    position did not come back where it was. This one measures against the
+    primary screen (which exists while any display is connected), the same
+    reference pywebview's move() restores with, and never raises into
+    AppKit. Returns whether it was installed."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import AppKit
+        from webview.platforms.cocoa import BrowserView
+    except Exception:
+        return False
+    if getattr(BrowserView, "_slowbooks_move_guard", False):
+        return True
+
+    def windowDidMove_(self, notification):
+        try:
+            i = BrowserView.get_instance("window", notification.object())
+            screens = AppKit.NSScreen.screens()
+            if not i or not screens or i.window is None:
+                return
+            frame = i.window.frame()
+            x, y = _mac_moved_position(
+                frame.origin.x,
+                frame.origin.y,
+                frame.size.height,
+                screens[0].frame().size.height,
+            )
+            i.pywebview_window.events.moved.set(x, y)
+        except Exception as exc:
+            print(f"Window move not tracked: {exc}")
+
+    BrowserView.WindowDelegate.windowDidMove_ = windowDidMove_
+    BrowserView._slowbooks_move_guard = True
+    return True
+
+
+def _watch_window_opened(window, session: dict) -> None:
+    """Note when the native window has opened (pywebview's shown or loaded
+    event), so an error after that is not taken for a failed start (#763)."""
+
+    def opened(*_args):
+        session["opened"] = True
+
+    window.events.shown += opened
+    window.events.loaded += opened
+
+
 def _windows_work_areas(screens) -> list[tuple]:
     """Each (x, y, width, height) screen followed by its work area -- the
     monitor less the taskbar -- from MonitorFromPoint/GetMonitorInfoW. A
@@ -2516,6 +2596,9 @@ def run_window(port: int, log_fh=None) -> int:
     # Open where it was closed last time (#681), clamped to today's screens.
     geometry_path = window_geometry_path()
     screens = _connected_screens(webview)
+    if sys.platform == "darwin":
+        screens = _mac_top_left_screens(screens)
+        install_mac_window_move_guard()
     # Clamp to the work area, clear of the taskbar, where Windows reports one.
     placement = _windows_work_areas(screens) if sys.platform == "win32" else screens
     geometry = restore_window_geometry(load_window_geometry(geometry_path), placement)
@@ -2537,6 +2620,11 @@ def run_window(port: int, log_fh=None) -> int:
         _track_window_geometry(api._window, geometry_tracker, geometry_path)
     except Exception as exc:  # an older pywebview without these events
         print(f"Window position will not be remembered: {exc}")
+    session = {"opened": False}
+    try:
+        _watch_window_opened(api._window, session)
+    except Exception:
+        pass  # without the events every error reads as a failed start
     try:
         # Require the WebView2 (Chromium) renderer on Windows. Without this,
         # pywebview silently falls back to the legacy IE/MSHTML control on
@@ -2552,6 +2640,16 @@ def run_window(port: int, log_fh=None) -> int:
         # Clean exit: save again in case the closing event never fired.
         save_window_geometry(geometry_tracker.geometry(), geometry_path)
     except Exception as exc:
+        if session["opened"]:
+            # The window was up and the books were in use: this came from the
+            # native backend while the window closed (#763), not a failed
+            # start. The server stops below as on any close.
+            save_window_geometry(geometry_tracker.geometry(), geometry_path)
+            print(
+                "The window closed with an error from the native backend: "
+                f"{exc!r}; the window position was saved."
+            )
+            return 0
         if sys.platform == "win32":
             guidance = (
                 "This usually means the Microsoft WebView2 runtime is missing "
@@ -2561,8 +2659,8 @@ def run_window(port: int, log_fh=None) -> int:
             )
         elif sys.platform == "darwin":
             guidance = (
-                "The macOS Cocoa/WebKit window could not start. Review the "
-                "launcher log for the packaged native dependency error."
+                "The macOS Cocoa/WebKit window could not start. The launcher "
+                "log has the error from the native window code."
             )
         else:
             guidance = "The native webview backend could not start."
