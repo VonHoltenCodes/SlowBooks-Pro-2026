@@ -294,10 +294,38 @@ check** opens a sample check (Sample Payee, $1,234.56, today, "Alignment
 test") in a new tab; print it on plain paper and hold it against your stock
 to see how far to nudge. The test check uses the stock and nudges as they
 stand in the form, saved or not, so a change can be tried before saving it
-(`GET /api/checks/test-print?check_stock=&check_position=&check_nudge_x_in=&check_nudge_y_in=`,
+(`GET /api/checks/test-print?check_stock=&check_position=&check_nudge_x_in=&check_nudge_y_in=&check_field_layout=`,
 each optional). This applies to every check print path — a bill
 payment, Pay Bills, the batch print of waiting checks, a register check
 and an expense paid from a bank account.
+
+**Field layout** (v2.31.12) is for stock whose boxes do not all sit where
+the check prints them: one company's payee line may sit right while its date
+is too far left and its amount box wants a larger figure, and the nudges move
+everything together. A table under the nudges has a row for each field of the
+check — **payee**, **payee address**, **date**, **amount in figures**,
+**amount in words** and **memo** — with four columns: **Left/right** and
+**Up/down**, in inches from where the field prints today (−1 to +1 in 0.01
+steps; a positive offset moves it right and down), applied on top of the
+nudges; **Size**, in points (6 to 18, one decimal place; empty prints the size
+it prints at today: payee 12, payee address 9, date 10, amount in figures 14,
+or 12 with the check on top, amount in words 9, memo 8); and **Bold** (the
+payee and the amount in figures are bold today, the others are not). Each
+change moves or restyles that field only: a field keeps its baseline as its
+size changes and nothing laid out after it moves (the payee's address, which
+runs to several lines, grows from its first line; a right-aligned field, the
+date or the amount, grows to the left, and on plain stock the date's DATE
+label moves with it). **Reset field layout to defaults** empties the table;
+Save Settings saves it like the rest. The layout applies to the check at the
+bottom and on top, to plain, pre-printed and blank stock, and to every print
+path, and the test check prints it as it stands in the form, saved or not.
+With nothing set (the default), every check prints exactly as before. The API
+keeps it in one setting, `check_field_layout`: JSON keyed by field (`payee`,
+`payee_address`, `date`, `amount`, `amount_words`, `memo`), each holding only
+what differs from today — `x` and `y` (inches), `size` (points) and `bold`
+(true or false), such as `{"date": {"x": -0.2, "size": 12, "bold": true}}`;
+`""` is today's layout. A value out of bounds is refused with a sentence that
+names the field, and nothing is saved.
 
 **Check position** (v2.31.9) says where the check sits on the sheet.
 **Check at the bottom** (the default) prints two stubs and then the check,
