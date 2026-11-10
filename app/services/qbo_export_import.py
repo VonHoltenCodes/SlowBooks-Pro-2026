@@ -126,6 +126,7 @@ _SECTION_TYPES = {
     "other revenue": AccountType.INCOME,
     "expenditures": AccountType.EXPENSE,
     "other expenditures": AccountType.EXPENSE,
+    "net assets": AccountType.EQUITY,
 }
 _KIND_SECTIONS = {"bank accounts": "bank", "credit cards": "credit_card"}
 # The reports' headings that name a detail type (#390); the innermost one an
@@ -170,6 +171,8 @@ _SECTIONS = {
     "expenditures",
     "other revenue",
     "other expenditures",
+    "net assets",
+    "liabilities and net assets",
 }
 # Report arithmetic that carries a figure but is not an account.
 _ARITHMETIC = {

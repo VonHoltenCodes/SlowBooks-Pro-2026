@@ -5,6 +5,7 @@ test_invoice_edit.py does for the invoice form. The server side of each
 item is in test_purchase_postings.py.
 """
 
+import re
 import shutil
 from pathlib import Path
 
@@ -18,8 +19,18 @@ def _js(name):
 
 
 def _method(js, signature):
-    """The body of one method of a page object (4-space indented)."""
-    body = js[js.index(f"\n    {signature} {{") :]
+    """The body of one method of a page object (4-space indented). The
+    signature is matched by its name and whether it is async; the parameter
+    list may differ from the one given, so a method that grows an argument
+    (#745 gave showForm its keep ids) does not break a test that reads its
+    body for something else."""
+    head = re.match(r"(async\s+)?(\w+)\(", signature)
+    assert head, signature
+    pattern = rf"\n    {'async ' if head.group(1) else ''}{head.group(2)}\([^)]*\) \{{"
+    found = re.search(pattern, js)
+    if found is None:
+        raise ValueError(f"no method {signature!r}")
+    body = js[found.start() :]
     return body[: body.index("\n    },")]
 
 
@@ -179,7 +190,8 @@ def test_purchase_account_pickers_offer_cost_of_goods_sold():
     assert "PurchaseAccounts.filter(accounts)" in expense_form
     card_form = _method(_js("cc_charges.js"), "async showForm()")
     assert "account_type=expense" not in card_form
-    assert "PurchaseAccounts.filter(allAccounts)" in card_form
+    # #745: a saved charge's account is kept in the picker (the keep ids)
+    assert "PurchaseAccounts.filter(allAccounts, ...keepIds)" in card_form
 
 
 def test_the_labels_say_cost_of_goods_too():

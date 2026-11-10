@@ -390,6 +390,10 @@ def _nonprofit_words(text):
         "Total Expenses": "Total Expenditures",
         "Other Expenses": "Other Expenditures",
         "Total Other Expenses": "Total Other Expenditures",
+        "Equity": "Net Assets",
+        "Total Equity": "Total Net Assets",
+        "LIABILITIES AND EQUITY": "LIABILITIES AND NET ASSETS",
+        "TOTAL LIABILITIES AND EQUITY": "TOTAL LIABILITIES AND NET ASSETS",
     }
     out = []
     for line in text.splitlines(keepends=True):
@@ -439,6 +443,36 @@ def test_the_qbo_report_reads_a_nonprofits_revenue_and_expenditures():
         "Net Other Revenue",
         "Gross Profit",
     } & set(types)
+
+
+def test_the_qbo_balance_sheet_reads_a_nonprofits_net_assets():
+    """The same company's Balance Sheet says Net Assets where a business
+    file says Equity, and Net Revenue under it for the year's result
+    (macbase1's question, 2.31.11 round 4): the section is equity, the
+    arithmetic line no account, and the chart is the business file's."""
+    from app.models.accounts import AccountType
+    from app.services import qbo_export_import as qbo
+
+    business = (FIXTURES / "qbo_export" / "Balance_sheet.csv").read_text(
+        encoding="utf-8"
+    )
+    nonprofit = _nonprofit_words(business)
+    labels = {line.partition(",")[0].strip() for line in nonprofit.splitlines()}
+    assert not labels & {
+        "Equity",
+        "Total Equity",
+        "LIABILITIES AND EQUITY",
+        "Net Income",
+    }
+    assert "Opening Balance Equity" in labels  # an account keeps its name
+    want, errors = qbo.parse_coa(business)
+    assert errors == []
+    got, errors = qbo.parse_coa(nonprofit)
+    assert errors == []
+    assert {a["name"]: a["type"] for a in got} == {a["name"]: a["type"] for a in want}
+    types = {a["name"]: a["type"] for a in got}
+    assert AccountType.EQUITY in types.values()
+    assert "Net Revenue" not in types and "Net Assets" not in types
 
 
 def test_a_dialects_detail_type_lands_on_the_account(client, db_session, seed_accounts):

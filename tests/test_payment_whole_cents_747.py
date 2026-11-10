@@ -317,3 +317,87 @@ def test_batch_payment_still_takes_whole_cents(client, db_session, acme):
     )
     assert r.status_code == 200, r.text
     assert _paid(client, inv) == (Decimal("12.34"), Decimal("87.66"))
+
+
+# ----- a credit's apply (macbase1, 2.31.11 round 4: NEW-216) -----------------
+
+
+def _credit_memo(client, cid, amount):
+    r = client.post(
+        "/api/credit-memos",
+        json={
+            "customer_id": cid,
+            "date": "2026-11-09",
+            "tax_rate": 0,
+            "lines": [{"description": "Return", "quantity": 1, "rate": amount}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def test_a_credit_memos_apply_refuses_a_sub_cent_amount(client, acme):
+    """A one-cent credit memo applied as 0.005 twice stored a cent each
+    time, and voiding the memo left the invoice two cents further from
+    where it started; the apply takes whole cents now."""
+    inv = _invoice(client, acme, "10.00")
+    before = _paid(client, inv)
+    memo = _credit_memo(client, acme, "0.01")
+    r = client.post(
+        f"/api/credit-memos/{memo['id']}/apply",
+        json={"invoice_id": inv["id"], "amount": "0.005"},
+    )
+    assert _message(r) == "An applied amount is in whole cents; 0.005 isn't."
+    r = client.post(
+        f"/api/credit-memos/{memo['id']}/apply",
+        json={"invoice_id": inv["id"], "amount": 0.005},
+    )
+    assert _message(r) == "An applied amount is in whole cents; 0.005 isn't."
+    assert _paid(client, inv) == before
+    assert Decimal(
+        str(client.get(f"/api/credit-memos/{memo['id']}").json()["balance_remaining"])
+    ) == Decimal("0.01")
+    r = client.post(
+        f"/api/credit-memos/{memo['id']}/apply",
+        json={"invoice_id": inv["id"], "amount": "0.01"},
+    )
+    assert r.status_code == 200, r.text
+    assert _paid(client, inv)[0] == before[0] + Decimal("0.01")
+
+
+def test_a_vendor_credits_apply_refuses_a_sub_cent_amount(
+    client, seed_accounts, vendor
+):
+    bill = _bill(client, seed_accounts, vendor["id"], "20.00")
+    r = client.post(
+        "/api/vendor-credits",
+        json={
+            "vendor_id": vendor["id"],
+            "date": "2026-11-09",
+            "lines": [
+                {
+                    "description": "Short-shipped",
+                    "quantity": 1,
+                    "rate": "0.01",
+                    "account_id": seed_accounts["6000"].id,
+                }
+            ],
+        },
+    )
+    assert r.status_code == 201, r.text
+    vc = r.json()
+    for amount in ("0.005", 0.005):
+        r = client.post(
+            f"/api/vendor-credits/{vc['id']}/apply",
+            json={"bill_id": bill["id"], "amount": amount},
+        )
+        assert _message(r) == "An applied amount is in whole cents; 0.005 isn't."
+    got = client.get(f"/api/bills/{bill['id']}").json()
+    assert Decimal(str(got["amount_paid"])) == Decimal("0")
+    r = client.post(
+        f"/api/vendor-credits/{vc['id']}/apply",
+        json={"bill_id": bill["id"], "amount": "0.01"},
+    )
+    assert r.status_code == 200, r.text
+    got = client.get(f"/api/bills/{bill['id']}").json()
+    assert Decimal(str(got["amount_paid"])) == Decimal("0.01")

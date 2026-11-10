@@ -4,13 +4,14 @@ from typing import Optional
 from pydantic import BaseModel, field_validator, model_validator, field_serializer
 
 from app.schemas.common import (
+    check_line_fits,
+    check_lines_fit,
+    quantity_text,
     StrictModel,
     TaxRateFloat,
     TaxRateOut,
-    check_line_fits,
-    check_lines_fit,
     validate_non_negative_line,
-    quantity_text,
+    WholeCents,
 )
 from app.schemas.invoices import RateOut
 
@@ -57,7 +58,7 @@ class CreditMemoLineResponse(BaseModel):
 
 class CreditApplicationCreate(StrictModel):
     invoice_id: int
-    amount: float
+    amount: WholeCents("An applied amount", float)
 
 
 class CreditMemoCreate(StrictModel):
