@@ -8,7 +8,7 @@ import" on a bookkeeper token. Every token that exists today starts without
 either.
 
 Revision ID: f3b9d2e6a1c7
-Revises: c8e1a4d7f305
+Revises: e2b6c4d8f0a3
 Create Date: 2026-11-10
 """
 
@@ -18,7 +18,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "f3b9d2e6a1c7"
-down_revision: Union[str, None] = "c8e1a4d7f305"
+down_revision: Union[str, None] = "e2b6c4d8f0a3"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
