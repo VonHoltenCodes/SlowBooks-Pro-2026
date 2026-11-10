@@ -140,8 +140,11 @@ def _build_scenario(client, customer_id, vendor_id):
     )
     assert r.status_code == 201, r.text
 
-    # Partial payment on inv_partial — half down
-    partial_amt = float(Decimal(str(inv_partial["total"])) / 2)
+    # Partial payment on inv_partial — half down, in whole cents (#747: a
+    # finer amount is refused, not rounded)
+    partial_amt = float(
+        (Decimal(str(inv_partial["total"])) / 2).quantize(Decimal("0.01"))
+    )
     r = client.post(
         "/api/payments",
         json={

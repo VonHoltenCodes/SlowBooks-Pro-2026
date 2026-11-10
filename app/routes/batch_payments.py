@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.schemas.common import StrictModel
+from app.schemas.common import StrictModel, WholeCents
 from typing import Optional
 
 from app.database import get_db
@@ -30,7 +30,8 @@ router = APIRouter(prefix="/api/batch-payments", tags=["batch_payments"])
 class BatchAllocation(StrictModel):
     customer_id: int
     invoice_id: int
-    amount: float
+    # Whole cents only (#747), judged on the decimal sent before the float.
+    amount: WholeCents("An allocation amount", float)
 
 
 class BatchPaymentCreate(StrictModel):
