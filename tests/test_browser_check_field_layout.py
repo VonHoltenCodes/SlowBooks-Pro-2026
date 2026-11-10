@@ -85,6 +85,39 @@ def test_the_field_layout_is_set_saved_test_printed_and_reset(browser, company, 
         page.close()
 
 
+def test_the_amount_size_hint_follows_check_position(browser, company, books):
+    # W-139: the figures print at 14 with the check at the bottom, 12 on top
+    size = "#check-field-amount-size"
+    page, handled = _open_at(browser, company, "#/settings", width=1264, height=800)
+    try:
+        page.click("#settings-tab-payroll")
+        hint = lambda: (  # noqa: E731
+            page.get_attribute(size, "placeholder"),
+            page.get_attribute(size, "aria-label"),
+        )
+        assert hint() == ("14", "Amount in figures text size (pt), today 14")
+        page.select_option("#settings-check-position", "top")
+        assert hint() == ("12", "Amount in figures text size (pt), today 12")
+        assert _hidden(page) == ""
+        assert page.text_content("#settings-dirty-note") == "Unsaved changes"
+        page.click("#settings-save-btn")
+        page.wait_for_function(
+            "() => !document.getElementById('settings-dirty-note').textContent"
+        )
+        assert company.get("/api/settings").json()["check_field_layout"] == ""
+    finally:
+        page.close()
+    # drawn again from the saved position
+    page, handled = _open_at(browser, company, "#/settings", width=1264, height=800)
+    try:
+        page.click("#settings-tab-payroll")
+        assert page.get_attribute(size, "placeholder") == "12"
+        page.select_option("#settings-check-position", "bottom")
+        assert page.get_attribute(size, "placeholder") == "14"
+    finally:
+        page.close()
+
+
 @pytest.mark.parametrize(
     "words", ["memo bold", "payee address size", "amount in figures", "field layout"]
 )

@@ -86,6 +86,43 @@ test("with nothing saved every box shows today's face: blank, bold where it is b
     assert.match(tag(html, 'check-field-memo-size'), /placeholder="8"/);
 });
 
+test("the amount's Size hint is the size it prints at for the saved Check Position", () => {
+    const bottom = tag(settingsPage()._checkFieldLayoutHtml('', 'bottom'), 'check-field-amount-size');
+    assert.match(bottom, /placeholder="14"/);
+    assert.match(bottom, /aria-label="Amount in figures text size \(pt\), today 14"/);
+    // on top the figures print at 12 (W-139)
+    const top = tag(settingsPage()._checkFieldLayoutHtml('', 'top'), 'check-field-amount-size');
+    assert.match(top, /placeholder="12"/);
+    assert.match(top, /aria-label="Amount in figures text size \(pt\), today 12"/);
+    // a saved size is still the value either way; the other fields keep theirs
+    assert.match(tag(settingsPage()._checkFieldLayoutHtml('{"amount":{"size":16}}', 'top'), 'check-field-amount-size'), /value="16"/);
+    assert.match(tag(settingsPage()._checkFieldLayoutHtml('', 'top'), 'check-field-payee-size'), /placeholder="12"/);
+    assert.match(tag(settingsPage()._checkFieldLayoutHtml('', 'top'), 'check-field-memo-size'), /aria-label="Memo text size \(pt\), today 8"/);
+});
+
+test('changing Check Position moves the hint with it, and nothing else', () => {
+    const src = fs.readFileSync(path.join(JS, 'settings.js'), 'utf8');
+    assert.match(src, /id="settings-check-position"[^>]*onchange="SettingsPage\.checkFieldSizesFollowPosition\(this\.value\)"/);
+    const html = settingsPage()._checkFieldLayoutHtml('', 'bottom');
+    const attrs = {};
+    for (const [, k, v] of tag(html, 'check-field-amount-size').matchAll(/ ([a-z-]+)="([^"]*)"/g)) attrs[k] = v;
+    const el = {
+        value: '', getAttribute: n => attrs[n], setAttribute: (n, v) => { attrs[n] = String(v); },
+    };
+    const document = {
+        getElementById: () => null,
+        querySelectorAll: sel => (sel === '#settings-check-fields [data-size-top]' ? [el] : []),
+    };
+    const page = settingsPage(document);
+    page.checkFieldSizesFollowPosition('top');
+    assert.equal(attrs.placeholder, '12');
+    assert.equal(attrs['aria-label'], 'Amount in figures text size (pt), today 12');
+    page.checkFieldSizesFollowPosition('bottom');
+    assert.equal(attrs.placeholder, '14');
+    assert.equal(attrs['aria-label'], 'Amount in figures text size (pt), today 14');
+    assert.equal(el.value, '');
+});
+
 test('a saved layout fills the boxes and the hidden field', () => {
     const saved = '{"date":{"bold":true,"size":12.5},"payee":{"bold":false,"x":0.25,"y":-0.1}}';
     const html = settingsPage()._checkFieldLayoutHtml(saved);

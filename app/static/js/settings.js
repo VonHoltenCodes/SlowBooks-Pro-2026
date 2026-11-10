@@ -1121,7 +1121,7 @@ const SettingsPage = {
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Pre-printed stock already carries the "Pay to the order of", memo and signature lines. Choose it to print only the values — payee, amount, amount in words, date and memo — in their places, with no labels, lines or borders. The two stubs are unchanged either way.</div>
                         </div>
                         <div class="form-group full-width"><label for="settings-check-position">Check Position</label>
-                            <select name="check_position" id="settings-check-position" aria-describedby="settings-check-position-help">
+                            <select name="check_position" id="settings-check-position" aria-describedby="settings-check-position-help" onchange="SettingsPage.checkFieldSizesFollowPosition(this.value)">
                                 <option value="bottom" ${s.check_position !== 'top' ? 'selected' : ''}>Check at the bottom (stub, stub, check)</option>
                                 <option value="top" ${s.check_position === 'top' ? 'selected' : ''}>Check on top (check, voucher, voucher)</option>
                             </select>
@@ -1135,7 +1135,7 @@ const SettingsPage = {
                             <input name="check_nudge_y_in" type="number" min="-0.5" max="0.5" step="0.01"
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
                                 value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
-                        ${SettingsPage._checkFieldLayoutHtml(s.check_field_layout)}
+                        ${SettingsPage._checkFieldLayoutHtml(s.check_field_layout, s.check_position)}
                         <div class="form-group full-width">
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
                                 <input type="checkbox" id="settings-check-blank-stock" name="check_blank_stock" value="true" data-bool aria-describedby="settings-check-blank-stock-help" style="width:auto; margin:0;" ${s.check_blank_stock === 'true' ? 'checked' : ''}>
@@ -1265,13 +1265,13 @@ const SettingsPage = {
                                 <option value="bookkeeper">Bookkeeper — daily books, no admin</option>
                             </select></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-backups" name="token_new_allow_backups" style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-backups" style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can make backups (make, list and download; never restore)</label></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-payroll" name="token_new_allow_payroll" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-payroll" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can run payroll (bookkeeper only; no deletes, portal logins, bank accounts or documents)</label></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-imports" name="token_new_allow_imports" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-imports" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can import (bookkeeper only; the migration imports)</label></div>
                     </div>
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
@@ -1845,10 +1845,10 @@ const SettingsPage = {
                 <td style="font-family:var(--font-mono); font-size:10px;">${escapeHtml(t.token_hint)}&hellip;</td>
                 <td>${escapeHtml(t.role)}${t.refused ? `<div style="font-size:10px;color:var(--text-danger)">no longer accepted: tokens can't be administrators. Revoke it and make a bookkeeper, accountant or read-only token (tick Can make backups if it makes backups). Settings, payroll and HR need an administrator signed in.</div>` : ''}</td>
                 <td>${t.is_active
-                    ? `<input type="checkbox" name="token-backups:${t.id}" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
+                    ? `<input type="checkbox" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
                     : (t.allow_backups ? 'Yes' : 'No')}</td>
                 ${['payroll', 'imports'].map(k => `<td>${t.is_active && t.role === 'bookkeeper'
-                    ? `<input type="checkbox" name="token-${k}:${t.id}" aria-label="${escapeHtml(t.label)} can ${k === 'payroll' ? 'run payroll' : 'import'}" style="width:auto;" ${t['allow_' + k] ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_${k}: this.checked})">`
+                    ? `<input type="checkbox" aria-label="${escapeHtml(t.label)} can ${k === 'payroll' ? 'run payroll' : 'import'}" style="width:auto;" ${t['allow_' + k] ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_${k}: this.checked})">`
                     : (t['allow_' + k] ? 'Yes' : 'No')}</td>`).join('')}
                 <td>${t.last_used_at ? formatDate(t.last_used_at) : '—'}</td>
                 <td>${t.is_active
@@ -3197,12 +3197,13 @@ const SettingsPage = {
     // inputs carry no name; what they hold is kept, as the JSON the server
     // stores (only what differs from today's face), in the hidden
     // check_field_layout field, which the form saves and the test print sends.
-    // [key, label, size it prints at today, bold today]
+    // [key, label, size it prints at today, bold today, size with the check
+    // on top where that differs]
     CHECK_LAYOUT_FIELDS: [
         ['payee', 'Payee', '12', true],
         ['payee_address', 'Payee address', '9', false],
         ['date', 'Date', '10', false],
-        ['amount', 'Amount in figures', '14 (12 on top)', true],
+        ['amount', 'Amount in figures', '14', true, '12'],
         ['amount_words', 'Amount in words', '9', false],
         ['memo', 'Memo', '8', false],
     ],
@@ -3230,10 +3231,14 @@ const SettingsPage = {
         return Object.keys(out).length ? JSON.stringify(out) : '';
     },
 
-    _checkFieldLayoutHtml(stored) {
+    // `position` is the saved Check Position: a field that prints at
+    // another size with the check on top shows that size as its hint.
+    _checkFieldLayoutHtml(stored, position) {
         const layout = SettingsPage._parseCheckLayout(stored);
         const num = v => (typeof v === 'number' && isFinite(v) ? String(v) : '');
-        const rows = SettingsPage.CHECK_LAYOUT_FIELDS.map(([key, label, size, bold]) => {
+        const rows = SettingsPage.CHECK_LAYOUT_FIELDS.map(([key, label, bottomSize, bold, topSize]) => {
+            const size = position === 'top' && topSize ? topSize : bottomSize;
+            const sizes = topSize ? ` data-size-bottom="${bottomSize}" data-size-top="${topSize}" data-label="${label}"` : '';
             const a = layout[key] || {};
             const on = typeof a.bold === 'boolean' ? a.bold : bold;
             const id = 'check-field-' + key.replace(/_/g, '-');
@@ -3243,7 +3248,7 @@ const SettingsPage = {
                     aria-label="${label} left/right offset (in)" value="${num(a.x)}" oninput="SettingsPage.syncCheckFieldLayout()"></td>
                 <td><input type="number" id="${id}-y" data-check-field="${key}" data-attr="y" data-admin min="-1" max="1" step="0.01" placeholder="0" style="width:70px;"
                     aria-label="${label} up/down offset (in)" value="${num(a.y)}" oninput="SettingsPage.syncCheckFieldLayout()"></td>
-                <td><input type="number" id="${id}-size" data-check-field="${key}" data-attr="size" data-admin min="6" max="18" step="0.1" placeholder="${size.split(' ')[0]}" style="width:70px;"
+                <td><input type="number" id="${id}-size" data-check-field="${key}" data-attr="size" data-admin min="6" max="18" step="0.1" placeholder="${size}"${sizes} style="width:70px;"
                     aria-label="${label} text size (pt), today ${size}" value="${num(a.size)}" oninput="SettingsPage.syncCheckFieldLayout()"></td>
                 <td style="text-align:center;"><input type="checkbox" id="${id}-bold" data-check-field="${key}" data-attr="bold" data-default="${bold}" data-admin style="width:auto; margin:0;"
                     aria-label="${label} bold" ${on ? 'checked' : ''} onchange="SettingsPage.syncCheckFieldLayout()"></td>
@@ -3261,6 +3266,17 @@ const SettingsPage = {
                                 <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.resetCheckFieldLayout()">Reset field layout to defaults</button>
                             </div>
                         </div>`;
+    },
+
+    // Check Position changed: the Size hint (and its spoken "today") of a
+    // field whose size depends on it follows, 14 at the bottom and 12 on top
+    // for the amount in figures. The stored layout is untouched.
+    checkFieldSizesFollowPosition(position) {
+        document.querySelectorAll('#settings-check-fields [data-size-top]').forEach(el => {
+            const size = el.getAttribute(position === 'top' ? 'data-size-top' : 'data-size-bottom');
+            el.setAttribute('placeholder', size);
+            el.setAttribute('aria-label', `${el.getAttribute('data-label')} text size (pt), today ${size}`);
+        });
     },
 
     // The table's inputs, as the hidden field's JSON: blank offsets and

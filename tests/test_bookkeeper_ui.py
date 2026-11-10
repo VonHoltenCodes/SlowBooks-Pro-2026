@@ -372,6 +372,12 @@ SETTINGS_TAKEN_PARTS = {
     "API Tokens — agents & integrations › #token-new-role": (
         "API Tokens — agents & integrations › Create Token"
     ),
+    # the new token's boxes are Create Token's, not Settings fields
+    # (NEW-221); payroll and imports stay locked until the role is
+    # bookkeeper (#755), so only backups is offered as the form opens
+    "API Tokens — agents & integrations › #token-new-backups": (
+        "API Tokens — agents & integrations › Create Token"
+    ),
 }
 
 COMPANIES_TAKEN = {
@@ -476,18 +482,13 @@ def test_settings_leaves_a_bookkeeper_the_lists_and_templates():
         assert (sorted(kept - offered), sorted(offered - kept)) == ([], []), run
 
 
-# Fields an administrator sees disabled for a reason other than the role: the
-# new token's payroll and imports boxes lock until its role is bookkeeper
-# (#755), and the form opens on read-only.
-LOCKED_BY_ANOTHER_FIELD = {"token_new_allow_payroll", "token_new_allow_imports"}
-
-
 def test_settings_is_as_it_was_for_an_administrator():
     got = _probe()["settings"]["admin"]
-    assert got["fields"]["enabled"] == [
-        n for n in got["fields"]["names"] if n not in LOCKED_BY_ANOTHER_FIELD
-    ]
-    assert LOCKED_BY_ANOTHER_FIELD <= set(got["fields"]["names"])
+    assert got["fields"]["enabled"] == got["fields"]["names"]
+    # the API token boxes (the new token's, which lock until its role is
+    # bookkeeper, #755, and each token's in the list) save through their own
+    # buttons, never Save Settings: none is a Settings field (NEW-221)
+    assert [n for n in got["fields"]["names"] if n.startswith("token")] == []
     everything = (
         set(SETTINGS_KEPT)
         | set(SETTINGS_KEPT_PARTS)

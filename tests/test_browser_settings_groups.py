@@ -10,10 +10,14 @@ showing opens that group on the field. The other pages' settings_focus jumps
 open their section's group. Find a setting finds a field by its label in any
 group. The list is a tab list for the keyboard, the group is remembered per
 computer, a narrow window puts the list above the panel, and at a large text
-size the list scrolls inside itself with Save in view.
+size the list scrolls inside itself with Save in view. An API token's boxes
+(each token's in the list, and the new-token form's) are no Settings fields
+and never a change of Users and security (NEW-221).
 
 Skipped, as one module, where playwright or its Chromium is not installed.
 """
+
+import json
 
 import pytest
 
@@ -532,5 +536,101 @@ def test_the_form_is_a_box_and_save_is_still_its_own_button(browser, company, bo
             "() => !document.getElementById('settings-dirty-note').textContent"
         )
         assert _ok(company.get("/api/settings"))["company_phone"] == "555-0199"
+    finally:
+        page.close()
+
+
+# NEW-221: the API Tokens boxes save through the token's own controls (each
+# box in the list at once, the form's with Create Token), never Save Settings.
+TOKEN_DIRTY = """() => ({
+    dirty: SettingsPage.isDirty(),
+    note: document.getElementById('settings-dirty-note').textContent,
+    count: document.getElementById('settings-dirty-groups').textContent,
+    groups: [...document.querySelectorAll('#settings-groups [role="tab"]')]
+        .filter(t => !t.querySelector('.settings-tab-dot').hidden)
+        .map(t => t.dataset.groupTab),
+    keys: Object.keys(SettingsPage._formData()).filter(k => k.startsWith('token')),
+})"""
+
+TOKEN_CLEAN = {"dirty": False, "note": "", "count": "", "groups": [], "keys": []}
+
+
+def _token_with_every_box(company):
+    r = company.post(
+        "/api/tokens",
+        json={
+            "label": "nightly-backup",
+            "role": "bookkeeper",
+            "allow_backups": True,
+            "allow_payroll": True,
+            "allow_imports": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def test_a_ticked_token_box_is_no_unsaved_change(browser, company, books):
+    tid = _token_with_every_box(company)
+    page, handled = _open_at(browser, company, "#/settings", width=1264, height=800)
+    try:
+        # the list draws after the page has taken its clean copy
+        page.wait_for_selector(
+            '[aria-label="nightly-backup can make backups"]', state="attached"
+        )
+        settle(page, handled)
+        for name in ("can make backups", "can run payroll", "can import"):
+            assert page.is_checked(f'[aria-label="nightly-backup {name}"]'), name
+        assert page.evaluate(TOKEN_DIRTY) == TOKEN_CLEAN
+        # leaving asks nothing
+        asked = []
+        page.on("dialog", lambda d: (asked.append(d.message), d.dismiss()))
+        # an edit elsewhere is one group's, and its undo leaves none
+        page.click("#settings-tab-company")
+        name = page.input_value('[name="company_name"]')
+        page.fill('[name="company_name"]', name + " & Cafe")
+        got = page.evaluate(TOKEN_DIRTY)
+        assert (got["dirty"], got["groups"], got["keys"]) == (True, ["company"], [])
+        assert "Users and security" not in got["count"]
+        page.fill('[name="company_name"]', name)
+        assert page.evaluate(TOKEN_DIRTY) == TOKEN_CLEAN
+        # the new-token form's boxes, ticked before Create Token
+        page.click("#settings-tab-security")
+        page.check("#token-new-backups")
+        page.select_option("#token-new-role", "bookkeeper")
+        page.check("#token-new-payroll")
+        page.check("#token-new-imports")
+        page.dispatch_event("#token-new-imports", "input")
+        assert page.evaluate(TOKEN_DIRTY) == TOKEN_CLEAN
+        # Save Settings, with an edit, sends no token key
+        page.click("#settings-tab-company")
+        page.fill('[name="company_name"]', name + " & Cafe")
+        sent = []
+        page.on(
+            "request",
+            lambda r: (
+                sent.append(r.post_data)
+                if r.method == "PUT" and r.url.endswith("/api/settings")
+                else None
+            ),
+        )
+        page.click("#settings-save-btn")
+        page.wait_for_function(
+            "() => !document.getElementById('settings-dirty-note').textContent"
+        )
+        assert len(sent) == 1
+        body = json.loads(sent[0])
+        assert body["company_name"] == name + " & Cafe"
+        assert [k for k in body if k.startswith("token")] == []
+        # the token itself is as it was
+        (row,) = [t for t in company.get("/api/tokens").json() if t["id"] == tid]
+        assert (row["allow_backups"], row["allow_payroll"], row["allow_imports"]) == (
+            True,
+            True,
+            True,
+        )
+        page.evaluate("() => App.navigate('#/')")
+        settle(page, handled)
+        assert asked == []
     finally:
         page.close()
