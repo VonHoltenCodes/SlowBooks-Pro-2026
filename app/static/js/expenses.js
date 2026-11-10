@@ -39,6 +39,7 @@ const ExpensesPage = {
                     <td class="amount">${formatCurrency(x.amount)}</td>
                     <td class="actions" style="text-decoration:none;">
                         <button class="btn btn-sm btn-secondary" onclick="ExpensesPage.showDetail(${x.id})">View</button>
+                        ${isVoid ? '' : `<button class="btn btn-sm btn-secondary" data-write title="Edit this expense: saving voids it and posts the new one in its place" onclick="ExpensesPage.replace(${x.id})">Edit</button>`}
                         ${isVoid ? '' : `<button data-destructive class="btn btn-sm btn-danger" onclick="ExpensesPage.void(${x.id})">Void</button>`}
                     </td>
                 </tr>`;
@@ -148,6 +149,12 @@ const ExpensesPage = {
             vendor.value = ExpensesPage.PAYEE;
         }
         $('#expense-lines').innerHTML = '';
+        // Keep every saved line's account in the picker, even one outside the
+        // active Expense/COGS list (a bank, liability or equity split such as
+        // mortgage principal or escrow, or an account since made inactive),
+        // so Void and Replace preselects it (#745).
+        ExpensesPage._expenseAccounts = PurchaseAccounts.filter(
+            ExpensesPage._accounts, ...(x.lines || []).map(l => l.account_id));
         (x.lines || []).forEach(l => ExpensesPage.addLine(l));
         if (!(x.lines || []).length) ExpensesPage.addLine();
         ExpensesPage.recalc();
@@ -416,6 +423,7 @@ const ExpensesPage = {
             </div>
             <div class="form-actions">
                 ${x.printable ? `<button type="button" class="btn btn-secondary" onclick="window.open('/api/checks/print?transaction_id=${x.id}','_blank')">Print Check</button>` : ''}
+                ${isVoid ? '' : `<button data-write type="button" class="btn btn-secondary" title="Edit this expense: saving voids it and posts the new one in its place" onclick="ExpensesPage.replace(${x.id})">Edit</button>`}
                 ${isVoid ? '' : `<button data-destructive type="button" class="btn btn-danger" onclick="ExpensesPage.void(${x.id})">Void</button>`}
                 <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
             </div>`);
