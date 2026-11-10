@@ -60,7 +60,7 @@ and job-cost tables are described in their own sections below the table.
 | `login_attempts` | Authentication-attempt audit log |
 | `reseller_permits` | Per-entity sales-tax reseller permits with expiration + verification trail |
 | `users`, `user_preferences` | Named sign-ins with a role (administrator, bookkeeper, accountant, read-only), end date, one-time-password flag; per-user preferences |
-| `api_tokens` | Scoped API tokens: label, role (never administrator), `allow_backups`, hash and hint, revoked flag |
+| `api_tokens` | Scoped API tokens: label, role (never administrator), `allow_backups`, `allow_payroll`, `allow_imports`, hash and hint, revoked flag |
 | `request_keys` | Idempotency keys seen on write requests |
 | `classes` | Classes (funds in a nonprofit) with the Uncategorized default |
 | `invoice_messages` | Saved messages for emailed invoices |

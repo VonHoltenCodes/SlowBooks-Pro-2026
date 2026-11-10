@@ -1159,6 +1159,30 @@ TOKEN_RESTORE_REFUSAL = (
 )
 
 
+# What a token's "Can run payroll" permission reaches (#755): pay runs, tax
+# forms and their audit history, benefits and deductions, every method; an
+# employee listed, read, added or edited, and its year-to-date pay. Never a
+# DELETE under /api/employees, and never the parts that are a credential or
+# an identity paper: the portal login and access, bank accounts, documents,
+# E-Verify, onboarding.
+_TOKEN_PAYROLL_PREFIXES = (
+    "/api/payroll",
+    "/api/tax-forms",
+    "/api/document-audits",
+    "/api/benefits",
+    "/api/deductions",
+)
+_TOKEN_PAYROLL_EMPLOYEE_RE = _re.compile(
+    r"^/api/employees(/[^/]+(/(ytd|opening-ytd))?)?/?$"
+)
+
+
+def _is_token_payroll_route(method: str, path: str) -> bool:
+    if path.startswith(_TOKEN_PAYROLL_PREFIXES):
+        return True
+    return method != "DELETE" and bool(_TOKEN_PAYROLL_EMPLOYEE_RE.match(path))
+
+
 def _is_token_backup_route(method: str, path: str) -> bool:
     if path == "/api/backups":
         return method in ("GET", "HEAD", "POST")
@@ -1202,7 +1226,7 @@ async def _require_session(request: Request, call_next):
     ):
         return await call_next(request)
     token_principal = None
-    backup_grant = False
+    token_grant = False
     if request.session.get("authenticated") is True:
         if _signed_in_before_this_start(request.session):
             # Settings -> "Ask for the password each time SlowBooks Pro
@@ -1303,15 +1327,31 @@ async def _require_session(request: Request, call_next):
             )
         role = token_principal["role"]
         allow_backups = bool(token_principal.get("allow_backups"))
+        # "Can run payroll" and "Can import" (#755) ride on a bookkeeper's
+        # role only; Settings refuses them on any other, and a row that
+        # carries one anyway gets nothing from it.
+        allow_payroll = role == "bookkeeper" and bool(
+            token_principal.get("allow_payroll")
+        )
+        allow_imports = role == "bookkeeper" and bool(
+            token_principal.get("allow_imports")
+        )
         # get_db reads this to stamp audit attribution ("token:<label>")
         request.state.token_principal = {
             "username": "token:" + token_principal["label"],
             "role": role,
             "allow_backups": allow_backups,
+            "allow_payroll": allow_payroll,
+            "allow_imports": allow_imports,
         }
-        # "Can make backups" (#434), set by an administrator on the token:
-        # make, list and download this company's backups on top of the role.
-        backup_grant = allow_backups and _is_token_backup_route(request.method, path)
+        # Permissions an administrator set on the token, on top of its role:
+        # "Can make backups" (#434) makes, lists and downloads this
+        # company's backups; "Can run payroll" and "Can import" (#755).
+        token_grant = (
+            (allow_backups and _is_token_backup_route(request.method, path))
+            or (allow_payroll and _is_token_payroll_route(request.method, path))
+            or (allow_imports and path.startswith("/api/migration"))
+        )
 
     # A signed-in person's own preferences (#480: Enter moves between
     # fields, the decimal point; the dashboard's order) are theirs to set
@@ -1331,7 +1371,7 @@ async def _require_session(request: Request, call_next):
             content={"detail": "An API token has no preferences of its own to set."},
         )
     if (
-        not backup_grant
+        not token_grant
         and not own_preference
         and not _role_allows(role, request.method, path)
     ):

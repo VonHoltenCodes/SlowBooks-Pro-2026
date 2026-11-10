@@ -30,6 +30,16 @@ def require_admin(request: Request) -> None:
         raise HTTPException(status_code=403, detail="Admin role required")
 
 
+def may_run_payroll(request: Request) -> bool:
+    """An administrator, or an API token an administrator let run payroll
+    (#755): it sees an employee's pay fields, which other roles see
+    redacted."""
+    if is_admin(request):
+        return True
+    tp = getattr(getattr(request, "state", None), "token_principal", None)
+    return bool(tp and tp.get("allow_payroll"))
+
+
 def may_download_backups(request: Request) -> bool:
     """An administrator, or an API token an administrator let make backups
     (#434). A backup is the whole company, so no other role reads one."""
