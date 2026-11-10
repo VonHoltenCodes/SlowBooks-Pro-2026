@@ -39,6 +39,12 @@
         padding: 3px 6px;
     }
     table.report th.amount, table.report td.amount { text-align: right; white-space: nowrap; }
+    {# A column heading wraps inside its column: one per job or class, an
+       unbroken long name made the grid wider than the page and lost the
+       columns past its edge, the Total too (#753). It breaks between words
+       (break-word, not anywhere, which split MARGIN into M/AR/GI/N);
+       amounts stay on one line. #}
+    table.report th.amount { white-space: normal; overflow-wrap: break-word; }
     table.report td { padding: 3px 6px; border-bottom: 0.5px solid #e2e2e2; }
     table.report tr.subtotal td { font-weight: 700; border-top: 1px solid #999; }
     {# a group or family heading inside a section: Current Assets, Travel #}

@@ -266,8 +266,10 @@ jobs:
           # test_browser_expense_edit.py for #745/#746 and
           # test_browser_encryption_dialog.py for Discussion #750).
           # 245 with the retainage-release invoice PDF tests (#751,
-          # test_retainage_release_invoice_751.py, five WeasyPrint renders).
-          MAX_SKIPS: "245"
+          # test_retainage_release_invoice_751.py, five WeasyPrint renders),
+          # 248 with the long-heading grid PDF tests (#753,
+          # test_grid_pdf_long_headings_753.py, three WeasyPrint renders).
+          MAX_SKIPS: "248"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
