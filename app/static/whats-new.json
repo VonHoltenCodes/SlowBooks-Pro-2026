@@ -6,10 +6,12 @@
       "A pay application that only releases retainage prints and shows as one: a \"Retainage release, PA-x\" line for the amount, no $0.00 total, the same on the customer's pay page.",
       "Report PDFs keep every column: long job and class names wrap inside their column, so P&L by Job and the other grids print every column and the Total, and the WIP Schedule goes over three pages of columns with the job and contract on each.",
       "API tokens: an administrator can let a bookkeeper token run payroll (pay runs, tax forms, benefits, deductions, employee records; never bank accounts, documents, E-Verify or the NACHA file) and run the migration imports, each off by default; a tax-form year out of range is refused and a W-2 for an unknown employee is a 404.",
+      "Bringing people onto the Employees list from an import is a tick you set: Migrate Data's dry run names the QuickBooks Online Employee Contact List and asks whether to bring it in, and a QuickBooks time report asks before adding people who are not on the list (an administrator's choice, or a payroll token's; anyone else's import leaves them out and says so).",
       "The customer payment page prints amounts in the invoice's currency, the way its PDF does.",
       "Apply Credit's part-way refusal ends the server's sentence before saying what was applied.",
       "Mac: quitting no longer shows a \"Could not open the native window\" message, and a window on a second display opens where you left it.",
-      "The macOS release build retries hdiutil verify on the runner's transient errors."
+      "The macOS release build retries hdiutil verify on the runner's transient errors.",
+      "Settings no longer reports unsaved changes when an API token has a ticked box in the token list."
     ]
   },
   "2.31.11": {

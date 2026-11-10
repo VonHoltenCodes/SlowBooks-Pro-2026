@@ -29,7 +29,7 @@ v2.31.2 and flagged in the list until revoked); a token cannot manage users
 or tokens or restore a backup, *Can make backups* lets it make, list and
 download them, *Can run payroll* and *Can import* let a bookkeeper token run
 payroll (never deleting an employee or touching portal logins, bank accounts
-or documents) and the migration imports, the audit log names it `token:<label>`, a revoked token
+or documents) and the migration imports (the people an import would add to the Employees list, from a QuickBooks Online export's Employee Contact List or a QuickBooks Desktop time report, come in only by an explicit tick, `include_employees` / `add_employees`, and only for an administrator or a token that may run payroll; anyone else's import leaves them out and says so), the audit log names it `token:<label>`, a revoked token
 answers 401, and on a server with several companies it names its company in
 `X-SlowBooks-Company`. Sign-ins end after four hours idle and when a user is
 deactivated, re-roled or given a new password. **A read never writes**: a
