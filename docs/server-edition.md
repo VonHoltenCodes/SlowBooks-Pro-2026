@@ -197,8 +197,11 @@ What a token can do:
   under `/api/employees`, and never the self-service portal login or access,
   direct-deposit bank accounts, the NACHA direct-deposit file (it carries
   every employee's full routing and account number), I-9 and other
-  documents, E-Verify or onboarding: those are credentials and identity
-  papers, and stay with a signed-in administrator. Tax forms include the
+  documents, E-Verify or onboarding (a new hire's onboarding checklist is
+  still created, as for any new employee, but the token can't read it):
+  those are credentials and identity papers, and stay with a signed-in
+  administrator. An employee's opening year-to-date figures can be set and
+  replaced (they are what the first pay run counts from), just not deleted. Tax forms include the
   vendor 1099s and the 1096. Running payroll includes its own deletes: a
   draft pay run discarded, a benefit enrollment or a garnishment removed. Pay stubs and W-2s carry Social Security numbers
   and pay, so tick it only for a program you would hand payroll to.
