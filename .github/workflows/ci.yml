@@ -68,9 +68,12 @@ jobs:
       - name: Run pytest with coverage
         # One worker per runner core (#770): the suite had grown to 33 to 38
         # minutes run serially, most of it the migration walks and the browser
-        # sweeps, which are CPU-bound and independent. loadfile keeps each
-        # test file on one worker, so a file's tests run in the order they
-        # run serially; conftest gives every worker its own scratch data
+        # sweeps, which are CPU-bound and independent. worksteal hands tests
+        # out one at a time and lets an idle worker take over a busy one's
+        # queue, so the browser sweeps (one file, eight minutes of them) no
+        # longer set the job's length the way loadfile's one-file-one-worker
+        # did (17 minutes against 33 serial; the longest single test is
+        # under two). conftest gives every worker its own scratch data
         # folder and migration cache. pytest-cov combines the workers'
         # coverage by itself.
         env:
@@ -82,7 +85,7 @@ jobs:
           RATE_LIMIT_ENABLED: "0"
         run: |
           nproc
-          pytest -n auto --dist loadfile --cov=app --cov-report=term-missing --cov-report=xml
+          pytest -n auto --dist worksteal --cov=app --cov-report=term-missing --cov-report=xml
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
         if: always()
@@ -293,7 +296,10 @@ jobs:
           # Defender exclusions above. 120 s catches a genuine hang without
           # failing an honestly slow test (the slowest test here is well under
           # a minute).
-          pytest -q --timeout=120 --tb=short | Tee-Object -Variable out
+          # one worker per core here too (#770); each has its own scratch
+          # folder and migration cache, and the skip budget below reads
+          # the same summary line
+          pytest -q -n auto --dist worksteal --timeout=120 --tb=short | Tee-Object -Variable out
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           $line = ($out | Select-String -Pattern '\d+ passed').Line
           Write-Host "summary: $line"
