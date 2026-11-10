@@ -1085,6 +1085,7 @@ def test_migration_upgrades_downgrades_and_backfills(tmp_path):
             timeout=180,
         )
 
+    own = "f3b5d7e9a2c4"  # construction buyout and commitments (#553)
     # Up to the revision just before this one, seed a closed PO with a bill.
     assert run("upgrade", "e2a4c6d8f0b1").returncode == 0
     import sqlite3
@@ -1102,7 +1103,7 @@ def test_migration_upgrades_downgrades_and_backfills(tmp_path):
     con.commit()
     con.close()
 
-    up = run("upgrade", "head")
+    up = run("upgrade", own)  # its own step, not the chain (#770)
     assert up.returncode == 0, up.stderr
     con = sqlite3.connect(db)
     billed = con.execute(
@@ -1112,7 +1113,7 @@ def test_migration_upgrades_downgrades_and_backfills(tmp_path):
     assert Decimal(str(billed)) == Decimal("100")  # backfilled
 
     assert run("downgrade", "-1").returncode == 0
-    assert run("upgrade", "head").returncode == 0
+    assert run("upgrade", own).returncode == 0  # its own step, not the chain (#770)
 
 
 # ── Retainage follows a converted bill's edited lines (#553) ─────────────
@@ -1375,7 +1376,7 @@ def test_retainage_manual_migration_adds_the_column_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     assert script.get_revision(revision).down_revision == before
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, revision)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     cols = {c["name"]: c for c in inspect(engine).get_columns("bills")}
     assert "retainage_manual" in cols

@@ -666,6 +666,9 @@ def test_the_bill_prints_its_discount_date(client, discounted_bill):
 # ── the migration ───────────────────────────────────────────────────────
 
 
+TERMS_REVISION = "e5c1a7d3f9b2"  # the payment terms list migration (#664)
+
+
 def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
     """Up from main's head: the five form terms, plus a Net N anything
     already carries; other text stays as it is. Down drops the list and the
@@ -720,7 +723,7 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
             )
     engine.dispose()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, TERMS_REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     with engine.connect() as conn:
         rows = conn.execute(
@@ -767,7 +770,7 @@ def test_the_migration_seeds_the_list_from_the_terms_in_use(tmp_path):
 
     # Up again rebuilds the list, re-ties the documents, and puts the
     # indexes back (#665: the re-upgrade used to assert nothing).
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, TERMS_REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     insp = inspect(engine)
     with engine.connect() as conn:
@@ -832,7 +835,7 @@ def test_the_downgrade_refuses_to_drop_a_standing_discount_link(tmp_path):
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, TERMS_REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     with engine.begin() as conn:
         # a payment, and a credit memo that is its early-payment discount

@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 PREV = "d6e7f8a9b0c1"
+REVISION = "e7f8a9b0c1d2"  # banking on the ledger (#114), which follows PREV
 
 
 def _cfg(db):
@@ -139,7 +140,7 @@ def test_downgrade_is_a_mirror(tmp_path):
 
     db = tmp_path / "round.db"
     cfg = _cfg(db)
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     command.downgrade(cfg, PREV)
     con = sqlite3.connect(db)
     assert "bank_kind" not in {r[1] for r in con.execute("PRAGMA table_info(accounts)")}

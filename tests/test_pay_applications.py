@@ -1264,6 +1264,10 @@ def test_business_invoice_journal_unchanged_with_zero_retainage(
 # ── Migration ───────────────────────────────────────────────────────────
 
 
+# the review-fix migration (#576), the last of the two the test walks back
+REVIEW_REVISION = "b4d6f8a0c2e3"
+
+
 def test_migration_up_down_reverses(tmp_path):
     from alembic import command
     from alembic.config import Config
@@ -1273,7 +1277,7 @@ def test_migration_up_down_reverses(tmp_path):
     cfg = Config(str(ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(ROOT / "migrations"))
     cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVIEW_REVISION)  # its own step, not the chain (#770)
     eng = create_engine("sqlite:///" + db.as_posix())
     insp = inspect(eng)
     assert "pay_applications" in insp.get_table_names()

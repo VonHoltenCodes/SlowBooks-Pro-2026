@@ -33,6 +33,8 @@ from app.services.job_costing import (
 
 ROOT = Path(__file__).resolve().parents[1]
 AS_OF = date(2026, 6, 30)
+# wip_as_of_budgets_and_lock (closed_on, change-order budgets, WIP locks)
+WIP_LOCK_REVISION = "b5d2e8f4a6c3"
 OTHER_PW = "other-password-123"
 
 
@@ -592,7 +594,7 @@ def test_the_upgrade_does_not_date_a_closed_job(tmp_path):
                 "VALUES (1, 1, 'J', 'closed', 1, '2026-11-05 14:00:00')"
             )
         )
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, WIP_LOCK_REVISION)  # its own step, not the chain (#770)
     with engine.connect() as conn:
         assert conn.execute(text("SELECT closed_on FROM jobs")).scalar() is None
 
@@ -1110,7 +1112,7 @@ def test_the_migration_up_down_and_up(tmp_path):
                 "VALUES (7, '2026-09-30', 'WIP', 'wip_adjustment', 20260930)"
             )
         )
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, WIP_LOCK_REVISION)  # its own step, not the chain (#770)
     with engine.begin() as conn:
         rows = conn.execute(
             text(
@@ -1130,7 +1132,7 @@ def test_the_migration_up_down_and_up(tmp_path):
         rows = conn.execute(text("SELECT amount FROM job_budgets")).fetchall()
         assert [float(r[0]) for r in rows] == [600.0]  # folded back into one row
     assert "wip_entry_locks" not in inspect(engine).get_table_names()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, WIP_LOCK_REVISION)  # its own step, not the chain (#770)
     engine.dispose()
 
 

@@ -17,6 +17,7 @@ from app.services.encryption import decrypt
 
 ROOT = Path(__file__).resolve().parents[1]
 BEFORE = "c5e1f7a9b3d2"
+REVISION = "e2b7c4d9a1f3"  # portal links kept as a digest and an encrypted copy
 # a link as an earlier release stored it (token_urlsafe(24): 32 characters)
 OLD_LINK = "Qm9va3NLZWVwVGhpc0xpbmtGb3JMZW5h"
 
@@ -126,7 +127,7 @@ def test_the_upgrade_moves_each_link_over_and_back(tmp_path, monkeypatch):
     finally:
         engine.dispose()
 
-    command.upgrade(_cfg(url), "head")
+    command.upgrade(_cfg(url), REVISION)  # its own step, not the chain (#770)
     engine = sa.create_engine(url)
     try:
         with engine.connect() as conn:

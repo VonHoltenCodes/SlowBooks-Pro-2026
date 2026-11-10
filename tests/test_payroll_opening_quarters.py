@@ -510,6 +510,9 @@ def test_a_blank_quarter_is_the_quarter_of_as_of(client):
 # ---------------------------------------------------------------------------
 # The migration
 # ---------------------------------------------------------------------------
+OPENING_REVISION = "a4330b1c2d3e"  # opening YTD balances for a mid-year switch
+
+
 def _check_migration(url):
     from alembic import command
     from alembic.config import Config
@@ -523,7 +526,7 @@ def _check_migration(url):
     # One line: 4ac01efbd72a (2.28.0) → a4330b1c2d3e → c5e8a1d47b20 → c4e5d6f7a8b9.
     assert len(script.get_heads()) == 1
     assert script.get_revision("a4330b1c2d3e").down_revision == "4ac01efbd72a"
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, OPENING_REVISION)  # its own step, not the chain (#770)
     engine = sa.create_engine(url)
     try:
         insp = sa.inspect(engine)
@@ -548,7 +551,7 @@ def _check_migration(url):
         assert not [t for t in insp.get_table_names() if t.startswith("payroll_open")]
         assert "stale_reason" not in {c["name"] for c in insp.get_columns("pay_runs")}
         # and up again
-        command.upgrade(cfg, "head")
+        command.upgrade(cfg, OPENING_REVISION)  # its own step, not the chain (#770)
     finally:
         engine.dispose()
 
