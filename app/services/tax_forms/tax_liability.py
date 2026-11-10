@@ -23,11 +23,16 @@ def _quarter_bounds(year: int, quarter: int) -> tuple:
 
 
 def _filing_due_date(year: int, quarter: int) -> date:
-    """Quarterly returns are due the last day of the month following quarter end."""
+    """Quarterly returns are due the last day of the month following quarter end.
+    The last quarter the calendar holds (Q4 of 9999) has no January after
+    it: its due date is the calendar's last day rather than an error (2.31.12
+    gate, W-137)."""
     if quarter == 4:
         due_year, due_month = year + 1, 1
     else:
         due_year, due_month = year, quarter * 3 + 1
+    if due_year > date.max.year:
+        return date.max
     return date(due_year, due_month, calendar.monthrange(due_year, due_month)[1])
 
 

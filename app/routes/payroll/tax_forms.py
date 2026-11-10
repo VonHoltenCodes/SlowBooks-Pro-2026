@@ -1,6 +1,8 @@
 from decimal import Decimal
 
-from fastapi import Depends, HTTPException, Query
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Path, Query
 from fastapi.responses import Response, JSONResponse
 from sqlalchemy.orm import Session
 
@@ -26,11 +28,16 @@ from app.services.tax_forms.w2_w3 import (
 
 # --- Tier 3: Tax Form Generation -----------------------------------------------
 
+# A tax year the forms can be dated in, as /api/tax-forms bounds it (#762):
+# 99999 reached date() and answered a 500 here too (2.31.12 gate, W-137).
+TaxYearQuery = Annotated[int, Query(ge=1900, le=9999)]
+TaxYearPath = Annotated[int, Path(ge=1900, le=9999)]
+
 
 @router.post("/forms/w2/{emp_id}", response_class=Response)
 def generate_w2_form(
     emp_id: int,
-    year: int = Query(...),
+    year: TaxYearQuery,
     db: Session = Depends(get_db),
 ):
     """Generate W-2 form PDF for an employee for the given year.
@@ -80,7 +87,7 @@ def generate_w2_form(
 
 @router.post("/forms/w3/{year}", response_class=Response)
 def generate_w3_form(
-    year: int,
+    year: TaxYearPath,
     db: Session = Depends(get_db),
 ):
     """Generate W-3 form (summary of all W-2s) for the given year.
@@ -113,7 +120,7 @@ def generate_w3_form(
 
 @router.post("/forms/940/{year}", response_class=Response)
 def generate_form_940(
-    year: int,
+    year: TaxYearPath,
     db: Session = Depends(get_db),
 ):
     """Generate Form 940 (FUTA) for the given year.
@@ -146,7 +153,7 @@ def generate_form_940(
 
 @router.post("/forms/941/{year}/{quarter}", response_class=Response)
 def generate_form_941(
-    year: int,
+    year: TaxYearPath,
     quarter: int,
     db: Session = Depends(get_db),
 ):
@@ -229,7 +236,7 @@ def _hash_and_audit(
 @router.post("/forms/w2/{emp_id}/pdf", response_class=Response)
 def generate_w2_form_pdf(
     emp_id: int,
-    year: int = Query(...),
+    year: TaxYearQuery,
     db: Session = Depends(get_db),
 ):
     """W-2 PDF for one employee for the given calendar year."""
@@ -246,7 +253,7 @@ def generate_w2_form_pdf(
 
 @router.get("/forms/w3/{year}/pdf", response_class=Response)
 @router.post("/forms/w3/{year}/pdf", response_class=Response)
-def generate_w3_form_pdf(year: int, db: Session = Depends(get_db)):
+def generate_w3_form_pdf(year: TaxYearPath, db: Session = Depends(get_db)):
     """W-3 transmittal PDF — aggregate across every W-2 for the year."""
     company = _company_for_pdf(db)
     audit = _hash_and_audit(db, "w3", f"yr{year}", company, compute_w3(db, year))
@@ -256,7 +263,7 @@ def generate_w3_form_pdf(year: int, db: Session = Depends(get_db)):
 
 @router.get("/forms/940/{year}/pdf", response_class=Response)
 @router.post("/forms/940/{year}/pdf", response_class=Response)
-def generate_form_940_pdf(year: int, db: Session = Depends(get_db)):
+def generate_form_940_pdf(year: TaxYearPath, db: Session = Depends(get_db)):
     """Form 940 (FUTA) PDF for the given calendar year."""
     company = _company_for_pdf(db)
     audit = _hash_and_audit(db, "940", f"yr{year}", company, compute_940(db, year))
@@ -266,7 +273,9 @@ def generate_form_940_pdf(year: int, db: Session = Depends(get_db)):
 
 @router.get("/forms/941/{year}/{quarter}/pdf", response_class=Response)
 @router.post("/forms/941/{year}/{quarter}/pdf", response_class=Response)
-def generate_form_941_pdf(year: int, quarter: int, db: Session = Depends(get_db)):
+def generate_form_941_pdf(
+    year: TaxYearPath, quarter: int, db: Session = Depends(get_db)
+):
     """Form 941 (quarterly FICA) PDF for year + quarter."""
     if quarter not in (1, 2, 3, 4):
         raise HTTPException(status_code=400, detail="quarter must be 1-4")
