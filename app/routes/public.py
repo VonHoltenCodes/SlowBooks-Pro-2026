@@ -105,9 +105,16 @@ def public_payment_page(
     else:
         payment_status = status or None
 
+    from app.services.pay_applications import pay_application_number
+    from app.services.pdf_service import invoice_is_release_only
+
     template = _jinja_env.get_template("public_pay.html")
     html = template.render(
         inv=invoice,
+        # a pay application that only releases retainage reads as the
+        # release, not a $0.00 total (#751)
+        release_only=invoice_is_release_only(invoice),
+        pay_application_number=pay_application_number(db, invoice),
         company=settings,
         providers=providers,
         payment_status=payment_status,

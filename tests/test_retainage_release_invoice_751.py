@@ -143,3 +143,30 @@ def test_a_voided_release_invoice_still_names_the_release(
     r = client.get(f"/api/invoices/{inv_id}/pdf")
     text = pypdf.PdfReader(io.BytesIO(r.content)).pages[0].extract_text()
     assert f"Retainage release, {number}" in text
+
+
+def test_the_pay_page_names_the_release_not_a_zero_total(
+    client, db_session, seed_accounts, seed_customer
+):
+    """The page the emailed payment link opens read Invoice Total $0.00 over
+    the balance; it names the release, as the PDF does."""
+    from app.models.invoices import Invoice
+
+    inv_id, number = _release_only_invoice(client, seed_customer.id)
+    token = db_session.get(Invoice, inv_id).payment_token
+    page = client.get(f"/pay/{token}")
+    assert page.status_code == 200, page.text[:200]
+    assert f"Retainage release, {number}" in page.text
+    assert "$3000.00" in page.text
+    assert "Invoice Total" not in page.text
+
+
+def test_the_release_prints_once(client, seed_accounts, seed_customer):
+    """The release is the invoice's line; a Retainage released row under it
+    read as a second $3,000."""
+    pypdf = pytest.importorskip("pypdf")
+    inv_id, number = _release_only_invoice(client, seed_customer.id)
+    r = client.get(f"/api/invoices/{inv_id}/pdf")
+    text = pypdf.PdfReader(io.BytesIO(r.content)).pages[0].extract_text()
+    assert f"Retainage release, {number}" in text
+    assert "Retainage released" not in text.replace("\n", " ")
