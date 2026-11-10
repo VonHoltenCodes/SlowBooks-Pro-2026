@@ -311,3 +311,23 @@ def test_the_migration_adds_and_removes_the_two_columns(tmp_path):
     assert not {"allow_payroll", "allow_imports"} & columns()
     command.upgrade(cfg, "head")
     assert {"allow_payroll", "allow_imports"} <= columns()
+
+
+def test_tax_forms_refuse_a_year_out_of_range_and_an_unknown_employee(
+    client, seed_accounts, payroll_token
+):
+    """Both answered on main before the grant reached them: year 99999 was a
+    500 from date(), and a W-2 for an employee not on file was a $0 form."""
+    emp = payroll_token.post("/api/employees", json=EMPLOYEE).json()
+    r = payroll_token.get(f"/api/tax-forms/w2/{emp['id']}/pdf?year=99999")
+    assert r.status_code == 422, r.text
+    for path in (
+        "/api/tax-forms/w2/999999?year=2026",
+        "/api/tax-forms/w2/999999/pdf?year=2026",
+    ):
+        r = payroll_token.get(path)
+        assert r.status_code == 404, (path, r.text)
+        assert r.json()["detail"] == "Employee not found"
+    assert (
+        payroll_token.get(f"/api/tax-forms/w2/{emp['id']}?year=2026").status_code == 200
+    )
