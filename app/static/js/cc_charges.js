@@ -34,13 +34,15 @@ const CCChargesPage = {
         return html;
     },
 
-    async showForm() {
+    // `keepIds`: the accounts a replaced charge already posts to, kept in the
+    // picker whatever their type or state (#745)
+    async showForm(...keepIds) {
         const [allAccounts, cards] = await Promise.all([
             API.get('/accounts'),
             API.get('/accounts?bank=1&active_only=true'),
         ]);
         // Expense and cost-of-goods accounts (W-L18): a card buys materials too.
-        const accounts = PurchaseAccounts.filter(allAccounts);
+        const accounts = PurchaseAccounts.filter(allAccounts, ...keepIds);
         const cardOpts = cards.filter(a => a.bank_kind === 'credit_card').map(a =>
             `<option value="${a.id}" ${a.account_number === '2100' ? 'selected' : ''}>${accountLabel(a)}</option>`
         ).join('');
@@ -79,10 +81,10 @@ const CCChargesPage = {
     async replace(id) {
         const entry = await API.get(`/journal/${id}`);
         if (entry.voided) { toast('This charge is void; there is nothing to change.', 'error'); return; }
-        await CCChargesPage.showForm();
+        const spent = (entry.lines || []).find(l => l.debit > 0) || {};
+        await CCChargesPage.showForm(spent.account_id);
         const form = document.querySelector('#modal-body form');
         if (!form) return;
-        const spent = (entry.lines || []).find(l => l.debit > 0) || {};
         const card = (entry.lines || []).find(l => l.credit > 0) || {};
         const payee = (entry.description || '').startsWith('CC Charge: ') ? entry.description.slice(11) : '';
         Replace.set(form, 'date', entry.date);

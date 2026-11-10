@@ -70,15 +70,18 @@ const VendorCreditsPage = {
     _vendors: [],
     lineCount: 0,
 
-    async showForm() {
+    // `keepIds`: the accounts a replaced credit's lines already post to, kept
+    // in the picker whatever their type or state (#745); the filter leaves
+    // every other inactive account out
+    async showForm(...keepIds) {
         const [vendors, items, accounts] = await Promise.all([
             API.get('/vendors?active_only=true'),
             API.get('/items?active_only=true'),
-            API.get('/accounts?active_only=true'),
+            API.get('/accounts'),
         ]);
         VendorCreditsPage._items = items;
         VendorCreditsPage._vendors = vendors;
-        VendorCreditsPage._accounts = PurchaseAccounts.filter(accounts);
+        VendorCreditsPage._accounts = PurchaseAccounts.filter(accounts, ...keepIds);
         VendorCreditsPage.lineCount = 1;
         const classGroup = await classFormGroupHtml();
 
@@ -170,7 +173,7 @@ const VendorCreditsPage = {
     async replace(id) {
         const c = await API.get(`/vendor-credits/${id}`);
         if (c.status === 'void') { toast('This vendor credit is void; there is nothing to change.', 'error'); return; }
-        await VendorCreditsPage.showForm();
+        await VendorCreditsPage.showForm(...(c.lines || []).map(l => l.account_id));
         const form = $('#vc-form');
         if (!form) return;
         Replace.set(form, 'vendor_id', c.vendor_id);
