@@ -331,3 +331,27 @@ def test_tax_forms_refuse_a_year_out_of_range_and_an_unknown_employee(
     assert (
         payroll_token.get(f"/api/tax-forms/w2/{emp['id']}?year=2026").status_code == 200
     )
+
+
+def test_an_import_token_without_payroll_adds_no_employees(
+    client, db_session, seed_accounts
+):
+    """The QuickBooks Online export's Employee Contact List adds employees,
+    which is HR: a token let import but not run payroll imports the books
+    without it and says so; one let do both brings the employees in."""
+    from app.models.payroll import Employee
+    from tests.test_qbo_export_migration import _controls_export
+
+    files = _controls_export(aging=False)
+    importer = _bearer(_mint(client, "books-import", allow_imports=True)["token"])
+    data = importer.post("/api/migration/qbo_export/import", files=files()).json()
+    assert data["ok"] is True, data["errors"]
+    assert db_session.query(Employee).count() == 0
+    assert any("Employee Contact List was left out" in w for w in data["warnings"])
+
+    both = _bearer(
+        _mint(client, "books-both", allow_imports=True, allow_payroll=True)["token"]
+    )
+    again = both.post("/api/migration/qbo_export/import", files=files()).json()
+    assert again["ok"] is True, again["errors"]
+    assert again["imported_employees"] == db_session.query(Employee).count() > 0

@@ -203,10 +203,12 @@ What a token can do:
   administrator. An employee's opening year-to-date figures can be set and
   replaced (they are what the first pay run counts from), just not deleted. Tax forms include the
   vendor 1099s and the 1096. Running payroll includes its own deletes: a
-  draft pay run discarded, a benefit enrollment or a garnishment removed. Pay stubs and W-2s carry Social Security numbers
-  and pay, so tick it only for a program you would hand payroll to.
+  draft pay run discarded, a benefit enrollment or a garnishment removed. Pay stubs and W-2s carry pay and the last four of each
+  Social Security number, so tick it only for a program you would hand payroll to.
 - With **Can import** ticked, on a bookkeeper token only (#755): the
-  migration imports (`/api/migration`: sources, dry run, import).
+  migration imports (`/api/migration`: sources, dry run, import). A QuickBooks Online export's Employee Contact List
+  comes in only when the token may also run payroll; otherwise the import
+  leaves it out and says so.
 
 What a token cannot do, whatever its role or permission:
 
