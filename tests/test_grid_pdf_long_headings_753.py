@@ -95,3 +95,23 @@ def test_every_job_column_and_the_total_print(client, db_session, long_jobs, siz
     # both pages print the Total column (12,128.00 of income and of expense,
     # five rows a page)
     assert on_page.count("$12,128.00") == 10, on_page
+
+
+def test_a_heading_breaks_between_words_not_inside_one(
+    client, seed_accounts, seed_customer
+):
+    """overflow-wrap: anywhere fit a crowded grid by splitting words: the
+    WIP Schedule printed MARGIN as M/AR/GI/N and % COMPLETE a letter a line.
+    A heading breaks at its spaces."""
+    pypdf = pytest.importorskip("pypdf")
+    from tests.test_pay_applications import _two_line_job
+
+    client.put("/api/settings", json={"company_type": "construction"})
+    _two_line_job(client, seed_customer.id)
+    r = client.get("/api/reports/wip-schedule/pdf")
+    assert r.status_code == 200, r.text[:200]
+    text = " ".join(
+        p.extract_text() for p in pypdf.PdfReader(io.BytesIO(r.content)).pages
+    )
+    words = ("MARGIN", "COMPLETE", "EARNED", "OVERBILLED", "PROVISION")
+    assert [w for w in words if w not in text] == [], text[:600]

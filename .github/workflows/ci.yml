@@ -265,9 +265,9 @@ jobs:
           # skip as one where playwright is absent (v2.31.11:
           # test_browser_expense_edit.py for #745/#746 and
           # test_browser_encryption_dialog.py for Discussion #750).
-          # 242 with the long-heading grid PDF tests (#753,
-          # test_grid_pdf_long_headings_753.py, two WeasyPrint renders).
-          MAX_SKIPS: "242"
+          # 243 with the long-heading grid PDF tests (#753,
+          # test_grid_pdf_long_headings_753.py, three WeasyPrint renders).
+          MAX_SKIPS: "243"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
