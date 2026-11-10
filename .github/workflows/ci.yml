@@ -269,7 +269,11 @@ jobs:
           # test_retainage_release_invoice_751.py, five WeasyPrint renders),
           # 248 with the long-heading grid PDF tests (#753,
           # test_grid_pdf_long_headings_753.py, three WeasyPrint renders).
-          MAX_SKIPS: "248"
+          # 300 in v2.31.12: 49 WeasyPrint renders in test_check_field_layout.py
+          # (#749), two in test_wip_pdf_columns_760.py (#760), and
+          # test_browser_check_field_layout.py, a browser module that skips as
+          # one where playwright is absent.
+          MAX_SKIPS: "300"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
