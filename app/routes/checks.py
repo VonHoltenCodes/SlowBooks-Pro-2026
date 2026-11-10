@@ -246,6 +246,7 @@ def test_print_check(
     check_nudge_y_in: str = Query(default=None),
     check_blank_stock: str = Query(default=None),
     check_micr_amount: str = Query(default=None),
+    check_field_layout: str = Query(default=None),
     db: Session = Depends(get_db),
 ):
     """A sample check with placeholder values (#440), printed through the
@@ -258,7 +259,9 @@ def test_print_check(
     setting. Nothing is stored. The sample carries a fictional payee address
     (#726) so the address block can be lined up too. On blank stock (#739)
     it prints sample bank details and a sample MICR line, never a saved
-    account's, so a test print is never a check a bank would take."""
+    account's, so a test print is never a check a bank would take. The
+    per-field layout (#749, check_field_layout) is sent the same way, as
+    its JSON."""
     check_data = {
         "payee": "Sample Payee",
         "date": date.today(),
@@ -297,6 +300,7 @@ def test_print_check(
     for key, value in (
         ("check_nudge_x_in", check_nudge_x_in),
         ("check_nudge_y_in", check_nudge_y_in),
+        ("check_field_layout", check_field_layout),
     ):
         if value is not None:
             try:

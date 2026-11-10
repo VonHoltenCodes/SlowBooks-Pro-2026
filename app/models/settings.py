@@ -163,6 +163,12 @@ DEFAULT_SETTINGS = {
     # check_micr_amount is "true".
     "check_blank_stock": "false",
     "check_micr_amount": "false",
+    # Per-field check layout (#749): each value on the check face (payee,
+    # payee address, date, amount in figures, amount in words, memo) moved,
+    # sized and bolded on its own, on top of the nudges, as JSON of what
+    # differs from today's face (settings_service._clean_check_field_layout).
+    # "" is today's layout, so a company that never sets it sees no change.
+    "check_field_layout": "",
     # Opening-balance wizard readiness metadata
     "chart_setup_source": "",
     "chart_setup_ready_at": "",

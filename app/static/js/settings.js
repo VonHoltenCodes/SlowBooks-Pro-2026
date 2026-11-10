@@ -1135,6 +1135,7 @@ const SettingsPage = {
                             <input name="check_nudge_y_in" type="number" min="-0.5" max="0.5" step="0.01"
                                 title="Inches, -0.5 to 0.5, in 0.01 steps"
                                 value="${escapeHtml(s.check_nudge_y_in || '0')}"></div>
+                        ${SettingsPage._checkFieldLayoutHtml(s.check_field_layout)}
                         <div class="form-group full-width">
                             <div style="display:flex; align-items:center; gap:6px; font-size:12px;">
                                 <input type="checkbox" id="settings-check-blank-stock" name="check_blank_stock" value="true" data-bool aria-describedby="settings-check-blank-stock-help" style="width:auto; margin:0;" ${s.check_blank_stock === 'true' ? 'checked' : ''}>
@@ -1172,7 +1173,7 @@ const SettingsPage = {
                         </div>
                         <div class="form-group full-width">
                             <button type="button" class="btn btn-sm btn-secondary" onclick="SettingsPage.testPrintCheck()">Print a test check</button>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account's.</div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">Prints a sample check with placeholder values on plain paper. Hold it against your check stock to see how far to nudge the values left/right (horizontal) or up/down (vertical); a positive nudge moves them right and down. The test print uses the stock, check position, nudges, field layout and blank-stock choices as set here, saved or not; on blank stock it prints sample bank details, never a saved account's.</div>
                         </div>
                     </div>
                 </div>
@@ -3178,17 +3179,124 @@ const SettingsPage = {
     },
 
     // Opens a sample check PDF in a new tab (#440) with the stock, check
-    // position (#727) and nudge as they stand in the form — saved or not — so a nudge can be tried
+    // position (#727), nudge and field layout (#749) as they stand in the form — saved or not — so a nudge can be tried
     // before it is saved.
     testPrintCheck() {
         const form = document.getElementById('settings-form');
         const params = new URLSearchParams();
-        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount']) {
+        for (const name of ['check_stock', 'check_position', 'check_nudge_x_in', 'check_nudge_y_in', 'check_blank_stock', 'check_micr_amount', 'check_field_layout']) {
             const el = form && form.querySelector(`[name="${name}"]`);
             if (el) params.set(name, el.type === 'checkbox' ? (el.checked ? 'true' : 'false') : el.value);
         }
         const qs = params.toString();
         window.open('/api/checks/test-print' + (qs ? `?${qs}` : ''), '_blank');
+    },
+
+    // ----- the check face's per-field layout (#749) ---------------------
+    // One row per field, each moved, sized and bolded on its own. The row's
+    // inputs carry no name; what they hold is kept, as the JSON the server
+    // stores (only what differs from today's face), in the hidden
+    // check_field_layout field, which the form saves and the test print sends.
+    // [key, label, size it prints at today, bold today]
+    CHECK_LAYOUT_FIELDS: [
+        ['payee', 'Payee', '12', true],
+        ['payee_address', 'Payee address', '9', false],
+        ['date', 'Date', '10', false],
+        ['amount', 'Amount in figures', '14 (12 on top)', true],
+        ['amount_words', 'Amount in words', '9', false],
+        ['memo', 'Memo', '8', false],
+    ],
+
+    _parseCheckLayout(text) {
+        if (!text) return {};
+        try {
+            const v = JSON.parse(text);
+            return v && typeof v === 'object' && !Array.isArray(v) ? v : {};
+        } catch (e) { return {}; }
+    },
+
+    // The layout as the server stores it: fields and attributes in name
+    // order, only those set; "" for none.
+    _checkLayoutJson(layout) {
+        const out = {};
+        for (const field of Object.keys(layout).sort()) {
+            const attrs = layout[field] || {};
+            const kept = {};
+            for (const a of Object.keys(attrs).sort()) {
+                if (attrs[a] !== undefined && attrs[a] !== null && attrs[a] !== '') kept[a] = attrs[a];
+            }
+            if (Object.keys(kept).length) out[field] = kept;
+        }
+        return Object.keys(out).length ? JSON.stringify(out) : '';
+    },
+
+    _checkFieldLayoutHtml(stored) {
+        const layout = SettingsPage._parseCheckLayout(stored);
+        const num = v => (typeof v === 'number' && isFinite(v) ? String(v) : '');
+        const rows = SettingsPage.CHECK_LAYOUT_FIELDS.map(([key, label, size, bold]) => {
+            const a = layout[key] || {};
+            const on = typeof a.bold === 'boolean' ? a.bold : bold;
+            const id = 'check-field-' + key.replace(/_/g, '-');
+            return `<tr>
+                <th scope="row" id="${id}-h" style="text-align:left; font-weight:normal;">${label}</th>
+                <td><input type="number" id="${id}-x" data-check-field="${key}" data-attr="x" data-admin min="-1" max="1" step="0.01" placeholder="0" style="width:70px;"
+                    aria-label="${label} left/right offset (in)" value="${num(a.x)}" oninput="SettingsPage.syncCheckFieldLayout()"></td>
+                <td><input type="number" id="${id}-y" data-check-field="${key}" data-attr="y" data-admin min="-1" max="1" step="0.01" placeholder="0" style="width:70px;"
+                    aria-label="${label} up/down offset (in)" value="${num(a.y)}" oninput="SettingsPage.syncCheckFieldLayout()"></td>
+                <td><input type="number" id="${id}-size" data-check-field="${key}" data-attr="size" data-admin min="6" max="18" step="0.1" placeholder="${size.split(' ')[0]}" style="width:70px;"
+                    aria-label="${label} text size (pt), today ${size}" value="${num(a.size)}" oninput="SettingsPage.syncCheckFieldLayout()"></td>
+                <td style="text-align:center;"><input type="checkbox" id="${id}-bold" data-check-field="${key}" data-attr="bold" data-default="${bold}" data-admin style="width:auto; margin:0;"
+                    aria-label="${label} bold" ${on ? 'checked' : ''} onchange="SettingsPage.syncCheckFieldLayout()"></td>
+            </tr>`;
+        }).join('');
+        return `<div class="form-group full-width" id="settings-check-fields" role="group" aria-labelledby="settings-check-fields-h">
+                            <h4 id="settings-check-fields-h" style="margin:4px 0; font-size:12px;">Field layout</h4>
+                            <div id="settings-check-fields-help" style="font-size:10px; color:var(--text-muted); margin-bottom:6px;">Move, size or bold one field of the check without moving the others, for stock whose boxes do not all sit where the check prints them. Left/right and up/down are inches from where the field prints today (-1 to 1; a positive offset moves it right and down), on top of the nudges. Size is in points (6 to 18); empty prints today's size. A field keeps its baseline as its size changes. It applies to the check at the bottom and on top and to every stock.</div>
+                            <input type="hidden" name="check_field_layout" id="settings-check-field-layout" value="${escapeHtml(SettingsPage._checkLayoutJson(layout))}">
+                            <table class="data-table" style="font-size:11px; width:auto;" aria-describedby="settings-check-fields-help">
+                                <thead><tr><th scope="col">Field</th><th scope="col">Left/right (in)</th><th scope="col">Up/down (in)</th><th scope="col">Size (pt)</th><th scope="col">Bold</th></tr></thead>
+                                <tbody>${rows}</tbody>
+                            </table>
+                            <div style="margin-top:6px;" data-write>
+                                <button type="button" class="btn btn-sm btn-secondary" data-admin data-write onclick="SettingsPage.resetCheckFieldLayout()">Reset field layout to defaults</button>
+                            </div>
+                        </div>`;
+    },
+
+    // The table's inputs, as the hidden field's JSON: blank offsets and
+    // sizes and a Bold box left at today's weight are left out.
+    syncCheckFieldLayout() {
+        const hidden = document.getElementById('settings-check-field-layout');
+        if (!hidden) return;
+        const layout = {};
+        document.querySelectorAll('#settings-check-fields [data-check-field]').forEach(el => {
+            const field = el.getAttribute('data-check-field');
+            const attr = el.getAttribute('data-attr');
+            let v;
+            if (attr === 'bold') {
+                if (el.checked === (el.getAttribute('data-default') === 'true')) return;
+                v = el.checked;
+            } else {
+                const t = String(el.value || '').trim();
+                if (t === '') return;
+                // what is not a number is sent as typed, so saving says why
+                v = isFinite(Number(t)) ? Number(t) : t;
+                if (v === 0 && attr !== 'size') return;
+            }
+            (layout[field] = layout[field] || {})[attr] = v;
+        });
+        hidden.value = SettingsPage._checkLayoutJson(layout);
+    },
+
+    // Every field back where it prints today: offsets and sizes empty, Bold
+    // at today's weight. Saved with Save Settings like the rest.
+    resetCheckFieldLayout() {
+        document.querySelectorAll('#settings-check-fields [data-check-field]').forEach(el => {
+            if (el.getAttribute('data-attr') === 'bold') el.checked = el.getAttribute('data-default') === 'true';
+            else el.value = '';
+        });
+        SettingsPage.syncCheckFieldLayout();
+        SettingsPage._updateDirty();
     },
 
     // ----- a bank account's details for blank check stock (#739) --------

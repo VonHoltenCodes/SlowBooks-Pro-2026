@@ -622,6 +622,61 @@ def blank_stock(company_settings: dict) -> dict:
     }
 
 
+# Where each field of the check layout (#749) sits on the face: the element
+# an offset moves, and whether its size and weight go on a span around the
+# value (the value's own line keeps its height, so nothing laid out after it
+# moves and its baseline stays put) or on the element itself (the payee's
+# address, several lines, last on the face).
+_CHECK_FIELD_BOXES = {
+    "payee": (".pay-to-line", True),
+    "payee_address": (".payee-address", False),
+    "date": (".check-date", True),
+    "amount": (".amount-box", True),
+    "amount_words": (".amount-words", True),
+    "memo": (".memo-text", True),
+}
+
+
+def check_field_layout_css(company_settings: dict) -> tuple:
+    """The per-field check layout (#749) as (css, wrapped): the rules that
+    move, size and bold each field the layout names, and the fields whose
+    value is printed in a span for its size and weight. ("", set()) when
+    the layout is empty, so the face is exactly what it was before it."""
+    from app.services.settings_service import check_field_layout
+
+    layout = check_field_layout(company_settings.get("check_field_layout"))
+    rules = []
+    wrapped = set()
+    for field, (box, wrap) in _CHECK_FIELD_BOXES.items():
+        attrs = layout.get(field)
+        if not attrs:
+            continue
+        x, y = attrs.get("x", 0), attrs.get("y", 0)
+        if x or y:
+            rules.append(
+                f"    .check-area {box} {{ transform: translate({x:g}in, {y:g}in); }}"
+            )
+        look = []
+        if "size" in attrs:
+            look.append(f"font-size: {attrs['size']:g}pt;")
+            if wrap:
+                # one line at its own baseline: a wrapped second line would
+                # sit on the first and push what follows down
+                look.append("line-height: 0; white-space: nowrap;")
+        if "bold" in attrs:
+            look.append(f"font-weight: {'bold' if attrs['bold'] else 'normal'};")
+        if look:
+            target = f".check-field-{field}" if wrap else box
+            rules.append(f"    .check-area {target} {{ {' '.join(look)} }}")
+            if wrap:
+                wrapped.add(field)
+    if wrapped:
+        # a value kept on one line may run past the face; the face keeps its
+        # width (a flex item is otherwise as wide as its widest line)
+        rules.insert(0, "    .check-area { min-width: 0; }")
+    return "\n".join(rules), wrapped
+
+
 def _blank_stock_fields(check_data: dict, micr_amount: bool) -> None:
     """The bank's lines and the MICR line of one check on blank stock, from
     its `bank_details`; a check without routing and account numbers prints
@@ -675,10 +730,13 @@ def render_checks_html(checks: list, company_settings: dict, options=None) -> st
         for check_data in checks:
             _blank_stock_fields(check_data, blank["micr_amount"])
         extra = {"blank": True, "logo": _company_logo_data_uri(company_settings)}
+    field_css, field_wrap = check_field_layout_css(company_settings)
     return template.render(
         checks=checks,
         company=company_settings,
         position=check_position(company_settings),
+        field_css=field_css,
+        field_wrap=field_wrap,
         **opts,
         **extra,
     )

@@ -138,10 +138,25 @@
     .check-top .micr { bottom: 0.0067in; }
 </style>
 {%- endif %}
+{%- if field_css %}
+<style>
+    /* The per-field layout (#749, Settings -> Check Printing): each field
+       moved from where it prints above, on top of the whole-face nudge, and
+       its size and weight changed, that field alone. A size goes on a span
+       around the value with no line height of its own, so the value's line
+       keeps its height and baseline: nothing after it moves. Only the
+       fields the layout names get a rule, so an empty layout is the face
+       above, unchanged. */
+{{ field_css }}
+</style>
+{%- endif %}
 </head>
 <body>
 {%- macro payee_address(check) -%}
 <div class="payee-address">{% for line in check.payee_address %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}</div>
+{%- endmacro %}
+{%- macro field(name, value) -%}
+{%- if name in field_wrap %}<span class="check-field-{{ name }}">{{ value }}</span>{% else %}{{ value }}{% endif -%}
 {%- endmacro %}
 {%- for check in checks %}
     <div class="check-page {% if position == 'top' %}check-page-top{% else %}check-page-bottom{% endif %}">
@@ -154,19 +169,19 @@
                 {% if company.company_city %}{{ company.company_city }}, {{ company.company_state }} {{ company.company_zip }}{% endif %}
             </div>
             <div class="check-number">#{{ check.check_number }}</div>
-            <div class="check-date"><span class="check-date-label">DATE</span> {{ check.date | fdate }}</div>
+            <div class="check-date"><span class="check-date-label">DATE</span> {{ field('date', check.date | fdate) }}</div>
             <div class="pay-to">
                 <span class="pay-to-label">PAY TO THE ORDER OF</span>
-                <span class="pay-to-line">{{ check.payee }}</span>
+                <span class="pay-to-line">{{ field('payee', check.payee) }}</span>
             </div>
-            <div class="amount-box">{{ check.amount | currency }}</div>
-            <div class="amount-words">{{ check.amount_words }} ******</div>
+            <div class="amount-box">{{ field('amount', check.amount | currency) }}</div>
+            <div class="amount-words">{{ field('amount_words', check.amount_words ~ ' ******') }}</div>
 {%- if check.payee_address %}
             {{ payee_address(check) }}
 {%- endif %}
             <div class="memo-line">
                 <span class="memo-label">MEMO</span>
-                <span class="memo-text">{{ check.memo or '' }}</span>
+                <span class="memo-text">{{ field('memo', check.memo or '') }}</span>
             </div>
             <div class="signature-line"></div>
 {%- if blank %}
@@ -267,20 +282,20 @@
             <div class="check-number">#{{ check.check_number }}</div>
             <div class="check-date">
                 <span class="check-date-label">DATE</span><br>
-                {{ check.date | fdate }}
+                {{ field('date', check.date | fdate) }}
             </div>
             <div class="pay-to">
                 <span class="pay-to-label">PAY TO THE ORDER OF</span><br>
-                <span class="pay-to-line">{{ check.payee }}</span>
+                <span class="pay-to-line">{{ field('payee', check.payee) }}</span>
             </div>
-            <div class="amount-box">{{ check.amount | currency }}</div>
-            <div class="amount-words">{{ check.amount_words }} ******</div>
+            <div class="amount-box">{{ field('amount', check.amount | currency) }}</div>
+            <div class="amount-words">{{ field('amount_words', check.amount_words ~ ' ******') }}</div>
 {%- if check.payee_address %}
             {{ payee_address(check) }}
 {%- endif %}
             <div class="memo-line">
                 <span class="memo-label">MEMO</span>
-                <span class="memo-text">{{ check.memo or '' }}</span>
+                <span class="memo-text">{{ field('memo', check.memo or '') }}</span>
             </div>
             <div class="signature-line"></div>
 {%- if blank %}
