@@ -261,8 +261,11 @@ jobs:
           # first_page, each at top and bottom) and the eight blank-stock
           # face tests in test_check_blank_stock.py (#739: every_new_element,
           # same_place, logo_moves at top and bottom; without_any_bank_details;
-          # micr_line_on_every_page).
-          MAX_SKIPS: "238"
+          # micr_line_on_every_page). 240 with two more browser modules that
+          # skip as one where playwright is absent (v2.31.11:
+          # test_browser_expense_edit.py for #745/#746 and
+          # test_browser_encryption_dialog.py for Discussion #750).
+          MAX_SKIPS: "240"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified
