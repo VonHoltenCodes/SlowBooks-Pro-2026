@@ -1338,8 +1338,11 @@ def test_wip_pdf_sections_include_the_adjusting_entry(db_session, seed_accounts)
     _wip_job(db_session, customer)
     data = _wip(db_session)
     sections = construction._wip_sections(data) + construction._wip_entry_sections(data)
-    assert [s["title"] for s in sections] == ["WIP Schedule", "WIP Adjusting Entry"]
-    entry = sections[1]
+    # the grid over three pages of columns (#760), then the entry
+    assert [s["title"] for s in sections] == ["WIP Schedule"] * 3 + [
+        "WIP Adjusting Entry"
+    ]
+    entry = sections[-1]
     assert entry["columns"] == ["Job", "Account", "Debit", "Credit"]
     texts = [c for r in entry["rows"] for c in r["cells"]]
     # the account by number and name, as the chart has it (2060 is free)

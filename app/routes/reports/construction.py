@@ -210,13 +210,41 @@ def _warnings_note(data: dict):
     return " ".join(data.get("warnings") or []) or None
 
 
+# The WIP Schedule's figures go over pages of this many columns at most (#760):
+# all nineteen side by side ran past a landscape page's edge, Loss provision
+# first, and ten a page left the Job column so narrow a long name took five
+# lines. Each page repeats the Customer and Job columns, and the revised
+# contract when its page does not hold it, and prints the totals row.
+WIP_PDF_FIGURES_PER_PAGE = 7
+
+
+def _wip_column_pages(cols: list[dict]) -> list[tuple[list[int], list[int]]]:
+    """The WIP grid's pages as (repeated, own) column indexes: the leading
+    text columns (and the revised contract where its page does not hold
+    it) on every page, then that page's share of the figures, split as
+    evenly as the page count allows."""
+    tc = _text_columns(cols)
+    figures = list(range(tc, len(cols)))
+    n_pages = max(1, -(-len(figures) // WIP_PDF_FIGURES_PER_PAGE))
+    size = max(1, -(-len(figures) // n_pages))
+    chunks = [figures[i : i + size] for i in range(0, len(figures), size)] or [[]]
+    revised = next(
+        (i for i, c in enumerate(cols) if c["key"] == "revised_contract"), None
+    )
+    pages = []
+    for chunk in chunks:
+        lead = list(range(tc))
+        if len(chunks) > 1 and revised is not None and revised not in chunk:
+            lead.append(revised)
+        pages.append((lead, chunk))
+    return pages
+
+
 def _wip_sections(data: dict) -> list[dict]:
     cols = data["columns"]
     tc = _text_columns(cols)
-    rows = []
-    for r in data["rows"]:
-        rows.append({"cells": [_pdf_cell(r[c["key"]], c["kind"]) for c in cols]})
     totals = data["totals"]
+    body = [[_pdf_cell(r[c["key"]], c["kind"]) for c in cols] for r in data["rows"]]
     total_cells = []
     for i, c in enumerate(cols):
         if i == 0:
@@ -225,17 +253,29 @@ def _wip_sections(data: dict) -> list[dict]:
             total_cells.append(_pdf_cell(totals[c["key"]], c["kind"]))
         else:
             total_cells.append("")
-    rows.append({"cells": total_cells, "style": "grand-total"})
-    return [
-        {
-            "title": "WIP Schedule",
-            "period": f"As of {data['as_of']} · cost-to-cost",
-            "columns": [c["label"] for c in cols],
-            "text_columns": tc,
-            "rows": rows,
-            "note": _warnings_note(data),
-        }
-    ]
+    pages = _wip_column_pages(cols)
+    sections = []
+    for page_no, (lead, own) in enumerate(pages, start=1):
+        idx = lead + own
+        rows = [{"cells": [cells[i] for i in idx]} for cells in body]
+        rows.append({"cells": [total_cells[i] for i in idx], "style": "grand-total"})
+        period = f"As of {data['as_of']} · cost-to-cost"
+        if len(pages) > 1 and own:
+            period += (
+                f" · columns {own[0] - tc + 1}–{own[-1] - tc + 1} of {len(cols) - tc}"
+                f" (page {page_no} of {len(pages)})"
+            )
+        sections.append(
+            {
+                "title": "WIP Schedule",
+                "period": period,
+                "columns": [cols[i]["label"] for i in idx],
+                "text_columns": tc,
+                "rows": rows,
+                "note": _warnings_note(data),
+            }
+        )
+    return sections
 
 
 _ENTRY_COLUMNS = ["Job", "Account", "Debit", "Credit"]
