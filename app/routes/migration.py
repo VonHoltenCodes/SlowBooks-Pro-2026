@@ -9,7 +9,15 @@
 # remain as compatibility aliases; new sources exist only here.
 # ============================================================================
 
-from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from sqlalchemy.orm import Session
 
 from app.routes._roles import may_run_payroll
@@ -377,9 +385,94 @@ def list_sources():
     return [{"key": key, "label": label} for key, (label, _, _) in SOURCES.items()]
 
 
+# Adding employees is HR (GHSA-rh75-6834-f66j, #755): the Employee Contact
+# List comes in only by a person's choice, ``include_employees``, which the
+# dry run and the import both take and answer alike (NEW-222). Left out of
+# the request, it comes in for a caller who may add employees (an
+# administrator, or a token let run payroll) and is left out, said so, for
+# anyone else; ``false`` leaves it out for anyone; ``true`` from a caller
+# who may not add employees is refused.
+_EMPLOYEES_NEED = (
+    "adding employees needs an administrator, or a token that may also run payroll"
+)
+
+
+def _employee_refusal(imported: bool) -> HTTPException:
+    detail = (
+        f"The Employee Contact List cannot come in: {_EMPLOYEES_NEED}. Leave "
+        "include_employees out, or send it false, to import the books without it."
+    )
+    if imported:
+        detail += " Nothing was imported."
+    return HTTPException(status_code=403, detail=detail)
+
+
+def _choose_employees(
+    request: Request,
+    db: Session,
+    module,
+    upload: Upload,
+    include: bool | None,
+    imported: bool,
+) -> dict | None:
+    """Apply the caller's choice to the bundle before the dry run or the
+    import reads it: the Employee Contact List stays in it only when it
+    comes in. Answers what the result says about the list, or None when
+    the bundle has none."""
+    may_add = may_run_payroll(request)
+    if include and not may_add:
+        raise _employee_refusal(imported)
+    if "employees" not in upload.bundle:
+        return None
+    counter = getattr(module, "employee_count", None)
+    try:
+        found = counter(db, upload.bundle) if counter else 0
+    except DataProblem:
+        found = 0  # the import's own reading of the list says what is wrong
+    included = may_add if include is None else bool(include)
+    people = f"{found} employee{'' if found == 1 else 's'}"
+    if included:
+        note = f"The Employee Contact List has {people} to add; they " + (
+            "came in with the import." if imported else "come in with the import."
+        )
+        warning = None
+    else:
+        upload.bundle.pop("employees")
+        when = "was" if imported else "will be"
+        if include is False:
+            note = warning = (
+                f"The Employee Contact List ({people}) {when} left out, as asked."
+            )
+        else:
+            note = warning = (
+                f"The Employee Contact List {when} left out: {_EMPLOYEES_NEED}."
+            )
+    return {
+        "employee_list": {
+            "employees": found,
+            "included": included,
+            "may_add": may_add,
+            "note": note,
+        },
+        "warning": warning,
+    }
+
+
+def _with_employee_choice(result: dict, chosen: dict | None) -> dict:
+    if chosen:
+        result["employee_list"] = chosen["employee_list"]
+        if chosen["warning"]:
+            result.setdefault("warnings", []).append(chosen["warning"])
+    return result
+
+
 @router.post("/{source}/dry-run")
 async def migration_dry_run(
-    source: str, files: list[UploadFile] = File(...), db: Session = Depends(get_db)
+    source: str,
+    request: Request,
+    files: list[UploadFile] = File(...),
+    include_employees: bool | None = Form(None),
+    db: Session = Depends(get_db),
 ):
     _, module, _ = _source(source)
     classify = module.classify_filename
@@ -389,11 +482,14 @@ async def migration_dry_run(
         getattr(module, "combine_same_kind", None),
         getattr(module, "same_kind_note", None),
     )
+    chosen = _choose_employees(
+        request, db, module, upload, include_employees, imported=False
+    )
     try:
         result = module.dry_run(db, upload.bundle)
     except DataProblem as e:
         raise _refused(db, e, upload, classify)
-    return _say_what_was_left(result, upload, classify)
+    return _with_employee_choice(_say_what_was_left(result, upload, classify), chosen)
 
 
 @router.post("/{source}/import")
@@ -401,6 +497,7 @@ async def migration_import(
     source: str,
     request: Request,
     files: list[UploadFile] = File(...),
+    include_employees: bool | None = Form(None),
     db: Session = Depends(get_db),
 ):
     _, module, chart_source = _source(source)
@@ -411,23 +508,14 @@ async def migration_import(
         getattr(module, "combine_same_kind", None),
         getattr(module, "same_kind_note", None),
     )
-    # Adding employees is HR (GHSA-rh75-6834-f66j): a token let import but
-    # not run payroll imports the books without the Employee Contact List,
-    # and says so (#755).
-    left_out = None
-    if "employees" in upload.bundle and not may_run_payroll(request):
-        upload.bundle.pop("employees")
-        left_out = (
-            "The Employee Contact List was left out: adding employees needs "
-            "an administrator, or a token that may also run payroll."
-        )
+    chosen = _choose_employees(
+        request, db, module, upload, include_employees, imported=True
+    )
     try:
         result = module.run_import(db, upload.bundle)
     except DataProblem as e:
         raise _refused(db, e, upload, classify)
-    result = _say_what_was_left(result, upload, classify)
-    if left_out:
-        result.setdefault("warnings", []).append(left_out)
+    result = _with_employee_choice(_say_what_was_left(result, upload, classify), chosen)
     if result["ok"]:
         from datetime import date
 

@@ -1450,6 +1450,8 @@ def import_qb_report(
     outflow_positive: bool = False,
     answers: dict | None = None,
     file_sha: str | None = None,
+    add_employees: bool = True,
+    may_add_employees: bool = True,
 ) -> dict:
     """Import any supported QB report CSV, auto-detected by its columns.
 
@@ -1463,6 +1465,11 @@ def import_qb_report(
     Account file's problems (qb_ledger_import.read_answers), and
     ``file_sha`` the file's sha256, which a list of them names; the other
     reports take neither.
+
+    ``add_employees`` (W-138) is whether a time report's people not on the
+    Employees list are added, or their entries left out and named;
+    ``may_add_employees`` whether the caller may add them (the words of the
+    warning). The other reports add no employees.
     """
     kind = detect_report_type(csv_text, db)
     base = {
@@ -1580,8 +1587,17 @@ def import_qb_report(
 
         rows = _csv_rows(csv_text)
         header_at, cols = _find_header_for(rows, TIME_COLUMNS)
-        sub = import_time_report(db, rows, header_at, cols)
+        sub = import_time_report(
+            db,
+            rows,
+            header_at,
+            cols,
+            add_employees=add_employees,
+            may_add_employees=may_add_employees,
+        )
         base["time_entries"] = sub.pop("time_entries", 0)
+        base["people_left_out"] = sub.pop("people_left_out", [])
+        base["entries_left_out"] = sub.pop("entries_left_out", 0)
         base["report"] = sub.pop("report", None)
     elif kind == "deposits":
         sub = import_deposit_report(db, csv_text)

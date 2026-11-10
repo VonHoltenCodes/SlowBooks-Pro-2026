@@ -209,7 +209,11 @@ What a token can do:
 - With **Can import** ticked, on a bookkeeper token only (#755): the migration
   imports (`/api/migration`: sources, dry run, import). A QuickBooks Online
   export's Employee Contact List comes in only when the token may also run
-  payroll; otherwise the import leaves it out and says so.
+  payroll; otherwise the dry run and the import both leave it out and say so,
+  and `include_employees: true` is refused (403). The same goes for the people
+  a QuickBooks Desktop time report would add to the Employees list
+  (`/api/csv/import/qb-report`, `add_employees`): without the payroll
+  permission their entries are left out and named.
 
 What a token cannot do, whatever its role or permission:
 

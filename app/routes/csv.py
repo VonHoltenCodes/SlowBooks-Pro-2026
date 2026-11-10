@@ -197,8 +197,10 @@ async def csv_import_accounts(
 
 @router.post("/import/qb-report")
 async def csv_import_qb_report(
+    request: Request,
     file: UploadFile = File(...),
     adjusting_only: bool = Form(False),
+    add_employees: bool | None = Form(None),
     outflow_positive: bool = Form(False),
     answers: UploadFile | str | None = Form(None),
     db: Session = Depends(get_db),
@@ -213,7 +215,15 @@ async def csv_import_qb_report(
     object, is the person's answers to them, sent with the same file again
     and carrying that sha256: a text field, or a part of its own, as the
     page sends it (a text field holds 1 MB, and thousands of ticked
-    transactions can be more). Answers made for another file are refused."""
+    transactions can be more). Answers made for another file are refused.
+
+    ``add_employees`` (W-138): whether a time report's people who are not
+    on the Employees list are added from their names. Adding employees is
+    an administrator's, or a token's let run payroll: left out of the
+    request, it is yes for those and no for anyone else, whose entries for
+    those people are left out and named; ``true`` from anyone else is
+    refused before the file is read."""
+    from app.routes._roles import may_run_payroll
     from app.services.qb_ledger_import import (
         check_answers_file,
         file_sha256,
@@ -222,6 +232,17 @@ async def csv_import_qb_report(
     from app.services.qb_report_import import import_qb_report
     from app.services.safe_errors import DataProblem
 
+    may_add = may_run_payroll(request)
+    if add_employees and not may_add:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Adding people to the Employees list needs an administrator, or "
+                "a token that may also run payroll. Leave add_employees out, or "
+                "send it false, to import the time of the people already on the "
+                "list. Nothing was imported."
+            ),
+        )
     if answers is not None and not isinstance(answers, str):
         answers = (await read_limited(answers, label="The answers")).decode(
             "utf-8", "replace"
@@ -258,6 +279,8 @@ async def csv_import_qb_report(
             outflow_positive=outflow_positive,
             answers=answered,
             file_sha=sha,
+            add_employees=may_add if add_employees is None else add_employees,
+            may_add_employees=may_add,
         )
     except DataProblem as e:
         # an answer the chart's rules refuse (an account made with a type

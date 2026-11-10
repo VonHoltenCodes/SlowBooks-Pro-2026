@@ -817,6 +817,12 @@ def _new_employees(db: Session, bundle: dict) -> list[dict]:
     return out
 
 
+def employee_count(db: Session, bundle: dict) -> int:
+    """How many people on the bundle's Employee Contact List the import
+    would add: the ones not on the Employees list yet."""
+    return len(_new_employees(db, bundle))
+
+
 def _import_employees(db: Session, bundle: dict) -> int:
     """The Employee Contact List into Employees: the name, the email and
     the address, the fields an employee has here. Nothing about pay: the

@@ -286,10 +286,23 @@ def _ref(fingerprint: str, nth: int) -> str:
 
 
 def import_time_report(
-    db: Session, rows: list[list[str]], header_at: int, cols: dict
+    db: Session,
+    rows: list[list[str]],
+    header_at: int,
+    cols: dict,
+    add_employees: bool = True,
+    may_add_employees: bool = True,
 ) -> dict:
+    """``add_employees`` (W-138): a person not on the Employees list is
+    added from their name, or, when False, their entries are left out and
+    named (an entry is always someone's). Adding employees is an
+    administrator's, or a token's let run payroll; ``may_add_employees``
+    says whether this caller is one, for the words of the left-out
+    warning."""
     result = {
         "time_entries": 0,
+        "people_left_out": [],
+        "entries_left_out": 0,
         "duplicates_skipped": 0,
         "errors": [],
         "warnings": [],
@@ -315,6 +328,7 @@ def import_time_report(
         else "Time by Name by Job detail"
     )
     added: list[str] = []
+    left_out: OrderedDict = OrderedDict()
     unlinked: OrderedDict = OrderedDict()
     have = {
         ref
@@ -331,6 +345,9 @@ def import_time_report(
             person = entry["labels"][person_at]
             label = entry["labels"][1 - person_at]
         emp = employees.get(_key(person))
+        if emp is None and not add_employees:
+            left_out[person] = left_out.get(person, 0) + 1
+            continue
         if emp is None:
             first, last = _split_name(person)
             emp = Employee(first_name=first[:100], last_name=last[:100], is_active=True)
@@ -389,6 +406,28 @@ def import_time_report(
             + "; ".join(f"'{name}'" for name in added)
             + ". Set their pay type and rate on the Employees page."
         )
+    if left_out:
+        n = sum(left_out.values())
+        entries = f"{n} entr{'y was' if n == 1 else 'ies were'} left out"
+        named = "; ".join(f"'{name}' ({k})" for name, k in left_out.items())
+        if may_add_employees:
+            said = (
+                f"{entries}, as asked: {named}. Add them on the Employees page, "
+                "then import the report again to bring their time in."
+            )
+        else:
+            said = (
+                f"{entries}: {named}. An administrator adds them on the "
+                "Employees page, or a token that may run payroll imports this "
+                "report; once they are on the list, importing it again brings "
+                "their time in."
+            )
+        result["warnings"].append(
+            f"{len(left_out)} person(s) in the report are not on the Employees "
+            f"list, so their {said}"
+        )
+        result["people_left_out"] = list(left_out)
+        result["entries_left_out"] = n
     if unlinked:
         result["warnings"].append(
             f"{len(unlinked)} customer or job label(s) in the report are not a job "

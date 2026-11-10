@@ -339,20 +339,125 @@ def test_an_import_token_without_payroll_adds_no_employees(
 ):
     """The QuickBooks Online export's Employee Contact List adds employees,
     which is HR: a token let import but not run payroll imports the books
-    without it and says so; one let do both brings the employees in."""
+    without it and says so, its dry run says the same beforehand (NEW-222),
+    and asking for the list is refused; one let do both brings them in."""
+    from app.models.accounts import Account
     from app.models.payroll import Employee
     from tests.test_qbo_export_migration import _controls_export
 
     files = _controls_export(aging=False)
     importer = _bearer(_mint(client, "books-import", allow_imports=True)["token"])
+
+    # the dry run says what the import will do: the list is found, and left out
+    dry = importer.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert dry["ok"] is True, dry["errors"]
+    assert dry["employees"] == 0
+    listed = dry["employee_list"]
+    assert listed["employees"] == 3 and listed["included"] is False
+    assert listed["may_add"] is False
+    assert any(
+        "Employee Contact List will be left out" in w
+        and "an administrator, or a token that may also run payroll" in w
+        for w in dry["warnings"]
+    ), dry["warnings"]
+
+    # asking for it is refused, saying why, and nothing is imported
+    accounts = db_session.query(Account).count()
+    for path in ("dry-run", "import"):
+        r = importer.post(
+            f"/api/migration/qbo_export/{path}",
+            files=files(),
+            data={"include_employees": "true"},
+        )
+        assert r.status_code == 403, r.text
+        detail = r.json()["detail"]
+        assert detail.startswith("The Employee Contact List cannot come in:")
+        assert "a token that may also run payroll" in detail
+        assert ("Nothing was imported." in detail) == (path == "import")
+    db_session.expire_all()
+    assert db_session.query(Account).count() == accounts
+    assert db_session.query(Employee).count() == 0
+
+    # left out of the request: the import matches its dry run
     data = importer.post("/api/migration/qbo_export/import", files=files()).json()
     assert data["ok"] is True, data["errors"]
+    assert data["imported_employees"] == dry["employees"] == 0
     assert db_session.query(Employee).count() == 0
     assert any("Employee Contact List was left out" in w for w in data["warnings"])
 
     both = _bearer(
         _mint(client, "books-both", allow_imports=True, allow_payroll=True)["token"]
     )
-    again = both.post("/api/migration/qbo_export/import", files=files()).json()
+    dry = both.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert dry["employee_list"]["included"] is True and dry["employees"] == 3
+    assert "come in with the import" in dry["employee_list"]["note"]
+    assert not any("Employee Contact List" in w for w in dry["warnings"])
+    again = both.post(
+        "/api/migration/qbo_export/import",
+        files=files(),
+        data={"include_employees": "true"},
+    ).json()
     assert again["ok"] is True, again["errors"]
-    assert again["imported_employees"] == db_session.query(Employee).count() > 0
+    assert again["imported_employees"] == dry["employees"] == 3
+    assert db_session.query(Employee).count() == 3
+    names = {
+        r.username
+        for r in db_session.query(AuditLog).filter(AuditLog.table_name == "employees")
+    }
+    assert names == {"token:books-both"}
+
+
+def test_include_employees_false_leaves_the_list_out_for_an_administrator(
+    client, db_session, seed_accounts
+):
+    from app.models.payroll import Employee
+    from tests.test_qbo_export_migration import _controls_export
+
+    files = _controls_export(aging=False)
+    dry = client.post(
+        "/api/migration/qbo_export/dry-run",
+        files=files(),
+        data={"include_employees": "false"},
+    ).json()
+    assert dry["ok"] is True, dry["errors"]
+    assert dry["employees"] == 0
+    assert dry["employee_list"] == {
+        "employees": 3,
+        "included": False,
+        "may_add": True,
+        "note": "The Employee Contact List (3 employees) will be left out, as asked.",
+    }
+    data = client.post(
+        "/api/migration/qbo_export/import",
+        files=files(),
+        data={"include_employees": "false"},
+    ).json()
+    assert data["ok"] is True, data["errors"]
+    assert data["imported_employees"] == 0
+    assert db_session.query(Employee).count() == 0
+    assert (
+        "The Employee Contact List (3 employees) was left out, as asked."
+        in data["warnings"]
+    )
+    # and left out of the request, an administrator's import brings it in
+    dry = client.post("/api/migration/qbo_export/dry-run", files=files()).json()
+    assert dry["employee_list"]["included"] is True and dry["employees"] == 3
+    data = client.post("/api/migration/qbo_export/import", files=files()).json()
+    assert data["imported_employees"] == 3
+    assert db_session.query(Employee).count() == 3
+
+
+def test_an_export_without_the_list_says_nothing_about_it(
+    client, db_session, seed_accounts
+):
+    from tests.test_qbo_export_migration import _controls_export
+
+    files = _controls_export(aging=False)
+    kept = [f for f in files() if "Employee" not in f[1][0]]
+    assert len(kept) < len(files())
+    dry = client.post("/api/migration/qbo_export/dry-run", files=kept).json()
+    assert "employee_list" not in dry
+    importer = _bearer(_mint(client, "books-import-2", allow_imports=True)["token"])
+    dry = importer.post("/api/migration/qbo_export/dry-run", files=kept).json()
+    assert "employee_list" not in dry
+    assert not any("Employee Contact List" in w for w in dry["warnings"])
