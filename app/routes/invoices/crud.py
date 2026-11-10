@@ -16,6 +16,7 @@ from app.services.accounting import (
     _q,
 )
 from app.services.numbering import next_invoice_number
+from app.services.pay_applications import pay_application_number
 from app.services.payment_terms import (
     DocumentTerms,
     document_due_date,
@@ -127,6 +128,7 @@ def get_invoice(invoice_id: int, db: Session = Depends(get_db)):
     DocumentTerms(db, "invoice").fill(resp, inv)
     if inv.customer:
         resp.customer_name = invoice_customer_name(inv)
+    resp.pay_application_number = pay_application_number(db, inv)
     return resp
 
 

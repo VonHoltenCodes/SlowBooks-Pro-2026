@@ -752,3 +752,14 @@ class _Row:
         self.stored = stored
         self.is_taxable = is_taxable
         self.prior_stored = prior_stored
+
+
+def pay_application_number(db, invoice):
+    """The pay application number (PA-8-03) an invoice came from, else None
+    (#751)."""
+    if db is None or not invoice.pay_application_id:
+        return None
+    from app.models.pay_applications import PayApplication
+
+    app = db.get(PayApplication, invoice.pay_application_id)
+    return app.number if app else None

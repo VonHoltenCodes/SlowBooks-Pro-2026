@@ -246,6 +246,8 @@ class InvoiceResponse(BaseModel):
     retainage_held: Decimal = Decimal("0")
     retainage_released: Decimal = Decimal("0")
     pay_application_id: Optional[int] = None
+    # Filled by GET /invoices/{id} only: the pay application's number (#751).
+    pay_application_number: Optional[str] = None
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None

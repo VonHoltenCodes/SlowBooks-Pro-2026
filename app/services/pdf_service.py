@@ -261,11 +261,22 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
     )
 
 
+def invoice_is_release_only(invoice) -> bool:
+    """A pay application's invoice that bills only released retainage: no
+    lines, a zero total and a nonzero release (#751)."""
+    return (
+        not invoice.lines
+        and not (invoice.total or 0)
+        and bool(invoice.retainage_released or 0)
+    )
+
+
 def render_invoice_html(invoice, company_settings: dict) -> str:
     """Use the same invoice face and logo preference for PDF and Print."""
     from sqlalchemy.orm import object_session
 
     from app.services.donor_documents import invoice_pdf_context
+    from app.services.pay_applications import pay_application_number
     from app.services.payment_terms import (
         document_discount_line,
         document_discount_taken,
@@ -276,6 +287,8 @@ def render_invoice_html(invoice, company_settings: dict) -> str:
         "invoice_pdf.html",
         company_settings,
         inv=invoice,
+        release_only=invoice_is_release_only(invoice),
+        pay_application_number=pay_application_number(_db, invoice),
         discount_line=document_discount_line(invoice),
         # the discount already taken, shown in place of the offer (#664)
         discount_taken=(
