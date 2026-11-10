@@ -38,7 +38,8 @@ def hash_token(token: str) -> str:
 
 
 def resolve(bearer: str) -> dict | None:
-    """Bearer secret → {"label", "role", "allow_backups"} for an active token; {"revoked":
+    """Bearer secret → {"label", "role", "allow_backups", "allow_payroll",
+    "allow_imports"} for an active token; {"revoked":
     True, "label"} for one an administrator turned off (so the 401 can say
     so, #434); None for a secret that matches nothing."""
     if not bearer or not bearer.startswith(TOKEN_PREFIX):
@@ -69,6 +70,8 @@ def resolve(bearer: str) -> dict | None:
             "label": row.label,
             "role": row.role,
             "allow_backups": bool(row.allow_backups),
+            "allow_payroll": bool(row.allow_payroll),
+            "allow_imports": bool(row.allow_imports),
         }
     finally:
         db.close()

@@ -165,7 +165,7 @@ one more reason Server Edition is for trusted networks.
 A program (an AI agent, the receipt service, an import tool, a script) signs
 in with an API token instead of a password. An administrator makes one under
 **Settings → Users and security → API Tokens**: a label, a role and, if the program needs it,
-**Can make backups**. The secret (`sbp_…`) is shown once and kept only as a
+**Can make backups**, **Can run payroll** or **Can import**. The secret (`sbp_…`) is shown once and kept only as a
 SHA-256 hash, with its first ten characters as a hint in the list. The
 program sends it on every request as `Authorization: Bearer sbp_…`; no
 session cookie and no CSRF token are involved. Every change it makes is in
@@ -181,7 +181,8 @@ What a token can do:
 - Whatever its role allows: **bookkeeper** (daily books), **accountant**
   (reads everything but payroll, HR and employee records; posts journal
   entries) or **read-only** (reports and lookups), exactly as for a person
-  with that role. HR and payroll stay closed to all three.
+  with that role. HR and payroll stay closed to all three unless the token
+  is let run payroll (below).
 - With **Can make backups** ticked: make a backup (`POST /api/backups`), list
   this company's backups (`GET /api/backups`) and download one
   (`GET /api/backups/download/<file>`), on top of its role. A backup is the
@@ -189,12 +190,33 @@ What a token can do:
   so tick it only for a program you would hand the company file to. Only an
   administrator can tick or clear it, and the token list shows which tokens
   have it.
+- With **Can run payroll** ticked, on a bookkeeper token only (#755): every
+  method on pay runs, tax forms and their audit history, benefits and
+  deductions; employees listed and read with their pay fields, added and
+  edited, and their year-to-date pay and opening balance. Never a `DELETE`
+  under `/api/employees`, and never the self-service portal login or access,
+  direct-deposit bank accounts, the NACHA direct-deposit file (it carries
+  every employee's full routing and account number), I-9 and other documents,
+  E-Verify or onboarding (a new hire's onboarding checklist is still created,
+  as for any new employee, but the token can't read it): those are credentials
+  and identity papers, and stay with a signed-in administrator. An employee's
+  opening year-to-date figures can be set and replaced (they are what the
+  first pay run counts from), just not deleted. Tax forms include the vendor
+  1099s and the 1096. Running payroll includes its own deletes: a draft pay
+  run discarded, a benefit enrollment or a garnishment removed. Pay stubs and
+  W-2s carry pay and the last four of each Social Security number, so tick it
+  only for a program you would hand payroll to.
+- With **Can import** ticked, on a bookkeeper token only (#755): the migration
+  imports (`/api/migration`: sources, dry run, import). A QuickBooks Online
+  export's Employee Contact List comes in only when the token may also run
+  payroll; otherwise the import leaves it out and says so.
 
 What a token cannot do, whatever its role or permission:
 
 - Be an administrator. A new token is bookkeeper, accountant or read-only;
-  settings, users, tokens, companies, migration imports and HR stay with a
-  signed-in administrator.
+  settings, users, tokens and companies stay with a signed-in administrator,
+  and payroll, HR and the migration imports do too unless a bookkeeper token
+  is let run them.
 - Restore a backup. Restoring replaces the whole company, so it is done by an
   administrator signed in to SlowBooks Pro (Settings → Backups → Backup / Restore, or
   `POST /api/backups/restore` from that session). A tool that resets the books

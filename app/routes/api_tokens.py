@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models.api_tokens import ApiToken
-from app.models.users import ROLE_ADMIN, VALID_ROLES
+from app.models.users import ROLE_ADMIN, ROLE_BOOKKEEPER, VALID_ROLES
 from app.services.api_token_service import generate_token, hash_token
 
 
@@ -50,6 +50,10 @@ def _out(t: ApiToken) -> dict:
         "role": t.role,
         "is_active": t.is_active,
         "allow_backups": bool(t.allow_backups),
+        # what the gate honours: on any role but bookkeeper a stored grant
+        # gives nothing, so the list doesn't say it does (#755)
+        "allow_payroll": t.role == ROLE_BOOKKEEPER and bool(t.allow_payroll),
+        "allow_imports": t.role == ROLE_BOOKKEEPER and bool(t.allow_imports),
         "created_by": t.created_by,
         "created_at": _utc_iso(t.created_at),
         "last_used_at": _utc_iso(t.last_used_at),
@@ -65,12 +69,31 @@ class TokenCreate(StrictModel):
     # Make, list and download this company's backups on top of the role
     # (#434): an import tool's safety net. Never restore.
     allow_backups: bool = False
+    # Run payroll / run the migration imports on top of a bookkeeper's
+    # role (#755). Bookkeeper tokens only.
+    allow_payroll: bool = False
+    allow_imports: bool = False
 
 
 class TokenUpdate(StrictModel):
     is_active: Optional[bool] = None
     label: Optional[str] = Field(None, min_length=1, max_length=100)
     allow_backups: Optional[bool] = None
+    allow_payroll: Optional[bool] = None
+    allow_imports: Optional[bool] = None
+
+
+def _check_grants(role: str, allow_payroll: bool, allow_imports: bool) -> None:
+    """Payroll and imports are writes on top of the role (#755): a token
+    that may not write the books may not be given them."""
+    if (allow_payroll or allow_imports) and role != ROLE_BOOKKEEPER:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Only a bookkeeper token can run payroll or imports. Make a "
+                "bookkeeper token for the program that needs them."
+            ),
+        )
 
 
 @router.get("")
@@ -99,6 +122,7 @@ def create_token(payload: TokenCreate, request: Request, db: Session = Depends(g
                 "a signed-in administrator."
             ),
         )
+    _check_grants(payload.role, payload.allow_payroll, payload.allow_imports)
     if db.query(ApiToken).filter(ApiToken.label == label).first():
         raise HTTPException(status_code=409, detail="Label already exists")
     secret = generate_token()
@@ -109,6 +133,8 @@ def create_token(payload: TokenCreate, request: Request, db: Session = Depends(g
         role=payload.role,
         is_active=True,
         allow_backups=payload.allow_backups,
+        allow_payroll=payload.allow_payroll,
+        allow_imports=payload.allow_imports,
         created_by=request.session.get("username") or "operator",
     )
     db.add(row)
@@ -152,5 +178,10 @@ def update_token(
         row.is_active = False
     if payload.allow_backups is not None:
         row.allow_backups = payload.allow_backups
+    _check_grants(row.role, bool(payload.allow_payroll), bool(payload.allow_imports))
+    if payload.allow_payroll is not None:
+        row.allow_payroll = payload.allow_payroll
+    if payload.allow_imports is not None:
+        row.allow_imports = payload.allow_imports
     db.commit()
     return _out(row)

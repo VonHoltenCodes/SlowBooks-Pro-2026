@@ -29,7 +29,7 @@ from app.models.bank_accounts import (
     DepositType,
 )
 from app.models.payroll import Employee
-from app.routes._roles import is_admin
+from app.routes._roles import may_run_payroll
 from app.routes.attachments import (
     _sanitize_filename,
     ALLOWED_EXTENSIONS,
@@ -112,7 +112,7 @@ _EMPLOYEE_PRIVATE_DEFAULTS = {
 
 def _employee_view(emp: Employee, request: Request) -> dict:
     out = EmployeeResponse.model_validate(emp).model_dump()
-    if not is_admin(request):
+    if not may_run_payroll(request):
         out.update(_EMPLOYEE_PRIVATE_DEFAULTS)
     return out
 

@@ -453,9 +453,18 @@ def test_settings_leaves_a_bookkeeper_the_lists_and_templates():
         assert (sorted(kept - offered), sorted(offered - kept)) == ([], []), run
 
 
+# Fields an administrator sees disabled for a reason other than the role: the
+# new token's payroll and imports boxes lock until its role is bookkeeper
+# (#755), and the form opens on read-only.
+LOCKED_BY_ANOTHER_FIELD = {"token_new_allow_payroll", "token_new_allow_imports"}
+
+
 def test_settings_is_as_it_was_for_an_administrator():
     got = _probe()["settings"]["admin"]
-    assert got["fields"]["enabled"] == got["fields"]["names"]
+    assert got["fields"]["enabled"] == [
+        n for n in got["fields"]["names"] if n not in LOCKED_BY_ANOTHER_FIELD
+    ]
+    assert LOCKED_BY_ANOTHER_FIELD <= set(got["fields"]["names"])
     everything = (
         set(SETTINGS_KEPT)
         | set(SETTINGS_KEPT_PARTS)

@@ -27,7 +27,9 @@ Bearer sbp_…`) as bookkeeper, accountant or read-only, never administrator
 (since v2.29.0; one made as an administrator before then is refused since
 v2.31.2 and flagged in the list until revoked); a token cannot manage users
 or tokens or restore a backup, *Can make backups* lets it make, list and
-download them, the audit log names it `token:<label>`, a revoked token
+download them, *Can run payroll* and *Can import* let a bookkeeper token run
+payroll (never deleting an employee or touching portal logins, bank accounts
+or documents) and the migration imports, the audit log names it `token:<label>`, a revoked token
 answers 401, and on a server with several companies it names its company in
 `X-SlowBooks-Company`. Sign-ins end after four hours idle and when a user is
 deactivated, re-roled or given a new password. **A read never writes**: a

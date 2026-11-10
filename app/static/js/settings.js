@@ -1239,7 +1239,11 @@ const SettingsPage = {
                         change settings or restore a backup. Tick
                         <em>Can make backups</em> for a program that takes a backup
                         before it writes (an import tool); the token may then make,
-                        list and download this company's backups. A revoked token
+                        list and download this company's backups. A bookkeeper token
+                        can also be let <em>run payroll</em> (pay runs, tax forms,
+                        benefits, deductions, and employees added and edited, never
+                        deleted, with no portal logins, bank accounts or documents)
+                        or <em>import</em> (the migration imports). A revoked token
                         stays revoked: make a new one instead.
                     </p>
                     <div id="api-token-reveal" style="display:none; margin-bottom:12px; padding:10px; border:1px solid var(--qb-gold); border-radius:4px; background:rgba(224,158,36,0.08); font-size:12px;">
@@ -1254,7 +1258,7 @@ const SettingsPage = {
                         <div class="form-group"><label>Label</label>
                             <input id="token-new-label" autocomplete="off" placeholder="e.g. claude-code, receipt-service"></div>
                         <div class="form-group"><label>Role</label>
-                            <select id="token-new-role">
+                            <select id="token-new-role" onchange="SettingsPage.tokenGrantsFollowRole()">
                                 <option value="readonly">Read-only — reports and lookups</option>
                                 <option value="accountant">Accountant — reads everything, posts journal entries</option>
                                 <option value="bookkeeper">Bookkeeper — daily books, no admin</option>
@@ -1262,6 +1266,12 @@ const SettingsPage = {
                         <div class="form-group"><label style="font-weight:normal;">
                             <input type="checkbox" id="token-new-backups" name="token_new_allow_backups" style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can make backups (make, list and download; never restore)</label></div>
+                        <div class="form-group"><label style="font-weight:normal;">
+                            <input type="checkbox" id="token-new-payroll" name="token_new_allow_payroll" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
+                            Can run payroll (bookkeeper only; no deletes, portal logins, bank accounts or documents)</label></div>
+                        <div class="form-group"><label style="font-weight:normal;">
+                            <input type="checkbox" id="token-new-imports" name="token_new_allow_imports" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
+                            Can import (bookkeeper only; the migration imports)</label></div>
                     </div>
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
                 </div>
@@ -1836,6 +1846,9 @@ const SettingsPage = {
                 <td>${t.is_active
                     ? `<input type="checkbox" name="token-backups:${t.id}" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
                     : (t.allow_backups ? 'Yes' : 'No')}</td>
+                ${['payroll', 'imports'].map(k => `<td>${t.is_active && t.role === 'bookkeeper'
+                    ? `<input type="checkbox" name="token-${k}:${t.id}" aria-label="${escapeHtml(t.label)} can ${k === 'payroll' ? 'run payroll' : 'import'}" style="width:auto;" ${t['allow_' + k] ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_${k}: this.checked})">`
+                    : (t['allow_' + k] ? 'Yes' : 'No')}</td>`).join('')}
                 <td>${t.last_used_at ? formatDate(t.last_used_at) : '—'}</td>
                 <td>${t.is_active
                     ? `<button type="button" class="btn btn-sm btn-secondary" onclick="if (confirm('Revoke this token? A revoked token stays revoked.')) SettingsPage.updateApiToken(${t.id}, {is_active: false})" aria-label="Revoke ${escapeHtml(t.label)}">Revoke</button>`
@@ -1843,10 +1856,22 @@ const SettingsPage = {
                 </td>
             </tr>`).join('');
             $('#api-token-list').innerHTML = `<div class="table-container"><table>
-                <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Backups</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
+                <thead><tr><th scope="col">Label</th><th scope="col">Token</th><th scope="col">Role</th><th scope="col">Backups</th><th scope="col">Payroll</th><th scope="col">Imports</th><th scope="col">Last used</th><th scope="col"></th></tr></thead>
                 <tbody>${rows}</tbody></table></div>`;
             SettingsPage._showSection(section, true);
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
+    },
+
+    // Payroll and imports are a bookkeeper token's only (#755): the boxes
+    // clear and lock for any other role, so the form can't ask for them.
+    tokenGrantsFollowRole() {
+        const book = $('#token-new-role').value === 'bookkeeper';
+        for (const id of ['#token-new-payroll', '#token-new-imports']) {
+            const box = $(id);
+            if (!box) continue;
+            box.disabled = !book;
+            if (!book) box.checked = false;
+        }
     },
 
     async createApiToken() {
@@ -1855,11 +1880,15 @@ const SettingsPage = {
                 label: $('#token-new-label').value.trim(),
                 role: $('#token-new-role').value,
                 allow_backups: $('#token-new-backups').checked,
+                allow_payroll: $('#token-new-payroll').checked,
+                allow_imports: $('#token-new-imports').checked,
             });
             $('#api-token-secret').textContent = created.token;
             $('#api-token-reveal').style.display = '';
             $('#token-new-label').value = '';
             $('#token-new-backups').checked = false;
+            $('#token-new-payroll').checked = false;
+            $('#token-new-imports').checked = false;
             toast('Token created — press Copy below, it will not be shown again');
             SettingsPage.loadApiTokens();
         } catch (err) { toast(err.message, 'error'); }

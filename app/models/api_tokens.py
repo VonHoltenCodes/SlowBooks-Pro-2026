@@ -41,6 +41,16 @@ class ApiToken(Base):
     allow_backups = Column(
         Boolean, nullable=False, default=False, server_default=sa_false()
     )
+    # Run payroll on top of a bookkeeper's role (#755): pay runs, tax forms,
+    # benefits, deductions, and employees added and edited with their pay
+    # fields. Never deletes, portal logins, bank accounts or documents.
+    allow_payroll = Column(
+        Boolean, nullable=False, default=False, server_default=sa_false()
+    )
+    # Run the migration imports on top of a bookkeeper's role (#755).
+    allow_imports = Column(
+        Boolean, nullable=False, default=False, server_default=sa_false()
+    )
     created_by = Column(String(100), nullable=False, default="")
     created_at = Column(DateTime, default=_utcnow, nullable=False)
     last_used_at = Column(DateTime, nullable=True)

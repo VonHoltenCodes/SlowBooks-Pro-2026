@@ -9,9 +9,10 @@
 # remain as compatibility aliases; new sources exist only here.
 # ============================================================================
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.orm import Session
 
+from app.routes._roles import may_run_payroll
 from app.database import get_db
 from app.services import (
     gnucash_import,
@@ -397,7 +398,10 @@ async def migration_dry_run(
 
 @router.post("/{source}/import")
 async def migration_import(
-    source: str, files: list[UploadFile] = File(...), db: Session = Depends(get_db)
+    source: str,
+    request: Request,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
 ):
     _, module, chart_source = _source(source)
     classify = module.classify_filename
@@ -407,11 +411,23 @@ async def migration_import(
         getattr(module, "combine_same_kind", None),
         getattr(module, "same_kind_note", None),
     )
+    # Adding employees is HR (GHSA-rh75-6834-f66j): a token let import but
+    # not run payroll imports the books without the Employee Contact List,
+    # and says so (#755).
+    left_out = None
+    if "employees" in upload.bundle and not may_run_payroll(request):
+        upload.bundle.pop("employees")
+        left_out = (
+            "The Employee Contact List was left out: adding employees needs "
+            "an administrator, or a token that may also run payroll."
+        )
     try:
         result = module.run_import(db, upload.bundle)
     except DataProblem as e:
         raise _refused(db, e, upload, classify)
     result = _say_what_was_left(result, upload, classify)
+    if left_out:
+        result.setdefault("warnings", []).append(left_out)
     if result["ok"]:
         from datetime import date
 

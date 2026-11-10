@@ -2,6 +2,8 @@
 # Payroll tax forms — 941, 940, W-2 / W-3, state SUI, 1099-NEC / 1096
 # ============================================================================
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
@@ -15,6 +17,16 @@ from app.services.payroll_documents import employer_block
 from app.services.request_utils import content_disposition, file_name
 
 router = APIRouter(prefix="/api/tax-forms", tags=["tax-forms"])
+
+# A tax year the forms can be dated in: 99999 reached date() and answered a
+# 500 (#755 review; a payroll token can reach these routes now).
+TaxYear = Annotated[int, Query(ge=1900, le=9999)]
+
+
+def _employee_or_404(db: Session, employee_id: int) -> None:
+    """A W-2 for an employee who isn't on file is a 404, not a $0 form."""
+    if db.get(Employee, employee_id) is None:
+        raise HTTPException(status_code=404, detail="Employee not found")
 
 
 def _company(db: Session) -> dict:
@@ -42,16 +54,14 @@ def _check_quarter(quarter: int):
 
 # --- Form 941 — quarterly federal -----------------------------------------
 @router.get("/941")
-def get_941(
-    year: int = Query(...), quarter: int = Query(...), db: Session = Depends(get_db)
-):
+def get_941(year: TaxYear, quarter: int = Query(...), db: Session = Depends(get_db)):
     _check_quarter(quarter)
     return form_941.compute_941(db, year, quarter)
 
 
 @router.get("/941/pdf")
 def get_941_pdf(
-    year: int = Query(...), quarter: int = Query(...), db: Session = Depends(get_db)
+    year: TaxYear, quarter: int = Query(...), db: Session = Depends(get_db)
 ):
     _check_quarter(quarter)
     pdf = form_941.generate_941_pdf(db, year, quarter, _company(db))
@@ -60,19 +70,19 @@ def get_941_pdf(
 
 # --- Form 940 — annual FUTA ------------------------------------------------
 @router.get("/940")
-def get_940(year: int = Query(...), db: Session = Depends(get_db)):
+def get_940(year: TaxYear, db: Session = Depends(get_db)):
     return form_940.compute_940(db, year)
 
 
 @router.get("/940/pdf")
-def get_940_pdf(year: int = Query(...), db: Session = Depends(get_db)):
+def get_940_pdf(year: TaxYear, db: Session = Depends(get_db)):
     pdf = form_940.generate_940_pdf(db, year, _company(db))
     return _pdf(pdf, "940", year)
 
 
 # --- W-2 / W-3 -------------------------------------------------------------
 @router.get("/w2")
-def get_all_w2(year: int = Query(...), db: Session = Depends(get_db)):
+def get_all_w2(year: TaxYear, db: Session = Depends(get_db)):
     return {
         "year": year,
         "w3": w2_w3.compute_w3(db, year),
@@ -81,12 +91,14 @@ def get_all_w2(year: int = Query(...), db: Session = Depends(get_db)):
 
 
 @router.get("/w2/{employee_id}")
-def get_w2(employee_id: int, year: int = Query(...), db: Session = Depends(get_db)):
+def get_w2(employee_id: int, year: TaxYear, db: Session = Depends(get_db)):
+    _employee_or_404(db, employee_id)
     return w2_w3.compute_w2(db, year, employee_id)
 
 
 @router.get("/w2/{employee_id}/pdf")
-def get_w2_pdf(employee_id: int, year: int = Query(...), db: Session = Depends(get_db)):
+def get_w2_pdf(employee_id: int, year: TaxYear, db: Session = Depends(get_db)):
+    _employee_or_404(db, employee_id)
     pdf = w2_w3.generate_w2_pdf(db, year, employee_id, _company(db))
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     return _pdf(pdf, "W-2", year, emp.full_name if emp else None)
@@ -95,7 +107,7 @@ def get_w2_pdf(employee_id: int, year: int = Query(...), db: Session = Depends(g
 # --- State unemployment ----------------------------------------------------
 @router.get("/sui")
 def get_sui(
-    year: int = Query(...),
+    year: TaxYear,
     quarter: int = Query(...),
     state: str = Query(default=None),
     db: Session = Depends(get_db),
@@ -107,7 +119,7 @@ def get_sui(
 # --- Quarterly tax liability schedule --------------------------------------
 @router.get("/liability")
 def get_tax_liability(
-    year: int = Query(...), quarter: int = Query(...), db: Session = Depends(get_db)
+    year: TaxYear, quarter: int = Query(...), db: Session = Depends(get_db)
 ):
     """What payroll tax is owed for the quarter, and when it is due."""
     _check_quarter(quarter)
@@ -116,7 +128,7 @@ def get_tax_liability(
 
 # --- 1099-NEC / 1096 -------------------------------------------------------
 @router.get("/1099")
-def get_1099(year: int = Query(...), db: Session = Depends(get_db)):
+def get_1099(year: TaxYear, db: Session = Depends(get_db)):
     return {
         "year": year,
         "threshold": float(form_1099.nec_threshold(year)),
@@ -126,7 +138,7 @@ def get_1099(year: int = Query(...), db: Session = Depends(get_db)):
 
 
 @router.get("/1099/{vendor_id}/pdf")
-def get_1099_pdf(vendor_id: int, year: int = Query(...), db: Session = Depends(get_db)):
+def get_1099_pdf(vendor_id: int, year: TaxYear, db: Session = Depends(get_db)):
     try:
         pdf = form_1099.generate_1099_nec_pdf(db, year, vendor_id, _company(db))
     except ValueError as e:
@@ -139,6 +151,6 @@ def get_1099_pdf(vendor_id: int, year: int = Query(...), db: Session = Depends(g
 
 
 @router.get("/1096/pdf")
-def get_1096_pdf(year: int = Query(...), db: Session = Depends(get_db)):
+def get_1096_pdf(year: TaxYear, db: Session = Depends(get_db)):
     pdf = form_1099.generate_1096_pdf(db, year, _company(db))
     return _pdf(pdf, "1096", year)
