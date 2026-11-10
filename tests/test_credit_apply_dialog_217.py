@@ -47,7 +47,7 @@ def test_the_apply_credit_dialogs_check_every_row_and_say_what_was_applied():
         {"invoice_id": 1163, "amount": 0.01},
     ]
     assert mid["toast"] == [
-        "Invoice 1163: Amount exceeds credit balance $0.50 to invoice 1164 was "
+        "Invoice 1163: Amount exceeds credit balance. $0.50 to invoice 1164 was "
         "applied before it; the dialog shows what remains now.",
         "error",
     ]
@@ -71,6 +71,6 @@ def test_the_apply_credit_dialogs_check_every_row_and_say_what_was_applied():
         {"bill_id": 52, "amount": 0.01},
     ]
     assert vc["toast"][0].startswith(
-        "Bill B-52: Amount exceeds credit balance $0.50 to bill B-51 was applied before it"
+        "Bill B-52: Amount exceeds credit balance. $0.50 to bill B-51 was applied before it"
     )
     assert vc["reopened"] == 2 and vc["open"] is True

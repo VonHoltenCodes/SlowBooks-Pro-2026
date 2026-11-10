@@ -399,6 +399,11 @@ const CreditApply = {
             ? ` ${applied.map(r => `${formatCurrency(r.amount)} to ${noun} ${r.label}`).join(', ')} ${applied.length === 1 ? 'was' : 'were'} applied before it; the dialog shows what remains now.`
             : ' Nothing was applied.';
         const cap = noun.charAt(0).toUpperCase() + noun.slice(1);
-        return `${cap} ${row.label}: ${err.message}${before}`;
+        // The routes' sentences ("Amount exceeds credit balance") carry no
+        // full stop; without one the figure that follows read as the balance
+        // (2.31.11 gate, #757).
+        const said = String(err && err.message || 'The server refused it').trim();
+        const sentence = /[.!?]$/.test(said) ? said : `${said}.`;
+        return `${cap} ${row.label}: ${sentence}${before}`;
     },
 };
