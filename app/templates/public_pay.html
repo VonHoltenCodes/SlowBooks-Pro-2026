@@ -135,6 +135,7 @@
             </div>
             {% endif %}
 
+            {% set cur = document_currency_code(inv, company) %}
             <table class="detail-table">
                 <tr><td>Invoice Date</td><td>{{ inv.date }}</td></tr>
                 {% if inv.due_date %}
@@ -144,16 +145,16 @@
                 <tr><td>Terms</td><td>{{ inv.terms }}</td></tr>
                 {% endif %}
                 {% if release_only %}
-                <tr><td>Retainage release{% if pay_application_number %}, {{ pay_application_number }}{% endif %}</td><td>${{ "%.2f"|format(inv.retainage_released|float) }}</td></tr>
+                <tr><td>Retainage release{% if pay_application_number %}, {{ pay_application_number }}{% endif %}</td><td>{{ inv.retainage_released | currency(cur) }}</td></tr>
                 {% else %}
-                <tr><td>Invoice Total</td><td>${{ "%.2f"|format(inv.total|float) }}</td></tr>
+                <tr><td>Invoice Total</td><td>{{ inv.total | currency(cur) }}</td></tr>
                 {% endif %}
                 {% if inv.amount_paid|float > 0 %}
-                <tr><td>Amount Paid</td><td>${{ "%.2f"|format(inv.amount_paid|float) }}</td></tr>
+                <tr><td>Amount Paid</td><td>{{ inv.amount_paid | currency(cur) }}</td></tr>
                 {% endif %}
                 <tr class="balance-row">
                     <td>Balance Due</td>
-                    <td>${{ "%.2f"|format(inv.balance_due|float) }}</td>
+                    <td>{{ inv.balance_due | currency(cur) }}</td>
                 </tr>
             </table>
 
@@ -169,7 +170,7 @@
             {% for p in providers %}
             <button id="pay-btn-{{ p.name }}" class="pay-btn" data-provider="{{ p.name }}"
                     onclick="startCheckout('{{ p.name }}')">
-                Pay ${{ "%.2f"|format(inv.balance_due|float) }}{% if providers|length > 1 %} with {{ p.display_name }}{% endif %}
+                Pay {{ inv.balance_due | currency(cur) }}{% if providers|length > 1 %} with {{ p.display_name }}{% endif %}
             </button>
             {% endfor %}
             {% endif %}

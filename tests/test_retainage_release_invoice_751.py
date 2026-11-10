@@ -159,7 +159,7 @@ def test_the_pay_page_names_the_release_not_a_zero_total(
     page = client.get(f"/pay/{token}")
     assert page.status_code == 200, page.text[:200]
     assert f"Retainage release, {number}" in page.text
-    assert "$3000.00" in page.text
+    assert "$3,000.00" in page.text
     assert "Invoice Total" not in page.text
 
 
