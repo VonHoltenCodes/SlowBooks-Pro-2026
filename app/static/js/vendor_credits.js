@@ -265,12 +265,12 @@ const VendorCreditsPage = {
                 <td>${escapeHtml(b.bill_number)}</td>
                 <td>${formatDate(b.date)}</td>
                 <td class="amount">${formatCurrency(b.balance_due)}</td>
-                <td><input type="number" step="0.01" class="vc-apply-amt money" data-bill="${b.id}" value="0" style="width:90px;"></td>
+                <td><input type="number" step="0.01" class="vc-apply-amt money" data-bill="${b.id}" data-label="${escapeHtml(b.bill_number)}" data-balance="${b.balance_due}" value="0" style="width:90px;"></td>
             </tr>`).join('');
         if (!rows) rows = '<tr><td colspan="4">No open bills for this vendor. The credit stays on their account until there is one.</td></tr>';
 
         openModal(`Apply Credit ${escapeHtml(vc.credit_number)}`, `
-            <p style="margin-bottom:8px;">Credit remaining: <strong>${formatCurrency(vc.balance_remaining)}</strong></p>
+            <p style="margin-bottom:8px;">Credit remaining: <strong id="vc-apply-remaining" data-remaining="${vc.balance_remaining}">${formatCurrency(vc.balance_remaining)}</strong></p>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">Bill</th><th scope="col">Date</th><th scope="col" class="amount">Balance</th><th scope="col" class="amount">Apply</th></tr></thead>
                 <tbody>${rows}</tbody>
@@ -281,21 +281,23 @@ const VendorCreditsPage = {
             </div>`);
     },
 
+    // Every row is checked before anything is sent (NEW-217, with the
+    // credit memo's dialog: CreditApply in credit_memos.js); a refusal
+    // mid-way says what was applied before it and reopens the dialog.
     async doApply(vcId) {
-        const inputs = $$('.vc-apply-amt');
-        let applied = 0;
-        for (const input of inputs) {
-            const amt = parseFloat(input.value) || 0;
-            if (amt > 0) {
-                try {
-                    await API.post(`/vendor-credits/${vcId}/apply`, {
-                        bill_id: parseInt(input.dataset.bill), amount: amt,
-                    });
-                    applied += amt;
-                } catch (err) { toast(err.message, 'error'); return; }
+        const rows = CreditApply.rows($$('.vc-apply-amt'), $('#vc-apply-remaining'), 'Bill');
+        if (!rows) return;
+        const applied = [];
+        for (const row of rows) {
+            try {
+                await API.post(`/vendor-credits/${vcId}/apply`, { bill_id: row.id, amount: row.amount });
+                applied.push(row);
+            } catch (err) {
+                toast(CreditApply.failed(row, err, applied, 'bill'), 'error');
+                await VendorCreditsPage.showApply(vcId);
+                return;
             }
         }
-        if (!applied) { toast('Enter an amount to apply', 'error'); return; }
         toast('Credit applied');
         closeModal();
         App.navigate('#/vendor-credits');

@@ -317,12 +317,12 @@ const CreditMemosPage = {
             <tr>
                 <td>${escapeHtml(inv.invoice_number)}</td>
                 <td class="amount">${formatCurrency(inv.balance_due)}</td>
-                <td><input type="number" step="0.01" class="apply-amt money" data-inv="${inv.id}" value="0" style="width:80px;"></td>
+                <td><input type="number" step="0.01" class="apply-amt money" data-inv="${inv.id}" data-label="${escapeHtml(inv.invoice_number)}" data-balance="${inv.balance_due}" value="0" style="width:80px;"></td>
             </tr>`).join('');
         if (!rows) rows = '<tr><td colspan="3">No open invoices for this customer</td></tr>';
 
         openModal(`Apply Credit ${cm.memo_number}`, `
-            <p style="margin-bottom:8px;">Credit remaining: <strong>${formatCurrency(cm.balance_remaining)}</strong></p>
+            <p style="margin-bottom:8px;">Credit remaining: <strong id="cm-apply-remaining" data-remaining="${cm.balance_remaining}">${formatCurrency(cm.balance_remaining)}</strong></p>
             <div class="table-container"><table>
                 <thead><tr><th scope="col">${T('Invoice')}</th><th scope="col" class="amount">Balance</th><th scope="col" class="amount">Apply</th></tr></thead>
                 <tbody>${rows}</tbody>
@@ -333,20 +333,72 @@ const CreditMemosPage = {
             </div>`);
     },
 
+    // Every row is checked before anything is sent, so a bad row does not
+    // leave the rows above it applied behind a dialog that still shows the
+    // old remaining (2.31.11 gate, NEW-217: a second Apply then applied them
+    // again). A refusal from the server mid-way says what was applied before
+    // it and opens the dialog again on what remains now.
     async doApply(cmId) {
-        const inputs = $$('.apply-amt');
-        for (const input of inputs) {
-            const amt = parseFloat(input.value) || 0;
-            if (amt > 0) {
-                try {
-                    await API.post(`/credit-memos/${cmId}/apply`, {
-                        invoice_id: parseInt(input.dataset.inv), amount: amt,
-                    });
-                } catch (err) { toast(err.message, 'error'); return; }
+        const rows = CreditApply.rows($$('.apply-amt'), $('#cm-apply-remaining'), T('Invoice'));
+        if (!rows) return;
+        const applied = [];
+        for (const row of rows) {
+            try {
+                await API.post(`/credit-memos/${cmId}/apply`, { invoice_id: row.id, amount: row.amount });
+                applied.push(row);
+            } catch (err) {
+                toast(CreditApply.failed(row, err, applied, T('invoice')), 'error');
+                await CreditMemosPage.showApply(cmId);
+                return;
             }
         }
         toast('Credit applied');
         closeModal();
         App.navigate('#/credit-memos');
+    },
+};
+
+// What the two Apply Credit dialogs (a credit memo's, a vendor credit's)
+// share: the rows read and checked before a request goes out, and the
+// sentence when the server refuses one part-way (NEW-217).
+const CreditApply = {
+    // The rows with an amount: [{id, amount, label}], or null after a toast
+    // when a row is not in whole cents, is more than its document's balance,
+    // the rows together are more than the credit remaining, or nothing was
+    // entered. Nothing is sent in those cases.
+    rows(inputs, remainingEl, noun) {
+        const rows = [];
+        for (const input of inputs) {
+            const raw = String(input.value || '').trim();
+            const amt = parseFloat(raw) || 0;
+            if (amt <= 0) continue;
+            const label = input.dataset.label || input.dataset.inv || input.dataset.bill || '';
+            if (Math.abs(Math.round(amt * 100) - amt * 100) > 1e-6) {
+                toast(`${noun} ${label}: an amount is in whole cents; ${raw} isn't. Nothing was applied.`, 'error');
+                return null;
+            }
+            const balance = parseFloat(input.dataset.balance);
+            if (!isNaN(balance) && amt > balance + 1e-9) {
+                toast(`${noun} ${label}: ${formatCurrency(amt)} is more than its ${formatCurrency(balance)} balance. Nothing was applied.`, 'error');
+                return null;
+            }
+            rows.push({ id: parseInt(input.dataset.inv || input.dataset.bill), amount: Math.round(amt * 100) / 100, label });
+        }
+        if (!rows.length) { toast('Enter an amount to apply', 'error'); return null; }
+        const remaining = remainingEl && remainingEl.dataset ? parseFloat(remainingEl.dataset.remaining) : NaN;
+        const total = rows.reduce((sum, r) => sum + r.amount, 0);
+        if (!isNaN(remaining) && total > remaining + 1e-9) {
+            toast(`${formatCurrency(total)} is more than the ${formatCurrency(remaining)} of credit remaining. Nothing was applied.`, 'error');
+            return null;
+        }
+        return rows;
+    },
+    // The server refused a row: its sentence, and what was applied before it.
+    failed(row, err, applied, noun) {
+        const before = applied.length
+            ? ` ${applied.map(r => `${formatCurrency(r.amount)} to ${noun} ${r.label}`).join(', ')} ${applied.length === 1 ? 'was' : 'were'} applied before it; the dialog shows what remains now.`
+            : ' Nothing was applied.';
+        const cap = noun.charAt(0).toUpperCase() + noun.slice(1);
+        return `${cap} ${row.label}: ${err.message}${before}`;
     },
 };
