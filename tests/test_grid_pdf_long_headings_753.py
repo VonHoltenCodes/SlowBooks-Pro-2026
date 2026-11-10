@@ -76,14 +76,17 @@ def test_every_job_column_and_the_total_print(client, db_session, long_jobs, siz
     # No job and twelve jobs: eight columns a page, then the rest
     assert len(pages) == 2
     # Text past the page's right edge is still in the PDF (extract_text
-    # finds it), just not on paper, so place each amount by its x.
+    # finds it), just not on paper, so place each amount by its x: the
+    # text matrix's origin through the current transform (the pages are
+    # not rotated; the test asserts so).
+    assert all(not page.get("/Rotate") for page in pages)
     on_page = []
     for page in pages:
         width = float(page.mediabox.width)
         page.extract_text(
             visitor_text=lambda text, cm, tm, *_: (
                 on_page.append(text.strip())
-                if text.strip() and 0 <= cm[4] + tm[4] * cm[0] < width
+                if text.strip() and 0 <= cm[0] * tm[4] + cm[2] * tm[5] + cm[4] < width
                 else None
             )
         )
