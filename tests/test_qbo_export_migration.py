@@ -315,6 +315,36 @@ def test_two_trial_balance_files_read_the_accrual_one_and_make_no_account_of_the
     assert "All Dates" not in names and "Trial Balance" not in names
 
 
+def test_three_trial_balance_files_get_one_sentence_that_counts_them(
+    client, db_session, seed_accounts
+):
+    """2.31.11 gate, W-135: a note per extra file said "Two" twice with
+    three Trial Balances. One sentence per kind now, counting the files and
+    naming every one set aside."""
+    accrual = (FIXTURES / "Trial_balance_accrual.csv").read_text()
+    cash = (FIXTURES / "Trial_balance.csv").read_text()
+    files = _csv_files(BUNDLE) + [
+        (
+            "files",
+            ("Trial_balance_accrual.csv", io.BytesIO(accrual.encode()), "text/csv"),
+        ),
+        ("files", ("Trial_balance_copy.csv", io.BytesIO(cash.encode()), "text/csv")),
+    ]
+    data = client.post("/api/migration/qbo_export/dry-run", files=files).json()
+    assert data["ok"] is True, data["errors"]
+    notes = [
+        w for w in data["warnings"] if "Trial Balance files were in the upload" in w
+    ]
+    assert notes == [
+        "Three Trial Balance files were in the upload: Trial_balance_accrual.csv "
+        "(accrual basis) was read and Trial_balance.csv (cash basis) and "
+        "Trial_balance_copy.csv (cash basis) set aside; the import reads one Trial Balance."
+    ], data["warnings"]
+    assert not any(
+        "'All Dates'" in w or "'Trial Balance'" in w for w in data["warnings"]
+    )
+
+
 def test_the_workbooks_and_the_zip_read_the_same_as_the_csvs(
     client, db_session, seed_accounts
 ):

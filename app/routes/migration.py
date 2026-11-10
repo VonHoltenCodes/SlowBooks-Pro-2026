@@ -242,14 +242,14 @@ class Upload:
 
 
 async def bundle_from_uploads(
-    files: list[UploadFile], classify, combine=None
+    files: list[UploadFile], classify, combine=None, note_for=None
 ) -> Upload:
     bundle: dict[str, str] = {}
     unrecognized = []
     left_out = []
     names = []
-    notes: list[str] = []
     kept_names: dict[str, str] = {}
+    set_aside: dict[str, list] = {}
     for file in files:
         content = await read_limited(file, label=f"Migration file {file.filename}")
         zipped = (file.filename or "").lower().endswith(".zip")
@@ -269,12 +269,22 @@ async def bundle_from_uploads(
                     text = data.decode("utf-8-sig")
                 except UnicodeDecodeError:
                     text = data.decode("latin-1")
-            _add_to_bundle(bundle, kind, name, text, combine, notes, kept_names)
+            _add_to_bundle(bundle, kind, name, text, combine, set_aside, kept_names)
     if unrecognized:
         raise HTTPException(
             status_code=400,
             detail=_unclassified_text(left_out + unrecognized, classify, names),
         )
+    # one sentence per kind that kept one file, however many came (W-135)
+    notes: list[str] = []
+    for kind, others in set_aside.items():
+        note = (
+            note_for(kind, kept_names.get(kind), bundle[kind], others)
+            if note_for
+            else None
+        )
+        if note:
+            notes.append(note)
     return Upload(bundle, names, left_out, notes)
 
 
@@ -304,27 +314,25 @@ def _add_to_bundle(
     name: str,
     text: str,
     combine=None,
-    notes: list[str] | None = None,
+    set_aside: dict[str, list] | None = None,
     kept_names: dict[str, str] | None = None,
 ) -> None:
     if True:
         if kind in bundle and combine is not None:
             # the source may know what two files of this kind mean (one
             # Trial Balance is read, W-133); None leaves the joining below
-            chosen = combine(
-                kind,
-                bundle[kind],
-                (kept_names or {}).get(kind, "the first file"),
-                text,
-                name,
-            )
+            kept_name = (kept_names or {}).get(kind, "the first file")
+            chosen = combine(kind, bundle[kind], kept_name, text, name)
             if chosen is not None:
-                chosen_text, note = chosen
-                if kept_names is not None and chosen_text is text:
-                    kept_names[kind] = name
+                chosen_text, chosen_name = chosen
+                other = (
+                    (kept_name, bundle[kind]) if chosen_text is text else (name, text)
+                )
+                if set_aside is not None:
+                    set_aside.setdefault(kind, []).append(other)
+                if kept_names is not None:
+                    kept_names[kind] = chosen_name
                 bundle[kind] = chosen_text
-                if notes is not None and note:
-                    notes.append(note)
                 return
         if kind in bundle:
             # Multiple files of one kind (MYOB exports journals per type):
@@ -375,7 +383,10 @@ async def migration_dry_run(
     _, module, _ = _source(source)
     classify = module.classify_filename
     upload = await bundle_from_uploads(
-        files, classify, getattr(module, "combine_same_kind", None)
+        files,
+        classify,
+        getattr(module, "combine_same_kind", None),
+        getattr(module, "same_kind_note", None),
     )
     try:
         result = module.dry_run(db, upload.bundle)
@@ -391,7 +402,10 @@ async def migration_import(
     _, module, chart_source = _source(source)
     classify = module.classify_filename
     upload = await bundle_from_uploads(
-        files, classify, getattr(module, "combine_same_kind", None)
+        files,
+        classify,
+        getattr(module, "combine_same_kind", None),
+        getattr(module, "same_kind_note", None),
     )
     try:
         result = module.run_import(db, upload.bundle)

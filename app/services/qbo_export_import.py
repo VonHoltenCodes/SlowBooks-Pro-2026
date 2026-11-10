@@ -589,36 +589,41 @@ def combine_same_kind(kind, kept_text, kept_name, new_text, new_name):
     (MYOB exports journals per type), but a Trial Balance is one report: a
     second one's title rows, "Trial Balance" and "All Dates", read as
     expense accounts at 0.00 once joined (2.31.11 gate, W-133). One is
-    kept, the accrual one where the two differ, and the dry run says so.
-    None leaves the route's joining to every other kind."""
+    kept, the accrual one where the two differ; the route notes the file
+    set aside and asks same_kind_note for the one sentence (W-135: a note
+    per extra file said "Two" twice with three files). None leaves the
+    route's joining to every other kind."""
     if kind != "tb":
         return None
-    kept_basis = trial_balance_basis(kept_text)
-    new_basis = trial_balance_basis(new_text)
-    if new_basis == "accrual" and kept_basis != "accrual":
-        chosen, chosen_name, other_name, other_basis = (
-            new_text,
-            new_name,
-            kept_name,
-            kept_basis,
-        )
-    else:
-        chosen, chosen_name, other_name, other_basis = (
-            kept_text,
-            kept_name,
-            new_name,
-            new_basis,
-        )
+    if (
+        trial_balance_basis(new_text) == "accrual"
+        and trial_balance_basis(kept_text) != "accrual"
+    ):
+        return new_text, new_name
+    return kept_text, kept_name
 
-    def basis_words(basis):
-        return f" ({basis} basis)" if basis else ""
 
-    note = (
-        f"Two Trial Balance files were in the upload: {chosen_name}"
-        f"{basis_words(trial_balance_basis(chosen))} was read and {other_name}"
-        f"{basis_words(other_basis)} set aside; the import reads one Trial Balance."
+def _basis_words(text):
+    basis = trial_balance_basis(text)
+    return f" ({basis} basis)" if basis else ""
+
+
+def same_kind_note(kind, kept_name, kept_text, set_aside):
+    """The dry run's sentence for a kind that keeps one file: how many
+    came, which was read, which were set aside (name and basis each)."""
+    if kind != "tb" or not set_aside:
+        return None
+    count = len(set_aside) + 1
+    words = {2: "Two", 3: "Three", 4: "Four", 5: "Five"}.get(count, str(count))
+    aside = [f"{name}{_basis_words(text)}" for name, text in set_aside]
+    listed = (
+        aside[0] if len(aside) == 1 else ", ".join(aside[:-1]) + f" and {aside[-1]}"
     )
-    return chosen, note
+    return (
+        f"{words} Trial Balance files were in the upload: {kept_name}"
+        f"{_basis_words(kept_text)} was read and {listed} set aside; "
+        "the import reads one Trial Balance."
+    )
 
 
 def parse_tb(csv_text: str) -> tuple[dict, list[str]]:
