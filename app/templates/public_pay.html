@@ -143,7 +143,11 @@
                 {% if inv.terms %}
                 <tr><td>Terms</td><td>{{ inv.terms }}</td></tr>
                 {% endif %}
+                {% if release_only %}
+                <tr><td>Retainage release{% if pay_application_number %}, {{ pay_application_number }}{% endif %}</td><td>${{ "%.2f"|format(inv.retainage_released|float) }}</td></tr>
+                {% else %}
                 <tr><td>Invoice Total</td><td>${{ "%.2f"|format(inv.total|float) }}</td></tr>
+                {% endif %}
                 {% if inv.amount_paid|float > 0 %}
                 <tr><td>Amount Paid</td><td>${{ "%.2f"|format(inv.amount_paid|float) }}</td></tr>
                 {% endif %}

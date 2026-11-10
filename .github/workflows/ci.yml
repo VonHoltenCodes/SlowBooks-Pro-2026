@@ -265,7 +265,9 @@ jobs:
           # skip as one where playwright is absent (v2.31.11:
           # test_browser_expense_edit.py for #745/#746 and
           # test_browser_encryption_dialog.py for Discussion #750).
-          MAX_SKIPS: "240"
+          # 245 with the retainage-release invoice PDF tests (#751,
+          # test_retainage_release_invoice_751.py, five WeasyPrint renders).
+          MAX_SKIPS: "245"
         shell: pwsh
         run: |
           # -v names each test as it starts, so a mid-run death is identified

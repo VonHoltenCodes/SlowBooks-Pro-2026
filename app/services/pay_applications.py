@@ -752,3 +752,28 @@ class _Row:
         self.stored = stored
         self.is_taxable = is_taxable
         self.prior_stored = prior_stored
+
+
+def pay_application_number(db, invoice):
+    """The pay application number (PA-8-03) an invoice came from, else None
+    (#751)."""
+    if db is None or not invoice.pay_application_id:
+        return None
+    from app.models.pay_applications import PayApplication
+
+    app = db.get(PayApplication, invoice.pay_application_id)
+    return app.number if app else None
+
+
+def invoice_is_release_only(invoice) -> bool:
+    """A pay application's invoice that bills only released retainage: no
+    lines, a zero total, no tax and no retainage held, and a positive release
+    (#751). A voided one still qualifies, as a voided invoice keeps printing
+    its lines."""
+    return (
+        not invoice.lines
+        and not (invoice.total or 0)
+        and not (invoice.tax_amount or 0)
+        and not (invoice.retainage_held or 0)
+        and (invoice.retainage_released or 0) > 0
+    )
