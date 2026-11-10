@@ -1265,13 +1265,13 @@ const SettingsPage = {
                                 <option value="bookkeeper">Bookkeeper — daily books, no admin</option>
                             </select></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-backups" name="token_new_allow_backups" style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-backups" style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can make backups (make, list and download; never restore)</label></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-payroll" name="token_new_allow_payroll" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-payroll" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can run payroll (bookkeeper only; no deletes, portal logins, bank accounts or documents)</label></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-imports" name="token_new_allow_imports" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-imports" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can import (bookkeeper only; the migration imports)</label></div>
                     </div>
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
@@ -1845,10 +1845,10 @@ const SettingsPage = {
                 <td style="font-family:var(--font-mono); font-size:10px;">${escapeHtml(t.token_hint)}&hellip;</td>
                 <td>${escapeHtml(t.role)}${t.refused ? `<div style="font-size:10px;color:var(--text-danger)">no longer accepted: tokens can't be administrators. Revoke it and make a bookkeeper, accountant or read-only token (tick Can make backups if it makes backups). Settings, payroll and HR need an administrator signed in.</div>` : ''}</td>
                 <td>${t.is_active
-                    ? `<input type="checkbox" name="token-backups:${t.id}" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
+                    ? `<input type="checkbox" aria-label="${escapeHtml(t.label)} can make backups" style="width:auto;" ${t.allow_backups ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_backups: this.checked})">`
                     : (t.allow_backups ? 'Yes' : 'No')}</td>
                 ${['payroll', 'imports'].map(k => `<td>${t.is_active && t.role === 'bookkeeper'
-                    ? `<input type="checkbox" name="token-${k}:${t.id}" aria-label="${escapeHtml(t.label)} can ${k === 'payroll' ? 'run payroll' : 'import'}" style="width:auto;" ${t['allow_' + k] ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_${k}: this.checked})">`
+                    ? `<input type="checkbox" aria-label="${escapeHtml(t.label)} can ${k === 'payroll' ? 'run payroll' : 'import'}" style="width:auto;" ${t['allow_' + k] ? 'checked' : ''} onchange="SettingsPage.updateApiToken(${t.id}, {allow_${k}: this.checked})">`
                     : (t['allow_' + k] ? 'Yes' : 'No')}</td>`).join('')}
                 <td>${t.last_used_at ? formatDate(t.last_used_at) : '—'}</td>
                 <td>${t.is_active

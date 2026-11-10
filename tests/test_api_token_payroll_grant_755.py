@@ -273,8 +273,9 @@ def test_the_create_form_locks_the_grants_to_a_bookkeeper():
     from pathlib import Path
 
     js = Path("app/static/js/settings.js").read_text(encoding="utf-8")
-    assert 'id="token-new-payroll" name="token_new_allow_payroll" disabled' in js
-    assert 'id="token-new-imports" name="token_new_allow_imports" disabled' in js
+    # locked, and no Settings field: Create Token reads them by id (NEW-221)
+    assert '<input type="checkbox" id="token-new-payroll" disabled' in js
+    assert '<input type="checkbox" id="token-new-imports" disabled' in js
     assert 'onchange="SettingsPage.tokenGrantsFollowRole()"' in js
 
 
