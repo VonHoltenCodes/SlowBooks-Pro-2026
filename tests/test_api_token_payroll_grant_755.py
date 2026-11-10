@@ -147,7 +147,12 @@ def test_only_a_bookkeeper_token_gets_payroll_or_imports(client):
 
 def test_an_import_token_reaches_the_imports_and_not_payroll(client):
     api = _bearer(_mint(client, "importer", allow_imports=True)["token"])
+    plain = _bearer(_mint(client, "no-imports")["token"])
+    # any bookkeeper reads the sources; the grant shows on a write, where an
+    # import token gets past the gate to the route's own 422
     assert api.get("/api/migration/sources").status_code == 200
+    assert plain.post("/api/migration/qbo/dry-run", json={}).status_code == 403
+    assert api.post("/api/migration/qbo/dry-run", json={}).status_code == 422
     assert api.get("/api/payroll").status_code == 403
     assert api.put("/api/settings", json={"invoice_prefix": "X-"}).status_code == 403
 
@@ -271,3 +276,38 @@ def test_the_create_form_locks_the_grants_to_a_bookkeeper():
     assert 'id="token-new-payroll" name="token_new_allow_payroll" disabled' in js
     assert 'id="token-new-imports" name="token_new_allow_imports" disabled' in js
     assert 'onchange="SettingsPage.tokenGrantsFollowRole()"' in js
+
+
+def test_a_prefix_grants_only_its_own_segments():
+    from app.main import _is_token_payroll_route
+
+    assert _is_token_payroll_route("GET", "/api/payroll")
+    assert _is_token_payroll_route("GET", "/api/payroll/3")
+    assert not _is_token_payroll_route("GET", "/api/payrollx")
+    assert not _is_token_payroll_route("GET", "/api/payroll-export")
+    assert not _is_token_payroll_route("GET", "/api/benefits-admin")
+
+
+def test_the_migration_adds_and_removes_the_two_columns(tmp_path):
+    import sqlite3
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    root = Path(__file__).resolve().parents[1]
+    cfg = Config(str(root / "alembic.ini"))
+    cfg.set_main_option("script_location", str(root / "migrations"))
+    db = tmp_path / "tokens.db"
+    cfg.attributes["database_url"] = "sqlite:///" + db.as_posix()
+
+    def columns():
+        with sqlite3.connect(db) as conn:
+            return {r[1] for r in conn.execute("PRAGMA table_info(api_tokens)")}
+
+    command.upgrade(cfg, "f3b9d2e6a1c7")
+    assert {"allow_payroll", "allow_imports"} <= columns()
+    command.downgrade(cfg, "e2b6c4d8f0a3")
+    assert not {"allow_payroll", "allow_imports"} & columns()
+    command.upgrade(cfg, "head")
+    assert {"allow_payroll", "allow_imports"} <= columns()

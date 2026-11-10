@@ -1181,10 +1181,16 @@ _TOKEN_PAYROLL_EMPLOYEE_RE = _re.compile(
 _TOKEN_PAYROLL_NEVER_RE = _re.compile(r"^/api/payroll/[^/]+/nacha(/|$)")
 
 
+def _under(path: str, prefix: str) -> bool:
+    """`path` is `prefix` or below it, segment by segment: a later route
+    named /api/payroll-export would not ride on /api/payroll's grant."""
+    return path == prefix or path.startswith(prefix + "/")
+
+
 def _is_token_payroll_route(method: str, path: str) -> bool:
     if _TOKEN_PAYROLL_NEVER_RE.match(path):
         return False
-    if path.startswith(_TOKEN_PAYROLL_PREFIXES):
+    if any(_under(path, p) for p in _TOKEN_PAYROLL_PREFIXES):
         return True
     return method != "DELETE" and bool(_TOKEN_PAYROLL_EMPLOYEE_RE.match(path))
 
@@ -1356,7 +1362,7 @@ async def _require_session(request: Request, call_next):
         token_grant = (
             (allow_backups and _is_token_backup_route(request.method, path))
             or (allow_payroll and _is_token_payroll_route(request.method, path))
-            or (allow_imports and path.startswith("/api/migration"))
+            or (allow_imports and _under(path, "/api/migration"))
         )
 
     # A signed-in person's own preferences (#480: Enter moves between
