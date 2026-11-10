@@ -242,6 +242,13 @@ SETTINGS_TAKEN = {
         "/api/settings/check-bank-details/{bank_account}",
         {"bank_name": "First Prairie Bank", "routing_number": "071000013"},
     ),
+    # the check face's per-field layout (#749) is a company setting, saved
+    # and cleared with the rest: an administrator's, like the nudges
+    "Check Printing › Reset field layout to defaults": (
+        "PUT",
+        "/api/settings",
+        {"check_field_layout": ""},
+    ),
     "Backup / Restore › Create Backup": ("POST", "/api/backups", None),
     "Backup / Restore › Restore…": (
         "POST",
@@ -336,6 +343,22 @@ SETTINGS_TAKEN_PARTS = {
         "Check Printing › Save bank account details"
     ),
     "Check Printing › #check-bank-fraction": "Check Printing › Save bank account details",
+    # the Field layout table (#749): six fields, each with its offsets, size
+    # and bold, saved with the company settings
+    **{
+        f"Check Printing › #check-field-{field}-{attr}": (
+            "Check Printing › Reset field layout to defaults"
+        )
+        for field in (
+            "payee",
+            "payee-address",
+            "date",
+            "amount",
+            "amount-words",
+            "memo",
+        )
+        for attr in ("x", "y", "size", "bold")
+    },
     "AI Insights › #ai-settings-provider": "AI Insights › Save AI settings",
     "AI Insights › #ai-settings-model-select": "AI Insights › Save AI settings",
     "AI Insights › #ai-settings-key": "AI Insights › Save AI settings",
