@@ -195,9 +195,12 @@ What a token can do:
   deductions; employees listed and read with their pay fields, added and
   edited, and their year-to-date pay and opening balance. Never a `DELETE`
   under `/api/employees`, and never the self-service portal login or access,
-  direct-deposit bank accounts, I-9 and other documents, E-Verify or
-  onboarding: those are credentials and identity papers, and stay with a
-  signed-in administrator. Pay stubs and W-2s carry Social Security numbers
+  direct-deposit bank accounts, the NACHA direct-deposit file (it carries
+  every employee's full routing and account number), I-9 and other
+  documents, E-Verify or onboarding: those are credentials and identity
+  papers, and stay with a signed-in administrator. Tax forms include the
+  vendor 1099s and the 1096. Running payroll includes its own deletes: a
+  draft pay run discarded, a benefit enrollment or a garnishment removed. Pay stubs and W-2s carry Social Security numbers
   and pay, so tick it only for a program you would hand payroll to.
 - With **Can import** ticked, on a bookkeeper token only (#755): the
   migration imports (`/api/migration`: sources, dry run, import).

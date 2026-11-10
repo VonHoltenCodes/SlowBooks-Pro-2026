@@ -1258,7 +1258,7 @@ const SettingsPage = {
                         <div class="form-group"><label>Label</label>
                             <input id="token-new-label" autocomplete="off" placeholder="e.g. claude-code, receipt-service"></div>
                         <div class="form-group"><label>Role</label>
-                            <select id="token-new-role">
+                            <select id="token-new-role" onchange="SettingsPage.tokenGrantsFollowRole()">
                                 <option value="readonly">Read-only — reports and lookups</option>
                                 <option value="accountant">Accountant — reads everything, posts journal entries</option>
                                 <option value="bookkeeper">Bookkeeper — daily books, no admin</option>
@@ -1267,10 +1267,10 @@ const SettingsPage = {
                             <input type="checkbox" id="token-new-backups" name="token_new_allow_backups" style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can make backups (make, list and download; never restore)</label></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-payroll" name="token_new_allow_payroll" style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-payroll" name="token_new_allow_payroll" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can run payroll (bookkeeper only; no deletes, portal logins, bank accounts or documents)</label></div>
                         <div class="form-group"><label style="font-weight:normal;">
-                            <input type="checkbox" id="token-new-imports" name="token_new_allow_imports" style="width:auto; vertical-align:middle; margin-right:6px;">
+                            <input type="checkbox" id="token-new-imports" name="token_new_allow_imports" disabled style="width:auto; vertical-align:middle; margin-right:6px;">
                             Can import (bookkeeper only; the migration imports)</label></div>
                     </div>
                     <button type="button" class="btn btn-primary" onclick="SettingsPage.createApiToken()">Create Token</button>
@@ -1860,6 +1860,18 @@ const SettingsPage = {
                 <tbody>${rows}</tbody></table></div>`;
             SettingsPage._showSection(section, true);
         } catch (e) { /* non-admin or pre-upgrade server: section stays hidden */ }
+    },
+
+    // Payroll and imports are a bookkeeper token's only (#755): the boxes
+    // clear and lock for any other role, so the form can't ask for them.
+    tokenGrantsFollowRole() {
+        const book = $('#token-new-role').value === 'bookkeeper';
+        for (const id of ['#token-new-payroll', '#token-new-imports']) {
+            const box = $(id);
+            if (!box) continue;
+            box.disabled = !book;
+            if (!book) box.checked = false;
+        }
     },
 
     async createApiToken() {

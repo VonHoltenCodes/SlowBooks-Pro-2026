@@ -1164,7 +1164,7 @@ TOKEN_RESTORE_REFUSAL = (
 # employee listed, read, added or edited, and its year-to-date pay. Never a
 # DELETE under /api/employees, and never the parts that are a credential or
 # an identity paper: the portal login and access, bank accounts, documents,
-# E-Verify, onboarding.
+# E-Verify, onboarding, and the NACHA direct-deposit file.
 _TOKEN_PAYROLL_PREFIXES = (
     "/api/payroll",
     "/api/tax-forms",
@@ -1173,11 +1173,17 @@ _TOKEN_PAYROLL_PREFIXES = (
     "/api/deductions",
 )
 _TOKEN_PAYROLL_EMPLOYEE_RE = _re.compile(
-    r"^/api/employees(/[^/]+(/(ytd|opening-ytd))?)?/?$"
+    r"^/api/employees(/\d+(/(ytd|opening-ytd))?)?/?$"
 )
+# The NACHA file decrypts every employee's full routing and account number
+# and takes the company's originating account from the request: a bank
+# credential, so it stays with a signed-in administrator, grant or not.
+_TOKEN_PAYROLL_NEVER_RE = _re.compile(r"^/api/payroll/[^/]+/nacha(/|$)")
 
 
 def _is_token_payroll_route(method: str, path: str) -> bool:
+    if _TOKEN_PAYROLL_NEVER_RE.match(path):
+        return False
     if path.startswith(_TOKEN_PAYROLL_PREFIXES):
         return True
     return method != "DELETE" and bool(_TOKEN_PAYROLL_EMPLOYEE_RE.match(path))

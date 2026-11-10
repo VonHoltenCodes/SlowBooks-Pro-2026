@@ -50,8 +50,10 @@ def _out(t: ApiToken) -> dict:
         "role": t.role,
         "is_active": t.is_active,
         "allow_backups": bool(t.allow_backups),
-        "allow_payroll": bool(t.allow_payroll),
-        "allow_imports": bool(t.allow_imports),
+        # what the gate honours: on any role but bookkeeper a stored grant
+        # gives nothing, so the list doesn't say it does (#755)
+        "allow_payroll": t.role == ROLE_BOOKKEEPER and bool(t.allow_payroll),
+        "allow_imports": t.role == ROLE_BOOKKEEPER and bool(t.allow_imports),
         "created_by": t.created_by,
         "created_at": _utc_iso(t.created_at),
         "last_used_at": _utc_iso(t.last_used_at),

@@ -214,3 +214,60 @@ def test_the_pay_run_is_audited_as_the_token(
     assert by_table and all(
         names == {"token:books-agent"} for names in by_table.values()
     ), by_table
+
+
+def test_a_payroll_token_never_gets_the_nacha_file(
+    client, seed_accounts, payroll_token
+):
+    """The NACHA file decrypts every employee's full routing and account
+    number and takes the originating account from the request."""
+    emp = payroll_token.post("/api/employees", json=EMPLOYEE).json()
+    run = payroll_token.post(
+        "/api/payroll",
+        json={
+            "period_start": "2026-07-01",
+            "period_end": "2026-07-14",
+            "pay_date": "2026-07-17",
+            "stubs": [{"employee_id": emp["id"]}],
+        },
+    ).json()
+    assert payroll_token.post(f"/api/payroll/{run['id']}/process").status_code == 200
+    for r in (
+        payroll_token.get(f"/api/payroll/{run['id']}/nacha"),
+        payroll_token.post(
+            f"/api/payroll/{run['id']}/nacha", json={"company_name": "EVIL CO"}
+        ),
+        payroll_token.get(f"/api/payroll/{run['id']}/nacha/"),
+    ):
+        assert r.status_code == 403, r.text
+        assert "EVIL" not in r.text
+
+
+def test_the_list_shows_only_a_grant_the_gate_honours(client, db_session):
+    from app.models.api_tokens import ApiToken
+
+    made = _mint(client, "forced-list", "readonly")
+    row = db_session.get(ApiToken, made["id"])
+    row.allow_payroll = True
+    row.allow_imports = True
+    db_session.commit()
+    listed = next(t for t in client.get("/api/tokens").json() if t["id"] == made["id"])
+    assert listed["allow_payroll"] is False and listed["allow_imports"] is False
+
+
+def test_only_an_employee_id_is_a_payroll_route(client, payroll_token):
+    from app.main import _is_token_payroll_route
+
+    assert _is_token_payroll_route("GET", "/api/employees/12")
+    assert _is_token_payroll_route("PUT", "/api/employees/12/ytd")
+    assert not _is_token_payroll_route("GET", "/api/employees/export")
+    assert not _is_token_payroll_route("DELETE", "/api/employees/12")
+
+
+def test_the_create_form_locks_the_grants_to_a_bookkeeper():
+    from pathlib import Path
+
+    js = Path("app/static/js/settings.js").read_text(encoding="utf-8")
+    assert 'id="token-new-payroll" name="token_new_allow_payroll" disabled' in js
+    assert 'id="token-new-imports" name="token_new_allow_imports" disabled' in js
+    assert 'onchange="SettingsPage.tokenGrantsFollowRole()"' in js
