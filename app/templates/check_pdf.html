@@ -22,7 +22,12 @@
     .stub-table td { padding: 2px 6px; border-bottom: 1px solid #ddd; }
     .stub-table td.r { text-align: right; }
     .check-number { position: absolute; top: 0.25in; right: 0.25in; font-size: 11pt; font-weight: bold; }
-    .check-date { position: absolute; top: 0.25in; right: 2.5in; font-size: 10pt; }
+    /* nowrap: the box has no width, so it is shrink-to-fit, and Pango 1.50
+       (Ubuntu 22.04) measures it a hair narrower than the line it then lays
+       out and wraps the date at its space ("Oct" over "24, 2026"); Pango
+       1.52 does not. The <br> after the label still breaks (2.31.12 gate,
+       Linux round 1). */
+    .check-date { position: absolute; top: 0.25in; right: 2.5in; font-size: 10pt; white-space: nowrap; }
     .check-date-label { font-size: 8pt; color: #666; }
     .check-company { font-weight: bold; font-size: 11pt; margin-bottom: 4px; }
     .check-company-addr { font-size: 8pt; color: #444; margin-bottom: 16px; }

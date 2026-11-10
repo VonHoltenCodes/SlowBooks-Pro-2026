@@ -521,3 +521,29 @@ def test_the_settings_page_has_the_layout_table_and_the_test_print_sends_it():
     for header in ("Left/right (in)", "Up/down (in)", "Size (pt)", "Bold"):
         assert f'<th scope="col">{header}</th>' in js
     assert "Reset field layout to defaults" in js
+
+
+# ----- the face itself -------------------------------------------------
+
+
+def test_the_bottom_layouts_date_box_never_wraps():
+    """Pango 1.50 (Ubuntu 22.04) measured the bottom layout's shrink-to-fit
+    date box a hair narrower than the line it then laid out, and wrapped the
+    date at its space, "Oct" over "24, 2026" (2.31.12 gate, Linux round 1);
+    Pango 1.52 did not. The rule says nowrap, so every Pango prints the date
+    on one line, and the label's <br> still breaks."""
+    import pathlib
+    import re
+
+    template = (
+        pathlib.Path(pdf_service.__file__).resolve().parents[1]
+        / "templates"
+        / "check_pdf.html"
+    ).read_text(encoding="utf-8")
+    rule = re.search(r"\n    \.check-date \{[^}]*\}", template).group(0)
+    assert "white-space: nowrap" in rule, rule
+    words = _words(_settings())[0]
+    dates = [w for w in words if w[0] in ("Oct 24, 2026", "Oct", "24, 2026")]
+    assert [w[0] for w in dates] == ["Oct 24, 2026"], dates
+    label = [w for w in words if w[0] == "DATE"]
+    assert label and label[0][2] > dates[0][2], (label, dates)
