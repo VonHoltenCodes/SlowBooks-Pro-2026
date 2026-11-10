@@ -105,8 +105,10 @@ def public_payment_page(
     else:
         payment_status = status or None
 
-    from app.services.pay_applications import pay_application_number
-    from app.services.pdf_service import invoice_is_release_only
+    from app.services.pay_applications import (
+        invoice_is_release_only,
+        pay_application_number,
+    )
 
     template = _jinja_env.get_template("public_pay.html")
     html = template.render(

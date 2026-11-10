@@ -305,8 +305,7 @@ const InvoicesPage = {
         ).join('');
         // A pay application that only releases retainage posts no lines (#751):
         // name the release, and drop the $0.00 subtotal, tax and total rows.
-        const releaseOnly = !inv.lines.length && !Number(inv.total) && !Number(inv.tax_amount)
-            && !Number(inv.retainage_held) && Number(inv.retainage_released) > 0;
+        const releaseOnly = !!inv.release_only;  // the server's one test of it
         if (releaseOnly) {
             linesHtml = `<tr><td>Retainage release${inv.pay_application_number ? `, ${escapeHtml(inv.pay_application_number)}` : ''}</td><td class="amount">1</td>
              <td class="amount">${money(inv.retainage_released)}</td><td class="amount">${money(inv.retainage_released)}</td></tr>`;
@@ -333,7 +332,7 @@ const InvoicesPage = {
                 <div class="total-row grand-total"><span class="label">Total</span><span class="value">${money(inv.total)}</span></div>`}
                 ${Number(inv.retainage_held) ? `<div class="total-row"><span class="label">Retainage withheld this period</span><span class="value">-${money(inv.retainage_held)}</span></div>` : ''}
                 ${Number(inv.retainage_released) && !releaseOnly ? `<div class="total-row"><span class="label">Retainage released</span><span class="value">${money(inv.retainage_released)}</span></div>` : ''}
-                ${(Number(inv.retainage_held) || Number(inv.retainage_released)) ? `<div class="total-row"><span class="label">Current payment due</span><span class="value">${money((Number(inv.total) - Number(inv.retainage_held) + Number(inv.retainage_released)).toFixed(2))}</span></div>` : ''}
+                ${(Number(inv.retainage_held) || Number(inv.retainage_released)) && !(releaseOnly && inv.status === 'void') ? `<div class="total-row"><span class="label">Current payment due</span><span class="value">${money((Number(inv.total) - Number(inv.retainage_held) + Number(inv.retainage_released)).toFixed(2))}</span></div>` : ''}
                 <div class="total-row"><span class="label">Paid</span><span class="value">${money(inv.amount_paid)}</span></div>
                 <div class="total-row grand-total"><span class="label">Balance Due</span><span class="value">${money(inv.balance_due)}</span></div>
             </div>

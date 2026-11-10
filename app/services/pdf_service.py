@@ -261,26 +261,15 @@ def _render(template_name: str, company_settings: dict, **context) -> str:
     )
 
 
-def invoice_is_release_only(invoice) -> bool:
-    """A pay application's invoice that bills only released retainage: no
-    lines, a zero total, no tax and no retainage held, and a positive release
-    (#751). A voided one still qualifies, as a voided invoice keeps printing
-    its lines."""
-    return (
-        not invoice.lines
-        and not (invoice.total or 0)
-        and not (invoice.tax_amount or 0)
-        and not (invoice.retainage_held or 0)
-        and (invoice.retainage_released or 0) > 0
-    )
-
-
 def render_invoice_html(invoice, company_settings: dict) -> str:
     """Use the same invoice face and logo preference for PDF and Print."""
     from sqlalchemy.orm import object_session
 
     from app.services.donor_documents import invoice_pdf_context
-    from app.services.pay_applications import pay_application_number
+    from app.services.pay_applications import (
+        invoice_is_release_only,
+        pay_application_number,
+    )
     from app.services.payment_terms import (
         document_discount_line,
         document_discount_taken,

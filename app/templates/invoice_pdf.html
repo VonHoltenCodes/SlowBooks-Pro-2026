@@ -195,7 +195,8 @@
             {% if inv.retainage_released and inv.retainage_released != 0 and not release_only %}
             <tr><td class="label">Retainage released</td><td class="r">{{ inv.retainage_released | currency(cur) }}</td></tr>
             {% endif %}
-            {% if (inv.retainage_held and inv.retainage_held != 0) or (inv.retainage_released and inv.retainage_released != 0) %}
+            {# A voided release has nothing due; its line stays, its due row doesn't (#751). #}
+            {% if ((inv.retainage_held and inv.retainage_held != 0) or (inv.retainage_released and inv.retainage_released != 0)) and not (release_only and inv.status == 'void') %}
             <tr><td class="label grand">Current payment due</td><td class="r grand">{{ (inv.total - inv.retainage_held + inv.retainage_released) | currency(cur) }}</td></tr>
             {% endif %}
             {% if inv.is_sales_receipt %}

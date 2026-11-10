@@ -45,6 +45,7 @@ def test_the_invoice_names_its_pay_application(client, seed_accounts, seed_custo
     assert inv["total"] == "0.00"
     assert inv["retainage_released"] == "3000.00"
     assert inv["pay_application_number"] == number
+    assert inv["release_only"] is True
 
 
 def test_an_ordinary_invoice_has_no_pay_application_number(
@@ -61,6 +62,7 @@ def test_an_ordinary_invoice_has_no_pay_application_number(
     assert r.status_code == 201, r.text
     inv = client.get(f"/api/invoices/{r.json()['id']}").json()
     assert inv["pay_application_number"] is None
+    assert inv["release_only"] is False
 
 
 def test_the_pdf_names_the_release_and_drops_the_zero_total(
@@ -105,7 +107,7 @@ def test_only_a_pure_release_reads_as_one(db_session, seed_accounts, seed_custom
     from decimal import Decimal
 
     from app.models.invoices import Invoice, InvoiceStatus
-    from app.services.pdf_service import invoice_is_release_only
+    from app.services.pay_applications import invoice_is_release_only
 
     def inv(**kw):
         base = dict(
@@ -170,3 +172,26 @@ def test_the_release_prints_once(client, seed_accounts, seed_customer):
     text = pypdf.PdfReader(io.BytesIO(r.content)).pages[0].extract_text()
     assert f"Retainage release, {number}" in text
     assert "Retainage released" not in text.replace("\n", " ")
+
+
+def test_a_voided_release_shows_nothing_due(client, seed_accounts, seed_customer):
+    pypdf = pytest.importorskip("pypdf")
+    inv_id, number = _release_only_invoice(client, seed_customer.id)
+    app_id = client.get(f"/api/invoices/{inv_id}").json()["pay_application_id"]
+    assert client.post(f"/api/pay-applications/{app_id}/void").status_code == 200
+    text = (
+        pypdf.PdfReader(io.BytesIO(client.get(f"/api/invoices/{inv_id}/pdf").content))
+        .pages[0]
+        .extract_text()
+    )
+    assert f"Retainage release, {number}" in text
+    assert "Current payment due" not in text.replace("\n", " ")
+
+
+def test_the_view_takes_release_only_from_the_server():
+    """One test of release-only, the server's: the view reads the flag GET
+    /invoices/{id} returns rather than re-deriving it."""
+    from pathlib import Path
+
+    js = Path("app/static/js/invoices.js").read_text(encoding="utf-8")
+    assert "const releaseOnly = !!inv.release_only;" in js

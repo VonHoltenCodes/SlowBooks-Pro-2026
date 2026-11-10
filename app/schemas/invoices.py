@@ -248,6 +248,9 @@ class InvoiceResponse(BaseModel):
     pay_application_id: Optional[int] = None
     # Filled by GET /invoices/{id} only: the pay application's number (#751).
     pay_application_number: Optional[str] = None
+    # Filled by GET /invoices/{id} only: the invoice bills nothing but a
+    # retainage release, so it reads as one (#751).
+    release_only: bool = False
     notes: Optional[str]
     class_id: Optional[int] = None
     job_id: Optional[int] = None
