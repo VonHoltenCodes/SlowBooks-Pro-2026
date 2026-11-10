@@ -278,6 +278,43 @@ def test_an_accrual_trial_balance_is_verified_against_the_journal(
     assert data["opening_balances"] == []
 
 
+def test_two_trial_balance_files_read_the_accrual_one_and_make_no_account_of_the_other(
+    client, db_session, seed_accounts
+):
+    """2.31.11 gate, W-133: the cash Trial Balance beside the accrual one
+    joined the two files (both begin with the company's name), and the
+    second report's title rows, "Trial Balance" and "All Dates", became
+    expense accounts at 0.00. One Trial Balance is read, the accrual one
+    whichever came first, and the dry run says which was set aside."""
+    accrual = (FIXTURES / "Trial_balance_accrual.csv").read_text()
+    extra = (
+        "files",
+        ("Trial_balance_accrual.csv", io.BytesIO(accrual.encode()), "text/csv"),
+    )
+    for files in (_csv_files(BUNDLE) + [extra], [extra] + _csv_files(BUNDLE)):
+        data = client.post("/api/migration/qbo_export/dry-run", files=files).json()
+        assert data["ok"] is True, data["errors"]
+        notes = [w for w in data["warnings"] if "Two Trial Balance files" in w]
+        assert len(notes) == 1, data["warnings"]
+        assert "Trial_balance_accrual.csv (accrual basis) was read" in notes[0]
+        assert "Trial_balance.csv (cash basis) set aside" in notes[0]
+        others = [w for w in data["warnings"] if w not in notes]
+        assert not any("cash basis" in w.lower() for w in others), others
+        assert not any(
+            "'All Dates'" in w or "'Trial Balance'" in w for w in others
+        ), others
+    files = _csv_files(BUNDLE) + [
+        (
+            "files",
+            ("Trial_balance_accrual.csv", io.BytesIO(accrual.encode()), "text/csv"),
+        )
+    ]
+    resp = client.post("/api/migration/qbo_export/import", files=files)
+    assert resp.status_code == 200, resp.text
+    names = {a["name"] for a in client.get("/api/accounts").json()}
+    assert "All Dates" not in names and "Trial Balance" not in names
+
+
 def test_the_workbooks_and_the_zip_read_the_same_as_the_csvs(
     client, db_session, seed_accounts
 ):

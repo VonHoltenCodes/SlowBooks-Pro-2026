@@ -584,6 +584,43 @@ def trial_balance_basis(csv_text: str) -> str | None:
     return None
 
 
+def combine_same_kind(kind, kept_text, kept_name, new_text, new_name):
+    """Two files of one kind in one upload. The route joins same-kind files
+    (MYOB exports journals per type), but a Trial Balance is one report: a
+    second one's title rows, "Trial Balance" and "All Dates", read as
+    expense accounts at 0.00 once joined (2.31.11 gate, W-133). One is
+    kept, the accrual one where the two differ, and the dry run says so.
+    None leaves the route's joining to every other kind."""
+    if kind != "tb":
+        return None
+    kept_basis = trial_balance_basis(kept_text)
+    new_basis = trial_balance_basis(new_text)
+    if new_basis == "accrual" and kept_basis != "accrual":
+        chosen, chosen_name, other_name, other_basis = (
+            new_text,
+            new_name,
+            kept_name,
+            kept_basis,
+        )
+    else:
+        chosen, chosen_name, other_name, other_basis = (
+            kept_text,
+            kept_name,
+            new_name,
+            new_basis,
+        )
+
+    def basis_words(basis):
+        return f" ({basis} basis)" if basis else ""
+
+    note = (
+        f"Two Trial Balance files were in the upload: {chosen_name}"
+        f"{basis_words(trial_balance_basis(chosen))} was read and {other_name}"
+        f"{basis_words(other_basis)} set aside; the import reads one Trial Balance."
+    )
+    return chosen, note
+
+
 def parse_tb(csv_text: str) -> tuple[dict, list[str]]:
     balances: dict[str, Decimal] = {}
     errors: list[str] = []

@@ -223,20 +223,33 @@ class Upload:
     not place, which are left out rather than refused (a vendor's bundle
     may carry files it has no use for)."""
 
-    def __init__(self, bundle: dict, names: list[str], left_out: list[str]):
+    def __init__(
+        self,
+        bundle: dict,
+        names: list[str],
+        left_out: list[str],
+        notes: list[str] | None = None,
+    ):
         self.bundle = bundle
         self.names = names
         self.left_out = left_out
+        # what the source said while the bundle was built (two Trial
+        # Balances, one kept): the dry run's first warnings
+        self.notes = notes or []
 
     def missing_required(self) -> bool:
         return "coa" not in self.bundle or "gl" not in self.bundle
 
 
-async def bundle_from_uploads(files: list[UploadFile], classify) -> Upload:
+async def bundle_from_uploads(
+    files: list[UploadFile], classify, combine=None
+) -> Upload:
     bundle: dict[str, str] = {}
     unrecognized = []
     left_out = []
     names = []
+    notes: list[str] = []
+    kept_names: dict[str, str] = {}
     for file in files:
         content = await read_limited(file, label=f"Migration file {file.filename}")
         zipped = (file.filename or "").lower().endswith(".zip")
@@ -256,13 +269,13 @@ async def bundle_from_uploads(files: list[UploadFile], classify) -> Upload:
                     text = data.decode("utf-8-sig")
                 except UnicodeDecodeError:
                     text = data.decode("latin-1")
-            _add_to_bundle(bundle, kind, name, text)
+            _add_to_bundle(bundle, kind, name, text, combine, notes, kept_names)
     if unrecognized:
         raise HTTPException(
             status_code=400,
             detail=_unclassified_text(left_out + unrecognized, classify, names),
         )
-    return Upload(bundle, names, left_out)
+    return Upload(bundle, names, left_out, notes)
 
 
 def _say_what_was_left(result: dict, upload: Upload, classify) -> dict:
@@ -274,6 +287,8 @@ def _say_what_was_left(result: dict, upload: Upload, classify) -> dict:
             f"{_names_in_a_sentence(upload.left_out)}, so "
             f"{'it was' if len(upload.left_out) == 1 else 'they were'} left out."
         ] + list(result.get("warnings") or [])
+    if upload.notes:
+        result["warnings"] = list(upload.notes) + list(result.get("warnings") or [])
     if not result.get("ok") and upload.missing_required():
         other = _looks_like(upload.names, classify)
         if other:
@@ -283,8 +298,34 @@ def _say_what_was_left(result: dict, upload: Upload, classify) -> dict:
     return result
 
 
-def _add_to_bundle(bundle: dict, kind: str, name: str, text: str) -> None:
+def _add_to_bundle(
+    bundle: dict,
+    kind: str,
+    name: str,
+    text: str,
+    combine=None,
+    notes: list[str] | None = None,
+    kept_names: dict[str, str] | None = None,
+) -> None:
     if True:
+        if kind in bundle and combine is not None:
+            # the source may know what two files of this kind mean (one
+            # Trial Balance is read, W-133); None leaves the joining below
+            chosen = combine(
+                kind,
+                bundle[kind],
+                (kept_names or {}).get(kind, "the first file"),
+                text,
+                name,
+            )
+            if chosen is not None:
+                chosen_text, note = chosen
+                if kept_names is not None and chosen_text is text:
+                    kept_names[kind] = name
+                bundle[kind] = chosen_text
+                if notes is not None and note:
+                    notes.append(note)
+                return
         if kind in bundle:
             # Multiple files of one kind (MYOB exports journals per type):
             # concatenate, dropping the duplicate header row — which must
@@ -302,6 +343,8 @@ def _add_to_bundle(bundle: dict, kind: str, name: str, text: str) -> None:
             bundle[kind] = bundle[kind].rstrip("\n") + "\n" + body
         else:
             bundle[kind] = text
+            if kept_names is not None:
+                kept_names[kind] = name
 
 
 def _refused(
@@ -331,7 +374,9 @@ async def migration_dry_run(
 ):
     _, module, _ = _source(source)
     classify = module.classify_filename
-    upload = await bundle_from_uploads(files, classify)
+    upload = await bundle_from_uploads(
+        files, classify, getattr(module, "combine_same_kind", None)
+    )
     try:
         result = module.dry_run(db, upload.bundle)
     except DataProblem as e:
@@ -345,7 +390,9 @@ async def migration_import(
 ):
     _, module, chart_source = _source(source)
     classify = module.classify_filename
-    upload = await bundle_from_uploads(files, classify)
+    upload = await bundle_from_uploads(
+        files, classify, getattr(module, "combine_same_kind", None)
+    )
     try:
         result = module.run_import(db, upload.bundle)
     except DataProblem as e:
