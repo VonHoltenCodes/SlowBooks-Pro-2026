@@ -144,6 +144,7 @@ const IIFPage = {
                         <input type="checkbox" id="qbcsv-adjusting-only">
                         Adjusting entries only: an accountant's Transaction Detail by Account filtered to journal entries. Anything else in the file is refused, and what posts is marked adjusting.
                     </label>
+                    ${IIFPage._addEmployeesTick()}
                     <div>
                         <button class="btn btn-primary" id="qbcsv-import-btn" onclick="IIFPage.importQbReportCsv()">Import Report CSV</button>
                     </div>
@@ -204,6 +205,21 @@ const IIFPage = {
         }
     },
 
+    // A time report's people who are not on the Employees list are added
+    // only by a person's choice (W-138): ticked for an administrator, who
+    // may add employees; unticked and disabled for anyone else, with the
+    // reason, and their entries are left out and named.
+    _addEmployeesTick() {
+        // drawn before the role may be known; App.adminPass disables and
+        // unticks it for any role but admin, and shows the reason
+        const may = typeof App === 'undefined' || !App.isAdmin || App.isAdmin();
+        return `<label style="display:flex; align-items:center; gap:6px; font-size:11px; margin-bottom:8px;">
+                        <input type="checkbox" id="qbcsv-add-employees" data-admin data-admin-untick aria-describedby="qbcsv-add-employees-why" ${may ? 'checked' : 'disabled'}>
+                        Add people who are not on the Employees list (a time report: Time by Job Detail or Time by Name)
+                    </label>
+                    <div id="qbcsv-add-employees-why" data-admin-note class="${may ? 'hidden' : ''}" style="font-size:11px; color:var(--text-muted); margin:-4px 0 8px 22px;">Adding people to the Employees list needs an administrator: the time of the people not on it is left out and named, for an administrator to add them.</div>`;
+    },
+
     async importQbReportCsv() {
         const input = $('#qbcsv-file-input');
         if (!input?.files[0]) { toast('Choose a file first', 'error'); return; }
@@ -212,6 +228,7 @@ const IIFPage = {
             file: input.files[0],
             adjusting: !!$('#qbcsv-adjusting-only')?.checked,
             outflow: !!$('#qbcsv-outflow-positive')?.checked,
+            addEmployees: !!($('#qbcsv-add-employees')?.checked && !$('#qbcsv-add-employees')?.disabled),
         };
         await IIFPage._sendQbReport(null);
     },
@@ -222,6 +239,7 @@ const IIFPage = {
         formData.append('file', sent.file);
         formData.append('adjusting_only', sent.adjusting ? 'true' : 'false');
         formData.append('outflow_positive', sent.outflow ? 'true' : 'false');
+        formData.append('add_employees', sent.addEmployees ? 'true' : 'false');
         // a part of its own: a text field holds 1 MB, and thousands of
         // ticked transactions' keys can be more
         if (answers) formData.append('answers', new Blob([JSON.stringify(answers)], { type: 'application/json' }), 'answers.json');
@@ -261,6 +279,9 @@ const IIFPage = {
         }
         if (result.invoices_updated > 0) {
             html += `<div class="result-row"><span>Already here, marked paid or partly paid from Open Balance</span><span class="result-count">${result.invoices_updated}</span></div>`;
+        }
+        if (result.entries_left_out > 0) {
+            html += `<div class="result-row"><span>Time entries left out: people not on the Employees list</span><span class="result-count">${result.entries_left_out}</span></div>`;
         }
         html += IIFPage._answeredRows(result);
         // the lines that posted with the report's Class (#722)

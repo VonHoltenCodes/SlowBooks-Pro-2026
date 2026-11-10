@@ -1084,6 +1084,9 @@ const App = {
         root.querySelectorAll('[data-admin]').forEach(el => {
             const field = /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName);
             if (field) el.disabled = true;
+            // a tick that is a yes only an administrator gives (adding
+            // employees on an import, W-138) reads no, not a locked yes
+            if (field && el.hasAttribute('data-admin-untick')) el.checked = false;
             // a field shows its value; a file chooser has none to show
             if (!field || el.type === 'file') el.classList.add('hidden');
         });
