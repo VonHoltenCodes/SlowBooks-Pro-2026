@@ -119,6 +119,13 @@ _SECTION_TYPES = {
     "cost of goods sold": AccountType.COGS,
     "expenses": AccountType.EXPENSE,
     "other expenses": AccountType.EXPENSE,
+    # a nonprofit company's QuickBooks Online words for the same sections
+    # (a Hacksburg export, 2.31.11: every account "sits under no section that
+    # names its type" because its statement said Revenue and Expenditures)
+    "revenue": AccountType.INCOME,
+    "other revenue": AccountType.INCOME,
+    "expenditures": AccountType.EXPENSE,
+    "other expenditures": AccountType.EXPENSE,
 }
 _KIND_SECTIONS = {"bank accounts": "bank", "credit cards": "credit_card"}
 # The reports' headings that name a detail type (#390); the innermost one an
@@ -159,6 +166,10 @@ _SECTIONS = {
     "expenses",
     "other income",
     "other expenses",
+    "revenue",
+    "expenditures",
+    "other revenue",
+    "other expenditures",
 }
 # Report arithmetic that carries a figure but is not an account.
 _ARITHMETIC = {
@@ -167,6 +178,10 @@ _ARITHMETIC = {
     "net operating income",
     "net other income",
     "retained earnings",
+    # the nonprofit statement's words for the same lines
+    "net revenue",
+    "net operating revenue",
+    "net other revenue",
 }
 _BASIS = re.compile(r"\b(cash|accrual)\s+basis\b", re.I)
 # What parse_coa inferred about accounts the reports hide, for the dry run

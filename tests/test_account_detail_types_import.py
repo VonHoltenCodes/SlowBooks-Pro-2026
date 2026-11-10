@@ -373,6 +373,74 @@ def test_the_qbo_report_imports_cost_of_goods_sold_as_cogs():
     assert got["Advertising"] == AccountType.EXPENSE
 
 
+def _nonprofit_words(text):
+    """The same statement as QuickBooks Online prints it for a company set up
+    as a nonprofit: Revenue for Income, Expenditures for Expenses, and the
+    arithmetic lines renamed with them. Only the report's own labels change;
+    an account named "Commission Income" keeps its name."""
+    words = {
+        "Income": "Revenue",
+        "Total Income": "Total Revenue",
+        "Other Income": "Other Revenue",
+        "Total Other Income": "Total Other Revenue",
+        "Net Operating Income": "Net Operating Revenue",
+        "Net Other Income": "Net Other Revenue",
+        "Net Income": "Net Revenue",
+        "Expenses": "Expenditures",
+        "Total Expenses": "Total Expenditures",
+        "Other Expenses": "Other Expenditures",
+        "Total Other Expenses": "Total Other Expenditures",
+    }
+    out = []
+    for line in text.splitlines(keepends=True):
+        label, sep, rest = line.partition(",")
+        indent = label[: len(label) - len(label.lstrip(" "))]
+        out.append(indent + words.get(label.strip(), label.strip()) + sep + rest)
+    return "".join(out)
+
+
+def test_the_qbo_report_reads_a_nonprofits_revenue_and_expenditures():
+    """A nonprofit company's QuickBooks Online statement groups its accounts
+    under Revenue and Expenditures (Other Revenue, Other Expenditures; Net
+    Revenue for the arithmetic). The importer took only the business words,
+    so a Hacksburg export's dry run stopped with every income and expense
+    account sitting "under no section that names its type" (2.31.11)."""
+    from app.models.accounts import AccountType
+    from app.services import qbo_export_import as qbo
+
+    business = (FIXTURES / "qbo_export" / "Profit_and_loss.csv").read_text(
+        encoding="utf-8"
+    )
+    business = business.replace(
+        "Net Operating Income,=3640.00\n",
+        "Net Operating Income,=3640.00\nOther Income,\n   Interest Earned,=12.00\n"
+        "Total Other Income,=12.00\nOther Expenses,\n   Bank Charges,=5.00\n"
+        "Total Other Expenses,=5.00\nNet Other Income,=7.00\n",
+    )
+    nonprofit = _nonprofit_words(business)
+    assert (
+        "Income" not in nonprofit.replace("Commission Income", "")
+        and "Expenses" not in nonprofit
+    )
+    want, errors = qbo.parse_coa(business)
+    assert errors == []
+    got, errors = qbo.parse_coa(nonprofit)
+    assert errors == []
+    assert {a["name"]: a["type"] for a in got} == {a["name"]: a["type"] for a in want}
+    types = {a["name"]: a["type"] for a in got}
+    assert types["Commission Income"] == AccountType.INCOME
+    assert types["Interest Earned"] == AccountType.INCOME
+    assert types["Advertising"] == AccountType.EXPENSE
+    assert types["Bank Charges"] == AccountType.EXPENSE
+    # the arithmetic lines are not accounts
+    assert not {
+        "Net Revenue",
+        "Net Operating Revenue",
+        "Net Other Revenue",
+        "Gross Profit",
+    } & set(types)
+
+
 def test_a_dialects_detail_type_lands_on_the_account(client, db_session, seed_accounts):
     """Through the shared engine: the detail type reaches the row, and an AR
     the posting code does not use takes the default."""
