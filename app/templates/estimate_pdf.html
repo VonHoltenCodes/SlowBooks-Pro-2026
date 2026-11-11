@@ -96,7 +96,33 @@
         {% endif %}
     </div>
 
-    {% if terms.is_construction %}
+    {% if terms.is_construction %}{% if presentation_style(est, company.estimate_style) == 'line_markup' %}
+    {# Markup per line (#774): the owner sees what each line costs them —
+       description, quantity with its unit, amount — and the totals. No rate,
+       no cost code, no cost and no markup. The commercial bid below prints as
+       it always has. #}
+    <table class="line-items">
+        <thead><tr><th>Description</th><th class="r" style="width:80px;">Qty</th><th class="r" style="width:90px;">Amount</th></tr></thead>
+        <tbody>
+        {% for line in est.lines %}
+            <tr>
+                <td>{{ line.description or '' }}</td>
+                <td class="r">{{ line.quantity | qty }}{% if line.unit %} {{ line.unit }}{% endif %}</td>
+                <td class="r">{{ line.amount | currency }}</td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="totals keep">
+        <table>
+            <tr><td class="label">Subtotal</td><td class="r">{{ est.subtotal | currency }}</td></tr>
+            {% if est.tax_amount and est.tax_amount != 0 %}
+            <tr><td class="label">Tax ({{ est.tax_rate | tax_percent }}%)</td><td class="r">{{ est.tax_amount | currency }}</td></tr>
+            {% endif %}
+            <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
+        </table>
+    </div>{% else %}
     {# Construction bid (#551): lines AT COST grouped by package with the
        section code in the description column, then allowances, alternates
        (marked-up price, accepted ones marked) and unit prices in their own
@@ -208,7 +234,7 @@
             {% endif %}
             <tr><td class="label grand">Total</td><td class="r grand">{{ est.total | currency }}</td></tr>
         </table>
-    </div>
+    </div>{% endif %}
 
     {% if est.terms %}
     <div class="terms-block"><strong>Terms, inclusions and exclusions</strong>

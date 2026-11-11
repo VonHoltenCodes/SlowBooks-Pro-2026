@@ -438,3 +438,63 @@ def test_the_default_markup_is_a_percent_from_0_to_1000(client):
     r = client.put("/api/settings", json={"estimate_default_markup_pct": ""})
     assert r.status_code == 200, r.text
     assert client.get("/api/settings").json()["estimate_default_markup_pct"] == ""
+
+
+# ── The owner's PDF (print preview: the same template, no WeasyPrint) ────────
+
+
+def _preview(client, est_id):
+    r = client.get(f"/api/estimates/{est_id}/print-preview")
+    assert r.status_code == 200, r.text
+    return r.text
+
+
+def test_the_owner_sees_description_quantity_and_amount(client, seed_customer):
+    _construction(client, estimate_terms="Gates swing in.", company_license="CGC1")
+    code = client.post(
+        "/api/cost-codes", json={"code": "32 31 00", "name": "Fences and Gates"}
+    ).json()
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [
+            {
+                "description": "Fence",
+                "quantity": 300,
+                "unit": "LF",
+                "unit_cost": 16,
+                "markup_pct": 25,
+                "cost_code_id": code["id"],
+            }
+        ],
+        tax_rate=0.07,
+    )
+    html = _preview(client, est["id"])
+    head = html[html.index('<table class="line-items">') :]
+    head = head[: head.index("</thead>")]
+    assert ">Description<" in head and ">Qty<" in head and ">Amount<" in head
+    assert ">Rate<" not in head
+    assert "300.00 LF" in html
+    assert "$6,000.00" in html
+    assert "32 31 00" not in html  # no cost code before the description
+    assert "$20.00" not in html and "$16.00" not in html  # no rate, no cost
+    assert "25%" not in html and "Markup" not in html
+    assert "Subtotal" in html and "Tax (7.00%)" in html and "$420.00" in html
+    assert "$6,420.00" in html
+    assert "Bid total" not in html
+    assert "Gates swing in." in html and "Owner signature" in html
+
+
+def test_the_commercial_bid_keeps_its_own_pdf(client, seed_customer):
+    _construction(client, estimate_style="commercial_bid")
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [{"description": "Slab", "quantity": 1, "unit_cost": 400}],
+    )
+    html = _preview(client, est["id"])
+    assert ">Rate<" in html and "Bid total" in html
+    # under markup per line, the same estimate prints as a priced list
+    _construction(client, estimate_style="line_markup")
+    html = _preview(client, est["id"])
+    assert ">Rate<" not in html and "Bid total" not in html
