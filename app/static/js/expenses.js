@@ -76,7 +76,7 @@ const ExpensesPage = {
         await Nonprofit.loadFunds();
         // Expense and cost-of-goods accounts: materials are bought against
         // 5100 Materials Cost as often as against an expense (W-L18).
-        const expenseAccts = PurchaseAccounts.filter(accounts);
+        const expenseAccts = PurchaseAccounts.withBalanceSheet(accounts);  // and the balance-sheet accounts (#766)
         ExpensesPage._expenseAccounts = expenseAccts;
         const paidFrom = ExpensesPage.paidFromAccounts(accounts);
         const acctOpt = a => `<option value="${a.id}">${accountLabel(a)}</option>`;
@@ -153,7 +153,7 @@ const ExpensesPage = {
         // active Expense/COGS list (a bank, liability or equity split such as
         // mortgage principal or escrow, or an account since made inactive),
         // so Void and Replace preselects it (#745).
-        ExpensesPage._expenseAccounts = PurchaseAccounts.filter(
+        ExpensesPage._expenseAccounts = PurchaseAccounts.withBalanceSheet(
             ExpensesPage._accounts, ...(x.lines || []).map(l => l.account_id));
         (x.lines || []).forEach(l => ExpensesPage.addLine(l));
         if (!(x.lines || []).length) ExpensesPage.addLine();

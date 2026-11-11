@@ -369,7 +369,7 @@ const MemorizedPage = {
         }
         // Enter Bill's grid draws from BillsPage's own state
         BillsPage._items = items;
-        BillsPage._accounts = PurchaseAccounts.filter(accounts, ...m.lines.map(l => l.account_id));
+        BillsPage._accounts = PurchaseAccounts.withBalanceSheet(accounts, ...m.lines.map(l => l.account_id));  // (#766)
         BillsPage._vendors = vendors;
         BillsPage._defaultExpenseAccountId = null;
         BillsPage._taxRate = Number(m.tax_rate) || 0;
