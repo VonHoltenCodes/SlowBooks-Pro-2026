@@ -230,12 +230,15 @@ nothing on it is hidden; one whose lines carry their own markups opens as
 markup per line. Either way the job budget comes from each line's cost and the
 contract and schedule of values from its price. On either form a costed
 estimate whose price equals its cost says *Priced at cost: there is no markup
-on this estimate*, and the totals panel leaves out any row that is $0.00.
+on this estimate*, and the totals panel leaves out any row that is $0.00,
+and a Cost of work or Bid total that only repeats the Subtotal or the Total.
 
 Through the API a line carries its markup as `markup_pct` (25 means 25%,
 −100 to 10,000); a base or alternate line with a unit cost and a markup is
 priced at unit cost × (1 + markup ÷ 100), to four places, and one with no
-markup at cost. A markup is kept to four places. Any other line keeps the
+markup at cost (a line sent with a price above its cost and no `markup_pct`
+is priced at cost, and the response's `warnings` say so). A markup and a unit
+cost are kept to four places. Any other line keeps the
 markup it carries without being priced by it: an allowance or unit price, a
 line with no cost, or any line while the company is Business or Nonprofit, so
 switching the company type and back, or a line's kind away and back, does not

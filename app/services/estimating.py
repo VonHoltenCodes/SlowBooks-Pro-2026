@@ -341,11 +341,13 @@ def markup_parts(estimate) -> list[dict]:
 def estimate_totals(estimate) -> dict:
     """Every bid figure for an estimate, from its own lines and markups.
 
-    The lines stay at cost; the markups are their own figures under the
-    subtotal:
+    A commercial bid's lines stay at cost; the markups are their own figures
+    under the subtotal:
 
     - markup_base — Σ price of base + accepted-alternate lines that HAVE a
-      unit cost (priced at cost, so this is the cost the markups build on);
+      unit cost (at cost on a commercial bid, so this is the cost the markups
+      build on; a line that carries its own markup (#774) is in it at its
+      marked-up price, and the four markups build on that);
       allowances count only when the estimate's markup_allowances flag is on
       (off by default).
     - the four markups compound in order on markup_base; markup_total is their

@@ -25,6 +25,8 @@
     table.line-items td { padding: 5px 8px; font-size: 9pt; border-bottom: 1px solid #e0e0e0; }
     table.line-items td.r { text-align: right; font-variant-numeric: tabular-nums; }
     table.line-items tr:nth-child(even) { background: #f7f9fb; }
+    /* a markup-per-line row prints whole on one page, its description wrapping (#774) */
+    table.line-items.priced-lines tr { break-inside: avoid; page-break-inside: avoid; }
     .totals { float: right; width: 240px; }
     .totals table { width: 100%; }
     .totals td { padding: 3px 8px; font-size: 9pt; }
@@ -101,7 +103,7 @@
        description, quantity with its unit, amount — and the totals. No rate,
        no cost code, no cost and no markup. The commercial bid below prints as
        it always has. #}
-    <table class="line-items">
+    <table class="line-items priced-lines">
         <thead><tr><th>Description</th><th class="r" style="width:80px;">Qty</th><th class="r" style="width:90px;">Amount</th></tr></thead>
         <tbody>
         {% for line in est.lines %}

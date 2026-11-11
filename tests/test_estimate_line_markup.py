@@ -537,7 +537,7 @@ def test_the_owner_sees_description_quantity_and_amount(client, seed_customer):
         tax_rate=0.07,
     )
     html = _preview(client, est["id"])
-    head = html[html.index('<table class="line-items">') :]
+    head = html[html.index('<table class="line-items priced-lines">') :]
     head = head[: head.index("</thead>")]
     assert ">Description<" in head and ">Qty<" in head and ">Amount<" in head
     assert ">Rate<" not in head
@@ -546,6 +546,9 @@ def test_the_owner_sees_description_quantity_and_amount(client, seed_customer):
     assert "32 31 00" not in html  # no cost code before the description
     assert "$20.00" not in html and "$16.00" not in html  # no rate, no cost
     assert "25%" not in html and "Markup" not in html
+    # nor the raw figures, however a template might print them
+    for raw in ("16.0000", "16.00 ", "20.0000", ">25<", ">16<", "Profit", "Margin"):
+        assert raw not in html, raw
     assert "Subtotal" in html and "Tax (7.00%)" in html and "$420.00" in html
     assert "$6,420.00" in html
     assert "Bid total" not in html
@@ -565,3 +568,91 @@ def test_the_commercial_bid_keeps_its_own_pdf(client, seed_customer):
     _construction(client, estimate_style="line_markup")
     html = _preview(client, est["id"])
     assert ">Rate<" not in html and "Bid total" not in html
+
+
+def test_an_owner_estimate_with_no_tax_prints_no_tax_row(client, seed_customer):
+    _construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [{"description": "Fence", "quantity": 1, "unit_cost": 16, "markup_pct": 25}],
+    )
+    html = _preview(client, est["id"])
+    assert "Tax (" not in html and "Total" in html
+
+
+def test_a_markup_per_line_row_prints_whole_on_one_page(client, seed_customer):
+    _construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [{"description": "Fence", "quantity": 1, "unit_cost": 16, "markup_pct": 25}],
+    )
+    html = _preview(client, est["id"])
+    assert "table.line-items.priced-lines tr { break-inside: avoid;" in html
+    assert '<table class="line-items priced-lines">' in html
+
+
+def test_a_marked_up_rate_too_large_for_a_line_is_refused(client, seed_customer):
+    _construction(client)
+    line = {"quantity": 1, "unit_cost": "1000000000000", "markup_pct": 10000}
+    r = client.post(
+        "/api/estimates",
+        json={"customer_id": seed_customer.id, "date": "2026-11-10", "lines": [line]},
+    )
+    assert r.status_code == 422, r.text
+    assert "more than a line can be" in r.text
+
+
+def test_a_cost_finer_than_four_places_prices_as_it_is_stored(client, seed_customer):
+    _construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [
+            {
+                "description": "a",
+                "quantity": 3,
+                "unit_cost": "10.428571",
+                "markup_pct": 3,
+            },
+            {
+                "description": "b",
+                "quantity": 6,
+                "unit_cost": "10.857142",
+                "markup_pct": 6,
+            },
+        ],
+    )
+    lines = _by_desc(est)
+    assert lines["a"]["unit_cost"].startswith("10.4286")
+    # the rate is the stored cost marked up: 10.4286 x 1.03 = 10.741458
+    assert Decimal(lines["a"]["rate"]) == Decimal("10.7415")
+    assert _save_unchanged(client, est)["total"] == est["total"]
+
+
+def test_a_line_sent_above_cost_with_no_markup_says_it_is_at_cost(
+    client, seed_customer
+):
+    _construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [{"description": "Fence", "quantity": 10, "unit_cost": 16, "markup_pct": 25}],
+    )
+    old_client_line = {"description": "Fence", "quantity": 10, "unit_cost": 16}
+    r = client.put(
+        f"/api/estimates/{est['id']}",
+        json={"lines": [{**old_client_line, "rate": 20}]},
+    )
+    assert r.status_code == 200, r.text
+    (warning,) = r.json()["warnings"]
+    assert warning.startswith("Line 1 came with no markup, so it is priced at its")
+    assert "markup_pct" in warning
+    # sent with its markup, or at its cost, there is nothing to say
+    for line in (
+        {**old_client_line, "rate": 16},
+        {**old_client_line, "markup_pct": 25},
+    ):
+        r = client.put(f"/api/estimates/{est['id']}", json={"lines": [line]})
+        assert r.status_code == 200 and r.json()["warnings"] == [], r.text

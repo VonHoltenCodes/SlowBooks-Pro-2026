@@ -70,6 +70,16 @@ class EstimateLineCreate(StrictModel):
 
     _cost_type = field_validator("cost_type")(clean_line_cost_type)
 
+    @field_validator("unit_cost")
+    @classmethod
+    def _cost_places(cls, v):
+        # to the column's four places before a line is priced from it (#774),
+        # so the rate stored is the one the stored cost and markup give
+        # (a figure too large to round is left for the size check's sentence)
+        if v is None or not v.is_finite() or abs(v) >= Decimal("1e20"):
+            return v
+        return v.quantize(Decimal("0.0001"))
+
     @field_validator("markup_pct")
     @classmethod
     def _markup(cls, v):

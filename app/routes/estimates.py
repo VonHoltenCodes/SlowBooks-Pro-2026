@@ -103,7 +103,7 @@ def _customer_bill_to(customer) -> dict:
 _MARKUP_PCTS = ("gc_pct", "insurance_pct", "fee_pct", "bond_pct")
 
 
-def _enforce_at_cost(lines, is_construction: bool) -> None:
+def _enforce_at_cost(lines, is_construction: bool) -> list[str]:
     """The construction pricing rule, driven by the line alone. A base or
     alternate line that carries a unit cost is priced from it: at cost (#551)
     when it has no markup of its own, else unit cost × (1 + markup_pct / 100)
@@ -112,15 +112,31 @@ def _enforce_at_cost(lines, is_construction: bool) -> None:
     priced by it (no unit cost, an allowance or unit price, or a Business or
     Nonprofit estimate, whose rate is what they charge), so a company that
     switches type and back, or a line whose kind goes and comes back, still
-    has the rule that priced it."""
-    for ln in lines:
+    has the rule that priced it. Returns a sentence for each line sent with a
+    price above its cost and no markup, which is priced at cost: a client
+    written before markup_pct existed is told rather than repriced quietly."""
+    warnings = []
+    for n, ln in enumerate(lines, start=1):
         priced = (
             is_construction
             and ln.line_kind in ("base", "alternate")
             and ln.unit_cost is not None
         )
-        if priced:
-            ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
+        if not priced:
+            continue
+        sent = ln.rate
+        ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
+        if (
+            "markup_pct" not in ln.model_fields_set
+            and "rate" in ln.model_fields_set
+            and sent != ln.rate
+        ):
+            warnings.append(
+                f"Line {n} came with no markup, so it is priced at its cost "
+                f"({ln.rate:,.2f}), not the {sent:,.2f} sent. Send its "
+                "markup_pct to price it above cost."
+            )
+    return warnings
 
 
 def _locked_a_budget(db: Session, estimate: Estimate) -> bool:
@@ -399,7 +415,7 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
         data.terms = get_settings(db).get("estimate_terms") or None
     # Construction lines are priced from their cost (at cost, or plus their
     # own markup) before anything is totalled (#551, #774).
-    _enforce_at_cost(data.lines, is_construction)
+    priced_warnings = _enforce_at_cost(data.lines, is_construction)
     # The document totals cover the bought scope and the four markups: lines
     # at cost, the markups under the subtotal, tax on both. A unit-price line
     # is a rate card and an un-accepted alternate is not in the bid, so the
@@ -492,7 +508,9 @@ def create_estimate(data: EstimateCreate, db: Session = Depends(get_db)):
 
     db.commit()
     db.refresh(estimate)
-    return _estimate_response(estimate)
+    resp = _estimate_response(estimate)
+    resp.warnings = priced_warnings
+    return resp
 
 
 @router.put("/{estimate_id}", response_model=EstimateResponse)
@@ -503,6 +521,7 @@ def update_estimate(
     if not estimate:
         raise HTTPException(status_code=404, detail="Estimate not found")
 
+    priced_warnings: list[str] = []
     changes = reject_null_updates(
         Estimate, data.model_dump(exclude_unset=True, exclude={"lines"})
     )
@@ -567,7 +586,7 @@ def update_estimate(
         resolve_line_taxable(db, data.lines, db.get(Customer, estimate.customer_id))
         # construction lines are priced from their cost before they are
         # stored (#551, #774)
-        _enforce_at_cost(data.lines, is_construction)
+        priced_warnings = _enforce_at_cost(data.lines, is_construction)
         # each old line leaves a DELETE event with its amounts (#289)
         audited_bulk_delete(
             db, db.query(EstimateLine).filter(EstimateLine.estimate_id == estimate_id)
@@ -653,7 +672,9 @@ def update_estimate(
 
     db.commit()
     db.refresh(estimate)
-    return _estimate_response(estimate)
+    resp = _estimate_response(estimate)
+    resp.warnings = priced_warnings
+    return resp
 
 
 @router.post("/{estimate_id}/accept", response_model=EstimateResponse)
