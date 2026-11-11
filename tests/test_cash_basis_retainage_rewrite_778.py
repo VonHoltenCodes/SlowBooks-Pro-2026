@@ -16,6 +16,8 @@ shape the old rule wrote (reconstructed below from the code before
 
 from decimal import Decimal
 
+import pytest
+
 from app.models.bills import Bill, BillPayment, BillPaymentAllocation
 from app.models.invoices import Invoice
 from app.models.payments import Payment, PaymentAllocation
@@ -28,6 +30,7 @@ from app.models.transactions import (
     TransactionLine,
 )
 from app.services import cash_basis
+from tests.test_backups_per_company import _backup, books  # noqa: F401
 from tests.test_cash_basis import (
     _amount,
     _bill_payment,
@@ -423,6 +426,109 @@ def test_the_pass_runs_when_the_server_starts(monkeypatch, lifespan_client, caps
     assert len(calls) == 1 and calls[0] is not None
     assert (
         "Cash basis and retainage: rewrote the cash lines of 3 payment(s) and 2 "
-        "bill payment(s); 1 payment(s) before the closing date kept their cash "
-        "lines"
+        "bill payment(s) to the 2.31.11 rule; 1 payment(s) on or before the "
+        "closing date were left as they were, unread"
     ) in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------------
+# what is counted as rewritten
+# ---------------------------------------------------------------------------
+
+
+def test_a_payment_the_recompute_leaves_is_not_counted_as_rewritten(
+    client, db_session, seed_accounts, seed_customer, caplog
+):
+    """One payment on two pay applications whose old lines name neither (a
+    payment from before lines named their document): the recompute cannot
+    tell them apart and leaves them, logged, so the pass counts nothing."""
+    job, sov = _job(client, seed_customer.id)
+    a = _approved_app(client, job["id"], "2026-07-31", sov, (10000, 0), tax_rate="0")
+    b = _approved_app(client, job["id"], "2026-08-31", sov, (5000, 0), tax_rate="0")
+    pay = _payment(
+        client, seed_customer.id, "2026-09-10", "13500", [(a, "9000"), (b, "4500")]
+    )
+    _to_old_rule(db_session)
+    entry = db_session.get(Payment, pay["id"]).transaction_id
+    db_session.query(TransactionLine).filter(
+        TransactionLine.transaction_id == entry
+    ).execution_options(**{LEDGER_BASIS_OPTION: READ_ALL}).update(
+        {TransactionLine.recognizes_invoice_id: None}, synchronize_session=False
+    )
+    db_session.commit()
+    before = _entry_lines(db_session, entry)
+
+    done = cash_basis.rewrite_retainage_cash_lines(db_session)
+    assert done["payments"] == 0 and done["failed"] == 0
+    assert _entry_lines(db_session, entry) == before
+    assert "not recomputed" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# mid-session: an import, a restore
+# ---------------------------------------------------------------------------
+
+
+def _forget_the_pass(db):
+    """The file as a backup from before the pass holds it: no done row."""
+    db.query(Settings).filter_by(key=cash_basis.RETAINAGE_REWRITE_KEY).delete()
+    db.commit()
+
+
+def test_an_import_runs_the_pass_on_a_file_that_has_not_had_it(
+    client, db_session, seed_accounts, seed_customer
+):
+    _job_, inv_id, _rel = _small_book(client, seed_accounts, seed_customer.id)
+    _payment(client, seed_customer.id, "2026-08-20", "35309.57", [(inv_id, "35309.57")])
+    fresh = _cash_lines(db_session)
+    _to_old_rule(db_session)
+    _forget_the_pass(db_session)
+
+    cash_basis.backfill_after_import(db_session)
+    assert _cash_lines(db_session) == fresh
+    assert _done_flag(db_session)
+
+
+def test_restored_books_are_caught_up_without_a_restart(
+    client, db_session, seed_accounts, seed_customer
+):
+    """A backup from before the pass comes back with old-rule lines and no
+    done row; the restore's catch-up gives it the 2.31.11 lines."""
+    _job_, inv_id, _rel = _small_book(client, seed_accounts, seed_customer.id)
+    _payment(client, seed_customer.id, "2026-08-20", "35309.57", [(inv_id, "35309.57")])
+    fresh = _cash_lines(db_session)
+    cash_basis.rewrite_retainage_cash_lines(db_session)
+    _to_old_rule(db_session)
+    _forget_the_pass(db_session)
+
+    cash_basis.catch_up_after_restore(db_session)
+    assert _cash_lines(db_session) == fresh
+    assert _done_flag(db_session)
+    year = _pl(client, "2026-01-01", "2026-12-31", "cash")
+    assert D(str(year["total_income"])) == D("35309.57")
+
+
+@pytest.mark.usefixtures("books")
+def test_the_restore_route_runs_the_catch_up(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        cash_basis, "catch_up_after_restore", lambda db: calls.append(db)
+    )
+    name = _backup(client)
+    r = client.post("/api/backups/restore", json={"filename": name})
+    assert r.status_code == 200, r.text
+    assert len(calls) == 1
+
+
+@pytest.mark.usefixtures("books")
+def test_a_catch_up_that_fails_does_not_fail_the_restore(client, monkeypatch, caplog):
+    def broken(db, on_progress=None):
+        raise RuntimeError("simulated")
+
+    monkeypatch.setattr(cash_basis, "backfill", broken)
+    monkeypatch.setattr(cash_basis, "rewrite_retainage_cash_lines", broken)
+    name = _backup(client)
+    r = client.post("/api/backups/restore", json={"filename": name})
+    assert r.status_code == 200, r.text
+    assert "could not be caught up" in caplog.text
+    assert "could not be rewritten after a restore" in caplog.text
