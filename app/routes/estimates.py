@@ -113,8 +113,9 @@ def _enforce_at_cost(lines, is_construction: bool) -> list[str]:
     Nonprofit estimate, whose rate is what they charge), so a company that
     switches type and back, or a line whose kind goes and comes back, still
     has the rule that priced it. Returns a sentence for each line sent with a
-    price above its cost and no markup, which is priced at cost: a client
-    written before markup_pct existed is told rather than repriced quietly."""
+    price a cent or more above its cost and no markup, which is priced at
+    cost: a client written before markup_pct existed is told rather than
+    repriced quietly."""
     warnings = []
     for n, ln in enumerate(lines, start=1):
         priced = (
@@ -124,13 +125,10 @@ def _enforce_at_cost(lines, is_construction: bool) -> list[str]:
         )
         if not priced:
             continue
+        # a rate left off is 0, never above cost, so it never warns
         sent = ln.rate
         ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
-        if (
-            "markup_pct" not in ln.model_fields_set
-            and "rate" in ln.model_fields_set
-            and abs(sent) > abs(ln.rate)
-        ):
+        if ln.markup_pct is None and _q(abs(Decimal(str(sent)))) > _q(abs(ln.rate)):
             warnings.append(
                 f"Line {n} came with no markup, so it is priced at its cost "
                 f"({ln.rate:,.2f}), not the {sent:,.2f} sent. Send its "

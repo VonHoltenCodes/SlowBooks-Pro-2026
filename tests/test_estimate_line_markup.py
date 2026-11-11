@@ -662,6 +662,12 @@ def test_a_line_sent_above_cost_with_no_markup_says_it_is_at_cost(
     )
     assert r.status_code == 200, r.text
     (warning,) = r.json()["warnings"]
+    # a markup sent as null is no markup: the same sentence
+    r = client.put(
+        f"/api/estimates/{est['id']}",
+        json={"lines": [{**old_client_line, "rate": 20, "markup_pct": None}]},
+    )
+    assert len(r.json()["warnings"]) == 1, r.text
     assert warning.startswith("Line 1 came with no markup, so it is priced at its")
     assert "markup_pct" in warning
     # sent with its markup, or at its cost, there is nothing to say
@@ -671,6 +677,10 @@ def test_a_line_sent_above_cost_with_no_markup_says_it_is_at_cost(
         # a commercial client sends 0, or less than cost, for an at-cost line
         {**old_client_line, "rate": 0},
         {**old_client_line, "rate": 12},
+        # no rate at all, the natural commercial call
+        old_client_line,
+        # above cost by less than a cent
+        {**old_client_line, "rate": "16.00004"},
     )
     for line in quiet:
         r = client.put(f"/api/estimates/{est['id']}", json={"lines": [line]})
