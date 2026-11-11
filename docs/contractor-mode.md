@@ -223,14 +223,17 @@ PDF are exactly as they were.
   subtotal.
 
 A construction company that already had estimates when this setting arrived
-was put on Commercial bid by the upgrade, so its screen did not change. An
+was put on Commercial bid by the upgrade, so its screen did not change. A
+company that becomes construction later starts on Markup per line, and its
+earlier estimates print in that layout; choose Commercial bid in Settings to
+keep the rate column. An
 estimate that uses packages, a kind other than Base or any of the four
 markups always opens as a commercial bid, whatever the setting says, so
 nothing on it is hidden; one whose lines carry their own markups opens as
 markup per line. Either way the job budget comes from each line's cost and the
 contract and schedule of values from its price. On either form a costed
 estimate whose price equals its cost says *Priced at cost: there is no markup
-on this estimate*, and the totals panel leaves out any row that is $0.00,
+on this estimate*, and the totals panel leaves out any row other than Subtotal and Total that is $0.00,
 and a Cost of work or Bid total that only repeats the Subtotal or the Total.
 
 Through the API a line carries its markup as `markup_pct` (25 means 25%,

@@ -272,12 +272,21 @@ def test_a_markup_finer_than_four_places_prices_as_it_is_stored(client, seed_cus
     assert again["subtotal"] == est["subtotal"] == "1333333.00"
 
 
-@pytest.mark.parametrize("markup", [None, 25])
-def test_a_cost_too_large_to_store_is_a_sentence_at_quantity_zero(
-    client, seed_customer, markup
+@pytest.mark.parametrize(
+    "line",
+    [
+        {"unit_cost": "1e40"},
+        {"unit_cost": "1e40", "markup_pct": 25},
+        {"rate": "1e40"},
+        # the cost fits, the rate its markup gives does not
+        {"unit_cost": "100000000000", "markup_pct": 10000},
+    ],
+)
+def test_a_figure_too_large_to_store_is_a_sentence_at_quantity_zero(
+    client, seed_customer, line
 ):
     _construction(client)
-    line = {"quantity": 0, "unit_cost": "1e40", "markup_pct": markup}
+    line = {"quantity": 0, **line}
     r = client.post(
         "/api/estimates",
         json={"customer_id": seed_customer.id, "date": "2026-11-10", "lines": [line]},
@@ -591,6 +600,12 @@ def test_a_markup_per_line_row_prints_whole_on_one_page(client, seed_customer):
     html = _preview(client, est["id"])
     assert "table.line-items.priced-lines tr { break-inside: avoid;" in html
     assert '<table class="line-items priced-lines">' in html
+    # a commercial bid's PDF is as it was, the rule included
+    _construction(client, estimate_style="commercial_bid")
+    est = _estimate(
+        client, seed_customer.id, [{"description": "At cost", "unit_cost": 16}]
+    )
+    assert "priced-lines" not in _preview(client, est["id"])
 
 
 def test_a_marked_up_rate_too_large_for_a_line_is_refused(client, seed_customer):
@@ -650,9 +665,13 @@ def test_a_line_sent_above_cost_with_no_markup_says_it_is_at_cost(
     assert warning.startswith("Line 1 came with no markup, so it is priced at its")
     assert "markup_pct" in warning
     # sent with its markup, or at its cost, there is nothing to say
-    for line in (
+    quiet = (
         {**old_client_line, "rate": 16},
         {**old_client_line, "markup_pct": 25},
-    ):
+        # a commercial client sends 0, or less than cost, for an at-cost line
+        {**old_client_line, "rate": 0},
+        {**old_client_line, "rate": 12},
+    )
+    for line in quiet:
         r = client.put(f"/api/estimates/{est['id']}", json={"lines": [line]})
         assert r.status_code == 200 and r.json()["warnings"] == [], r.text

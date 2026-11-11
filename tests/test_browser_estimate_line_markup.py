@@ -331,3 +331,37 @@ def test_a_business_save_keeps_the_markup_for_construction(client, seed_customer
     line = client.get(f"/api/estimates/{est_id}").json()["lines"][0]
     assert line["markup_pct"] == "25"
     assert Decimal(line["rate"]) == Decimal("125")
+
+
+def test_the_form_rounds_a_half_as_the_server_does(client, seed_customer):
+    _construction(client)
+
+    def test(page):
+        cases = [("3.51", "12.5"), ("1.41", "62.5"), ("4.35", "7.5"), ("-200", "25")]
+        got = [
+            page.evaluate("([c, m]) => EstimatesPage.pricedRate(c, m)", case)
+            for case in cases
+        ]
+        assert got == ["3.9488", "2.2913", "4.6763", "-250"]
+
+    _estimate_form(client, test)
+
+
+def test_a_save_keeps_the_markup_of_a_line_with_no_cost(client, seed_customer):
+    _construction(client)
+    line = {"description": "Typed", "quantity": 2, "rate": 100, "markup_pct": 25}
+    r = client.post(
+        "/api/estimates",
+        json={"customer_id": seed_customer.id, "date": "2026-11-10", "lines": [line]},
+    )
+    assert r.status_code == 201, r.text
+    est_id = r.json()["id"]
+
+    def test(page):
+        page.get_by_role("button", name="Update Estimate").click()
+        page.locator("#est-form").wait_for(state="hidden")
+
+    _estimate_form(client, test, est_id)
+    est = client.get(f"/api/estimates/{est_id}").json()
+    assert est["lines"][0]["markup_pct"] == "25"
+    assert est["style"] == "line_markup"

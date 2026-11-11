@@ -760,7 +760,7 @@ const EstimatesPage = {
             if (mk && mk.type !== 'hidden') mk.disabled = !atCost;
             if (atCost) {
                 const pct = mk && mk.value !== '' ? Number(mk.value) || 0 : null;
-                rate.value = pct === null ? ucEl.value : String(EstimatesPage._r4(Number(ucEl.value) * (1 + pct / 100)));
+                rate.value = pct === null ? ucEl.value : EstimatesPage.pricedRate(ucEl.value, mk.value);
                 rate.readOnly = true;
                 rate.title = pct === null ? 'At cost; the markups are lines under the subtotal' : 'Cost plus the line\'s markup';
             } else {
@@ -773,13 +773,33 @@ const EstimatesPage = {
         });
     },
 
-    _r4(x) { return Math.round((Number(x) + Number.EPSILON) * 10000) / 10000; },
+    // The server's priced_rate (#774) in exact arithmetic: cost and markup to
+    // four places, then cost × (1 + markup / 100) to four, half away from
+    // zero as Decimal's ROUND_HALF_UP. Floats put 3.51 at 12.5% at 3.9487.
+    _units4(text) {
+        const [whole, frac = ''] = Number(text).toFixed(8).split('.');
+        const neg = whole.startsWith('-');
+        let n = BigInt(whole.replace('-', '') + frac.slice(0, 4));
+        if (Number(frac[4]) >= 5) n += 1n;
+        return neg ? -n : n;
+    },
+    pricedRate(cost, markup) {
+        const c = EstimatesPage._units4(cost), m = EstimatesPage._units4(markup);
+        const num = c * (1000000n + m), den = 1000000n;
+        const abs = num < 0n ? -num : num;
+        let q = (abs * 2n + den) / (2n * den);
+        if (num < 0n) q = -q;
+        const neg = q < 0n, a = (neg ? -q : q).toString().padStart(5, '0');
+        return String(Number((neg ? '-' : '') + a.slice(0, -4) + '.' + a.slice(-4)));
+    },
 
     // A line's markup as the save sends it: none when the row has no Markup
-    // box, when it is blank, or when it is disabled (the line has no cost).
+    // box or it is blank.
     markupFromRow(row) {
         const mk = row.querySelector('.line-markup');
-        if (!mk || mk.disabled || mk.value === '') return null;
+        // a disabled box (the line has no cost) still sends what it holds:
+        // the server keeps a markup it does not price by (#774)
+        if (!mk || mk.value === '') return null;
         return parseFloat(mk.value);
     },
 

@@ -129,7 +129,7 @@ def _enforce_at_cost(lines, is_construction: bool) -> list[str]:
         if (
             "markup_pct" not in ln.model_fields_set
             and "rate" in ln.model_fields_set
-            and sent != ln.rate
+            and abs(sent) > abs(ln.rate)
         ):
             warnings.append(
                 f"Line {n} came with no markup, so it is priced at its cost "
