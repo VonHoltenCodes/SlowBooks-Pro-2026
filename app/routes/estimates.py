@@ -58,7 +58,7 @@ from app.schemas.estimates import (
     EstimateLost,
     totals_from_dict,
 )
-from app.schemas.common import StrictModel
+from app.schemas.common import StrictModel, check_line_fits
 from app.schemas.invoices import InvoiceResponse, ZeroTotalConfirmation
 from app.services.pdf_service import generate_estimate_pdf
 from app.services.numbering import next_estimate_number, next_invoice_number
@@ -127,8 +127,20 @@ def _enforce_at_cost(lines, is_construction: bool) -> list[str]:
             continue
         # a rate left off is 0, never above cost, so it never warns
         sent = ln.rate
+        if ln.markup_pct is not None:
+            # the rate the markup gives must fit, at any quantity (a markup
+            # kept on a line it does not price is never checked)
+            marked_up = Decimal(str(ln.unit_cost)) * (
+                1 + ln.markup_pct / Decimal("100")
+            )
+            try:
+                check_line_fits(Decimal("1"), marked_up)
+                check_line_fits(ln.quantity, marked_up)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Line {n}: {exc}")
         ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
-        if ln.markup_pct is None and _q(abs(Decimal(str(sent)))) > _q(abs(ln.rate)):
+        over = abs(Decimal(str(sent))) - abs(ln.rate)
+        if ln.markup_pct is None and over >= Decimal("0.01"):
             warnings.append(
                 f"Line {n} came with no markup, so it is priced at its cost "
                 f"({ln.rate:,.2f}), not the {sent:,.2f} sent. Send its "

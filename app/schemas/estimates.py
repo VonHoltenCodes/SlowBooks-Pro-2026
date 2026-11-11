@@ -110,11 +110,8 @@ class EstimateLineCreate(StrictModel):
         if self.unit_cost is not None:
             check_line_fits(Decimal("1"), self.unit_cost)
             check_line_fits(self.quantity, self.unit_cost)
-            if self.markup_pct is not None:
-                # the marked-up rate the server will store fits too
-                marked_up = self.unit_cost * (1 + self.markup_pct / Decimal("100"))
-                check_line_fits(Decimal("1"), marked_up)
-                check_line_fits(self.quantity, marked_up)
+            # the marked-up rate is checked where the line is priced by it
+            # (estimates._enforce_at_cost): a kept, unapplied markup is not
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":

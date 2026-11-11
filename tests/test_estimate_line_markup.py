@@ -605,7 +605,10 @@ def test_a_markup_per_line_row_prints_whole_on_one_page(client, seed_customer):
     est = _estimate(
         client, seed_customer.id, [{"description": "At cost", "unit_cost": 16}]
     )
-    assert "priced-lines" not in _preview(client, est["id"])
+    html = _preview(client, est["id"])
+    assert "priced-lines" not in html
+    # not even a blank line where the rule would be
+    assert "#f7f9fb; }\n    .totals {" in html
 
 
 def test_a_marked_up_rate_too_large_for_a_line_is_refused(client, seed_customer):
@@ -681,7 +684,29 @@ def test_a_line_sent_above_cost_with_no_markup_says_it_is_at_cost(
         old_client_line,
         # above cost by less than a cent
         {**old_client_line, "rate": "16.00004"},
+        {**old_client_line, "rate": "16.005"},
+        {**old_client_line, "rate": "16.009"},
     )
     for line in quiet:
         r = client.put(f"/api/estimates/{est['id']}", json={"lines": [line]})
         assert r.status_code == 200 and r.json()["warnings"] == [], r.text
+
+
+@pytest.mark.parametrize(
+    "company,kind",
+    [
+        ("construction", "allowance"),
+        ("construction", "unit_price"),
+        ("business", "base"),
+    ],
+)
+def test_a_kept_markup_that_does_not_price_a_line_is_not_size_checked(
+    client, seed_customer, company, kind
+):
+    r = client.put("/api/settings", json={"company_type": company})
+    assert r.status_code == 200, r.text
+    line = {"description": "Big", "quantity": 1000000, "rate": 1, "unit_cost": 100000}
+    line.update(markup_pct=10000, line_kind=kind)
+    est = _estimate(client, seed_customer.id, [line])
+    assert est["lines"][0]["markup_pct"] == "10000"
+    assert Decimal(est["lines"][0]["rate"]) == Decimal("1")
