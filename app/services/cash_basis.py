@@ -725,13 +725,14 @@ def _recompute(
     allocations,
     fully_applied,
     adopted: bool,
+    rewritten_ids: set | None = None,
 ) -> int:
     """Rewrite, in each non-void payment of `document`, the cash lines that
     recognize it from the document's lines as they now stand, prorated by
     the same applied amount and kept on the payment's date. A payment on or
     before the closing date keeps what it has; so does one whose older cash
     lines cannot be told from another document's. Returns the payments
-    rewritten."""
+    rewritten, and adds their ids to `rewritten_ids` when it is given."""
     from app.services.audit import audited_bulk_delete
     from app.services.closing_date import get_closing_date
     from app.services.currency import to_home
@@ -814,12 +815,18 @@ def _recompute(
                 ],
             )
         rewritten += 1
+        if rewritten_ids is not None:
+            rewritten_ids.add(payment.id)
     db.flush()
     return rewritten
 
 
 def recompute_invoice_cash_lines(
-    db: Session, invoice: Invoice, *, adopted: bool = False
+    db: Session,
+    invoice: Invoice,
+    *,
+    adopted: bool = False,
+    rewritten_ids: set | None = None,
 ) -> int:
     """After an invoice's journal is reposted (an edit, #483): rewrite the
     cash recognition lines of each payment on it. `adopted` is for an invoice
@@ -849,12 +856,36 @@ def recompute_invoice_cash_lines(
         allocations=allocations,
         fully_applied=fully_applied,
         adopted=adopted,
+        rewritten_ids=rewritten_ids,
     )
     return rewritten + recompute_discount_cash_lines(db, invoice, invoice=True)
 
 
 def recompute_bill_cash_lines(db: Session, bill: Bill) -> int:
     """The same for a bill's payments after its journal is reposted."""
+    rewritten = _recompute_bill_payments(db, bill)
+    # a release on the same commitment recognized this bill's held part as
+    # its lines stood; rewrite that too
+    if bill.po_id is not None and not (bill.retainage_released or 0):
+        for release in (
+            db.query(Bill)
+            .filter(
+                Bill.po_id == bill.po_id,
+                Bill.id > bill.id,
+                Bill.retainage_released > 0,
+                Bill.status != BillStatus.VOID,
+            )
+            .order_by(Bill.id)
+        ):
+            rewritten += recompute_bill_cash_lines(db, release)
+    return rewritten
+
+
+def _recompute_bill_payments(
+    db: Session, bill: Bill, rewritten_ids: set | None = None
+) -> int:
+    """Rewrite the cash lines of one bill's own payments and discounts, not
+    those of the releases on its commitment."""
     from app.services.accounting import get_ap_account_id
 
     def allocations(b):
@@ -876,23 +907,9 @@ def recompute_bill_cash_lines(db: Session, bill: Bill) -> int:
         allocations=allocations,
         fully_applied=fully_applied,
         adopted=False,
+        rewritten_ids=rewritten_ids,
     )
-    rewritten += recompute_discount_cash_lines(db, bill, invoice=False)
-    # a release on the same commitment recognized this bill's held part as
-    # its lines stood; rewrite that too
-    if bill.po_id is not None and not (bill.retainage_released or 0):
-        for release in (
-            db.query(Bill)
-            .filter(
-                Bill.po_id == bill.po_id,
-                Bill.id > bill.id,
-                Bill.retainage_released > 0,
-                Bill.status != BillStatus.VOID,
-            )
-            .order_by(Bill.id)
-        ):
-            rewritten += recompute_bill_cash_lines(db, release)
-    return rewritten
+    return rewritten + recompute_discount_cash_lines(db, bill, invoice=False)
 
 
 def recompute_discount_cash_lines(db: Session, document, invoice: bool = True) -> int:
@@ -1287,15 +1304,220 @@ def backfill(db: Session, on_progress=None) -> dict:
 
 def backfill_after_import(db: Session) -> dict:
     """Give the payments an importer just created their cash lines (#483),
-    so the cash reports are right without a restart. Never fails the import:
-    a payment that cannot be given cash lines is logged and retried at the
-    next start."""
+    so the cash reports are right without a restart, and run the once-per-file
+    retainage pass (#778) when this file has not had it. Never fails the
+    import: a payment that cannot be given cash lines is logged and retried
+    at the next start."""
     try:
-        return backfill(db)
+        done = backfill(db)
     except Exception:
         db.rollback()
         log.exception("Cash-basis backfill after an import failed")
-        return {"tagged": 0, "payments": 0, "bill_payments": 0, "failed": 0}
+        done = {"tagged": 0, "payments": 0, "bill_payments": 0, "failed": 0}
+    _retainage_pass_quietly(db, "an import")
+    return done
+
+
+def _retainage_pass_quietly(db: Session, after: str) -> dict | None:
+    """rewrite_retainage_cash_lines, logged, never raising: the caller's
+    work (an import, a restore) stands whatever happens here."""
+    try:
+        redone = rewrite_retainage_cash_lines(db)
+    except Exception:
+        db.rollback()
+        log.exception(
+            "The cash-basis lines of retainage payments could not be rewritten "
+            "after %s; they are tried again at the next start",
+            after,
+        )
+        return None
+    if not redone["already_done"] and (
+        redone["payments"] or redone["bill_payments"] or redone["kept_closed"]
+    ):
+        log.info("%s", retainage_pass_sentence(redone))
+    return redone
+
+
+def retainage_pass_sentence(redone: dict) -> str:
+    """The start-up log line of the retainage pass (#778)."""
+    return (
+        "Cash basis and retainage: rewrote the cash lines of %d payment(s) and "
+        "%d bill payment(s) to the 2.31.11 rule; %d payment(s) on or before "
+        "the closing date were left as they were, unread"
+        % (redone["payments"], redone["bill_payments"], redone["kept_closed"])
+    )
+
+
+def catch_up_after_restore(db: Session) -> None:
+    """After a backup is restored into the running app: what the start-up
+    would do for that file, so an older backup reads right on the cash basis
+    without a restart: the backfill (#483), then the retainage pass (#778),
+    which a file restored from before it has not had (its settings row came
+    back with the backup). Never fails the restore; anything that cannot be
+    done now is tried again at the next start."""
+    try:
+        backfill(db)
+    except Exception:
+        db.rollback()
+        log.exception(
+            "The cash-basis lines of the restored books could not be caught up; "
+            "they are tried again at the next start"
+        )
+    _retainage_pass_quietly(db, "a restore")
+
+
+# ---------------------------------------------------------------------------
+# Upgrade pass (#778): retainage payments recorded before 2.31.11
+# ---------------------------------------------------------------------------
+
+# The settings row written when the pass has finished with nothing failed:
+# a second start finds it and does nothing. Its value is the date it ran.
+RETAINAGE_REWRITE_KEY = "cash_basis_retainage_rewrite_done"
+
+
+def _retainage_documents(db: Session, invoice: bool) -> list:
+    """The invoices (or bills) that hold or release retainage and have a
+    payment applied, oldest first; void ones left out. Queried directly, so
+    a large book with no retainage costs one query."""
+    model, alloc, link, void = (
+        (Invoice, PaymentAllocation, PaymentAllocation.invoice_id, InvoiceStatus.VOID)
+        if invoice
+        else (
+            Bill,
+            BillPaymentAllocation,
+            BillPaymentAllocation.bill_id,
+            BillStatus.VOID,
+        )
+    )
+    paid = select(link).where(link.isnot(None))
+    return (
+        db.query(model)
+        .filter(
+            model.status != void,
+            (model.retainage_held != 0) | (model.retainage_released > 0),
+            model.id.in_(paid),
+        )
+        .order_by(model.id)
+        .all()
+    )
+
+
+def _payments_of(db: Session, document, invoice: bool) -> list[tuple]:
+    """[(payment id, entry date)] of the posted, non-void payments applied to
+    one document."""
+    if invoice:
+        q = (
+            db.query(Payment.id, Transaction.date)
+            .join(PaymentAllocation, PaymentAllocation.payment_id == Payment.id)
+            .join(Transaction, Transaction.id == Payment.transaction_id)
+            .filter(
+                PaymentAllocation.invoice_id == document.id,
+                Payment.is_voided.isnot(True),
+            )
+        )
+    else:
+        q = (
+            db.query(BillPayment.id, Transaction.date)
+            .join(
+                BillPaymentAllocation,
+                BillPaymentAllocation.bill_payment_id == BillPayment.id,
+            )
+            .join(Transaction, Transaction.id == BillPayment.transaction_id)
+            .filter(
+                BillPaymentAllocation.bill_id == document.id,
+                BillPayment.is_voided.isnot(True),
+            )
+        )
+    return list(q.distinct().all())
+
+
+def rewrite_retainage_cash_lines(db: Session, on_progress=None) -> dict:
+    """Once per company file, after the upgrade to the 2.31.11 retainage rule
+    (#778): rewrite the cash lines of every payment applied to an invoice or
+    bill that holds or releases retainage, with the recompute an edit runs,
+    so a payment recorded under the old rule reads as a fresh posting does.
+    The accrual lines do not move, and a payment on or before the closing
+    date keeps its cash lines (a closed year was reported as it stood).
+
+    A document that fails is logged and skipped; the pass is marked done
+    only when nothing failed, so the failures are tried again next start.
+    Returns counts for the start-up log: payments and bill_payments
+    rewritten, kept_closed (on or before the closing date), failed, and
+    already_done (the pass ran on an earlier start)."""
+    from datetime import date as _date
+
+    from app.services.accounting import get_ap_account_id, get_ar_account_id
+    from app.services.closing_date import get_closing_date
+    from app.services.control_accounts import MissingControlAccount
+    from app.services.settings_service import get_setting_raw, set_setting
+
+    out = {
+        "payments": 0,
+        "bill_payments": 0,
+        "kept_closed": 0,
+        "failed": 0,
+        "already_done": False,
+    }
+    if get_setting_raw(db, RETAINAGE_REWRITE_KEY):
+        out["already_done"] = True
+        return out
+
+    progress = _Progress(db, on_progress)
+    closing = get_closing_date(db)
+    kept: set = set()
+    for invoice, key, label in (
+        (True, "payments", "payment"),
+        (False, "bill_payments", "bill payment"),
+    ):
+        try:
+            get_ar_account_id(db) if invoice else get_ap_account_id(db)
+        except MissingControlAccount:
+            continue
+        documents = _retainage_documents(db, invoice)
+        rewritten: set = set()
+        note = f"Rewriting the cash-basis lines of retainage {label}s"
+        total = len(documents)
+        if total:
+            progress.note(note, 0, total)
+        for done, document in enumerate(documents, start=1):
+            document_id = document.id  # read before a failure expires the row
+            try:
+                mine: set = set()
+                with db.begin_nested():
+                    payments = _payments_of(db, document, invoice)
+                    if invoice:
+                        recompute_invoice_cash_lines(db, document, rewritten_ids=mine)
+                    else:
+                        _recompute_bill_payments(db, document, rewritten_ids=mine)
+            except Exception:
+                progress.failed += 1
+                log.exception(
+                    "The cash-basis lines of the payments on %s %s could not be "
+                    "rewritten; they are tried again at the next start",
+                    "invoice" if invoice else "bill",
+                    document_id,
+                )
+            else:
+                # rewritten: what the recompute rewrote (a payment whose older
+                # lines it could not tell apart is left, and logged there);
+                # kept: on or before the closing date, left unread
+                rewritten |= mine
+                for payment_id, day in payments:
+                    if closing is not None and day <= closing:
+                        kept.add((invoice, payment_id))
+                progress.pending += 1
+                if progress.pending >= BACKFILL_BATCH:
+                    db.commit()
+                    progress.pending = 0
+            progress.note(note, done, total)
+        out[key] = len(rewritten)
+
+    out["kept_closed"] = len(kept)
+    out["failed"] = progress.failed
+    if not progress.failed:
+        set_setting(db, RETAINAGE_REWRITE_KEY, _date.today().isoformat())
+    db.commit()
+    return out
 
 
 def pending_backfill(db: Session) -> bool:
@@ -1323,6 +1545,7 @@ __all__ = [
     "append_cash_lines",
     "apply_reclass_lines",
     "backfill",
+    "catch_up_after_restore",
     "bill_payment_cash_lines",
     "company_basis",
     "customer_payment_cash_lines",
@@ -1333,6 +1556,7 @@ __all__ = [
     "recompute_bill_cash_lines",
     "recompute_invoice_cash_lines",
     "resolve_basis",
+    "rewrite_retainage_cash_lines",
     "unapplied_expense_id",
     "unapplied_income_id",
 ]
