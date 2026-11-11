@@ -660,18 +660,20 @@ const PurchaseAccounts = {
 
 /** Line arithmetic for the purchase forms, the way the server stores it. */
 const PurchaseLines = {
-    // Half up to the cent, as the server rounds and as SalesLines.cents does:
-    // shift by exponent, not by multiplying. 2.5 x 13.37 is 33.42499999...
-    // in floating point, Number.EPSILON is far below its last digit, and
-    // x 100 rounded to $33.42 while the server stored $33.43 (2.22.1 gate,
-    // NEW-48: bills, purchase orders and vendor credits).
+    // To the cent, half away from zero, as the server's _q rounds and as
+    // SalesLines.cents does (a copy, so this helper runs on its own). The
+    // point is moved in decimal text, not by multiplying: 2.5 x 13.37 is
+    // 33.42499999... in floating point and x 100 rounded to $33.42 while the
+    // server stored $33.43 (2.22.1 gate, NEW-48: bills, purchase orders and
+    // vendor credits). The text is the value to 15 significant digits, all
+    // a double holds, so 0.3 x 2.15 (0.6449999999999999) is 0.645, $0.65 (#783).
     cents(x) {
         const n = Number(x) || 0;
-        const a = Math.abs(n);
-        let r = Number(`${a}e2`);
-        r = Number.isFinite(r) ? Math.round(r) : Math.round(a * 100);
-        const back = Number(`${r}e-2`); // NaN past 1e21, where the string has an exponent
-        return (n < 0 ? -1 : 1) * (Number.isFinite(back) ? back : r / 100);
+        if (!Number.isFinite(n)) return n;
+        const [digits, exp] = Math.abs(n).toPrecision(15).split('e');
+        const r = Math.round(Number(`${digits}e${Number(exp || 0) + 2}`));
+        const back = Number(`${r}e-2`); // NaN past 1e21, where r's text has an exponent
+        return (n < 0 && r ? -1 : 1) * (Number.isFinite(back) ? back : r / 100);
     },
     // Each line is rounded to the cent before it is added up.
     lineAmount(row) {
