@@ -84,6 +84,13 @@ jobs:
           DATABASE_URL: "sqlite:///:memory:"
           SESSION_SECRET_KEY: ci-secret-key
           RATE_LIMIT_ENABLED: "0"
+          # Tesseract is built with OpenMP and takes every core for each
+          # run; with four workers and their Chromiums on four cores, one
+          # OCR test in three runs starved past the service's 20 s limit.
+          # One thread per Tesseract, as its own documentation says for
+          # several at once; the images here are small and read in well
+          # under a second either way.
+          OMP_THREAD_LIMIT: "1"
         run: |
           nproc
           pytest -n auto --dist loadfile --cov=app --cov-report=term-missing --cov-report=xml
