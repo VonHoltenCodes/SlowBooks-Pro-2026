@@ -138,6 +138,14 @@ class EstimateLineResponse(BaseModel):
     def _quantity(self, value):
         return quantity_text(value)
 
+    @field_serializer("markup_pct")
+    def _markup_text(self, value):
+        # as typed: 33.3 reads back "33.3", 25 as "25" (the column keeps four
+        # places, so it would otherwise read "33.3000")
+        if value is None:
+            return None
+        return format(Decimal(str(value)).normalize(), "f")
+
 
 class EstimateCreate(StrictModel):
     customer_id: int

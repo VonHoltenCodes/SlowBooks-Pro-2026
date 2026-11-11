@@ -102,9 +102,9 @@ def test_the_rate_is_rounded_to_four_places_and_the_markup_reads_back(
     # 0.45 × 1.333 = 0.59985, half-up to four places
     assert Decimal(line["rate"]) == Decimal("0.5999")
     assert Decimal(line["amount"]) == Decimal("59.99")
-    assert Decimal(line["markup_pct"]) == Decimal("33.3")
+    assert line["markup_pct"] == "33.3"
     again = client.get(f"/api/estimates/{est['id']}").json()["lines"][0]
-    assert Decimal(again["markup_pct"]) == Decimal("33.3")
+    assert again["markup_pct"] == "33.3"
 
 
 def test_an_alternate_is_marked_up_too(client, seed_customer):
