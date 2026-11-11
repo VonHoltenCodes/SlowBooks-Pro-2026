@@ -793,6 +793,13 @@ const EstimatesPage = {
         return String(Number((neg ? '-' : '') + a.slice(0, -4) + '.' + a.slice(-4)));
     },
 
+    // A line's quantity as the save sends it: 0 is a quantity (an unpriced
+    // placeholder line), only a blank box is 1.
+    qtyFromRow(row) {
+        const q = parseFloat(row.querySelector('.line-qty')?.value);
+        return Number.isFinite(q) ? q : 1;
+    },
+
     // A line's markup as the save sends it: none when the row has no Markup
     // box or it is blank.
     markupFromRow(row) {
@@ -811,7 +818,7 @@ const EstimatesPage = {
             lines.push({
                 item_id: ItemQuickAdd.itemId(row.querySelector('.line-item')),
                 description: row.querySelector('.line-desc')?.value || '',
-                quantity: parseFloat(row.querySelector('.line-qty')?.value) || 1,
+                quantity: EstimatesPage.qtyFromRow(row),
                 rate: parseFloat(row.querySelector('.line-rate')?.value) || 0,
                 is_taxable: row.querySelector('.line-taxable') ? row.querySelector('.line-taxable').checked : null,
                 cost_code_id: CostCodes.fromRow(row, 'line-cost-code'),

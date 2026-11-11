@@ -365,3 +365,28 @@ def test_a_save_keeps_the_markup_of_a_line_with_no_cost(client, seed_customer):
     est = client.get(f"/api/estimates/{est_id}").json()
     assert est["lines"][0]["markup_pct"] == "25"
     assert est["style"] == "line_markup"
+
+
+def test_a_save_keeps_a_quantity_of_zero(client, seed_customer):
+    _construction(client)
+    line = {
+        "description": "Placeholder",
+        "quantity": 0,
+        "unit_cost": 100,
+        "markup_pct": 25,
+    }
+    r = client.post(
+        "/api/estimates",
+        json={"customer_id": seed_customer.id, "date": "2026-11-10", "lines": [line]},
+    )
+    assert r.status_code == 201, r.text
+    est_id = r.json()["id"]
+
+    def test(page):
+        page.get_by_role("button", name="Update Estimate").click()
+        page.locator("#est-form").wait_for(state="hidden")
+
+    _estimate_form(client, test, est_id)
+    est = client.get(f"/api/estimates/{est_id}").json()
+    assert Decimal(est["lines"][0]["quantity"]) == 0
+    assert Decimal(est["total"]) == 0
