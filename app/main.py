@@ -630,6 +630,34 @@ async def lifespan(app: FastAPI):
                     "and were skipped; see the log above for each",
                     done["failed"],
                 )
+            # #778: once per company file, the cash lines of payments on a
+            # document holding or releasing retainage are rewritten to the
+            # 2.31.11 rule; those on or before the closing date are kept.
+            from app.services.cash_basis import rewrite_retainage_cash_lines
+
+            redone = rewrite_retainage_cash_lines(
+                _db, on_progress=startup_progress.report
+            )
+            if not redone["already_done"] and (
+                redone["payments"] or redone["bill_payments"] or redone["kept_closed"]
+            ):
+                print(
+                    "Cash basis and retainage: rewrote the cash lines of %d "
+                    "payment(s) and %d bill payment(s); %d payment(s) before "
+                    "the closing date kept their cash lines"
+                    % (
+                        redone["payments"],
+                        redone["bill_payments"],
+                        redone["kept_closed"],
+                    )
+                )
+            if redone["failed"]:
+                logging.getLogger("uvicorn.error").warning(
+                    "Cash basis and retainage: the payments on %d document(s) "
+                    "could not be rewritten and were skipped; see the log above "
+                    "for each. They are tried again at the next start",
+                    redone["failed"],
+                )
         finally:
             _db.close()
             startup_progress.clear()
