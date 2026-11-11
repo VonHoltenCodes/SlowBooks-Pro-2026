@@ -1,12 +1,15 @@
 from datetime import date
-from typing import Optional
+from typing import Annotated, Literal, Optional
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     Field,
     field_validator,
     model_validator,
     field_serializer,
 )
+
+from app.services.recurring_service import FREQUENCIES
 
 from app.schemas.common import (
     StrictModel,
@@ -14,6 +17,29 @@ from app.schemas.common import (
     validate_non_negative_line,
     quantity_text,
 )
+
+# The words the generator steps by (advance_date). Any other word was saved
+# and then stepped as monthly, or never as anything anyone chose (#779);
+# a recurring invoice has no interval, so QuickBooks' counted names
+# (biweekly, every two months) are not among them.
+FREQUENCY_SENTENCE = (
+    "Frequency must be daily, weekly, semimonthly (twice a month), monthly, "
+    "quarterly or yearly."
+)
+
+
+def _known_frequency(value):
+    if isinstance(value, str) and value in FREQUENCIES:
+        return value
+    raise ValueError(FREQUENCY_SENTENCE)
+
+
+# The Literal puts the allowed words in the OpenAPI schema as an enum; the
+# check before it answers in one sentence instead of Pydantic's list.
+Frequency = Annotated[
+    Literal["daily", "weekly", "semimonthly", "monthly", "quarterly", "yearly"],
+    BeforeValidator(_known_frequency),
+]
 
 
 class RecurringLineCreate(StrictModel):
@@ -47,7 +73,7 @@ class RecurringLineResponse(BaseModel):
 
 class RecurringCreate(StrictModel):
     customer_id: int
-    frequency: str  # weekly, monthly, quarterly, yearly
+    frequency: Frequency
     start_date: date
     end_date: Optional[date] = None
     terms: str = "Net 30"
@@ -68,7 +94,7 @@ class RecurringCreate(StrictModel):
 
 
 class RecurringUpdate(StrictModel):
-    frequency: Optional[str] = None
+    frequency: Optional[Frequency] = None
     end_date: Optional[date] = None
     is_active: Optional[bool] = None
     terms: Optional[str] = None
