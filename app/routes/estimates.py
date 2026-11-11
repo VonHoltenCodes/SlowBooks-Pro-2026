@@ -108,19 +108,19 @@ def _enforce_at_cost(lines, is_construction: bool) -> None:
     alternate line that carries a unit cost is priced from it: at cost (#551)
     when it has no markup of its own, else unit cost × (1 + markup_pct / 100)
     to the rate's four places (#774). Allowances and unit-price lines keep
-    their rate. A line with nothing to mark up stores no markup: no unit cost,
-    an allowance or unit price, or a Business or Nonprofit estimate (whose
-    Cost column is the budget side and whose rate is what they charge)."""
+    their rate. Any other line keeps the markup it carries without being
+    priced by it (no unit cost, an allowance or unit price, or a Business or
+    Nonprofit estimate, whose rate is what they charge), so a company that
+    switches type and back, or a line whose kind goes and comes back, still
+    has the rule that priced it."""
     for ln in lines:
         priced = (
             is_construction
             and ln.line_kind in ("base", "alternate")
             and ln.unit_cost is not None
         )
-        if not priced:
-            ln.markup_pct = None
-            continue
-        ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
+        if priced:
+            ln.rate = priced_rate(ln.unit_cost, ln.markup_pct)
 
 
 def _locked_a_budget(db: Session, estimate: Estimate) -> bool:

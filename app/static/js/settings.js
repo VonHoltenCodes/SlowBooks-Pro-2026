@@ -508,9 +508,9 @@ const SettingsPage = {
                                 <option value="line_markup" ${s.estimate_style !== 'commercial_bid' ? 'selected' : ''}>Markup per line</option>
                                 <option value="commercial_bid" ${s.estimate_style === 'commercial_bid' ? 'selected' : ''}>Commercial bid (packages, allowances, alternates, markups under the subtotal)</option>
                             </select>
-                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">How a new estimate is priced; an estimate that already uses packages, allowances, alternates or markups opens as a commercial bid.</div></div>
+                            <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">How a new estimate is laid out; an estimate that already uses packages, allowances, alternates or markups opens as a commercial bid.</div></div>
                         <div class="form-group" id="estimate-default-markup-group" ${s.estimate_style === 'commercial_bid' ? 'hidden' : ''}><label for="estimate-default-markup">Default markup (%)</label>
-                            <input id="estimate-default-markup" name="estimate_default_markup_pct" type="number" step="0.01" min="0" max="1000" value="${escapeHtml(s.estimate_default_markup_pct || '')}">
+                            <input id="estimate-default-markup" name="estimate_default_markup_pct" type="number" step="0.0001" min="0" max="1000" value="${escapeHtml(s.estimate_default_markup_pct || '')}">
                             <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">A new estimate line starts with this markup on its cost; change it on any line.</div></div>` : ''}
                         <div class="form-group full-width"><label for="company-type">Company Type</label>
                             <select id="company-type" name="company_type" data-prev="${s.company_type === 'nonprofit' ? 'nonprofit' : (s.company_type === 'construction' ? 'construction' : 'business')}" onchange="SettingsPage.changeCompanyType(this)">

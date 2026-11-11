@@ -10,6 +10,8 @@ values from price.
 
 from decimal import Decimal
 
+import pytest
+
 from app.models.estimates import Estimate
 from app.services.contracts import sov_from_estimate
 from app.services.estimating import presentation_style
@@ -125,7 +127,7 @@ def test_an_alternate_is_marked_up_too(client, seed_customer):
     assert Decimal(est["lines"][0]["rate"]) == Decimal("110")
 
 
-def test_a_line_with_nothing_to_mark_up_stores_no_markup(client, seed_customer):
+def test_a_line_with_nothing_to_mark_up_keeps_it_unapplied(client, seed_customer):
     _construction(client)
     est = _estimate(
         client,
@@ -155,7 +157,8 @@ def test_a_line_with_nothing_to_mark_up_stores_no_markup(client, seed_customer):
     assert Decimal(lines["Haul off"]["rate"]) == Decimal("250")
     assert Decimal(lines["Fixtures"]["rate"]) == Decimal("5000")
     assert Decimal(lines["Extra post"]["rate"]) == Decimal("40")
-    assert all(line["markup_pct"] is None for line in est["lines"])
+    # kept, so a line whose kind goes and comes back is priced by it again
+    assert all(line["markup_pct"] == "20" for line in est["lines"])
 
 
 def test_the_style_setting_never_changes_the_math(client, seed_customer):
@@ -197,7 +200,9 @@ def test_a_put_reprices_from_the_markup(client, seed_customer):
     assert Decimal(body["total"]) == Decimal("7200.00")
 
 
-def test_a_business_company_ignores_the_markup(client, seed_customer):
+def test_a_business_company_keeps_the_markup_but_charges_its_rate(
+    client, seed_customer
+):
     r = client.put("/api/settings", json={"company_type": "business"})
     assert r.status_code == 200, r.text
     est = _estimate(
@@ -215,8 +220,70 @@ def test_a_business_company_ignores_the_markup(client, seed_customer):
     )
     line = est["lines"][0]
     assert Decimal(line["rate"]) == Decimal("75")
-    assert line["markup_pct"] is None
+    assert line["markup_pct"] == "25"
     assert est["style"] is None
+
+
+def _save_unchanged(client, est):
+    """PUT an estimate's lines back as GET returned them."""
+    keep = ("description", "quantity", "rate", "unit_cost", "markup_pct")
+    keep += ("line_kind", "unit", "is_taxable")
+    lines = [{k: ln[k] for k in keep} for ln in est["lines"]]
+    r = client.put(f"/api/estimates/{est['id']}", json={"lines": lines})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+@pytest.mark.parametrize("other", ["business", "nonprofit"])
+def test_a_switch_of_company_type_and_back_keeps_the_price(
+    client, seed_customer, other
+):
+    _construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [{"description": "Flip", "quantity": 1, "unit_cost": 100, "markup_pct": 25}],
+    )
+    r = client.put("/api/settings", json={"company_type": other})
+    assert r.status_code == 200, r.text
+    est = _save_unchanged(client, client.get(f"/api/estimates/{est['id']}").json())
+    assert est["lines"][0]["markup_pct"] == "25"
+    _construction(client)
+    est = _save_unchanged(client, client.get(f"/api/estimates/{est['id']}").json())
+    assert Decimal(est["total"]) == Decimal("125.00")
+
+
+def test_a_markup_finer_than_four_places_prices_as_it_is_stored(client, seed_customer):
+    _construction(client)
+    est = _estimate(
+        client,
+        seed_customer.id,
+        [
+            {
+                "description": "Precise",
+                "quantity": 1,
+                "unit_cost": 1000000,
+                "markup_pct": "33.3333333",
+            }
+        ],
+    )
+    assert est["lines"][0]["markup_pct"] == "33.3333"
+    again = _save_unchanged(client, est)
+    assert again["subtotal"] == est["subtotal"] == "1333333.00"
+
+
+@pytest.mark.parametrize("markup", [None, 25])
+def test_a_cost_too_large_to_store_is_a_sentence_at_quantity_zero(
+    client, seed_customer, markup
+):
+    _construction(client)
+    line = {"quantity": 0, "unit_cost": "1e40", "markup_pct": markup}
+    r = client.post(
+        "/api/estimates",
+        json={"customer_id": seed_customer.id, "date": "2026-11-10", "lines": [line]},
+    )
+    assert r.status_code == 422, r.text
+    assert "more than a line can be" in r.text
 
 
 def test_a_markup_out_of_bounds_is_refused(client, seed_customer):

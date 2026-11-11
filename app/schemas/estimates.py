@@ -78,7 +78,9 @@ class EstimateLineCreate(StrictModel):
                 f"A line's markup must be between {MIN_LINE_MARKUP:f}% and "
                 f"{MAX_LINE_MARKUP:,f}%."
             )
-        return v
+        # to the column's four places before the line is priced from it, so
+        # a saved line read back and saved again prices the same
+        return None if v is None else v.quantize(Decimal("0.0001"))
 
     @field_validator("line_kind")
     @classmethod
@@ -92,14 +94,17 @@ class EstimateLineCreate(StrictModel):
     def _check_non_negative(self):
         # a deduct alternate's negative figures must fit the column too
         check_line_fits(self.quantity, self.rate)
+        # a rate or cost too large to store refused even at quantity 0, which
+        # the line's amount alone lets through (a 500 in the rounding)
+        check_line_fits(Decimal("1"), self.rate)
         if self.unit_cost is not None:
+            check_line_fits(Decimal("1"), self.unit_cost)
             check_line_fits(self.quantity, self.unit_cost)
             if self.markup_pct is not None:
                 # the marked-up rate the server will store fits too
-                check_line_fits(
-                    self.quantity,
-                    self.unit_cost * (1 + self.markup_pct / Decimal("100")),
-                )
+                marked_up = self.unit_cost * (1 + self.markup_pct / Decimal("100"))
+                check_line_fits(Decimal("1"), marked_up)
+                check_line_fits(self.quantity, marked_up)
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":

@@ -685,7 +685,7 @@ const EstimatesPage = {
             <td><input class="line-qty" type="number" step="0.0001" value="${line.quantity || 1}" oninput="EstimatesPage.recalc()"></td>
             ${EstimatesPage.unitCell(line)}
             <td><input class="line-unit-cost money" type="number" step="0.0001" value="${line.unit_cost ?? ''}" placeholder="cost" aria-label="Unit cost" oninput="EstimatesPage.recalc()"></td>
-            <td><input class="line-markup" type="number" step="0.01" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" aria-label="Markup percent" oninput="EstimatesPage.recalc()"></td>
+            <td><input class="line-markup" type="number" step="0.0001" min="-100" max="10000" value="${escapeHtml(line.markup_pct ?? '')}" aria-label="Markup percent" oninput="EstimatesPage.recalc()"></td>
             <td><input class="line-rate money" type="number" step="0.0001" min="0" value="${Number(line.rate) || 0}" aria-label="Price" oninput="EstimatesPage.recalc()"></td>
             <td style="text-align:center"><input type="checkbox" class="line-taxable" title="Sales tax applies to this line" ${TaxDefault.checked(line)} onchange="EstimatesPage.recalc()"></td>
             <td class="col-amount line-amount">${formatCurrency((line.quantity||1) * (line.rate||0))}</td>
@@ -697,7 +697,9 @@ const EstimatesPage = {
     // API) keeps it: the markup rides the row hidden, and its rate shows the
     // marked-up price read-only (#774).
     keptMarkupHtml(line) {
-        if (!Terms.isConstruction() || line.markup_pct == null) return '';
+        // kept on every company's rows, so a Business or Nonprofit save does
+        // not drop the rule that priced the line in construction (#774)
+        if (line.markup_pct == null) return '';
         return `<input type="hidden" class="line-markup" value="${escapeHtml(line.markup_pct)}">`;
     },
 

@@ -20,50 +20,62 @@ def _construction(client, **settings):
     assert r.status_code == 200, r.text
 
 
-def _estimate_form(client, test, est_id=None):
-    """Open the estimate form (a new one, or `est_id`) and run test(page)."""
+_BROWSER = {}
+
+
+@pytest.fixture(scope="module", autouse=True)
+def _chromium():
+    """One Chromium for the module's tests; each test opens its own page."""
     with sync_api.sync_playwright() as p:
         try:
-            browser = p.chromium.launch()
+            _BROWSER["browser"] = p.chromium.launch()
         except Exception as exc:
             pytest.skip(f"Playwright Chromium is unavailable: {exc}")
-        page = browser.new_page(viewport={"width": 1400, "height": 1000})
-        errors = []
-        page.on("pageerror", lambda error: errors.append(str(error)))
-        page.on("dialog", lambda dialog: dialog.accept())
-
-        def serve(route):
-            url = urlsplit(route.request.url)
-            if url.hostname != "testserver":
-                return route.abort()
-            response = client.request(
-                route.request.method,
-                url.path + ("?" + url.query if url.query else ""),
-                content=route.request.post_data_buffer,
-                headers={
-                    "Content-Type": route.request.headers.get(
-                        "content-type", "application/json"
-                    )
-                },
-            )
-            route.fulfill(
-                status=response.status_code,
-                body=response.content,
-                content_type=response.headers.get(
-                    "content-type", "application/octet-stream"
-                ),
-            )
-
-        page.route("**/*", serve)
         try:
-            page.goto("http://testserver/#/estimates")
-            page.locator("#splash-dismiss").click()
-            page.evaluate("async (id) => { await EstimatesPage.showForm(id); }", est_id)
-            page.locator("#est-form").wait_for()
-            test(page)
-            assert errors == []
+            yield
         finally:
-            browser.close()
+            _BROWSER.pop("browser").close()
+
+
+def _estimate_form(client, test, est_id=None):
+    """Open the estimate form (a new one, or `est_id`) and run test(page)."""
+    page = _BROWSER["browser"].new_page(viewport={"width": 1400, "height": 1000})
+    errors = []
+    page.on("pageerror", lambda error: errors.append(str(error)))
+    page.on("dialog", lambda dialog: dialog.accept())
+
+    def serve(route):
+        url = urlsplit(route.request.url)
+        if url.hostname != "testserver":
+            return route.abort()
+        response = client.request(
+            route.request.method,
+            url.path + ("?" + url.query if url.query else ""),
+            content=route.request.post_data_buffer,
+            headers={
+                "Content-Type": route.request.headers.get(
+                    "content-type", "application/json"
+                )
+            },
+        )
+        route.fulfill(
+            status=response.status_code,
+            body=response.content,
+            content_type=response.headers.get(
+                "content-type", "application/octet-stream"
+            ),
+        )
+
+    page.route("**/*", serve)
+    try:
+        page.goto("http://testserver/#/estimates")
+        page.locator("#splash-dismiss").click()
+        page.evaluate("async (id) => { await EstimatesPage.showForm(id); }", est_id)
+        page.locator("#est-form").wait_for()
+        test(page)
+        assert errors == []
+    finally:
+        page.close()
 
 
 def _first_row(page):
@@ -273,3 +285,49 @@ def test_a_commercial_line_keeps_a_markup_made_through_the_api(
     line = client.get(f"/api/estimates/{est_id}").json()["lines"][0]
     assert line["markup_pct"] == "20"
     assert Decimal(line["rate"]) == Decimal("120")
+
+
+def test_a_four_place_markup_is_a_valid_entry(client, seed_customer):
+    _construction(client, estimate_default_markup_pct="33.3333")
+    r = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-11-10",
+            "lines": [{"quantity": 1, "unit_cost": 100, "markup_pct": "33.3333"}],
+        },
+    )
+    assert r.status_code == 201, r.text
+
+    def test(page):
+        markup = _first_row(page).locator(".line-markup")
+        assert markup.input_value() == "33.3333"
+        assert markup.evaluate("el => el.checkValidity()")
+        assert page.locator("#est-form").evaluate("el => el.checkValidity()")
+
+    _estimate_form(client, test, r.json()["id"])
+
+
+def test_a_business_save_keeps_the_markup_for_construction(client, seed_customer):
+    _construction(client)
+    r = client.post(
+        "/api/estimates",
+        json={
+            "customer_id": seed_customer.id,
+            "date": "2026-11-10",
+            "lines": [{"quantity": 1, "unit_cost": 100, "markup_pct": 25}],
+        },
+    )
+    assert r.status_code == 201, r.text
+    est_id = r.json()["id"]
+    r = client.put("/api/settings", json={"company_type": "business"})
+    assert r.status_code == 200, r.text
+
+    def test(page):
+        page.get_by_role("button", name="Update Estimate").click()
+        page.locator("#est-form").wait_for(state="hidden")
+
+    _estimate_form(client, test, est_id)
+    line = client.get(f"/api/estimates/{est_id}").json()["lines"][0]
+    assert line["markup_pct"] == "25"
+    assert Decimal(line["rate"]) == Decimal("125")

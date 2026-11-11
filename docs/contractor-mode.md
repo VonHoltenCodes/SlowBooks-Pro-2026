@@ -235,7 +235,11 @@ on this estimate*, and the totals panel leaves out any row that is $0.00.
 Through the API a line carries its markup as `markup_pct` (25 means 25%,
 −100 to 10,000); a base or alternate line with a unit cost and a markup is
 priced at unit cost × (1 + markup ÷ 100), to four places, and one with no
-markup at cost. The estimate's `style` says which layout it gets, and its
+markup at cost. A markup is kept to four places. Any other line keeps the
+markup it carries without being priced by it: an allowance or unit price, a
+line with no cost, or any line while the company is Business or Nonprofit, so
+switching the company type and back, or a line's kind away and back, does not
+lose the price. The estimate's `style` says which layout it gets, and its
 totals carry `cost_total`, `profit` and `margin_pct`.
 
 The commercial bid is a bid, not just a priced list (#551).

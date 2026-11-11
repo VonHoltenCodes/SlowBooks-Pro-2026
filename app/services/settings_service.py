@@ -203,7 +203,11 @@ _PERCENT_SETTINGS = {
 _PERCENT_MAX = {"estimate_default_markup_pct": Decimal("1000")}
 # A document keeps its tax rate to four places of a percent (New York
 # City's 8.875%, 7.0625%), so the default that fills it in can have no more.
-_FOUR_PLACE_PERCENTS = {"default_tax_rate", "use_tax_rate"}
+_FOUR_PLACE_PERCENTS = {
+    "default_tax_rate",
+    "use_tax_rate",
+    "estimate_default_markup_pct",
+}
 # Percents whose empty value means "follow another setting", kept empty.
 _BLANK_IS_DEFAULT = {"use_tax_rate", "estimate_default_markup_pct"}
 # key -> (label, smallest allowed, largest allowed or None)
