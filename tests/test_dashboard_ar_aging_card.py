@@ -23,7 +23,13 @@ from app.models.contacts import Customer
 from app.models.transactions import TransactionLine
 
 ROOT = Path(__file__).resolve().parents[1]
-TODAY = date.today()
+
+
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today()
 
 
 def _d(value) -> Decimal:
@@ -59,7 +65,7 @@ def _unapplied_payment(client, cid, amount):
         "/api/payments",
         json={
             "customer_id": cid,
-            "date": TODAY.isoformat(),
+            "date": _today().isoformat(),
             "amount": amount,
             "allocations": [],
         },
@@ -91,8 +97,8 @@ def test_the_card_names_the_credit_and_totals_what_total_receivables_says(
         client,
         salt_and_pine,
         323.56,
-        TODAY - timedelta(days=5),
-        TODAY + timedelta(days=25),
+        _today() - timedelta(days=5),
+        _today() + timedelta(days=25),
     )
     _unapplied_payment(client, salt_and_pine, 20)
 
@@ -103,7 +109,7 @@ def test_the_card_names_the_credit_and_totals_what_total_receivables_says(
     assert aging["credits"] == 20.0
     assert aging["total"] == 303.56
     assert cards["receivables"]["total"] == 303.56
-    report = client.get(f"/api/reports/ar-aging?as_of_date={TODAY}").json()
+    report = client.get(f"/api/reports/ar-aging?as_of_date={_today()}").json()
     assert report["totals"]["total"] == 303.56
     assert _gl_ar(db_session, seed_accounts) == Decimal("303.56")
 
@@ -118,23 +124,23 @@ def test_the_buckets_less_the_credits_are_the_total_in_home_currency(
         client,
         salt_and_pine,
         400,
-        TODAY - timedelta(days=75),
-        TODAY - timedelta(days=45),  # 45 days overdue: 31-60
+        _today() - timedelta(days=75),
+        _today() - timedelta(days=45),  # 45 days overdue: 31-60
     )
     _invoice(
         client,
         salt_and_pine,
         120,
-        TODAY - timedelta(days=40),
-        TODAY - timedelta(days=10),  # 1-30
+        _today() - timedelta(days=40),
+        _today() - timedelta(days=10),  # 1-30
     )
     # EUR 850 booked at 1.10 is USD 935 on the ledger, not 850
     _invoice(
         client,
         muller.id,
         850,
-        TODAY - timedelta(days=3),
-        TODAY + timedelta(days=27),
+        _today() - timedelta(days=3),
+        _today() + timedelta(days=27),
         currency="EUR",
         exchange_rate="1.10",
     )
@@ -153,13 +159,13 @@ def test_the_buckets_less_the_credits_are_the_total_in_home_currency(
 def test_the_two_cards_agree_with_a_post_dated_invoice_on_the_books(
     client, seed_accounts, salt_and_pine
 ):
-    _invoice(client, salt_and_pine, 75, TODAY, TODAY + timedelta(days=30))
+    _invoice(client, salt_and_pine, 75, _today(), _today() + timedelta(days=30))
     _invoice(
         client,
         salt_and_pine,
         60,
-        TODAY + timedelta(days=5),  # dated next week
-        TODAY + timedelta(days=35),
+        _today() + timedelta(days=5),  # dated next week
+        _today() + timedelta(days=35),
     )
     _unapplied_payment(client, salt_and_pine, 10)
     cards = _cards(client)
@@ -204,8 +210,8 @@ def test_the_card_on_screen_shows_the_credits_and_the_total(
         client,
         salt_and_pine,
         323.56,
-        TODAY - timedelta(days=5),
-        TODAY + timedelta(days=25),
+        _today() - timedelta(days=5),
+        _today() + timedelta(days=25),
     )
     _unapplied_payment(client, salt_and_pine, 20)
     lines = _drawn(_cards(client)["ar_aging"])

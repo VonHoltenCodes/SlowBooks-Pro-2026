@@ -19,7 +19,14 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.services import collections as svc
 from app.services.settings_service import get_setting_raw, set_setting
 
-TODAY = date.today()
+
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today()
+
+
 NO_SMTP = (
     "Email isn't set up yet, so no reminders were sent. Enter your mail "
     "server under Settings, Email, then try again."
@@ -71,8 +78,8 @@ def _invoice(db, cust, due_in=-5, balance=100, status=InvoiceStatus.SENT, **kw):
         invoice_number=f"C{_n[0]:04d}",
         customer_id=cust.id,
         status=status,
-        date=TODAY - timedelta(days=60),
-        due_date=TODAY + timedelta(days=due_in),
+        date=_today() - timedelta(days=60),
+        due_date=_today() + timedelta(days=due_in),
         total=balance,
         balance_due=balance,
         **kw,
@@ -267,7 +274,7 @@ def test_spent_rule_not_resent_next_rule_follows(client, db_session, rules, mail
     # three days on (the invoice's due date moved back, since a send is
     # always dated today) the 7 day rule matches and goes
     inv = db_session.query(Invoice).one()
-    inv.due_date = TODAY - timedelta(days=7)
+    inv.due_date = _today() - timedelta(days=7)
     db_session.commit()
     assert _run(client).json()["sent"] == 1
     assert len(mail) == 2
@@ -279,13 +286,13 @@ def test_a_send_is_dated_today_never_the_as_of_date(client, db_session, rules, m
     field is), the preview is today's, and only today's rule goes."""
     cust = _customer(db_session)
     _invoice(db_session, cust, due_in=-4)  # the 3 day rule today
-    later = (TODAY + timedelta(days=30)).isoformat()
+    later = (_today() + timedelta(days=30)).isoformat()
     assert _run(client, as_of_date=later).status_code == 422
     assert (
         client.post("/api/collections/statements/run", json={"as_of_date": later})
     ).status_code == 422
     due = client.get(f"/api/collections/reminders/due?as_of_date={later}").json()
-    assert due["as_of_date"] == TODAY.isoformat()
+    assert due["as_of_date"] == _today().isoformat()
     assert [i["label"] for i in due["items"]] == ["3 days overdue"]
     assert _run(client).json()["sent"] == 1
     assert "3 days" not in mail[0]["subject"] and "Friendly" in mail[0]["subject"]
@@ -362,7 +369,7 @@ def test_run_writes_audit_rows_and_counts(client, db_session, rules, mail):
         "skipped": 0,
         "taken": 0,
         "errors": [],
-        "ran_on": TODAY.isoformat(),
+        "ran_on": _today().isoformat(),
     }
     row = db_session.query(InvoiceReminder).one()
     assert (row.invoice_id, row.rule_id) == (a.id, rules[7]["id"])
@@ -425,7 +432,8 @@ def test_run_if_due_runs_once_a_day_and_stamps(client, db_session, rules, mail):
     assert first["ran"] is True and first["sent"] == 1
     db_session.expire_all()
     assert (
-        get_setting_raw(db_session, "invoice_reminders_last_run") == TODAY.isoformat()
+        get_setting_raw(db_session, "invoice_reminders_last_run")
+        == _today().isoformat()
     )
     assert db_session.query(InvoiceReminder).one().trigger == "auto"
     assert client.post("/api/collections/reminders/run-if-due").json() == {
@@ -507,7 +515,7 @@ def test_invoice_list_shape_totals_and_filters(client, db_session, rules, mail):
     soon = _invoice(db_session, b, due_in=2, balance=50)
     _run(client)  # sends the 7 day reminder for `late`
     got = client.get("/api/collections/invoices").json()
-    assert got["as_of_date"] == TODAY.isoformat()
+    assert got["as_of_date"] == _today().isoformat()
     assert [i["invoice_id"] for i in got["items"]] == [late.id, soon.id]
     first, second = got["items"]
     assert first["customer_name"] == "Alpha"
@@ -538,7 +546,7 @@ def test_invoice_list_shape_totals_and_filters(client, db_session, rules, mail):
     assert [i["invoice_id"] for i in only["items"]] == [late.id]
     mine = client.get(f"/api/collections/invoices?customer_id={b.id}").json()
     assert [i["invoice_id"] for i in mine["items"]] == [soon.id]
-    future = (TODAY + timedelta(days=30)).isoformat()
+    future = (_today() + timedelta(days=30)).isoformat()
     far = client.get(f"/api/collections/invoices?as_of_date={future}").json()
     assert all(i["days_overdue"] > 0 for i in far["items"])
     assert far["as_of_date"] == future
@@ -664,8 +672,8 @@ def test_auto_run_claims_the_day_once(client, db_session, rules, mail):
     cust = _customer(db_session)
     _invoice(db_session, cust, due_in=-5)
     client.put("/api/settings", json={"invoice_reminders_auto": "true"})
-    assert svc._claim_day(db_session, TODAY) is True
-    assert svc._claim_day(db_session, TODAY) is False
+    assert svc._claim_day(db_session, _today()) is True
+    assert svc._claim_day(db_session, _today()) is False
     assert client.post("/api/collections/reminders/run-if-due").json() == {
         "ran": False,
         "reason": "already_today",

@@ -16,7 +16,14 @@ from app.models.bills import Bill, BillStatus
 from app.models.contacts import Customer, Vendor
 from app.models.invoices import Invoice, InvoiceStatus
 
-TODAY = date.today()
+
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today()
+
+
 ZERO = Decimal("0.00")
 
 
@@ -34,8 +41,8 @@ def books(db_session, seed_accounts):
                 invoice_number="1001",
                 customer_id=cust.id,
                 status=InvoiceStatus.SENT,
-                date=TODAY - timedelta(days=42),
-                due_date=TODAY - timedelta(days=12),
+                date=_today() - timedelta(days=42),
+                due_date=_today() - timedelta(days=12),
                 total=ZERO,
                 balance_due=ZERO,
             ),
@@ -43,8 +50,8 @@ def books(db_session, seed_accounts):
                 invoice_number="1002",
                 customer_id=cust.id,
                 status=InvoiceStatus.SENT,
-                date=TODAY - timedelta(days=50),
-                due_date=TODAY - timedelta(days=20),
+                date=_today() - timedelta(days=50),
+                due_date=_today() - timedelta(days=20),
                 total=Decimal("250.00"),
                 balance_due=Decimal("250.00"),
             ),
@@ -52,8 +59,8 @@ def books(db_session, seed_accounts):
                 invoice_number="1003",
                 customer_id=cust.id,
                 status=InvoiceStatus.DRAFT,
-                date=TODAY - timedelta(days=40),
-                due_date=TODAY - timedelta(days=10),
+                date=_today() - timedelta(days=40),
+                due_date=_today() - timedelta(days=10),
                 total=ZERO,
                 balance_due=ZERO,
             ),
@@ -61,8 +68,8 @@ def books(db_session, seed_accounts):
                 bill_number="CF-7",
                 vendor_id=vend.id,
                 status=BillStatus.UNPAID,
-                date=TODAY - timedelta(days=35),
-                due_date=TODAY - timedelta(days=5),
+                date=_today() - timedelta(days=35),
+                due_date=_today() - timedelta(days=5),
                 total=ZERO,
                 balance_due=ZERO,
             ),
@@ -70,8 +77,8 @@ def books(db_session, seed_accounts):
                 bill_number="CF-8",
                 vendor_id=vend.id,
                 status=BillStatus.UNPAID,
-                date=TODAY - timedelta(days=33),
-                due_date=TODAY - timedelta(days=3),
+                date=_today() - timedelta(days=33),
+                due_date=_today() - timedelta(days=3),
                 total=Decimal("80.00"),
                 balance_due=Decimal("80.00"),
             ),

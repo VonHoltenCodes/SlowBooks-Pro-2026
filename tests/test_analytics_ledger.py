@@ -22,12 +22,26 @@ from app.services.ai_service import build_insights_prompt
 from app.services.analytics import AnalyticsEngine, account_label
 
 ROOT = Path(__file__).resolve().parents[1]
-THIS_MONTH = date.today().replace(day=1).isoformat()
-TODAY = date.today().isoformat()
-PERIOD = {"start_date": THIS_MONTH, "end_date": TODAY}
 
 
-def _journal(client, seed_accounts, dr, cr, amount, when=TODAY, text="Entry"):
+def _this_month():
+    return date.today().replace(day=1).isoformat()
+
+
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today().isoformat()
+
+
+def _period():
+    return {"start_date": _this_month(), "end_date": _today()}
+
+
+def _journal(client, seed_accounts, dr, cr, amount, when=None, text="Entry"):
+    if when is None:
+        when = _today()
     r = client.post(
         "/api/journal",
         json={
@@ -52,7 +66,7 @@ def _journal(client, seed_accounts, dr, cr, amount, when=TODAY, text="Entry"):
 
 
 def _dashboard(client):
-    r = client.get("/api/analytics/dashboard", params=PERIOD)
+    r = client.get("/api/analytics/dashboard", params=_period())
     assert r.status_code == 200, r.text
     return r.json()
 
@@ -84,7 +98,7 @@ def test_a_journal_entry_and_a_register_entry_count_as_expenses(client, seed_acc
         "/api/banking/transactions",
         json={
             "account_id": seed_accounts["1000"].id,
-            "date": TODAY,
+            "date": _today(),
             "amount": "-120.00",
             "category_account_id": seed_accounts["6100"].id,
             "payee": "Corner Hardware",
@@ -108,7 +122,7 @@ def test_an_unpaid_bill_counts_when_dated_and_a_void_nets_out(client, seed_accou
         "/api/bills",
         json={
             "vendor_id": vendor.json()["id"],
-            "date": TODAY,
+            "date": _today(),
             "lines": [
                 {
                     "description": "Lumber",
@@ -126,7 +140,7 @@ def test_an_unpaid_bill_counts_when_dated_and_a_void_nets_out(client, seed_accou
     ex = client.post(
         "/api/expenses",
         json={
-            "date": TODAY,
+            "date": _today(),
             "payee": "Corner Hardware",
             "expense_account_id": seed_accounts["6100"].id,
             "paid_from_account_id": seed_accounts["1000"].id,
@@ -177,7 +191,7 @@ def test_the_headline_figures_are_on_one_basis(client, seed_accounts):
         "margin_pct": 81.3,
     }
     assert dash["revenue_by_customer"] == {}  # the paid basis, its own section
-    pl = client.get("/api/reports/profit-loss", params=PERIOD).json()
+    pl = client.get("/api/reports/profit-loss", params=_period()).json()
     assert float(pl["total_income"]) == 2500.0
     assert float(pl["net_income"]) == 2032.0
 
@@ -196,7 +210,7 @@ def test_the_ai_brief_reads_the_same_totals(client, seed_accounts):
     _journal(client, seed_accounts, "6100", "1000", "420.00", text="Truck repair")
     _journal(client, seed_accounts, "1000", "4000", "2500.00", text="Deposit")
     dash = _dashboard(client)
-    dash["period"] = {"name": "month", "start": THIS_MONTH, "end": TODAY}
+    dash["period"] = {"name": "month", "start": _this_month(), "end": _today()}
     prompt = build_insights_prompt(dash, "Ledger Scratch")
     assert (
         "=== KEY METRICS (the ledger, as the Profit & Loss counts them) ===" in prompt
@@ -228,14 +242,14 @@ def test_the_ai_tool_answers_from_the_same_ledger(client, db_session, seed_accou
     _journal(
         client, seed_accounts, "6100", "3000", "12.00", when="2024-01-15", text="Old"
     )
-    got = ai_tools.get_expenses_by_category(db_session, THIS_MONTH, TODAY)
+    got = ai_tools.get_expenses_by_category(db_session, _this_month(), _today())
     assert got["total"] == 48.0
     assert [r["category"] for r in got["results"]] == [_label(seed_accounts, "6000")]
     everything = ai_tools.get_expenses_by_category(db_session)
     assert everything["total"] == 60.0  # no dates: all time, as before
     # the engine's own rows, shared by both
     rows = AnalyticsEngine(db_session).expenses_by_account(
-        date.fromisoformat(THIS_MONTH), date.today()
+        date.fromisoformat(_this_month()), date.today()
     )
     assert [(n, a) for n, _, a in rows] == [("6000", 48.0)]
 
@@ -268,7 +282,7 @@ def test_the_action_catalogue_lists_it_under_financial_reports(client):
 def test_the_csv_carries_the_totals_and_the_named_categories(client, seed_accounts):
     _journal(client, seed_accounts, "6000", "3000", "48.00")
     _journal(client, seed_accounts, "1000", "4000", "2500.00")
-    r = client.get("/api/analytics/export.csv", params=PERIOD)
+    r = client.get("/api/analytics/export.csv", params=_period())
     assert r.status_code == 200, r.text
     rows = [
         row
@@ -360,7 +374,7 @@ def test_no_paid_sales_in_thirty_days_means_no_dso(
         "/api/invoices",
         json={
             "customer_id": cid,
-            "date": TODAY,
+            "date": _today(),
             "lines": [{"description": "work", "quantity": 1, "rate": "250.00"}],
         },
     )
@@ -369,7 +383,7 @@ def test_no_paid_sales_in_thirty_days_means_no_dso(
         "/api/payments",
         json={
             "customer_id": cid,
-            "date": TODAY,
+            "date": _today(),
             "amount": "250.00",
             "allocations": [{"invoice_id": paid.json()["id"], "amount": "250.00"}],
         },
@@ -426,7 +440,7 @@ def test_a_payment_today_on_an_older_invoice_is_not_in_the_dso(
         "/api/payments",
         json={
             "customer_id": cid,
-            "date": TODAY,
+            "date": _today(),
             "amount": "500.00",
             "allocations": [{"invoice_id": old.json()["id"], "amount": "500.00"}],
         },

@@ -14,7 +14,14 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.services import collections as svc
 from app.services.settings_service import set_setting
 
-TODAY = date.today()
+
+def _today():
+    # today as the code under test reads it, at the moment the test runs: a
+    # module constant, taken at import, failed seven tests when a CI run
+    # crossed midnight UTC (#773)
+    return date.today()
+
+
 NO_SMTP = (
     "Email isn't set up yet, so no statements were sent. Enter your mail "
     "server under Settings, Email, then try again."
@@ -104,7 +111,7 @@ def test_candidates_need_the_flag_and_a_balance_or_activity(client, db_session):
                 invoice_number=f"S-{who.id}",
                 customer_id=who.id,
                 status=InvoiceStatus.PAID,
-                date=TODAY - timedelta(days=days),
+                date=_today() - timedelta(days=days),
                 total=10,
                 balance_due=0,
             )
@@ -125,7 +132,7 @@ def test_void_invoice_is_not_activity(client, db_session):
             invoice_number="V-1",
             customer_id=c.id,
             status=InvoiceStatus.VOID,
-            date=TODAY - timedelta(days=2),
+            date=_today() - timedelta(days=2),
             total=10,
             balance_due=0,
         )
@@ -139,17 +146,19 @@ def test_already_sent_this_month_and_no_email(client, db_session):
     _logged(
         db_session,
         sent,
-        datetime.combine(TODAY, datetime.min.time()) + timedelta(hours=12),
+        datetime.combine(_today(), datetime.min.time()) + timedelta(hours=12),
     )
     last_month = _cust(db_session, "Sent last month")
     _logged(
         db_session,
         last_month,
-        datetime.combine(TODAY.replace(day=1) - timedelta(days=3), datetime.min.time()),
+        datetime.combine(
+            _today().replace(day=1) - timedelta(days=3), datetime.min.time()
+        ),
     )
     _cust(db_session, "Bare", email=None)
     got = _due(client)
-    assert got["Sent"]["already_sent_on"] == TODAY.isoformat()
+    assert got["Sent"]["already_sent_on"] == _today().isoformat()
     assert got["Sent"]["will_send"] is False
     assert got["Sent"]["reason"] == "already sent this month"
     assert got["Sent last month"]["will_send"] is True
@@ -214,8 +223,8 @@ def test_a_property_whose_tenants_owe_is_on_the_list(client, db_session):
             invoice_number="RENT-2",
             customer_id=t2.id,
             status=InvoiceStatus.PAID,
-            date=TODAY - timedelta(days=3),
-            due_date=TODAY,
+            date=_today() - timedelta(days=3),
+            due_date=_today(),
             total=Decimal(10),
             balance_due=Decimal(0),
         )
@@ -256,7 +265,7 @@ def test_run_claims_then_records_the_month_row(client, db_session, mail):
     row = db_session.query(CustomerStatement).one()
     assert (row.customer_id, row.period, row.status) == (
         cust.id,
-        svc.period_of(TODAY),
+        svc.period_of(_today()),
         "sent",
     )
     assert row.recipient == "fresh@example.com" and float(row.balance) == 100
@@ -275,7 +284,7 @@ def test_run_sends_and_skips(client, db_session, mail):
     _logged(
         db_session,
         sent,
-        datetime.combine(TODAY, datetime.min.time()) + timedelta(hours=12),
+        datetime.combine(_today(), datetime.min.time()) + timedelta(hours=12),
     )
     _cust(db_session, "Bare", email=None)
     r = client.post("/api/collections/statements/run", json={}).json()
@@ -291,7 +300,7 @@ def test_force_resends_to_already_sent(client, db_session, mail):
     first = _logged(
         db_session,
         done,
-        datetime.combine(TODAY, datetime.min.time()) + timedelta(hours=12),
+        datetime.combine(_today(), datetime.min.time()) + timedelta(hours=12),
     )
     r = client.post("/api/collections/statements/run", json={"force": True}).json()
     assert r["sent"] == 1 and r["skipped"] == 0
