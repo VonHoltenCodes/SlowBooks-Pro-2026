@@ -602,7 +602,8 @@ const VendorsPage = {
  * credits, expenses, card charges and the vendor's default. They listed
  * expense accounts only, so materials could not be pointed at 5100
  * Materials Cost (W-L18, F8). `keepId` keeps an account already chosen on
- * the record even when it is of another type or inactive.
+ * the record even when it is of another type or inactive. Bills, expenses
+ * and card charges also offer the balance-sheet accounts (#766).
  */
 const PurchaseAccounts = {
     filter(accounts, ...keepIds) {
@@ -611,9 +612,37 @@ const PurchaseAccounts = {
             ((a.account_type === 'expense' || a.account_type === 'cogs') && a.is_active !== false)
             || keep.has(Number(a.id)));
     },
+    // A balance-sheet account a purchase can post to (#766): a loan's
+    // principal, an escrow or prepaid asset, equity. Not a bank or card
+    // account (those pay for things), nor a control asset whose figure a
+    // sub-ledger keeps: Accounts Receivable (the invoices), Undeposited
+    // Funds (Make Deposits: a bill line there showed as a payment waiting
+    // to be deposited) and Inventory (the items: a line there raised the
+    // asset with no item behind it), W-143; nor Accounts Payable, which
+    // the bill itself posts to. The control liabilities and equity stay:
+    // a bill can pay the sales tax owed. `is_control` is the server's
+    // registry (#122), so the picker keeps no list of numbers.
+    isBalanceSheet(a) {
+        return (a.account_type === 'asset' || a.account_type === 'liability' || a.account_type === 'equity')
+            && !a.bank_kind
+            && !(a.account_type === 'asset' && a.is_control)
+            && a.detail_type !== 'accounts_receivable' && a.detail_type !== 'accounts_payable';
+    },
+    // The cost accounts and the balance-sheet accounts (#766): what a bill,
+    // an expense or a card charge can post a line to, as QuickBooks' Enter
+    // Bills allows, so a loan payment splits between interest and
+    // principal. The server took any account already; the picker did not
+    // offer them. A purchase order keeps `filter`: it commits cost.
+    withBalanceSheet(accounts, ...keepIds) {
+        const keep = new Set(keepIds.filter(Boolean).map(Number));
+        return accounts.filter(a =>
+            ((a.account_type === 'expense' || a.account_type === 'cogs' || PurchaseAccounts.isBalanceSheet(a))
+                && a.is_active !== false)
+            || keep.has(Number(a.id)));
+    },
     // Grouped, cost of goods first, so the COGS accounts read as a set and
-    // not as a few odd expenses (#214); anything else the record already
-    // uses comes last.
+    // not as a few odd expenses (#214); the balance-sheet accounts, and
+    // anything else the record already uses, come last as Other accounts.
     options(accounts, selectedId) {
         const opt = a => `<option value="${a.id}" ${selectedId && a.id == selectedId ? 'selected' : ''}>`
             + `${accountLabel(a)}</option>`;
@@ -624,7 +653,7 @@ const PurchaseAccounts = {
             if (these.length) html += `<optgroup label="${label}">${these.map(opt).join('')}</optgroup>`;
         }
         const rest = accounts.filter(a => !groups.some(([type]) => type === a.account_type));
-        if (rest.length) html += `<optgroup label="Other">${rest.map(opt).join('')}</optgroup>`;
+        if (rest.length) html += `<optgroup label="Other accounts">${rest.map(opt).join('')}</optgroup>`;
         return html;
     },
 };

@@ -255,6 +255,9 @@ def test_an_estimate_converted_without_notes_starts_with_the_default(
 # ---------------------------------------------------------------------------
 
 
+MESSAGES_REVISION = "e4f5a6b7c8d9"  # the saved invoice messages migration (#392)
+
+
 def test_the_migration_makes_the_table_and_keeps_one_head(tmp_path):
     from alembic import command
     from alembic.config import Config
@@ -268,7 +271,7 @@ def test_the_migration_makes_the_table_and_keeps_one_head(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     assert script.get_revision("e4f5a6b7c8d9").down_revision == "a1f2e3d4c5b6"
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, MESSAGES_REVISION)  # its own step, not the chain (#770)
     engine = sa.create_engine(url)
     insp = sa.inspect(engine)
     assert "invoice_messages" in insp.get_table_names()
@@ -289,7 +292,7 @@ def test_the_migration_makes_the_table_and_keeps_one_head(tmp_path):
     # a second run is a no-op, as a file create_all already made
     command.downgrade(cfg, "a1f2e3d4c5b6")
     assert "invoice_messages" not in sa.inspect(engine).get_table_names()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, MESSAGES_REVISION)  # its own step, not the chain (#770)
     engine.dispose()
 
 

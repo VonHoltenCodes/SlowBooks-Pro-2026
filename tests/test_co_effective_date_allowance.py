@@ -504,6 +504,11 @@ def test_a_credit_after_the_final_release_says_what_to_do(
 # ── Migration ────────────────────────────────────────────────────────────
 
 
+# the migration under test: change orders' approved_on and allowance_return
+# (two steps above d7f3a9c1b5e2, after the collections migration)
+CO_DATE_REVISION = "e2a6c8f4b1d9"
+
+
 def test_the_migration_gives_existing_approved_rows_their_day(tmp_path):
     from pathlib import Path
 
@@ -527,7 +532,7 @@ def test_the_migration_gives_existing_approved_rows_their_day(tmp_path):
                 "(1, 'J1-CO-002', 'owner', 'draft', 'contract', 1, 1, NULL)"
             )
         )
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, CO_DATE_REVISION)  # its own step, not the chain (#770)
     with engine.connect() as conn:
         rows = dict(
             conn.execute(

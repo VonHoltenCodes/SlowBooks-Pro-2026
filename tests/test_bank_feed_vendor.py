@@ -225,7 +225,7 @@ def test_the_migration_adds_the_column_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     assert script.get_revision(REVISION).down_revision == "c4e5d6f7a8b9"
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     insp = inspect(engine)
     assert "vendor_id" in {c["name"] for c in insp.get_columns("transactions")}
@@ -241,4 +241,4 @@ def test_the_migration_adds_the_column_and_walks_back(tmp_path):
         c["name"] for c in inspect(engine).get_columns("transactions")
     }
     engine.dispose()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)

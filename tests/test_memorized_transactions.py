@@ -936,7 +936,7 @@ def test_the_migration_creates_the_tables_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     assert script.get_revision(REVISION).down_revision == BEFORE
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     names = set(inspect(engine).get_table_names())
     assert {"memorized_transactions", "memorized_transaction_lines"} <= names

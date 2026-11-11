@@ -40,7 +40,9 @@ const MigrationPage = {
                     QuickBooks Online, upload the Export data zip as downloaded, with
                     its <strong>A/R Aging Detail</strong> report beside it (Reports →
                     A/R Aging Detail → Export to Excel) to carry the open invoices and
-                    unapplied payments over.
+                    unapplied payments over, and its <strong>Account List</strong> report
+                    (Reports → Account List → Export to Excel) to give every account its
+                    number, type and description.
                 </p>
                 <input type="file" id="migration-files" aria-label="Files to import" multiple accept=".csv,.txt,.xlsx,.zip" onchange="MigrationPage.reset()">
                 <div class="form-actions" style="margin-top:12px;" data-write>

@@ -1,4 +1,12 @@
 {
+  "2.31.13": {
+    "title": "QuickBooks Online account numbers, and bills that pay a loan",
+    "items": [
+      "QuickBooks Online export with account numbers switched on: the number comes across as the account's number and the rest as its name, every sub-account under a numbered parent is found by the Journal's spelling, and a second upload of the same export makes nothing twice; a number the books already use, or a control number, is left off and the dry run says which.",
+      "A zero-balance account QuickBooks deleted, off the statements and the Trial Balance, is typed from its place in the General Ledger instead of stopping the import; deleted accounts come across inactive with their history. The Account List report uploaded beside the zip is read as the chart, with every account's number, type and description.",
+      "A bill line, an expense line or a card charge can post to a balance-sheet account: Other accounts in the picker holds the loan, escrow, prepaid and equity accounts, so a loan payment entered as a bill splits between interest and principal; bank and card accounts, Accounts Receivable, Accounts Payable, Undeposited Funds and Inventory stay out."
+    ]
+  },
   "2.31.12": {
     "title": "Checks laid out field by field, report PDFs that keep every column, and payroll for API tokens",
     "items": [

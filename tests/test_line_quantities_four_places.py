@@ -215,6 +215,9 @@ def test_the_documents_print_the_quantity_as_entered():
         ), name
 
 
+QUANTITY_REVISION = "e8f9a0b1c2d3"  # line quantities to four decimal places
+
+
 def test_the_migration_widens_and_the_downgrade_rounds(tmp_path):
     import sqlite3
 
@@ -240,7 +243,7 @@ def test_the_migration_widens_and_the_downgrade_rounds(tmp_path):
     )
     con.commit()
     con.close()
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, QUANTITY_REVISION)  # its own step, not the chain (#770)
     con = sqlite3.connect(db)
     assert con.execute("select quantity from invoice_lines").fetchone()[0] == 2.125
     con.close()

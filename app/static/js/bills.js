@@ -448,7 +448,7 @@ const BillsPage = {
             vendors.push({ id: bill.vendor_id, name: bill.vendor_name || `Vendor #${bill.vendor_id}` });
         }
         BillsPage._items = items;
-        BillsPage._accounts = PurchaseAccounts.filter(accounts, ...(bill ? bill.lines.map(l => l.account_id) : []));
+        BillsPage._accounts = PurchaseAccounts.withBalanceSheet(accounts, ...(bill ? bill.lines.map(l => l.account_id) : []));  // the balance-sheet accounts too (#766)
         BillsPage._defaultExpenseAccountId = null;
         // A bill's tax rate (set through the API, #250) is kept by the save,
         // so the form shows its tax and a total that is the bill's (2.22.1

@@ -138,7 +138,15 @@ SlowBooks-Pro-2026/
   revision -m "..."`, then `alembic upgrade head`). Both are required:
   the app refuses to start against a database behind the migration
   head, and `tests/test_gate_290_fixes.py` fails on a table only
-  `create_all()` makes.
+  `create_all()` makes. Test the migration by walking **its own step**:
+  `command.upgrade(cfg, BEFORE)` (the revision it follows; the suite
+  serves that walk from a cache), seed the rows it must handle,
+  `command.upgrade(cfg, ITS_REVISION)`, assert, `command.downgrade(cfg,
+  BEFORE)`, assert. Never walk a seeded file to `"head"`: every such
+  walk runs the whole chain for real, twice, and grew the suite past
+  thirty minutes (#770). The chain as a whole, every migration walking
+  back over the earlier ones and forward again, is proven once per run
+  by `tests/test_migration_chain_770.py`.
 - **New Pydantic shape** — `app/schemas/<domain>.py`. **Beware the
   `date: date` field-shadows-type collision** — see
   [CONTRIBUTING.md → Schema conventions](../CONTRIBUTING.md#-the-date-date-field-name-shadows-the-type-collision).

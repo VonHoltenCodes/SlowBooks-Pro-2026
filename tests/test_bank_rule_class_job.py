@@ -260,7 +260,7 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
         "a4c8e2f6b1d3"
     ]  # the estimate line markup (#774) is the head above it
     assert script.get_revision(REVISION).down_revision == "4810bd59e481"
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     insp = inspect(engine)
     cols = {c["name"] for c in insp.get_columns("bank_rules")}
@@ -275,9 +275,9 @@ def test_the_migration_adds_the_columns_and_walks_back(tmp_path):
     engine.dispose()
     # and up again; an upgrade over books that already have the columns
     # (stamped back, as create_all books are) is a no-op, not an error
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     command.stamp(cfg, "4810bd59e481")
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     assert {"class_id", "job_id"} <= {
         c["name"] for c in inspect(engine).get_columns("bank_rules")

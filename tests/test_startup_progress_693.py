@@ -79,10 +79,12 @@ def test_hand_made_indexes_do_not_stop_ours_and_downgrade_drops_only_ours(
         )
     engine.dispose()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     names = set(_indexes(db))
     assert OURS <= names and {"ix_tmp_tl_txn", "ix_tmp_tl_acct"} <= names
-    command.upgrade(cfg, "head")  # a second run has nothing to do
+    command.upgrade(
+        cfg, REVISION
+    )  # a second run has nothing to do (its own step, #770)
 
     command.downgrade(cfg, BEFORE)
     names = set(_indexes(db))

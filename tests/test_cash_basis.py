@@ -623,7 +623,7 @@ def test_the_migration_adds_the_column_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     assert script.get_revision(REVISION).down_revision == BEFORE
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, INDEX_REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     cols = {c["name"]: c for c in inspect(engine).get_columns("transaction_lines")}
     assert "basis" in cols and cols["basis"]["nullable"] is False

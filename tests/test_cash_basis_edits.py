@@ -435,7 +435,7 @@ def test_the_migration_adds_the_document_columns_and_walks_back(tmp_path):
     script = ScriptDirectory.from_config(cfg)
     assert len(script.get_heads()) == 1
     assert script.get_revision(REVISION).down_revision == BEFORE
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     cols = {c["name"]: c for c in inspect(engine).get_columns("transaction_lines")}
     for name in ("recognizes_invoice_id", "recognizes_bill_id"):

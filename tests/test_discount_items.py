@@ -354,7 +354,7 @@ def test_the_migration_adds_the_flag_and_marks_the_mapped_items(tmp_path):
         )
     engine.dispose()
 
-    command.upgrade(cfg, "head")
+    command.upgrade(cfg, REVISION)  # its own step, not the chain (#770)
     engine = create_engine(f"sqlite:///{db}")
     cols = {c["name"]: c for c in inspect(engine).get_columns("items")}
     assert cols["allows_negative_price"]["nullable"] is False
