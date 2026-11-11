@@ -404,3 +404,37 @@ def test_convert_carries_the_marked_up_rate(client, seed_accounts, seed_customer
     assert Decimal(lines["Fence"]["rate"]) == Decimal("20")
     assert Decimal(lines["Gate"]["rate"]) == Decimal("210")
     assert Decimal(inv["total"]) == Decimal("6420.00")
+
+
+# ── Settings ───────────────────────────────────────────────────────────────
+
+
+def test_the_style_defaults_to_markup_per_line(client):
+    s = client.get("/api/settings").json()
+    assert s["estimate_style"] == "line_markup"
+    assert s["estimate_default_markup_pct"] == ""
+
+
+def test_settings_take_either_style_and_refuse_another(client):
+    for style in ("commercial_bid", "line_markup"):
+        r = client.put("/api/settings", json={"estimate_style": style})
+        assert r.status_code == 200, r.text
+        assert client.get("/api/settings").json()["estimate_style"] == style
+    r = client.put("/api/settings", json={"estimate_style": "simple"})
+    assert r.status_code == 422
+    assert client.get("/api/settings").json()["estimate_style"] == "line_markup"
+
+
+def test_the_default_markup_is_a_percent_from_0_to_1000(client):
+    r = client.put("/api/settings", json={"estimate_default_markup_pct": "25"})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/settings").json()["estimate_default_markup_pct"] == "25"
+    r = client.put("/api/settings", json={"estimate_default_markup_pct": "1000"})
+    assert r.status_code == 200, r.text
+    for bad in ("1000.01", "-1", "lots"):
+        r = client.put("/api/settings", json={"estimate_default_markup_pct": bad})
+        assert r.status_code == 422, bad
+        assert "Default markup must be a number from 0 to 1000" in r.json()["detail"]
+    r = client.put("/api/settings", json={"estimate_default_markup_pct": ""})
+    assert r.status_code == 200, r.text
+    assert client.get("/api/settings").json()["estimate_default_markup_pct"] == ""
