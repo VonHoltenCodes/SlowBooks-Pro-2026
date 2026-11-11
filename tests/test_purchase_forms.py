@@ -186,12 +186,24 @@ def test_purchase_account_pickers_offer_cost_of_goods_sold():
     assert (
         "PurchaseAccounts.filter(accounts, v.default_expense_account_id)" in vendor_form
     )
+    # #766: a bill, an expense or a card charge also offers the balance-sheet
+    # accounts (a loan's principal, an escrow asset); the vendor default and
+    # the purchase order keep the cost accounts
+    assert "withBalanceSheet(accounts, ...keepIds)" in pick
+    assert "isBalanceSheet(a)" in pick
     expense_form = _method(_js("expenses.js"), "async showForm()")
-    assert "PurchaseAccounts.filter(accounts)" in expense_form
+    assert "PurchaseAccounts.withBalanceSheet(accounts)" in expense_form
     card_form = _method(_js("cc_charges.js"), "async showForm()")
     assert "account_type=expense" not in card_form
     # #745: a saved charge's account is kept in the picker (the keep ids)
-    assert "PurchaseAccounts.filter(allAccounts, ...keepIds)" in card_form
+    assert "PurchaseAccounts.withBalanceSheet(allAccounts, ...keepIds)" in card_form
+    bill_form = _js("bills.js")
+    assert (
+        "PurchaseAccounts.withBalanceSheet(accounts, ...(bill ? bill.lines" in bill_form
+    )
+    po_form = _js("purchase_orders.js")
+    assert "PurchaseAccounts.filter(accounts)" in po_form
+    assert "withBalanceSheet" not in po_form
 
 
 def test_the_labels_say_cost_of_goods_too():
@@ -251,7 +263,9 @@ def test_the_purchase_accounts_are_grouped_cost_of_goods_first():
     assert (
         html.index('<optgroup label="Cost of Goods Sold">')
         < html.index('<optgroup label="Expenses">')
-        < html.index('<optgroup label="Other">')
+        < html.index(
+            '<optgroup label="Other accounts">'
+        )  # the balance-sheet accounts' group (#766)
     )
     assert '<option value="2" selected>5300 - Subcontractor Costs</option>' in html
     # an account with no number has no stray dash

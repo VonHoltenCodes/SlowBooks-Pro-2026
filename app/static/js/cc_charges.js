@@ -42,7 +42,7 @@ const CCChargesPage = {
             API.get('/accounts?bank=1&active_only=true'),
         ]);
         // Expense and cost-of-goods accounts (W-L18): a card buys materials too.
-        const accounts = PurchaseAccounts.filter(allAccounts, ...keepIds);
+        const accounts = PurchaseAccounts.withBalanceSheet(allAccounts, ...keepIds);  // and the balance-sheet accounts (#766)
         const cardOpts = cards.filter(a => a.bank_kind === 'credit_card').map(a =>
             `<option value="${a.id}" ${a.account_number === '2100' ? 'selected' : ''}>${accountLabel(a)}</option>`
         ).join('');

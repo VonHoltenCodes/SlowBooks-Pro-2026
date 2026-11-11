@@ -30,7 +30,7 @@ const BillQuickEntry = {
         ]);
         BillQuickEntry._vendors = vendors;
         BillQuickEntry._items = items;
-        BillQuickEntry._accounts = PurchaseAccounts.filter(accounts);
+        BillQuickEntry._accounts = PurchaseAccounts.withBalanceSheet(accounts);  // the balance-sheet accounts too (#766)
         BillQuickEntry._defaultAccountId = null;
         BillQuickEntry._lineCount = 0;
         BillQuickEntry._batch = [];
