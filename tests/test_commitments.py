@@ -1420,10 +1420,11 @@ def test_raising_a_closed_commitment_is_refused(
 
 
 def test_a_po_line_too_large_for_the_column_is_a_422(client, seed_accounts):
-    """1e15 x 1e15 and 99,999,999,999 x 99,999,999,999 are each a 422 sentence,
+    """99,999,999 x 999,999 and 9,999,999 x 9,999,999 (figures that fit their
+    columns, products that do not) are each a 422 sentence,
     never a 500 or a stored figure Postgres would reject."""
     vendor = client.post("/api/vendors", json={"name": "Big Co"}).json()
-    for qty, rate in ((1e15, 1e15), (99_999_999_999, 99_999_999_999)):
+    for qty, rate in ((99_999_999, 999_999), (9_999_999, 9_999_999)):
         r = _po(
             client, vendor["id"], [{"description": "x", "quantity": qty, "rate": rate}]
         )

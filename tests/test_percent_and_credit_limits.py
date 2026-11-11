@@ -108,11 +108,13 @@ def _memo(client, customer_id, lines, **extra):
     )
 
 
-def test_a_credit_memo_line_of_1e15_by_1e15_is_refused_with_a_sentence(
+def test_a_credit_memo_line_past_the_money_column_is_refused_with_a_sentence(
     client, seed_accounts, seed_customer
 ):
     r = _memo(
-        client, seed_customer.id, [{"description": "x", "quantity": 1e15, "rate": 1e15}]
+        client,
+        seed_customer.id,
+        [{"description": "x", "quantity": 99999999, "rate": 999999}],
     )
     assert r.status_code == 422, r.text
     assert "more than a line can be (9,999,999,999,999.99)" in _message(r)
@@ -164,7 +166,7 @@ def test_replacing_a_credit_memo_holds_the_new_lines_to_the_column(
         json={
             "customer_id": seed_customer.id,
             "date": "2026-03-01",
-            "lines": [{"description": "x", "quantity": 1e15, "rate": 1e15}],
+            "lines": [{"description": "x", "quantity": 99999999, "rate": 999999}],
         },
     )
     assert r.status_code == 422, r.text
@@ -180,12 +182,14 @@ def _credit(client, vendor_id, account_id, lines, **extra):
     )
 
 
-def test_a_vendor_credit_line_of_1e15_by_1e15_is_refused_with_a_sentence(
+def test_a_vendor_credit_line_past_the_money_column_is_refused_with_a_sentence(
     client, seed_accounts
 ):
     v = _vendor(client)["id"]
     acct = seed_accounts["6000"].id
-    r = _credit(client, v, acct, [{"description": "x", "quantity": 1e15, "rate": 1e15}])
+    r = _credit(
+        client, v, acct, [{"description": "x", "quantity": 99999999, "rate": 999999}]
+    )
     assert r.status_code == 422, r.text
     assert "more than a line can be (9,999,999,999,999.99)" in _message(r)
 
@@ -238,7 +242,12 @@ def test_replacing_a_vendor_credit_holds_the_new_lines_to_the_column(
             "vendor_id": v,
             "date": "2026-03-01",
             "lines": [
-                {"account_id": acct, "description": "x", "quantity": 1e15, "rate": 1e15}
+                {
+                    "account_id": acct,
+                    "description": "x",
+                    "quantity": 99999999,
+                    "rate": 999999,
+                }
             ],
         },
     )

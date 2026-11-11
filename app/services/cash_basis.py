@@ -1334,7 +1334,13 @@ def _retainage_pass_quietly(db: Session, after: str) -> dict | None:
     if not redone["already_done"] and (
         redone["payments"] or redone["bill_payments"] or redone["kept_closed"]
     ):
-        log.info("%s", retainage_pass_sentence(redone))
+        # Printed as well as logged: the desktop's server process logs WARNING
+        # and up, so an INFO line never reached launcher.log after a restore
+        # (W-144, the 2.31.14 gate); the start-up line is printed for the same
+        # reason (app/main.py).
+        sentence = f"{retainage_pass_sentence(redone)} (after {after})"
+        print(sentence)
+        log.info("%s", sentence)
     return redone
 
 

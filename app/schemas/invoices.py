@@ -68,8 +68,9 @@ class InvoiceLineCreate(StrictModel):
         # A negative price is a discount; whether this line may carry one
         # depends on its item and on the invoice it is on, which the route
         # decides (routes/invoices/helpers.py, refuse_negative_lines).
-        check_line_fits(self.quantity, self.rate)
+        # each figure to its own column first (#782), then the product (W-145)
         check_line_size(self.quantity, self.rate)
+        check_line_fits(self.quantity, self.rate)
         validate_non_negative_line(self.quantity, None)
         return self
 

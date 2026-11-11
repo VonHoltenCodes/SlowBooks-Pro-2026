@@ -72,12 +72,14 @@ class EstimateLineCreate(StrictModel):
 
     @model_validator(mode="after")
     def _check_non_negative(self):
+        # each figure fits its own column first, whatever the other is (#782),
+        # so an oversize unit cost gets its own sentence at any quantity
+        # (W-145, the 2.31.14 gate); then the product must fit the money column
+        check_line_size(self.quantity, self.rate, self.unit_cost)
         # a deduct alternate's negative figures must fit the column too
         check_line_fits(self.quantity, self.rate)
         if self.unit_cost is not None:
             check_line_fits(self.quantity, self.unit_cost)
-        # each figure fits its own column too, whatever the other is (#782)
-        check_line_size(self.quantity, self.rate, self.unit_cost)
         # A deduct alternate carries a negative amount (its rate is a credit),
         # so the non-negative rule skips alternates; every other kind keeps it.
         if self.line_kind != "alternate":

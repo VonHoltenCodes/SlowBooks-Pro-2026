@@ -371,12 +371,17 @@ def test_a_purchase_order_total_with_tax_past_the_column_is_a_422(client, db_ses
 
 
 def test_an_invoice_line_too_large_for_the_column_is_a_422(client, seed_customer):
-    """1e15 x 1e15 was an uncaught decimal error (a 500); two lines that
-    each fit but together do not, and a total with tax, are sentences too."""
+    """1e15 x 1e15 was an uncaught decimal error (a 500); a line whose figures
+    fit their columns but whose product does not, two lines that each fit but
+    together do not, and a total with tax, are sentences (a figure past its own
+    column gets its own sentence first, #782)."""
     base = {"customer_id": seed_customer.id, "date": "2026-03-01"}
     r = client.post(
         "/api/invoices",
-        json={**base, "lines": [{"description": "x", "quantity": 1e15, "rate": 1e15}]},
+        json={
+            **base,
+            "lines": [{"description": "x", "quantity": 99999999, "rate": 999999}],
+        },
     )
     assert r.status_code == 422, r.text
     assert "more than a line can be" in r.text

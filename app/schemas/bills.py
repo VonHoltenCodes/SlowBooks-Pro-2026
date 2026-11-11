@@ -65,9 +65,10 @@ class BillLineCreate(StrictModel):
 
     @model_validator(mode="after")
     def _price_the_line(self):
+        # each figure to its own column first (#782), then the product (W-145)
+        check_line_size(self.quantity, self.rate)
         check_line_fits(1, self.amount)
         check_line_fits(1 if self.quantity is None else self.quantity, self.rate or 0)
-        check_line_size(self.quantity, self.rate)
         sent = None if self.amount is None else _cents(Decimal(str(self.amount)))
         if sent is not None and sent < 0:
             raise ValueError(

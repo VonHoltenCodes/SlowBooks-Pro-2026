@@ -150,12 +150,46 @@ def test_the_largest_rate_a_line_can_hold_still_saves(post_line, kind):
 
 
 @pytest.mark.parametrize("kind", DOCUMENTS)
-def test_a_line_of_1e9_by_1e9_is_still_refused_as_more_than_a_line_can_be(
+def test_a_line_whose_figures_fit_but_whose_product_does_not_is_still_refused(
     post_line, kind
 ):
-    r = post_line(kind, quantity="1000000000", rate="1000000000")
+    # 99,999,999 x 999,999 is 99,999,899,000,001: both fit their columns, the
+    # line does not fit the money column
+    r = post_line(kind, quantity="99999999", rate="999999")
     assert r.status_code == 422, r.text
     assert "more than a line can be (9,999,999,999,999.99)" in _message(r)
+
+
+# W-145 (the 2.31.14 gate): a figure past its own column gets its own sentence
+# whatever the other figure is, before the product is looked at, so a unit cost
+# of 1e40 at a quantity of 1 is the unit-cost sentence, not the line's.
+@pytest.mark.parametrize("kind", DOCUMENTS)
+def test_a_quantity_past_its_column_at_a_rate_of_1_gets_the_quantity_sentence(
+    post_line, kind
+):
+    r = post_line(kind, quantity="1000000000", rate=1)
+    assert r.status_code == 422, r.text
+    assert QUANTITY_SENTENCE in _message(r)
+
+
+@pytest.mark.parametrize("kind", DOCUMENTS)
+def test_a_rate_past_its_column_at_a_quantity_of_1_gets_the_rate_sentence(
+    post_line, kind
+):
+    r = post_line(kind, quantity=1, rate="1e40")
+    assert r.status_code == 422, r.text
+    assert RATE_SENTENCE in _message(r)
+
+
+def test_an_estimate_unit_cost_past_its_column_at_a_quantity_of_1_gets_its_own_sentence(
+    post_line,
+):
+    r = post_line("estimate", quantity=1, rate=1, unit_cost="1e40")
+    assert r.status_code == 422, r.text
+    assert UNIT_COST_SENTENCE in _message(r)
+    r = post_line("estimate", quantity=1, rate="1e40", unit_cost=1)
+    assert r.status_code == 422, r.text
+    assert RATE_SENTENCE in _message(r)
 
 
 def test_an_estimate_unit_cost_past_its_column_is_refused_whatever_the_quantity(
