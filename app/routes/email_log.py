@@ -8,9 +8,10 @@
 # the raw error left out: `error_message` carries the bookkeeper's sentence
 # for the failure (email_errors.failure_sentence) instead, because the raw
 # text carries mail-server hostnames and banners. Recipients, copies,
-# subjects, times and sent/failed are what an integration needs to confirm
-# a send went out, and every one of those roles can already read the
-# customer and invoice they came from. The Recent sends section in Settings
+# subjects, times, sent/failed and the document a row was for (entity_type,
+# entity_id) are what an integration needs to confirm a send went out, and
+# every one of those roles can already read the customer and invoice they
+# came from. The Recent sends section in Settings
 # stays an administrator's; this is the API.
 # ============================================================================
 
@@ -65,6 +66,9 @@ def _row(r: EmailLog, admin: bool) -> dict:
         "bcc": r.bcc,
         "subject": r.subject,
         "entity_type": r.entity_type,
+        # the invoice, estimate, statement's customer, ... it was sent for,
+        # so a client can tie the row to its document (#781)
+        "entity_id": r.entity_id,
         "status": r.status,
         # the raw SMTP text is an administrator's (hostnames, banners);
         # anyone else reads the sentence in its place

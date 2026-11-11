@@ -102,6 +102,7 @@ def test_an_administrator_sees_the_whole_row_with_the_raw_error(client, db_sessi
         "bcc",
         "subject",
         "entity_type",
+        "entity_id",
         "status",
         "error_message",
         "failure",
@@ -166,3 +167,58 @@ def test_an_unauthenticated_call_is_still_refused(client, db_session):
     r = TestClient(app).get("/api/email-log")
     assert r.status_code == 401
     assert "relay7" not in r.text
+
+
+@pytest.mark.parametrize("how", ["admin", "token-bookkeeper"])
+def test_a_row_for_an_emailed_invoice_carries_that_invoice_id(
+    client, db_session, seed_accounts, monkeypatch, how
+):
+    import smtplib
+
+    from app.routes.invoices import documents
+    from app.services.settings_service import set_setting
+
+    class FakeSMTP:
+        def __init__(self, *a, **k):
+            pass
+
+        def starttls(self):
+            pass
+
+        def login(self, *a):
+            pass
+
+        def sendmail(self, *a):
+            pass
+
+        def quit(self):
+            pass
+
+    monkeypatch.setattr(smtplib, "SMTP", FakeSMTP)
+    monkeypatch.setattr(documents, "generate_invoice_pdf", lambda *a, **k: b"%PDF-")
+    set_setting(db_session, "smtp_host", "mail.example.com")
+    set_setting(db_session, "smtp_from_email", "books@example.com")
+    db_session.commit()
+    cust = client.post(
+        "/api/customers", json={"name": "Probe Co", "email": "ap@probe.test"}
+    ).json()
+    inv = client.post(
+        "/api/invoices",
+        json={
+            "customer_id": cust["id"],
+            "date": "2026-06-01",
+            "due_date": "2026-06-30",
+            "lines": [
+                {"description": "work", "quantity": 1, "rate": 100, "line_order": 0}
+            ],
+        },
+    ).json()
+    r = client.post(
+        f"/api/invoices/{inv['id']}/email",
+        json={"recipient": "ap@probe.test", "subject": "Invoice", "message": ""},
+    )
+    assert r.status_code == 200, r.text
+    rows = _who(client, db_session, how).get("/api/email-log").json()["rows"]
+    (row,) = rows
+    assert (row["entity_type"], row["entity_id"]) == ("invoice", inv["id"])
+    assert row["status"] == "sent"
